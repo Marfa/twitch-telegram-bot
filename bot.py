@@ -37,7 +37,15 @@ CHANNEL, TEMPLATE, DEST_TYPE, DEST_CHAT = range(4)
 BTN_NEW = "➕ Новая подписка"
 BTN_LIST = "📋 Мои подписки"
 BTN_DELETE = "🗑 Удалить подписку"
-MENU_BUTTONS = {BTN_NEW, BTN_LIST, BTN_DELETE}
+BTN_FEEDBACK = "🐛 Сообщить о проблеме"
+MENU_BUTTONS = {BTN_NEW, BTN_LIST, BTN_DELETE, BTN_FEEDBACK}
+
+GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
+FEEDBACK_TEXT = (
+    "Обратная связь:\n"
+    "• Telegram: @immarfa\n"
+    f"• GitHub Issues: {GITHUB_ISSUES_URL}"
+)
 
 DEST_LABELS = {
     "dm": "личку",
@@ -59,7 +67,11 @@ GROUP_SETUP_TEXT = (
 )
 
 MAIN_MENU = ReplyKeyboardMarkup(
-    [[KeyboardButton(BTN_NEW)], [KeyboardButton(BTN_LIST), KeyboardButton(BTN_DELETE)]],
+    [
+        [KeyboardButton(BTN_NEW)],
+        [KeyboardButton(BTN_LIST), KeyboardButton(BTN_DELETE)],
+        [KeyboardButton(BTN_FEEDBACK)],
+    ],
     resize_keyboard=True,
 )
 
@@ -362,6 +374,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(
+        FEEDBACK_TEXT,
+        reply_markup=MAIN_MENU,
+        disable_web_page_preview=True,
+    )
+
+
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     subs = db.get_subscriptions_by_owner(update.effective_user.id)
@@ -461,6 +481,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["twitch"] = twitch
     app.bot_data["last_live"] = {}
 
+    app.add_handler(
+        MessageHandler(filters.Regex(f"^{re.escape(BTN_FEEDBACK)}$"), report_problem),
+        group=0,
+    )
+
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -476,11 +501,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         allow_reentry=True,
     )
 
-    app.add_handler(conv)
-    app.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_LIST)}$"), list_subscriptions))
-    app.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_DELETE)}$"), delete_menu))
-    app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"))
-    app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"))
+    app.add_handler(conv, group=1)
+    app.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_LIST)}$"), list_subscriptions), group=1)
+    app.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_DELETE)}$"), delete_menu), group=1)
+    app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=1)
+    app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=1)
 
     from config import CHECK_INTERVAL
 
