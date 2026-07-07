@@ -6,17 +6,29 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
+    def _health_paths(self) -> bool:
+        return self.path.split("?", 1)[0] in ("/", "/health")
+
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0]
-        if path in ("/", "/health"):
-            body = b"ok"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Length", str(len(body)))
+        if not self._health_paths():
+            self.send_response(404)
             self.end_headers()
-            self.wfile.write(body)
             return
-        self.send_response(404)
+        body = b"ok"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_HEAD(self) -> None:
+        if not self._health_paths():
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", "2")
         self.end_headers()
 
     def log_message(self, format: str, *args) -> None:
