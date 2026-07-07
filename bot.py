@@ -11,7 +11,6 @@ from telegram import (
     MessageOriginChannel,
     MessageOriginChat,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
     Update,
 )
 from telegram.constants import ChatType
@@ -45,6 +44,18 @@ FEEDBACK_TEXT = (
     "Обратная связь:\n"
     "• Telegram: @immarfa\n"
     f"• GitHub Issues: {GITHUB_ISSUES_URL}"
+)
+
+HELP_TEXT = (
+    "Доступные команды:\n"
+    "/start — настроить подписку на стрим\n"
+    "/help — показать эту справку\n"
+    "/cancel — отменить текущую настройку\n\n"
+    "Кнопки меню:\n"
+    f"• {BTN_NEW}\n"
+    f"• {BTN_LIST}\n"
+    f"• {BTN_DELETE}\n"
+    f"• {BTN_FEEDBACK}"
 )
 
 DEST_LABELS = {
@@ -102,10 +113,12 @@ async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> boo
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
     await update.effective_message.reply_text(
         "Привет! Я присылаю уведомления о старте стримов на Twitch.\n\n"
+        "Справка по командам: /help\n\n"
         "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=MAIN_MENU,
     )
     return CHANNEL
 
@@ -114,7 +127,7 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.clear()
     await update.effective_message.reply_text(
         "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=MAIN_MENU,
     )
     return CHANNEL
 
@@ -352,16 +365,20 @@ async def _finish_subscription(
         "Just Chatting",
         "Тестовый стрим",
     )
+    thread_note = f"\nТема: {thread_id}" if thread_id else ""
     text = (
-        f"Подписка #{sub_id} создана!\n"
-        f"Канал: {data['twitch_username']}\n"
-        f"Куда: {_dest_label(data['dest_type'])}\n\n"
-        f"Пример сообщения:\n{preview}"
+        f"✅ Настройка завершена!\n\n"
+        f"Подписка #{sub_id} создана.\n"
+        f"Канал Twitch: {data['twitch_username']}\n"
+        f"Уведомления: {_dest_label(data['dest_type'])}{thread_note}\n\n"
+        f"Пример сообщения:\n{preview}\n\n"
+        f"Когда {data['twitch_username']} начнёт стрим — пришлю уведомление.\n"
+        f"Справка: /help"
     )
 
     if update.callback_query:
-        await update.callback_query.edit_message_text(text)
-        await context.bot.send_message(owner_id, "Готово!", reply_markup=MAIN_MENU)
+        await update.callback_query.edit_message_text("✅ Подписка создана.")
+        await context.bot.send_message(owner_id, text, reply_markup=MAIN_MENU)
     else:
         await update.effective_message.reply_text(text, reply_markup=MAIN_MENU)
 
@@ -380,6 +397,10 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         reply_markup=MAIN_MENU,
         disable_web_page_preview=True,
     )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(HELP_TEXT, reply_markup=MAIN_MENU)
 
 
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -481,6 +502,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["twitch"] = twitch
     app.bot_data["last_live"] = {}
 
+    app.add_handler(CommandHandler("help", help_command), group=0)
     app.add_handler(
         MessageHandler(filters.Regex(f"^{re.escape(BTN_FEEDBACK)}$"), report_problem),
         group=0,
@@ -497,7 +519,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             DEST_TYPE: [CallbackQueryHandler(receive_dest_type, pattern=r"^dest:")],
             DEST_CHAT: [MessageHandler(filters.TEXT | filters.FORWARDED, receive_dest_chat)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("help", help_command),
+        ],
         allow_reentry=True,
     )
 
