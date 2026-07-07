@@ -31,7 +31,7 @@ from twitch import TwitchClient, render_template
 
 logger = logging.getLogger(__name__)
 
-CHANNEL, TEMPLATE, DEST_TYPE, DEST_CHAT = range(4)
+CHANNEL, TEMPLATE, DEST_TYPE, DEST_CHAT, DELETE_OLD = range(5)
 
 BTN_NEW = "➕ Новая подписка"
 BTN_LIST = "📋 Мои подписки"
@@ -84,6 +84,19 @@ GROUP_SETUP_TEXT = (
     "Для групп с темами ссылка на тему — самый надёжный способ."
 )
 
+DELETE_OLD_TEXT = (
+    "Удалять предыдущее сообщение бота при новом стриме?\n\n"
+    "Если включено — перед новым уведомлением бот удалит своё прошлое в этом чате.\n"
+    "В канале боту нужно право удалять сообщения."
+)
+
+DELETE_OLD_KEYBOARD = InlineKeyboardMarkup(
+    [
+        [InlineKeyboardButton("✅ Да, удалять", callback_data="delete_old:1")],
+        [InlineKeyboardButton("❌ Нет", callback_data="delete_old:0")],
+    ]
+)
+
 MAIN_MENU = ReplyKeyboardMarkup(
     [
         [KeyboardButton(BTN_NEW)],
@@ -101,10 +114,39 @@ def _dest_label(dest_type: str) -> str:
 def _format_sub_line(sub: Subscription) -> str:
     status = "✅" if sub.enabled else "⏸"
     thread = f", тема {sub.thread_id}" if sub.thread_id else ""
+    delete = ", удалять старые" if sub.delete_previous else ""
     return (
         f"{status} #{sub.id} — {sub.twitch_username}\n"
-        f"   → {_dest_label(sub.dest_type)} ({sub.chat_id}{thread})"
+        f"   → {_dest_label(sub.dest_type)} ({sub.chat_id}{thread}{delete})"
     )
+
+
+async def _send_notification(
+    bot,
+    db: Database,
+    sub: Subscription,
+    text: str,
+) -> None:
+    if sub.delete_previous and sub.last_message_id:
+        try:
+            await bot.delete_message(chat_id=sub.chat_id, message_id=sub.last_message_id)
+        except BadRequest as exc:
+            logger.warning(
+                "Cannot delete message %s in %s: %s",
+                sub.last_message_id,
+                sub.chat_id,
+                exc,
+            )
+
+    kwargs: dict = {"chat_id": sub.chat_id, "text": text}
+    if sub.thread_id:
+        kwargs["message_thread_id"] = sub.thread_id
+    try:
+        msg = await bot.send_message(**kwargs)
+        if sub.delete_previous:
+            db.set_last_message_id(sub.id, msg.message_id)
+    except (BadRequest, Forbidden) as exc:
+        logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
 
 
 async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> bool:
@@ -214,7 +256,10 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["dest_type"] = dest_type
 
     if dest_type == "dm":
-        return await _finish_subscription(update, context, query.from_user.id, query.from_user.id, None)
+        context.user_data["pending_chat_id"] = query.from_user.id
+        context.user_data["pending_thread_id"] = None
+        await query.edit_message_text(DELETE_OLD_TEXT, reply_markup=DELETE_OLD_KEYBOARD)
+        return DELETE_OLD
 
     if dest_type == "channel":
         await query.edit_message_text(
@@ -343,7 +388,21 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return DEST_CHAT
 
-    return await _finish_subscription(update, context, update.effective_user.id, chat_id, thread_id)
+    context.user_data["pending_chat_id"] = chat_id
+    context.user_data["pending_thread_id"] = thread_id
+    await message.reply_text(DELETE_OLD_TEXT, reply_markup=DELETE_OLD_KEYBOARD)
+    return DELETE_OLD
+
+
+async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["delete_previous"] = query.data.endswith(":1")
+    chat_id = context.user_data["pending_chat_id"]
+    thread_id = context.user_data.get("pending_thread_id")
+    return await _finish_subscription(
+        update, context, query.from_user.id, chat_id, thread_id
+    )
 
 
 async def _finish_subscription(
@@ -365,6 +424,7 @@ async def _finish_subscription(
             dest_type=data["dest_type"],
             chat_id=chat_id,
             thread_id=thread_id,
+            delete_previous=bool(data.get("delete_previous", False)),
         )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -385,11 +445,17 @@ async def _finish_subscription(
         "Тестовый стрим",
     )
     thread_note = f"\nТема: {thread_id}" if thread_id else ""
+    delete_note = (
+        "Удалять старые сообщения: да"
+        if data.get("delete_previous")
+        else "Удалять старые сообщения: нет"
+    )
     text = (
         f"✅ Настройка завершена!\n\n"
         f"Подписка #{sub_id} создана.\n"
         f"Канал Twitch: {data['twitch_username']}\n"
-        f"Уведомления: {_dest_label(data['dest_type'])}{thread_note}\n\n"
+        f"Уведомления: {_dest_label(data['dest_type'])}{thread_note}\n"
+        f"{delete_note}\n\n"
         f"Пример сообщения:\n{preview}\n\n"
         f"Когда {data['twitch_username']} начнёт стрим — пришлю уведомление.\n"
         f"Справка: /help"
@@ -514,7 +580,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             title = stream.get("title", "")
             for sub in db.get_enabled_by_twitch_user_id(uid):
                 text = render_template(sub.message_template, username, game, title)
-                await _send_test(context.bot, sub.chat_id, sub.thread_id, text)
+                await _send_notification(context.bot, db, sub, text)
         last_live[uid] = is_live
 
 
@@ -562,6 +628,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template)],
             DEST_TYPE: [CallbackQueryHandler(receive_dest_type, pattern=r"^dest:")],
             DEST_CHAT: [MessageHandler(filters.TEXT | filters.FORWARDED, receive_dest_chat)],
+            DELETE_OLD: [CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:")],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),

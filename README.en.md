@@ -48,6 +48,7 @@ The bot uses **Client Credentials** only — no user OAuth.
 2. Message template (`{username}`, `{game}`, `{name}`)
 3. Destination: DM / channel / group or community
 4. For channel or group — add the bot and confirm the chat
+5. Delete previous bot message on each new stream? (yes/no)
 
 **Group or community** — send one of:
 - topic link: `https://t.me/c/name/30`
