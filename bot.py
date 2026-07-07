@@ -112,6 +112,11 @@ def _dest_label(dest_type: str) -> str:
     return DEST_LABELS.get(dest_type, dest_type)
 
 
+def _is_link_preview_disabled(message) -> bool:
+    opts = message.link_preview_options
+    return bool(opts and opts.is_disabled)
+
+
 def _format_sub_line(sub: Subscription) -> str:
     status = "✅" if sub.enabled else "⏸"
     thread = f", тема {sub.thread_id}" if sub.thread_id else ""
@@ -142,6 +147,8 @@ async def _send_notification(
     kwargs: dict = {"chat_id": sub.chat_id, "text": text}
     if sub.thread_id:
         kwargs["message_thread_id"] = sub.thread_id
+    if sub.disable_link_preview:
+        kwargs["disable_web_page_preview"] = True
     try:
         msg = await bot.send_message(**kwargs)
         if sub.delete_previous:
@@ -222,7 +229,9 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "Пример:\n"
         "{username} в эфире!\n"
         "{name}\n"
-        "Категория: {game}"
+        "Категория: {game}\n\n"
+        "Если в тексте есть ссылка — перед отправкой можно отключить её превью "
+        "(долгое нажатие на кнопку отправки → «Без превью»)."
     )
     return TEMPLATE
 
@@ -239,6 +248,9 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return TEMPLATE
 
     context.user_data["message_template"] = template
+    context.user_data["disable_link_preview"] = _is_link_preview_disabled(
+        update.effective_message
+    )
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("📩 В личку", callback_data="dest:dm")],
@@ -429,6 +441,7 @@ async def _finish_subscription(
             chat_id=chat_id,
             thread_id=thread_id,
             delete_previous=bool(data.get("delete_previous", False)),
+            disable_link_preview=bool(data.get("disable_link_preview", False)),
         )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -455,12 +468,18 @@ async def _finish_subscription(
         if data.get("delete_previous")
         else "Удалять старые сообщения: нет"
     )
+    preview_note = (
+        "Превью ссылок: выключено"
+        if data.get("disable_link_preview")
+        else "Превью ссылок: включено"
+    )
     text = (
         f"✅ Настройка завершена!\n\n"
         f"Подписка #{sub_id} создана.\n"
         f"Канал Twitch: {data['twitch_username']}\n"
         f"Уведомления: {_dest_label(data['dest_type'])}{thread_note}\n"
-        f"{delete_note}\n\n"
+        f"{delete_note}\n"
+        f"{preview_note}\n\n"
         f"Пример сообщения:\n{preview}\n\n"
         f"Когда {data['twitch_username']} начнёт стрим — пришлю уведомление.\n"
         f"Справка: /help"

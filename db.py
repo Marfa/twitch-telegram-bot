@@ -19,6 +19,7 @@ class Subscription:
     thread_id: int | None
     enabled: bool
     delete_previous: bool
+    disable_link_preview: bool
     last_message_id: int | None
 
 
@@ -95,6 +96,10 @@ class Database:
             )
         if "last_message_id" not in cols:
             conn.execute("ALTER TABLE subscriptions ADD COLUMN last_message_id INTEGER")
+        if "disable_link_preview" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN disable_link_preview INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _row_to_sub(self, row: sqlite3.Row) -> Subscription:
         return Subscription(
@@ -108,6 +113,7 @@ class Database:
             thread_id=row["thread_id"],
             enabled=bool(row["enabled"]),
             delete_previous=bool(row["delete_previous"]),
+            disable_link_preview=bool(row["disable_link_preview"]),
             last_message_id=row["last_message_id"],
         )
 
@@ -121,6 +127,7 @@ class Database:
         chat_id: int,
         thread_id: int | None,
         delete_previous: bool = False,
+        disable_link_preview: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -128,8 +135,8 @@ class Database:
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
-                    delete_previous
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    delete_previous, disable_link_preview
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -140,6 +147,7 @@ class Database:
                     chat_id,
                     thread_id,
                     int(delete_previous),
+                    int(disable_link_preview),
                 ),
             )
             return int(cur.lastrowid)
