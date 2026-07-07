@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: twitch-telegram-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TWITCH_CLIENT_ID
+        sync: false
+      - key: TWITCH_CLIENT_SECRET
+        sync: false
+      - key: CHECK_INTERVAL
+        value: "60"
+      - key: DATABASE_PATH
+        value: /tmp/bot.db

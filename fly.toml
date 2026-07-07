@@ -1,0 +1,22 @@
+# fly.toml — бесплатный деплой с постоянным хранилищем
+# fly launch --no-deploy
+# fly volumes create bot_data --size 1 --region ams
+# fly secrets set TELEGRAM_BOT_TOKEN=... TWITCH_CLIENT_ID=... TWITCH_CLIENT_SECRET=...
+# fly deploy
+
+app = "twitch-telegram-bot"
+primary_region = "ams"
+
+[build]
+
+[mounts]
+  source = "bot_data"
+  destination = "/data"
+
+[env]
+  DATABASE_PATH = "/data/bot.db"
+  CHECK_INTERVAL = "60"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
