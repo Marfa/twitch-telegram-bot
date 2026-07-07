@@ -8,6 +8,8 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
+    MessageOriginChannel,
+    MessageOriginChat,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     Update,
@@ -25,6 +27,7 @@ from telegram.ext import (
 )
 
 from db import Database, Subscription
+from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
 from twitch import TwitchClient, render_template
 
 logger = logging.getLogger(__name__)
@@ -39,8 +42,21 @@ MENU_BUTTONS = {BTN_NEW, BTN_LIST, BTN_DELETE}
 DEST_LABELS = {
     "dm": "личку",
     "channel": "канал",
-    "group": "группу",
+    "group": "группу или сообщество",
 }
+
+GROUP_SETUP_TEXT = (
+    "Добавьте бота в группу или сообщество.\n\n"
+    "Права бота:\n"
+    "• Отправка сообщений (обязательно)\n"
+    "• Администратор не нужен, если участникам разрешено писать\n\n"
+    "Отправьте одно из:\n"
+    "• Ссылку на тему: https://t.me/c/название/30\n"
+    "• @username группы (без темы — в общий чат)\n"
+    "• ID группы (например -1001234567890)\n"
+    "• Пересланное сообщение из группы (должно быть «Переслано из: …», не из лички)\n\n"
+    "Для групп с темами ссылка на тему — самый надёжный способ."
+)
 
 MAIN_MENU = ReplyKeyboardMarkup(
     [[KeyboardButton(BTN_NEW)], [KeyboardButton(BTN_LIST), KeyboardButton(BTN_DELETE)]],
@@ -126,7 +142,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "• {game} — категория стрима\n"
         "• {name} — название стрима\n\n"
         "Пример:\n"
-        "🔴 {username} в эфире!\n"
+        "{username} в эфире!\n"
         "{name}\n"
         "Категория: {game}"
     )
@@ -149,7 +165,7 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         [
             [InlineKeyboardButton("📩 В личку", callback_data="dest:dm")],
             [InlineKeyboardButton("📢 В канал", callback_data="dest:channel")],
-            [InlineKeyboardButton("💬 В группу с темами", callback_data="dest:group")],
+            [InlineKeyboardButton("💬 В группу или сообщество", callback_data="dest:group")],
         ]
     )
     await update.effective_message.reply_text(
@@ -175,43 +191,89 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return DEST_CHAT
 
-    await query.edit_message_text(
-        "Добавьте бота в группу с включёнными темами.\n\n"
-        "Затем перешлите сообщение из нужной темы "
-        "или напишите ID группы (со знаком минус)."
-    )
+    await query.edit_message_text(GROUP_SETUP_TEXT)
     return DEST_CHAT
+
+
+async def _resolve_chat_ref(bot, ref: str) -> int:
+    numeric = chat_ref_to_id(ref)
+    if numeric is not None:
+        return numeric
+    chat = await bot.get_chat(f"@{ref.lstrip('@')}")
+    return chat.id
+
+
+async def _resolve_from_topic_link(bot, link: TelegramTopicLink) -> tuple[int, int]:
+    chat_id = await _resolve_chat_ref(bot, link.chat_ref)
+    return chat_id, link.thread_id
+
+
+def _extract_forward_chat(message) -> tuple[int | None, int | None]:
+    origin = message.forward_origin
+    if isinstance(origin, MessageOriginChannel):
+        return origin.chat.id, None
+    if isinstance(origin, MessageOriginChat):
+        return origin.sender_chat.id, message.message_thread_id or None
+    if message.forward_from_chat:
+        return message.forward_from_chat.id, message.message_thread_id or None
+    return None, None
+
+
+async def _parse_dest_input(
+    bot,
+    message,
+    dest_type: str,
+) -> tuple[int | None, int | None, str | None]:
+    text = (message.text or message.caption or "").strip()
+
+    topic = parse_telegram_topic_link(text)
+    if topic:
+        try:
+            chat_id, thread_id = await _resolve_from_topic_link(bot, topic)
+            return chat_id, thread_id, None
+        except BadRequest:
+            return None, None, "Группа не найдена. Добавьте бота и проверьте ссылку."
+
+    fwd_chat, fwd_thread = _extract_forward_chat(message)
+    if fwd_chat is not None:
+        return fwd_chat, fwd_thread, None
+
+    if text.startswith("@"):
+        try:
+            chat = await bot.get_chat(text)
+            return chat.id, None, None
+        except BadRequest:
+            label = "Канал" if dest_type == "channel" else "Группа"
+            return None, None, f"{label} не найдена. Проверьте @username."
+
+    if text and re.fullmatch(r"-?\d+", text):
+        return int(text), None, None
+
+    if message.forward_origin or message.forward_from_chat:
+        return (
+            None,
+            None,
+            "Пересылка из лички не подходит. Нужно «Переслано из: Название группы» "
+            "или ссылка на тему: https://t.me/c/название/30",
+        )
+
+    hint = (
+        "Отправьте ссылку на тему, @username, ID группы "
+        "или перешлите сообщение из группы."
+        if dest_type == "group"
+        else "Отправьте @username канала, ID или перешлите сообщение из канала."
+    )
+    return None, None, hint
 
 
 async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.effective_message
-    dest_type = context.user_data.get("dest_type")
-    chat_id: int | None = None
-    thread_id: int | None = None
+    dest_type = context.user_data.get("dest_type", "")
 
-    if message.forward_origin and getattr(message.forward_origin, "chat", None):
-        chat_id = message.forward_origin.chat.id
-        thread_id = message.message_thread_id
-    elif message.forward_from_chat:
-        chat_id = message.forward_from_chat.id
-        thread_id = message.message_thread_id
-    elif message.text:
-        text = message.text.strip()
-        if text.startswith("@"):
-            try:
-                chat = await context.bot.get_chat(text)
-                chat_id = chat.id
-            except BadRequest:
-                await message.reply_text("Канал не найден. Проверьте @username.")
-                return DEST_CHAT
-        elif re.fullmatch(r"-?\d+", text):
-            chat_id = int(text)
-        else:
-            await message.reply_text(
-                "Отправьте @username канала, ID чата или перешлите сообщение."
-            )
-            return DEST_CHAT
-
+    chat_id, thread_id, error = await _parse_dest_input(context.bot, message, dest_type)
+    if error:
+        await message.reply_text(error)
+        return DEST_CHAT
     if chat_id is None:
         await message.reply_text("Не удалось определить чат. Попробуйте ещё раз.")
         return DEST_CHAT
@@ -230,7 +292,7 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         try:
             chat = await context.bot.get_chat(chat_id)
             if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-                await message.reply_text("Это не группа.")
+                await message.reply_text("Это не группа или сообщество.")
                 return DEST_CHAT
         except BadRequest:
             await message.reply_text("Бот не видит эту группу. Добавьте бота в группу.")
