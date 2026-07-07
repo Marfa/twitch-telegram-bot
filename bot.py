@@ -536,7 +536,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("help", help_command),
         ],
         allow_reentry=True,
-        per_message=True,
     )
 
     app.add_handler(conv, group=1)
