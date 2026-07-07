@@ -2,6 +2,8 @@
 
 **Стрим начался — бот сам напишет туда, куда вы скажете.** Настройка за минуту в Telegram.
 
+Готовый бот: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
+
 English: [README.en.md](README.en.md)
 
 ```bash
@@ -11,6 +13,7 @@ docker compose up -d --build
 
 | Возможность | Как работает |
 |---|---|
+| Готовый бот | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и настройка |
 | Куда слать | Личка, канал, группа или сообщество (с темами) |
 | Канал Twitch | Ссылка, `m.twitch.tv` или username |
 | Текст | Свой шаблон: `{username}`, `{game}`, `{name}` |

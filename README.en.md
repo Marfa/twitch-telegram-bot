@@ -2,6 +2,8 @@
 
 **Stream goes live — the bot notifies wherever you choose.** One-minute setup in Telegram.
 
+Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
+
 ```bash
 cp .env.example .env
 docker compose up -d --build
@@ -9,6 +11,7 @@ docker compose up -d --build
 
 | Feature | How it works |
 |---|---|
+| Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` to set up |
 | Destinations | DM, channel, group or community (with topics) |
 | Twitch channel | URL, `m.twitch.tv`, or username |
 | Message text | Custom template: `{username}`, `{game}`, `{name}` |
