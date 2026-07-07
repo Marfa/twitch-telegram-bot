@@ -43,7 +43,14 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
 FEEDBACK_TEXT = (
     "Обратная связь:\n"
     "• Telegram: @immarfa\n"
-    f"• GitHub Issues: {GITHUB_ISSUES_URL}"
+    f"• GitHub Issues: {GITHUB_ISSUES_URL}\n\n"
+    "Поддержка:\n"
+    "• DonationAlerts: https://www.donationalerts.com/r/themarfa\n"
+    "• Криптой: https://nowpayments.io/donation/themarfa\n\n"
+    "Ссылки:\n"
+    "• Twitch: https://www.twitch.tv/marfapr\n"
+    "• Telegram: https://t.me/themarfa\n"
+    "• Сайт: https://blog.themarfa.name/"
 )
 
 HELP_TEXT = (
