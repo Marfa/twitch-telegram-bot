@@ -1,5 +1,6 @@
 """ponytail: minimal self-check for twitch parsing and templates."""
 from links import parse_telegram_topic_link, chat_ref_to_id
+from render_status import fetch_render_status, is_planned_maintenance
 from twitch import TwitchClient, render_template
 
 
@@ -19,6 +20,10 @@ def main() -> None:
     assert link.chat_ref == "themarfa_gaming"
     assert link.thread_id == 30
     assert chat_ref_to_id("1234567890") == -1001234567890
+
+    items = fetch_render_status("https://status.render.com/history.rss")
+    assert items
+    assert any(is_planned_maintenance(i) for i in items[:3])
 
     print("ok")
 

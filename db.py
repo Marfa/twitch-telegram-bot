@@ -69,6 +69,22 @@ class Database:
                 ON subscriptions(owner_id)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS render_status_seen (
+                    guid TEXT PRIMARY KEY,
+                    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    first_seen TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
             self._migrate(conn)
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
@@ -193,3 +209,42 @@ class Database:
                 (twitch_user_id,),
             ).fetchall()
         return [self._row_to_sub(r) for r in rows]
+
+    def get_all_owner_ids(self) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT owner_id FROM subscriptions ORDER BY owner_id"
+            ).fetchall()
+        return [int(r["owner_id"]) for r in rows]
+
+    def is_status_seen(self, guid: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM render_status_seen WHERE guid = ?", (guid,)
+            ).fetchone()
+        return row is not None
+
+    def mark_status_seen(self, guid: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO render_status_seen (guid) VALUES (?)",
+                (guid,),
+            )
+
+    def upsert_user(self, user_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+                (user_id,),
+            )
+
+    def get_notify_user_ids(self) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id FROM users
+                UNION
+                SELECT DISTINCT owner_id FROM subscriptions
+                """
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]

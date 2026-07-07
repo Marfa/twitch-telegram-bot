@@ -14,5 +14,9 @@ services:
       - key: CHECK_INTERVAL
         value: "60"
       - key: DATABASE_PATH
-        value: /tmp/bot.db
+        value: /data/bot.db
+    disk:
+      name: bot-data
+      mountPath: /data
+      sizeGB: 1
     autoDeploy: true
