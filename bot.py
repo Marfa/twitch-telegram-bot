@@ -14,7 +14,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatType
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Conflict, Forbidden
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -496,11 +496,23 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         last_live[uid] = is_live
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    err = context.error
+    if isinstance(err, Conflict):
+        logger.warning(
+            "Конфликт polling — возможно, запущено два экземпляра бота "
+            "(Render + локально?). Оставляем один."
+        )
+        return
+    logger.exception("Необработанная ошибка: %s", err)
+
+
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
     app = Application.builder().token(token).build()
     app.bot_data["db"] = db
     app.bot_data["twitch"] = twitch
     app.bot_data["last_live"] = {}
+    app.add_error_handler(error_handler)
 
     app.add_handler(CommandHandler("help", help_command), group=0)
     app.add_handler(
@@ -524,6 +536,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("help", help_command),
         ],
         allow_reentry=True,
+        per_message=True,
     )
 
     app.add_handler(conv, group=1)
