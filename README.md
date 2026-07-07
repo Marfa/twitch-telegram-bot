@@ -90,7 +90,7 @@ python main.py
 2. Секреты: `TELEGRAM_BOT_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`
 3. [UptimeRobot](https://uptimerobot.com/): **HTTP(s)** → `https://ВАШ-СЕРВИС.onrender.com/health`, интервал **5 min**
 
-На free-тарифе SQLite в `/tmp` — подписки сбрасываются при редеплое.
+Подписки хранятся в SQLite на диске `/data` (см. `render.yaml`). **Persistent Disk** на Render требует план Starter ($7/мес) — без диска данные сбрасываются при каждом перезапуске.
 
 ### Fly.io (данные на volume)
 
@@ -111,6 +111,9 @@ fly deploy
 | `CHECK_INTERVAL` | Опрос Twitch, сек (по умолчанию 60) |
 | `DATABASE_PATH` | SQLite (по умолчанию `data/bot.db`) |
 | `PORT` | Health-check (Render задаёт сам) |
+| `STATUS_CHECK_INTERVAL` | Опрос RSS Render, сек (по умолчанию 1800) |
+
+Бот присылает уведомление о **запланированных работах Render** (RSS status.render.com) всем, кто писал `/start`.
 
 ## Архитектура
 

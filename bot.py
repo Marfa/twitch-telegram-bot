@@ -27,6 +27,7 @@ from telegram.ext import (
 
 from db import Database, Subscription
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
+from render_status import fetch_render_status, is_planned_maintenance
 from twitch import TwitchClient, render_template
 
 logger = logging.getLogger(__name__)
@@ -163,9 +164,12 @@ async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> boo
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(update.effective_user.id)
     await update.effective_message.reply_text(
         "Привет! Я присылаю уведомления о старте стримов на Twitch.\n\n"
-        "Справка по командам: /help\n\n"
+        "Справка по командам: /help\n"
+        "/start не удаляет ваши подписки — только запускает новую настройку.\n\n"
         "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
         reply_markup=MAIN_MENU,
     )
@@ -436,6 +440,7 @@ async def _finish_subscription(
         context.user_data.clear()
         return ConversationHandler.END
 
+    db.upsert_user(owner_id)
     context.user_data.clear()
 
     preview = render_template(
@@ -486,6 +491,7 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.application.bot_data["db"].upsert_user(update.effective_user.id)
     await update.effective_message.reply_text(HELP_TEXT, reply_markup=MAIN_MENU)
 
 
@@ -494,7 +500,14 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db: Database = context.application.bot_data["db"]
     subs = db.get_subscriptions_by_owner(update.effective_user.id)
     if not subs:
-        await update.effective_message.reply_text("Подписок пока нет.", reply_markup=MAIN_MENU)
+        await update.effective_message.reply_text(
+            "Подписок пока нет.\n\n"
+            "Если настраивали раньше — на Render подписки могли сброситься "
+            "при перезапуске сервера (до подключения диска). "
+            "Нажмите ➕ Новая подписка.\n\n"
+            "Справка: /help",
+            reply_markup=MAIN_MENU,
+        )
         return
 
     lines = [_format_sub_line(s) for s in subs]
@@ -584,6 +597,55 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         last_live[uid] = is_live
 
 
+async def check_render_status(context: ContextTypes.DEFAULT_TYPE) -> None:
+    from config import RENDER_STATUS_RSS
+
+    db: Database = context.application.bot_data["db"]
+    seeded = context.application.bot_data.setdefault("render_status_seeded", False)
+
+    try:
+        items = await asyncio.to_thread(fetch_render_status, RENDER_STATUS_RSS)
+    except Exception:
+        logger.exception("Render status RSS fetch failed")
+        return
+
+    new_planned = []
+    for item in items:
+        if db.is_status_seen(item.guid):
+            continue
+        db.mark_status_seen(item.guid)
+        if not seeded:
+            continue
+        if is_planned_maintenance(item):
+            new_planned.append(item)
+
+    context.application.bot_data["render_status_seeded"] = True
+    if not new_planned:
+        return
+
+    user_ids = db.get_notify_user_ids()
+    if not user_ids:
+        return
+
+    for item in new_planned:
+        body = item.description[:600] + ("…" if len(item.description) > 600 else "")
+        text = (
+            "⚠️ Render: запланированы работы\n"
+            "Бот может быть недоступен.\n\n"
+            f"{item.title}\n{body}\n\n"
+            f"{item.link}"
+        )
+        for user_id in user_ids:
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    text,
+                    disable_web_page_preview=True,
+                )
+            except (BadRequest, Forbidden) as exc:
+                logger.warning("Cannot notify user %s: %s", user_id, exc)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     err = context.error
     if isinstance(err, Conflict):
@@ -639,7 +701,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     app.add_handler(conv, group=1)
 
-    from config import CHECK_INTERVAL
+    from config import CHECK_INTERVAL, STATUS_CHECK_INTERVAL
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
+    app.job_queue.run_repeating(
+        check_render_status, interval=STATUS_CHECK_INTERVAL, first=30
+    )
     return app
