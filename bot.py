@@ -347,16 +347,28 @@ async def _finish_subscription(
     thread_id: int | None,
 ) -> int:
     db: Database = context.application.bot_data["db"]
-    data = context.user_data
-    sub_id = db.add_subscription(
-        owner_id=owner_id,
-        twitch_username=data["twitch_username"],
-        twitch_user_id=data["twitch_user_id"],
-        message_template=data["message_template"],
-        dest_type=data["dest_type"],
-        chat_id=chat_id,
-        thread_id=thread_id,
-    )
+    data = dict(context.user_data)
+
+    try:
+        sub_id = db.add_subscription(
+            owner_id=owner_id,
+            twitch_username=data["twitch_username"],
+            twitch_user_id=data["twitch_user_id"],
+            message_template=data["message_template"],
+            dest_type=data["dest_type"],
+            chat_id=chat_id,
+            thread_id=thread_id,
+        )
+    except Exception:
+        logger.exception("Failed to save subscription for owner %s", owner_id)
+        await context.bot.send_message(
+            owner_id,
+            "Не удалось сохранить подписку. Попробуйте ещё раз: /start",
+            reply_markup=MAIN_MENU,
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
     context.user_data.clear()
 
     preview = render_template(
@@ -377,11 +389,12 @@ async def _finish_subscription(
     )
 
     if update.callback_query:
-        await update.callback_query.edit_message_text("✅ Подписка создана.")
-        await context.bot.send_message(owner_id, text, reply_markup=MAIN_MENU)
-    else:
-        await update.effective_message.reply_text(text, reply_markup=MAIN_MENU)
+        try:
+            await update.callback_query.edit_message_text("✅ Подписка создана.")
+        except BadRequest:
+            pass
 
+    await context.bot.send_message(owner_id, text, reply_markup=MAIN_MENU)
     return ConversationHandler.END
 
 
@@ -404,6 +417,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.clear()
     db: Database = context.application.bot_data["db"]
     subs = db.get_subscriptions_by_owner(update.effective_user.id)
     if not subs:
@@ -427,6 +441,7 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.clear()
     db: Database = context.application.bot_data["db"]
     subs = db.get_subscriptions_by_owner(update.effective_user.id)
     if not subs:
@@ -519,6 +534,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(filters.Regex(f"^{re.escape(BTN_FEEDBACK)}$"), report_problem),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(filters.Regex(f"^{re.escape(BTN_LIST)}$"), list_subscriptions),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(filters.Regex(f"^{re.escape(BTN_DELETE)}$"), delete_menu),
+        group=0,
+    )
+    app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
+    app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
 
     conv = ConversationHandler(
         entry_points=[
@@ -539,10 +564,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     app.add_handler(conv, group=1)
-    app.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_LIST)}$"), list_subscriptions), group=1)
-    app.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_DELETE)}$"), delete_menu), group=1)
-    app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=1)
-    app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=1)
 
     from config import CHECK_INTERVAL
 
