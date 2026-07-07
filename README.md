@@ -1,32 +1,31 @@
-# Twitch → Telegram — уведомления о старте стримов в личку, канал или группу с темами
+# Twitch → Telegram — уведомления о старте стримов
 
-**Стрим начался — бот сам напишет туда, куда вы скажете.** Настройка за минуту через диалог в Telegram.
+**Стрим начался — бот сам напишет туда, куда вы скажете.** Настройка за минуту в Telegram.
+
+English: [README.en.md](README.en.md)
 
 ```bash
-cp .env.example .env   # заполните токены
-docker compose up -d
+cp .env.example .env
+docker compose up -d --build
 ```
 
 | Возможность | Как работает |
 |---|---|
-| Куда слать | Личка, канал, группа с темами |
-| Канал Twitch | Ссылка, m.twitch.tv или username |
-| Текст уведомления | Свой шаблон с `{username}`, `{game}`, `{name}` |
+| Куда слать | Личка, канал, группа или сообщество (с темами) |
+| Канал Twitch | Ссылка, `m.twitch.tv` или username |
+| Текст | Свой шаблон: `{username}`, `{game}`, `{name}` |
 | Подписки | Список, вкл/выкл, удаление |
-| Деплой | Docker, Fly.io (бесплатно), Render |
+| Команды | `/start`, `/help`, `/cancel` |
+| Деплой | Render + UptimeRobot, Fly.io, Docker |
 
 ## Quick Start
 
-1. Создайте бота у [@BotFather](https://t.me/BotFather) → `TELEGRAM_BOT_TOKEN`
-2. Получите Twitch API ключи (см. ниже) → `TWITCH_CLIENT_ID` и `TWITCH_CLIENT_SECRET`
-3. Скопируйте `.env.example` в `.env` и заполните переменные
-4. Запустите:
+1. Бот у [@BotFather](https://t.me/BotFather) → `TELEGRAM_BOT_TOKEN`
+2. Приложение на [Twitch Developer Console](https://dev.twitch.tv/console) → `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` (см. ниже)
+3. `cp .env.example .env` — заполните переменные
+4. `docker compose up -d --build`
 
-```bash
-docker compose up -d --build
-```
-
-Локально без Docker:
+Локально:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -34,46 +33,65 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Где взять TWITCH_CLIENT_ID и TWITCH_CLIENT_SECRET
+## Twitch API ключи
 
-1. Войдите на [Twitch Developer Console](https://dev.twitch.tv/console) под аккаунтом Twitch
-2. **Register Your Application** (или откройте существующее)
-3. Заполните форму:
-   - **Name** — любое (например, `My Stream Notifier`)
-   - **OAuth Redirect URLs** — для этого бота не нужны, можно `http://localhost`
-   - **Category** — например, `Application Integration`
-4. После создания на странице приложения:
-   - **Client ID** — скопируйте в `TWITCH_CLIENT_ID`
-   - **Client Secret** — нажмите **New Secret**, скопируйте в `TWITCH_CLIENT_SECRET`
+1. [Twitch Developer Console](https://dev.twitch.tv/console) → **Register Your Application**
+2. **OAuth Redirect URLs** — `http://localhost` (для бота не используется, поле обязательное)
+3. **Client ID** → `TWITCH_CLIENT_ID`
+4. **New Secret** → `TWITCH_CLIENT_SECRET`
 
-Бот использует **Client Credentials** (app access token) — достаточно ID и Secret, OAuth-авторизация пользователя не требуется. Нужны права на чтение публичных данных: статус стрима, название, категория.
+Бот использует **Client Credentials** — OAuth пользователя не нужен.
 
 ## Использование
 
 `/start` — мастер настройки:
 
-1. Канал Twitch (ссылка или username)
+1. Канал Twitch
 2. Формат сообщения (`{username}`, `{game}`, `{name}`)
-3. Куда слать: личка / канал / группа с темами
+3. Куда слать: личка / канал / группа или сообщество
 4. Для канала или группы — добавьте бота и подтвердите чат
 
-Меню:
+**Группа или сообщество** — отправьте:
+- ссылку на тему: `https://t.me/c/название/30`
+- `@username` группы
+- ID группы (`-100…`)
+- пересланное сообщение из группы («Переслано из: …»)
 
-- **➕ Новая подписка** — ещё один канал
-- **📋 Мои подписки** — список, вкл/выкл кнопкой
-- **🗑 Удалить подписку** — полное удаление
+Права бота в группе: **отправка сообщений** (админ не обязателен).
+
+После настройки бот пришлёт **«✅ Настройка завершена!»** в личку и тестовое сообщение в выбранный чат.
+
+### Меню и команды
+
+| Кнопка / команда | Действие |
+|---|---|
+| `/start` | Новая подписка |
+| `/help` | Справка |
+| `/cancel` | Отменить настройку |
+| ➕ Новая подписка | Ещё один канал |
+| 📋 Мои подписки | Список, вкл/выкл |
+| 🗑 Удалить подписку | Удалить |
+| 🐛 Сообщить о проблеме | @immarfa или [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
 
 Пример шаблона:
 
 ```
-🔴 {username} в эфире!
+{username} в эфире!
 {name}
 Категория: {game}
 ```
 
-## Бесплатный деплой
+## Деплой
 
-### Fly.io (рекомендуется — данные сохраняются)
+### Render + UptimeRobot (бесплатно)
+
+1. GitHub → [Render Blueprint](https://dashboard.render.com/) (`render.yaml`)
+2. Секреты: `TELEGRAM_BOT_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`
+3. [UptimeRobot](https://uptimerobot.com/): **HTTP(s)** → `https://ВАШ-СЕРВИС.onrender.com/health`, интервал **5 min**
+
+На free-тарифе SQLite в `/tmp` — подписки сбрасываются при редеплое.
+
+### Fly.io (данные на volume)
 
 ```bash
 fly launch --no-deploy
@@ -82,78 +100,41 @@ fly secrets set TELEGRAM_BOT_TOKEN=... TWITCH_CLIENT_ID=... TWITCH_CLIENT_SECRET
 fly deploy
 ```
 
-### Render + UptimeRobot (бесплатно, без засыпания)
-
-Render усыпляет бесплатные **Web Service** через ~15 мин без запросов. Бот поднимает `/health`, а [UptimeRobot](https://uptimerobot.com/) пингует его каждые 5 минут.
-
-1. Залейте репозиторий на GitHub
-2. [Render Dashboard](https://dashboard.render.com/) → **New** → **Blueprint** → выберите репозиторий (`render.yaml`)
-3. Задайте секреты: `TELEGRAM_BOT_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`
-4. После деплоя скопируйте URL сервиса, например `https://twitch-telegram-bot.onrender.com`
-5. UptimeRobot → **Add Monitor**:
-   - Type: **HTTP(s)**
-   - URL: `https://ВАШ-СЕРВИС.onrender.com/health`
-   - Monitoring interval: **5 minutes**
-
-На free-тарифе SQLite в `/tmp` — подписки сбросятся при редеплое или рестарте. Пока сервис не перезапускается, данные живут.
-
-### Fly.io (данные сохраняются на volume)
-
-```bash
-docker compose up -d --build
-```
-
 ## Переменные окружения
 
 | Переменная | Описание |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | Токен от BotFather |
-| `TWITCH_CLIENT_ID` | Client ID приложения Twitch |
-| `TWITCH_CLIENT_SECRET` | Client Secret приложения Twitch |
-| `CHECK_INTERVAL` | Интервал опроса Twitch, сек (по умолчанию 60) |
-| `DATABASE_PATH` | Путь к SQLite (по умолчанию `data/bot.db`) |
-| `PORT` | Порт HTTP health-check (Render задаёт автоматически) |
+| `TELEGRAM_BOT_TOKEN` | Токен BotFather |
+| `TWITCH_CLIENT_ID` | Twitch Client ID |
+| `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
+| `CHECK_INTERVAL` | Опрос Twitch, сек (по умолчанию 60) |
+| `DATABASE_PATH` | SQLite (по умолчанию `data/bot.db`) |
+| `PORT` | Health-check (Render задаёт сам) |
 
-## Cursor rules
+## Архитектура
 
-Правила для AI-ассистента адаптированы из [awesome-cursorrules](https://github.com/PatrickJS/awesome-cursorrules) и лежат в `.cursor/rules/`:
+| Модуль | Назначение |
+|---|---|
+| `bot.py` | Wizard, меню, уведомления |
+| `twitch.py` | Helix API, шаблоны |
+| `links.py` | Парсинг `t.me/c/…/тема` |
+| `health.py` | `/health` для Render и UptimeRobot |
+| `db.py` | SQLite подписки |
 
-| Файл | Источник | Область |
-|---|---|---|
-| `python-bot.mdc` | python best practices | `**/*.py` |
-| `docker.mdc` | docker | Dockerfile, compose, render |
-| `telegram-twitch.mdc` | telegram API patterns | bot, twitch, health |
+Опрос Twitch Helix ~60 сек, polling Telegram, без публичного webhook.
 
-## Как устроено
+## Заимствования
 
-Опрос Twitch Helix API каждые ~60 сек — не нужен публичный webhook. Подписки в SQLite. Один процесс, polling Telegram.
+Изучены [twitchrise](https://github.com/driftywinds/twitchrise), [lajujabot](https://github.com/ria4/lajujabot), [twitch-telegram-bot](https://github.com/mehdizebhi/twitch-telegram-bot). **Их код не копировался** — только идеи (polling API, подписки, отправка в канал/группу).
 
-## Заимствования и лицензии
+## Лицензия
 
-Перед разработкой изучены три открытых проекта. **Их исходный код в этот репозиторий не включён** — ни файлов, ни фрагментов, ни форков. Всё написано с нуля на Python.
+**Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**
 
-| Проект | Лицензия | Что взято | Что не взято |
-|---|---|---|---|
-| [twitchrise](https://github.com/driftywinds/twitchrise) | [GPL-3.0](https://github.com/driftywinds/twitchrise/blob/main/LICENSE) | Идея опроса Helix API (`/oauth2/token`, `/helix/streams`) вместо EventSub webhook | `head.py`, Apprise, цикл из репозитория |
-| [lajujabot](https://github.com/ria4/lajujabot) | [GPL-3.0](https://github.com/ria4/lajujabot/blob/main/LICENSE) | Идея Telegram-бота с подписками и шаблоном текста | `bot.py`, `twitch.py`, EventSub, PicklePersistence |
-| [twitch-telegram-bot](https://github.com/mehdizebhi/twitch-telegram-bot) | **Файл LICENSE отсутствует** | Идея отправки в канал/группу Telegram | Java/Spring-код, Twitch4J, SQLite-схема |
-
-### Почему это не нарушает GPL-3.0
-
-GPL-3.0 распространяется на **производные работы от исходного кода**. Здесь:
-
-- нет копирования выражений из GPL-проектов (только общие идеи: «опрашивать API», «слать в Telegram»);
-- вызовы публичного Twitch Helix API — стандартная интеграция, не защищённое авторским правом выражение;
-- архитектура отличается: polling + SQLite + `python-telegram-bot`, а не EventSub webhook или Spring Boot.
-
-Если сравнить `twitch.py` с `head.py` из twitchrise — совпадает только последовательность публичных HTTP-запросов к Twitch; классы, структура и остальной код разные.
-
-### Лицензия этого репозитория
-
-Код этого проекта — оригинальная реализация. При публикации рекомендуется добавить собственный файл `LICENSE` (например, MIT). До его появления распространяйте исходники на своих условиях с сохранением атрибуции проектов из таблицы выше.
+См. [LICENSE](LICENSE) · https://creativecommons.org/licenses/by-nc-sa/4.0/
 
 ---
 
 Код подготовлен с помощью Cursor
 
-Поддержка проекта: [DonationAlerts](https://www.donationalerts.com/r/themarfa) · [Криптой](https://nowpayments.io/donation/themarfa)
+Поддержка: [DonationAlerts](https://www.donationalerts.com/r/themarfa) · [Криптой](https://nowpayments.io/donation/themarfa)
