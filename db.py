@@ -18,6 +18,8 @@ class Subscription:
     chat_id: int
     thread_id: int | None
     enabled: bool
+    delete_previous: bool
+    last_message_id: int | None
 
 
 class Database:
@@ -67,6 +69,16 @@ class Database:
                 ON subscriptions(owner_id)
                 """
             )
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(subscriptions)")}
+        if "delete_previous" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN delete_previous INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_message_id" not in cols:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN last_message_id INTEGER")
 
     def _row_to_sub(self, row: sqlite3.Row) -> Subscription:
         return Subscription(
@@ -79,6 +91,8 @@ class Database:
             chat_id=row["chat_id"],
             thread_id=row["thread_id"],
             enabled=bool(row["enabled"]),
+            delete_previous=bool(row["delete_previous"]),
+            last_message_id=row["last_message_id"],
         )
 
     def add_subscription(
@@ -90,14 +104,16 @@ class Database:
         dest_type: str,
         chat_id: int,
         thread_id: int | None,
+        delete_previous: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
-                    message_template, dest_type, chat_id, thread_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    message_template, dest_type, chat_id, thread_id,
+                    delete_previous
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -107,9 +123,17 @@ class Database:
                     dest_type,
                     chat_id,
                     thread_id,
+                    int(delete_previous),
                 ),
             )
             return int(cur.lastrowid)
+
+    def set_last_message_id(self, sub_id: int, message_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE subscriptions SET last_message_id = ? WHERE id = ?",
+                (message_id, sub_id),
+            )
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]:
         with self._conn() as conn:
