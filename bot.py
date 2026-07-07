@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -109,7 +110,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return CHANNEL
 
-    user = twitch.get_user(username)
+    user = await asyncio.to_thread(twitch.get_user, username)
     if not user:
         await update.effective_message.reply_text(
             f"Канал «{username}» не найден на Twitch. Попробуйте ещё раз."
@@ -373,7 +374,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        live_streams = twitch.get_live_streams(user_ids)
+        live_streams = await asyncio.to_thread(twitch.get_live_streams, user_ids)
     except Exception:
         logger.exception("Twitch poll failed")
         return

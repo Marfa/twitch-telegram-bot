@@ -18,7 +18,7 @@ docker compose up -d
 ## Quick Start
 
 1. Создайте бота у [@BotFather](https://t.me/BotFather) → `TELEGRAM_BOT_TOKEN`
-2. Зарегистрируйте приложение на [Twitch Developer Console](https://dev.twitch.tv/console) → `TWITCH_CLIENT_ID` и `TWITCH_CLIENT_SECRET`
+2. Получите Twitch API ключи (см. ниже) → `TWITCH_CLIENT_ID` и `TWITCH_CLIENT_SECRET`
 3. Скопируйте `.env.example` в `.env` и заполните переменные
 4. Запустите:
 
@@ -33,6 +33,20 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
+
+## Где взять TWITCH_CLIENT_ID и TWITCH_CLIENT_SECRET
+
+1. Войдите на [Twitch Developer Console](https://dev.twitch.tv/console) под аккаунтом Twitch
+2. **Register Your Application** (или откройте существующее)
+3. Заполните форму:
+   - **Name** — любое (например, `My Stream Notifier`)
+   - **OAuth Redirect URLs** — для этого бота не нужны, можно `http://localhost`
+   - **Category** — например, `Application Integration`
+4. После создания на странице приложения:
+   - **Client ID** — скопируйте в `TWITCH_CLIENT_ID`
+   - **Client Secret** — нажмите **New Secret**, скопируйте в `TWITCH_CLIENT_SECRET`
+
+Бот использует **Client Credentials** (app access token) — достаточно ID и Secret, OAuth-авторизация пользователя не требуется. Нужны права на чтение публичных данных: статус стрима, название, категория.
 
 ## Использование
 
@@ -99,6 +113,16 @@ docker compose up -d --build
 | `CHECK_INTERVAL` | Интервал опроса Twitch, сек (по умолчанию 60) |
 | `DATABASE_PATH` | Путь к SQLite (по умолчанию `data/bot.db`) |
 | `PORT` | Порт HTTP health-check (Render задаёт автоматически) |
+
+## Cursor rules
+
+Правила для AI-ассистента адаптированы из [awesome-cursorrules](https://github.com/PatrickJS/awesome-cursorrules) и лежат в `.cursor/rules/`:
+
+| Файл | Источник | Область |
+|---|---|---|
+| `python-bot.mdc` | python best practices | `**/*.py` |
+| `docker.mdc` | docker | Dockerfile, compose, render |
+| `telegram-twitch.mdc` | telegram API patterns | bot, twitch, health |
 
 ## Как устроено
 

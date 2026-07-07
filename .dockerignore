@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+.env
+.env.*
+data
+*.db
+.cursor
+fly.toml
+compose.yml
+README.md
+self_check.py

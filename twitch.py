@@ -20,6 +20,7 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 
 class TwitchClient:
     def __init__(self) -> None:
+        self._session = requests.Session()
         self._token = ""
         self._token_expires = 0.0
 
@@ -38,7 +39,7 @@ class TwitchClient:
     def _ensure_token(self) -> str:
         if self._token and time.time() < self._token_expires - 60:
             return self._token
-        resp = requests.post(
+        resp = self._session.post(
             "https://id.twitch.tv/oauth2/token",
             params={
                 "client_id": TWITCH_CLIENT_ID,
@@ -60,7 +61,7 @@ class TwitchClient:
         }
 
     def get_user(self, login: str) -> dict[str, Any] | None:
-        resp = requests.get(
+        resp = self._session.get(
             "https://api.twitch.tv/helix/users",
             headers=self._headers(),
             params={"login": login.lower()},
@@ -74,7 +75,7 @@ class TwitchClient:
         if not user_ids:
             return {}
         params: list[tuple[str, str]] = [("user_id", uid) for uid in user_ids]
-        resp = requests.get(
+        resp = self._session.get(
             "https://api.twitch.tv/helix/streams",
             headers=self._headers(),
             params=params,

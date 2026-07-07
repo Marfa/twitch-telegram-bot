@@ -38,6 +38,7 @@ class Database:
 
     def _init_schema(self) -> None:
         with self._conn() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -115,13 +116,6 @@ class Database:
             rows = conn.execute(
                 "SELECT * FROM subscriptions WHERE owner_id = ? ORDER BY id",
                 (owner_id,),
-            ).fetchall()
-        return [self._row_to_sub(r) for r in rows]
-
-    def get_enabled_subscriptions(self) -> list[Subscription]:
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM subscriptions WHERE enabled = 1 ORDER BY id"
             ).fetchall()
         return [self._row_to_sub(r) for r in rows]
 

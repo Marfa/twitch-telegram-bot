@@ -14,8 +14,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main() -> None:
-    validate()
     start_health_server()
+    validate()
     db = Database(DATABASE_PATH)
     twitch = TwitchClient()
     app = build_application(TELEGRAM_BOT_TOKEN, db, twitch)

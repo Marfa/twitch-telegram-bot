@@ -1,0 +1,17 @@
+---
+description: Python-стандарты проекта (адаптировано из awesome-cursorrules/python)
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python — twitch-telegram-bot
+
+- `from __future__ import annotations` в каждом модуле
+- Type hints на всех публичных функциях и методах
+- Конфиг только через `config.py` и env vars, без хардкода секретов
+- Блокирующий I/O (requests, sqlite) — не в async-хендлерах: `asyncio.to_thread()`
+- Логирование через `logging`, без `print` в прод-коде
+- Минимальный diff: не добавлять фреймворки и абстракции без запроса
+- Проверка логики: `python self_check.py` после нетривиальных изменений
+
+Структура: плоские модули в корне (`bot.py`, `twitch.py`, `db.py`), без `src/` — не рефакторить без причины.
