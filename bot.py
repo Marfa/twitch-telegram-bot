@@ -7,10 +7,8 @@ import re
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     MessageOriginChannel,
     MessageOriginChat,
-    ReplyKeyboardMarkup,
     Update,
 )
 from telegram.constants import ChatType
@@ -26,90 +24,51 @@ from telegram.ext import (
 )
 
 from db import Database, Subscription
+from i18n import (
+    DEFAULT_LOCALE,
+    SUPPORTED_LOCALES,
+    all_menu_buttons,
+    btn,
+    delete_old_keyboard,
+    dest_keyboard,
+    dest_label,
+    edit_bool_keyboard,
+    edit_options_keyboard,
+    language_keyboard,
+    main_menu,
+    t,
+)
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
 from render_status import fetch_render_status, is_planned_maintenance
 from twitch import TwitchClient, render_template
 
 logger = logging.getLogger(__name__)
 
-CHANNEL, TEMPLATE, DEST_TYPE, DEST_CHAT, DELETE_OLD = range(5)
-
-BTN_NEW = "➕ Новая подписка"
-BTN_LIST = "📋 Мои подписки"
-BTN_DELETE = "🗑 Удалить подписку"
-BTN_FEEDBACK = "🐛 Сообщить о проблеме"
-MENU_BUTTONS = {BTN_NEW, BTN_LIST, BTN_DELETE, BTN_FEEDBACK}
-
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
-FEEDBACK_TEXT = (
-    "Обратная связь:\n"
-    "• Telegram: @immarfa\n"
-    f"• GitHub Issues: {GITHUB_ISSUES_URL}\n\n"
-    "Поддержка:\n"
-    "• DonationAlerts: https://www.donationalerts.com/r/themarfa\n"
-    "• Криптой: https://nowpayments.io/donation/themarfa\n\n"
-    "Ссылки:\n"
-    "• Twitch: https://www.twitch.tv/marfapr\n"
-    "• Telegram: https://t.me/themarfa\n"
-    "• Сайт: https://blog.themarfa.name/"
-)
 
-HELP_TEXT = (
-    "Доступные команды:\n"
-    "/start — настроить подписку на стрим\n"
-    "/help — показать эту справку\n"
-    "/cancel — отменить текущую настройку\n\n"
-    "Кнопки меню:\n"
-    f"• {BTN_NEW}\n"
-    f"• {BTN_LIST}\n"
-    f"• {BTN_DELETE}\n"
-    f"• {BTN_FEEDBACK}"
-)
-
-DEST_LABELS = {
-    "dm": "личку",
-    "channel": "канал",
-    "group": "группу или сообщество",
-}
-
-GROUP_SETUP_TEXT = (
-    "Добавьте бота в группу или сообщество.\n\n"
-    "Права бота:\n"
-    "• Отправка сообщений (обязательно)\n"
-    "• Администратор не нужен, если участникам разрешено писать\n\n"
-    "Отправьте одно из:\n"
-    "• Ссылку на тему: https://t.me/c/название/30\n"
-    "• @username группы (без темы — в общий чат)\n"
-    "• ID группы (например -1001234567890)\n"
-    "• Пересланное сообщение из группы (должно быть «Переслано из: …», не из лички)\n\n"
-    "Для групп с темами ссылка на тему — самый надёжный способ."
-)
-
-DELETE_OLD_TEXT = (
-    "Удалять предыдущее сообщение бота при новом стриме?\n\n"
-    "Если включено — перед новым уведомлением бот удалит своё прошлое в этом чате.\n"
-    "В канале боту нужно право удалять сообщения."
-)
-
-DELETE_OLD_KEYBOARD = InlineKeyboardMarkup(
-    [
-        [InlineKeyboardButton("✅ Да, удалять", callback_data="delete_old:1")],
-        [InlineKeyboardButton("❌ Нет", callback_data="delete_old:0")],
-    ]
-)
-
-MAIN_MENU = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton(BTN_NEW)],
-        [KeyboardButton(BTN_LIST), KeyboardButton(BTN_DELETE)],
-        [KeyboardButton(BTN_FEEDBACK)],
-    ],
-    resize_keyboard=True,
-)
+LANG_SELECT, CHANNEL, TEMPLATE, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE = range(7)
 
 
-def _dest_label(dest_type: str) -> str:
-    return DEST_LABELS.get(dest_type, dest_type)
+def _btn_filter(key: str) -> filters.Regex:
+    texts = "|".join(re.escape(btn(key, loc)) for loc in SUPPORTED_LOCALES)
+    return filters.Regex(f"^({texts})$")
+
+
+def _user_lang(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> str:
+    db: Database = context.application.bot_data["db"]
+    return db.get_user_locale(user_id) or DEFAULT_LOCALE
+
+
+def _help_text(lang: str) -> str:
+    return t(
+        "help",
+        lang,
+        btn_new=btn("new", lang),
+        btn_list=btn("list", lang),
+        btn_edit=btn("edit", lang),
+        btn_delete=btn("delete", lang),
+        btn_feedback=btn("feedback", lang),
+    )
 
 
 def _is_link_preview_disabled(message) -> bool:
@@ -117,13 +76,13 @@ def _is_link_preview_disabled(message) -> bool:
     return bool(opts and opts.is_disabled)
 
 
-def _format_sub_line(sub: Subscription) -> str:
+def _format_sub_line(sub: Subscription, lang: str) -> str:
     status = "✅" if sub.enabled else "⏸"
-    thread = f", тема {sub.thread_id}" if sub.thread_id else ""
-    delete = ", удалять старые" if sub.delete_previous else ""
+    thread = t("sub_line_thread", lang, thread_id=sub.thread_id) if sub.thread_id else ""
+    delete = t("sub_line_delete", lang) if sub.delete_previous else ""
     return (
         f"{status} #{sub.id} — {sub.twitch_username}\n"
-        f"   → {_dest_label(sub.dest_type)} ({sub.chat_id}{thread}{delete})"
+        f"   → {dest_label(sub.dest_type, lang)} ({sub.chat_id}{thread}{delete})"
     )
 
 
@@ -169,122 +128,171 @@ async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> boo
         return False
 
 
+async def _prompt_language(update: Update) -> int:
+    await update.effective_message.reply_text(
+        t("lang_pick", DEFAULT_LOCALE),
+        reply_markup=language_keyboard(),
+    )
+    return LANG_SELECT
+
+
+async def _begin_setup_message(update: Update, lang: str) -> int:
+    await update.effective_message.reply_text(
+        t("start_welcome", lang),
+        reply_markup=main_menu(lang),
+    )
+    return CHANNEL
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(update.effective_user.id)
-    await update.effective_message.reply_text(
-        "Привет! Я присылаю уведомления о старте стримов на Twitch.\n\n"
-        "Справка по командам: /help\n"
-        "/start не удаляет ваши подписки — только запускает новую настройку.\n\n"
-        "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
-        reply_markup=MAIN_MENU,
+    user_id = update.effective_user.id
+    db.upsert_user(user_id)
+    lang = db.get_user_locale(user_id)
+    if not lang:
+        context.user_data["after_lang"] = "setup"
+        return await _prompt_language(update)
+    return await _begin_setup_message(update, lang)
+
+
+async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = query.data.split(":", 1)[1]
+    if lang not in SUPPORTED_LOCALES:
+        lang = DEFAULT_LOCALE
+    db: Database = context.application.bot_data["db"]
+    db.set_user_locale(query.from_user.id, lang)
+    await query.edit_message_text(t("lang_set", lang))
+    after = context.user_data.pop("after_lang", "setup")
+    if after == "help":
+        await context.bot.send_message(
+            query.from_user.id,
+            _help_text(lang),
+            reply_markup=main_menu(lang),
+        )
+        return ConversationHandler.END
+    await context.bot.send_message(
+        query.from_user.id,
+        t("start_welcome", lang),
+        reply_markup=main_menu(lang),
     )
     return CHANNEL
 
 
 async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
+    lang = _user_lang(context, update.effective_user.id)
     await update.effective_message.reply_text(
-        "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
-        reply_markup=MAIN_MENU,
+        t("new_sub_prompt", lang),
+        reply_markup=main_menu(lang),
     )
     return CHANNEL
 
 
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
     text = update.effective_message.text or ""
-    if text in MENU_BUTTONS:
-        await update.effective_message.reply_text(
-            "Сначала завершите настройку подписки или нажмите /cancel."
-        )
+    if text in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
         return CHANNEL
 
     twitch: TwitchClient = context.application.bot_data["twitch"]
     username = twitch.parse_username(text)
     if not username:
-        await update.effective_message.reply_text(
-            "Не удалось распознать канал. Примеры:\n"
-            "• ninja\n"
-            "• https://twitch.tv/ninja\n"
-            "• https://m.twitch.tv/ninja"
-        )
+        await update.effective_message.reply_text(t("channel_not_parsed", lang))
         return CHANNEL
 
     user = await asyncio.to_thread(twitch.get_user, username)
     if not user:
         await update.effective_message.reply_text(
-            f"Канал «{username}» не найден на Twitch. Попробуйте ещё раз."
+            t("channel_not_found", lang, username=username)
         )
         return CHANNEL
 
     context.user_data["twitch_username"] = user["login"]
     context.user_data["twitch_user_id"] = user["id"]
     await update.effective_message.reply_text(
-        f"Канал: {user['display_name']}\n\n"
-        "Задайте формат сообщения. Доступные ключевые слова:\n"
-        "• {username} — имя канала\n"
-        "• {game} — категория стрима\n"
-        "• {name} — название стрима\n\n"
-        "Пример:\n"
-        "{username} в эфире!\n"
-        "{name}\n"
-        "Категория: {game}\n\n"
-        "Если в тексте есть ссылка — перед отправкой можно отключить её превью "
-        "(долгое нажатие на кнопку отправки → «Без превью»)."
+        t("channel_found", lang, display_name=user["display_name"])
     )
     return TEMPLATE
 
 
 async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
     template = (update.effective_message.text or "").strip()
-    if template in MENU_BUTTONS:
-        await update.effective_message.reply_text(
-            "Сначала завершите настройку подписки или нажмите /cancel."
-        )
+    if template in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
         return TEMPLATE
     if not template:
-        await update.effective_message.reply_text("Шаблон не может быть пустым.")
+        await update.effective_message.reply_text(t("template_empty", lang))
         return TEMPLATE
 
     context.user_data["message_template"] = template
     context.user_data["disable_link_preview"] = _is_link_preview_disabled(
         update.effective_message
     )
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📩 В личку", callback_data="dest:dm")],
-            [InlineKeyboardButton("📢 В канал", callback_data="dest:channel")],
-            [InlineKeyboardButton("💬 В группу или сообщество", callback_data="dest:group")],
-        ]
-    )
     await update.effective_message.reply_text(
-        "Куда отправлять уведомления?",
-        reply_markup=keyboard,
+        t("dest_prompt", lang),
+        reply_markup=dest_keyboard(lang),
     )
     return DEST_TYPE
+
+
+async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    template = (update.effective_message.text or "").strip()
+    if template in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return EDIT_TEMPLATE
+    if not template:
+        await update.effective_message.reply_text(t("template_empty", lang))
+        return EDIT_TEMPLATE
+
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    if not db.update_subscription(
+        sub_id,
+        owner_id,
+        message_template=template,
+        disable_link_preview=_is_link_preview_disabled(update.effective_message),
+    ):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_id),
+            reply_markup=main_menu(lang),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    lang = _user_lang(context, query.from_user.id)
     dest_type = query.data.split(":", 1)[1]
     context.user_data["dest_type"] = dest_type
 
     if dest_type == "dm":
         context.user_data["pending_chat_id"] = query.from_user.id
         context.user_data["pending_thread_id"] = None
-        await query.edit_message_text(DELETE_OLD_TEXT, reply_markup=DELETE_OLD_KEYBOARD)
+        await query.edit_message_text(
+            t("delete_old_text", lang),
+            reply_markup=delete_old_keyboard(lang),
+        )
         return DELETE_OLD
 
     if dest_type == "channel":
-        await query.edit_message_text(
-            "Добавьте бота в канал как администратора с правом публикации.\n\n"
-            "Затем отправьте @username канала или перешлите сообщение из канала."
-        )
+        await query.edit_message_text(t("channel_setup", lang))
         return DEST_CHAT
 
-    await query.edit_message_text(GROUP_SETUP_TEXT)
+    await query.edit_message_text(t("group_setup", lang))
     return DEST_CHAT
 
 
@@ -316,6 +324,7 @@ async def _parse_dest_input(
     bot,
     message,
     dest_type: str,
+    lang: str,
 ) -> tuple[int | None, int | None, str | None]:
     text = (message.text or message.caption or "").strip()
 
@@ -325,7 +334,7 @@ async def _parse_dest_input(
             chat_id, thread_id = await _resolve_from_topic_link(bot, topic)
             return chat_id, thread_id, None
         except BadRequest:
-            return None, None, "Группа не найдена. Добавьте бота и проверьте ссылку."
+            return None, None, t("group_not_found", lang)
 
     fwd_chat, fwd_thread = _extract_forward_chat(message)
     if fwd_chat is not None:
@@ -336,77 +345,65 @@ async def _parse_dest_input(
             chat = await bot.get_chat(text)
             return chat.id, None, None
         except BadRequest:
-            label = "Канал" if dest_type == "channel" else "Группа"
-            return None, None, f"{label} не найдена. Проверьте @username."
+            key = "dest_not_found_channel" if dest_type == "channel" else "dest_not_found_group"
+            return None, None, t(key, lang)
 
     if text and re.fullmatch(r"-?\d+", text):
         return int(text), None, None
 
     if message.forward_origin or message.forward_from_chat:
-        return (
-            None,
-            None,
-            "Пересылка из лички не подходит. Нужно «Переслано из: Название группы» "
-            "или ссылка на тему: https://t.me/c/название/30",
-        )
+        return None, None, t("fwd_from_dm", lang)
 
-    hint = (
-        "Отправьте ссылку на тему, @username, ID группы "
-        "или перешлите сообщение из группы."
-        if dest_type == "group"
-        else "Отправьте @username канала, ID или перешлите сообщение из канала."
-    )
-    return None, None, hint
+    hint_key = "dest_hint_group" if dest_type == "group" else "dest_hint_channel"
+    return None, None, t(hint_key, lang)
 
 
 async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.effective_message
+    lang = _user_lang(context, update.effective_user.id)
     dest_type = context.user_data.get("dest_type", "")
 
-    chat_id, thread_id, error = await _parse_dest_input(context.bot, message, dest_type)
+    chat_id, thread_id, error = await _parse_dest_input(
+        context.bot, message, dest_type, lang
+    )
     if error:
         await message.reply_text(error)
         return DEST_CHAT
     if chat_id is None:
-        await message.reply_text("Не удалось определить чат. Попробуйте ещё раз.")
+        await message.reply_text(t("chat_not_determined", lang))
         return DEST_CHAT
 
     if dest_type == "channel":
         try:
             chat = await context.bot.get_chat(chat_id)
             if chat.type != ChatType.CHANNEL:
-                await message.reply_text("Это не канал. Укажите канал или перешлите из канала.")
+                await message.reply_text(t("not_a_channel", lang))
                 return DEST_CHAT
         except BadRequest:
-            await message.reply_text("Бот не видит этот канал. Добавьте бота как администратора.")
+            await message.reply_text(t("bot_no_channel", lang))
             return DEST_CHAT
 
     if dest_type == "group":
         try:
             chat = await context.bot.get_chat(chat_id)
             if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-                await message.reply_text("Это не группа или сообщество.")
+                await message.reply_text(t("not_a_group", lang))
                 return DEST_CHAT
         except BadRequest:
-            await message.reply_text("Бот не видит эту группу. Добавьте бота в группу.")
+            await message.reply_text(t("bot_no_group", lang))
             return DEST_CHAT
 
-    ok = await _send_test(
-        context.bot,
-        chat_id,
-        thread_id,
-        "✅ Тест: бот может отправлять уведомления сюда.",
-    )
+    ok = await _send_test(context.bot, chat_id, thread_id, t("test_ok", lang))
     if not ok:
-        await message.reply_text(
-            "Не удалось отправить тестовое сообщение. "
-            "Проверьте права бота и попробуйте снова."
-        )
+        await message.reply_text(t("test_failed", lang))
         return DEST_CHAT
 
     context.user_data["pending_chat_id"] = chat_id
     context.user_data["pending_thread_id"] = thread_id
-    await message.reply_text(DELETE_OLD_TEXT, reply_markup=DELETE_OLD_KEYBOARD)
+    await message.reply_text(
+        t("delete_old_text", lang),
+        reply_markup=delete_old_keyboard(lang),
+    )
     return DELETE_OLD
 
 
@@ -429,26 +426,47 @@ async def _finish_subscription(
     thread_id: int | None,
 ) -> int:
     db: Database = context.application.bot_data["db"]
+    lang = _user_lang(context, owner_id)
     data = dict(context.user_data)
+    edit_sub_id = data.get("edit_sub_id")
 
     try:
-        sub_id = db.add_subscription(
-            owner_id=owner_id,
-            twitch_username=data["twitch_username"],
-            twitch_user_id=data["twitch_user_id"],
-            message_template=data["message_template"],
-            dest_type=data["dest_type"],
-            chat_id=chat_id,
-            thread_id=thread_id,
-            delete_previous=bool(data.get("delete_previous", False)),
-            disable_link_preview=bool(data.get("disable_link_preview", False)),
-        )
+        if edit_sub_id:
+            ok = db.update_subscription(
+                edit_sub_id,
+                owner_id,
+                dest_type=data["dest_type"],
+                chat_id=chat_id,
+                thread_id=thread_id,
+                delete_previous=bool(data.get("delete_previous", False)),
+            )
+            if not ok:
+                await context.bot.send_message(
+                    owner_id,
+                    t("sub_not_found", lang),
+                    reply_markup=main_menu(lang),
+                )
+                context.user_data.clear()
+                return ConversationHandler.END
+            sub_id = edit_sub_id
+        else:
+            sub_id = db.add_subscription(
+                owner_id=owner_id,
+                twitch_username=data["twitch_username"],
+                twitch_user_id=data["twitch_user_id"],
+                message_template=data["message_template"],
+                dest_type=data["dest_type"],
+                chat_id=chat_id,
+                thread_id=thread_id,
+                delete_previous=bool(data.get("delete_previous", False)),
+                disable_link_preview=bool(data.get("disable_link_preview", False)),
+            )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
         await context.bot.send_message(
             owner_id,
-            "Не удалось сохранить подписку. Попробуйте ещё раз: /start",
-            reply_markup=MAIN_MENU,
+            t("save_failed", lang),
+            reply_markup=main_menu(lang),
         )
         context.user_data.clear()
         return ConversationHandler.END
@@ -456,101 +474,236 @@ async def _finish_subscription(
     db.upsert_user(owner_id)
     context.user_data.clear()
 
-    preview = render_template(
-        data["message_template"],
-        data["twitch_username"],
-        "Just Chatting",
-        "Тестовый стрим",
-    )
-    thread_note = f"\nТема: {thread_id}" if thread_id else ""
-    delete_note = (
-        "Удалять старые сообщения: да"
-        if data.get("delete_previous")
-        else "Удалять старые сообщения: нет"
-    )
-    preview_note = (
-        "Превью ссылок: выключено"
-        if data.get("disable_link_preview")
-        else "Превью ссылок: включено"
-    )
-    text = (
-        f"✅ Настройка завершена!\n\n"
-        f"Подписка #{sub_id} создана.\n"
-        f"Канал Twitch: {data['twitch_username']}\n"
-        f"Уведомления: {_dest_label(data['dest_type'])}{thread_note}\n"
-        f"{delete_note}\n"
-        f"{preview_note}\n\n"
-        f"Пример сообщения:\n{preview}\n\n"
-        f"Когда {data['twitch_username']} начнёт стрим — пришлю уведомление.\n"
-        f"Справка: /help"
-    )
+    if edit_sub_id:
+        text = t("edit_updated", lang, sub_id=sub_id)
+    else:
+        preview = render_template(
+            data["message_template"],
+            data["twitch_username"],
+            "Just Chatting",
+            t("preview_stream", lang),
+        )
+        thread_note = (
+            t("thread_note", lang, thread_id=thread_id) if thread_id else ""
+        )
+        delete_note = (
+            t("delete_yes", lang)
+            if data.get("delete_previous")
+            else t("delete_no", lang)
+        )
+        preview_note = (
+            t("preview_off", lang)
+            if data.get("disable_link_preview")
+            else t("preview_on", lang)
+        )
+        text = t(
+            "setup_done",
+            lang,
+            sub_id=sub_id,
+            twitch_username=data["twitch_username"],
+            dest=dest_label(data["dest_type"], lang),
+            thread_note=thread_note,
+            delete_note=delete_note,
+            preview_note=preview_note,
+            preview=preview,
+        )
 
     if update.callback_query:
         try:
-            await update.callback_query.edit_message_text("✅ Подписка создана.")
+            msg_key = "sub_created_short" if not edit_sub_id else "edit_updated"
+            await update.callback_query.edit_message_text(
+                t(msg_key, lang, sub_id=sub_id)
+            )
         except BadRequest:
             pass
 
-    await context.bot.send_message(owner_id, text, reply_markup=MAIN_MENU)
+    await context.bot.send_message(owner_id, text, reply_markup=main_menu(lang))
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
     context.user_data.clear()
-    await update.effective_message.reply_text("Отменено.", reply_markup=MAIN_MENU)
+    await update.effective_message.reply_text(t("cancelled", lang), reply_markup=main_menu(lang))
     return ConversationHandler.END
 
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = _user_lang(context, update.effective_user.id)
     await update.effective_message.reply_text(
-        FEEDBACK_TEXT,
-        reply_markup=MAIN_MENU,
+        t("feedback", lang, github=GITHUB_ISSUES_URL),
+        reply_markup=main_menu(lang),
         disable_web_page_preview=True,
     )
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.application.bot_data["db"].upsert_user(update.effective_user.id)
-    await update.effective_message.reply_text(HELP_TEXT, reply_markup=MAIN_MENU)
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    db.upsert_user(user_id)
+    lang = db.get_user_locale(user_id)
+    if not lang:
+        context.user_data["after_lang"] = "help"
+        return await _prompt_language(update)
+    await update.effective_message.reply_text(
+        _help_text(lang),
+        reply_markup=main_menu(lang),
+    )
+    return ConversationHandler.END
 
 
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
+    lang = _user_lang(context, update.effective_user.id)
     db: Database = context.application.bot_data["db"]
     subs = db.get_subscriptions_by_owner(update.effective_user.id)
     if not subs:
         await update.effective_message.reply_text(
-            "Подписок пока нет.\n\n"
-            "Если настраивали раньше — на Render подписки могли сброситься "
-            "при перезапуске сервера (до подключения диска). "
-            "Нажмите ➕ Новая подписка.\n\n"
-            "Справка: /help",
-            reply_markup=MAIN_MENU,
+            t("no_subs", lang),
+            reply_markup=main_menu(lang),
         )
         return
 
-    lines = [_format_sub_line(s) for s in subs]
+    lines = [_format_sub_line(s, lang) for s in subs]
     keyboard = [
         [
             InlineKeyboardButton(
-                f"{'⏸ Выкл' if s.enabled else '✅ Вкл'} #{s.id} {s.twitch_username}",
+                f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
+                f"#{s.id} {s.twitch_username}",
                 callback_data=f"toggle:{s.id}",
             )
         ]
         for s in subs
     ]
     await update.effective_message.reply_text(
-        "Ваши подписки (нажмите, чтобы включить/выключить):\n\n" + "\n".join(lines),
+        t("subs_list", lang) + "\n".join(lines),
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
 
-async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
+    lang = _user_lang(context, update.effective_user.id)
     db: Database = context.application.bot_data["db"]
     subs = db.get_subscriptions_by_owner(update.effective_user.id)
     if not subs:
-        await update.effective_message.reply_text("Подписок нет.", reply_markup=MAIN_MENU)
+        await update.effective_message.reply_text(
+            t("no_subs_short", lang),
+            reply_markup=main_menu(lang),
+        )
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                f"✏️ #{s.id} {s.twitch_username}",
+                callback_data=f"edit:{s.id}",
+            )
+        ]
+        for s in subs
+    ]
+    await update.effective_message.reply_text(
+        t("edit_pick", lang),
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":", 1)[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    await query.edit_message_text(
+        t("edit_menu", lang, sub_id=sub_id, username=sub.twitch_username),
+        reply_markup=edit_options_keyboard(sub_id, lang),
+    )
+
+
+async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    if not db.get_subscription(sub_id, query.from_user.id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(t("edit_template_prompt", lang, sub_id=sub_id))
+    return EDIT_TEMPLATE
+
+
+async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["twitch_username"] = sub.twitch_username
+    context.user_data["twitch_user_id"] = sub.twitch_user_id
+    context.user_data["message_template"] = sub.message_template
+    context.user_data["disable_link_preview"] = sub.disable_link_preview
+    await query.edit_message_text(
+        t("dest_prompt", lang),
+        reply_markup=dest_keyboard(lang),
+    )
+    return DEST_TYPE
+
+
+async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    parts = query.data.split(":")
+    sub_id = int(parts[1])
+    field = parts[2]
+    menu_key = "edit_delete_old_menu" if field == "delete_old" else "edit_preview_menu"
+    await query.edit_message_text(
+        t(menu_key, lang),
+        reply_markup=edit_bool_keyboard(sub_id, field, lang),
+    )
+
+
+async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    parts = query.data.split(":")
+    sub_id = int(parts[1])
+    field = parts[2]
+    value = parts[3] == "1"
+    db: Database = context.application.bot_data["db"]
+    kwargs = (
+        {"delete_previous": value}
+        if field == "delete_old"
+        else {"disable_link_preview": value}
+    )
+    if db.update_subscription(sub_id, query.from_user.id, **kwargs):
+        await query.edit_message_text(t("edit_updated", lang, sub_id=sub_id))
+    else:
+        await query.edit_message_text(t("sub_not_found", lang))
+
+
+async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.clear()
+    lang = _user_lang(context, update.effective_user.id)
+    db: Database = context.application.bot_data["db"]
+    subs = db.get_subscriptions_by_owner(update.effective_user.id)
+    if not subs:
+        await update.effective_message.reply_text(
+            t("no_subs_short", lang),
+            reply_markup=main_menu(lang),
+        )
         return
 
     keyboard = [
@@ -558,7 +711,7 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         for s in subs
     ]
     await update.effective_message.reply_text(
-        "Выберите подписку для удаления:",
+        t("delete_pick", lang),
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -566,25 +719,27 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
     new_state = db.toggle_subscription(sub_id, query.from_user.id)
     if new_state is None:
-        await query.edit_message_text("Подписка не найдена.")
+        await query.edit_message_text(t("sub_not_found", lang))
         return
-    label = "включена" if new_state else "выключена"
-    await query.edit_message_text(f"Подписка #{sub_id} {label}.")
+    key = "sub_enabled" if new_state else "sub_disabled"
+    await query.edit_message_text(t(key, lang, sub_id=sub_id))
 
 
 async def on_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
     if db.delete_subscription(sub_id, query.from_user.id):
-        await query.edit_message_text(f"Подписка #{sub_id} удалена.")
+        await query.edit_message_text(t("sub_deleted", lang, sub_id=sub_id))
     else:
-        await query.edit_message_text("Подписка не найдена.")
+        await query.edit_message_text(t("sub_not_found", lang))
 
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -648,13 +803,15 @@ async def check_render_status(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for item in new_planned:
         body = item.description[:600] + ("…" if len(item.description) > 600 else "")
-        text = (
-            "⚠️ Render: запланированы работы\n"
-            "Бот может быть недоступен.\n\n"
-            f"{item.title}\n{body}\n\n"
-            f"{item.link}"
-        )
         for user_id in user_ids:
+            lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
+            text = t(
+                "render_maintenance",
+                lang,
+                title=item.title,
+                body=body,
+                link=item.link,
+            )
             try:
                 await context.bot.send_message(
                     user_id,
@@ -668,12 +825,9 @@ async def check_render_status(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     err = context.error
     if isinstance(err, Conflict):
-        logger.warning(
-            "Конфликт polling — возможно, запущено два экземпляра бота "
-            "(Render + локально?). Оставляем один."
-        )
+        logger.warning(t("conflict_polling", DEFAULT_LOCALE))
         return
-    logger.exception("Необработанная ошибка: %s", err)
+    logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
 
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
@@ -683,30 +837,43 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["last_live"] = {}
     app.add_error_handler(error_handler)
 
-    app.add_handler(CommandHandler("help", help_command), group=0)
     app.add_handler(
-        MessageHandler(filters.Regex(f"^{re.escape(BTN_FEEDBACK)}$"), report_problem),
+        MessageHandler(_btn_filter("feedback"), report_problem),
         group=0,
     )
     app.add_handler(
-        MessageHandler(filters.Regex(f"^{re.escape(BTN_LIST)}$"), list_subscriptions),
+        MessageHandler(_btn_filter("list"), list_subscriptions),
         group=0,
     )
     app.add_handler(
-        MessageHandler(filters.Regex(f"^{re.escape(BTN_DELETE)}$"), delete_menu),
+        MessageHandler(_btn_filter("edit"), edit_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("delete"), delete_menu),
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
+    app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_edit_bool_menu, pattern=r"^edit_f:\d+:(delete_old|preview)$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_edit_set, pattern=r"^edit_set:\d+:(delete_old|preview):[01]$"), group=0)
 
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            MessageHandler(filters.Regex(f"^{re.escape(BTN_NEW)}$"), start_new_subscription),
+            CommandHandler("help", help_command),
+            MessageHandler(_btn_filter("new"), start_new_subscription),
+            CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
+            CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
         ],
         states={
+            LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
             CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel)],
             TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template)],
+            EDIT_TEMPLATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template)
+            ],
             DEST_TYPE: [CallbackQueryHandler(receive_dest_type, pattern=r"^dest:")],
             DEST_CHAT: [MessageHandler(filters.TEXT | filters.FORWARDED, receive_dest_chat)],
             DELETE_OLD: [CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:")],
