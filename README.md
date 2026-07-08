@@ -19,7 +19,7 @@ docker compose up -d --build
 | Текст | Свой шаблон: `{username}`, `{game}`, `{name}` |
 | Подписки | Список, вкл/выкл, удаление, опция «удалять старые» |
 | Команды | `/start`, `/help`, `/cancel` |
-| Деплой | Render + UptimeRobot, Fly.io, Docker |
+| Deploy | Render Free + Aiven PostgreSQL, Fly.io, Docker |
 
 ## Quick Start
 
@@ -87,13 +87,31 @@ python main.py
 
 ## Деплой
 
-### Render + UptimeRobot (бесплатно)
+### Render Free + Aiven PostgreSQL (бесплатно, подписки сохраняются)
+
+Бот на Render Free, данные — во внешней PostgreSQL на [Aiven](https://aiven.io/free-postgresql-database) (без карты).
+
+**1. Aiven**
+
+1. Регистрация на [aiven.io](https://aiven.io) (карта не нужна)
+2. **Create service** → PostgreSQL → план **Free**
+3. Скопируйте **Service URI** (`postgres://…`)
+
+**2. Render**
 
 1. GitHub → [Render Blueprint](https://dashboard.render.com/) (`render.yaml`)
-2. Секреты: `TELEGRAM_BOT_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`
+2. Секреты:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TWITCH_CLIENT_ID`
+   - `TWITCH_CLIENT_SECRET`
+   - `DATABASE_URL` — URI из Aiven
 3. [UptimeRobot](https://uptimerobot.com/): **HTTP(s)** → `https://ВАШ-СЕРВИС.onrender.com/health`, интервал **5 min**
 
-Подписки хранятся в SQLite на диске `/data` (см. `render.yaml`). **Persistent Disk** на Render требует план Starter ($7/мес) — без диска данные сбрасываются при каждом перезапуске.
+Подписки живут в Aiven и не сбрасываются при рестарте Render.
+
+### Локально / Docker
+
+`DATABASE_URL` не задавайте — используется SQLite (`DATABASE_PATH`, volume в `compose.yml`).
 
 ### Fly.io (данные на volume)
 
@@ -112,7 +130,8 @@ fly deploy
 | `TWITCH_CLIENT_ID` | Twitch Client ID |
 | `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
 | `CHECK_INTERVAL` | Опрос Twitch, сек (по умолчанию 60) |
-| `DATABASE_PATH` | SQLite (по умолчанию `data/bot.db`) |
+| `DATABASE_URL` | PostgreSQL (Aiven). Если не задан — SQLite |
+| `DATABASE_PATH` | Путь к SQLite (по умолчанию `data/bot.db`) |
 | `PORT` | Health-check (Render задаёт сам) |
 | `STATUS_CHECK_INTERVAL` | Опрос RSS Render, сек (по умолчанию 1800) |
 
@@ -126,7 +145,7 @@ fly deploy
 | `twitch.py` | Helix API, шаблоны |
 | `links.py` | Парсинг `t.me/c/…/тема` |
 | `health.py` | `/health` для Render и UptimeRobot |
-| `db.py` | SQLite подписки |
+| `db.py` | SQLite или PostgreSQL подписки |
 
 Опрос Twitch Helix ~60 сек, polling Telegram, без публичного webhook.
 

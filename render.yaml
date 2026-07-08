@@ -13,10 +13,6 @@ services:
         sync: false
       - key: CHECK_INTERVAL
         value: "60"
-      - key: DATABASE_PATH
-        value: /data/bot.db
-    disk:
-      name: bot-data
-      mountPath: /data
-      sizeGB: 1
+      - key: DATABASE_URL
+        sync: false
     autoDeploy: true
