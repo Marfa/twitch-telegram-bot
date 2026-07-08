@@ -20,6 +20,7 @@ RENDER_STATUS_RSS = os.getenv(
     "RENDER_STATUS_RSS", "https://status.render.com/history.rss"
 )
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None
 
 
 def validate() -> None:

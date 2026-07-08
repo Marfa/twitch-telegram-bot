@@ -1,8 +1,8 @@
 import logging
 
 from bot import build_application
-from config import DATABASE_PATH, TELEGRAM_BOT_TOKEN, validate
-from db import Database
+from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN, validate
+from db import open_database
 from health import start_health_server
 from twitch import TwitchClient
 
@@ -16,7 +16,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 def main() -> None:
     start_health_server()
     validate()
-    db = Database(DATABASE_PATH)
+    log = logging.getLogger(__name__)
+    if DATABASE_URL:
+        log.info("Using PostgreSQL (DATABASE_URL)")
+    else:
+        log.info("DATABASE_PATH=%s", DATABASE_PATH.resolve())
+    db = open_database(DATABASE_PATH, DATABASE_URL)
     twitch = TwitchClient()
     app = build_application(TELEGRAM_BOT_TOKEN, db, twitch)
     app.run_polling(

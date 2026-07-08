@@ -6,7 +6,7 @@ from links import parse_telegram_topic_link, chat_ref_to_id
 from render_status import fetch_render_status, is_planned_maintenance
 from twitch import TwitchClient, render_template
 from bot import _is_link_preview_disabled
-from db import Database
+from db import SqliteDatabase, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
 from telegram import LinkPreviewOptions, Message
 
@@ -28,6 +28,10 @@ def main() -> None:
     assert link.thread_id == 30
     assert chat_ref_to_id("1234567890") == -1001234567890
 
+    pg_url = _normalize_pg_url("postgres://user:pass@host:1234/db")
+    assert pg_url.startswith("postgresql://")
+    assert "sslmode=require" in pg_url
+
     plain = Message(message_id=1, date=None, chat=None)
     assert not _is_link_preview_disabled(plain)
     no_preview = Message(
@@ -43,7 +47,7 @@ def main() -> None:
         assert tr("start_welcome", loc)
 
     with tempfile.TemporaryDirectory() as tmp:
-        db = Database(Path(tmp) / "test.db")
+        db = SqliteDatabase(Path(tmp) / "test.db")
         db.upsert_user(1)
         assert db.get_user_locale(1) is None
         db.set_user_locale(1, "en")

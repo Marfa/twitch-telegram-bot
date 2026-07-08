@@ -17,7 +17,7 @@ docker compose up -d --build
 | Message text | Custom template: `{username}`, `{game}`, `{name}` |
 | Subscriptions | List, enable/disable, delete |
 | Commands | `/start`, `/help`, `/cancel` |
-| Deploy | Render + UptimeRobot, Fly.io, Docker |
+| Deploy | Render Free + Aiven PostgreSQL, Fly.io, Docker |
 
 ## Quick Start
 
@@ -85,13 +85,31 @@ Category: {game}
 
 ## Deploy
 
-### Render + UptimeRobot (free)
+### Render Free + Aiven PostgreSQL (free, persistent subscriptions)
+
+Bot on Render Free, data in external PostgreSQL on [Aiven](https://aiven.io/free-postgresql-database) (no credit card).
+
+**1. Aiven**
+
+1. Sign up at [aiven.io](https://aiven.io)
+2. **Create service** → PostgreSQL → **Free** plan
+3. Copy **Service URI** (`postgres://…`)
+
+**2. Render**
 
 1. Push to GitHub → [Render Blueprint](https://dashboard.render.com/) (`render.yaml`)
-2. Set secrets: `TELEGRAM_BOT_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`
+2. Set secrets:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TWITCH_CLIENT_ID`
+   - `TWITCH_CLIENT_SECRET`
+   - `DATABASE_URL` — Aiven URI
 3. [UptimeRobot](https://uptimerobot.com/): **HTTP(s)** → `https://YOUR-SERVICE.onrender.com/health`, interval **5 min**
 
-On Render free tier SQLite lives in `/tmp` — subscriptions reset on redeploy.
+Subscriptions live in Aiven and survive Render restarts.
+
+### Local / Docker
+
+Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compose.yml`).
 
 ### Fly.io (persistent volume)
 
@@ -110,6 +128,7 @@ fly deploy
 | `TWITCH_CLIENT_ID` | Twitch Client ID |
 | `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
 | `CHECK_INTERVAL` | Twitch poll interval, seconds (default 60) |
+| `DATABASE_URL` | PostgreSQL (Aiven). If unset — SQLite |
 | `DATABASE_PATH` | SQLite path (default `data/bot.db`) |
 | `PORT` | Health-check port (set by Render) |
 
@@ -121,7 +140,7 @@ fly deploy
 | `twitch.py` | Helix API, templates |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health` for Render and UptimeRobot |
-| `db.py` | SQLite subscriptions |
+| `db.py` | SQLite or PostgreSQL subscriptions |
 
 Twitch Helix polling ~60s, Telegram polling, no public webhook.
 

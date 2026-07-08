@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 
@@ -11,7 +12,7 @@ from telegram import (
     MessageOriginChat,
     Update,
 )
-from telegram.constants import ChatType
+from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest, Conflict, Forbidden
 from telegram.ext import (
     Application,
@@ -35,6 +36,7 @@ from i18n import (
     edit_bool_keyboard,
     edit_options_keyboard,
     language_keyboard,
+    link_preview_keyboard,
     main_menu,
     t,
 )
@@ -46,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
 
-LANG_SELECT, CHANNEL, TEMPLATE, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE = range(7)
+LANG_SELECT, CHANNEL, TEMPLATE, LINK_PREVIEW, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE = range(8)
 
 
 def _btn_filter(key: str) -> filters.Regex:
@@ -214,7 +216,8 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["twitch_username"] = user["login"]
     context.user_data["twitch_user_id"] = user["id"]
     await update.effective_message.reply_text(
-        t("channel_found", lang, display_name=user["display_name"])
+        t("channel_found", lang, display_name=html.escape(user["display_name"])),
+        parse_mode=ParseMode.HTML,
     )
     return TEMPLATE
 
@@ -230,10 +233,19 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return TEMPLATE
 
     context.user_data["message_template"] = template
-    context.user_data["disable_link_preview"] = _is_link_preview_disabled(
-        update.effective_message
-    )
     await update.effective_message.reply_text(
+        t("link_preview_prompt", lang),
+        reply_markup=link_preview_keyboard(lang),
+    )
+    return LINK_PREVIEW
+
+
+async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    context.user_data["disable_link_preview"] = query.data.endswith(":1")
+    await query.edit_message_text(
         t("dest_prompt", lang),
         reply_markup=dest_keyboard(lang),
     )
@@ -634,7 +646,10 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
-    await query.edit_message_text(t("edit_template_prompt", lang, sub_id=sub_id))
+    await query.edit_message_text(
+        t("edit_template_prompt", lang, sub_id=sub_id),
+        parse_mode=ParseMode.HTML,
+    )
     return EDIT_TEMPLATE
 
 
@@ -871,6 +886,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
             CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel)],
             TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template)],
+            LINK_PREVIEW: [
+                CallbackQueryHandler(receive_link_preview, pattern=r"^link_preview:")
+            ],
             EDIT_TEMPLATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template)
             ],

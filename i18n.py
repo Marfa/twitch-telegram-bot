@@ -37,17 +37,18 @@ _STRINGS: dict[str, dict[str, str]] = {
         "channel_found": (
             "Channel: {display_name}\n\n"
             "Set the message format. Available placeholders:\n"
-            "• {{username}} — channel name\n"
-            "• {{game}} — stream category\n"
-            "• {{name}} — stream title\n\n"
+            "• <code>{{username}}</code> — channel name\n"
+            "• <code>{{game}}</code> — stream category\n"
+            "• <code>{{name}}</code> — stream title\n\n"
             "Example:\n"
-            "{{username}} is live!\n"
+            "<code>{{username}} is live!\n"
             "{{name}}\n"
-            "Category: {{game}}\n\n"
-            "If your text contains a link, you can disable its preview before sending "
-            "(long-press the send button → «No preview»)."
+            "Category: {{game}}</code>"
         ),
         "template_empty": "Template cannot be empty.",
+        "link_preview_prompt": "Show link preview in notifications?",
+        "link_preview_on": "✅ Show preview",
+        "link_preview_off": "❌ Hide preview",
         "dest_prompt": "Where should notifications be sent?",
         "dest_dm": "📩 To DM",
         "dest_channel": "📢 To channel",
@@ -146,8 +147,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "no_subs": (
             "No subscriptions yet.\n\n"
-            "If you set up before — on Render subscriptions may reset "
-            "after a server restart (before disk was attached). "
             "Tap ➕ New subscription.\n\n"
             "Help: /help"
         ),
@@ -170,7 +169,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_link_preview": "🔗 Link preview",
         "edit_template_prompt": (
             "Send a new message template for subscription #{sub_id}.\n\n"
-            "Placeholders: {{username}}, {{game}}, {{name}}"
+            "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
         "edit_updated": "✅ Subscription #{sub_id} updated.",
         "edit_delete_old_menu": "Delete old messages on new stream?",
@@ -215,17 +214,18 @@ _STRINGS: dict[str, dict[str, str]] = {
         "channel_found": (
             "Канал: {display_name}\n\n"
             "Задайте формат сообщения. Доступные ключевые слова:\n"
-            "• {{username}} — имя канала\n"
-            "• {{game}} — категория стрима\n"
-            "• {{name}} — название стрима\n\n"
+            "• <code>{{username}}</code> — имя канала\n"
+            "• <code>{{game}}</code> — категория стрима\n"
+            "• <code>{{name}}</code> — название стрима\n\n"
             "Пример:\n"
-            "{{username}} в эфире!\n"
+            "<code>{{username}} в эфире!\n"
             "{{name}}\n"
-            "Категория: {{game}}\n\n"
-            "Если в тексте есть ссылка — перед отправкой можно отключить её превью "
-            "(долгое нажатие на кнопку отправки → «Без превью»)."
+            "Категория: {{game}}</code>"
         ),
         "template_empty": "Шаблон не может быть пустым.",
+        "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
+        "link_preview_on": "✅ Показывать превью",
+        "link_preview_off": "❌ Скрыть превью",
         "dest_prompt": "Куда отправлять уведомления?",
         "dest_dm": "📩 В личку",
         "dest_channel": "📢 В канал",
@@ -326,8 +326,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "no_subs": (
             "Подписок пока нет.\n\n"
-            "Если настраивали раньше — на Render подписки могли сброситься "
-            "при перезапуске сервера (до подключения диска). "
             "Нажмите ➕ Новая подписка.\n\n"
             "Справка: /help"
         ),
@@ -350,7 +348,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_link_preview": "🔗 Превью ссылок",
         "edit_template_prompt": (
             "Отправьте новый шаблон для подписки #{sub_id}.\n\n"
-            "Ключевые слова: {{username}}, {{game}}, {{name}}"
+            "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
         "edit_updated": "✅ Подписка #{sub_id} обновлена.",
         "edit_delete_old_menu": "Удалять старые сообщения при новом стриме?",
@@ -430,6 +428,15 @@ def delete_old_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("delete_old_yes", lang), callback_data="delete_old:1")],
             [InlineKeyboardButton(t("delete_old_no", lang), callback_data="delete_old:0")],
+        ]
+    )
+
+
+def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("link_preview_on", lang), callback_data="link_preview:0")],
+            [InlineKeyboardButton(t("link_preview_off", lang), callback_data="link_preview:1")],
         ]
     )
 
