@@ -1,8 +1,13 @@
 """ponytail: minimal self-check for twitch parsing and templates."""
+from pathlib import Path
+import tempfile
+
 from links import parse_telegram_topic_link, chat_ref_to_id
 from render_status import fetch_render_status, is_planned_maintenance
 from twitch import TwitchClient, render_template
 from bot import _is_link_preview_disabled
+from db import Database
+from i18n import SUPPORTED_LOCALES, btn, t as tr
 from telegram import LinkPreviewOptions, Message
 
 
@@ -32,6 +37,31 @@ def main() -> None:
         link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
     assert _is_link_preview_disabled(no_preview)
+
+    for loc in SUPPORTED_LOCALES:
+        assert btn("new", loc)
+        assert tr("start_welcome", loc)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        db.upsert_user(1)
+        assert db.get_user_locale(1) is None
+        db.set_user_locale(1, "en")
+        assert db.get_user_locale(1) == "en"
+        sub_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="ninja",
+            twitch_user_id="123",
+            message_template="hi",
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+        )
+        assert db.update_subscription(sub_id, 1, message_template="bye")
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.message_template == "bye"
+        assert not db.update_subscription(999, 1, message_template="x")
 
     items = fetch_render_status("https://status.render.com/history.rss")
     assert items

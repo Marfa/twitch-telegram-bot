@@ -100,6 +100,9 @@ class Database:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN disable_link_preview INTEGER NOT NULL DEFAULT 0"
             )
+        user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "locale" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
 
     def _row_to_sub(self, row: sqlite3.Row) -> Subscription:
         return Subscription(
@@ -194,6 +197,53 @@ class Database:
                 (sub_id, owner_id),
             )
         return cur.rowcount > 0
+
+    def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool:
+        allowed = {
+            "message_template",
+            "dest_type",
+            "chat_id",
+            "thread_id",
+            "delete_previous",
+            "disable_link_preview",
+        }
+        updates: list[str] = []
+        values: list[object] = []
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            updates.append(f"{key} = ?")
+            if key in ("delete_previous", "disable_link_preview"):
+                values.append(int(bool(value)))
+            else:
+                values.append(value)
+        if not updates:
+            return self.get_subscription(sub_id, owner_id) is not None
+        values.extend([sub_id, owner_id])
+        with self._conn() as conn:
+            cur = conn.execute(
+                f"UPDATE subscriptions SET {', '.join(updates)} "
+                "WHERE id = ? AND owner_id = ?",
+                values,
+            )
+        return cur.rowcount > 0
+
+    def get_user_locale(self, user_id: int) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT locale FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        if not row or not row["locale"]:
+            return None
+        return str(row["locale"])
+
+    def set_user_locale(self, user_id: int, locale: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO users (user_id, locale) VALUES (?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET locale = excluded.locale",
+                (user_id, locale),
+            )
 
     def get_unique_twitch_user_ids(self) -> list[str]:
         with self._conn() as conn:
