@@ -21,6 +21,11 @@ RENDER_STATUS_RSS = os.getenv(
 )
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None
+ADMIN_USER_IDS = frozenset(
+    int(x.strip())
+    for x in os.getenv("ADMIN_USER_IDS", "REDACTED_TELEGRAM_ID").split(",")
+    if x.strip()
+)
 
 
 def validate() -> None:
