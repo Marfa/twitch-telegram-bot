@@ -61,6 +61,10 @@ def main() -> None:
             chat_id=1,
             thread_id=None,
         )
+        stats = db.get_bot_stats()
+        assert stats.users == 1
+        assert stats.subscriptions_total == 1
+        assert stats.subscriptions_enabled == 1
         assert db.update_subscription(sub_id, 1, message_template="bye")
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None

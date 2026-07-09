@@ -17,6 +17,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_edit": "✏️ Edit subscription",
         "btn_delete": "🗑 Delete subscription",
         "btn_feedback": "🐛 Report a problem",
+        "btn_broadcast": "📣 Broadcast",
+        "btn_stats": "📊 Statistics",
         "lang_pick": "Choose your language:",
         "lang_set": "Language set to English.",
         "start_welcome": (
@@ -187,6 +189,30 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(Render + local?). Keep only one."
         ),
         "unhandled_error": "Unhandled error: {err}",
+        "broadcast_prompt": (
+            "Send the message to broadcast to all users.\n"
+            "/cancel — abort."
+        ),
+        "broadcast_empty": "Message cannot be empty.",
+        "broadcast_done": (
+            "Broadcast complete.\n"
+            "Sent: {sent}\n"
+            "Failed: {failed}\n"
+            "Total recipients: {total}"
+        ),
+        "bot_stats": (
+            "📊 Bot statistics\n\n"
+            "Users: {users}\n"
+            "Recipients (users + owners): {notify_users}\n"
+            "Subscriptions: {subscriptions_total} "
+            "(✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\n"
+            "Unique owners: {unique_owners}\n"
+            "Twitch channels tracked: {unique_twitch_channels}\n\n"
+            "Languages:\n"
+            "• English: {locale_en}\n"
+            "• Russian: {locale_ru}\n"
+            "• Not set: {locale_unset}"
+        ),
     },
     "ru": {
         "btn_new": "➕ Новая подписка",
@@ -194,6 +220,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_edit": "✏️ Редактировать подписку",
         "btn_delete": "🗑 Удалить подписку",
         "btn_feedback": "🐛 Сообщить о проблеме",
+        "btn_broadcast": "📣 Рассылка",
+        "btn_stats": "📊 Статистика",
         "lang_pick": "Выберите язык / Choose your language:",
         "lang_set": "Язык: русский.",
         "start_welcome": (
@@ -366,6 +394,30 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(Render + локально?). Оставляем один."
         ),
         "unhandled_error": "Необработанная ошибка: {err}",
+        "broadcast_prompt": (
+            "Отправьте сообщение для рассылки всем пользователям.\n"
+            "/cancel — отмена."
+        ),
+        "broadcast_empty": "Сообщение не может быть пустым.",
+        "broadcast_done": (
+            "Рассылка завершена.\n"
+            "Доставлено: {sent}\n"
+            "Ошибок: {failed}\n"
+            "Всего получателей: {total}"
+        ),
+        "bot_stats": (
+            "📊 Статистика бота\n\n"
+            "Пользователей: {users}\n"
+            "Получателей (users + owners): {notify_users}\n"
+            "Подписок: {subscriptions_total} "
+            "(✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\n"
+            "Уникальных владельцев: {unique_owners}\n"
+            "Каналов Twitch: {unique_twitch_channels}\n\n"
+            "Языки:\n"
+            "• English: {locale_en}\n"
+            "• Русский: {locale_ru}\n"
+            "• Не выбран: {locale_unset}"
+        ),
     },
 }
 
@@ -385,23 +437,28 @@ def all_btn_texts(key: str) -> set[str]:
 
 
 def all_menu_buttons() -> set[str]:
-    keys = ("new", "list", "edit", "delete", "feedback")
+    keys = ("new", "list", "edit", "delete", "feedback", "broadcast", "stats")
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
 
-def main_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
+def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(btn("new", lang))],
         [
-            [KeyboardButton(btn("new", lang))],
-            [
-                KeyboardButton(btn("list", lang)),
-                KeyboardButton(btn("edit", lang)),
-            ],
-            [KeyboardButton(btn("delete", lang))],
-            [KeyboardButton(btn("feedback", lang))],
+            KeyboardButton(btn("list", lang)),
+            KeyboardButton(btn("edit", lang)),
         ],
-        resize_keyboard=True,
-    )
+        [KeyboardButton(btn("delete", lang))],
+        [KeyboardButton(btn("feedback", lang))],
+    ]
+    if is_admin:
+        rows.append(
+            [
+                KeyboardButton(btn("broadcast", lang)),
+                KeyboardButton(btn("stats", lang)),
+            ]
+        )
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def language_keyboard() -> InlineKeyboardMarkup:

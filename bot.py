@@ -10,6 +10,7 @@ from telegram import (
     InlineKeyboardMarkup,
     MessageOriginChannel,
     MessageOriginChat,
+    ReplyKeyboardMarkup,
     Update,
 )
 from telegram.constants import ChatType, ParseMode
@@ -24,7 +25,7 @@ from telegram.ext import (
     filters,
 )
 
-from db import Database, Subscription
+from db import BotStats, Database, Subscription
 from i18n import (
     DEFAULT_LOCALE,
     SUPPORTED_LOCALES,
@@ -48,12 +49,22 @@ logger = logging.getLogger(__name__)
 
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
 
-LANG_SELECT, CHANNEL, TEMPLATE, LINK_PREVIEW, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE = range(8)
+LANG_SELECT, CHANNEL, TEMPLATE, LINK_PREVIEW, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE, BROADCAST = range(9)
 
 
 def _btn_filter(key: str) -> filters.Regex:
     texts = "|".join(re.escape(btn(key, loc)) for loc in SUPPORTED_LOCALES)
     return filters.Regex(f"^({texts})$")
+
+
+def _is_admin(user_id: int) -> bool:
+    from config import ADMIN_USER_IDS
+
+    return user_id in ADMIN_USER_IDS
+
+
+def _menu(lang: str, user_id: int) -> ReplyKeyboardMarkup:
+    return main_menu(lang, is_admin=_is_admin(user_id))
 
 
 def _user_lang(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> str:
@@ -139,9 +150,10 @@ async def _prompt_language(update: Update) -> int:
 
 
 async def _begin_setup_message(update: Update, lang: str) -> int:
+    user_id = update.effective_user.id
     await update.effective_message.reply_text(
         t("start_welcome", lang),
-        reply_markup=main_menu(lang),
+        reply_markup=_menu(lang, user_id),
     )
     return CHANNEL
 
@@ -172,23 +184,24 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await context.bot.send_message(
             query.from_user.id,
             _help_text(lang),
-            reply_markup=main_menu(lang),
+            reply_markup=_menu(lang, query.from_user.id),
         )
         return ConversationHandler.END
     await context.bot.send_message(
         query.from_user.id,
         t("start_welcome", lang),
-        reply_markup=main_menu(lang),
+        reply_markup=_menu(lang, query.from_user.id),
     )
     return CHANNEL
 
 
 async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
-    lang = _user_lang(context, update.effective_user.id)
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
     await update.effective_message.reply_text(
         t("new_sub_prompt", lang),
-        reply_markup=main_menu(lang),
+        reply_markup=_menu(lang, user_id),
     )
     return CHANNEL
 
@@ -278,7 +291,7 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await update.effective_message.reply_text(
             t("edit_updated", lang, sub_id=sub_id),
-            reply_markup=main_menu(lang),
+            reply_markup=_menu(lang, owner_id),
         )
     context.user_data.clear()
     return ConversationHandler.END
@@ -456,7 +469,7 @@ async def _finish_subscription(
                 await context.bot.send_message(
                     owner_id,
                     t("sub_not_found", lang),
-                    reply_markup=main_menu(lang),
+                    reply_markup=_menu(lang, owner_id),
                 )
                 context.user_data.clear()
                 return ConversationHandler.END
@@ -478,7 +491,7 @@ async def _finish_subscription(
         await context.bot.send_message(
             owner_id,
             t("save_failed", lang),
-            reply_markup=main_menu(lang),
+            reply_markup=_menu(lang, owner_id),
         )
         context.user_data.clear()
         return ConversationHandler.END
@@ -529,22 +542,27 @@ async def _finish_subscription(
         except BadRequest:
             pass
 
-    await context.bot.send_message(owner_id, text, reply_markup=main_menu(lang))
+    await context.bot.send_message(owner_id, text, reply_markup=_menu(lang, owner_id))
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = _user_lang(context, update.effective_user.id)
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
     context.user_data.clear()
-    await update.effective_message.reply_text(t("cancelled", lang), reply_markup=main_menu(lang))
+    await update.effective_message.reply_text(
+        t("cancelled", lang),
+        reply_markup=_menu(lang, user_id),
+    )
     return ConversationHandler.END
 
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    lang = _user_lang(context, update.effective_user.id)
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
     await update.effective_message.reply_text(
         t("feedback", lang, github=GITHUB_ISSUES_URL),
-        reply_markup=main_menu(lang),
+        reply_markup=_menu(lang, user_id),
         disable_web_page_preview=True,
     )
 
@@ -559,20 +577,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return await _prompt_language(update)
     await update.effective_message.reply_text(
         _help_text(lang),
-        reply_markup=main_menu(lang),
+        reply_markup=_menu(lang, user_id),
     )
     return ConversationHandler.END
 
 
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
-    lang = _user_lang(context, update.effective_user.id)
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(update.effective_user.id)
+    subs = db.get_subscriptions_by_owner(user_id)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs", lang),
-            reply_markup=main_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
 
@@ -595,13 +614,14 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
-    lang = _user_lang(context, update.effective_user.id)
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(update.effective_user.id)
+    subs = db.get_subscriptions_by_owner(user_id)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
-            reply_markup=main_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
 
@@ -711,13 +731,14 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
-    lang = _user_lang(context, update.effective_user.id)
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(update.effective_user.id)
+    subs = db.get_subscriptions_by_owner(user_id)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
-            reply_markup=main_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
 
@@ -755,6 +776,79 @@ async def on_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await query.edit_message_text(t("sub_deleted", lang, sub_id=sub_id))
     else:
         await query.edit_message_text(t("sub_not_found", lang))
+
+
+async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return ConversationHandler.END
+    context.user_data.clear()
+    lang = _user_lang(context, user_id)
+    await update.effective_message.reply_text(
+        t("broadcast_prompt", lang),
+        reply_markup=_menu(lang, user_id),
+    )
+    return BROADCAST
+
+
+async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    text = (update.effective_message.text or "").strip()
+    if text in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return BROADCAST
+    if not text:
+        await update.effective_message.reply_text(t("broadcast_empty", lang))
+        return BROADCAST
+
+    db: Database = context.application.bot_data["db"]
+    user_ids = db.get_notify_user_ids()
+    sent = failed = 0
+    for uid in user_ids:
+        try:
+            await context.bot.send_message(uid, text)
+            sent += 1
+        except (BadRequest, Forbidden) as exc:
+            failed += 1
+            logger.warning("Broadcast to %s failed: %s", uid, exc)
+
+    context.user_data.clear()
+    await update.effective_message.reply_text(
+        t("broadcast_done", lang, sent=sent, failed=failed, total=len(user_ids)),
+        reply_markup=_menu(lang, user_id),
+    )
+    return ConversationHandler.END
+
+
+def _format_stats(stats: BotStats, lang: str) -> str:
+    return t(
+        "bot_stats",
+        lang,
+        users=stats.users,
+        notify_users=stats.notify_users,
+        subscriptions_total=stats.subscriptions_total,
+        subscriptions_enabled=stats.subscriptions_enabled,
+        subscriptions_disabled=stats.subscriptions_disabled,
+        unique_owners=stats.unique_owners,
+        unique_twitch_channels=stats.unique_twitch_channels,
+        locale_en=stats.locale_en,
+        locale_ru=stats.locale_ru,
+        locale_unset=stats.locale_unset,
+    )
+
+
+async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    stats = db.get_bot_stats()
+    await update.effective_message.reply_text(
+        _format_stats(stats, lang),
+        reply_markup=_menu(lang, user_id),
+    )
 
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -868,6 +962,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("delete"), delete_menu),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(_btn_filter("stats"), admin_show_stats),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
@@ -879,6 +977,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("start", start),
             CommandHandler("help", help_command),
             MessageHandler(_btn_filter("new"), start_new_subscription),
+            MessageHandler(_btn_filter("broadcast"), admin_broadcast_start),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
         ],
@@ -895,6 +994,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             DEST_TYPE: [CallbackQueryHandler(receive_dest_type, pattern=r"^dest:")],
             DEST_CHAT: [MessageHandler(filters.TEXT | filters.FORWARDED, receive_dest_chat)],
             DELETE_OLD: [CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:")],
+            BROADCAST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_send)
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),

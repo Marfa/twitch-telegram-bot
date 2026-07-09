@@ -12,6 +12,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class BotStats:
+    users: int
+    notify_users: int
+    subscriptions_total: int
+    subscriptions_enabled: int
+    subscriptions_disabled: int
+    unique_owners: int
+    unique_twitch_channels: int
+    locale_en: int
+    locale_ru: int
+    locale_unset: int
+
+
+@dataclass
 class Subscription:
     id: int
     owner_id: int
@@ -97,6 +111,8 @@ class Database(Protocol):
     def upsert_user(self, user_id: int) -> None: ...
 
     def get_notify_user_ids(self) -> list[int]: ...
+
+    def get_bot_stats(self) -> BotStats: ...
 
 
 class SqliteDatabase:
@@ -369,6 +385,52 @@ class SqliteDatabase:
                 """
             ).fetchall()
         return [int(r["user_id"]) for r in rows]
+
+    def get_bot_stats(self) -> BotStats:
+        with self._conn() as conn:
+            users = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+            notify = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id FROM subscriptions
+                )
+                """
+            ).fetchone()["c"]
+            subs_total = conn.execute(
+                "SELECT COUNT(*) AS c FROM subscriptions"
+            ).fetchone()["c"]
+            subs_enabled = conn.execute(
+                "SELECT COUNT(*) AS c FROM subscriptions WHERE enabled = 1"
+            ).fetchone()["c"]
+            unique_owners = conn.execute(
+                "SELECT COUNT(DISTINCT owner_id) AS c FROM subscriptions"
+            ).fetchone()["c"]
+            unique_twitch = conn.execute(
+                "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
+            ).fetchone()["c"]
+            locale_en = conn.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE locale = 'en'"
+            ).fetchone()["c"]
+            locale_ru = conn.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE locale = 'ru'"
+            ).fetchone()["c"]
+            locale_unset = conn.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE locale IS NULL OR locale = ''"
+            ).fetchone()["c"]
+        return BotStats(
+            users=int(users),
+            notify_users=int(notify),
+            subscriptions_total=int(subs_total),
+            subscriptions_enabled=int(subs_enabled),
+            subscriptions_disabled=int(subs_total) - int(subs_enabled),
+            unique_owners=int(unique_owners),
+            unique_twitch_channels=int(unique_twitch),
+            locale_en=int(locale_en),
+            locale_ru=int(locale_ru),
+            locale_unset=int(locale_unset),
+        )
 
 
 class PostgresDatabase:
@@ -662,6 +724,56 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return [int(r["user_id"]) for r in rows]
+
+    def get_bot_stats(self) -> BotStats:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("SELECT COUNT(*) AS c FROM users")
+            users = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id FROM subscriptions
+                ) AS u
+                """
+            )
+            notify = int(cur.fetchone()["c"])
+            cur.execute("SELECT COUNT(*) AS c FROM subscriptions")
+            subs_total = int(cur.fetchone()["c"])
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM subscriptions WHERE enabled = TRUE"
+            )
+            subs_enabled = int(cur.fetchone()["c"])
+            cur.execute(
+                "SELECT COUNT(DISTINCT owner_id) AS c FROM subscriptions"
+            )
+            unique_owners = int(cur.fetchone()["c"])
+            cur.execute(
+                "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
+            )
+            unique_twitch = int(cur.fetchone()["c"])
+            cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'en'")
+            locale_en = int(cur.fetchone()["c"])
+            cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'ru'")
+            locale_ru = int(cur.fetchone()["c"])
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE locale IS NULL OR locale = ''"
+            )
+            locale_unset = int(cur.fetchone()["c"])
+        return BotStats(
+            users=users,
+            notify_users=notify,
+            subscriptions_total=subs_total,
+            subscriptions_enabled=subs_enabled,
+            subscriptions_disabled=subs_total - subs_enabled,
+            unique_owners=unique_owners,
+            unique_twitch_channels=unique_twitch,
+            locale_en=locale_en,
+            locale_ru=locale_ru,
+            locale_unset=locale_unset,
+        )
 
 
 def open_database(path: Path, database_url: str | None = None) -> Database:
