@@ -29,6 +29,7 @@ from db import BotStats, Database, Subscription
 from i18n import (
     DEFAULT_LOCALE,
     SUPPORTED_LOCALES,
+    admin_menu,
     all_menu_buttons,
     btn,
     delete_old_keyboard,
@@ -39,6 +40,7 @@ from i18n import (
     language_keyboard,
     link_preview_keyboard,
     main_menu,
+    subscriptions_menu,
     t,
 )
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
@@ -77,9 +79,7 @@ def _help_text(lang: str) -> str:
         "help",
         lang,
         btn_new=btn("new", lang),
-        btn_list=btn("list", lang),
-        btn_edit=btn("edit", lang),
-        btn_delete=btn("delete", lang),
+        btn_manage=btn("manage", lang),
         btn_feedback=btn("feedback", lang),
     )
 
@@ -582,6 +582,35 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+async def open_subscriptions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=subscriptions_menu(lang),
+    )
+
+
+async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return
+    lang = _user_lang(context, user_id)
+    await update.effective_message.reply_text(
+        t("menu_admin", lang),
+        reply_markup=admin_menu(lang),
+    )
+
+
+async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    await update.effective_message.reply_text(
+        t("menu_main", lang),
+        reply_markup=_menu(lang, user_id),
+    )
+
+
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
     user_id = update.effective_user.id
@@ -591,7 +620,7 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs", lang),
-            reply_markup=_menu(lang, user_id),
+            reply_markup=subscriptions_menu(lang),
         )
         return
 
@@ -610,6 +639,10 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         t("subs_list", lang) + "\n".join(lines),
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=subscriptions_menu(lang),
+    )
 
 
 async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -621,7 +654,7 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
-            reply_markup=_menu(lang, user_id),
+            reply_markup=subscriptions_menu(lang),
         )
         return
 
@@ -637,6 +670,10 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         t("edit_pick", lang),
         reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=subscriptions_menu(lang),
     )
 
 
@@ -738,7 +775,7 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
-            reply_markup=_menu(lang, user_id),
+            reply_markup=subscriptions_menu(lang),
         )
         return
 
@@ -749,6 +786,10 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.effective_message.reply_text(
         t("delete_pick", lang),
         reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=subscriptions_menu(lang),
     )
 
 
@@ -786,7 +827,7 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
     lang = _user_lang(context, user_id)
     await update.effective_message.reply_text(
         t("broadcast_prompt", lang),
-        reply_markup=_menu(lang, user_id),
+        reply_markup=admin_menu(lang),
     )
     return BROADCAST
 
@@ -816,7 +857,7 @@ async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.clear()
     await update.effective_message.reply_text(
         t("broadcast_done", lang, sent=sent, failed=failed, total=len(user_ids)),
-        reply_markup=_menu(lang, user_id),
+        reply_markup=admin_menu(lang),
     )
     return ConversationHandler.END
 
@@ -847,7 +888,7 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     stats = db.get_bot_stats()
     await update.effective_message.reply_text(
         _format_stats(stats, lang),
-        reply_markup=_menu(lang, user_id),
+        reply_markup=admin_menu(lang),
     )
 
 
@@ -948,6 +989,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     app.add_handler(
         MessageHandler(_btn_filter("feedback"), report_problem),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("manage"), open_subscriptions_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("admin"), open_admin_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("back"), back_to_main_menu),
         group=0,
     )
     app.add_handler(

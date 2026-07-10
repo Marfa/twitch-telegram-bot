@@ -13,12 +13,18 @@ DEFAULT_LOCALE = "en"
 _STRINGS: dict[str, dict[str, str]] = {
     "en": {
         "btn_new": "➕ New subscription",
+        "btn_manage": "📋 Manage subscriptions",
         "btn_list": "📋 My subscriptions",
         "btn_edit": "✏️ Edit subscription",
         "btn_delete": "🗑 Delete subscription",
         "btn_feedback": "🐛 Report a problem",
+        "btn_admin": "⚙️ Admin",
         "btn_broadcast": "📣 Broadcast",
         "btn_stats": "📊 Statistics",
+        "btn_back": "◀️ Main menu",
+        "menu_subs": "Manage subscriptions:",
+        "menu_admin": "Admin panel:",
+        "menu_main": "Main menu",
         "lang_pick": "Choose your language:",
         "lang_set": "Language set to English.",
         "start_welcome": (
@@ -142,9 +148,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/cancel — cancel current setup\n\n"
             "Menu buttons:\n"
             "• {btn_new}\n"
-            "• {btn_list}\n"
-            "• {btn_edit}\n"
-            "• {btn_delete}\n"
+            "• {btn_manage} — list, edit, delete\n"
             "• {btn_feedback}"
         ),
         "no_subs": (
@@ -216,12 +220,18 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "ru": {
         "btn_new": "➕ Новая подписка",
+        "btn_manage": "📋 Управление подписками",
         "btn_list": "📋 Мои подписки",
         "btn_edit": "✏️ Редактировать подписку",
         "btn_delete": "🗑 Удалить подписку",
         "btn_feedback": "🐛 Сообщить о проблеме",
+        "btn_admin": "⚙️ Админка",
         "btn_broadcast": "📣 Рассылка",
         "btn_stats": "📊 Статистика",
+        "btn_back": "◀️ Главное меню",
+        "menu_subs": "Управление подписками:",
+        "menu_admin": "Админка:",
+        "menu_main": "Главное меню",
         "lang_pick": "Выберите язык / Choose your language:",
         "lang_set": "Язык: русский.",
         "start_welcome": (
@@ -347,9 +357,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/cancel — отменить текущую настройку\n\n"
             "Кнопки меню:\n"
             "• {btn_new}\n"
-            "• {btn_list}\n"
-            "• {btn_edit}\n"
-            "• {btn_delete}\n"
+            "• {btn_manage} — список, редактирование, удаление\n"
             "• {btn_feedback}"
         ),
         "no_subs": (
@@ -437,28 +445,57 @@ def all_btn_texts(key: str) -> set[str]:
 
 
 def all_menu_buttons() -> set[str]:
-    keys = ("new", "list", "edit", "delete", "feedback", "broadcast", "stats")
+    keys = (
+        "new",
+        "manage",
+        "list",
+        "edit",
+        "delete",
+        "feedback",
+        "admin",
+        "broadcast",
+        "stats",
+        "back",
+    )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
 
 def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(btn("new", lang))],
-        [
-            KeyboardButton(btn("list", lang)),
-            KeyboardButton(btn("edit", lang)),
-        ],
-        [KeyboardButton(btn("delete", lang))],
+        [KeyboardButton(btn("manage", lang))],
         [KeyboardButton(btn("feedback", lang))],
     ]
     if is_admin:
-        rows.append(
+        rows.append([KeyboardButton(btn("admin", lang))])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
+def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton(btn("list", lang)),
+                KeyboardButton(btn("edit", lang)),
+            ],
+            [KeyboardButton(btn("delete", lang))],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def admin_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
             [
                 KeyboardButton(btn("broadcast", lang)),
                 KeyboardButton(btn("stats", lang)),
-            ]
-        )
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+            ],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def language_keyboard() -> InlineKeyboardMarkup:
