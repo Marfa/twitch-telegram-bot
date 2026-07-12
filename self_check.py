@@ -53,8 +53,11 @@ def main() -> None:
     for loc in SUPPORTED_LOCALES:
         assert btn("new", loc)
         assert tr("start_welcome", loc)
-        feedback = tr("feedback", loc, github="https://example.com", bot_version="abc1234")
+        feedback = tr("feedback", loc, github="https://example.com", bot_version="abc1234", user_id=42)
         assert "abc1234" in feedback
+        assert "42" in feedback
+        assert "<code>abc1234</code>" in feedback
+        assert "<code>42</code>" in feedback
 
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "test.db")

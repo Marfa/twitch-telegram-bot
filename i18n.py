@@ -140,7 +140,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Twitch: https://www.twitch.tv/marfapr\n"
             "• Telegram: https://t.me/themarfa\n"
             "• Website: https://blog.themarfa.name/\n\n"
-            "Bot version: {bot_version}"
+            "Bot version: <code>{bot_version}</code>\n"
+            "Your ID: <code>{user_id}</code>"
         ),
         "help": (
             "Available commands:\n"
@@ -356,7 +357,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Twitch: https://www.twitch.tv/marfapr\n"
             "• Telegram: https://t.me/themarfa\n"
             "• Сайт: https://blog.themarfa.name/\n\n"
-            "Версия бота: {bot_version}"
+            "Версия бота: <code>{bot_version}</code>\n"
+            "Ваш ID: <code>{user_id}</code>"
         ),
         "help": (
             "Доступные команды:\n"

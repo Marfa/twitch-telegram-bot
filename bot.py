@@ -565,12 +565,15 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import BOT_VERSION
 
+    db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
+    db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
     version = BOT_VERSION[:7] if len(BOT_VERSION) >= 7 else BOT_VERSION
     await update.effective_message.reply_text(
-        t("feedback", lang, github=GITHUB_ISSUES_URL, bot_version=version),
+        t("feedback", lang, github=GITHUB_ISSUES_URL, bot_version=version, user_id=user_id),
         reply_markup=_menu(lang, user_id),
+        parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
 
