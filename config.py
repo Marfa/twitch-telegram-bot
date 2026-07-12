@@ -19,6 +19,9 @@ STATUS_CHECK_INTERVAL = int(os.getenv("STATUS_CHECK_INTERVAL", "1800"))
 RENDER_STATUS_RSS = os.getenv(
     "RENDER_STATUS_RSS", "https://status.render.com/history.rss"
 )
+AIVEN_STATUS_RSS = os.getenv(
+    "AIVEN_STATUS_RSS", "https://status.aiven.io/feed.rss"
+)
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None
 ADMIN_USER_IDS = frozenset(
@@ -26,6 +29,11 @@ ADMIN_USER_IDS = frozenset(
     for x in os.getenv("ADMIN_USER_IDS", "REDACTED_TELEGRAM_ID").split(",")
     if x.strip()
 )
+BOT_VERSION = (
+    os.getenv("RENDER_GIT_COMMIT")
+    or os.getenv("BOT_VERSION")
+    or "dev"
+).strip() or "dev"
 
 
 def validate() -> None:

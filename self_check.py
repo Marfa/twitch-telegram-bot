@@ -3,7 +3,11 @@ from pathlib import Path
 import tempfile
 
 from links import parse_telegram_topic_link, chat_ref_to_id
-from render_status import fetch_render_status, is_planned_maintenance
+from render_status import (
+    fetch_render_status,
+    is_aiven_outage,
+    is_planned_maintenance,
+)
 from twitch import TwitchClient, render_template
 from bot import _is_link_preview_disabled
 from db import SqliteDatabase, _normalize_pg_url, open_database
@@ -45,6 +49,8 @@ def main() -> None:
     for loc in SUPPORTED_LOCALES:
         assert btn("new", loc)
         assert tr("start_welcome", loc)
+        feedback = tr("feedback", loc, github="https://example.com", bot_version="abc1234")
+        assert "abc1234" in feedback
 
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "test.db")
@@ -74,6 +80,10 @@ def main() -> None:
     items = fetch_render_status("https://status.render.com/history.rss")
     assert items
     assert any(is_planned_maintenance(i) for i in items[:3])
+
+    aiven_items = fetch_render_status("https://status.aiven.io/feed.rss")
+    assert aiven_items
+    assert not any(is_aiven_outage(i) for i in aiven_items[:3])
 
     print("ok")
 

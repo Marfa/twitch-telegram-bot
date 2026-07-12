@@ -14,6 +14,7 @@ _PLANNED_RE = re.compile(
     r"scheduled|maintenance\s+period|this\s+is\s+a\s+scheduled\s+event",
     re.IGNORECASE,
 )
+_STATUS_RE = re.compile(r"Status:\s*(\S+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -54,3 +55,10 @@ def fetch_render_status(url: str) -> list[StatusItem]:
 def is_planned_maintenance(item: StatusItem) -> bool:
     haystack = f"{item.title} {item.description}"
     return bool(_PLANNED_RE.search(haystack))
+
+
+def is_aiven_outage(item: StatusItem) -> bool:
+    match = _STATUS_RE.search(f"{item.title} {item.description}")
+    if not match:
+        return False
+    return match.group(1).lower() != "resolved"

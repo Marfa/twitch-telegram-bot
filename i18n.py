@@ -139,7 +139,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Links:\n"
             "• Twitch: https://www.twitch.tv/marfapr\n"
             "• Telegram: https://t.me/themarfa\n"
-            "• Website: https://blog.themarfa.name/"
+            "• Website: https://blog.themarfa.name/\n\n"
+            "Bot version: {bot_version}"
         ),
         "help": (
             "Available commands:\n"
@@ -185,6 +186,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "render_maintenance": (
             "⚠️ Render: planned maintenance\n"
             "The bot may be unavailable.\n\n"
+            "{title}\n{body}\n\n"
+            "{link}"
+        ),
+        "aiven_outage": (
+            "⚠️ Aiven: service disruption\n"
+            "Subscriptions may be unavailable.\n\n"
             "{title}\n{body}\n\n"
             "{link}"
         ),
@@ -348,7 +355,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Ссылки:\n"
             "• Twitch: https://www.twitch.tv/marfapr\n"
             "• Telegram: https://t.me/themarfa\n"
-            "• Сайт: https://blog.themarfa.name/"
+            "• Сайт: https://blog.themarfa.name/\n\n"
+            "Версия бота: {bot_version}"
         ),
         "help": (
             "Доступные команды:\n"
@@ -394,6 +402,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "render_maintenance": (
             "⚠️ Render: запланированы работы\n"
             "Бот может быть недоступен.\n\n"
+            "{title}\n{body}\n\n"
+            "{link}"
+        ),
+        "aiven_outage": (
+            "⚠️ Aiven: сбой в работе\n"
+            "Подписки могут быть недоступны.\n\n"
             "{title}\n{body}\n\n"
             "{link}"
         ),
