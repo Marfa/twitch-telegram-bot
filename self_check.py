@@ -1,8 +1,12 @@
 """ponytail: minimal self-check for twitch parsing and templates."""
 from pathlib import Path
+import os
 import tempfile
+from unittest.mock import patch
 
+from config import parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
+from render_deploy import _service_id
 from render_status import (
     fetch_render_status,
     is_aiven_outage,
@@ -84,6 +88,20 @@ def main() -> None:
     aiven_items = fetch_render_status("https://status.aiven.io/feed.rss")
     assert aiven_items
     assert not any(is_aiven_outage(i) for i in aiven_items[:3])
+
+    assert parse_admin_user_ids("") == frozenset()
+    assert parse_admin_user_ids("123, 456") == frozenset({123, 456})
+
+    with patch.dict(os.environ, {"RENDER_SERVICE_ID": "srv-test123"}, clear=False):
+        assert _service_id("") == "srv-test123"
+    assert _service_id("srv-cli456") == "srv-cli456"
+    with patch("render_deploy._load_dotenv", lambda path=Path(".env"): None):
+        with patch.dict(os.environ, {}, clear=True):
+            try:
+                _service_id("")
+                raise AssertionError("expected missing RENDER_SERVICE_ID")
+            except RuntimeError:
+                pass
 
     print("ok")
 

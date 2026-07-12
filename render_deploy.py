@@ -11,6 +11,8 @@ from pathlib import Path
 
 import requests
 
+from config import load_dotenv, parse_admin_user_ids
+
 logger = logging.getLogger(__name__)
 
 RENDER_API = "https://api.render.com/v1"
@@ -24,21 +26,11 @@ _TERMINAL_FAIL = frozenset(
 
 
 def _load_dotenv(path: Path = Path(".env")) -> None:
-    if not path.is_file():
-        return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip()
-        if key == "render":
-            os.environ.setdefault("RENDER_API_KEY", value)
-        else:
-            os.environ.setdefault(key, value)
+    load_dotenv(path)
 
 
 def _render_api_key() -> str:
+    _load_dotenv()
     key = os.getenv("RENDER_API_KEY", "").strip() or os.getenv("render", "").strip()
     if not key:
         raise RuntimeError("Missing Render API key (RENDER_API_KEY or render in .env)")
@@ -94,16 +86,14 @@ def wait_for_deploy(api_key: str, service_id: str, deploy_id: str) -> dict:
 
 
 def notify_admins(text: str) -> None:
+    _load_dotenv()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         raise RuntimeError("Missing TELEGRAM_BOT_TOKEN for admin notification")
 
-    admin_raw = os.getenv("ADMIN_USER_IDS", "").strip()
-    if not admin_raw:
-        raise RuntimeError("Missing ADMIN_USER_IDS for admin notification")
-    admin_ids = [int(x.strip()) for x in admin_raw.split(",") if x.strip()]
+    admin_ids = parse_admin_user_ids(os.getenv("ADMIN_USER_IDS", ""))
     if not admin_ids:
-        raise RuntimeError("ADMIN_USER_IDS is empty")
+        raise RuntimeError("Missing ADMIN_USER_IDS for admin notification")
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     for admin_id in admin_ids:
@@ -116,6 +106,7 @@ def notify_admins(text: str) -> None:
 
 
 def _service_id(explicit: str = "") -> str:
+    _load_dotenv()
     service_id = explicit.strip() or os.getenv("RENDER_SERVICE_ID", "").strip()
     if not service_id:
         raise RuntimeError("Missing RENDER_SERVICE_ID (env or --service-id)")

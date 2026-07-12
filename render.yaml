@@ -15,4 +15,6 @@ services:
         value: "60"
       - key: DATABASE_URL
         sync: false
+      - key: ADMIN_USER_IDS
+        sync: false
     autoDeploy: true
