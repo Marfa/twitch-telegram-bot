@@ -14,8 +14,6 @@ import requests
 logger = logging.getLogger(__name__)
 
 RENDER_API = "https://api.render.com/v1"
-DEFAULT_BLUEPRINT_ID = "REDACTED_BLUEPRINT_ID"
-DEFAULT_SERVICE_ID = "REDACTED_SERVICE_ID"
 POLL_INTERVAL_SEC = 15
 DEPLOY_TIMEOUT_SEC = 900
 
@@ -100,7 +98,9 @@ def notify_admins(text: str) -> None:
     if not token:
         raise RuntimeError("Missing TELEGRAM_BOT_TOKEN for admin notification")
 
-    admin_raw = os.getenv("ADMIN_USER_IDS", "REDACTED_TELEGRAM_ID")
+    admin_raw = os.getenv("ADMIN_USER_IDS", "").strip()
+    if not admin_raw:
+        raise RuntimeError("Missing ADMIN_USER_IDS for admin notification")
     admin_ids = [int(x.strip()) for x in admin_raw.split(",") if x.strip()]
     if not admin_ids:
         raise RuntimeError("ADMIN_USER_IDS is empty")
@@ -115,13 +115,25 @@ def notify_admins(text: str) -> None:
         resp.raise_for_status()
 
 
+def _service_id(explicit: str = "") -> str:
+    service_id = explicit.strip() or os.getenv("RENDER_SERVICE_ID", "").strip()
+    if not service_id:
+        raise RuntimeError("Missing RENDER_SERVICE_ID (env or --service-id)")
+    return service_id
+
+
+def _service_dashboard(service_id: str) -> str:
+    return f"https://dashboard.render.com/web/{service_id}"
+
+
 def _short_commit(commit_id: str) -> str:
     return commit_id[:7] if len(commit_id) >= 7 else commit_id
 
 
 def run_deploy(commit_id: str, *, service_id: str, notify: bool = True) -> int:
     api_key = _render_api_key()
-    service_id = service_id or os.getenv("RENDER_SERVICE_ID", DEFAULT_SERVICE_ID)
+    service_id = _service_id(service_id)
+    dashboard = _service_dashboard(service_id)
 
     logger.info("Triggering Render deploy for %s on %s", _short_commit(commit_id), service_id)
     deploy_id = trigger_deploy(api_key, service_id, commit_id)
@@ -134,7 +146,7 @@ def run_deploy(commit_id: str, *, service_id: str, notify: bool = True) -> int:
             f"✅ Render: деплой успешен\n"
             f"Коммит: {short}\n"
             f"Deploy: {deploy_id}\n"
-            f"Blueprint: https://dashboard.render.com/blueprint/{DEFAULT_BLUEPRINT_ID}"
+            f"Service: {dashboard}"
         )
         logger.info("Deploy succeeded: %s", deploy_id)
         if notify:
@@ -146,7 +158,7 @@ def run_deploy(commit_id: str, *, service_id: str, notify: bool = True) -> int:
         f"Коммит: {short}\n"
         f"Статус: {status}\n"
         f"Deploy: {deploy_id}\n"
-        f"Blueprint: https://dashboard.render.com/blueprint/{DEFAULT_BLUEPRINT_ID}"
+        f"Service: {dashboard}"
     )
     logger.error("Deploy failed: %s status=%s", deploy_id, status)
     if notify:
@@ -169,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--service-id",
-        default=os.getenv("RENDER_SERVICE_ID", DEFAULT_SERVICE_ID),
+        default=os.getenv("RENDER_SERVICE_ID", ""),
         help="Render service ID",
     )
     parser.add_argument(
