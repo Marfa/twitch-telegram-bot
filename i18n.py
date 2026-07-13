@@ -44,9 +44,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "finish_setup_first": "Finish the subscription setup or tap /cancel.",
         "channel_not_parsed": (
             "Could not parse the channel. Examples:\n"
-            "• ninja\n"
-            "• https://twitch.tv/ninja\n"
-            "• https://m.twitch.tv/ninja"
+            "• marfapr\n"
+            "• https://www.twitch.tv/marfapr\n"
+            "• https://m.twitch.tv/marfapr"
         ),
         "channel_not_found": 'Channel "{username}" not found on Twitch. Try again.',
         "channel_found": (
@@ -327,9 +327,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "finish_setup_first": "Сначала завершите настройку подписки или нажмите /cancel.",
         "channel_not_parsed": (
             "Не удалось распознать канал. Примеры:\n"
-            "• ninja\n"
-            "• https://twitch.tv/ninja\n"
-            "• https://m.twitch.tv/ninja"
+            "• marfapr\n"
+            "• https://www.twitch.tv/marfapr\n"
+            "• https://m.twitch.tv/marfapr"
         ),
         "channel_not_found": "Канал «{username}» не найден на Twitch. Попробуйте ещё раз.",
         "channel_found": (

@@ -20,15 +20,17 @@ from telegram import LinkPreviewOptions, Message
 
 
 def main() -> None:
+    CHANNEL = "marfapr"
     t = TwitchClient()
-    assert t.parse_username("ninja") == "ninja"
-    assert t.parse_username("https://twitch.tv/Ninja") == "ninja"
-    assert t.parse_username("https://m.twitch.tv/ninja") == "ninja"
-    assert t.parse_username("@ninja") == "ninja"
+    assert t.parse_username(CHANNEL) == CHANNEL
+    assert t.parse_username("https://www.twitch.tv/marfapr") == CHANNEL
+    assert t.parse_username("https://twitch.tv/Marfapr") == CHANNEL
+    assert t.parse_username("https://m.twitch.tv/marfapr") == CHANNEL
+    assert t.parse_username("@marfapr") == CHANNEL
     assert t.parse_username("not valid!!!") is None
 
-    out = render_template("{username}: {game} / {name}", "ninja", "Fortnite", "Test")
-    assert out == "ninja: Fortnite / Test"
+    out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
+    assert out == "marfapr: Just Chatting / Test"
 
     link = parse_telegram_topic_link("https://t.me/c/themarfa_gaming/30")
     assert link is not None
@@ -67,7 +69,7 @@ def main() -> None:
         assert db.get_user_locale(1) == "en"
         sub_id = db.add_subscription(
             owner_id=1,
-            twitch_username="ninja",
+            twitch_username=CHANNEL,
             twitch_user_id="123",
             message_template="hi",
             dest_type="dm",
