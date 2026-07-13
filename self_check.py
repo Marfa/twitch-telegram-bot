@@ -104,6 +104,10 @@ def main() -> None:
         db.set_receive_bot_updates(1, False)
         assert db.get_receive_bot_updates(1) is False
         assert 1 not in db.get_bot_update_recipients()
+        assert db.get_receive_availability_updates(1) is True
+        db.set_receive_availability_updates(1, False)
+        assert db.get_receive_availability_updates(1) is False
+        assert 1 not in db.get_availability_recipients()
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1
         )

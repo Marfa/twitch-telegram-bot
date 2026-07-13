@@ -162,9 +162,15 @@ class Database(Protocol):
 
     def get_bot_update_recipients(self) -> list[int]: ...
 
+    def get_availability_recipients(self) -> list[int]: ...
+
     def get_receive_bot_updates(self, user_id: int) -> bool: ...
 
     def set_receive_bot_updates(self, user_id: int, enabled: bool) -> None: ...
+
+    def get_receive_availability_updates(self, user_id: int) -> bool: ...
+
+    def set_receive_availability_updates(self, user_id: int, enabled: bool) -> None: ...
 
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]: ...
 
@@ -279,6 +285,10 @@ class SqliteDatabase:
         if "receive_bot_updates" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN receive_bot_updates INTEGER NOT NULL DEFAULT 1"
+            )
+        if "receive_availability_updates" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN receive_availability_updates INTEGER NOT NULL DEFAULT 1"
             )
         if "saved_schedule_hour" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_hour INTEGER")
@@ -517,6 +527,13 @@ class SqliteDatabase:
             uid for uid in self.get_notify_user_ids() if self.get_receive_bot_updates(uid)
         ]
 
+    def get_availability_recipients(self) -> list[int]:
+        return [
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_availability_updates(uid)
+        ]
+
     def get_receive_bot_updates(self, user_id: int) -> bool:
         with self._conn() as conn:
             row = conn.execute(
@@ -533,6 +550,27 @@ class SqliteDatabase:
                 """
                 INSERT INTO users (user_id, receive_bot_updates) VALUES (?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET receive_bot_updates = excluded.receive_bot_updates
+                """,
+                (user_id, int(enabled)),
+            )
+
+    def get_receive_availability_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT receive_availability_updates FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return True
+        return bool(row["receive_availability_updates"])
+
+    def set_receive_availability_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, receive_availability_updates) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    receive_availability_updates = excluded.receive_availability_updates
                 """,
                 (user_id, int(enabled)),
             )
@@ -765,6 +803,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS receive_availability_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
             )
             cur.execute(
@@ -1049,6 +1093,13 @@ class PostgresDatabase:
             uid for uid in self.get_notify_user_ids() if self.get_receive_bot_updates(uid)
         ]
 
+    def get_availability_recipients(self) -> list[int]:
+        return [
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_availability_updates(uid)
+        ]
+
     def get_receive_bot_updates(self, user_id: int) -> bool:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -1068,6 +1119,30 @@ class PostgresDatabase:
                 """
                 INSERT INTO users (user_id, receive_bot_updates) VALUES (%s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET receive_bot_updates = EXCLUDED.receive_bot_updates
+                """,
+                (user_id, enabled),
+            )
+
+    def get_receive_availability_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT receive_availability_updates FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return True
+        return bool(row["receive_availability_updates"])
+
+    def set_receive_availability_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, receive_availability_updates) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    receive_availability_updates = EXCLUDED.receive_availability_updates
                 """,
                 (user_id, enabled),
             )

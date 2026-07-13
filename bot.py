@@ -1368,6 +1368,8 @@ async def _send_admin_broadcast(
     db: Database = context.application.bot_data["db"]
     if msg_type == "bot_update":
         user_ids = db.get_bot_update_recipients()
+    elif msg_type == "availability":
+        user_ids = db.get_availability_recipients()
     else:
         user_ids = db.get_notify_user_ids()
     sent = failed = 0
@@ -1519,10 +1521,27 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    enabled = db.get_receive_bot_updates(user_id)
     await update.effective_message.reply_text(
         t("sys_notifications_menu", lang),
-        reply_markup=sys_notifications_keyboard(lang, enabled=enabled),
+        reply_markup=sys_notifications_keyboard(
+            lang,
+            updates_enabled=db.get_receive_bot_updates(user_id),
+            availability_enabled=db.get_receive_availability_updates(user_id),
+        ),
+    )
+
+
+async def _refresh_sys_notifications_menu(
+    query, context: ContextTypes.DEFAULT_TYPE, lang: str, user_id: int
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    await query.edit_message_text(
+        t("sys_notifications_menu", lang),
+        reply_markup=sys_notifications_keyboard(
+            lang,
+            updates_enabled=db.get_receive_bot_updates(user_id),
+            availability_enabled=db.get_receive_availability_updates(user_id),
+        ),
     )
 
 
@@ -1533,12 +1552,21 @@ async def on_sys_updates_toggle(update: Update, context: ContextTypes.DEFAULT_TY
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    enabled = not db.get_receive_bot_updates(user_id)
-    db.set_receive_bot_updates(user_id, enabled)
-    await query.edit_message_text(
-        t("sys_notifications_menu", lang),
-        reply_markup=sys_notifications_keyboard(lang, enabled=enabled),
+    db.set_receive_bot_updates(user_id, not db.get_receive_bot_updates(user_id))
+    await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+
+async def on_sys_availability_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    db.set_receive_availability_updates(
+        user_id, not db.get_receive_availability_updates(user_id)
     )
+    await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
 
 def _format_stats(stats: BotStats, lang: str) -> str:
@@ -1659,7 +1687,7 @@ async def _notify_status_items(
     message_key: str,
 ) -> None:
     db: Database = context.application.bot_data["db"]
-    user_ids = db.get_notify_user_ids()
+    user_ids = db.get_availability_recipients()
     if not user_ids:
         return
 
@@ -1833,6 +1861,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_sys_updates_toggle, pattern=r"^sys_updates:toggle$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_sys_availability_toggle, pattern=r"^sys_availability:toggle$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)

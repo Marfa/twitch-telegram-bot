@@ -256,7 +256,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_prompt": (
             "Choose notification type:"
         ),
-        "broadcast_type_bot_update": "📬 Bot updates",
+        "broadcast_type_bot_update": "📬 Bot update notifications",
+        "broadcast_type_availability": "📡 Bot availability alerts",
         "broadcast_text_prompt": (
             "Send the message text.\n"
             "/cancel — abort."
@@ -282,7 +283,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_show_calendar": "🗓 Show calendar",
         "schedule_minutes_header": "——— Select minutes ———",
         "sys_notifications_menu": "System notifications:",
-        "sys_updates_label": "Bot update alerts",
+        "sys_updates_label": "Bot update notifications",
+        "sys_availability_label": "Bot availability alerts",
         "bot_stats": (
             "📊 Bot statistics\n\n"
             "Users: {users}\n"
@@ -539,7 +541,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "unhandled_error": "Необработанная ошибка: {err}",
         "broadcast_prompt": "Выберите тип оповещения:",
-        "broadcast_type_bot_update": "📬 Обновления бота",
+        "broadcast_type_bot_update": "📬 Оповещения об обновлении бота",
+        "broadcast_type_availability": "📡 Оповещения о доступности бота",
         "broadcast_text_prompt": (
             "Отправьте текст сообщения.\n"
             "/cancel — отмена."
@@ -565,7 +568,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_show_calendar": "🗓 Показать календарь",
         "schedule_minutes_header": "——— Выберите минуты ———",
         "sys_notifications_menu": "Настройка системных уведомлений:",
-        "sys_updates_label": "Получение оповещений об обновлениях",
+        "sys_updates_label": "Оповещения об обновлении бота",
+        "sys_availability_label": "Оповещения о доступности бота",
         "bot_stats": (
             "📊 Статистика бота\n\n"
             "Пользователей: {users}\n"
@@ -732,20 +736,38 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                     callback_data="admin_type:bot_update",
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    t("broadcast_type_availability", lang),
+                    callback_data="admin_type:availability",
+                )
+            ],
         ]
     )
 
 
-def sys_notifications_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
-    mark = "✅ " if enabled else "❌ "
+def sys_notifications_keyboard(
+    lang: str,
+    *,
+    updates_enabled: bool,
+    availability_enabled: bool,
+) -> InlineKeyboardMarkup:
+    updates_mark = "✅ " if updates_enabled else "❌ "
+    availability_mark = "✅ " if availability_enabled else "❌ "
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    mark + t("sys_updates_label", lang),
+                    updates_mark + t("sys_updates_label", lang),
                     callback_data="sys_updates:toggle",
                 )
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    availability_mark + t("sys_availability_label", lang),
+                    callback_data="sys_availability:toggle",
+                )
+            ],
         ]
     )
 
