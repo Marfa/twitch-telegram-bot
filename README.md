@@ -163,4 +163,4 @@ fly deploy
 
 Код подготовлен с помощью Cursor
 
-Поддержка: [DonationAlerts](https://www.donationalerts.com/r/themarfa) · [Криптой](https://nowpayments.io/donation/themarfa)
+Поддержка: [Telegram Tribute](https://t.me/tribute/app?startapp=dBlc) · [Криптой](https://nowpayments.io/donation/themarfa)

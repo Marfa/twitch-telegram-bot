@@ -158,4 +158,4 @@ See [LICENSE](LICENSE) · https://creativecommons.org/licenses/by-nc-sa/4.0/
 
 Built with Cursor
 
-Support: [DonationAlerts](https://www.donationalerts.com/r/themarfa) · [Crypto](https://nowpayments.io/donation/themarfa)
+Support: [Telegram Tribute](https://t.me/tribute/app?startapp=dBlc) · [Crypto](https://nowpayments.io/donation/themarfa)
