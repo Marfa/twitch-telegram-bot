@@ -71,7 +71,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delay_minutes_invalid": "Enter a positive number of minutes, e.g. 5.",
         "repeat_prompt": "If the stream is interrupted, repeat notifications will not be sent.",
         "repeat_yes": "✅ Yes, allow repeats",
-        "repeat_no": "❌ No, set mute period",
+        "repeat_no": "❌ No",
         "repeat_mute_prompt": "Enter how many minutes to suppress repeat notifications:",
         "repeat_mute_invalid": "Enter a positive number of minutes, e.g. 30.",
         "repeat_yes_note": "Repeat notifications: yes",
@@ -354,7 +354,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delay_minutes_invalid": "Введите положительное число минут, например 5.",
         "repeat_prompt": "Если стрим прервался, повторные уведомления не будут отправляться",
         "repeat_yes": "✅ Да, разрешить повторы",
-        "repeat_no": "❌ Нет, указать заглушку",
+        "repeat_no": "❌ Нет",
         "repeat_mute_prompt": "Укажите в минутах, на сколько заглушить уведомления:",
         "repeat_mute_invalid": "Введите положительное число минут, например 30.",
         "repeat_yes_note": "Повторные уведомления: да",
@@ -614,6 +614,10 @@ def all_menu_buttons() -> set[str]:
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
 
+def all_wizard_nav_buttons() -> set[str]:
+    return {btn(k, loc) for k in ("wizard_back", "wizard_cancel") for loc in SUPPORTED_LOCALES}
+
+
 def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(btn("new", lang))],
@@ -653,6 +657,17 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
+def wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
+    row = [KeyboardButton(btn("wizard_cancel", lang))]
+    if back:
+        row.insert(0, KeyboardButton(btn("wizard_back", lang)))
+    return ReplyKeyboardMarkup([row], resize_keyboard=True)
+
+
+def admin_wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
+    return wizard_menu(lang, back=back)
+
+
 def language_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -668,7 +683,6 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("dest_dm", lang), callback_data="dest:dm")],
             [InlineKeyboardButton(t("dest_channel", lang), callback_data="dest:channel")],
             [InlineKeyboardButton(t("dest_group", lang), callback_data="dest:group")],
-            *_wizard_nav_rows(lang),
         ]
     )
 
@@ -678,7 +692,6 @@ def delete_old_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("delete_old_yes", lang), callback_data="delete_old:1")],
             [InlineKeyboardButton(t("delete_old_no", lang), callback_data="delete_old:0")],
-            *_wizard_nav_rows(lang),
         ]
     )
 
@@ -688,7 +701,6 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("link_preview_on", lang), callback_data="link_preview:0")],
             [InlineKeyboardButton(t("link_preview_off", lang), callback_data="link_preview:1")],
-            *_wizard_nav_rows(lang),
         ]
     )
 
@@ -696,9 +708,8 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
 def delay_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t("delay_no", lang), callback_data="delay_send:0")],
             [InlineKeyboardButton(t("delay_yes", lang), callback_data="delay_send:1")],
-            *_wizard_nav_rows(lang),
+            [InlineKeyboardButton(t("delay_no", lang), callback_data="delay_send:0")],
         ]
     )
 
@@ -708,22 +719,8 @@ def repeat_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("repeat_yes", lang), callback_data="repeat:1")],
             [InlineKeyboardButton(t("repeat_no", lang), callback_data="repeat:0")],
-            *_wizard_nav_rows(lang),
         ]
     )
-
-
-def _wizard_nav_rows(lang: str) -> list[list[InlineKeyboardButton]]:
-    return [
-        [
-            InlineKeyboardButton(btn("wizard_back", lang), callback_data="wiz:back"),
-            InlineKeyboardButton(btn("wizard_cancel", lang), callback_data="wiz:cancel"),
-        ]
-    ]
-
-
-def wizard_nav_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(_wizard_nav_rows(lang))
 
 
 def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
@@ -735,7 +732,6 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                     callback_data="admin_type:bot_update",
                 )
             ],
-            *_wizard_nav_rows(lang),
         ]
     )
 
@@ -829,10 +825,7 @@ def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(t("schedule_pick_minutes", lang), callback_data="sched:toggle_min")])
 
     rows.append(
-        [
-            InlineKeyboardButton(btn("wizard_back", lang), callback_data="sched:back"),
-            InlineKeyboardButton(t("schedule_apply", lang), callback_data="sched:apply"),
-        ]
+        [InlineKeyboardButton(t("schedule_apply", lang), callback_data="sched:apply")]
     )
     rows.append([InlineKeyboardButton(t("broadcast_send_now", lang), callback_data="sched:now")])
     return InlineKeyboardMarkup(rows)
