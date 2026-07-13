@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
+
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -9,6 +11,7 @@ from telegram import (
 
 SUPPORTED_LOCALES = ("en", "ru")
 DEFAULT_LOCALE = "en"
+SCHEDULE_TZ = timezone(timedelta(hours=3))
 
 _STRINGS: dict[str, dict[str, str]] = {
     "en": {
@@ -22,6 +25,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_broadcast": "📣 Broadcast",
         "btn_stats": "📊 Statistics",
         "btn_back": "◀️ Main menu",
+        "btn_wizard_back": "« Back",
+        "btn_wizard_cancel": "Cancel",
+        "btn_sys_notifications": "🔔 System notifications",
+        "btn_sys_updates": "📬 Bot update alerts",
         "menu_subs": "Manage subscriptions:",
         "menu_admin": "Admin panel:",
         "menu_main": "Main menu",
@@ -57,11 +64,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Show link preview in notifications?",
         "link_preview_on": "✅ Show preview",
         "link_preview_off": "❌ Hide preview",
-        "delay_prompt": "Delay sending the notification?",
+        "delay_prompt": "Delay notification after stream start?",
         "delay_no": "❌ No",
         "delay_yes": "✅ Yes",
         "delay_minutes_prompt": "Enter the delay in minutes (a number):",
         "delay_minutes_invalid": "Enter a positive number of minutes, e.g. 5.",
+        "repeat_prompt": "Allow repeat notifications?",
+        "repeat_yes": "✅ Yes",
+        "repeat_no": "❌ No",
+        "repeat_mute_prompt": "Enter how many minutes to suppress repeat notifications:",
+        "repeat_mute_invalid": "Enter a positive number of minutes, e.g. 30.",
+        "repeat_yes_note": "Repeat notifications: yes",
+        "repeat_no_note": "Suppress repeats: {minutes} min after first alert",
+        "sub_line_repeat": ", suppress {minutes} min",
         "dest_prompt": "Where should notifications be sent?",
         "dest_dm": "📩 To DM",
         "dest_channel": "📢 To channel",
@@ -124,7 +139,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}\n"
             "{preview_note}\n"
-            "{delay_note}\n\n"
+            "{delay_note}\n"
+            "{repeat_note}\n\n"
             "Sample message:\n{preview}\n\n"
             "When {twitch_username} goes live — I'll send a notification.\n"
             "Help: /help"
@@ -190,6 +206,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_delete_old": "🗑 Delete old messages",
         "edit_link_preview": "🔗 Link preview",
         "edit_delay": "⏱ Delay send",
+        "edit_repeat": "🔁 Repeat notifications",
+        "edit_repeat_menu": "Allow repeat notifications?",
+        "edit_repeat_mute_prompt": (
+            "Subscription #{sub_id}\n"
+            "Current: {current}\n\n"
+            "Enter suppression minutes (0 — allow repeats):"
+        ),
+        "edit_repeat_current_allow": "allowed",
+        "edit_repeat_current_mute": "suppress {minutes} min",
+        "edit_repeat_invalid": "Enter 0 or a positive number of minutes.",
         "edit_template_prompt": (
             "Send a new message template for subscription #{sub_id}.\n\n"
             "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
@@ -228,7 +254,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "unhandled_error": "Unhandled error: {err}",
         "broadcast_prompt": (
-            "Send the message to broadcast to all users.\n"
+            "Choose notification type:"
+        ),
+        "broadcast_type_bot_update": "📬 Bot updates",
+        "broadcast_text_prompt": (
+            "Send the message text.\n"
             "/cancel — abort."
         ),
         "broadcast_empty": "Message cannot be empty.",
@@ -238,6 +268,24 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Failed: {failed}\n"
             "Total recipients: {total}"
         ),
+        "broadcast_scheduled": (
+            "Message scheduled.\n"
+            "Send time: {when}\n"
+            "Recipients will receive it automatically."
+        ),
+        "broadcast_send_now": "Send now",
+        "schedule_title": "Choose send time (MSK, UTC+3):",
+        "schedule_pick_hour": "——— Select hour ———",
+        "schedule_pick_minutes": "Select minutes ↘",
+        "schedule_saved_time": "Saved time ↘",
+        "schedule_apply": "Apply time",
+        "schedule_show_calendar": "🗓 Show calendar",
+        "schedule_minutes_header": "——— Select minutes ———",
+        "sys_notifications_menu": "System notifications:",
+        "sys_updates_menu": "Receive bot update alerts from admin?",
+        "sys_updates_on": "✅ On",
+        "sys_updates_off": "❌ Off",
+        "sys_updates_saved": "Setting saved.",
         "bot_stats": (
             "📊 Bot statistics\n\n"
             "Users: {users}\n"
@@ -263,6 +311,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_broadcast": "📣 Рассылка",
         "btn_stats": "📊 Статистика",
         "btn_back": "◀️ Главное меню",
+        "btn_wizard_back": "« Назад",
+        "btn_wizard_cancel": "Отмена",
+        "btn_sys_notifications": "🔔 Настройка системных уведомлений",
+        "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "menu_subs": "Управление подписками:",
         "menu_admin": "Админка:",
         "menu_main": "Главное меню",
@@ -298,11 +350,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
         "link_preview_on": "✅ Показывать превью",
         "link_preview_off": "❌ Скрыть превью",
-        "delay_prompt": "Отложить отправку?",
+        "delay_prompt": "Отложить отправку уведомления после начала стрима",
         "delay_no": "❌ Нет",
         "delay_yes": "✅ Да",
         "delay_minutes_prompt": "Укажите задержку отправки в минутах (число):",
         "delay_minutes_invalid": "Введите положительное число минут, например 5.",
+        "repeat_prompt": "Разрешить повторные уведомления?",
+        "repeat_yes": "✅ Да",
+        "repeat_no": "❌ Нет",
+        "repeat_mute_prompt": "Укажите в минутах, на сколько заглушить уведомления:",
+        "repeat_mute_invalid": "Введите положительное число минут, например 30.",
+        "repeat_yes_note": "Повторные уведомления: да",
+        "repeat_no_note": "Заглушка повторов: {minutes} мин. после первого",
+        "sub_line_repeat": ", заглушка {minutes} мин.",
         "dest_prompt": "Куда отправлять уведомления?",
         "dest_dm": "📩 В личку",
         "dest_channel": "📢 В канал",
@@ -367,7 +427,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}\n"
             "{preview_note}\n"
-            "{delay_note}\n\n"
+            "{delay_note}\n"
+            "{repeat_note}\n\n"
             "Пример сообщения:\n{preview}\n\n"
             "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n"
             "Справка: /help"
@@ -433,6 +494,16 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_delete_old": "🗑 Удалять старые",
         "edit_link_preview": "🔗 Превью ссылок",
         "edit_delay": "⏱ Задержка отправки",
+        "edit_repeat": "🔁 Повторные уведомления",
+        "edit_repeat_menu": "Разрешить повторные уведомления?",
+        "edit_repeat_mute_prompt": (
+            "Подписка #{sub_id}\n"
+            "Сейчас: {current}\n\n"
+            "Укажите минуты заглушки (0 — разрешить повторы):"
+        ),
+        "edit_repeat_current_allow": "разрешены",
+        "edit_repeat_current_mute": "заглушка {minutes} мин.",
+        "edit_repeat_invalid": "Введите 0 или положительное число минут.",
         "edit_template_prompt": (
             "Отправьте новый шаблон для подписки #{sub_id}.\n\n"
             "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
@@ -470,8 +541,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(Render + локально?). Оставляем один."
         ),
         "unhandled_error": "Необработанная ошибка: {err}",
-        "broadcast_prompt": (
-            "Отправьте сообщение для рассылки всем пользователям.\n"
+        "broadcast_prompt": "Выберите тип оповещения:",
+        "broadcast_type_bot_update": "📬 Обновления бота",
+        "broadcast_text_prompt": (
+            "Отправьте текст сообщения.\n"
             "/cancel — отмена."
         ),
         "broadcast_empty": "Сообщение не может быть пустым.",
@@ -481,6 +554,24 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Ошибок: {failed}\n"
             "Всего получателей: {total}"
         ),
+        "broadcast_scheduled": (
+            "Сообщение запланировано.\n"
+            "Время отправки: {when}\n"
+            "Получатели получат его автоматически."
+        ),
+        "broadcast_send_now": "Отправить сейчас",
+        "schedule_title": "Выберите время отправки (МСК, UTC+3):",
+        "schedule_pick_hour": "——— Выберите час ———",
+        "schedule_pick_minutes": "Выберите минуты ↘",
+        "schedule_saved_time": "Запомненное время ↘",
+        "schedule_apply": "Применить время",
+        "schedule_show_calendar": "🗓 Показать календарь",
+        "schedule_minutes_header": "——— Выберите минуты ———",
+        "sys_notifications_menu": "Настройка системных уведомлений:",
+        "sys_updates_menu": "Получение оповещений об обновлениях?",
+        "sys_updates_on": "✅ Вкл",
+        "sys_updates_off": "❌ Выкл",
+        "sys_updates_saved": "Настройка сохранена.",
         "bot_stats": (
             "📊 Статистика бота\n\n"
             "Пользователей: {users}\n"
@@ -524,14 +615,36 @@ def all_menu_buttons() -> set[str]:
         "broadcast",
         "stats",
         "back",
+        "sys_notifications",
+        "sys_updates",
+        "wizard_back",
+        "wizard_cancel",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
+
+
+def wizard_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton(btn("wizard_back", lang)),
+                KeyboardButton(btn("wizard_cancel", lang)),
+            ],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def edit_wizard_menu(lang: str) -> ReplyKeyboardMarkup:
+    return wizard_menu(lang)
 
 
 def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(btn("new", lang))],
         [KeyboardButton(btn("manage", lang))],
+        [KeyboardButton(btn("sys_notifications", lang))],
         [KeyboardButton(btn("feedback", lang))],
     ]
     if is_admin:
@@ -581,6 +694,7 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("dest_dm", lang), callback_data="dest:dm")],
             [InlineKeyboardButton(t("dest_channel", lang), callback_data="dest:channel")],
             [InlineKeyboardButton(t("dest_group", lang), callback_data="dest:group")],
+            *_wizard_nav_rows(lang),
         ]
     )
 
@@ -590,6 +704,7 @@ def delete_old_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("delete_old_yes", lang), callback_data="delete_old:1")],
             [InlineKeyboardButton(t("delete_old_no", lang), callback_data="delete_old:0")],
+            *_wizard_nav_rows(lang),
         ]
     )
 
@@ -599,6 +714,7 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("link_preview_on", lang), callback_data="link_preview:0")],
             [InlineKeyboardButton(t("link_preview_off", lang), callback_data="link_preview:1")],
+            *_wizard_nav_rows(lang),
         ]
     )
 
@@ -608,8 +724,157 @@ def delay_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("delay_no", lang), callback_data="delay_send:0")],
             [InlineKeyboardButton(t("delay_yes", lang), callback_data="delay_send:1")],
+            *_wizard_nav_rows(lang),
         ]
     )
+
+
+def repeat_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("repeat_yes", lang), callback_data="repeat:1")],
+            [InlineKeyboardButton(t("repeat_no", lang), callback_data="repeat:0")],
+            *_wizard_nav_rows(lang),
+        ]
+    )
+
+
+def _wizard_nav_rows(lang: str) -> list[list[InlineKeyboardButton]]:
+    return [
+        [
+            InlineKeyboardButton(btn("wizard_back", lang), callback_data="wiz:back"),
+            InlineKeyboardButton(btn("wizard_cancel", lang), callback_data="wiz:cancel"),
+        ]
+    ]
+
+
+def wizard_nav_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(_wizard_nav_rows(lang))
+
+
+def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("broadcast_type_bot_update", lang),
+                    callback_data="admin_type:bot_update",
+                )
+            ],
+            *_wizard_nav_rows(lang),
+        ]
+    )
+
+
+def sys_notifications_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(btn("sys_updates", lang))],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def sys_updates_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("sys_updates_on", lang) + (" ✓" if enabled else ""),
+                    callback_data="sys_updates:1",
+                ),
+                InlineKeyboardButton(
+                    t("sys_updates_off", lang) + (" ✓" if not enabled else ""),
+                    callback_data="sys_updates:0",
+                ),
+            ]
+        ]
+    )
+
+
+_WEEKDAYS = {
+    "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    "ru": ["пн", "вт", "ср", "чт", "пт", "сб", "вс"],
+}
+_MONTHS = {
+    "en": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    "ru": ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+}
+
+
+def _format_schedule_date(d: date, lang: str) -> str:
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    wd = _WEEKDAYS[loc][d.weekday()]
+    month = _MONTHS[loc][d.month]
+    if loc == "ru":
+        return f"{wd}, {d.day} {month}"
+    return f"{wd}, {month} {d.day}"
+
+
+def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:
+    now = datetime.now(SCHEDULE_TZ)
+    page = int(schedule.get("date_page", 0))
+    selected_offset = int(schedule.get("date_offset", 0))
+    hour = schedule.get("hour")
+    minute = schedule.get("minute")
+    show_minutes = bool(schedule.get("show_minutes"))
+    rows: list[list[InlineKeyboardButton]] = []
+
+    rows.append(
+        [InlineKeyboardButton(t("schedule_show_calendar", lang), callback_data="sched:noop")]
+    )
+
+    date_row: list[InlineKeyboardButton] = []
+    for i in range(3):
+        offset = page * 3 + i
+        d = now.date() + timedelta(days=offset)
+        label = _format_schedule_date(d, lang)
+        if offset == selected_offset:
+            label = f"✅ {label}"
+        date_row.append(
+            InlineKeyboardButton(label, callback_data=f"sched:date:{offset}")
+        )
+    if page < 10:
+        date_row.append(InlineKeyboardButton("→", callback_data="sched:date_next"))
+    rows.append(date_row)
+
+    rows.append([InlineKeyboardButton(t("schedule_saved_time", lang), callback_data="sched:saved")])
+
+    rows.append([InlineKeyboardButton(t("schedule_pick_hour", lang), callback_data="sched:noop")])
+    for block in range(4):
+        hour_row = []
+        for h in range(block * 6, block * 6 + 6):
+            label = f"{h:02d}"
+            if hour == h:
+                label = f"✅ {label}"
+            hour_row.append(InlineKeyboardButton(label, callback_data=f"sched:hour:{h}"))
+        rows.append(hour_row)
+
+    if show_minutes:
+        rows.append([InlineKeyboardButton(t("schedule_minutes_header", lang), callback_data="sched:noop")])
+        min_row: list[InlineKeyboardButton] = []
+        for m in range(0, 60, 5):
+            label = f"{m:02d}"
+            if minute == m:
+                label = f"✅ {label}"
+            min_row.append(InlineKeyboardButton(label, callback_data=f"sched:min:{m}"))
+            if len(min_row) == 6:
+                rows.append(min_row)
+                min_row = []
+        if min_row:
+            rows.append(min_row)
+    else:
+        rows.append([InlineKeyboardButton(t("schedule_pick_minutes", lang), callback_data="sched:toggle_min")])
+
+    rows.append(
+        [
+            InlineKeyboardButton(btn("wizard_back", lang), callback_data="sched:back"),
+            InlineKeyboardButton(t("schedule_apply", lang), callback_data="sched:apply"),
+        ]
+    )
+    rows.append([InlineKeyboardButton(t("broadcast_send_now", lang), callback_data="sched:now")])
+    return InlineKeyboardMarkup(rows)
 
 
 def edit_options_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
@@ -618,6 +883,7 @@ def edit_options_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
             [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
             [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
+            [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
             [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")],
             [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")],
         ]
@@ -630,6 +896,13 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
             [
                 [InlineKeyboardButton(t("preview_yes", lang), callback_data=f"edit_set:{sub_id}:preview:1")],
                 [InlineKeyboardButton(t("preview_no", lang), callback_data=f"edit_set:{sub_id}:preview:0")],
+            ]
+        )
+    if field == "repeat":
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(t("repeat_yes", lang), callback_data=f"edit_set:{sub_id}:repeat:1")],
+                [InlineKeyboardButton(t("repeat_no", lang), callback_data=f"edit_set:{sub_id}:repeat:0")],
             ]
         )
     return InlineKeyboardMarkup(

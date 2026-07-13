@@ -87,6 +87,26 @@ def main() -> None:
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.delay_minutes == 10
+        assert db.update_subscription(sub_id, 1, suppress_repeat_minutes=30)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.suppress_repeat_minutes == 30
+        db.set_notify_cooldown(sub_id, 5)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.notify_cooldown_until is not None
+        from db import is_on_notify_cooldown
+
+        assert is_on_notify_cooldown(sub)
+        assert db.get_receive_bot_updates(1) is True
+        db.set_receive_bot_updates(1, False)
+        assert db.get_receive_bot_updates(1) is False
+        assert 1 not in db.get_bot_update_recipients()
+        bid = db.add_scheduled_broadcast(
+            "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1
+        )
+        unsent = db.get_unsent_scheduled_broadcasts()
+        assert any(b.id == bid for b in unsent)
         assert not db.update_subscription(999, 1, message_template="x")
 
     items = fetch_render_status("https://status.render.com/history.rss")

@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 
 from telegram import (
     InlineKeyboardButton,
@@ -25,11 +26,14 @@ from telegram.ext import (
     filters,
 )
 
-from db import BotStats, Database, Subscription
+from db import BotStats, Database, Subscription, is_on_notify_cooldown
 from i18n import (
     DEFAULT_LOCALE,
+    SCHEDULE_TZ,
     SUPPORTED_LOCALES,
     admin_menu,
+    admin_type_keyboard,
+    all_btn_texts,
     all_menu_buttons,
     btn,
     delete_old_keyboard,
@@ -38,11 +42,17 @@ from i18n import (
     delay_keyboard,
     edit_bool_keyboard,
     edit_options_keyboard,
+    edit_wizard_menu,
     language_keyboard,
     link_preview_keyboard,
     main_menu,
+    repeat_keyboard,
+    schedule_keyboard,
     subscriptions_menu,
+    sys_notifications_menu,
+    sys_updates_keyboard,
     t,
+    wizard_menu,
 )
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
 from render_status import (
@@ -57,13 +67,88 @@ logger = logging.getLogger(__name__)
 
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
 
-LANG_SELECT, CHANNEL, TEMPLATE, LINK_PREVIEW, DELAY_SEND, DELAY_MINUTES, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE, EDIT_DELAY, BROADCAST = range(12)
+(
+    LANG_SELECT,
+    CHANNEL,
+    TEMPLATE,
+    LINK_PREVIEW,
+    DELAY_SEND,
+    DELAY_MINUTES,
+    REPEAT_ALLOW,
+    REPEAT_MUTE_MINUTES,
+    DEST_TYPE,
+    DEST_CHAT,
+    DELETE_OLD,
+    EDIT_TEMPLATE,
+    EDIT_DELAY,
+    EDIT_REPEAT,
+    ADMIN_MSG_TYPE,
+    ADMIN_MSG_TEXT,
+    ADMIN_MSG_SCHEDULE,
+) = range(17)
 
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
         return t("edit_delay_current_none", lang)
     return t("edit_delay_current", lang, minutes=minutes)
+
+
+def _repeat_current_label(minutes: int, lang: str) -> str:
+    if minutes <= 0:
+        return t("edit_repeat_current_allow", lang)
+    return t("edit_repeat_current_mute", lang, minutes=minutes)
+
+
+def _wizard_kb(lang: str, *, editing: bool = False) -> ReplyKeyboardMarkup:
+    return edit_wizard_menu(lang) if editing else wizard_menu(lang)
+
+
+def _is_wizard_nav(text: str) -> str | None:
+    for key in ("wizard_back", "wizard_cancel", "back"):
+        if text in all_btn_texts(key):
+            return key
+    return None
+
+
+async def _wizard_cancel_flow(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    return await cancel(update, context)
+
+
+async def _prompt_repeat_step(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, *, edit: bool = False
+) -> int:
+    kb = _wizard_kb(lang, editing=edit)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            t("repeat_prompt", lang),
+            reply_markup=repeat_keyboard(lang),
+        )
+    else:
+        await update.effective_message.reply_text(
+            t("repeat_prompt", lang),
+            reply_markup=repeat_keyboard(lang),
+        )
+    return REPEAT_ALLOW
+
+
+async def _prompt_dest_step(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, *, edit: bool = False
+) -> int:
+    kb = _wizard_kb(lang, editing=edit)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            t("dest_prompt", lang),
+            reply_markup=dest_keyboard(lang),
+        )
+    else:
+        await update.effective_message.reply_text(
+            t("dest_prompt", lang),
+            reply_markup=dest_keyboard(lang),
+        )
+    return DEST_TYPE
 
 
 def _btn_filter(key: str) -> filters.Regex:
@@ -110,9 +195,14 @@ def _format_sub_line(sub: Subscription, lang: str) -> str:
         if sub.delay_minutes > 0
         else ""
     )
+    repeat = (
+        t("sub_line_repeat", lang, minutes=sub.suppress_repeat_minutes)
+        if sub.suppress_repeat_minutes > 0
+        else ""
+    )
     return (
         f"{status} #{sub.id} — {sub.twitch_username}\n"
-        f"   → {dest_label(sub.dest_type, lang)} ({sub.chat_id}{thread}{delete}{delay})"
+        f"   → {dest_label(sub.dest_type, lang)} ({sub.chat_id}{thread}{delete}{delay}{repeat})"
     )
 
 
@@ -142,6 +232,8 @@ async def _send_notification(
         msg = await bot.send_message(**kwargs)
         if sub.delete_previous:
             db.set_last_message_id(sub.id, msg.message_id)
+        if sub.suppress_repeat_minutes > 0:
+            db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
 
@@ -170,7 +262,7 @@ async def _begin_setup_message(update: Update, lang: str) -> int:
     user_id = update.effective_user.id
     await update.effective_message.reply_text(
         t("start_welcome", lang),
-        reply_markup=_menu(lang, user_id),
+        reply_markup=_wizard_kb(lang),
     )
     return CHANNEL
 
@@ -218,7 +310,7 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
     lang = _user_lang(context, user_id)
     await update.effective_message.reply_text(
         t("new_sub_prompt", lang),
-        reply_markup=_menu(lang, user_id),
+        reply_markup=_wizard_kb(lang),
     )
     return CHANNEL
 
@@ -226,6 +318,12 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     text = update.effective_message.text or ""
+    nav = _is_wizard_nav(text)
+    if nav == "wizard_cancel":
+        return await _wizard_cancel_flow(update, context)
+    if nav in ("wizard_back", "back"):
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return CHANNEL
     if text in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return CHANNEL
@@ -248,6 +346,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.effective_message.reply_text(
         t("channel_found", lang, display_name=html.escape(user["display_name"])),
         parse_mode=ParseMode.HTML,
+        reply_markup=_wizard_kb(lang),
     )
     return TEMPLATE
 
@@ -255,7 +354,16 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     template = (update.effective_message.text or "").strip()
-    if template in all_menu_buttons():
+    nav = _is_wizard_nav(template)
+    if nav == "wizard_cancel":
+        return await _wizard_cancel_flow(update, context)
+    if nav == "wizard_back":
+        await update.effective_message.reply_text(
+            t("new_sub_prompt", lang),
+            reply_markup=_wizard_kb(lang),
+        )
+        return CHANNEL
+    if nav == "back" or template in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return TEMPLATE
     if not template:
@@ -274,6 +382,21 @@ async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
+    if query.data == "wiz:cancel":
+        context.user_data.clear()
+        await query.edit_message_text(t("cancelled", lang))
+        await context.bot.send_message(
+            query.from_user.id, t("menu_main", lang), reply_markup=_menu(lang, query.from_user.id)
+        )
+        return ConversationHandler.END
+    if query.data == "wiz:back":
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            query.from_user.id,
+            t("channel_found", lang, display_name=html.escape(context.user_data.get("twitch_username", ""))),
+            reply_markup=_wizard_kb(lang),
+        )
+        return TEMPLATE
     context.user_data["disable_link_preview"] = query.data.endswith(":1")
     await query.edit_message_text(
         t("delay_prompt", lang),
@@ -286,32 +409,114 @@ async def receive_delay_send(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
+    if query.data == "wiz:cancel":
+        context.user_data.clear()
+        await query.edit_message_text(t("cancelled", lang))
+        await context.bot.send_message(
+            query.from_user.id, t("menu_main", lang), reply_markup=_menu(lang, query.from_user.id)
+        )
+        return ConversationHandler.END
+    if query.data == "wiz:back":
+        await query.edit_message_text(
+            t("link_preview_prompt", lang),
+            reply_markup=link_preview_keyboard(lang),
+        )
+        return LINK_PREVIEW
     if query.data.endswith(":1"):
-        await query.edit_message_text(t("delay_minutes_prompt", lang))
+        context.user_data["after_delay_state"] = DELAY_MINUTES
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            query.from_user.id,
+            t("delay_minutes_prompt", lang),
+            reply_markup=_wizard_kb(lang),
+        )
         return DELAY_MINUTES
     context.user_data["delay_minutes"] = 0
-    await query.edit_message_text(
-        t("dest_prompt", lang),
-        reply_markup=dest_keyboard(lang),
-    )
-    return DEST_TYPE
+    context.user_data["after_delay_state"] = DELAY_SEND
+    return await _prompt_repeat_step(update, context, lang)
 
 
 async def receive_delay_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons():
+    nav = _is_wizard_nav(raw)
+    if nav == "wizard_cancel":
+        return await _wizard_cancel_flow(update, context)
+    if nav == "wizard_back":
+        await update.effective_message.reply_text(
+            t("delay_prompt", lang),
+            reply_markup=delay_keyboard(lang),
+        )
+        return DELAY_SEND
+    if nav == "back" or raw in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return DELAY_MINUTES
     if not raw.isdigit() or int(raw) < 1:
         await update.effective_message.reply_text(t("delay_minutes_invalid", lang))
         return DELAY_MINUTES
     context.user_data["delay_minutes"] = int(raw)
-    await update.effective_message.reply_text(
-        t("dest_prompt", lang),
-        reply_markup=dest_keyboard(lang),
+    context.user_data["after_delay_state"] = DELAY_MINUTES
+    return await _prompt_repeat_step(update, context, lang)
+
+
+async def receive_repeat_allow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data == "wiz:cancel":
+        context.user_data.clear()
+        await query.edit_message_text(t("cancelled", lang))
+        await context.bot.send_message(
+            query.from_user.id, t("menu_main", lang), reply_markup=_menu(lang, query.from_user.id)
+        )
+        return ConversationHandler.END
+    if query.data == "wiz:back":
+        after = context.user_data.get("after_delay_state", DELAY_SEND)
+        if after == DELAY_MINUTES:
+            await query.edit_message_text("✓")
+            await context.bot.send_message(
+                query.from_user.id,
+                t("delay_minutes_prompt", lang),
+                reply_markup=_wizard_kb(lang),
+            )
+            return DELAY_MINUTES
+        await query.edit_message_text(
+            t("delay_prompt", lang),
+            reply_markup=delay_keyboard(lang),
+        )
+        return DELAY_SEND
+    if query.data.endswith(":1"):
+        context.user_data["suppress_repeat_minutes"] = 0
+        return await _prompt_dest_step(update, context, lang)
+    await query.edit_message_text(t("repeat_mute_prompt", lang))
+    await context.bot.send_message(
+        query.from_user.id,
+        t("repeat_mute_prompt", lang),
+        reply_markup=_wizard_kb(lang),
     )
-    return DEST_TYPE
+    return REPEAT_MUTE_MINUTES
+
+
+async def receive_repeat_mute_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (update.effective_message.text or "").strip()
+    nav = _is_wizard_nav(raw)
+    if nav == "wizard_cancel":
+        return await _wizard_cancel_flow(update, context)
+    if nav == "wizard_back":
+        await update.effective_message.reply_text(
+            t("repeat_prompt", lang),
+            reply_markup=repeat_keyboard(lang),
+        )
+        return REPEAT_ALLOW
+    if nav == "back" or raw in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return REPEAT_MUTE_MINUTES
+    if not raw.isdigit() or int(raw) < 1:
+        await update.effective_message.reply_text(t("repeat_mute_invalid", lang))
+        return REPEAT_MUTE_MINUTES
+    context.user_data["suppress_repeat_minutes"] = int(raw)
+    return await _prompt_dest_step(update, context, lang)
 
 
 async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -325,15 +530,32 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
-    await query.edit_message_text(
-        t(
-            "edit_delay_prompt",
-            lang,
-            sub_id=sub_id,
-            current=_delay_current_label(sub.delay_minutes, lang),
-        ),
+    context.user_data["wizard_edit"] = True
+    current = _delay_current_label(sub.delay_minutes, lang)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t("edit_delay_prompt", lang, sub_id=sub_id, current=current),
+        reply_markup=_wizard_kb(lang, editing=True),
     )
     return EDIT_DELAY
+
+
+async def start_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    await query.edit_message_text(
+        t("edit_repeat_menu", lang),
+        reply_markup=edit_bool_keyboard(sub_id, "repeat", lang),
+    )
+    return ConversationHandler.END
 
 
 async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -343,6 +565,13 @@ async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     raw = (update.effective_message.text or "").strip()
+    nav = _is_wizard_nav(raw)
+    if nav == "wizard_cancel":
+        return await _wizard_cancel_flow(update, context)
+    if nav in ("wizard_back", "back"):
+        await update.effective_message.reply_text(t("cancelled", lang), reply_markup=_menu(lang, update.effective_user.id))
+        context.user_data.clear()
+        return ConversationHandler.END
     if raw in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_DELAY
@@ -371,6 +600,13 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
     template = (update.effective_message.text or "").strip()
+    nav = _is_wizard_nav(template)
+    if nav == "wizard_cancel":
+        return await _wizard_cancel_flow(update, context)
+    if nav in ("wizard_back", "back"):
+        await update.effective_message.reply_text(t("cancelled", lang), reply_markup=_menu(lang, update.effective_user.id))
+        context.user_data.clear()
+        return ConversationHandler.END
     if template in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_TEMPLATE
@@ -396,10 +632,54 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 
+async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    raw = (update.effective_message.text or "").strip()
+    nav = _is_wizard_nav(raw)
+    if nav == "wizard_cancel":
+        return await _wizard_cancel_flow(update, context)
+    if nav in ("wizard_back", "back"):
+        await update.effective_message.reply_text(t("cancelled", lang), reply_markup=_menu(lang, update.effective_user.id))
+        context.user_data.clear()
+        return ConversationHandler.END
+    if raw in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return EDIT_REPEAT
+    if not raw.isdigit():
+        await update.effective_message.reply_text(t("edit_repeat_invalid", lang))
+        return EDIT_REPEAT
+
+    minutes = int(raw)
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    if not db.update_subscription(sub_id, owner_id, suppress_repeat_minutes=minutes):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_id),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
 async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
+    if query.data == "wiz:cancel":
+        context.user_data.clear()
+        await query.edit_message_text(t("cancelled", lang))
+        await context.bot.send_message(
+            query.from_user.id, t("menu_main", lang), reply_markup=_menu(lang, query.from_user.id)
+        )
+        return ConversationHandler.END
+    if query.data == "wiz:back":
+        return await _prompt_repeat_step(update, context, lang, edit=bool(context.user_data.get("edit_sub_id")))
     dest_type = query.data.split(":", 1)[1]
     context.user_data["dest_type"] = dest_type
 
@@ -414,9 +694,15 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if dest_type == "channel":
         await query.edit_message_text(t("channel_setup", lang))
+        await context.bot.send_message(
+            query.from_user.id, t("channel_setup", lang), reply_markup=_wizard_kb(lang, editing=bool(context.user_data.get("edit_sub_id")))
+        )
         return DEST_CHAT
 
     await query.edit_message_text(t("group_setup", lang))
+    await context.bot.send_message(
+        query.from_user.id, t("group_setup", lang), reply_markup=_wizard_kb(lang, editing=bool(context.user_data.get("edit_sub_id")))
+    )
     return DEST_CHAT
 
 
@@ -534,6 +820,16 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data == "wiz:cancel":
+        context.user_data.clear()
+        await query.edit_message_text(t("cancelled", lang))
+        await context.bot.send_message(
+            query.from_user.id, t("menu_main", lang), reply_markup=_menu(lang, query.from_user.id)
+        )
+        return ConversationHandler.END
+    if query.data == "wiz:back":
+        return await _prompt_dest_step(update, context, lang, edit=bool(context.user_data.get("edit_sub_id")))
     context.user_data["delete_previous"] = query.data.endswith(":1")
     chat_id = context.user_data["pending_chat_id"]
     thread_id = context.user_data.get("pending_thread_id")
@@ -585,6 +881,7 @@ async def _finish_subscription(
                 delete_previous=bool(data.get("delete_previous", False)),
                 disable_link_preview=bool(data.get("disable_link_preview", False)),
                 delay_minutes=int(data.get("delay_minutes", 0)),
+                suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
             )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -627,6 +924,12 @@ async def _finish_subscription(
             if delay_minutes > 0
             else t("delay_no_note", lang)
         )
+        suppress = int(data.get("suppress_repeat_minutes", 0))
+        repeat_note = (
+            t("repeat_no_note", lang, minutes=suppress)
+            if suppress > 0
+            else t("repeat_yes_note", lang)
+        )
         text = t(
             "setup_done",
             lang,
@@ -637,6 +940,7 @@ async def _finish_subscription(
             delete_note=delete_note,
             preview_note=preview_note,
             delay_note=delay_note,
+            repeat_note=repeat_note,
             preview=preview,
         )
 
@@ -657,10 +961,20 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     context.user_data.clear()
-    await update.effective_message.reply_text(
-        t("cancelled", lang),
-        reply_markup=_menu(lang, user_id),
-    )
+    if update.callback_query:
+        await update.callback_query.answer()
+        try:
+            await update.callback_query.edit_message_text(t("cancelled", lang))
+        except BadRequest:
+            pass
+        await context.bot.send_message(
+            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        )
+    else:
+        await update.effective_message.reply_text(
+            t("cancelled", lang),
+            reply_markup=_menu(lang, user_id),
+        )
     return ConversationHandler.END
 
 
@@ -816,11 +1130,37 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
-    await query.edit_message_text(
+    context.user_data["wizard_edit"] = True
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
         t("edit_template_prompt", lang, sub_id=sub_id),
         parse_mode=ParseMode.HTML,
+        reply_markup=_wizard_kb(lang, editing=True),
     )
     return EDIT_TEMPLATE
+
+
+async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    current = _repeat_current_label(sub.suppress_repeat_minutes, lang)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t("edit_repeat_mute_prompt", lang, sub_id=sub_id, current=current),
+        reply_markup=_wizard_kb(lang, editing=True),
+    )
+    return EDIT_REPEAT
 
 
 async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -838,9 +1178,16 @@ async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["twitch_user_id"] = sub.twitch_user_id
     context.user_data["message_template"] = sub.message_template
     context.user_data["disable_link_preview"] = sub.disable_link_preview
+    context.user_data["suppress_repeat_minutes"] = sub.suppress_repeat_minutes
+    context.user_data["wizard_edit"] = True
     await query.edit_message_text(
         t("dest_prompt", lang),
         reply_markup=dest_keyboard(lang),
+    )
+    await context.bot.send_message(
+        query.from_user.id,
+        t("dest_prompt", lang),
+        reply_markup=_wizard_kb(lang, editing=True),
     )
     return DEST_TYPE
 
@@ -852,9 +1199,13 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     parts = query.data.split(":")
     sub_id = int(parts[1])
     field = parts[2]
-    menu_key = "edit_delete_old_menu" if field == "delete_old" else "edit_preview_menu"
+    menu_keys = {
+        "delete_old": "edit_delete_old_menu",
+        "preview": "edit_preview_menu",
+        "repeat": "edit_repeat_menu",
+    }
     await query.edit_message_text(
-        t(menu_key, lang),
+        t(menu_keys[field], lang),
         reply_markup=edit_bool_keyboard(sub_id, field, lang),
     )
 
@@ -868,11 +1219,16 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     field = parts[2]
     value = parts[3] == "1"
     db: Database = context.application.bot_data["db"]
-    kwargs = (
-        {"delete_previous": value}
-        if field == "delete_old"
-        else {"disable_link_preview": value}
-    )
+    if field == "delete_old":
+        kwargs = {"delete_previous": value}
+    elif field == "preview":
+        kwargs = {"disable_link_preview": value}
+    elif field == "repeat":
+        kwargs = {"suppress_repeat_minutes": 0} if value else None
+        if kwargs is None:
+            return
+    else:
+        return
     if db.update_subscription(sub_id, query.from_user.id, **kwargs):
         await query.edit_message_text(t("edit_updated", lang, sub_id=sub_id))
     else:
@@ -940,24 +1296,83 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
     lang = _user_lang(context, user_id)
     await update.effective_message.reply_text(
         t("broadcast_prompt", lang),
+        reply_markup=admin_type_keyboard(lang),
+    )
+    return ADMIN_MSG_TYPE
+
+
+async def admin_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        return ConversationHandler.END
+    lang = _user_lang(context, query.from_user.id)
+    if query.data == "wiz:cancel":
+        return await _wizard_cancel_flow(update, context)
+    msg_type = query.data.split(":", 1)[1]
+    context.user_data["admin_msg_type"] = msg_type
+    await query.edit_message_text(t("broadcast_text_prompt", lang))
+    await context.bot.send_message(
+        query.from_user.id,
+        t("broadcast_text_prompt", lang),
         reply_markup=admin_menu(lang),
     )
-    return BROADCAST
+    return ADMIN_MSG_TEXT
 
 
-async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return ConversationHandler.END
     lang = _user_lang(context, user_id)
     text = (update.effective_message.text or "").strip()
+    nav = _is_wizard_nav(text)
+    if nav == "wizard_cancel" or text == btn("back", lang):
+        return await _wizard_cancel_flow(update, context)
     if text in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
-        return BROADCAST
+        return ADMIN_MSG_TEXT
     if not text:
         await update.effective_message.reply_text(t("broadcast_empty", lang))
-        return BROADCAST
+        return ADMIN_MSG_TEXT
 
+    context.user_data["admin_msg_text"] = text
     db: Database = context.application.bot_data["db"]
-    user_ids = db.get_notify_user_ids()
+    hour, minute = db.get_saved_schedule(user_id)
+    schedule = {
+        "date_offset": 0,
+        "date_page": 0,
+        "hour": hour,
+        "minute": minute,
+        "show_minutes": minute is not None,
+    }
+    context.user_data["schedule"] = schedule
+    await update.effective_message.reply_text(
+        t("schedule_title", lang),
+        reply_markup=schedule_keyboard(lang, schedule),
+    )
+    return ADMIN_MSG_SCHEDULE
+
+
+def _schedule_to_utc_iso(schedule: dict) -> str:
+    now = datetime.now(SCHEDULE_TZ)
+    d = now.date() + timedelta(days=int(schedule.get("date_offset", 0)))
+    hour = int(schedule.get("hour", 0))
+    minute = int(schedule.get("minute", 0))
+    local_dt = datetime(d.year, d.month, d.day, hour, minute, tzinfo=SCHEDULE_TZ)
+    return local_dt.astimezone(timezone.utc).isoformat()
+
+
+async def _send_admin_broadcast(
+    context: ContextTypes.DEFAULT_TYPE,
+    msg_type: str,
+    text: str,
+) -> tuple[int, int, int]:
+    db: Database = context.application.bot_data["db"]
+    if msg_type == "bot_update":
+        user_ids = db.get_bot_update_recipients()
+    else:
+        user_ids = db.get_notify_user_ids()
     sent = failed = 0
     for uid in user_ids:
         try:
@@ -966,13 +1381,181 @@ async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYP
         except (BadRequest, Forbidden) as exc:
             failed += 1
             logger.warning("Broadcast to %s failed: %s", uid, exc)
+    return sent, failed, len(user_ids)
 
-    context.user_data.clear()
+
+async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if not _is_admin(user_id):
+        return ConversationHandler.END
+    lang = _user_lang(context, user_id)
+    data = query.data
+    schedule = dict(context.user_data.get("schedule") or {})
+    db: Database = context.application.bot_data["db"]
+
+    if data == "sched:noop":
+        return ADMIN_MSG_SCHEDULE
+    if data == "sched:back":
+        await query.edit_message_text(t("broadcast_text_prompt", lang))
+        await context.bot.send_message(
+            user_id, t("broadcast_text_prompt", lang), reply_markup=admin_menu(lang)
+        )
+        return ADMIN_MSG_TEXT
+    if data == "sched:toggle_min":
+        schedule["show_minutes"] = True
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("schedule_title", lang),
+            reply_markup=schedule_keyboard(lang, schedule),
+        )
+        return ADMIN_MSG_SCHEDULE
+    if data == "sched:date_next":
+        schedule["date_page"] = int(schedule.get("date_page", 0)) + 1
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("schedule_title", lang),
+            reply_markup=schedule_keyboard(lang, schedule),
+        )
+        return ADMIN_MSG_SCHEDULE
+    if data.startswith("sched:date:"):
+        schedule["date_offset"] = int(data.split(":")[2])
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("schedule_title", lang),
+            reply_markup=schedule_keyboard(lang, schedule),
+        )
+        return ADMIN_MSG_SCHEDULE
+    if data.startswith("sched:hour:"):
+        schedule["hour"] = int(data.split(":")[2])
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("schedule_title", lang),
+            reply_markup=schedule_keyboard(lang, schedule),
+        )
+        return ADMIN_MSG_SCHEDULE
+    if data.startswith("sched:min:"):
+        schedule["minute"] = int(data.split(":")[2])
+        schedule["show_minutes"] = True
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("schedule_title", lang),
+            reply_markup=schedule_keyboard(lang, schedule),
+        )
+        return ADMIN_MSG_SCHEDULE
+    if data == "sched:saved":
+        hour, minute = db.get_saved_schedule(user_id)
+        if hour is not None and minute is not None:
+            schedule["hour"] = hour
+            schedule["minute"] = minute
+            schedule["show_minutes"] = True
+            context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("schedule_title", lang),
+            reply_markup=schedule_keyboard(lang, schedule),
+        )
+        return ADMIN_MSG_SCHEDULE
+
+    msg_type = context.user_data.get("admin_msg_type", "bot_update")
+    text = context.user_data.get("admin_msg_text", "")
+    if data == "sched:now":
+        sent, failed, total = await _send_admin_broadcast(context, msg_type, text)
+        context.user_data.clear()
+        await query.edit_message_text(
+            t("broadcast_done", lang, sent=sent, failed=failed, total=total)
+        )
+        await context.bot.send_message(user_id, t("menu_admin", lang), reply_markup=admin_menu(lang))
+        return ConversationHandler.END
+
+    if data == "sched:apply":
+        if schedule.get("hour") is None or schedule.get("minute") is None:
+            await query.answer(t("schedule_pick_minutes", lang), show_alert=True)
+            return ADMIN_MSG_SCHEDULE
+        hour = int(schedule["hour"])
+        minute = int(schedule["minute"])
+        db.set_saved_schedule(user_id, hour, minute)
+        scheduled_at = _schedule_to_utc_iso(schedule)
+        broadcast_id = db.add_scheduled_broadcast(msg_type, text, scheduled_at, user_id)
+        when = (
+            datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            - datetime.now(timezone.utc)
+        ).total_seconds()
+        if when <= 0:
+            sent, failed, total = await _send_admin_broadcast(context, msg_type, text)
+            db.mark_scheduled_broadcast_sent(broadcast_id)
+            context.user_data.clear()
+            await query.edit_message_text(
+                t("broadcast_done", lang, sent=sent, failed=failed, total=total)
+            )
+        else:
+            context.job_queue.run_once(
+                _run_scheduled_broadcast,
+                when=when,
+                data={"broadcast_id": broadcast_id},
+                name=f"broadcast_{broadcast_id}",
+            )
+            when_local = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00")).astimezone(
+                SCHEDULE_TZ
+            )
+            when_label = when_local.strftime("%d.%m.%Y %H:%M MSK")
+            context.user_data.clear()
+            await query.edit_message_text(
+                t("broadcast_scheduled", lang, when=when_label)
+            )
+        await context.bot.send_message(user_id, t("menu_admin", lang), reply_markup=admin_menu(lang))
+        return ConversationHandler.END
+
+    return ADMIN_MSG_SCHEDULE
+
+
+async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
+    broadcast_id = context.job.data["broadcast_id"]
+    db: Database = context.application.bot_data["db"]
+    pending = db.get_pending_scheduled_broadcasts()
+    item = next((b for b in pending if b.id == broadcast_id), None)
+    if not item:
+        unsent = db.get_unsent_scheduled_broadcasts()
+        item = next((b for b in unsent if b.id == broadcast_id), None)
+    if not item:
+        return
+    await _send_admin_broadcast(context, item.msg_type, item.text)
+    db.mark_scheduled_broadcast_sent(broadcast_id)
+
+
+async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
     await update.effective_message.reply_text(
-        t("broadcast_done", lang, sent=sent, failed=failed, total=len(user_ids)),
-        reply_markup=admin_menu(lang),
+        t("sys_notifications_menu", lang),
+        reply_markup=sys_notifications_menu(lang),
     )
-    return ConversationHandler.END
+
+
+async def open_sys_updates_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    enabled = db.get_receive_bot_updates(user_id)
+    await update.effective_message.reply_text(
+        t("sys_updates_menu", lang),
+        reply_markup=sys_updates_keyboard(lang, enabled=enabled),
+    )
+
+
+async def on_sys_updates_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    enabled = query.data.endswith(":1")
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    db.set_receive_bot_updates(user_id, enabled)
+    await query.edit_message_text(
+        t("sys_updates_saved", lang),
+        reply_markup=sys_updates_keyboard(lang, enabled=enabled),
+    )
 
 
 def _format_stats(stats: BotStats, lang: str) -> str:
@@ -1039,6 +1622,8 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     stream = live_streams[sub.twitch_user_id]
+    if is_on_notify_cooldown(sub):
+        return
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
@@ -1070,6 +1655,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             game = stream.get("game_name", "")
             title = stream.get("title", "")
             for sub in db.get_enabled_by_twitch_user_id(uid):
+                if is_on_notify_cooldown(sub):
+                    continue
                 if sub.delay_minutes > 0:
                     context.job_queue.run_once(
                         _send_delayed_notification,
@@ -1175,6 +1762,34 @@ async def check_aiven_status(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    for item in db.get_pending_scheduled_broadcasts():
+        await _send_admin_broadcast(context, item.msg_type, item.text)
+        db.mark_scheduled_broadcast_sent(item.id)
+
+
+async def _restore_broadcast_jobs(app: Application) -> None:
+    db: Database = app.bot_data["db"]
+    now = datetime.now(timezone.utc)
+    for item in db.get_unsent_scheduled_broadcasts():
+        try:
+            due = datetime.fromisoformat(item.scheduled_at.replace("Z", "+00:00"))
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        delta = (due - now).total_seconds()
+        if delta <= 0:
+            continue
+        app.job_queue.run_once(
+            _run_scheduled_broadcast,
+            when=delta,
+            data={"broadcast_id": item.id},
+            name=f"broadcast_{item.id}",
+        )
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     err = context.error
     if isinstance(err, Conflict):
@@ -1184,7 +1799,15 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
-    app = Application.builder().token(token).build()
+    async def post_init(application: Application) -> None:
+        await _restore_broadcast_jobs(application)
+
+    app = (
+        Application.builder()
+        .token(token)
+        .post_init(post_init)
+        .build()
+    )
     app.bot_data["db"] = db
     app.bot_data["twitch"] = twitch
     app.bot_data["last_live"] = {}
@@ -1222,11 +1845,26 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("stats"), admin_show_stats),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(_btn_filter("sys_notifications"), open_sys_notifications_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("sys_updates"), open_sys_updates_menu),
+        group=0,
+    )
+    app.add_handler(CallbackQueryHandler(on_sys_updates_set, pattern=r"^sys_updates:"), group=0)
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
-    app.add_handler(CallbackQueryHandler(on_edit_bool_menu, pattern=r"^edit_f:\d+:(delete_old|preview)$"), group=0)
-    app.add_handler(CallbackQueryHandler(on_edit_set, pattern=r"^edit_set:\d+:(delete_old|preview):[01]$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_edit_bool_menu, pattern=r"^edit_f:\d+:(delete_old|preview|repeat)$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_edit_set, pattern=r"^edit_set:\d+:(delete_old|preview|repeat):1$"),
+        group=0,
+    )
 
     conv = ConversationHandler(
         entry_points=[
@@ -1237,19 +1875,27 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
             CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
+            CallbackQueryHandler(start_edit_repeat, pattern=r"^edit_f:\d+:repeat$"),
+            CallbackQueryHandler(start_edit_repeat_mute, pattern=r"^edit_set:\d+:repeat:0$"),
         ],
         states={
             LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
             CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel)],
             TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template)],
             LINK_PREVIEW: [
-                CallbackQueryHandler(receive_link_preview, pattern=r"^link_preview:")
+                CallbackQueryHandler(receive_link_preview, pattern=r"^link_preview:|^wiz:")
             ],
             DELAY_SEND: [
-                CallbackQueryHandler(receive_delay_send, pattern=r"^delay_send:")
+                CallbackQueryHandler(receive_delay_send, pattern=r"^delay_send:|^wiz:")
             ],
             DELAY_MINUTES: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_delay_minutes)
+            ],
+            REPEAT_ALLOW: [
+                CallbackQueryHandler(receive_repeat_allow, pattern=r"^repeat:|^wiz:")
+            ],
+            REPEAT_MUTE_MINUTES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_repeat_mute_minutes)
             ],
             EDIT_TEMPLATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template)
@@ -1257,16 +1903,28 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             EDIT_DELAY: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_delay)
             ],
-            DEST_TYPE: [CallbackQueryHandler(receive_dest_type, pattern=r"^dest:")],
+            EDIT_REPEAT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_repeat)
+            ],
+            DEST_TYPE: [CallbackQueryHandler(receive_dest_type, pattern=r"^dest:|^wiz:")],
             DEST_CHAT: [MessageHandler(filters.TEXT | filters.FORWARDED, receive_dest_chat)],
-            DELETE_OLD: [CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:")],
-            BROADCAST: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_send)
+            DELETE_OLD: [
+                CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:|^wiz:")
+            ],
+            ADMIN_MSG_TYPE: [
+                CallbackQueryHandler(admin_select_type, pattern=r"^admin_type:|^wiz:")
+            ],
+            ADMIN_MSG_TEXT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_text)
+            ],
+            ADMIN_MSG_SCHEDULE: [
+                CallbackQueryHandler(admin_schedule_callback, pattern=r"^sched:")
             ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
             CommandHandler("help", help_command),
+            MessageHandler(_btn_filter("wizard_cancel"), cancel),
         ],
         allow_reentry=True,
     )
@@ -1276,6 +1934,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     from config import CHECK_INTERVAL, DATABASE_URL, STATUS_CHECK_INTERVAL
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
+    app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(
         check_render_status, interval=STATUS_CHECK_INTERVAL, first=30
     )

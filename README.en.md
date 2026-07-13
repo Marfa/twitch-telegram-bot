@@ -13,9 +13,11 @@ docker compose up -d --build
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` to set up |
 | Destinations | DM, channel, group or community (with topics) |
-| Twitch channel | URL, `m.twitch.tv`, or username |
-| Message text | Custom template: `{username}`, `{game}`, `{name}` |
-| Subscriptions | List, enable/disable, delete |
+| Delay after go-live | Send notification N minutes after stream start |
+| Repeat suppression | Skip repeat alerts for X minutes after the first one |
+| Subscriptions | List, edit, enable/disable, delete |
+| System alerts | Toggle admin “bot update” broadcasts |
+| Admin | Scheduled “Bot updates” broadcast, statistics |
 | Commands | `/start`, `/help`, `/cancel` |
 | Deploy | Render Free + Aiven PostgreSQL, Fly.io, Docker |
 
@@ -34,34 +36,20 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Twitch API keys
-
-1. Open [Twitch Developer Console](https://dev.twitch.tv/console) → **Register Your Application**
-2. **OAuth Redirect URLs** — `http://localhost` (not used by this bot, but required by the form)
-3. Copy **Client ID** → `TWITCH_CLIENT_ID`
-4. Click **New Secret** → `TWITCH_CLIENT_SECRET`
-
-The bot uses **Client Credentials** only — no user OAuth.
-
 ## Usage
 
 `/start` — setup wizard:
 
 1. Twitch channel
 2. Message template (`{username}`, `{game}`, `{name}`)
-3. Destination: DM / channel / group or community
-4. For channel or group — add the bot and confirm the chat
-5. Delete previous bot message on each new stream? (yes/no)
+3. Link preview on/off
+4. Delay notification after stream start (yes/no, minutes)
+5. Allow repeat notifications (yes/no; if no — mute minutes)
+6. Destination: DM / channel / group or community
+7. For channel or group — add the bot and confirm the chat
+8. Delete previous bot message on each new stream? (yes/no)
 
-**Group or community** — send one of:
-- topic link: `https://t.me/c/name/30`
-- group `@username`
-- group ID (`-100…`)
-- a message forwarded from the group (“Forwarded from: …”)
-
-Bot permissions in groups: **send messages** (admin not required).
-
-After setup you get **“✅ Setup complete!”** in DM plus a test message in the target chat.
+Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
 ### Menu and commands
 
@@ -71,8 +59,9 @@ After setup you get **“✅ Setup complete!”** in DM plus a test message in t
 | `/help` | Help |
 | `/cancel` | Cancel setup |
 | ➕ New subscription | Add another channel |
-| 📋 My subscriptions | List, toggle on/off |
-| 🗑 Delete subscription | Remove |
+| 📋 Manage subscriptions | List, edit, delete |
+| 🔔 System notifications | Toggle bot update alerts |
+| ⚙️ Admin | Scheduled broadcast, stats (admins only) |
 | 🐛 Report a problem | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
 
 Template example:
@@ -81,43 +70,6 @@ Template example:
 {username} is live!
 {name}
 Category: {game}
-```
-
-## Deploy
-
-### Render Free + Aiven PostgreSQL (free, persistent subscriptions)
-
-Bot on Render Free, data in external PostgreSQL on [Aiven](https://aiven.io/free-postgresql-database) (no credit card).
-
-**1. Aiven**
-
-1. Sign up at [aiven.io](https://aiven.io)
-2. **Create service** → PostgreSQL → **Free** plan
-3. Copy **Service URI** (`postgres://…`)
-
-**2. Render**
-
-1. Push to GitHub → [Render Blueprint](https://dashboard.render.com/) (`render.yaml`)
-2. Set secrets:
-   - `TELEGRAM_BOT_TOKEN`
-   - `TWITCH_CLIENT_ID`
-   - `TWITCH_CLIENT_SECRET`
-   - `DATABASE_URL` — Aiven URI
-3. [UptimeRobot](https://uptimerobot.com/): **HTTP(s)** → `https://YOUR-SERVICE.onrender.com/health`, interval **5 min**
-
-Subscriptions live in Aiven and survive Render restarts.
-
-### Local / Docker
-
-Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compose.yml`).
-
-### Fly.io (persistent volume)
-
-```bash
-fly launch --no-deploy
-fly volumes create bot_data --size 1
-fly secrets set TELEGRAM_BOT_TOKEN=... TWITCH_CLIENT_ID=... TWITCH_CLIENT_SECRET=...
-fly deploy
 ```
 
 ## Environment variables
@@ -136,23 +88,15 @@ fly deploy
 
 | Module | Role |
 |---|---|
-| `bot.py` | Wizard, menu, notifications |
+| `bot.py` | Wizard, menu, notifications, admin broadcast |
 | `twitch.py` | Helix API, templates |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health` for Render and UptimeRobot |
 | `db.py` | SQLite or PostgreSQL subscriptions |
 
-Twitch Helix polling ~60s, Telegram polling, no public webhook.
-
-## Third-party inspiration
-
-Studied [twitchrise](https://github.com/driftywinds/twitchrise), [lajujabot](https://github.com/ria4/lajujabot), [twitch-telegram-bot](https://github.com/mehdizebhi/twitch-telegram-bot). **No code was copied** — ideas only (API polling, subscriptions, channel/group delivery).
-
 ## License
 
-**Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**
-
-See [LICENSE](LICENSE) · https://creativecommons.org/licenses/by-nc-sa/4.0/
+**CC BY-NC-SA 4.0** — see [LICENSE](LICENSE)
 
 ---
 
