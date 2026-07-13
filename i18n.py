@@ -69,9 +69,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delay_yes": "✅ Yes",
         "delay_minutes_prompt": "Enter the delay in minutes (a number):",
         "delay_minutes_invalid": "Enter a positive number of minutes, e.g. 5.",
-        "repeat_prompt": "Allow repeat notifications?",
-        "repeat_yes": "✅ Yes",
-        "repeat_no": "❌ No",
+        "repeat_prompt": "If the stream is interrupted, repeat notifications will not be sent.",
+        "repeat_yes": "✅ Yes, allow repeats",
+        "repeat_no": "❌ No, set mute period",
         "repeat_mute_prompt": "Enter how many minutes to suppress repeat notifications:",
         "repeat_mute_invalid": "Enter a positive number of minutes, e.g. 30.",
         "repeat_yes_note": "Repeat notifications: yes",
@@ -207,7 +207,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_link_preview": "🔗 Link preview",
         "edit_delay": "⏱ Delay send",
         "edit_repeat": "🔁 Repeat notifications",
-        "edit_repeat_menu": "Allow repeat notifications?",
+        "edit_repeat_menu": "If the stream is interrupted, repeat notifications will not be sent.",
         "edit_repeat_mute_prompt": (
             "Subscription #{sub_id}\n"
             "Current: {current}\n\n"
@@ -282,10 +282,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_show_calendar": "🗓 Show calendar",
         "schedule_minutes_header": "——— Select minutes ———",
         "sys_notifications_menu": "System notifications:",
-        "sys_updates_menu": "Receive bot update alerts from admin?",
-        "sys_updates_on": "✅ On",
-        "sys_updates_off": "❌ Off",
-        "sys_updates_saved": "Setting saved.",
+        "sys_updates_label": "Bot update alerts",
         "bot_stats": (
             "📊 Bot statistics\n\n"
             "Users: {users}\n"
@@ -355,9 +352,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delay_yes": "✅ Да",
         "delay_minutes_prompt": "Укажите задержку отправки в минутах (число):",
         "delay_minutes_invalid": "Введите положительное число минут, например 5.",
-        "repeat_prompt": "Разрешить повторные уведомления?",
-        "repeat_yes": "✅ Да",
-        "repeat_no": "❌ Нет",
+        "repeat_prompt": "Если стрим прервался, повторные уведомления не будут отправляться",
+        "repeat_yes": "✅ Да, разрешить повторы",
+        "repeat_no": "❌ Нет, указать заглушку",
         "repeat_mute_prompt": "Укажите в минутах, на сколько заглушить уведомления:",
         "repeat_mute_invalid": "Введите положительное число минут, например 30.",
         "repeat_yes_note": "Повторные уведомления: да",
@@ -495,7 +492,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_link_preview": "🔗 Превью ссылок",
         "edit_delay": "⏱ Задержка отправки",
         "edit_repeat": "🔁 Повторные уведомления",
-        "edit_repeat_menu": "Разрешить повторные уведомления?",
+        "edit_repeat_menu": "Если стрим прервался, повторные уведомления не будут отправляться",
         "edit_repeat_mute_prompt": (
             "Подписка #{sub_id}\n"
             "Сейчас: {current}\n\n"
@@ -568,10 +565,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_show_calendar": "🗓 Показать календарь",
         "schedule_minutes_header": "——— Выберите минуты ———",
         "sys_notifications_menu": "Настройка системных уведомлений:",
-        "sys_updates_menu": "Получение оповещений об обновлениях?",
-        "sys_updates_on": "✅ Вкл",
-        "sys_updates_off": "❌ Выкл",
-        "sys_updates_saved": "Настройка сохранена.",
+        "sys_updates_label": "Получение оповещений об обновлениях",
         "bot_stats": (
             "📊 Статистика бота\n\n"
             "Пользователей: {users}\n"
@@ -616,28 +610,8 @@ def all_menu_buttons() -> set[str]:
         "stats",
         "back",
         "sys_notifications",
-        "sys_updates",
-        "wizard_back",
-        "wizard_cancel",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
-
-
-def wizard_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [
-            [
-                KeyboardButton(btn("wizard_back", lang)),
-                KeyboardButton(btn("wizard_cancel", lang)),
-            ],
-            [KeyboardButton(btn("back", lang))],
-        ],
-        resize_keyboard=True,
-    )
-
-
-def edit_wizard_menu(lang: str) -> ReplyKeyboardMarkup:
-    return wizard_menu(lang)
 
 
 def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
@@ -766,28 +740,15 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def sys_notifications_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [
-            [KeyboardButton(btn("sys_updates", lang))],
-            [KeyboardButton(btn("back", lang))],
-        ],
-        resize_keyboard=True,
-    )
-
-
-def sys_updates_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
+def sys_notifications_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
+    mark = "✅ " if enabled else "❌ "
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    t("sys_updates_on", lang) + (" ✓" if enabled else ""),
-                    callback_data="sys_updates:1",
-                ),
-                InlineKeyboardButton(
-                    t("sys_updates_off", lang) + (" ✓" if not enabled else ""),
-                    callback_data="sys_updates:0",
-                ),
+                    mark + t("sys_updates_label", lang),
+                    callback_data="sys_updates:toggle",
+                )
             ]
         ]
     )
