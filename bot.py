@@ -35,6 +35,7 @@ from i18n import (
     delete_old_keyboard,
     dest_keyboard,
     dest_label,
+    delay_keyboard,
     edit_bool_keyboard,
     edit_options_keyboard,
     language_keyboard,
@@ -56,7 +57,13 @@ logger = logging.getLogger(__name__)
 
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
 
-LANG_SELECT, CHANNEL, TEMPLATE, LINK_PREVIEW, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE, BROADCAST = range(9)
+LANG_SELECT, CHANNEL, TEMPLATE, LINK_PREVIEW, DELAY_SEND, DELAY_MINUTES, DEST_TYPE, DEST_CHAT, DELETE_OLD, EDIT_TEMPLATE, EDIT_DELAY, BROADCAST = range(12)
+
+
+def _delay_current_label(minutes: int, lang: str) -> str:
+    if minutes <= 0:
+        return t("edit_delay_current_none", lang)
+    return t("edit_delay_current", lang, minutes=minutes)
 
 
 def _btn_filter(key: str) -> filters.Regex:
@@ -98,9 +105,14 @@ def _format_sub_line(sub: Subscription, lang: str) -> str:
     status = "✅" if sub.enabled else "⏸"
     thread = t("sub_line_thread", lang, thread_id=sub.thread_id) if sub.thread_id else ""
     delete = t("sub_line_delete", lang) if sub.delete_previous else ""
+    delay = (
+        t("sub_line_delay", lang, minutes=sub.delay_minutes)
+        if sub.delay_minutes > 0
+        else ""
+    )
     return (
         f"{status} #{sub.id} — {sub.twitch_username}\n"
-        f"   → {dest_label(sub.dest_type, lang)} ({sub.chat_id}{thread}{delete})"
+        f"   → {dest_label(sub.dest_type, lang)} ({sub.chat_id}{thread}{delete}{delay})"
     )
 
 
@@ -264,10 +276,92 @@ async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = _user_lang(context, query.from_user.id)
     context.user_data["disable_link_preview"] = query.data.endswith(":1")
     await query.edit_message_text(
+        t("delay_prompt", lang),
+        reply_markup=delay_keyboard(lang),
+    )
+    return DELAY_SEND
+
+
+async def receive_delay_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data.endswith(":1"):
+        await query.edit_message_text(t("delay_minutes_prompt", lang))
+        return DELAY_MINUTES
+    context.user_data["delay_minutes"] = 0
+    await query.edit_message_text(
         t("dest_prompt", lang),
         reply_markup=dest_keyboard(lang),
     )
     return DEST_TYPE
+
+
+async def receive_delay_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (update.effective_message.text or "").strip()
+    if raw in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return DELAY_MINUTES
+    if not raw.isdigit() or int(raw) < 1:
+        await update.effective_message.reply_text(t("delay_minutes_invalid", lang))
+        return DELAY_MINUTES
+    context.user_data["delay_minutes"] = int(raw)
+    await update.effective_message.reply_text(
+        t("dest_prompt", lang),
+        reply_markup=dest_keyboard(lang),
+    )
+    return DEST_TYPE
+
+
+async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        t(
+            "edit_delay_prompt",
+            lang,
+            sub_id=sub_id,
+            current=_delay_current_label(sub.delay_minutes, lang),
+        ),
+    )
+    return EDIT_DELAY
+
+
+async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    raw = (update.effective_message.text or "").strip()
+    if raw in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return EDIT_DELAY
+    if not raw.isdigit():
+        await update.effective_message.reply_text(t("edit_delay_invalid", lang))
+        return EDIT_DELAY
+
+    delay_minutes = int(raw)
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    if not db.update_subscription(sub_id, owner_id, delay_minutes=delay_minutes):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_id),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -490,6 +584,7 @@ async def _finish_subscription(
                 thread_id=thread_id,
                 delete_previous=bool(data.get("delete_previous", False)),
                 disable_link_preview=bool(data.get("disable_link_preview", False)),
+                delay_minutes=int(data.get("delay_minutes", 0)),
             )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -526,6 +621,12 @@ async def _finish_subscription(
             if data.get("disable_link_preview")
             else t("preview_on", lang)
         )
+        delay_minutes = int(data.get("delay_minutes", 0))
+        delay_note = (
+            t("delay_yes_note", lang, minutes=delay_minutes)
+            if delay_minutes > 0
+            else t("delay_no_note", lang)
+        )
         text = t(
             "setup_done",
             lang,
@@ -535,6 +636,7 @@ async def _finish_subscription(
             thread_note=thread_note,
             delete_note=delete_note,
             preview_note=preview_note,
+            delay_note=delay_note,
             preview=preview,
         )
 
@@ -903,6 +1005,47 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 
+async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
+    sub_id = context.job.data["sub_id"]
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    sub = db.get_subscription_by_id(sub_id)
+    if not sub or not sub.enabled:
+        return
+
+    try:
+        live_streams = await asyncio.to_thread(
+            twitch.get_live_streams, [sub.twitch_user_id]
+        )
+    except Exception:
+        logger.exception("Twitch poll failed for delayed notification sub %s", sub_id)
+        return
+
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    if sub.twitch_user_id not in live_streams:
+        preview = render_template(
+            sub.message_template,
+            sub.twitch_username,
+            "—",
+            "—",
+        )
+        try:
+            await context.bot.send_message(
+                sub.owner_id,
+                t("delayed_not_sent", lang, message=preview),
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning("Cannot notify owner %s: %s", sub.owner_id, exc)
+        return
+
+    stream = live_streams[sub.twitch_user_id]
+    username = stream.get("user_login", stream.get("user_name", ""))
+    game = stream.get("game_name", "")
+    title = stream.get("title", "")
+    text = render_template(sub.message_template, username, game, title)
+    await _send_notification(context.bot, db, sub, text)
+
+
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
@@ -927,6 +1070,14 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             game = stream.get("game_name", "")
             title = stream.get("title", "")
             for sub in db.get_enabled_by_twitch_user_id(uid):
+                if sub.delay_minutes > 0:
+                    context.job_queue.run_once(
+                        _send_delayed_notification,
+                        when=sub.delay_minutes * 60,
+                        data={"sub_id": sub.id},
+                        name=f"delay_{sub.id}",
+                    )
+                    continue
                 text = render_template(sub.message_template, username, game, title)
                 await _send_notification(context.bot, db, sub, text)
         last_live[uid] = is_live
@@ -1085,6 +1236,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(_btn_filter("broadcast"), admin_broadcast_start),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
+            CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
         ],
         states={
             LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
@@ -1093,8 +1245,17 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             LINK_PREVIEW: [
                 CallbackQueryHandler(receive_link_preview, pattern=r"^link_preview:")
             ],
+            DELAY_SEND: [
+                CallbackQueryHandler(receive_delay_send, pattern=r"^delay_send:")
+            ],
+            DELAY_MINUTES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_delay_minutes)
+            ],
             EDIT_TEMPLATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template)
+            ],
+            EDIT_DELAY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_delay)
             ],
             DEST_TYPE: [CallbackQueryHandler(receive_dest_type, pattern=r"^dest:")],
             DEST_CHAT: [MessageHandler(filters.TEXT | filters.FORWARDED, receive_dest_chat)],

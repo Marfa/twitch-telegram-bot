@@ -38,6 +38,7 @@ class Subscription:
     enabled: bool
     delete_previous: bool
     disable_link_preview: bool
+    delay_minutes: int
     last_message_id: int | None
 
 
@@ -54,6 +55,7 @@ def _row_to_sub(row: Any) -> Subscription:
         enabled=bool(row["enabled"]),
         delete_previous=bool(row["delete_previous"]),
         disable_link_preview=bool(row["disable_link_preview"]),
+        delay_minutes=int(row["delay_minutes"] or 0),
         last_message_id=row["last_message_id"],
     )
 
@@ -80,9 +82,12 @@ class Database(Protocol):
         thread_id: int | None,
         delete_previous: bool = False,
         disable_link_preview: bool = False,
+        delay_minutes: int = 0,
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
+
+    def get_subscription_by_id(self, sub_id: int) -> Subscription | None: ...
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]: ...
 
@@ -195,6 +200,10 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN disable_link_preview INTEGER NOT NULL DEFAULT 0"
             )
+        if "delay_minutes" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN delay_minutes INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -210,6 +219,7 @@ class SqliteDatabase:
         thread_id: int | None,
         delete_previous: bool = False,
         disable_link_preview: bool = False,
+        delay_minutes: int = 0,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -217,8 +227,8 @@ class SqliteDatabase:
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
-                    delete_previous, disable_link_preview
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delete_previous, disable_link_preview, delay_minutes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -230,9 +240,18 @@ class SqliteDatabase:
                     thread_id,
                     int(delete_previous),
                     int(disable_link_preview),
+                    max(0, int(delay_minutes)),
                 ),
             )
             return int(cur.lastrowid)
+
+    def get_subscription_by_id(self, sub_id: int) -> Subscription | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM subscriptions WHERE id = ?",
+                (sub_id,),
+            ).fetchone()
+        return _row_to_sub(row) if row else None
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None:
         with self._conn() as conn:
@@ -285,6 +304,7 @@ class SqliteDatabase:
             "thread_id",
             "delete_previous",
             "disable_link_preview",
+            "delay_minutes",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -294,6 +314,8 @@ class SqliteDatabase:
             updates.append(f"{key} = ?")
             if key in ("delete_previous", "disable_link_preview"):
                 values.append(int(bool(value)))
+            elif key == "delay_minutes":
+                values.append(max(0, int(value)))
             else:
                 values.append(value)
         if not updates:
@@ -469,6 +491,7 @@ class PostgresDatabase:
                     enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     delete_previous BOOLEAN NOT NULL DEFAULT FALSE,
                     disable_link_preview BOOLEAN NOT NULL DEFAULT FALSE,
+                    delay_minutes INTEGER NOT NULL DEFAULT 0,
                     last_message_id BIGINT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
@@ -503,6 +526,12 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS delay_minutes INTEGER NOT NULL DEFAULT 0
+                """
+            )
 
     def add_subscription(
         self,
@@ -515,6 +544,7 @@ class PostgresDatabase:
         thread_id: int | None,
         delete_previous: bool = False,
         disable_link_preview: bool = False,
+        delay_minutes: int = 0,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -523,8 +553,8 @@ class PostgresDatabase:
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
-                    delete_previous, disable_link_preview
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delete_previous, disable_link_preview, delay_minutes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -537,10 +567,21 @@ class PostgresDatabase:
                     thread_id,
                     delete_previous,
                     disable_link_preview,
+                    max(0, int(delay_minutes)),
                 ),
             )
             row = cur.fetchone()
             return int(row["id"])
+
+    def get_subscription_by_id(self, sub_id: int) -> Subscription | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM subscriptions WHERE id = %s",
+                (sub_id,),
+            )
+            row = cur.fetchone()
+        return _row_to_sub(row) if row else None
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None:
         with self._conn() as conn:
@@ -601,6 +642,7 @@ class PostgresDatabase:
             "thread_id",
             "delete_previous",
             "disable_link_preview",
+            "delay_minutes",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -610,6 +652,8 @@ class PostgresDatabase:
             updates.append(f"{key} = %s")
             if key in ("delete_previous", "disable_link_preview"):
                 values.append(bool(value))
+            elif key == "delay_minutes":
+                values.append(max(0, int(value)))
             else:
                 values.append(value)
         if not updates:

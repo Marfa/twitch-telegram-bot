@@ -82,6 +82,11 @@ def main() -> None:
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.message_template == "bye"
+        assert sub.delay_minutes == 0
+        assert db.update_subscription(sub_id, 1, delay_minutes=10)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.delay_minutes == 10
         assert not db.update_subscription(999, 1, message_template="x")
 
     items = fetch_render_status("https://status.render.com/history.rss")

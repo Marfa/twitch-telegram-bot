@@ -57,6 +57,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Show link preview in notifications?",
         "link_preview_on": "✅ Show preview",
         "link_preview_off": "❌ Hide preview",
+        "delay_prompt": "Delay sending the notification?",
+        "delay_no": "❌ No",
+        "delay_yes": "✅ Yes",
+        "delay_minutes_prompt": "Enter the delay in minutes (a number):",
+        "delay_minutes_invalid": "Enter a positive number of minutes, e.g. 5.",
         "dest_prompt": "Where should notifications be sent?",
         "dest_dm": "📩 To DM",
         "dest_channel": "📢 To channel",
@@ -83,7 +88,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_old_text": (
             "Delete the bot's previous message when a new stream starts?\n\n"
             "If enabled, the bot deletes its last message in this chat before sending a new one.\n"
-            "In channels the bot needs permission to delete messages."
+            "In channels the bot needs permission to delete messages.\n"
+            "Telegram allows deleting only messages younger than ~48 hours."
         ),
         "delete_old_yes": "✅ Yes, delete",
         "delete_old_no": "❌ No",
@@ -117,7 +123,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Twitch channel: {twitch_username}\n"
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}\n"
-            "{preview_note}\n\n"
+            "{preview_note}\n"
+            "{delay_note}\n\n"
             "Sample message:\n{preview}\n\n"
             "When {twitch_username} goes live — I'll send a notification.\n"
             "Help: /help"
@@ -127,6 +134,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_no": "Delete old messages: no",
         "preview_off": "Link preview: off",
         "preview_on": "Link preview: on",
+        "delay_yes_note": "Delayed send: {minutes} min",
+        "delay_no_note": "Delayed send: no",
+        "delayed_not_sent": (
+            "Delayed notification was not sent — streamer is offline.\n\n"
+            "Message:\n{message}"
+        ),
         "preview_stream": "Test stream",
         "cancelled": "Cancelled.",
         "feedback": (
@@ -163,6 +176,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "toggle_on": "✅ On",
         "sub_line_thread": ", topic {thread_id}",
         "sub_line_delete": ", delete old",
+        "sub_line_delay": ", delay {minutes} min",
         "sub_not_found": "Subscription not found.",
         "sub_enabled": "Subscription #{sub_id} enabled.",
         "sub_disabled": "Subscription #{sub_id} disabled.",
@@ -175,12 +189,24 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_dest": "📍 Destination",
         "edit_delete_old": "🗑 Delete old messages",
         "edit_link_preview": "🔗 Link preview",
+        "edit_delay": "⏱ Delay send",
         "edit_template_prompt": (
             "Send a new message template for subscription #{sub_id}.\n\n"
             "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
         "edit_updated": "✅ Subscription #{sub_id} updated.",
-        "edit_delete_old_menu": "Delete old messages on new stream?",
+        "edit_delay_prompt": (
+            "Subscription #{sub_id}\n"
+            "Current delay: {current}\n\n"
+            "Enter delay in minutes (0 — send immediately):"
+        ),
+        "edit_delay_current_none": "none (immediate)",
+        "edit_delay_current": "{minutes} min",
+        "edit_delay_invalid": "Enter 0 or a positive number of minutes.",
+        "edit_delete_old_menu": (
+            "Delete old messages on new stream?\n\n"
+            "Telegram allows deleting only messages younger than ~48 hours."
+        ),
         "edit_preview_menu": "Disable link preview in notifications?",
         "preview_yes": "✅ Off (no preview)",
         "preview_no": "❌ On (show preview)",
@@ -272,6 +298,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
         "link_preview_on": "✅ Показывать превью",
         "link_preview_off": "❌ Скрыть превью",
+        "delay_prompt": "Отложить отправку?",
+        "delay_no": "❌ Нет",
+        "delay_yes": "✅ Да",
+        "delay_minutes_prompt": "Укажите задержку отправки в минутах (число):",
+        "delay_minutes_invalid": "Введите положительное число минут, например 5.",
         "dest_prompt": "Куда отправлять уведомления?",
         "dest_dm": "📩 В личку",
         "dest_channel": "📢 В канал",
@@ -298,7 +329,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_old_text": (
             "Удалять предыдущее сообщение бота при новом стриме?\n\n"
             "Если включено — перед новым уведомлением бот удалит своё прошлое в этом чате.\n"
-            "В канале боту нужно право удалять сообщения."
+            "В канале боту нужно право удалять сообщения.\n"
+            "Telegram позволяет удалять только сообщения младше ~48 часов."
         ),
         "delete_old_yes": "✅ Да, удалять",
         "delete_old_no": "❌ Нет",
@@ -334,7 +366,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Канал Twitch: {twitch_username}\n"
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}\n"
-            "{preview_note}\n\n"
+            "{preview_note}\n"
+            "{delay_note}\n\n"
             "Пример сообщения:\n{preview}\n\n"
             "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n"
             "Справка: /help"
@@ -344,6 +377,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_no": "Удалять старые сообщения: нет",
         "preview_off": "Превью ссылок: выключено",
         "preview_on": "Превью ссылок: включено",
+        "delay_yes_note": "Отложенная отправка: {minutes} мин.",
+        "delay_no_note": "Отложенная отправка: нет",
+        "delayed_not_sent": (
+            "Отложенное сообщение не было отправлено. Стример офлайн.\n\n"
+            "Сообщение:\n{message}"
+        ),
         "preview_stream": "Тестовый стрим",
         "cancelled": "Отменено.",
         "feedback": (
@@ -380,6 +419,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "toggle_on": "✅ Вкл",
         "sub_line_thread": ", тема {thread_id}",
         "sub_line_delete": ", удалять старые",
+        "sub_line_delay": ", задержка {minutes} мин.",
         "sub_not_found": "Подписка не найдена.",
         "sub_enabled": "Подписка #{sub_id} включена.",
         "sub_disabled": "Подписка #{sub_id} выключена.",
@@ -392,12 +432,24 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_dest": "📍 Куда отправлять",
         "edit_delete_old": "🗑 Удалять старые",
         "edit_link_preview": "🔗 Превью ссылок",
+        "edit_delay": "⏱ Задержка отправки",
         "edit_template_prompt": (
             "Отправьте новый шаблон для подписки #{sub_id}.\n\n"
             "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
         "edit_updated": "✅ Подписка #{sub_id} обновлена.",
-        "edit_delete_old_menu": "Удалять старые сообщения при новом стриме?",
+        "edit_delay_prompt": (
+            "Подписка #{sub_id}\n"
+            "Текущая задержка: {current}\n\n"
+            "Укажите задержку в минутах (0 — отправлять сразу):"
+        ),
+        "edit_delay_current_none": "нет (сразу)",
+        "edit_delay_current": "{minutes} мин.",
+        "edit_delay_invalid": "Введите 0 или положительное число минут.",
+        "edit_delete_old_menu": (
+            "Удалять старые сообщения при новом стриме?\n\n"
+            "Telegram позволяет удалять только сообщения младше ~48 часов."
+        ),
         "edit_preview_menu": "Отключить превью ссылок в уведомлениях?",
         "preview_yes": "✅ Выкл (без превью)",
         "preview_no": "❌ Вкл (с превью)",
@@ -551,11 +603,21 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def delay_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("delay_no", lang), callback_data="delay_send:0")],
+            [InlineKeyboardButton(t("delay_yes", lang), callback_data="delay_send:1")],
+        ]
+    )
+
+
 def edit_options_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
             [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
+            [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
             [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")],
             [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")],
         ]
