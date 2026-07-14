@@ -58,6 +58,7 @@ def parse_admin_user_ids(raw: str | None = None) -> frozenset[int]:
 
 
 ADMIN_USER_IDS = parse_admin_user_ids()
+DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
 BOT_VERSION = (
     os.getenv("RENDER_GIT_COMMIT")
     or os.getenv("BOT_VERSION")

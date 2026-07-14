@@ -21,6 +21,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_edit": "✏️ Edit subscription",
         "btn_delete": "🗑 Delete subscription",
         "btn_feedback": "🐛 Report a problem",
+        "btn_settings": "⚙️ Settings",
+        "btn_language": "🌐 Language",
         "btn_admin": "⚙️ Admin",
         "btn_broadcast": "📣 Broadcast",
         "btn_stats": "📊 Statistics",
@@ -30,6 +32,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sys_notifications": "🔔 System notifications",
         "btn_sys_updates": "📬 Bot update alerts",
         "menu_subs": "Manage subscriptions:",
+        "menu_settings": "Settings:",
         "menu_admin": "Admin panel:",
         "menu_main": "Main menu",
         "lang_pick": "Choose your language:",
@@ -260,6 +263,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_availability": "📡 Bot availability alerts",
         "broadcast_text_prompt": (
             "Send the message text.\n"
+            "It will be auto-translated to each recipient's language.\n"
             "/cancel — abort."
         ),
         "broadcast_empty": "Message cannot be empty.",
@@ -306,6 +310,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_edit": "✏️ Редактировать подписку",
         "btn_delete": "🗑 Удалить подписку",
         "btn_feedback": "🐛 Сообщить о проблеме",
+        "btn_settings": "⚙️ Настройки",
+        "btn_language": "🌐 Выбор языка",
         "btn_admin": "⚙️ Админка",
         "btn_broadcast": "📣 Рассылка",
         "btn_stats": "📊 Статистика",
@@ -315,6 +321,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sys_notifications": "🔔 Настройка системных уведомлений",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "menu_subs": "Управление подписками:",
+        "menu_settings": "Настройки:",
         "menu_admin": "Админка:",
         "menu_main": "Главное меню",
         "lang_pick": "Выберите язык / Choose your language:",
@@ -545,6 +552,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_availability": "📡 Оповещения о доступности бота",
         "broadcast_text_prompt": (
             "Отправьте текст сообщения.\n"
+            "Оно будет автоматически переведено на язык каждого получателя.\n"
             "/cancel — отмена."
         ),
         "broadcast_empty": "Сообщение не может быть пустым.",
@@ -609,6 +617,8 @@ def all_menu_buttons() -> set[str]:
         "edit",
         "delete",
         "feedback",
+        "settings",
+        "language",
         "admin",
         "broadcast",
         "stats",
@@ -626,7 +636,7 @@ def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(btn("new", lang))],
         [KeyboardButton(btn("manage", lang))],
-        [KeyboardButton(btn("sys_notifications", lang))],
+        [KeyboardButton(btn("settings", lang))],
         [KeyboardButton(btn("feedback", lang))],
     ]
     if is_admin:
@@ -642,6 +652,17 @@ def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("edit", lang)),
             ],
             [KeyboardButton(btn("delete", lang))],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def settings_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(btn("sys_notifications", lang))],
+            [KeyboardButton(btn("language", lang))],
             [KeyboardButton(btn("back", lang))],
         ],
         resize_keyboard=True,

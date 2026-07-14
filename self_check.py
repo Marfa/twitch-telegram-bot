@@ -13,6 +13,7 @@ from render_status import (
     is_planned_maintenance,
 )
 from twitch import TwitchClient, render_template
+from translate import build_translations, translate_text
 from bot import _is_link_preview_disabled
 from db import SqliteDatabase, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
@@ -54,6 +55,8 @@ def main() -> None:
 
     for loc in SUPPORTED_LOCALES:
         assert btn("new", loc)
+        assert btn("settings", loc)
+        assert btn("language", loc)
         assert tr("start_welcome", loc)
         feedback = tr("feedback", loc, github="https://example.com", bot_version="abc1234", user_id=42)
         assert "abc1234" in feedback
@@ -125,6 +128,10 @@ def main() -> None:
 
     assert parse_admin_user_ids("") == frozenset()
     assert parse_admin_user_ids("123, 456") == frozenset({123, 456})
+
+    assert translate_text("hello", target_lang="en", source_lang="en") == "hello"
+    assert build_translations("hello", "en", {"en"}) == {"en": "hello"}
+    assert build_translations("hello", "en", {"en", "ru"})["en"] == "hello"
 
     with patch.dict(os.environ, {"RENDER_SERVICE_ID": "srv-test123"}, clear=False):
         assert _service_id("") == "srv-test123"

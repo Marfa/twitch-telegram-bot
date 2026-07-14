@@ -48,6 +48,7 @@ from i18n import (
     main_menu,
     repeat_keyboard,
     schedule_keyboard,
+    settings_menu,
     subscriptions_menu,
     sys_notifications_keyboard,
     t,
@@ -61,6 +62,7 @@ from render_status import (
     is_planned_maintenance,
 )
 from twitch import TwitchClient, render_template
+from translate import build_translations
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +400,13 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             query.from_user.id,
             _help_text(lang),
             reply_markup=_menu(lang, query.from_user.id),
+        )
+        return ConversationHandler.END
+    if after == "settings":
+        await context.bot.send_message(
+            query.from_user.id,
+            t("menu_settings", lang),
+            reply_markup=settings_menu(lang),
         )
         return ConversationHandler.END
     await context.bot.send_message(
@@ -1364,6 +1373,8 @@ async def _send_admin_broadcast(
     context: ContextTypes.DEFAULT_TYPE,
     msg_type: str,
     text: str,
+    *,
+    source_lang: str | None = None,
 ) -> tuple[int, int, int]:
     db: Database = context.application.bot_data["db"]
     if msg_type == "bot_update":
@@ -1372,10 +1383,22 @@ async def _send_admin_broadcast(
         user_ids = db.get_availability_recipients()
     else:
         user_ids = db.get_notify_user_ids()
+    source = source_lang or DEFAULT_LOCALE
+    user_locales = {
+        uid: db.get_user_locale(uid) or DEFAULT_LOCALE for uid in user_ids
+    }
+    translations = await asyncio.to_thread(
+        build_translations,
+        text,
+        source,
+        set(user_locales.values()),
+    )
     sent = failed = 0
     for uid in user_ids:
+        locale = user_locales[uid]
+        message = translations.get(locale, text)
         try:
-            await context.bot.send_message(uid, text)
+            await context.bot.send_message(uid, message)
             sent += 1
         except (BadRequest, Forbidden) as exc:
             failed += 1
@@ -1453,7 +1476,9 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
     msg_type = context.user_data.get("admin_msg_type", "bot_update")
     text = context.user_data.get("admin_msg_text", "")
     if data == "sched:now":
-        sent, failed, total = await _send_admin_broadcast(context, msg_type, text)
+        sent, failed, total = await _send_admin_broadcast(
+            context, msg_type, text, source_lang=lang
+        )
         context.user_data.clear()
         await query.edit_message_text(
             t("broadcast_done", lang, sent=sent, failed=failed, total=total)
@@ -1475,7 +1500,9 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             - datetime.now(timezone.utc)
         ).total_seconds()
         if when <= 0:
-            sent, failed, total = await _send_admin_broadcast(context, msg_type, text)
+            sent, failed, total = await _send_admin_broadcast(
+                context, msg_type, text, source_lang=lang
+            )
             db.mark_scheduled_broadcast_sent(broadcast_id)
             context.user_data.clear()
             await query.edit_message_text(
@@ -1512,8 +1539,33 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
         item = next((b for b in unsent if b.id == broadcast_id), None)
     if not item:
         return
-    await _send_admin_broadcast(context, item.msg_type, item.text)
+    source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+    await _send_admin_broadcast(
+        context, item.msg_type, item.text, source_lang=source_lang
+    )
     db.mark_scheduled_broadcast_sent(broadcast_id)
+
+
+async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    await update.effective_message.reply_text(
+        t("menu_settings", lang),
+        reply_markup=settings_menu(lang),
+    )
+
+
+async def start_language_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    context.user_data["after_lang"] = "settings"
+    await update.effective_message.reply_text(
+        t("lang_pick", lang),
+        reply_markup=language_keyboard(),
+    )
+    return LANG_SELECT
 
 
 async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1776,7 +1828,10 @@ async def check_aiven_status(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     for item in db.get_pending_scheduled_broadcasts():
-        await _send_admin_broadcast(context, item.msg_type, item.text)
+        source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+        await _send_admin_broadcast(
+            context, item.msg_type, item.text, source_lang=source_lang
+        )
         db.mark_scheduled_broadcast_sent(item.id)
 
 
@@ -1857,6 +1912,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("settings"), open_settings_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("sys_notifications"), open_sys_notifications_menu),
         group=0,
     )
@@ -1885,6 +1944,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("start", start),
             CommandHandler("help", help_command),
             MessageHandler(_btn_filter("new"), start_new_subscription),
+            MessageHandler(_btn_filter("language"), start_language_change),
             MessageHandler(_btn_filter("broadcast"), admin_broadcast_start),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),

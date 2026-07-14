@@ -17,4 +17,6 @@ services:
         sync: false
       - key: ADMIN_USER_IDS
         sync: false
+      - key: DEEPL_API_KEY
+        sync: false
     autoDeploy: true
