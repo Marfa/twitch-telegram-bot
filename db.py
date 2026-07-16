@@ -21,6 +21,8 @@ class BotStats:
     subscriptions_disabled: int
     unique_owners: int
     unique_twitch_channels: int
+    sys_updates: int
+    sys_availability: int
     locale_en: int
     locale_ru: int
     locale_unset: int
@@ -687,6 +689,28 @@ class SqliteDatabase:
             unique_twitch = conn.execute(
                 "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
             ).fetchone()["c"]
+            sys_updates = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_bot_updates, 1) = 1
+                """
+            ).fetchone()["c"]
+            sys_availability = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_availability_updates, 1) = 1
+                """
+            ).fetchone()["c"]
             locale_en = conn.execute(
                 "SELECT COUNT(*) AS c FROM users WHERE locale = 'en'"
             ).fetchone()["c"]
@@ -704,6 +728,8 @@ class SqliteDatabase:
             subscriptions_disabled=int(subs_total) - int(subs_enabled),
             unique_owners=int(unique_owners),
             unique_twitch_channels=int(unique_twitch),
+            sys_updates=int(sys_updates),
+            sys_availability=int(sys_availability),
             locale_en=int(locale_en),
             locale_ru=int(locale_ru),
             locale_unset=int(locale_unset),
@@ -1275,6 +1301,30 @@ class PostgresDatabase:
                 "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
             )
             unique_twitch = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_bot_updates, TRUE) = TRUE
+                """
+            )
+            sys_updates = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_availability_updates, TRUE) = TRUE
+                """
+            )
+            sys_availability = int(cur.fetchone()["c"])
             cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'en'")
             locale_en = int(cur.fetchone()["c"])
             cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'ru'")
@@ -1291,6 +1341,8 @@ class PostgresDatabase:
             subscriptions_disabled=subs_total - subs_enabled,
             unique_owners=unique_owners,
             unique_twitch_channels=unique_twitch,
+            sys_updates=sys_updates,
+            sys_availability=sys_availability,
             locale_en=locale_en,
             locale_ru=locale_ru,
             locale_unset=locale_unset,
