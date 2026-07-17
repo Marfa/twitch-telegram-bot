@@ -121,10 +121,22 @@ def main() -> None:
         assert db.is_bot_blocked(1) is True
         assert 1 not in db.get_bot_update_recipients()
         assert 1 not in db.get_availability_recipients()
-        assert db.get_bot_stats().blocked_users == 1
-        assert db.get_bot_stats().sys_updates == 0
+        blocked_stats = db.get_bot_stats()
+        assert blocked_stats.blocked_users == 1
+        assert blocked_stats.users == 0
+        assert blocked_stats.notify_users == 0
+        assert blocked_stats.subscriptions_total == 0
+        assert blocked_stats.subscriptions_enabled == 0
+        assert blocked_stats.unique_owners == 0
+        assert blocked_stats.unique_twitch_channels == 0
+        assert blocked_stats.sys_updates == 0
+        assert blocked_stats.sys_availability == 0
         db.upsert_user(1)
         assert db.is_bot_blocked(1) is False
+        restored = db.get_bot_stats()
+        assert restored.users == 1
+        assert restored.subscriptions_total == 1
+        assert restored.blocked_users == 0
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1
         )

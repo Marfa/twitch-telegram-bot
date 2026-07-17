@@ -701,27 +701,48 @@ class SqliteDatabase:
 
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:
-            users = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+            users = conn.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE COALESCE(bot_blocked, 0) = 0"
+            ).fetchone()["c"]
             notify = conn.execute(
                 """
                 SELECT COUNT(*) AS c FROM (
-                    SELECT user_id FROM users
+                    SELECT user_id AS id FROM users
+                    WHERE COALESCE(bot_blocked, 0) = 0
                     UNION
-                    SELECT DISTINCT owner_id FROM subscriptions
+                    SELECT DISTINCT s.owner_id AS id FROM subscriptions s
+                    LEFT JOIN users u ON u.user_id = s.owner_id
+                    WHERE COALESCE(u.bot_blocked, 0) = 0
                 )
                 """
             ).fetchone()["c"]
             subs_total = conn.execute(
-                "SELECT COUNT(*) AS c FROM subscriptions"
+                """
+                SELECT COUNT(*) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE COALESCE(u.bot_blocked, 0) = 0
+                """
             ).fetchone()["c"]
             subs_enabled = conn.execute(
-                "SELECT COUNT(*) AS c FROM subscriptions WHERE enabled = 1"
+                """
+                SELECT COUNT(*) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE s.enabled = 1 AND COALESCE(u.bot_blocked, 0) = 0
+                """
             ).fetchone()["c"]
             unique_owners = conn.execute(
-                "SELECT COUNT(DISTINCT owner_id) AS c FROM subscriptions"
+                """
+                SELECT COUNT(DISTINCT s.owner_id) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE COALESCE(u.bot_blocked, 0) = 0
+                """
             ).fetchone()["c"]
             unique_twitch = conn.execute(
-                "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
+                """
+                SELECT COUNT(DISTINCT s.twitch_user_id) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE COALESCE(u.bot_blocked, 0) = 0
+                """
             ).fetchone()["c"]
             sys_updates = conn.execute(
                 """
@@ -751,13 +772,23 @@ class SqliteDatabase:
                 "SELECT COUNT(*) AS c FROM users WHERE bot_blocked = 1"
             ).fetchone()["c"]
             locale_en = conn.execute(
-                "SELECT COUNT(*) AS c FROM users WHERE locale = 'en'"
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'en' AND COALESCE(bot_blocked, 0) = 0
+                """
             ).fetchone()["c"]
             locale_ru = conn.execute(
-                "SELECT COUNT(*) AS c FROM users WHERE locale = 'ru'"
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'ru' AND COALESCE(bot_blocked, 0) = 0
+                """
             ).fetchone()["c"]
             locale_unset = conn.execute(
-                "SELECT COUNT(*) AS c FROM users WHERE locale IS NULL OR locale = ''"
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE (locale IS NULL OR locale = '')
+                  AND COALESCE(bot_blocked, 0) = 0
+                """
             ).fetchone()["c"]
         return BotStats(
             users=int(users),
@@ -1346,30 +1377,56 @@ class PostgresDatabase:
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute("SELECT COUNT(*) AS c FROM users")
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE COALESCE(bot_blocked, FALSE) = FALSE
+                """
+            )
             users = int(cur.fetchone()["c"])
             cur.execute(
                 """
                 SELECT COUNT(*) AS c FROM (
-                    SELECT user_id FROM users
+                    SELECT user_id AS id FROM users
+                    WHERE COALESCE(bot_blocked, FALSE) = FALSE
                     UNION
-                    SELECT DISTINCT owner_id FROM subscriptions
+                    SELECT DISTINCT s.owner_id AS id FROM subscriptions s
+                    LEFT JOIN users u ON u.user_id = s.owner_id
+                    WHERE COALESCE(u.bot_blocked, FALSE) = FALSE
                 ) AS u
                 """
             )
             notify = int(cur.fetchone()["c"])
-            cur.execute("SELECT COUNT(*) AS c FROM subscriptions")
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE COALESCE(u.bot_blocked, FALSE) = FALSE
+                """
+            )
             subs_total = int(cur.fetchone()["c"])
             cur.execute(
-                "SELECT COUNT(*) AS c FROM subscriptions WHERE enabled = TRUE"
+                """
+                SELECT COUNT(*) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE s.enabled = TRUE AND COALESCE(u.bot_blocked, FALSE) = FALSE
+                """
             )
             subs_enabled = int(cur.fetchone()["c"])
             cur.execute(
-                "SELECT COUNT(DISTINCT owner_id) AS c FROM subscriptions"
+                """
+                SELECT COUNT(DISTINCT s.owner_id) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE COALESCE(u.bot_blocked, FALSE) = FALSE
+                """
             )
             unique_owners = int(cur.fetchone()["c"])
             cur.execute(
-                "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
+                """
+                SELECT COUNT(DISTINCT s.twitch_user_id) AS c FROM subscriptions s
+                LEFT JOIN users u ON u.user_id = s.owner_id
+                WHERE COALESCE(u.bot_blocked, FALSE) = FALSE
+                """
             )
             unique_twitch = int(cur.fetchone()["c"])
             cur.execute(
@@ -1402,12 +1459,26 @@ class PostgresDatabase:
                 "SELECT COUNT(*) AS c FROM users WHERE bot_blocked = TRUE"
             )
             blocked_users = int(cur.fetchone()["c"])
-            cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'en'")
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'en' AND COALESCE(bot_blocked, FALSE) = FALSE
+                """
+            )
             locale_en = int(cur.fetchone()["c"])
-            cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'ru'")
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'ru' AND COALESCE(bot_blocked, FALSE) = FALSE
+                """
+            )
             locale_ru = int(cur.fetchone()["c"])
             cur.execute(
-                "SELECT COUNT(*) AS c FROM users WHERE locale IS NULL OR locale = ''"
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE (locale IS NULL OR locale = '')
+                  AND COALESCE(bot_blocked, FALSE) = FALSE
+                """
             )
             locale_unset = int(cur.fetchone()["c"])
         return BotStats(
