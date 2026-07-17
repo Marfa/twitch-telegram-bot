@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -20,6 +21,8 @@ class BotStats:
     subscriptions_disabled: int
     unique_owners: int
     unique_twitch_channels: int
+    sys_updates: int
+    sys_availability: int
     locale_en: int
     locale_ru: int
     locale_unset: int
@@ -38,7 +41,19 @@ class Subscription:
     enabled: bool
     delete_previous: bool
     disable_link_preview: bool
+    delay_minutes: int
+    suppress_repeat_minutes: int
+    notify_cooldown_until: str | None
     last_message_id: int | None
+
+
+@dataclass
+class ScheduledBroadcast:
+    id: int
+    msg_type: str
+    text: str
+    scheduled_at: str
+    created_by: int
 
 
 def _row_to_sub(row: Any) -> Subscription:
@@ -54,8 +69,37 @@ def _row_to_sub(row: Any) -> Subscription:
         enabled=bool(row["enabled"]),
         delete_previous=bool(row["delete_previous"]),
         disable_link_preview=bool(row["disable_link_preview"]),
+        delay_minutes=int(row["delay_minutes"] or 0),
+        suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
+        notify_cooldown_until=(
+            row["notify_cooldown_until"].isoformat()
+            if row["notify_cooldown_until"] is not None
+            and not isinstance(row["notify_cooldown_until"], str)
+            else row["notify_cooldown_until"]
+        ),
         last_message_id=row["last_message_id"],
     )
+
+
+def _parse_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def is_on_notify_cooldown(sub: Subscription) -> bool:
+    if sub.suppress_repeat_minutes <= 0:
+        return False
+    until = _parse_utc(sub.notify_cooldown_until)
+    if until is None:
+        return False
+    return datetime.now(timezone.utc) < until
 
 
 def _normalize_pg_url(database_url: str) -> str:
@@ -80,9 +124,15 @@ class Database(Protocol):
         thread_id: int | None,
         delete_previous: bool = False,
         disable_link_preview: bool = False,
+        delay_minutes: int = 0,
+        suppress_repeat_minutes: int = 0,
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
+
+    def set_notify_cooldown(self, sub_id: int, minutes: int) -> None: ...
+
+    def get_subscription_by_id(self, sub_id: int) -> Subscription | None: ...
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]: ...
 
@@ -111,6 +161,32 @@ class Database(Protocol):
     def upsert_user(self, user_id: int) -> None: ...
 
     def get_notify_user_ids(self) -> list[int]: ...
+
+    def get_bot_update_recipients(self) -> list[int]: ...
+
+    def get_availability_recipients(self) -> list[int]: ...
+
+    def get_receive_bot_updates(self, user_id: int) -> bool: ...
+
+    def set_receive_bot_updates(self, user_id: int, enabled: bool) -> None: ...
+
+    def get_receive_availability_updates(self, user_id: int) -> bool: ...
+
+    def set_receive_availability_updates(self, user_id: int, enabled: bool) -> None: ...
+
+    def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]: ...
+
+    def set_saved_schedule(self, user_id: int, hour: int, minute: int) -> None: ...
+
+    def add_scheduled_broadcast(
+        self, msg_type: str, text: str, scheduled_at: str, created_by: int
+    ) -> int: ...
+
+    def get_pending_scheduled_broadcasts(self) -> list[ScheduledBroadcast]: ...
+
+    def get_unsent_scheduled_broadcasts(self) -> list[ScheduledBroadcast]: ...
+
+    def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None: ...
 
     def get_bot_stats(self) -> BotStats: ...
 
@@ -195,9 +271,43 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN disable_link_preview INTEGER NOT NULL DEFAULT 0"
             )
+        if "delay_minutes" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN delay_minutes INTEGER NOT NULL DEFAULT 0"
+            )
+        if "suppress_repeat_minutes" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN suppress_repeat_minutes INTEGER NOT NULL DEFAULT 0"
+            )
+        if "notify_cooldown_until" not in cols:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN notify_cooldown_until TEXT")
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
+        if "receive_bot_updates" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN receive_bot_updates INTEGER NOT NULL DEFAULT 1"
+            )
+        if "receive_availability_updates" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN receive_availability_updates INTEGER NOT NULL DEFAULT 1"
+            )
+        if "saved_schedule_hour" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_hour INTEGER")
+        if "saved_schedule_minute" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_minute INTEGER")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                msg_type TEXT NOT NULL,
+                text TEXT NOT NULL,
+                scheduled_at TEXT NOT NULL,
+                sent_at TEXT,
+                created_by INTEGER NOT NULL
+            )
+            """
+        )
 
     def add_subscription(
         self,
@@ -210,6 +320,8 @@ class SqliteDatabase:
         thread_id: int | None,
         delete_previous: bool = False,
         disable_link_preview: bool = False,
+        delay_minutes: int = 0,
+        suppress_repeat_minutes: int = 0,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -217,8 +329,9 @@ class SqliteDatabase:
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
-                    delete_previous, disable_link_preview
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delete_previous, disable_link_preview, delay_minutes,
+                    suppress_repeat_minutes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -230,15 +343,36 @@ class SqliteDatabase:
                     thread_id,
                     int(delete_previous),
                     int(disable_link_preview),
+                    max(0, int(delay_minutes)),
+                    max(0, int(suppress_repeat_minutes)),
                 ),
             )
             return int(cur.lastrowid)
+
+    def get_subscription_by_id(self, sub_id: int) -> Subscription | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM subscriptions WHERE id = ?",
+                (sub_id,),
+            ).fetchone()
+        return _row_to_sub(row) if row else None
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None:
         with self._conn() as conn:
             conn.execute(
                 "UPDATE subscriptions SET last_message_id = ? WHERE id = ?",
                 (message_id, sub_id),
+            )
+
+    def set_notify_cooldown(self, sub_id: int, minutes: int) -> None:
+        if minutes <= 0:
+            return
+        until = datetime.now(timezone.utc).timestamp() + minutes * 60
+        until_iso = datetime.fromtimestamp(until, tz=timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE subscriptions SET notify_cooldown_until = ? WHERE id = ?",
+                (until_iso, sub_id),
             )
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]:
@@ -285,6 +419,8 @@ class SqliteDatabase:
             "thread_id",
             "delete_previous",
             "disable_link_preview",
+            "delay_minutes",
+            "suppress_repeat_minutes",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -294,6 +430,8 @@ class SqliteDatabase:
             updates.append(f"{key} = ?")
             if key in ("delete_previous", "disable_link_preview"):
                 values.append(int(bool(value)))
+            elif key in ("delay_minutes", "suppress_repeat_minutes"):
+                values.append(max(0, int(value)))
             else:
                 values.append(value)
         if not updates:
@@ -386,6 +524,147 @@ class SqliteDatabase:
             ).fetchall()
         return [int(r["user_id"]) for r in rows]
 
+    def get_bot_update_recipients(self) -> list[int]:
+        return [
+            uid for uid in self.get_notify_user_ids() if self.get_receive_bot_updates(uid)
+        ]
+
+    def get_availability_recipients(self) -> list[int]:
+        return [
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_availability_updates(uid)
+        ]
+
+    def get_receive_bot_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT receive_bot_updates FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return True
+        return bool(row["receive_bot_updates"])
+
+    def set_receive_bot_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, receive_bot_updates) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET receive_bot_updates = excluded.receive_bot_updates
+                """,
+                (user_id, int(enabled)),
+            )
+
+    def get_receive_availability_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT receive_availability_updates FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return True
+        return bool(row["receive_availability_updates"])
+
+    def set_receive_availability_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, receive_availability_updates) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    receive_availability_updates = excluded.receive_availability_updates
+                """,
+                (user_id, int(enabled)),
+            )
+
+    def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT saved_schedule_hour, saved_schedule_minute FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return None, None
+        return row["saved_schedule_hour"], row["saved_schedule_minute"]
+
+    def set_saved_schedule(self, user_id: int, hour: int, minute: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, saved_schedule_hour, saved_schedule_minute)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    saved_schedule_hour = excluded.saved_schedule_hour,
+                    saved_schedule_minute = excluded.saved_schedule_minute
+                """,
+                (user_id, hour, minute),
+            )
+
+    def add_scheduled_broadcast(
+        self, msg_type: str, text: str, scheduled_at: str, created_by: int
+    ) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO scheduled_broadcasts (msg_type, text, scheduled_at, created_by)
+                VALUES (?, ?, ?, ?)
+                """,
+                (msg_type, text, scheduled_at, created_by),
+            )
+            return int(cur.lastrowid)
+
+    def get_unsent_scheduled_broadcasts(self) -> list[ScheduledBroadcast]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, msg_type, text, scheduled_at, created_by
+                FROM scheduled_broadcasts
+                WHERE sent_at IS NULL
+                ORDER BY scheduled_at
+                """
+            ).fetchall()
+        return [
+            ScheduledBroadcast(
+                id=int(r["id"]),
+                msg_type=r["msg_type"],
+                text=r["text"],
+                scheduled_at=r["scheduled_at"],
+                created_by=int(r["created_by"]),
+            )
+            for r in rows
+        ]
+
+    def get_pending_scheduled_broadcasts(self) -> list[ScheduledBroadcast]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, msg_type, text, scheduled_at, created_by
+                FROM scheduled_broadcasts
+                WHERE sent_at IS NULL AND scheduled_at <= ?
+                ORDER BY scheduled_at
+                """,
+                (now,),
+            ).fetchall()
+        return [
+            ScheduledBroadcast(
+                id=int(r["id"]),
+                msg_type=r["msg_type"],
+                text=r["text"],
+                scheduled_at=r["scheduled_at"],
+                created_by=int(r["created_by"]),
+            )
+            for r in rows
+        ]
+
+    def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE scheduled_broadcasts SET sent_at = ? WHERE id = ?",
+                (now, broadcast_id),
+            )
+
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:
             users = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
@@ -410,6 +689,28 @@ class SqliteDatabase:
             unique_twitch = conn.execute(
                 "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
             ).fetchone()["c"]
+            sys_updates = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_bot_updates, 1) = 1
+                """
+            ).fetchone()["c"]
+            sys_availability = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_availability_updates, 1) = 1
+                """
+            ).fetchone()["c"]
             locale_en = conn.execute(
                 "SELECT COUNT(*) AS c FROM users WHERE locale = 'en'"
             ).fetchone()["c"]
@@ -427,6 +728,8 @@ class SqliteDatabase:
             subscriptions_disabled=int(subs_total) - int(subs_enabled),
             unique_owners=int(unique_owners),
             unique_twitch_channels=int(unique_twitch),
+            sys_updates=int(sys_updates),
+            sys_availability=int(sys_availability),
             locale_en=int(locale_en),
             locale_ru=int(locale_ru),
             locale_unset=int(locale_unset),
@@ -469,6 +772,7 @@ class PostgresDatabase:
                     enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     delete_previous BOOLEAN NOT NULL DEFAULT FALSE,
                     disable_link_preview BOOLEAN NOT NULL DEFAULT FALSE,
+                    delay_minutes INTEGER NOT NULL DEFAULT 0,
                     last_message_id BIGINT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
@@ -503,6 +807,60 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS delay_minutes INTEGER NOT NULL DEFAULT 0
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS suppress_repeat_minutes INTEGER NOT NULL DEFAULT 0
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS notify_cooldown_until TIMESTAMPTZ
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS receive_availability_updates BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS saved_schedule_hour INTEGER
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS saved_schedule_minute INTEGER
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
+                    id SERIAL PRIMARY KEY,
+                    msg_type TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    scheduled_at TIMESTAMPTZ NOT NULL,
+                    sent_at TIMESTAMPTZ,
+                    created_by BIGINT NOT NULL
+                )
+                """
+            )
 
     def add_subscription(
         self,
@@ -515,6 +873,8 @@ class PostgresDatabase:
         thread_id: int | None,
         delete_previous: bool = False,
         disable_link_preview: bool = False,
+        delay_minutes: int = 0,
+        suppress_repeat_minutes: int = 0,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -523,8 +883,9 @@ class PostgresDatabase:
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
-                    delete_previous, disable_link_preview
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delete_previous, disable_link_preview, delay_minutes,
+                    suppress_repeat_minutes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -537,10 +898,22 @@ class PostgresDatabase:
                     thread_id,
                     delete_previous,
                     disable_link_preview,
+                    max(0, int(delay_minutes)),
+                    max(0, int(suppress_repeat_minutes)),
                 ),
             )
             row = cur.fetchone()
             return int(row["id"])
+
+    def get_subscription_by_id(self, sub_id: int) -> Subscription | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM subscriptions WHERE id = %s",
+                (sub_id,),
+            )
+            row = cur.fetchone()
+        return _row_to_sub(row) if row else None
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None:
         with self._conn() as conn:
@@ -548,6 +921,18 @@ class PostgresDatabase:
             cur.execute(
                 "UPDATE subscriptions SET last_message_id = %s WHERE id = %s",
                 (message_id, sub_id),
+            )
+
+    def set_notify_cooldown(self, sub_id: int, minutes: int) -> None:
+        if minutes <= 0:
+            return
+        until = datetime.now(timezone.utc).timestamp() + minutes * 60
+        until_iso = datetime.fromtimestamp(until, tz=timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE subscriptions SET notify_cooldown_until = %s WHERE id = %s",
+                (until_iso, sub_id),
             )
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]:
@@ -601,6 +986,8 @@ class PostgresDatabase:
             "thread_id",
             "delete_previous",
             "disable_link_preview",
+            "delay_minutes",
+            "suppress_repeat_minutes",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -610,6 +997,8 @@ class PostgresDatabase:
             updates.append(f"{key} = %s")
             if key in ("delete_previous", "disable_link_preview"):
                 values.append(bool(value))
+            elif key in ("delay_minutes", "suppress_repeat_minutes"):
+                values.append(max(0, int(value)))
             else:
                 values.append(value)
         if not updates:
@@ -725,6 +1114,164 @@ class PostgresDatabase:
             rows = cur.fetchall()
         return [int(r["user_id"]) for r in rows]
 
+    def get_bot_update_recipients(self) -> list[int]:
+        return [
+            uid for uid in self.get_notify_user_ids() if self.get_receive_bot_updates(uid)
+        ]
+
+    def get_availability_recipients(self) -> list[int]:
+        return [
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_availability_updates(uid)
+        ]
+
+    def get_receive_bot_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT receive_bot_updates FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return True
+        return bool(row["receive_bot_updates"])
+
+    def set_receive_bot_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, receive_bot_updates) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET receive_bot_updates = EXCLUDED.receive_bot_updates
+                """,
+                (user_id, enabled),
+            )
+
+    def get_receive_availability_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT receive_availability_updates FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return True
+        return bool(row["receive_availability_updates"])
+
+    def set_receive_availability_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, receive_availability_updates) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    receive_availability_updates = EXCLUDED.receive_availability_updates
+                """,
+                (user_id, enabled),
+            )
+
+    def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT saved_schedule_hour, saved_schedule_minute FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None, None
+        return row["saved_schedule_hour"], row["saved_schedule_minute"]
+
+    def set_saved_schedule(self, user_id: int, hour: int, minute: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, saved_schedule_hour, saved_schedule_minute)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    saved_schedule_hour = EXCLUDED.saved_schedule_hour,
+                    saved_schedule_minute = EXCLUDED.saved_schedule_minute
+                """,
+                (user_id, hour, minute),
+            )
+
+    def add_scheduled_broadcast(
+        self, msg_type: str, text: str, scheduled_at: str, created_by: int
+    ) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO scheduled_broadcasts (msg_type, text, scheduled_at, created_by)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (msg_type, text, scheduled_at, created_by),
+            )
+            row = cur.fetchone()
+            return int(row["id"])
+
+    def get_unsent_scheduled_broadcasts(self) -> list[ScheduledBroadcast]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, msg_type, text, scheduled_at, created_by
+                FROM scheduled_broadcasts
+                WHERE sent_at IS NULL
+                ORDER BY scheduled_at
+                """
+            )
+            rows = cur.fetchall()
+        return [
+            ScheduledBroadcast(
+                id=int(r["id"]),
+                msg_type=r["msg_type"],
+                text=r["text"],
+                scheduled_at=str(r["scheduled_at"]),
+                created_by=int(r["created_by"]),
+            )
+            for r in rows
+        ]
+
+    def get_pending_scheduled_broadcasts(self) -> list[ScheduledBroadcast]:
+        now = datetime.now(timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, msg_type, text, scheduled_at, created_by
+                FROM scheduled_broadcasts
+                WHERE sent_at IS NULL AND scheduled_at <= %s
+                ORDER BY scheduled_at
+                """,
+                (now,),
+            )
+            rows = cur.fetchall()
+        return [
+            ScheduledBroadcast(
+                id=int(r["id"]),
+                msg_type=r["msg_type"],
+                text=r["text"],
+                scheduled_at=str(r["scheduled_at"]),
+                created_by=int(r["created_by"]),
+            )
+            for r in rows
+        ]
+
+    def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None:
+        now = datetime.now(timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE scheduled_broadcasts SET sent_at = %s WHERE id = %s",
+                (now, broadcast_id),
+            )
+
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -754,6 +1301,30 @@ class PostgresDatabase:
                 "SELECT COUNT(DISTINCT twitch_user_id) AS c FROM subscriptions"
             )
             unique_twitch = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_bot_updates, TRUE) = TRUE
+                """
+            )
+            sys_updates = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_availability_updates, TRUE) = TRUE
+                """
+            )
+            sys_availability = int(cur.fetchone()["c"])
             cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'en'")
             locale_en = int(cur.fetchone()["c"])
             cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'ru'")
@@ -770,6 +1341,8 @@ class PostgresDatabase:
             subscriptions_disabled=subs_total - subs_enabled,
             unique_owners=unique_owners,
             unique_twitch_channels=unique_twitch,
+            sys_updates=sys_updates,
+            sys_availability=sys_availability,
             locale_en=locale_en,
             locale_ru=locale_ru,
             locale_unset=locale_unset,

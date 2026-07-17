@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
+
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -9,6 +11,7 @@ from telegram import (
 
 SUPPORTED_LOCALES = ("en", "ru")
 DEFAULT_LOCALE = "en"
+SCHEDULE_TZ = timezone(timedelta(hours=3))
 
 _STRINGS: dict[str, dict[str, str]] = {
     "en": {
@@ -18,11 +21,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_edit": "✏️ Edit subscription",
         "btn_delete": "🗑 Delete subscription",
         "btn_feedback": "🐛 Report a problem",
+        "btn_create_schedule": "📅 Create schedule",
+        "btn_settings": "⚙️ Settings",
+        "btn_language": "🌐 Language",
         "btn_admin": "⚙️ Admin",
         "btn_broadcast": "📣 Broadcast",
         "btn_stats": "📊 Statistics",
         "btn_back": "◀️ Main menu",
+        "btn_wizard_back": "« Back",
+        "btn_wizard_cancel": "Cancel",
+        "btn_sys_notifications": "🔔 System notifications",
+        "btn_sys_updates": "📬 Bot update alerts",
         "menu_subs": "Manage subscriptions:",
+        "menu_settings": "Settings:",
         "menu_admin": "Admin panel:",
         "menu_main": "Main menu",
         "lang_pick": "Choose your language:",
@@ -35,11 +46,29 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "new_sub_prompt": "Enter a Twitch channel: link, mobile link, or username.",
         "finish_setup_first": "Finish the subscription setup or tap /cancel.",
+        "stream_schedule_intro": (
+            "Use this menu to build text for publishing your weekly schedule, starting on Monday.\n\n"
+            "Example:\n"
+            "<b>- 13 July 15:30 Sovereign Syndicate\n"
+            "- 14 July 15:30 Sovereign Syndicate\n"
+            "- 15 July 15:30 Sovereign Syndicate\n"
+            "- 17 July 15:30 Sovereign Syndicate</b>"
+        ),
+        "stream_schedule_confirm": "Create the schedule?",
+        "stream_schedule_yes": "✅ Yes",
+        "stream_schedule_no": "❌ No",
+        "stream_schedule_game_prompt": "What do you want to stream on {date}?",
+        "stream_schedule_time_prompt": "Enter the planned stream start time in 15:30 format.",
+        "stream_schedule_time_invalid": "Enter time in HH:MM format, e.g. 15:30.",
+        "stream_schedule_game_empty": "Enter the stream title or game name.",
+        "stream_schedule_no_stream": "No stream planned",
+        "stream_schedule_finish": "Finish schedule",
+        "stream_schedule_line": "- {date} {time} {game}",
         "channel_not_parsed": (
             "Could not parse the channel. Examples:\n"
-            "• ninja\n"
-            "• https://twitch.tv/ninja\n"
-            "• https://m.twitch.tv/ninja"
+            "• marfapr\n"
+            "• https://www.twitch.tv/marfapr\n"
+            "• https://m.twitch.tv/marfapr"
         ),
         "channel_not_found": 'Channel "{username}" not found on Twitch. Try again.',
         "channel_found": (
@@ -57,6 +86,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Show link preview in notifications?",
         "link_preview_on": "✅ Show preview",
         "link_preview_off": "❌ Hide preview",
+        "delay_prompt": "Delay notification after stream start?",
+        "delay_no": "❌ No",
+        "delay_yes": "✅ Yes",
+        "delay_minutes_prompt": "Enter the delay in minutes (a number):",
+        "delay_minutes_invalid": "Enter a positive number of minutes, e.g. 5.",
+        "repeat_prompt": "If the stream is interrupted, repeat notifications will not be sent.",
+        "repeat_yes": "✅ Yes, allow repeats",
+        "repeat_no": "❌ No",
+        "repeat_mute_prompt": "Enter how many minutes to suppress repeat notifications:",
+        "repeat_mute_invalid": "Enter a positive number of minutes, e.g. 30.",
+        "repeat_yes_note": "Repeat notifications: yes",
+        "repeat_no_note": "Suppress repeats: {minutes} min after first alert",
+        "sub_line_repeat": ", suppress {minutes} min",
         "dest_prompt": "Where should notifications be sent?",
         "dest_dm": "📩 To DM",
         "dest_channel": "📢 To channel",
@@ -83,7 +125,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_old_text": (
             "Delete the bot's previous message when a new stream starts?\n\n"
             "If enabled, the bot deletes its last message in this chat before sending a new one.\n"
-            "In channels the bot needs permission to delete messages."
+            "In channels the bot needs permission to delete messages.\n"
+            "Telegram allows deleting only messages younger than ~48 hours."
         ),
         "delete_old_yes": "✅ Yes, delete",
         "delete_old_no": "❌ No",
@@ -105,6 +148,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "bot_no_channel": "The bot cannot see this channel. Add it as an admin.",
         "not_a_group": "This is not a group or community.",
         "bot_no_group": "The bot cannot see this group. Add it to the group.",
+        "dest_not_admin": (
+            "You must be an admin of that channel/group to bind notifications there."
+        ),
+        "sub_limit": (
+            "Subscription limit reached ({limit}). Delete an existing one first."
+        ),
         "test_ok": "✅ Test: the bot can send notifications here.",
         "test_failed": (
             "Could not send a test message. Check the bot's permissions and try again."
@@ -117,7 +166,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Twitch channel: {twitch_username}\n"
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}\n"
-            "{preview_note}\n\n"
+            "{preview_note}\n"
+            "{delay_note}\n"
+            "{repeat_note}\n\n"
             "Sample message:\n{preview}\n\n"
             "When {twitch_username} goes live — I'll send a notification.\n"
             "Help: /help"
@@ -127,6 +178,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_no": "Delete old messages: no",
         "preview_off": "Link preview: off",
         "preview_on": "Link preview: on",
+        "delay_yes_note": "Delayed send: {minutes} min",
+        "delay_no_note": "Delayed send: no",
+        "delayed_not_sent": (
+            "Delayed notification was not sent — streamer is offline.\n\n"
+            "Message:\n{message}"
+        ),
         "preview_stream": "Test stream",
         "cancelled": "Cancelled.",
         "feedback": (
@@ -134,12 +191,14 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Telegram: @immarfa\n"
             "• GitHub Issues: {github}\n\n"
             "Support:\n"
-            "• DonationAlerts: https://www.donationalerts.com/r/themarfa\n"
+            "• Telegram Tribute: https://t.me/tribute/app?startapp=dBlc\n"
             "• Crypto: https://nowpayments.io/donation/themarfa\n\n"
             "Links:\n"
             "• Twitch: https://www.twitch.tv/marfapr\n"
             "• Telegram: https://t.me/themarfa\n"
-            "• Website: https://blog.themarfa.name/"
+            "• Website: https://blog.themarfa.name/\n\n"
+            "Bot version: <code>{bot_version}</code>\n"
+            "Your ID: <code>{user_id}</code>"
         ),
         "help": (
             "Available commands:\n"
@@ -161,6 +220,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "toggle_on": "✅ On",
         "sub_line_thread": ", topic {thread_id}",
         "sub_line_delete": ", delete old",
+        "sub_line_delay": ", delay {minutes} min",
         "sub_not_found": "Subscription not found.",
         "sub_enabled": "Subscription #{sub_id} enabled.",
         "sub_disabled": "Subscription #{sub_id} disabled.",
@@ -173,12 +233,34 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_dest": "📍 Destination",
         "edit_delete_old": "🗑 Delete old messages",
         "edit_link_preview": "🔗 Link preview",
+        "edit_delay": "⏱ Delay send",
+        "edit_repeat": "🔁 Repeat notifications",
+        "edit_repeat_menu": "If the stream is interrupted, repeat notifications will not be sent.",
+        "edit_repeat_mute_prompt": (
+            "Subscription #{sub_id}\n"
+            "Current: {current}\n\n"
+            "Enter suppression minutes (0 — allow repeats):"
+        ),
+        "edit_repeat_current_allow": "allowed",
+        "edit_repeat_current_mute": "suppress {minutes} min",
+        "edit_repeat_invalid": "Enter 0 or a positive number of minutes.",
         "edit_template_prompt": (
             "Send a new message template for subscription #{sub_id}.\n\n"
             "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
         "edit_updated": "✅ Subscription #{sub_id} updated.",
-        "edit_delete_old_menu": "Delete old messages on new stream?",
+        "edit_delay_prompt": (
+            "Subscription #{sub_id}\n"
+            "Current delay: {current}\n\n"
+            "Enter delay in minutes (0 — send immediately):"
+        ),
+        "edit_delay_current_none": "none (immediate)",
+        "edit_delay_current": "{minutes} min",
+        "edit_delay_invalid": "Enter 0 or a positive number of minutes.",
+        "edit_delete_old_menu": (
+            "Delete old messages on new stream?\n\n"
+            "Telegram allows deleting only messages younger than ~48 hours."
+        ),
         "edit_preview_menu": "Disable link preview in notifications?",
         "preview_yes": "✅ Off (no preview)",
         "preview_no": "❌ On (show preview)",
@@ -188,13 +270,25 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{title}\n{body}\n\n"
             "{link}"
         ),
+        "aiven_outage": (
+            "⚠️ Aiven: service disruption\n"
+            "Subscriptions may be unavailable.\n\n"
+            "{title}\n{body}\n\n"
+            "{link}"
+        ),
         "conflict_polling": (
             "Polling conflict — two bot instances may be running "
             "(Render + local?). Keep only one."
         ),
         "unhandled_error": "Unhandled error: {err}",
         "broadcast_prompt": (
-            "Send the message to broadcast to all users.\n"
+            "Choose notification type:"
+        ),
+        "broadcast_type_bot_update": "📬 Bot update notifications",
+        "broadcast_type_availability": "📡 Bot availability alerts",
+        "broadcast_text_prompt": (
+            "Send the message text.\n"
+            "It will be auto-translated to each recipient's language.\n"
             "/cancel — abort."
         ),
         "broadcast_empty": "Message cannot be empty.",
@@ -204,14 +298,33 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Failed: {failed}\n"
             "Total recipients: {total}"
         ),
+        "broadcast_scheduled": (
+            "Message scheduled.\n"
+            "Send time: {when}\n"
+            "Recipients will receive it automatically."
+        ),
+        "broadcast_send_now": "Send now",
+        "schedule_title": "Choose send time (MSK, UTC+3):",
+        "schedule_pick_hour": "——— Select hour ———",
+        "schedule_pick_minutes": "Select minutes ↘",
+        "schedule_saved_time": "Saved time ↘",
+        "schedule_apply": "Apply time",
+        "schedule_show_calendar": "🗓 Show calendar",
+        "schedule_minutes_header": "——— Select minutes ———",
+        "sys_notifications_menu": "System notifications:",
+        "sys_updates_label": "Bot update notifications",
+        "sys_availability_label": "Bot availability alerts",
         "bot_stats": (
             "📊 Bot statistics\n\n"
             "Users: {users}\n"
-            "Recipients (users + owners): {notify_users}\n"
+            "Created alerts: {unique_owners}\n"
+            "Recipients: {notify_users}\n"
             "Subscriptions: {subscriptions_total} "
             "(✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\n"
-            "Unique owners: {unique_owners}\n"
             "Twitch channels tracked: {unique_twitch_channels}\n\n"
+            "System notifications:\n"
+            "• Bot updates: {sys_updates}\n"
+            "• Bot availability: {sys_availability}\n\n"
             "Languages:\n"
             "• English: {locale_en}\n"
             "• Russian: {locale_ru}\n"
@@ -225,11 +338,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_edit": "✏️ Редактировать подписку",
         "btn_delete": "🗑 Удалить подписку",
         "btn_feedback": "🐛 Сообщить о проблеме",
+        "btn_create_schedule": "📅 Создать расписание",
+        "btn_settings": "⚙️ Настройки",
+        "btn_language": "🌐 Выбор языка",
         "btn_admin": "⚙️ Админка",
         "btn_broadcast": "📣 Рассылка",
         "btn_stats": "📊 Статистика",
         "btn_back": "◀️ Главное меню",
+        "btn_wizard_back": "« Назад",
+        "btn_wizard_cancel": "Отмена",
+        "btn_sys_notifications": "🔔 Настройка системных уведомлений",
+        "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "menu_subs": "Управление подписками:",
+        "menu_settings": "Настройки:",
         "menu_admin": "Админка:",
         "menu_main": "Главное меню",
         "lang_pick": "Выберите язык / Choose your language:",
@@ -242,11 +363,30 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "new_sub_prompt": "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
         "finish_setup_first": "Сначала завершите настройку подписки или нажмите /cancel.",
+        "stream_schedule_intro": (
+            "С помощью этого меню вы можете сформировать текст для публикации "
+            "вашего расписания на неделю, начиная с понедельника.\n\n"
+            "Пример:\n"
+            "<b>- 13 июля 15:30 Sovereign Syndicate\n"
+            "- 14 июля 15:30 Sovereign Syndicate\n"
+            "- 15 июля 15:30 Sovereign Syndicate\n"
+            "- 17 июля 15:30 Sovereign Syndicate</b>"
+        ),
+        "stream_schedule_confirm": "Сформировать расписание?",
+        "stream_schedule_yes": "✅ Да",
+        "stream_schedule_no": "❌ Нет",
+        "stream_schedule_game_prompt": "Что вы хотите стримить в указание даты?\n\n{date}",
+        "stream_schedule_time_prompt": "Укажите планируемое время старта стрима в формате 15:30.",
+        "stream_schedule_time_invalid": "Укажите время в формате ЧЧ:ММ, например 15:30.",
+        "stream_schedule_game_empty": "Введите название игры или стрима.",
+        "stream_schedule_no_stream": "Стрим не планируется",
+        "stream_schedule_finish": "Завершить создание расписания",
+        "stream_schedule_line": "- {date} {time} {game}",
         "channel_not_parsed": (
             "Не удалось распознать канал. Примеры:\n"
-            "• ninja\n"
-            "• https://twitch.tv/ninja\n"
-            "• https://m.twitch.tv/ninja"
+            "• marfapr\n"
+            "• https://www.twitch.tv/marfapr\n"
+            "• https://m.twitch.tv/marfapr"
         ),
         "channel_not_found": "Канал «{username}» не найден на Twitch. Попробуйте ещё раз.",
         "channel_found": (
@@ -264,6 +404,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
         "link_preview_on": "✅ Показывать превью",
         "link_preview_off": "❌ Скрыть превью",
+        "delay_prompt": "Отложить отправку уведомления после начала стрима",
+        "delay_no": "❌ Нет",
+        "delay_yes": "✅ Да",
+        "delay_minutes_prompt": "Укажите задержку отправки в минутах (число):",
+        "delay_minutes_invalid": "Введите положительное число минут, например 5.",
+        "repeat_prompt": "Если стрим прервался, повторные уведомления не будут отправляться",
+        "repeat_yes": "✅ Да, разрешить повторы",
+        "repeat_no": "❌ Нет",
+        "repeat_mute_prompt": "Укажите в минутах, на сколько заглушить уведомления:",
+        "repeat_mute_invalid": "Введите положительное число минут, например 30.",
+        "repeat_yes_note": "Повторные уведомления: да",
+        "repeat_no_note": "Заглушка повторов: {minutes} мин. после первого",
+        "sub_line_repeat": ", заглушка {minutes} мин.",
         "dest_prompt": "Куда отправлять уведомления?",
         "dest_dm": "📩 В личку",
         "dest_channel": "📢 В канал",
@@ -290,7 +443,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_old_text": (
             "Удалять предыдущее сообщение бота при новом стриме?\n\n"
             "Если включено — перед новым уведомлением бот удалит своё прошлое в этом чате.\n"
-            "В канале боту нужно право удалять сообщения."
+            "В канале боту нужно право удалять сообщения.\n"
+            "Telegram позволяет удалять только сообщения младше ~48 часов."
         ),
         "delete_old_yes": "✅ Да, удалять",
         "delete_old_no": "❌ Нет",
@@ -313,6 +467,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "bot_no_channel": "Бот не видит этот канал. Добавьте бота как администратора.",
         "not_a_group": "Это не группа или сообщество.",
         "bot_no_group": "Бот не видит эту группу. Добавьте бота в группу.",
+        "dest_not_admin": (
+            "Чтобы привязать уведомления, вы должны быть администратором "
+            "этого канала или группы."
+        ),
+        "sub_limit": (
+            "Достигнут лимит подписок ({limit}). Сначала удалите одну из существующих."
+        ),
         "test_ok": "✅ Тест: бот может отправлять уведомления сюда.",
         "test_failed": (
             "Не удалось отправить тестовое сообщение. "
@@ -326,7 +487,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Канал Twitch: {twitch_username}\n"
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}\n"
-            "{preview_note}\n\n"
+            "{preview_note}\n"
+            "{delay_note}\n"
+            "{repeat_note}\n\n"
             "Пример сообщения:\n{preview}\n\n"
             "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n"
             "Справка: /help"
@@ -336,6 +499,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_no": "Удалять старые сообщения: нет",
         "preview_off": "Превью ссылок: выключено",
         "preview_on": "Превью ссылок: включено",
+        "delay_yes_note": "Отложенная отправка: {minutes} мин.",
+        "delay_no_note": "Отложенная отправка: нет",
+        "delayed_not_sent": (
+            "Отложенное сообщение не было отправлено. Стример офлайн.\n\n"
+            "Сообщение:\n{message}"
+        ),
         "preview_stream": "Тестовый стрим",
         "cancelled": "Отменено.",
         "feedback": (
@@ -343,12 +512,14 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Telegram: @immarfa\n"
             "• GitHub Issues: {github}\n\n"
             "Поддержка:\n"
-            "• DonationAlerts: https://www.donationalerts.com/r/themarfa\n"
+            "• Telegram Tribute: https://t.me/tribute/app?startapp=dBlc\n"
             "• Криптой: https://nowpayments.io/donation/themarfa\n\n"
             "Ссылки:\n"
             "• Twitch: https://www.twitch.tv/marfapr\n"
             "• Telegram: https://t.me/themarfa\n"
-            "• Сайт: https://blog.themarfa.name/"
+            "• Сайт: https://blog.themarfa.name/\n\n"
+            "Версия бота: <code>{bot_version}</code>\n"
+            "Ваш ID: <code>{user_id}</code>"
         ),
         "help": (
             "Доступные команды:\n"
@@ -370,6 +541,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "toggle_on": "✅ Вкл",
         "sub_line_thread": ", тема {thread_id}",
         "sub_line_delete": ", удалять старые",
+        "sub_line_delay": ", задержка {minutes} мин.",
         "sub_not_found": "Подписка не найдена.",
         "sub_enabled": "Подписка #{sub_id} включена.",
         "sub_disabled": "Подписка #{sub_id} выключена.",
@@ -382,12 +554,34 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_dest": "📍 Куда отправлять",
         "edit_delete_old": "🗑 Удалять старые",
         "edit_link_preview": "🔗 Превью ссылок",
+        "edit_delay": "⏱ Задержка отправки",
+        "edit_repeat": "🔁 Повторные уведомления",
+        "edit_repeat_menu": "Если стрим прервался, повторные уведомления не будут отправляться",
+        "edit_repeat_mute_prompt": (
+            "Подписка #{sub_id}\n"
+            "Сейчас: {current}\n\n"
+            "Укажите минуты заглушки (0 — разрешить повторы):"
+        ),
+        "edit_repeat_current_allow": "разрешены",
+        "edit_repeat_current_mute": "заглушка {minutes} мин.",
+        "edit_repeat_invalid": "Введите 0 или положительное число минут.",
         "edit_template_prompt": (
             "Отправьте новый шаблон для подписки #{sub_id}.\n\n"
             "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
         "edit_updated": "✅ Подписка #{sub_id} обновлена.",
-        "edit_delete_old_menu": "Удалять старые сообщения при новом стриме?",
+        "edit_delay_prompt": (
+            "Подписка #{sub_id}\n"
+            "Текущая задержка: {current}\n\n"
+            "Укажите задержку в минутах (0 — отправлять сразу):"
+        ),
+        "edit_delay_current_none": "нет (сразу)",
+        "edit_delay_current": "{minutes} мин.",
+        "edit_delay_invalid": "Введите 0 или положительное число минут.",
+        "edit_delete_old_menu": (
+            "Удалять старые сообщения при новом стриме?\n\n"
+            "Telegram позволяет удалять только сообщения младше ~48 часов."
+        ),
         "edit_preview_menu": "Отключить превью ссылок в уведомлениях?",
         "preview_yes": "✅ Выкл (без превью)",
         "preview_no": "❌ Вкл (с превью)",
@@ -397,13 +591,23 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{title}\n{body}\n\n"
             "{link}"
         ),
+        "aiven_outage": (
+            "⚠️ Aiven: сбой в работе\n"
+            "Подписки могут быть недоступны.\n\n"
+            "{title}\n{body}\n\n"
+            "{link}"
+        ),
         "conflict_polling": (
             "Конфликт polling — возможно, запущено два экземпляра бота "
             "(Render + локально?). Оставляем один."
         ),
         "unhandled_error": "Необработанная ошибка: {err}",
-        "broadcast_prompt": (
-            "Отправьте сообщение для рассылки всем пользователям.\n"
+        "broadcast_prompt": "Выберите тип оповещения:",
+        "broadcast_type_bot_update": "📬 Оповещения об обновлении бота",
+        "broadcast_type_availability": "📡 Оповещения о доступности бота",
+        "broadcast_text_prompt": (
+            "Отправьте текст сообщения.\n"
+            "Оно будет автоматически переведено на язык каждого получателя.\n"
             "/cancel — отмена."
         ),
         "broadcast_empty": "Сообщение не может быть пустым.",
@@ -413,14 +617,33 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Ошибок: {failed}\n"
             "Всего получателей: {total}"
         ),
+        "broadcast_scheduled": (
+            "Сообщение запланировано.\n"
+            "Время отправки: {when}\n"
+            "Получатели получат его автоматически."
+        ),
+        "broadcast_send_now": "Отправить сейчас",
+        "schedule_title": "Выберите время отправки (МСК, UTC+3):",
+        "schedule_pick_hour": "——— Выберите час ———",
+        "schedule_pick_minutes": "Выберите минуты ↘",
+        "schedule_saved_time": "Запомненное время ↘",
+        "schedule_apply": "Применить время",
+        "schedule_show_calendar": "🗓 Показать календарь",
+        "schedule_minutes_header": "——— Выберите минуты ———",
+        "sys_notifications_menu": "Настройка системных уведомлений:",
+        "sys_updates_label": "Оповещения об обновлении бота",
+        "sys_availability_label": "Оповещения о доступности бота",
         "bot_stats": (
             "📊 Статистика бота\n\n"
             "Пользователей: {users}\n"
-            "Получателей (users + owners): {notify_users}\n"
+            "Создали оповещение: {unique_owners}\n"
+            "Получателей: {notify_users}\n"
             "Подписок: {subscriptions_total} "
             "(✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\n"
-            "Уникальных владельцев: {unique_owners}\n"
             "Каналов Twitch: {unique_twitch_channels}\n\n"
+            "Системные оповещения:\n"
+            "• Обновление бота: {sys_updates}\n"
+            "• Доступность бота: {sys_availability}\n\n"
             "Языки:\n"
             "• English: {locale_en}\n"
             "• Русский: {locale_ru}\n"
@@ -452,18 +675,28 @@ def all_menu_buttons() -> set[str]:
         "edit",
         "delete",
         "feedback",
+        "create_schedule",
+        "settings",
+        "language",
         "admin",
         "broadcast",
         "stats",
         "back",
+        "sys_notifications",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
+
+
+def all_wizard_nav_buttons() -> set[str]:
+    return {btn(k, loc) for k in ("wizard_back", "wizard_cancel") for loc in SUPPORTED_LOCALES}
 
 
 def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(btn("new", lang))],
         [KeyboardButton(btn("manage", lang))],
+        [KeyboardButton(btn("create_schedule", lang))],
+        [KeyboardButton(btn("settings", lang))],
         [KeyboardButton(btn("feedback", lang))],
     ]
     if is_admin:
@@ -485,6 +718,17 @@ def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
+def settings_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(btn("sys_notifications", lang))],
+            [KeyboardButton(btn("language", lang))],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def admin_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
@@ -496,6 +740,17 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
+
+def wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
+    row = [KeyboardButton(btn("wizard_cancel", lang))]
+    if back:
+        row.insert(0, KeyboardButton(btn("wizard_back", lang)))
+    return ReplyKeyboardMarkup([row], resize_keyboard=True)
+
+
+def admin_wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
+    return wizard_menu(lang, back=back)
 
 
 def language_keyboard() -> InlineKeyboardMarkup:
@@ -535,11 +790,209 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def delay_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("delay_yes", lang), callback_data="delay_send:1")],
+            [InlineKeyboardButton(t("delay_no", lang), callback_data="delay_send:0")],
+        ]
+    )
+
+
+def repeat_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("repeat_yes", lang), callback_data="repeat:1")],
+            [InlineKeyboardButton(t("repeat_no", lang), callback_data="repeat:0")],
+        ]
+    )
+
+
+def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("broadcast_type_bot_update", lang),
+                    callback_data="admin_type:bot_update",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("broadcast_type_availability", lang),
+                    callback_data="admin_type:availability",
+                )
+            ],
+        ]
+    )
+
+
+def sys_notifications_keyboard(
+    lang: str,
+    *,
+    updates_enabled: bool,
+    availability_enabled: bool,
+) -> InlineKeyboardMarkup:
+    updates_mark = "✅ " if updates_enabled else "❌ "
+    availability_mark = "✅ " if availability_enabled else "❌ "
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    updates_mark + t("sys_updates_label", lang),
+                    callback_data="sys_updates:toggle",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    availability_mark + t("sys_availability_label", lang),
+                    callback_data="sys_availability:toggle",
+                )
+            ],
+        ]
+    )
+
+
+_WEEKDAYS = {
+    "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    "ru": ["пн", "вт", "ср", "чт", "пт", "сб", "вс"],
+}
+_MONTHS = {
+    "en": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    "ru": ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+}
+
+
+def _format_schedule_date(d: date, lang: str) -> str:
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    wd = _WEEKDAYS[loc][d.weekday()]
+    month = _MONTHS[loc][d.month]
+    if loc == "ru":
+        return f"{wd}, {d.day} {month}"
+    return f"{wd}, {month} {d.day}"
+
+
+def format_stream_schedule_date(d: date, lang: str) -> str:
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    month = _MONTHS[loc][d.month]
+    if loc == "ru":
+        return f"{d.day} {month}"
+    return f"{d.day} {month}"
+
+
+def format_stream_schedule_result(entries: list[dict], lang: str) -> str:
+    lines = [
+        t(
+            "stream_schedule_line",
+            lang,
+            date=format_stream_schedule_date(entry["date"], lang),
+            time=entry["time"],
+            game=entry["game"],
+        )
+        for entry in entries
+    ]
+    return "\n".join(lines)
+
+
+def stream_schedule_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("stream_schedule_yes", lang), callback_data="stream_sched:confirm:1")],
+            [InlineKeyboardButton(t("stream_schedule_no", lang), callback_data="stream_sched:confirm:0")],
+        ]
+    )
+
+
+def stream_schedule_day_keyboard(lang: str, *, show_finish: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                t("stream_schedule_no_stream", lang),
+                callback_data="stream_sched:skip",
+            )
+        ]
+    ]
+    if show_finish:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_finish", lang),
+                    callback_data="stream_sched:finish",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:
+    now = datetime.now(SCHEDULE_TZ)
+    page = int(schedule.get("date_page", 0))
+    selected_offset = int(schedule.get("date_offset", 0))
+    hour = schedule.get("hour")
+    minute = schedule.get("minute")
+    show_minutes = bool(schedule.get("show_minutes"))
+    rows: list[list[InlineKeyboardButton]] = []
+
+    rows.append(
+        [InlineKeyboardButton(t("schedule_show_calendar", lang), callback_data="sched:noop")]
+    )
+
+    date_row: list[InlineKeyboardButton] = []
+    for i in range(3):
+        offset = page * 3 + i
+        d = now.date() + timedelta(days=offset)
+        label = _format_schedule_date(d, lang)
+        if offset == selected_offset:
+            label = f"✅ {label}"
+        date_row.append(
+            InlineKeyboardButton(label, callback_data=f"sched:date:{offset}")
+        )
+    if page < 10:
+        date_row.append(InlineKeyboardButton("→", callback_data="sched:date_next"))
+    rows.append(date_row)
+
+    rows.append([InlineKeyboardButton(t("schedule_saved_time", lang), callback_data="sched:saved")])
+
+    rows.append([InlineKeyboardButton(t("schedule_pick_hour", lang), callback_data="sched:noop")])
+    for block in range(4):
+        hour_row = []
+        for h in range(block * 6, block * 6 + 6):
+            label = f"{h:02d}"
+            if hour == h:
+                label = f"✅ {label}"
+            hour_row.append(InlineKeyboardButton(label, callback_data=f"sched:hour:{h}"))
+        rows.append(hour_row)
+
+    if show_minutes:
+        rows.append([InlineKeyboardButton(t("schedule_minutes_header", lang), callback_data="sched:noop")])
+        min_row: list[InlineKeyboardButton] = []
+        for m in range(0, 60, 5):
+            label = f"{m:02d}"
+            if minute == m:
+                label = f"✅ {label}"
+            min_row.append(InlineKeyboardButton(label, callback_data=f"sched:min:{m}"))
+            if len(min_row) == 6:
+                rows.append(min_row)
+                min_row = []
+        if min_row:
+            rows.append(min_row)
+    else:
+        rows.append([InlineKeyboardButton(t("schedule_pick_minutes", lang), callback_data="sched:toggle_min")])
+
+    rows.append(
+        [InlineKeyboardButton(t("schedule_apply", lang), callback_data="sched:apply")]
+    )
+    rows.append([InlineKeyboardButton(t("broadcast_send_now", lang), callback_data="sched:now")])
+    return InlineKeyboardMarkup(rows)
+
+
 def edit_options_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
             [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
+            [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
+            [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
             [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")],
             [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")],
         ]
@@ -552,6 +1005,13 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
             [
                 [InlineKeyboardButton(t("preview_yes", lang), callback_data=f"edit_set:{sub_id}:preview:1")],
                 [InlineKeyboardButton(t("preview_no", lang), callback_data=f"edit_set:{sub_id}:preview:0")],
+            ]
+        )
+    if field == "repeat":
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(t("repeat_yes", lang), callback_data=f"edit_set:{sub_id}:repeat:1")],
+                [InlineKeyboardButton(t("repeat_no", lang), callback_data=f"edit_set:{sub_id}:repeat:0")],
             ]
         )
     return InlineKeyboardMarkup(

@@ -41,7 +41,7 @@ class TwitchClient:
             return self._token
         resp = self._session.post(
             "https://id.twitch.tv/oauth2/token",
-            params={
+            data={
                 "client_id": TWITCH_CLIENT_ID,
                 "client_secret": TWITCH_CLIENT_SECRET,
                 "grant_type": "client_credentials",

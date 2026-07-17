@@ -15,4 +15,8 @@ services:
         value: "60"
       - key: DATABASE_URL
         sync: false
+      - key: ADMIN_USER_IDS
+        sync: false
+      - key: DEEPL_API_KEY
+        sync: false
     autoDeploy: true
