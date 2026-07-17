@@ -129,6 +129,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "bot_no_channel": "The bot cannot see this channel. Add it as an admin.",
         "not_a_group": "This is not a group or community.",
         "bot_no_group": "The bot cannot see this group. Add it to the group.",
+        "dest_not_admin": (
+            "You must be an admin of that channel/group to bind notifications there."
+        ),
+        "sub_limit": (
+            "Subscription limit reached ({limit}). Delete an existing one first."
+        ),
         "test_ok": "✅ Test: the bot can send notifications here.",
         "test_failed": (
             "Could not send a test message. Check the bot's permissions and try again."
@@ -422,6 +428,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "bot_no_channel": "Бот не видит этот канал. Добавьте бота как администратора.",
         "not_a_group": "Это не группа или сообщество.",
         "bot_no_group": "Бот не видит эту группу. Добавьте бота в группу.",
+        "dest_not_admin": (
+            "Чтобы привязать уведомления, вы должны быть администратором "
+            "этого канала или группы."
+        ),
+        "sub_limit": (
+            "Достигнут лимит подписок ({limit}). Сначала удалите одну из существующих."
+        ),
         "test_ok": "✅ Тест: бот может отправлять уведомления сюда.",
         "test_failed": (
             "Не удалось отправить тестовое сообщение. "

@@ -41,6 +41,7 @@ RENDER_STATUS_RSS = os.getenv(
 AIVEN_STATUS_RSS = os.getenv(
     "AIVEN_STATUS_RSS", "https://status.aiven.io/feed.rss"
 )
+MAX_SUBSCRIPTIONS_PER_OWNER = int(os.getenv("MAX_SUBSCRIPTIONS_PER_OWNER", "25"))
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None
 RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "").strip()

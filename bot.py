@@ -14,7 +14,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     Update,
 )
-from telegram.constants import ChatType, ParseMode
+from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Conflict, Forbidden
 from telegram.ext import (
     Application,
@@ -354,6 +354,20 @@ async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> boo
         return False
 
 
+async def _user_can_manage_chat(bot, chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot verify membership of %s in %s: %s", user_id, chat_id, exc
+        )
+        return False
+    return member.status in (
+        ChatMemberStatus.OWNER,
+        ChatMemberStatus.ADMINISTRATOR,
+    )
+
+
 async def _prompt_language(update: Update) -> int:
     await update.effective_message.reply_text(
         t("lang_pick", DEFAULT_LOCALE),
@@ -365,6 +379,16 @@ async def _prompt_language(update: Update) -> int:
 async def _begin_setup_message(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await update.effective_message.reply_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+            reply_markup=_menu(lang, user_id),
+        )
+        return ConversationHandler.END
     await update.effective_message.reply_text(
         t("start_welcome", lang),
         reply_markup=_wizard(lang, back=False),
@@ -409,6 +433,15 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             reply_markup=settings_menu(lang),
         )
         return ConversationHandler.END
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(db.get_subscriptions_by_owner(query.from_user.id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await context.bot.send_message(
+            query.from_user.id,
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+            reply_markup=_menu(lang, query.from_user.id),
+        )
+        return ConversationHandler.END
     await context.bot.send_message(
         query.from_user.id,
         t("start_welcome", lang),
@@ -422,6 +455,15 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.clear()
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await update.effective_message.reply_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+            reply_markup=_menu(lang, user_id),
+        )
+        return ConversationHandler.END
     await update.effective_message.reply_text(
         t("new_sub_prompt", lang),
         reply_markup=_wizard(lang, back=False),
@@ -816,6 +858,12 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await message.reply_text(t("bot_no_group", lang))
             return DEST_CHAT
 
+    if not await _user_can_manage_chat(
+        context.bot, chat_id, update.effective_user.id
+    ):
+        await message.reply_text(t("dest_not_admin", lang))
+        return DEST_CHAT
+
     ok = await _send_test(context.bot, chat_id, thread_id, t("test_ok", lang))
     if not ok:
         await message.reply_text(t("test_failed", lang))
@@ -875,6 +923,16 @@ async def _finish_subscription(
                 return ConversationHandler.END
             sub_id = edit_sub_id
         else:
+            from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+            if len(db.get_subscriptions_by_owner(owner_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+                await context.bot.send_message(
+                    owner_id,
+                    t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+                    reply_markup=_menu(lang, owner_id),
+                )
+                context.user_data.clear()
+                return ConversationHandler.END
             sub_id = db.add_subscription(
                 owner_id=owner_id,
                 twitch_username=data["twitch_username"],

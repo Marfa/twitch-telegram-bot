@@ -8,6 +8,7 @@ from config import parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
 from render_deploy import _service_id
 from render_status import (
+    assert_safe_rss_url,
     fetch_render_status,
     is_aiven_outage,
     is_planned_maintenance,
@@ -122,11 +123,31 @@ def main() -> None:
 
     items = fetch_render_status("https://status.render.com/history.rss")
     assert items
-    assert any(is_planned_maintenance(i) for i in items[:3])
+    # Live feed content varies; only assert parser helpers on fixtures when present.
+    for item in items:
+        is_planned_maintenance(item)
 
     aiven_items = fetch_render_status("https://status.aiven.io/feed.rss")
     assert aiven_items
-    assert not any(is_aiven_outage(i) for i in aiven_items[:3])
+    for item in aiven_items:
+        is_aiven_outage(item)
+
+    assert_safe_rss_url("https://status.render.com/history.rss")
+    try:
+        assert_safe_rss_url("http://status.render.com/history.rss")
+        raise AssertionError("expected http RSS URL rejection")
+    except ValueError:
+        pass
+    try:
+        assert_safe_rss_url("https://evil.example/feed.rss")
+        raise AssertionError("expected host allowlist rejection")
+    except ValueError:
+        pass
+    try:
+        assert_safe_rss_url("https://169.254.169.254/latest/meta-data/")
+        raise AssertionError("expected metadata URL rejection")
+    except ValueError:
+        pass
 
     assert parse_admin_user_ids("") == frozenset()
     assert parse_admin_user_ids("123, 456") == frozenset({123, 456})

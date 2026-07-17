@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
                 notify_admins(
                     f"❌ Render: не удалось задеплоить\n"
                     f"Коммит: {short}\n"
-                    f"Ошибка: {exc}"
+                    f"Ошибка: {type(exc).__name__}"
                 )
             except Exception:
                 logger.exception("Failed to notify admin about deploy error")

@@ -4,6 +4,20 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+_ready = False
+_ready_lock = threading.Lock()
+
+
+def mark_ready() -> None:
+    global _ready
+    with _ready_lock:
+        _ready = True
+
+
+def is_ready() -> bool:
+    with _ready_lock:
+        return _ready
+
 
 class _HealthHandler(BaseHTTPRequestHandler):
     def _health_paths(self) -> bool:
@@ -14,8 +28,12 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        body = b"ok"
-        self.send_response(200)
+        if is_ready():
+            body = b"ok"
+            self.send_response(200)
+        else:
+            body = b"starting"
+            self.send_response(503)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -26,9 +44,13 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        self.send_response(200)
+        if is_ready():
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+        else:
+            self.send_response(503)
+            self.send_header("Content-Length", "8")
         self.send_header("Content-Type", "text/plain")
-        self.send_header("Content-Length", "2")
         self.end_headers()
 
     def log_message(self, format: str, *args) -> None:
