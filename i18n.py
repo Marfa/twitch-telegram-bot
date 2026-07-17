@@ -880,6 +880,10 @@ def format_stream_schedule_date(d: date, lang: str) -> str:
     return f"{d.day} {month}"
 
 
+def format_stream_schedule_prompt_date(d: date, lang: str) -> str:
+    return _format_schedule_date(d, lang)
+
+
 def format_stream_schedule_result(entries: list[dict], lang: str) -> str:
     lines = [
         t(
@@ -903,15 +907,19 @@ def stream_schedule_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def stream_schedule_day_keyboard(lang: str, *, show_finish: bool) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(
-                t("stream_schedule_no_stream", lang),
-                callback_data="stream_sched:skip",
-            )
-        ]
-    ]
+def stream_schedule_day_keyboard(
+    lang: str, *, show_finish: bool, show_skip: bool = True
+) -> InlineKeyboardMarkup | None:
+    rows: list[list[InlineKeyboardButton]] = []
+    if show_skip:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_no_stream", lang),
+                    callback_data="stream_sched:skip",
+                )
+            ]
+        )
     if show_finish:
         rows.append(
             [
@@ -921,7 +929,7 @@ def stream_schedule_day_keyboard(lang: str, *, show_finish: bool) -> InlineKeybo
                 )
             ]
         )
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup(rows) if rows else None
 
 
 def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:

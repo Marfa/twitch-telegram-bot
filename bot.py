@@ -52,7 +52,7 @@ from i18n import (
     settings_menu,
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
-    format_stream_schedule_date,
+    format_stream_schedule_prompt_date,
     format_stream_schedule_result,
     subscriptions_menu,
     sys_notifications_keyboard,
@@ -160,7 +160,7 @@ async def _prompt_stream_schedule_game(
     message = t(
         "stream_schedule_game_prompt",
         lang,
-        date=format_stream_schedule_date(current_date, lang),
+        date=format_stream_schedule_prompt_date(current_date, lang),
     )
     keyboard = stream_schedule_day_keyboard(
         lang, show_finish=_stream_schedule_show_finish(context)
@@ -181,7 +181,9 @@ async def _prompt_stream_schedule_time(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     keyboard = stream_schedule_day_keyboard(
-        lang, show_finish=_stream_schedule_show_finish(context)
+        lang,
+        show_finish=_stream_schedule_show_finish(context),
+        show_skip=False,
     )
     await update.effective_message.reply_text(
         t("stream_schedule_time_prompt", lang),
