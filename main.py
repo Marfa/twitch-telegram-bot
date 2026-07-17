@@ -26,7 +26,7 @@ def main() -> None:
     app = build_application(TELEGRAM_BOT_TOKEN, db, twitch)
     mark_ready()
     app.run_polling(
-        allowed_updates=["message", "callback_query"],
+        allowed_updates=["message", "callback_query", "my_chat_member"],
         drop_pending_updates=True,
     )
 

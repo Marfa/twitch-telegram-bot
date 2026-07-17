@@ -23,6 +23,7 @@ class BotStats:
     unique_twitch_channels: int
     sys_updates: int
     sys_availability: int
+    blocked_users: int
     locale_en: int
     locale_ru: int
     locale_unset: int
@@ -160,6 +161,10 @@ class Database(Protocol):
 
     def upsert_user(self, user_id: int) -> None: ...
 
+    def set_bot_blocked(self, user_id: int, blocked: bool) -> None: ...
+
+    def is_bot_blocked(self, user_id: int) -> bool: ...
+
     def get_notify_user_ids(self) -> list[int]: ...
 
     def get_bot_update_recipients(self) -> list[int]: ...
@@ -291,6 +296,10 @@ class SqliteDatabase:
         if "receive_availability_updates" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN receive_availability_updates INTEGER NOT NULL DEFAULT 1"
+            )
+        if "bot_blocked" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN bot_blocked INTEGER NOT NULL DEFAULT 0"
             )
         if "saved_schedule_hour" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_hour INTEGER")
@@ -509,9 +518,32 @@ class SqliteDatabase:
     def upsert_user(self, user_id: int) -> None:
         with self._conn() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+                """
+                INSERT INTO users (user_id, bot_blocked) VALUES (?, 0)
+                ON CONFLICT(user_id) DO UPDATE SET bot_blocked = 0
+                """,
                 (user_id,),
             )
+
+    def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, bot_blocked) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET bot_blocked = excluded.bot_blocked
+                """,
+                (user_id, int(blocked)),
+            )
+
+    def is_bot_blocked(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT bot_blocked FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return False
+        return bool(row["bot_blocked"])
 
     def get_notify_user_ids(self) -> list[int]:
         with self._conn() as conn:
@@ -526,14 +558,16 @@ class SqliteDatabase:
 
     def get_bot_update_recipients(self) -> list[int]:
         return [
-            uid for uid in self.get_notify_user_ids() if self.get_receive_bot_updates(uid)
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_bot_updates(uid) and not self.is_bot_blocked(uid)
         ]
 
     def get_availability_recipients(self) -> list[int]:
         return [
             uid
             for uid in self.get_notify_user_ids()
-            if self.get_receive_availability_updates(uid)
+            if self.get_receive_availability_updates(uid) and not self.is_bot_blocked(uid)
         ]
 
     def get_receive_bot_updates(self, user_id: int) -> bool:
@@ -698,6 +732,7 @@ class SqliteDatabase:
                 ) AS n
                 LEFT JOIN users u ON u.user_id = n.id
                 WHERE COALESCE(u.receive_bot_updates, 1) = 1
+                  AND COALESCE(u.bot_blocked, 0) = 0
                 """
             ).fetchone()["c"]
             sys_availability = conn.execute(
@@ -709,7 +744,11 @@ class SqliteDatabase:
                 ) AS n
                 LEFT JOIN users u ON u.user_id = n.id
                 WHERE COALESCE(u.receive_availability_updates, 1) = 1
+                  AND COALESCE(u.bot_blocked, 0) = 0
                 """
+            ).fetchone()["c"]
+            blocked_users = conn.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE bot_blocked = 1"
             ).fetchone()["c"]
             locale_en = conn.execute(
                 "SELECT COUNT(*) AS c FROM users WHERE locale = 'en'"
@@ -730,6 +769,7 @@ class SqliteDatabase:
             unique_twitch_channels=int(unique_twitch),
             sys_updates=int(sys_updates),
             sys_availability=int(sys_availability),
+            blocked_users=int(blocked_users),
             locale_en=int(locale_en),
             locale_ru=int(locale_ru),
             locale_unset=int(locale_unset),
@@ -835,6 +875,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_availability_updates BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS bot_blocked BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             cur.execute(
@@ -1095,11 +1141,34 @@ class PostgresDatabase:
             cur = self._cursor(conn)
             cur.execute(
                 """
-                INSERT INTO users (user_id) VALUES (%s)
-                ON CONFLICT DO NOTHING
+                INSERT INTO users (user_id, bot_blocked) VALUES (%s, FALSE)
+                ON CONFLICT (user_id) DO UPDATE SET bot_blocked = FALSE
                 """,
                 (user_id,),
             )
+
+    def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, bot_blocked) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET bot_blocked = EXCLUDED.bot_blocked
+                """,
+                (user_id, bool(blocked)),
+            )
+
+    def is_bot_blocked(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT bot_blocked FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return False
+        return bool(row["bot_blocked"])
 
     def get_notify_user_ids(self) -> list[int]:
         with self._conn() as conn:
@@ -1116,14 +1185,16 @@ class PostgresDatabase:
 
     def get_bot_update_recipients(self) -> list[int]:
         return [
-            uid for uid in self.get_notify_user_ids() if self.get_receive_bot_updates(uid)
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_bot_updates(uid) and not self.is_bot_blocked(uid)
         ]
 
     def get_availability_recipients(self) -> list[int]:
         return [
             uid
             for uid in self.get_notify_user_ids()
-            if self.get_receive_availability_updates(uid)
+            if self.get_receive_availability_updates(uid) and not self.is_bot_blocked(uid)
         ]
 
     def get_receive_bot_updates(self, user_id: int) -> bool:
@@ -1310,6 +1381,7 @@ class PostgresDatabase:
                 ) AS n
                 LEFT JOIN users u ON u.user_id = n.id
                 WHERE COALESCE(u.receive_bot_updates, TRUE) = TRUE
+                  AND COALESCE(u.bot_blocked, FALSE) = FALSE
                 """
             )
             sys_updates = int(cur.fetchone()["c"])
@@ -1322,9 +1394,14 @@ class PostgresDatabase:
                 ) AS n
                 LEFT JOIN users u ON u.user_id = n.id
                 WHERE COALESCE(u.receive_availability_updates, TRUE) = TRUE
+                  AND COALESCE(u.bot_blocked, FALSE) = FALSE
                 """
             )
             sys_availability = int(cur.fetchone()["c"])
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE bot_blocked = TRUE"
+            )
+            blocked_users = int(cur.fetchone()["c"])
             cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'en'")
             locale_en = int(cur.fetchone()["c"])
             cur.execute("SELECT COUNT(*) AS c FROM users WHERE locale = 'ru'")
@@ -1343,6 +1420,7 @@ class PostgresDatabase:
             unique_twitch_channels=unique_twitch,
             sys_updates=sys_updates,
             sys_availability=sys_availability,
+            blocked_users=blocked_users,
             locale_en=locale_en,
             locale_ru=locale_ru,
             locale_unset=locale_unset,

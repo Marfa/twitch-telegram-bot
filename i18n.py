@@ -295,6 +295,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_done": (
             "Broadcast complete.\n"
             "Sent: {sent}\n"
+            "Blocked the bot: {blocked}\n"
             "Failed: {failed}\n"
             "Total recipients: {total}"
         ),
@@ -324,7 +325,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Twitch channels tracked: {unique_twitch_channels}\n\n"
             "System notifications:\n"
             "• Bot updates: {sys_updates}\n"
-            "• Bot availability: {sys_availability}\n\n"
+            "• Bot availability: {sys_availability}\n"
+            "• Blocked the bot: {blocked_users}\n\n"
             "Languages:\n"
             "• English: {locale_en}\n"
             "• Russian: {locale_ru}\n"
@@ -614,6 +616,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_done": (
             "Рассылка завершена.\n"
             "Доставлено: {sent}\n"
+            "Заблокировали бота: {blocked}\n"
             "Ошибок: {failed}\n"
             "Всего получателей: {total}"
         ),
@@ -643,7 +646,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Каналов Twitch: {unique_twitch_channels}\n\n"
             "Системные оповещения:\n"
             "• Обновление бота: {sys_updates}\n"
-            "• Доступность бота: {sys_availability}\n\n"
+            "• Доступность бота: {sys_availability}\n"
+            "• Заблокировали бота: {blocked_users}\n\n"
             "Языки:\n"
             "• English: {locale_en}\n"
             "• Русский: {locale_ru}\n"

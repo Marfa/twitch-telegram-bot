@@ -86,6 +86,7 @@ def main() -> None:
         assert stats.subscriptions_enabled == 1
         assert stats.sys_updates == 1
         assert stats.sys_availability == 1
+        assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
@@ -114,6 +115,16 @@ def main() -> None:
         db.set_receive_availability_updates(1, False)
         assert db.get_receive_availability_updates(1) is False
         assert 1 not in db.get_availability_recipients()
+        db.set_receive_bot_updates(1, True)
+        db.set_receive_availability_updates(1, True)
+        db.set_bot_blocked(1, True)
+        assert db.is_bot_blocked(1) is True
+        assert 1 not in db.get_bot_update_recipients()
+        assert 1 not in db.get_availability_recipients()
+        assert db.get_bot_stats().blocked_users == 1
+        assert db.get_bot_stats().sys_updates == 0
+        db.upsert_user(1)
+        assert db.is_bot_blocked(1) is False
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1
         )

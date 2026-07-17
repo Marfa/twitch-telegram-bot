@@ -19,6 +19,7 @@ from telegram.error import BadRequest, Conflict, Forbidden
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
@@ -1641,14 +1642,16 @@ async def _send_admin_broadcast(
     text: str,
     *,
     source_lang: str | None = None,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     db: Database = context.application.bot_data["db"]
     if msg_type == "bot_update":
         user_ids = db.get_bot_update_recipients()
     elif msg_type == "availability":
         user_ids = db.get_availability_recipients()
     else:
-        user_ids = db.get_notify_user_ids()
+        user_ids = [
+            uid for uid in db.get_notify_user_ids() if not db.is_bot_blocked(uid)
+        ]
     source = source_lang or DEFAULT_LOCALE
     user_locales = {
         uid: db.get_user_locale(uid) or DEFAULT_LOCALE for uid in user_ids
@@ -1659,17 +1662,37 @@ async def _send_admin_broadcast(
         source,
         set(user_locales.values()),
     )
-    sent = failed = 0
+    sent = failed = blocked = 0
     for uid in user_ids:
         locale = user_locales[uid]
         message = translations.get(locale, text)
         try:
             await context.bot.send_message(uid, message)
             sent += 1
-        except (BadRequest, Forbidden) as exc:
+        except Forbidden as exc:
+            if "blocked" in str(exc).lower():
+                db.set_bot_blocked(uid, True)
+                blocked += 1
+            else:
+                failed += 1
+                logger.warning("Broadcast to %s failed: %s", uid, exc)
+        except BadRequest as exc:
             failed += 1
             logger.warning("Broadcast to %s failed: %s", uid, exc)
-    return sent, failed, len(user_ids)
+    return sent, failed, blocked, len(user_ids)
+
+
+async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    result = update.my_chat_member
+    if result is None or result.chat.type != ChatType.PRIVATE:
+        return
+    db: Database = context.application.bot_data["db"]
+    user_id = result.from_user.id
+    status = result.new_chat_member.status
+    if status == ChatMemberStatus.KICKED:
+        db.set_bot_blocked(user_id, True)
+    elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
+        db.set_bot_blocked(user_id, False)
 
 
 async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1742,12 +1765,19 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
     msg_type = context.user_data.get("admin_msg_type", "bot_update")
     text = context.user_data.get("admin_msg_text", "")
     if data == "sched:now":
-        sent, failed, total = await _send_admin_broadcast(
+        sent, failed, blocked, total = await _send_admin_broadcast(
             context, msg_type, text, source_lang=lang
         )
         context.user_data.clear()
         await query.edit_message_text(
-            t("broadcast_done", lang, sent=sent, failed=failed, total=total)
+            t(
+                "broadcast_done",
+                lang,
+                sent=sent,
+                failed=failed,
+                blocked=blocked,
+                total=total,
+            )
         )
         await context.bot.send_message(user_id, t("menu_admin", lang), reply_markup=admin_menu(lang))
         return ConversationHandler.END
@@ -1766,13 +1796,20 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             - datetime.now(timezone.utc)
         ).total_seconds()
         if when <= 0:
-            sent, failed, total = await _send_admin_broadcast(
+            sent, failed, blocked, total = await _send_admin_broadcast(
                 context, msg_type, text, source_lang=lang
             )
             db.mark_scheduled_broadcast_sent(broadcast_id)
             context.user_data.clear()
             await query.edit_message_text(
-                t("broadcast_done", lang, sent=sent, failed=failed, total=total)
+                t(
+                    "broadcast_done",
+                    lang,
+                    sent=sent,
+                    failed=failed,
+                    blocked=blocked,
+                    total=total,
+                )
             )
         else:
             context.job_queue.run_once(
@@ -1900,6 +1937,7 @@ def _format_stats(stats: BotStats, lang: str) -> str:
         unique_twitch_channels=stats.unique_twitch_channels,
         sys_updates=stats.sys_updates,
         sys_availability=stats.sys_availability,
+        blocked_users=stats.blocked_users,
         locale_en=stats.locale_en,
         locale_ru=stats.locale_ru,
         locale_unset=stats.locale_unset,
@@ -2028,7 +2066,12 @@ async def _notify_status_items(
                     text,
                     disable_web_page_preview=True,
                 )
-            except (BadRequest, Forbidden) as exc:
+            except Forbidden as exc:
+                if "blocked" in str(exc).lower():
+                    db.set_bot_blocked(user_id, True)
+                else:
+                    logger.warning("Cannot notify user %s: %s", user_id, exc)
+            except BadRequest as exc:
                 logger.warning("Cannot notify user %s: %s", user_id, exc)
 
 
@@ -2177,6 +2220,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("stats"), admin_show_stats),
+        group=0,
+    )
+    app.add_handler(
+        ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
         group=0,
     )
     app.add_handler(
