@@ -38,6 +38,8 @@ def translate_text(text: str, *, target_lang: str, source_lang: str | None = Non
     payload: dict[str, object] = {
         "text": [text],
         "target_lang": _DEEPL_TARGET[target],
+        # Preserve Telegram HTML from message.text_html (bold/italic/links).
+        "tag_handling": "html",
     }
     if source:
         payload["source_lang"] = _DEEPL_SOURCE[source]

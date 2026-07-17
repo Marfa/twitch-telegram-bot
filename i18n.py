@@ -48,11 +48,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "finish_setup_first": "Finish the subscription setup or tap /cancel.",
         "stream_schedule_intro": (
             "Use this menu to build text for publishing your weekly schedule, starting on Monday.\n\n"
-            "Example:\n"
-            "<b>- 13 July 15:30 Sovereign Syndicate\n"
+            "<b>Example:</b>\n"
+            "- 13 July 15:30 Sovereign Syndicate\n"
             "- 14 July 15:30 Sovereign Syndicate\n"
             "- 15 July 15:30 Sovereign Syndicate\n"
-            "- 17 July 15:30 Sovereign Syndicate</b>"
+            "- 17 July 15:30 Sovereign Syndicate"
         ),
         "stream_schedule_confirm": "Create the schedule?",
         "stream_schedule_yes": "✅ Yes",
@@ -300,7 +300,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_bot_update": "📬 Bot update notifications",
         "broadcast_type_availability": "📡 Bot availability alerts",
         "broadcast_text_prompt": (
-            "Send the message text.\n"
+            "Send the message text (bold/italic and line breaks are kept).\n"
             "It will be auto-translated to each recipient's language.\n"
             "/cancel — abort."
         ),
@@ -381,11 +381,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_intro": (
             "С помощью этого меню вы можете сформировать текст для публикации "
             "вашего расписания на неделю, начиная с понедельника.\n\n"
-            "Пример:\n"
-            "<b>- 13 июля 15:30 Sovereign Syndicate\n"
+            "<b>Пример:</b>\n"
+            "- 13 июля 15:30 Sovereign Syndicate\n"
             "- 14 июля 15:30 Sovereign Syndicate\n"
             "- 15 июля 15:30 Sovereign Syndicate\n"
-            "- 17 июля 15:30 Sovereign Syndicate</b>"
+            "- 17 июля 15:30 Sovereign Syndicate"
         ),
         "stream_schedule_confirm": "Сформировать расписание?",
         "stream_schedule_yes": "✅ Да",
@@ -634,7 +634,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_bot_update": "📬 Оповещения об обновлении бота",
         "broadcast_type_availability": "📡 Оповещения о доступности бота",
         "broadcast_text_prompt": (
-            "Отправьте текст сообщения.\n"
+            "Отправьте текст сообщения (жирный/курсив и переносы сохраняются).\n"
             "Оно будет автоматически переведено на язык каждого получателя.\n"
             "/cancel — отмена."
         ),

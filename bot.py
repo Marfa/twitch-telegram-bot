@@ -1708,14 +1708,17 @@ async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not _is_admin(user_id):
         return ConversationHandler.END
     lang = _user_lang(context, user_id)
-    text = (update.effective_message.text or "").strip()
-    if text in all_menu_buttons():
+    msg = update.effective_message
+    plain = (msg.text or "").strip()
+    if plain in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return ADMIN_MSG_TEXT
-    if not text:
+    if not plain:
         await update.effective_message.reply_text(t("broadcast_empty", lang))
         return ADMIN_MSG_TEXT
 
+    # Keep Telegram client formatting (bold/italic/links/…) as HTML for send.
+    text = (msg.text_html or plain).strip()
     context.user_data["admin_msg_text"] = text
     db: Database = context.application.bot_data["db"]
     hour, minute = db.get_saved_schedule(user_id)
@@ -1775,7 +1778,13 @@ async def _send_admin_broadcast(
         locale = user_locales[uid]
         message = translations.get(locale, text)
         try:
-            await context.bot.send_message(uid, message)
+            try:
+                await context.bot.send_message(
+                    uid, message, parse_mode=ParseMode.HTML
+                )
+            except BadRequest:
+                # Plain legacy text or translation broke tags — send without parse_mode.
+                await context.bot.send_message(uid, message)
             sent += 1
         except Forbidden as exc:
             if "blocked" in str(exc).lower():
