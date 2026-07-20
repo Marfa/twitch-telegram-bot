@@ -41,6 +41,7 @@ class Subscription:
     thread_id: int | None
     enabled: bool
     delete_previous: bool
+    notify_delete_fail: bool
     disable_link_preview: bool
     delay_minutes: int
     suppress_repeat_minutes: int
@@ -69,6 +70,7 @@ def _row_to_sub(row: Any) -> Subscription:
         thread_id=row["thread_id"],
         enabled=bool(row["enabled"]),
         delete_previous=bool(row["delete_previous"]),
+        notify_delete_fail=bool(row["notify_delete_fail"]),
         disable_link_preview=bool(row["disable_link_preview"]),
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
@@ -124,6 +126,7 @@ class Database(Protocol):
         chat_id: int,
         thread_id: int | None,
         delete_previous: bool = False,
+        notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
@@ -160,6 +163,8 @@ class Database(Protocol):
     def mark_status_seen(self, guid: str) -> None: ...
 
     def upsert_user(self, user_id: int) -> None: ...
+
+    def count_new_users_since(self, since: datetime) -> int: ...
 
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None: ...
 
@@ -286,6 +291,10 @@ class SqliteDatabase:
             )
         if "notify_cooldown_until" not in cols:
             conn.execute("ALTER TABLE subscriptions ADD COLUMN notify_cooldown_until TEXT")
+        if "notify_delete_fail" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN notify_delete_fail INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -328,6 +337,7 @@ class SqliteDatabase:
         chat_id: int,
         thread_id: int | None,
         delete_previous: bool = False,
+        notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
@@ -338,9 +348,9 @@ class SqliteDatabase:
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
-                    delete_previous, disable_link_preview, delay_minutes,
-                    suppress_repeat_minutes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delete_previous, notify_delete_fail, disable_link_preview,
+                    delay_minutes, suppress_repeat_minutes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -351,6 +361,7 @@ class SqliteDatabase:
                     chat_id,
                     thread_id,
                     int(delete_previous),
+                    int(notify_delete_fail),
                     int(disable_link_preview),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
@@ -427,6 +438,7 @@ class SqliteDatabase:
             "chat_id",
             "thread_id",
             "delete_previous",
+            "notify_delete_fail",
             "disable_link_preview",
             "delay_minutes",
             "suppress_repeat_minutes",
@@ -437,7 +449,7 @@ class SqliteDatabase:
             if key not in allowed:
                 continue
             updates.append(f"{key} = ?")
-            if key in ("delete_previous", "disable_link_preview"):
+            if key in ("delete_previous", "notify_delete_fail", "disable_link_preview"):
                 values.append(int(bool(value)))
             elif key in ("delay_minutes", "suppress_repeat_minutes"):
                 values.append(max(0, int(value)))
@@ -524,6 +536,16 @@ class SqliteDatabase:
                 """,
                 (user_id,),
             )
+
+    def count_new_users_since(self, since: datetime) -> int:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        since_s = since_utc.strftime("%Y-%m-%d %H:%M:%S")
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE first_seen >= ?",
+                (since_s,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
 
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
         with self._conn() as conn:
@@ -898,6 +920,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS notify_delete_fail BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -949,6 +977,7 @@ class PostgresDatabase:
         chat_id: int,
         thread_id: int | None,
         delete_previous: bool = False,
+        notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
@@ -960,9 +989,9 @@ class PostgresDatabase:
                 INSERT INTO subscriptions (
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
-                    delete_previous, disable_link_preview, delay_minutes,
-                    suppress_repeat_minutes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delete_previous, notify_delete_fail, disable_link_preview,
+                    delay_minutes, suppress_repeat_minutes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -974,6 +1003,7 @@ class PostgresDatabase:
                     chat_id,
                     thread_id,
                     delete_previous,
+                    notify_delete_fail,
                     disable_link_preview,
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
@@ -1062,6 +1092,7 @@ class PostgresDatabase:
             "chat_id",
             "thread_id",
             "delete_previous",
+            "notify_delete_fail",
             "disable_link_preview",
             "delay_minutes",
             "suppress_repeat_minutes",
@@ -1072,7 +1103,7 @@ class PostgresDatabase:
             if key not in allowed:
                 continue
             updates.append(f"{key} = %s")
-            if key in ("delete_previous", "disable_link_preview"):
+            if key in ("delete_previous", "notify_delete_fail", "disable_link_preview"):
                 values.append(bool(value))
             elif key in ("delay_minutes", "suppress_repeat_minutes"):
                 values.append(max(0, int(value)))
@@ -1177,6 +1208,17 @@ class PostgresDatabase:
                 """,
                 (user_id,),
             )
+
+    def count_new_users_since(self, since: datetime) -> int:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE first_seen >= %s",
+                (since_utc,),
+            )
+            row = cur.fetchone()
+        return int(row["n"]) if row else 0
 
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
         with self._conn() as conn:

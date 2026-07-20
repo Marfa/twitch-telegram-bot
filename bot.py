@@ -40,6 +40,7 @@ from i18n import (
     all_wizard_nav_buttons,
     btn,
     delete_old_keyboard,
+    delete_fail_notify_keyboard,
     dest_keyboard,
     dest_label,
     delay_keyboard,
@@ -86,6 +87,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     DEST_TYPE,
     DEST_CHAT,
     DELETE_OLD,
+    DELETE_FAIL_NOTIFY,
     EDIT_TEMPLATE,
     EDIT_DELAY,
     EDIT_REPEAT,
@@ -95,7 +97,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_CONFIRM,
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
-) = range(20)
+) = range(21)
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 
@@ -356,6 +358,13 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, DEST_CHAT)
         return DEST_CHAT
+    if state == DELETE_FAIL_NOTIFY:
+        await update.effective_message.reply_text(
+            t("delete_old_text", lang),
+            reply_markup=delete_old_keyboard(lang),
+        )
+        _set_wizard_back(context, DELETE_OLD)
+        return DELETE_OLD
     if state == ADMIN_MSG_TEXT:
         user_id = update.effective_user.id
         await update.effective_message.reply_text(
@@ -429,22 +438,47 @@ def _format_sub_line(sub: Subscription, lang: str, sub_num: int) -> str:
     )
 
 
+def _message_link(chat_id: int, message_id: int, thread_id: int | None = None) -> str:
+    s = str(chat_id)
+    if s.startswith("-100"):
+        internal = s[4:]
+    else:
+        internal = str(abs(chat_id))
+    if thread_id:
+        return f"https://t.me/c/{internal}/{thread_id}/{message_id}"
+    return f"https://t.me/c/{internal}/{message_id}"
+
+
 async def _send_notification(
     bot,
     db: Database,
     sub: Subscription,
     text: str,
 ) -> None:
-    if sub.delete_previous and sub.last_message_id:
+    if sub.delete_previous and sub.last_message_id and sub.dest_type != "dm":
         try:
             await bot.delete_message(chat_id=sub.chat_id, message_id=sub.last_message_id)
-        except BadRequest as exc:
+        except (BadRequest, Forbidden) as exc:
             logger.warning(
                 "Cannot delete message %s in %s: %s",
                 sub.last_message_id,
                 sub.chat_id,
                 exc,
             )
+            if sub.notify_delete_fail:
+                lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                link = _message_link(sub.chat_id, sub.last_message_id, sub.thread_id)
+                try:
+                    await bot.send_message(
+                        sub.owner_id,
+                        t("delete_fail_notice", lang, link=link),
+                    )
+                except (BadRequest, Forbidden) as notify_exc:
+                    logger.warning(
+                        "Cannot notify owner %s about delete failure: %s",
+                        sub.owner_id,
+                        notify_exc,
+                    )
 
     kwargs: dict = {"chat_id": sub.chat_id, "text": text}
     if sub.thread_id:
@@ -453,7 +487,7 @@ async def _send_notification(
         kwargs["disable_web_page_preview"] = True
     try:
         msg = await bot.send_message(**kwargs)
-        if sub.delete_previous:
+        if sub.delete_previous and sub.dest_type != "dm":
             db.set_last_message_id(sub.id, msg.message_id)
         if sub.suppress_repeat_minutes > 0:
             db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
@@ -862,12 +896,15 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if dest_type == "dm":
         context.user_data["pending_chat_id"] = query.from_user.id
         context.user_data["pending_thread_id"] = None
-        await query.edit_message_text(
-            t("delete_old_text", lang),
-            reply_markup=delete_old_keyboard(lang),
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        return await _finish_subscription(
+            update,
+            context,
+            query.from_user.id,
+            query.from_user.id,
+            None,
         )
-        _set_wizard_back(context, DELETE_OLD)
-        return DELETE_OLD
 
     setup_key = "channel_setup" if dest_type == "channel" else "group_setup"
     await query.edit_message_text("✓")
@@ -1002,7 +1039,29 @@ async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
-    context.user_data["delete_previous"] = query.data.endswith(":1")
+    delete_previous = query.data.endswith(":1")
+    context.user_data["delete_previous"] = delete_previous
+    if not delete_previous:
+        context.user_data["notify_delete_fail"] = False
+        chat_id = context.user_data["pending_chat_id"]
+        thread_id = context.user_data.get("pending_thread_id")
+        return await _finish_subscription(
+            update, context, query.from_user.id, chat_id, thread_id
+        )
+    await query.edit_message_text(
+        t("delete_fail_notify_text", lang),
+        reply_markup=delete_fail_notify_keyboard(lang),
+    )
+    _set_wizard_back(context, DELETE_FAIL_NOTIFY)
+    return DELETE_FAIL_NOTIFY
+
+
+async def receive_delete_fail_notify(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["notify_delete_fail"] = query.data.endswith(":1")
     chat_id = context.user_data["pending_chat_id"]
     thread_id = context.user_data.get("pending_thread_id")
     return await _finish_subscription(
@@ -1021,16 +1080,20 @@ async def _finish_subscription(
     lang = _user_lang(context, owner_id)
     data = dict(context.user_data)
     edit_sub_id = data.get("edit_sub_id")
+    dest_type = data["dest_type"]
+    delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
+    notify_delete_fail = bool(data.get("notify_delete_fail", False)) and delete_previous
 
     try:
         if edit_sub_id:
             ok = db.update_subscription(
                 edit_sub_id,
                 owner_id,
-                dest_type=data["dest_type"],
+                dest_type=dest_type,
                 chat_id=chat_id,
                 thread_id=thread_id,
-                delete_previous=bool(data.get("delete_previous", False)),
+                delete_previous=delete_previous,
+                notify_delete_fail=notify_delete_fail,
             )
             if not ok:
                 await context.bot.send_message(
@@ -1057,10 +1120,11 @@ async def _finish_subscription(
                 twitch_username=data["twitch_username"],
                 twitch_user_id=data["twitch_user_id"],
                 message_template=data["message_template"],
-                dest_type=data["dest_type"],
+                dest_type=dest_type,
                 chat_id=chat_id,
                 thread_id=thread_id,
-                delete_previous=bool(data.get("delete_previous", False)),
+                delete_previous=delete_previous,
+                notify_delete_fail=notify_delete_fail,
                 disable_link_preview=bool(data.get("disable_link_preview", False)),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
@@ -1092,9 +1156,19 @@ async def _finish_subscription(
         )
         delete_note = (
             t("delete_yes", lang)
-            if data.get("delete_previous")
+            if delete_previous
             else t("delete_no", lang)
         )
+        delete_fail_note = ""
+        if delete_previous:
+            delete_fail_note = (
+                "\n"
+                + (
+                    t("delete_fail_yes_note", lang)
+                    if notify_delete_fail
+                    else t("delete_fail_no_note", lang)
+                )
+            )
         preview_note = (
             t("preview_off", lang)
             if data.get("disable_link_preview")
@@ -1118,9 +1192,10 @@ async def _finish_subscription(
             lang,
             sub_id=user_sub_num,
             twitch_username=data["twitch_username"],
-            dest=dest_label(data["dest_type"], lang),
+            dest=dest_label(dest_type, lang),
             thread_note=thread_note,
             delete_note=delete_note,
+            delete_fail_note=delete_fail_note,
             preview_note=preview_note,
             delay_note=delay_note,
             repeat_note=repeat_note,
@@ -1390,7 +1465,12 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text(
         t("edit_menu", lang, sub_id=sub_num, username=sub.twitch_username),
-        reply_markup=edit_options_keyboard(sub_id, lang),
+        reply_markup=edit_options_keyboard(
+            sub_id,
+            lang,
+            dest_type=sub.dest_type,
+            delete_previous=sub.delete_previous,
+        ),
     )
 
 
@@ -1471,8 +1551,22 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     parts = query.data.split(":")
     sub_id = int(parts[1])
     field = parts[2]
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if field in ("delete_old", "delete_fail") and sub.dest_type == "dm":
+        await query.edit_message_text(
+            t("edit_menu", lang, sub_id=_owner_sub_number(db, query.from_user.id, sub_id), username=sub.twitch_username),
+            reply_markup=edit_options_keyboard(
+                sub_id, lang, dest_type=sub.dest_type, delete_previous=sub.delete_previous
+            ),
+        )
+        return
     menu_keys = {
         "delete_old": "edit_delete_old_menu",
+        "delete_fail": "edit_delete_fail_menu",
         "preview": "edit_preview_menu",
         "repeat": "edit_repeat_menu",
     }
@@ -1491,8 +1585,22 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     field = parts[2]
     value = parts[3] == "1"
     db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if field in ("delete_old", "delete_fail") and sub.dest_type == "dm":
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
     if field == "delete_old":
-        kwargs = {"delete_previous": value}
+        kwargs: dict = {"delete_previous": value}
+        if not value:
+            kwargs["notify_delete_fail"] = False
+    elif field == "delete_fail":
+        if not sub.delete_previous:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return
+        kwargs = {"notify_delete_fail": value}
     elif field == "preview":
         kwargs = {"disable_link_preview": value}
     elif field == "repeat":
@@ -2146,6 +2254,39 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
         db.mark_scheduled_broadcast_sent(item.id)
 
 
+def _seconds_until_next_weekly_report() -> float:
+    now = datetime.now(SCHEDULE_TZ)
+    # Next Monday 10:00 MSK
+    days_ahead = (7 - now.weekday()) % 7
+    target = now.replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(
+        days=days_ahead
+    )
+    if target <= now:
+        target += timedelta(days=7)
+    return (target - now).total_seconds()
+
+
+async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    from config import ADMIN_USER_IDS
+
+    if not ADMIN_USER_IDS:
+        return
+    db: Database = context.application.bot_data["db"]
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    count = db.count_new_users_since(since)
+    if count <= 0:
+        return
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        try:
+            await context.bot.send_message(
+                admin_id,
+                t("weekly_new_users", lang, count=count),
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning("Cannot send weekly report to admin %s: %s", admin_id, exc)
+
+
 async def _restore_broadcast_jobs(app: Application) -> None:
     db: Database = app.bot_data["db"]
     now = datetime.now(timezone.utc)
@@ -2243,11 +2384,17 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
-        CallbackQueryHandler(on_edit_bool_menu, pattern=r"^edit_f:\d+:(delete_old|preview|repeat)$"),
+        CallbackQueryHandler(
+            on_edit_bool_menu,
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|preview|repeat)$",
+        ),
         group=0,
     )
     app.add_handler(
-        CallbackQueryHandler(on_edit_set, pattern=r"^edit_set:\d+:(delete_old|preview|repeat):1$"),
+        CallbackQueryHandler(
+            on_edit_set,
+            pattern=r"^edit_set:\d+:(delete_old|delete_fail|preview):[01]$|^edit_set:\d+:repeat:1$",
+        ),
         group=0,
     )
 
@@ -2331,6 +2478,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:"),
             ],
+            DELETE_FAIL_NOTIFY: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(receive_delete_fail_notify, pattern=r"^delete_fail:"),
+            ],
             ADMIN_MSG_TYPE: [
                 _wiz_cancel,
                 CallbackQueryHandler(admin_select_type, pattern=r"^admin_type:"),
@@ -2379,6 +2531,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(
         check_render_status, interval=STATUS_CHECK_INTERVAL, first=30
+    )
+    app.job_queue.run_repeating(
+        weekly_new_users_report,
+        interval=7 * 24 * 3600,
+        first=_seconds_until_next_weekly_report(),
     )
     if DATABASE_URL:
         app.job_queue.run_repeating(

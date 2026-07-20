@@ -130,6 +130,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "delete_old_yes": "✅ Yes, delete",
         "delete_old_no": "❌ No",
+        "delete_fail_notify_text": (
+            "Notify about problems deleting the message?"
+        ),
+        "delete_fail_yes": "✅ Yes",
+        "delete_fail_no": "❌ No",
+        "delete_fail_notice": (
+            "Could not delete the previous notification:\n{link}"
+        ),
+        "delete_fail_yes_note": "Notify on delete failure: yes",
+        "delete_fail_no_note": "Notify on delete failure: no",
+        "weekly_new_users": "New users: {count}",
         "group_not_found": "Group not found. Add the bot and check the link.",
         "dest_not_found_channel": "Channel not found. Check @username.",
         "dest_not_found_group": "Group not found. Check @username.",
@@ -165,7 +176,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Subscription #{sub_id} created.\n"
             "Twitch channel: {twitch_username}\n"
             "Notifications: {dest}{thread_note}\n"
-            "{delete_note}\n"
+            "{delete_note}{delete_fail_note}\n"
             "{preview_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n\n"
@@ -232,6 +243,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_template": "📝 Message template",
         "edit_dest": "📍 Destination",
         "edit_delete_old": "🗑 Delete old messages",
+        "edit_delete_fail_notify": "⚠️ Notify on delete failure",
         "edit_link_preview": "🔗 Link preview",
         "edit_delay": "⏱ Delay send",
         "edit_repeat": "🔁 Repeat notifications",
@@ -261,6 +273,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Delete old messages on new stream?\n\n"
             "Telegram allows deleting only messages younger than ~48 hours."
         ),
+        "edit_delete_fail_menu": "Notify about problems deleting the message?",
         "edit_preview_menu": "Disable link preview in notifications?",
         "preview_yes": "✅ Off (no preview)",
         "preview_no": "❌ On (show preview)",
@@ -450,6 +463,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "delete_old_yes": "✅ Да, удалять",
         "delete_old_no": "❌ Нет",
+        "delete_fail_notify_text": (
+            "Сообщать о проблемах при удалении сообщения?"
+        ),
+        "delete_fail_yes": "✅ Да",
+        "delete_fail_no": "❌ Нет",
+        "delete_fail_notice": (
+            "Не удалось удалить предыдущее оповещение:\n{link}"
+        ),
+        "delete_fail_yes_note": "Сообщать о проблемах удаления: да",
+        "delete_fail_no_note": "Сообщать о проблемах удаления: нет",
+        "weekly_new_users": "Новых пользователей: {count}",
         "group_not_found": "Группа не найдена. Добавьте бота и проверьте ссылку.",
         "dest_not_found_channel": "Канал не найден. Проверьте @username.",
         "dest_not_found_group": "Группа не найдена. Проверьте @username.",
@@ -488,7 +512,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Подписка #{sub_id} создана.\n"
             "Канал Twitch: {twitch_username}\n"
             "Уведомления: {dest}{thread_note}\n"
-            "{delete_note}\n"
+            "{delete_note}{delete_fail_note}\n"
             "{preview_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n\n"
@@ -555,6 +579,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_template": "📝 Шаблон сообщения",
         "edit_dest": "📍 Куда отправлять",
         "edit_delete_old": "🗑 Удалять старые",
+        "edit_delete_fail_notify": "⚠️ Сообщать о проблемах удаления",
         "edit_link_preview": "🔗 Превью ссылок",
         "edit_delay": "⏱ Задержка отправки",
         "edit_repeat": "🔁 Повторные уведомления",
@@ -584,6 +609,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Удалять старые сообщения при новом стриме?\n\n"
             "Telegram позволяет удалять только сообщения младше ~48 часов."
         ),
+        "edit_delete_fail_menu": "Сообщать о проблемах при удалении сообщения?",
         "edit_preview_menu": "Отключить превью ссылок в уведомлениях?",
         "preview_yes": "✅ Выкл (без превью)",
         "preview_no": "❌ Вкл (с превью)",
@@ -781,6 +807,15 @@ def delete_old_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("delete_old_yes", lang), callback_data="delete_old:1")],
             [InlineKeyboardButton(t("delete_old_no", lang), callback_data="delete_old:0")],
+        ]
+    )
+
+
+def delete_fail_notify_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("delete_fail_yes", lang), callback_data="delete_fail:1")],
+            [InlineKeyboardButton(t("delete_fail_no", lang), callback_data="delete_fail:0")],
         ]
     )
 
@@ -998,17 +1033,36 @@ def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def edit_options_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
-            [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
-            [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
-            [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
-            [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")],
-            [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")],
-        ]
+def edit_options_keyboard(
+    sub_id: int,
+    lang: str,
+    *,
+    dest_type: str = "dm",
+    delete_previous: bool = False,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
+        [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
+        [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
+        [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
+    ]
+    if dest_type != "dm":
+        rows.append(
+            [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")]
+        )
+        if delete_previous:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        t("edit_delete_fail_notify", lang),
+                        callback_data=f"edit_f:{sub_id}:delete_fail",
+                    )
+                ]
+            )
+    rows.append(
+        [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")]
     )
+    return InlineKeyboardMarkup(rows)
 
 
 def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMarkup:
@@ -1024,6 +1078,23 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
             [
                 [InlineKeyboardButton(t("repeat_yes", lang), callback_data=f"edit_set:{sub_id}:repeat:1")],
                 [InlineKeyboardButton(t("repeat_no", lang), callback_data=f"edit_set:{sub_id}:repeat:0")],
+            ]
+        )
+    if field == "delete_fail":
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("delete_fail_yes", lang),
+                        callback_data=f"edit_set:{sub_id}:delete_fail:1",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        t("delete_fail_no", lang),
+                        callback_data=f"edit_set:{sub_id}:delete_fail:0",
+                    )
+                ],
             ]
         )
     return InlineKeyboardMarkup(

@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import tempfile
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from config import parse_admin_user_ids
@@ -15,7 +16,7 @@ from render_status import (
 )
 from twitch import TwitchClient, render_template
 from translate import build_translations, translate_text
-from bot import _is_link_preview_disabled
+from bot import _is_link_preview_disabled, _message_link
 from db import SqliteDatabase, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
 from telegram import LinkPreviewOptions, Message
@@ -39,6 +40,8 @@ def main() -> None:
     assert link.chat_ref == "themarfa_gaming"
     assert link.thread_id == 30
     assert chat_ref_to_id("1234567890") == -1001234567890
+    assert _message_link(-1001234567890, 42) == "https://t.me/c/1234567890/42"
+    assert _message_link(-1001234567890, 42, 7) == "https://t.me/c/1234567890/7/42"
 
     pg_url = _normalize_pg_url("postgres://user:pass@host:1234/db")
     assert pg_url.startswith("postgresql://")
@@ -100,6 +103,13 @@ def main() -> None:
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.suppress_repeat_minutes == 30
+        assert sub.notify_delete_fail is False
+        assert db.update_subscription(sub_id, 1, notify_delete_fail=True)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.notify_delete_fail is True
+        assert db.count_new_users_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
+        assert db.count_new_users_since(datetime.now(timezone.utc) + timedelta(days=1)) == 0
         db.set_notify_cooldown(sub_id, 5)
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
