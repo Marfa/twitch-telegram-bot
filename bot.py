@@ -595,7 +595,8 @@ async def _resolve_chat_display_name(bot, sub: Subscription) -> str:
 
 async def _resolve_thread_display_name(bot, chat_id: int, thread_id: int) -> str:
     try:
-        result = await bot.do_api_request(
+        # PTB 21.x has no getForumTopic wrapper; call the Bot API directly.
+        result = await bot._post(
             "getForumTopic",
             {"chat_id": chat_id, "message_thread_id": thread_id},
         )
@@ -606,6 +607,10 @@ async def _resolve_thread_display_name(bot, chat_id: int, thread_id: int) -> str
     except (BadRequest, Forbidden) as exc:
         logger.debug(
             "Cannot resolve topic name for %s/%s: %s", chat_id, thread_id, exc
+        )
+    except Exception:
+        logger.exception(
+            "Unexpected error resolving topic name for %s/%s", chat_id, thread_id
         )
     return str(thread_id)
 
