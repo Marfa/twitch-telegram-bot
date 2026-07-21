@@ -521,23 +521,13 @@ def _is_link_preview_disabled(message) -> bool:
 
 def _format_sub_line(sub: Subscription, lang: str, sub_num: int) -> str:
     status = "✅" if sub.enabled else "⏸"
-    settings = [
-        t(
-            "sub_list_dest",
-            lang,
-            dest=dest_label(sub.dest_type, lang),
-            chat_id=sub.chat_id,
+    settings: list[str] = []
+    if sub.ignore_keywords.strip():
+        settings.append(
+            t("sub_list_ignore_yes", lang, keywords=sub.ignore_keywords)
         )
-    ]
-    if sub.thread_id:
-        settings.append(t("sub_list_thread", lang, thread_id=sub.thread_id))
-    settings.append(
-        t("sub_list_delete_yes", lang)
-        if sub.delete_previous
-        else t("sub_list_delete_no", lang)
-    )
-    if sub.delete_previous and sub.dest_type != "dm" and sub.notify_delete_fail:
-        settings.append(t("sub_list_delete_fail", lang))
+    else:
+        settings.append(t("sub_list_ignore_no", lang))
     settings.append(
         t("sub_list_preview_off", lang)
         if sub.disable_link_preview
@@ -553,12 +543,24 @@ def _format_sub_line(sub: Subscription, lang: str, sub_num: int) -> str:
         if sub.suppress_repeat_minutes > 0
         else t("sub_list_repeat_allow", lang)
     )
-    if sub.ignore_keywords.strip():
-        settings.append(
-            t("sub_list_ignore_yes", lang, keywords=sub.ignore_keywords)
+    settings.append(
+        t(
+            "sub_list_dest",
+            lang,
+            dest=dest_label(sub.dest_type, lang),
+            chat_id=sub.chat_id,
         )
-    else:
-        settings.append(t("sub_list_ignore_no", lang))
+    )
+    if sub.thread_id:
+        settings.append(t("sub_list_thread", lang, thread_id=sub.thread_id))
+    if sub.dest_type != "dm":
+        settings.append(
+            t("sub_list_delete_yes", lang)
+            if sub.delete_previous
+            else t("sub_list_delete_no", lang)
+        )
+        if sub.delete_previous and sub.notify_delete_fail:
+            settings.append(t("sub_list_delete_fail", lang))
     return (
         f"{status} #{sub_num} — {sub.twitch_username}\n"
         + "\n".join(f"   {line}" for line in settings)
