@@ -519,8 +519,16 @@ def _is_link_preview_disabled(message) -> bool:
     return bool(opts and opts.is_disabled)
 
 
-def _format_sub_line(sub: Subscription, lang: str, sub_num: int) -> str:
+def _format_sub_line(
+    sub: Subscription,
+    lang: str,
+    sub_num: int,
+    *,
+    chat_display: str | None = None,
+    thread_display: str | None = None,
+) -> str:
     status = "✅" if sub.enabled else "⏸"
+    chat_label = chat_display if chat_display is not None else str(sub.chat_id)
     settings: list[str] = []
     if sub.ignore_keywords.strip():
         settings.append(
@@ -548,11 +556,12 @@ def _format_sub_line(sub: Subscription, lang: str, sub_num: int) -> str:
             "sub_list_dest",
             lang,
             dest=dest_label(sub.dest_type, lang),
-            chat_id=sub.chat_id,
+            chat_id=chat_label,
         )
     )
     if sub.thread_id:
-        settings.append(t("sub_list_thread", lang, thread_id=sub.thread_id))
+        thread_label = thread_display if thread_display is not None else str(sub.thread_id)
+        settings.append(t("sub_list_thread", lang, thread_id=thread_label))
     if sub.dest_type != "dm":
         settings.append(
             t("sub_list_delete_yes", lang)
@@ -565,6 +574,40 @@ def _format_sub_line(sub: Subscription, lang: str, sub_num: int) -> str:
         f"{status} #{sub_num} — {sub.twitch_username}\n"
         + "\n".join(f"   {line}" for line in settings)
     )
+
+
+async def _resolve_chat_display_name(bot, sub: Subscription) -> str:
+    try:
+        chat = await bot.get_chat(sub.chat_id)
+        if sub.dest_type == "dm":
+            parts = [chat.first_name or "", chat.last_name or ""]
+            name = " ".join(part for part in parts if part).strip()
+            if name:
+                return name
+        elif chat.title:
+            return chat.title
+        if chat.username:
+            return f"@{chat.username}"
+    except (BadRequest, Forbidden) as exc:
+        logger.debug("Cannot resolve chat name for %s: %s", sub.chat_id, exc)
+    return str(sub.chat_id)
+
+
+async def _resolve_thread_display_name(bot, chat_id: int, thread_id: int) -> str:
+    try:
+        result = await bot.do_api_request(
+            "getForumTopic",
+            {"chat_id": chat_id, "message_thread_id": thread_id},
+        )
+        if isinstance(result, dict):
+            name = result.get("name")
+            if name:
+                return str(name)
+    except (BadRequest, Forbidden) as exc:
+        logger.debug(
+            "Cannot resolve topic name for %s/%s: %s", chat_id, thread_id, exc
+        )
+    return str(thread_id)
 
 
 def _message_link(chat_id: int, message_id: int, thread_id: int | None = None) -> str:
@@ -1576,7 +1619,23 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    lines = [_format_sub_line(s, lang, i) for i, s in enumerate(subs, 1)]
+    lines: list[str] = []
+    for i, sub in enumerate(subs, 1):
+        chat_display = await _resolve_chat_display_name(context.bot, sub)
+        thread_display = None
+        if sub.thread_id:
+            thread_display = await _resolve_thread_display_name(
+                context.bot, sub.chat_id, sub.thread_id
+            )
+        lines.append(
+            _format_sub_line(
+                sub,
+                lang,
+                i,
+                chat_display=chat_display,
+                thread_display=thread_display,
+            )
+        )
     keyboard = [
         [
             InlineKeyboardButton(
