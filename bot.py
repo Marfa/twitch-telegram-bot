@@ -521,21 +521,47 @@ def _is_link_preview_disabled(message) -> bool:
 
 def _format_sub_line(sub: Subscription, lang: str, sub_num: int) -> str:
     status = "✅" if sub.enabled else "⏸"
-    thread = t("sub_line_thread", lang, thread_id=sub.thread_id) if sub.thread_id else ""
-    delete = t("sub_line_delete", lang) if sub.delete_previous else ""
-    delay = (
-        t("sub_line_delay", lang, minutes=sub.delay_minutes)
+    settings = [
+        t(
+            "sub_list_dest",
+            lang,
+            dest=dest_label(sub.dest_type, lang),
+            chat_id=sub.chat_id,
+        )
+    ]
+    if sub.thread_id:
+        settings.append(t("sub_list_thread", lang, thread_id=sub.thread_id))
+    settings.append(
+        t("sub_list_delete_yes", lang)
+        if sub.delete_previous
+        else t("sub_list_delete_no", lang)
+    )
+    if sub.delete_previous and sub.dest_type != "dm" and sub.notify_delete_fail:
+        settings.append(t("sub_list_delete_fail", lang))
+    settings.append(
+        t("sub_list_preview_off", lang)
+        if sub.disable_link_preview
+        else t("sub_list_preview_on", lang)
+    )
+    settings.append(
+        t("sub_list_delay", lang, minutes=sub.delay_minutes)
         if sub.delay_minutes > 0
-        else ""
+        else t("sub_list_delay_none", lang)
     )
-    repeat = (
-        t("sub_line_repeat", lang, minutes=sub.suppress_repeat_minutes)
+    settings.append(
+        t("sub_list_repeat_mute", lang, minutes=sub.suppress_repeat_minutes)
         if sub.suppress_repeat_minutes > 0
-        else ""
+        else t("sub_list_repeat_allow", lang)
     )
+    if sub.ignore_keywords.strip():
+        settings.append(
+            t("sub_list_ignore_yes", lang, keywords=sub.ignore_keywords)
+        )
+    else:
+        settings.append(t("sub_list_ignore_no", lang))
     return (
         f"{status} #{sub_num} — {sub.twitch_username}\n"
-        f"   → {dest_label(sub.dest_type, lang)} ({sub.chat_id}{thread}{delete}{delay}{repeat})"
+        + "\n".join(f"   {line}" for line in settings)
     )
 
 
