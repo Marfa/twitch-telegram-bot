@@ -26,6 +26,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_language": "🌐 Language",
         "btn_admin": "⚙️ Admin",
         "btn_broadcast": "📣 Broadcast",
+        "btn_broadcast_new": "➕ New broadcast",
+        "btn_scheduled_broadcasts": "📅 Scheduled messages",
         "btn_stats": "📊 Statistics",
         "btn_back": "◀️ Main menu",
         "btn_wizard_back": "« Back",
@@ -35,6 +37,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
         "menu_admin": "Admin panel:",
+        "menu_broadcast": "Broadcast:",
         "menu_main": "Main menu",
         "lang_pick": "Choose your language:",
         "lang_set": "Language set to English.",
@@ -337,6 +340,22 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Recipients will receive it automatically."
         ),
         "broadcast_send_now": "Send now",
+        "scheduled_list_title": "Scheduled messages:",
+        "scheduled_empty": "No scheduled messages.",
+        "scheduled_line": "#{id} — {when}\n{type}\n{preview}",
+        "scheduled_edit_menu": "Message #{id}\n\nWhat to change?",
+        "scheduled_edit_text": "✏️ Message text",
+        "scheduled_edit_time": "🕐 Send time",
+        "scheduled_edit_text_prompt": (
+            "Send new message text for #{id}.\n"
+            "/cancel — abort."
+        ),
+        "scheduled_edit_time_title": "Choose new send time for message #{id}:",
+        "scheduled_updated": "✅ Message #{id} updated.",
+        "scheduled_deleted": "✅ Message #{id} deleted.",
+        "scheduled_not_found": "Scheduled message not found.",
+        "scheduled_edit_btn": "✏️ #{id}",
+        "scheduled_delete_btn": "🗑 #{id}",
         "schedule_title": "Choose send time (MSK, UTC+3):",
         "schedule_pick_hour": "——— Select hour ———",
         "schedule_pick_minutes": "Select minutes ↘",
@@ -377,6 +396,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_language": "🌐 Выбор языка",
         "btn_admin": "⚙️ Админка",
         "btn_broadcast": "📣 Рассылка",
+        "btn_broadcast_new": "➕ Новая рассылка",
+        "btn_scheduled_broadcasts": "📅 Запланированные сообщения",
         "btn_stats": "📊 Статистика",
         "btn_back": "◀️ Главное меню",
         "btn_wizard_back": "« Назад",
@@ -386,6 +407,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
         "menu_admin": "Админка:",
+        "menu_broadcast": "Рассылка:",
         "menu_main": "Главное меню",
         "lang_pick": "Выберите язык / Choose your language:",
         "lang_set": "Язык: русский.",
@@ -690,6 +712,22 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Получатели получат его автоматически."
         ),
         "broadcast_send_now": "Отправить сейчас",
+        "scheduled_list_title": "Запланированные сообщения:",
+        "scheduled_empty": "Запланированных сообщений нет.",
+        "scheduled_line": "#{id} — {when}\n{type}\n{preview}",
+        "scheduled_edit_menu": "Сообщение #{id}\n\nЧто изменить?",
+        "scheduled_edit_text": "✏️ Текст сообщения",
+        "scheduled_edit_time": "🕐 Время отправки",
+        "scheduled_edit_text_prompt": (
+            "Отправьте новый текст для сообщения #{id}.\n"
+            "/cancel — отмена."
+        ),
+        "scheduled_edit_time_title": "Выберите новое время отправки для сообщения #{id}:",
+        "scheduled_updated": "✅ Сообщение #{id} обновлено.",
+        "scheduled_deleted": "✅ Сообщение #{id} удалено.",
+        "scheduled_not_found": "Запланированное сообщение не найдено.",
+        "scheduled_edit_btn": "✏️ #{id}",
+        "scheduled_delete_btn": "🗑 #{id}",
         "schedule_title": "Выберите время отправки (МСК, UTC+3):",
         "schedule_pick_hour": "——— Выберите час ———",
         "schedule_pick_minutes": "Выберите минуты ↘",
@@ -748,6 +786,8 @@ def all_menu_buttons() -> set[str]:
         "language",
         "admin",
         "broadcast",
+        "broadcast_new",
+        "scheduled_broadcasts",
         "stats",
         "back",
         "sys_notifications",
@@ -804,6 +844,17 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("broadcast", lang)),
                 KeyboardButton(btn("stats", lang)),
             ],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def broadcast_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(btn("broadcast_new", lang))],
+            [KeyboardButton(btn("scheduled_broadcasts", lang))],
             [KeyboardButton(btn("back", lang))],
         ],
         resize_keyboard=True,
@@ -1017,7 +1068,13 @@ def stream_schedule_day_keyboard(
     return InlineKeyboardMarkup(rows) if rows else None
 
 
-def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:
+def schedule_keyboard(
+    lang: str,
+    schedule: dict,
+    *,
+    prefix: str = "sched",
+    show_send_now: bool = True,
+) -> InlineKeyboardMarkup:
     now = datetime.now(SCHEDULE_TZ)
     page = int(schedule.get("date_page", 0))
     selected_offset = int(schedule.get("date_offset", 0))
@@ -1027,7 +1084,7 @@ def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
     rows.append(
-        [InlineKeyboardButton(t("schedule_show_calendar", lang), callback_data="sched:noop")]
+        [InlineKeyboardButton(t("schedule_show_calendar", lang), callback_data=f"{prefix}:noop")]
     )
 
     date_row: list[InlineKeyboardButton] = []
@@ -1038,44 +1095,90 @@ def schedule_keyboard(lang: str, schedule: dict) -> InlineKeyboardMarkup:
         if offset == selected_offset:
             label = f"✅ {label}"
         date_row.append(
-            InlineKeyboardButton(label, callback_data=f"sched:date:{offset}")
+            InlineKeyboardButton(label, callback_data=f"{prefix}:date:{offset}")
         )
     if page < 10:
-        date_row.append(InlineKeyboardButton("→", callback_data="sched:date_next"))
+        date_row.append(InlineKeyboardButton("→", callback_data=f"{prefix}:date_next"))
     rows.append(date_row)
 
-    rows.append([InlineKeyboardButton(t("schedule_saved_time", lang), callback_data="sched:saved")])
+    rows.append([InlineKeyboardButton(t("schedule_saved_time", lang), callback_data=f"{prefix}:saved")])
 
-    rows.append([InlineKeyboardButton(t("schedule_pick_hour", lang), callback_data="sched:noop")])
+    rows.append([InlineKeyboardButton(t("schedule_pick_hour", lang), callback_data=f"{prefix}:noop")])
     for block in range(4):
         hour_row = []
         for h in range(block * 6, block * 6 + 6):
             label = f"{h:02d}"
             if hour == h:
                 label = f"✅ {label}"
-            hour_row.append(InlineKeyboardButton(label, callback_data=f"sched:hour:{h}"))
+            hour_row.append(InlineKeyboardButton(label, callback_data=f"{prefix}:hour:{h}"))
         rows.append(hour_row)
 
     if show_minutes:
-        rows.append([InlineKeyboardButton(t("schedule_minutes_header", lang), callback_data="sched:noop")])
+        rows.append([InlineKeyboardButton(t("schedule_minutes_header", lang), callback_data=f"{prefix}:noop")])
         min_row: list[InlineKeyboardButton] = []
         for m in range(0, 60, 5):
             label = f"{m:02d}"
             if minute == m:
                 label = f"✅ {label}"
-            min_row.append(InlineKeyboardButton(label, callback_data=f"sched:min:{m}"))
+            min_row.append(InlineKeyboardButton(label, callback_data=f"{prefix}:min:{m}"))
             if len(min_row) == 6:
                 rows.append(min_row)
                 min_row = []
         if min_row:
             rows.append(min_row)
     else:
-        rows.append([InlineKeyboardButton(t("schedule_pick_minutes", lang), callback_data="sched:toggle_min")])
+        rows.append([InlineKeyboardButton(t("schedule_pick_minutes", lang), callback_data=f"{prefix}:toggle_min")])
 
     rows.append(
-        [InlineKeyboardButton(t("schedule_apply", lang), callback_data="sched:apply")]
+        [InlineKeyboardButton(t("schedule_apply", lang), callback_data=f"{prefix}:apply")]
     )
-    rows.append([InlineKeyboardButton(t("broadcast_send_now", lang), callback_data="sched:now")])
+    if show_send_now:
+        rows.append([InlineKeyboardButton(t("broadcast_send_now", lang), callback_data=f"{prefix}:now")])
+    return InlineKeyboardMarkup(rows)
+
+
+def scheduled_edit_keyboard(broadcast_id: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("scheduled_edit_text", lang),
+                    callback_data=f"sb_edit_f:{broadcast_id}:text",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("scheduled_edit_time", lang),
+                    callback_data=f"sb_edit_f:{broadcast_id}:time",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("scheduled_delete_btn", lang, id=broadcast_id),
+                    callback_data=f"sb_delete:{broadcast_id}",
+                )
+            ],
+        ]
+    )
+
+
+def scheduled_list_keyboard(items: list[int], lang: str) -> InlineKeyboardMarkup | None:
+    if not items:
+        return None
+    rows: list[list[InlineKeyboardButton]] = []
+    for broadcast_id in items:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("scheduled_edit_btn", lang, id=broadcast_id),
+                    callback_data=f"sb_edit:{broadcast_id}",
+                ),
+                InlineKeyboardButton(
+                    t("scheduled_delete_btn", lang, id=broadcast_id),
+                    callback_data=f"sb_delete:{broadcast_id}",
+                ),
+            ]
+        )
     return InlineKeyboardMarkup(rows)
 
 

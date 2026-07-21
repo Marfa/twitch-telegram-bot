@@ -199,6 +199,12 @@ class Database(Protocol):
 
     def get_unsent_scheduled_broadcasts(self) -> list[ScheduledBroadcast]: ...
 
+    def get_scheduled_broadcast(self, broadcast_id: int) -> ScheduledBroadcast | None: ...
+
+    def update_scheduled_broadcast(self, broadcast_id: int, **fields: object) -> bool: ...
+
+    def delete_scheduled_broadcast(self, broadcast_id: int) -> bool: ...
+
     def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None: ...
 
     def get_bot_stats(self) -> BotStats: ...
@@ -724,6 +730,54 @@ class SqliteDatabase:
             )
             for r in rows
         ]
+
+    def get_scheduled_broadcast(self, broadcast_id: int) -> ScheduledBroadcast | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, msg_type, text, scheduled_at, created_by
+                FROM scheduled_broadcasts
+                WHERE id = ? AND sent_at IS NULL
+                """,
+                (broadcast_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return ScheduledBroadcast(
+            id=int(row["id"]),
+            msg_type=row["msg_type"],
+            text=row["text"],
+            scheduled_at=row["scheduled_at"],
+            created_by=int(row["created_by"]),
+        )
+
+    def update_scheduled_broadcast(self, broadcast_id: int, **fields: object) -> bool:
+        allowed = {"text", "scheduled_at"}
+        updates: list[str] = []
+        values: list[object] = []
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            updates.append(f"{key} = ?")
+            values.append(value)
+        if not updates:
+            return self.get_scheduled_broadcast(broadcast_id) is not None
+        values.append(broadcast_id)
+        with self._conn() as conn:
+            cur = conn.execute(
+                f"UPDATE scheduled_broadcasts SET {', '.join(updates)} "
+                "WHERE id = ? AND sent_at IS NULL",
+                values,
+            )
+        return cur.rowcount > 0
+
+    def delete_scheduled_broadcast(self, broadcast_id: int) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM scheduled_broadcasts WHERE id = ? AND sent_at IS NULL",
+                (broadcast_id,),
+            )
+        return cur.rowcount > 0
 
     def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -1429,6 +1483,60 @@ class PostgresDatabase:
             )
             for r in rows
         ]
+
+    def get_scheduled_broadcast(self, broadcast_id: int) -> ScheduledBroadcast | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, msg_type, text, scheduled_at, created_by
+                FROM scheduled_broadcasts
+                WHERE id = %s AND sent_at IS NULL
+                """,
+                (broadcast_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return ScheduledBroadcast(
+            id=int(row["id"]),
+            msg_type=row["msg_type"],
+            text=row["text"],
+            scheduled_at=str(row["scheduled_at"]),
+            created_by=int(row["created_by"]),
+        )
+
+    def update_scheduled_broadcast(self, broadcast_id: int, **fields: object) -> bool:
+        allowed = {"text", "scheduled_at"}
+        updates: list[str] = []
+        values: list[object] = []
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            updates.append(f"{key} = %s")
+            values.append(value)
+        if not updates:
+            return self.get_scheduled_broadcast(broadcast_id) is not None
+        values.append(broadcast_id)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                f"UPDATE scheduled_broadcasts SET {', '.join(updates)} "
+                "WHERE id = %s AND sent_at IS NULL",
+                values,
+            )
+            updated = cur.rowcount > 0
+        return updated
+
+    def delete_scheduled_broadcast(self, broadcast_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM scheduled_broadcasts WHERE id = %s AND sent_at IS NULL",
+                (broadcast_id,),
+            )
+            deleted = cur.rowcount > 0
+        return deleted
 
     def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None:
         now = datetime.now(timezone.utc)

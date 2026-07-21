@@ -165,6 +165,15 @@ def main() -> None:
         )
         unsent = db.get_unsent_scheduled_broadcasts()
         assert any(b.id == bid for b in unsent)
+        item = db.get_scheduled_broadcast(bid)
+        assert item is not None
+        assert item.text == "hello"
+        assert db.update_scheduled_broadcast(bid, text="updated")
+        item = db.get_scheduled_broadcast(bid)
+        assert item is not None
+        assert item.text == "updated"
+        assert db.delete_scheduled_broadcast(bid)
+        assert db.get_scheduled_broadcast(bid) is None
         assert not db.update_subscription(999, 1, message_template="x")
 
     items = fetch_render_status("https://status.render.com/history.rss")

@@ -38,6 +38,7 @@ from i18n import (
     all_btn_texts,
     all_menu_buttons,
     all_wizard_nav_buttons,
+    broadcast_menu,
     btn,
     delete_old_keyboard,
     delete_fail_notify_keyboard,
@@ -52,6 +53,8 @@ from i18n import (
     main_menu,
     repeat_keyboard,
     schedule_keyboard,
+    scheduled_edit_keyboard,
+    scheduled_list_keyboard,
     settings_menu,
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
@@ -102,10 +105,12 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     ADMIN_MSG_TYPE,
     ADMIN_MSG_TEXT,
     ADMIN_MSG_SCHEDULE,
+    ADMIN_SB_EDIT_TEXT,
+    ADMIN_SB_EDIT_SCHEDULE,
     STREAM_SCHEDULE_CONFIRM,
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
-) = range(23)
+) = range(25)
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 
@@ -126,6 +131,68 @@ def _ignore_keywords_current_label(keywords: str, lang: str) -> str:
     if not keywords.strip():
         return t("ignore_keywords_current_none", lang)
     return keywords
+
+
+def _broadcast_type_label(msg_type: str, lang: str) -> str:
+    if msg_type == "bot_update":
+        return t("broadcast_type_bot_update", lang)
+    if msg_type == "availability":
+        return t("broadcast_type_availability", lang)
+    return msg_type
+
+
+def _format_scheduled_at_label(scheduled_at: str) -> str:
+    dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(SCHEDULE_TZ).strftime("%d.%m.%Y %H:%M MSK")
+
+
+def _utc_iso_to_schedule(scheduled_at: str) -> dict:
+    dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    local = dt.astimezone(SCHEDULE_TZ)
+    now = datetime.now(SCHEDULE_TZ)
+    date_offset = max(0, (local.date() - now.date()).days)
+    return {
+        "date_offset": date_offset,
+        "date_page": date_offset // 3,
+        "hour": local.hour,
+        "minute": local.minute,
+        "show_minutes": True,
+    }
+
+
+def _broadcast_job_name(broadcast_id: int) -> str:
+    return f"broadcast_{broadcast_id}"
+
+
+def _cancel_broadcast_job(job_queue, broadcast_id: int) -> None:
+    for job in job_queue.get_jobs_by_name(_broadcast_job_name(broadcast_id)):
+        job.schedule_removal()
+
+
+def _schedule_broadcast_job(job_queue, broadcast_id: int, scheduled_at: str) -> None:
+    _cancel_broadcast_job(job_queue, broadcast_id)
+    due = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=timezone.utc)
+    when = (due - datetime.now(timezone.utc)).total_seconds()
+    if when > 0:
+        job_queue.run_once(
+            _run_scheduled_broadcast,
+            when=when,
+            data={"broadcast_id": broadcast_id},
+            name=_broadcast_job_name(broadcast_id),
+        )
+
+
+def _scheduled_text_preview(text: str, limit: int = 120) -> str:
+    plain = re.sub(r"<[^>]+>", "", text).strip()
+    if len(plain) <= limit:
+        return plain
+    return plain[: limit - 1] + "…"
 
 
 def _owner_sub_number(db: Database, owner_id: int, sub_id: int) -> int:
@@ -406,6 +473,14 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, ADMIN_MSG_TEXT)
         return ADMIN_MSG_TEXT
+    if state == ADMIN_SB_EDIT_SCHEDULE:
+        broadcast_id = context.user_data.get("sb_edit_id")
+        if broadcast_id:
+            return await _go_sb_edit_time_prompt(update, context, lang, int(broadcast_id))
+    if state == ADMIN_SB_EDIT_TEXT:
+        broadcast_id = context.user_data.get("sb_edit_id")
+        if broadcast_id:
+            return await _go_sb_edit_text_prompt(update, context, lang, int(broadcast_id))
     return ConversationHandler.END
 
 
@@ -1439,6 +1514,18 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+async def open_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return
+    context.user_data.clear()
+    lang = _user_lang(context, user_id)
+    await update.effective_message.reply_text(
+        t("menu_broadcast", lang),
+        reply_markup=broadcast_menu(lang),
+    )
+
+
 async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -2038,7 +2125,7 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
                 total=total,
             )
         )
-        await context.bot.send_message(user_id, t("menu_admin", lang), reply_markup=admin_menu(lang))
+        await context.bot.send_message(user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu(lang))
         return ConversationHandler.END
 
     if data == "sched:apply":
@@ -2085,7 +2172,7 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text(
                 t("broadcast_scheduled", lang, when=when_label)
             )
-        await context.bot.send_message(user_id, t("menu_admin", lang), reply_markup=admin_menu(lang))
+        await context.bot.send_message(user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu(lang))
         return ConversationHandler.END
 
     return ADMIN_MSG_SCHEDULE
@@ -2106,6 +2193,317 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
         context, item.msg_type, item.text, source_lang=source_lang
     )
     db.mark_scheduled_broadcast_sent(broadcast_id)
+
+
+async def admin_scheduled_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    items = db.get_unsent_scheduled_broadcasts()
+    if not items:
+        await update.effective_message.reply_text(
+            t("scheduled_empty", lang),
+            reply_markup=broadcast_menu(lang),
+        )
+        return
+
+    lines = [t("scheduled_list_title", lang)]
+    ids: list[int] = []
+    for item in items:
+        ids.append(item.id)
+        lines.append(
+            t(
+                "scheduled_line",
+                lang,
+                id=item.id,
+                when=_format_scheduled_at_label(item.scheduled_at),
+                type=_broadcast_type_label(item.msg_type, lang),
+                preview=_scheduled_text_preview(item.text),
+            )
+        )
+    await update.effective_message.reply_text(
+        "\n\n".join(lines),
+        reply_markup=scheduled_list_keyboard(ids, lang),
+    )
+
+
+async def on_sb_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        return
+    lang = _user_lang(context, query.from_user.id)
+    broadcast_id = int(query.data.split(":", 1)[1])
+    db: Database = context.application.bot_data["db"]
+    item = db.get_scheduled_broadcast(broadcast_id)
+    if not item:
+        await query.edit_message_text(t("scheduled_not_found", lang))
+        return
+    await query.edit_message_text(
+        t("scheduled_edit_menu", lang, id=broadcast_id),
+        reply_markup=scheduled_edit_keyboard(broadcast_id, lang),
+    )
+
+
+async def on_sb_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if not _is_admin(user_id):
+        return
+    lang = _user_lang(context, user_id)
+    broadcast_id = int(query.data.split(":", 1)[1])
+    db: Database = context.application.bot_data["db"]
+    if db.delete_scheduled_broadcast(broadcast_id):
+        _cancel_broadcast_job(context.application.job_queue, broadcast_id)
+        await query.edit_message_text(t("scheduled_deleted", lang, id=broadcast_id))
+    else:
+        await query.edit_message_text(t("scheduled_not_found", lang))
+    await context.bot.send_message(
+        user_id,
+        t("menu_broadcast", lang),
+        reply_markup=broadcast_menu(lang),
+    )
+
+
+async def _go_sb_edit_text_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, broadcast_id: int
+) -> int:
+    user_id = update.effective_user.id
+    await context.bot.send_message(
+        user_id,
+        t("scheduled_edit_text_prompt", lang, id=broadcast_id),
+        reply_markup=admin_wizard_menu(lang, back=False),
+    )
+    _set_wizard_back(context, ADMIN_SB_EDIT_TEXT)
+    return ADMIN_SB_EDIT_TEXT
+
+
+async def _go_sb_edit_time_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, broadcast_id: int
+) -> int:
+    user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    item = db.get_scheduled_broadcast(broadcast_id)
+    if not item:
+        await context.bot.send_message(user_id, t("scheduled_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["schedule"] = _utc_iso_to_schedule(item.scheduled_at)
+    await context.bot.send_message(
+        user_id,
+        t("scheduled_edit_time_title", lang, id=broadcast_id),
+        reply_markup=schedule_keyboard(
+            lang,
+            context.user_data["schedule"],
+            prefix="sb_sched",
+            show_send_now=False,
+        ),
+    )
+    _set_wizard_back(context, ADMIN_SB_EDIT_SCHEDULE)
+    return ADMIN_SB_EDIT_SCHEDULE
+
+
+async def start_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        return ConversationHandler.END
+    lang = _user_lang(context, query.from_user.id)
+    broadcast_id = int(query.data.split(":")[2])
+    db: Database = context.application.bot_data["db"]
+    if not db.get_scheduled_broadcast(broadcast_id):
+        await query.edit_message_text(t("scheduled_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["sb_edit_id"] = broadcast_id
+    await query.edit_message_text("✓")
+    return await _go_sb_edit_text_prompt(update, context, lang, broadcast_id)
+
+
+async def start_sb_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        return ConversationHandler.END
+    lang = _user_lang(context, query.from_user.id)
+    broadcast_id = int(query.data.split(":")[2])
+    db: Database = context.application.bot_data["db"]
+    if not db.get_scheduled_broadcast(broadcast_id):
+        await query.edit_message_text(t("scheduled_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["sb_edit_id"] = broadcast_id
+    await query.edit_message_text("✓")
+    return await _go_sb_edit_time_prompt(update, context, lang, broadcast_id)
+
+
+async def receive_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return ConversationHandler.END
+    lang = _user_lang(context, user_id)
+    broadcast_id = context.user_data.get("sb_edit_id")
+    if not broadcast_id:
+        return ConversationHandler.END
+
+    msg = update.effective_message
+    plain = (msg.text or "").strip()
+    if plain in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return ADMIN_SB_EDIT_TEXT
+    if not plain:
+        await update.effective_message.reply_text(t("broadcast_empty", lang))
+        return ADMIN_SB_EDIT_TEXT
+
+    text = (msg.text_html or plain).strip()
+    db: Database = context.application.bot_data["db"]
+    if not db.update_scheduled_broadcast(int(broadcast_id), text=text):
+        await update.effective_message.reply_text(t("scheduled_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("scheduled_updated", lang, id=broadcast_id),
+            reply_markup=broadcast_menu(lang),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if not _is_admin(user_id):
+        return ConversationHandler.END
+    lang = _user_lang(context, user_id)
+    broadcast_id = context.user_data.get("sb_edit_id")
+    if not broadcast_id:
+        return ConversationHandler.END
+
+    data = query.data
+    schedule = dict(context.user_data.get("schedule") or {})
+    db: Database = context.application.bot_data["db"]
+    item = db.get_scheduled_broadcast(int(broadcast_id))
+    if not item:
+        await query.edit_message_text(t("scheduled_not_found", lang))
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if data == "sb_sched:noop":
+        return ADMIN_SB_EDIT_SCHEDULE
+    if data == "sb_sched:toggle_min":
+        schedule["show_minutes"] = True
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            reply_markup=schedule_keyboard(
+                lang, schedule, prefix="sb_sched", show_send_now=False
+            ),
+        )
+        return ADMIN_SB_EDIT_SCHEDULE
+    if data == "sb_sched:date_next":
+        schedule["date_page"] = int(schedule.get("date_page", 0)) + 1
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            reply_markup=schedule_keyboard(
+                lang, schedule, prefix="sb_sched", show_send_now=False
+            ),
+        )
+        return ADMIN_SB_EDIT_SCHEDULE
+    if data.startswith("sb_sched:date:"):
+        schedule["date_offset"] = int(data.split(":")[2])
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            reply_markup=schedule_keyboard(
+                lang, schedule, prefix="sb_sched", show_send_now=False
+            ),
+        )
+        return ADMIN_SB_EDIT_SCHEDULE
+    if data.startswith("sb_sched:hour:"):
+        schedule["hour"] = int(data.split(":")[2])
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            reply_markup=schedule_keyboard(
+                lang, schedule, prefix="sb_sched", show_send_now=False
+            ),
+        )
+        return ADMIN_SB_EDIT_SCHEDULE
+    if data.startswith("sb_sched:min:"):
+        schedule["minute"] = int(data.split(":")[2])
+        schedule["show_minutes"] = True
+        context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            reply_markup=schedule_keyboard(
+                lang, schedule, prefix="sb_sched", show_send_now=False
+            ),
+        )
+        return ADMIN_SB_EDIT_SCHEDULE
+    if data == "sb_sched:saved":
+        hour, minute = db.get_saved_schedule(user_id)
+        if hour is not None and minute is not None:
+            schedule["hour"] = hour
+            schedule["minute"] = minute
+            schedule["show_minutes"] = True
+            context.user_data["schedule"] = schedule
+        await query.edit_message_text(
+            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            reply_markup=schedule_keyboard(
+                lang, schedule, prefix="sb_sched", show_send_now=False
+            ),
+        )
+        return ADMIN_SB_EDIT_SCHEDULE
+
+    if data == "sb_sched:apply":
+        if schedule.get("hour") is None or schedule.get("minute") is None:
+            await query.answer(t("schedule_pick_minutes", lang), show_alert=True)
+            return ADMIN_SB_EDIT_SCHEDULE
+        hour = int(schedule["hour"])
+        minute = int(schedule["minute"])
+        db.set_saved_schedule(user_id, hour, minute)
+        scheduled_at = _schedule_to_utc_iso(schedule)
+        when = (
+            datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            - datetime.now(timezone.utc)
+        ).total_seconds()
+        if when <= 0:
+            source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+            sent, failed, blocked, total = await _send_admin_broadcast(
+                context, item.msg_type, item.text, source_lang=source_lang
+            )
+            db.mark_scheduled_broadcast_sent(int(broadcast_id))
+            _cancel_broadcast_job(context.application.job_queue, int(broadcast_id))
+            await query.edit_message_text(
+                t(
+                    "broadcast_done",
+                    lang,
+                    sent=sent,
+                    failed=failed,
+                    blocked=blocked,
+                    total=total,
+                )
+            )
+        elif db.update_scheduled_broadcast(int(broadcast_id), scheduled_at=scheduled_at):
+            _schedule_broadcast_job(
+                context.application.job_queue, int(broadcast_id), scheduled_at
+            )
+            when_label = _format_scheduled_at_label(scheduled_at)
+            await query.edit_message_text(
+                t("scheduled_updated", lang, id=broadcast_id) + f"\n{when_label}"
+            )
+        else:
+            await query.edit_message_text(t("scheduled_not_found", lang))
+        context.user_data.clear()
+        await context.bot.send_message(
+            user_id,
+            t("menu_broadcast", lang),
+            reply_markup=broadcast_menu(lang),
+        )
+        return ConversationHandler.END
+
+    return ADMIN_SB_EDIT_SCHEDULE
 
 
 async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2519,6 +2917,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("broadcast"), open_broadcast_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("scheduled_broadcasts"), admin_scheduled_list),
+        group=0,
+    )
+    app.add_handler(CallbackQueryHandler(on_sb_edit_pick, pattern=r"^sb_edit:\d+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_sb_delete, pattern=r"^sb_delete:\d+$"), group=0)
+    app.add_handler(
         ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
         group=0,
     )
@@ -2563,7 +2971,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(_btn_filter("new"), start_new_subscription),
             MessageHandler(_btn_filter("create_schedule"), start_stream_schedule),
             MessageHandler(_btn_filter("language"), start_language_change),
-            MessageHandler(_btn_filter("broadcast"), admin_broadcast_start),
+            MessageHandler(_btn_filter("broadcast_new"), admin_broadcast_start),
+            CallbackQueryHandler(start_sb_edit_text, pattern=r"^sb_edit_f:\d+:text$"),
+            CallbackQueryHandler(start_sb_edit_time, pattern=r"^sb_edit_f:\d+:time$"),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
             CallbackQueryHandler(start_edit_ignore_keywords, pattern=r"^edit_f:\d+:ignore_keywords$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
@@ -2667,6 +3077,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(admin_schedule_callback, pattern=r"^sched:"),
+            ],
+            ADMIN_SB_EDIT_TEXT: [
+                _wiz_cancel,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sb_edit_text),
+            ],
+            ADMIN_SB_EDIT_SCHEDULE: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(admin_sb_schedule_callback, pattern=r"^sb_sched:"),
             ],
             STREAM_SCHEDULE_CONFIRM: [
                 _wiz_cancel,
