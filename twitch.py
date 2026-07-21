@@ -96,3 +96,20 @@ def render_template(
         .replace("{game}", game or "—")
         .replace("{name}", name or "—")
     )
+
+
+def normalize_ignore_keywords(text: str) -> str:
+    parts = [part.strip() for part in text.split(",")]
+    return ", ".join(part for part in parts if part)
+
+
+def should_ignore_stream(ignore_keywords: str, game: str, title: str) -> bool:
+    if not ignore_keywords.strip():
+        return False
+    game_lower = (game or "").lower()
+    title_lower = (title or "").lower()
+    for raw in ignore_keywords.split(","):
+        keyword = raw.strip().lower()
+        if keyword and (keyword in game_lower or keyword in title_lower):
+            return True
+    return False

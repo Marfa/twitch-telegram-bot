@@ -83,6 +83,16 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Category: {{game}}</code>"
         ),
         "template_empty": "Template cannot be empty.",
+        "ignore_keywords_prompt": (
+            "<b>Ignore keywords</b>\n\n"
+            "Specify keywords in the stream title or category that will prevent "
+            "the notification from being sent.\n\n"
+            "If multiple words, separate them with commas.\n\n"
+            "Send the list or tap Skip."
+        ),
+        "ignore_keywords_skip": "Skip ⏭",
+        "ignore_keywords_yes_note": "Ignore keywords: {keywords}",
+        "ignore_keywords_no_note": "Ignore keywords: none",
         "link_preview_prompt": "Show link preview in notifications?",
         "link_preview_on": "✅ Show preview",
         "link_preview_off": "❌ Hide preview",
@@ -178,6 +188,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n"
             "{preview_note}\n"
+            "{ignore_keywords_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n\n"
             "Sample message:\n{preview}\n\n"
@@ -241,6 +252,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_pick": "Choose a subscription to edit:",
         "edit_menu": "Subscription #{sub_id} — {username}\n\nWhat to change?",
         "edit_template": "📝 Message template",
+        "edit_ignore_keywords": "🚫 Ignore keywords",
         "edit_dest": "📍 Destination",
         "edit_delete_old": "🗑 Delete old messages",
         "edit_delete_fail_notify": "⚠️ Notify on delete failure",
@@ -260,6 +272,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Send a new message template for subscription #{sub_id}.\n\n"
             "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
+        "edit_ignore_keywords_prompt": (
+            "Subscription #{sub_id}\n"
+            "Current: {current}\n\n"
+            "Send keywords separated by commas.\n"
+            "Empty message or Skip — disable the filter."
+        ),
+        "ignore_keywords_current_none": "none",
         "edit_updated": "✅ Subscription #{sub_id} updated.",
         "edit_delay_prompt": (
             "Subscription #{sub_id}\n"
@@ -416,6 +435,16 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Категория: {{game}}</code>"
         ),
         "template_empty": "Шаблон не может быть пустым.",
+        "ignore_keywords_prompt": (
+            "<b>Игнорировать ключевые слова</b>\n\n"
+            "Укажите ключевые слова в названии стрима или игре, при наличии которых "
+            "оповещение не будет отправляться.\n\n"
+            "Если несколько слов, укажите их через запятую.\n\n"
+            "Отправьте список слов или нажмите «Пропустить»."
+        ),
+        "ignore_keywords_skip": "Пропустить ⏭",
+        "ignore_keywords_yes_note": "Игнорировать ключевые слова: {keywords}",
+        "ignore_keywords_no_note": "Игнорировать ключевые слова: нет",
         "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
         "link_preview_on": "✅ Показывать превью",
         "link_preview_off": "❌ Скрыть превью",
@@ -514,6 +543,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n"
             "{preview_note}\n"
+            "{ignore_keywords_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n\n"
             "Пример сообщения:\n{preview}\n\n"
@@ -577,6 +607,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_pick": "Выберите подписку для редактирования:",
         "edit_menu": "Подписка #{sub_id} — {username}\n\nЧто изменить?",
         "edit_template": "📝 Шаблон сообщения",
+        "edit_ignore_keywords": "🚫 Игнорировать ключевые слова",
         "edit_dest": "📍 Куда отправлять",
         "edit_delete_old": "🗑 Удалять старые",
         "edit_delete_fail_notify": "⚠️ Сообщать о проблемах удаления",
@@ -596,6 +627,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Отправьте новый шаблон для подписки #{sub_id}.\n\n"
             "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
         ),
+        "edit_ignore_keywords_prompt": (
+            "Подписка #{sub_id}\n"
+            "Сейчас: {current}\n\n"
+            "Отправьте ключевые слова через запятую.\n"
+            "Пустое сообщение или «Пропустить» — отключить фильтр."
+        ),
+        "ignore_keywords_current_none": "нет",
         "edit_updated": "✅ Подписка #{sub_id} обновлена.",
         "edit_delay_prompt": (
             "Подписка #{sub_id}\n"
@@ -829,6 +867,14 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def ignore_keywords_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("ignore_keywords_skip", lang), callback_data="ignore_keywords:skip")],
+        ]
+    )
+
+
 def delay_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -1042,9 +1088,11 @@ def edit_options_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
-        [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
+        [InlineKeyboardButton(t("edit_ignore_keywords", lang), callback_data=f"edit_f:{sub_id}:ignore_keywords")],
+        [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")],
         [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
         [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
+        [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
     ]
     if dest_type != "dm":
         rows.append(
@@ -1059,9 +1107,6 @@ def edit_options_keyboard(
                     )
                 ]
             )
-    rows.append(
-        [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")]
-    )
     return InlineKeyboardMarkup(rows)
 
 

@@ -45,6 +45,7 @@ class Subscription:
     disable_link_preview: bool
     delay_minutes: int
     suppress_repeat_minutes: int
+    ignore_keywords: str
     notify_cooldown_until: str | None
     last_message_id: int | None
 
@@ -74,6 +75,7 @@ def _row_to_sub(row: Any) -> Subscription:
         disable_link_preview=bool(row["disable_link_preview"]),
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
+        ignore_keywords=str(row["ignore_keywords"] or ""),
         notify_cooldown_until=(
             row["notify_cooldown_until"].isoformat()
             if row["notify_cooldown_until"] is not None
@@ -130,6 +132,7 @@ class Database(Protocol):
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
+        ignore_keywords: str = "",
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
@@ -295,6 +298,10 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN notify_delete_fail INTEGER NOT NULL DEFAULT 0"
             )
+        if "ignore_keywords" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN ignore_keywords TEXT NOT NULL DEFAULT ''"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -341,6 +348,7 @@ class SqliteDatabase:
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
+        ignore_keywords: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -349,8 +357,8 @@ class SqliteDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    delay_minutes, suppress_repeat_minutes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delay_minutes, suppress_repeat_minutes, ignore_keywords
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -365,6 +373,7 @@ class SqliteDatabase:
                     int(disable_link_preview),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
+                    ignore_keywords,
                 ),
             )
             return int(cur.lastrowid)
@@ -442,6 +451,7 @@ class SqliteDatabase:
             "disable_link_preview",
             "delay_minutes",
             "suppress_repeat_minutes",
+            "ignore_keywords",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -453,6 +463,8 @@ class SqliteDatabase:
                 values.append(int(bool(value)))
             elif key in ("delay_minutes", "suppress_repeat_minutes"):
                 values.append(max(0, int(value)))
+            elif key == "ignore_keywords":
+                values.append(str(value or ""))
             else:
                 values.append(value)
         if not updates:
@@ -926,6 +938,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS ignore_keywords TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -981,6 +999,7 @@ class PostgresDatabase:
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
+        ignore_keywords: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -990,8 +1009,8 @@ class PostgresDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    delay_minutes, suppress_repeat_minutes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delay_minutes, suppress_repeat_minutes, ignore_keywords
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1007,6 +1026,7 @@ class PostgresDatabase:
                     disable_link_preview,
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
+                    ignore_keywords,
                 ),
             )
             row = cur.fetchone()
@@ -1096,6 +1116,7 @@ class PostgresDatabase:
             "disable_link_preview",
             "delay_minutes",
             "suppress_repeat_minutes",
+            "ignore_keywords",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1107,6 +1128,8 @@ class PostgresDatabase:
                 values.append(bool(value))
             elif key in ("delay_minutes", "suppress_repeat_minutes"):
                 values.append(max(0, int(value)))
+            elif key == "ignore_keywords":
+                values.append(str(value or ""))
             else:
                 values.append(value)
         if not updates:

@@ -14,7 +14,7 @@ from render_status import (
     is_aiven_outage,
     is_planned_maintenance,
 )
-from twitch import TwitchClient, render_template
+from twitch import TwitchClient, normalize_ignore_keywords, render_template, should_ignore_stream
 from translate import build_translations, translate_text
 from bot import _is_link_preview_disabled, _message_link
 from db import SqliteDatabase, _normalize_pg_url, open_database
@@ -34,6 +34,14 @@ def main() -> None:
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+
+    assert normalize_ignore_keywords("foo, bar , baz") == "foo, bar, baz"
+    assert normalize_ignore_keywords("") == ""
+    assert should_ignore_stream("chatting", "Just Chatting", "Playing games")
+    assert should_ignore_stream("foo", "Foo Bar", "Playing games")
+    assert should_ignore_stream("stream", "Just Chatting", "My Foo stream")
+    assert not should_ignore_stream("foo, bar", "Just Chatting", "Playing games")
+    assert not should_ignore_stream("", "Just Chatting", "Foo")
 
     link = parse_telegram_topic_link("https://t.me/c/themarfa_gaming/30")
     assert link is not None
@@ -108,6 +116,11 @@ def main() -> None:
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.notify_delete_fail is True
+        assert sub.ignore_keywords == ""
+        assert db.update_subscription(sub_id, 1, ignore_keywords="foo, bar")
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.ignore_keywords == "foo, bar"
         assert db.count_new_users_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
         assert db.count_new_users_since(datetime.now(timezone.utc) + timedelta(days=1)) == 0
         db.set_notify_cooldown(sub_id, 5)

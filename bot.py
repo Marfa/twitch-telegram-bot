@@ -46,6 +46,7 @@ from i18n import (
     delay_keyboard,
     edit_bool_keyboard,
     edit_options_keyboard,
+    ignore_keywords_keyboard,
     language_keyboard,
     link_preview_keyboard,
     main_menu,
@@ -68,7 +69,12 @@ from render_status import (
     is_aiven_outage,
     is_planned_maintenance,
 )
-from twitch import TwitchClient, render_template
+from twitch import (
+    TwitchClient,
+    normalize_ignore_keywords,
+    render_template,
+    should_ignore_stream,
+)
 from translate import build_translations
 
 logger = logging.getLogger(__name__)
@@ -79,6 +85,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     LANG_SELECT,
     CHANNEL,
     TEMPLATE,
+    IGNORE_KEYWORDS,
     LINK_PREVIEW,
     DELAY_SEND,
     DELAY_MINUTES,
@@ -89,6 +96,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     DELETE_OLD,
     DELETE_FAIL_NOTIFY,
     EDIT_TEMPLATE,
+    EDIT_IGNORE_KEYWORDS,
     EDIT_DELAY,
     EDIT_REPEAT,
     ADMIN_MSG_TYPE,
@@ -97,7 +105,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_CONFIRM,
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
-) = range(21)
+) = range(23)
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 
@@ -112,6 +120,12 @@ def _repeat_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
         return t("edit_repeat_current_allow", lang)
     return t("edit_repeat_current_mute", lang, minutes=minutes)
+
+
+def _ignore_keywords_current_label(keywords: str, lang: str) -> str:
+    if not keywords.strip():
+        return t("ignore_keywords_current_none", lang)
+    return keywords
 
 
 def _owner_sub_number(db: Database, owner_id: int, sub_id: int) -> int:
@@ -290,6 +304,16 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     return TEMPLATE
 
 
+async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
+    await update.effective_message.reply_text(
+        t("ignore_keywords_prompt", lang),
+        parse_mode=ParseMode.HTML,
+        reply_markup=ignore_keywords_keyboard(lang),
+    )
+    _set_wizard_back(context, IGNORE_KEYWORDS)
+    return IGNORE_KEYWORDS
+
+
 async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     await update.effective_message.reply_text(
         t("link_preview_prompt", lang),
@@ -330,8 +354,10 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     state = context.user_data.get("wizard_back_state")
     if state == TEMPLATE:
         return await _go_channel_prompt(update, context, lang)
-    if state == LINK_PREVIEW:
+    if state == IGNORE_KEYWORDS:
         return await _go_template_prompt(update, context, lang)
+    if state == LINK_PREVIEW:
+        return await _go_ignore_keywords_prompt(update, context, lang)
     if state == DELAY_SEND:
         return await _go_link_preview_prompt(update, context, lang)
     if state == DELAY_MINUTES:
@@ -667,7 +693,35 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return TEMPLATE
 
     context.user_data["message_template"] = template
+    return await _go_ignore_keywords_prompt(update, context, lang)
+
+
+async def receive_ignore_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    text = (update.effective_message.text or "").strip()
+    if text in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return IGNORE_KEYWORDS
+
+    context.user_data["ignore_keywords"] = normalize_ignore_keywords(text)
     await update.effective_message.reply_text(
+        t("link_preview_prompt", lang),
+        reply_markup=link_preview_keyboard(lang),
+    )
+    _set_wizard_back(context, LINK_PREVIEW)
+    return LINK_PREVIEW
+
+
+async def receive_ignore_keywords_skip(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    context.user_data["ignore_keywords"] = ""
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
         t("link_preview_prompt", lang),
         reply_markup=link_preview_keyboard(lang),
     )
@@ -1128,6 +1182,7 @@ async def _finish_subscription(
                 disable_link_preview=bool(data.get("disable_link_preview", False)),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
+                ignore_keywords=str(data.get("ignore_keywords", "")),
             )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -1174,6 +1229,12 @@ async def _finish_subscription(
             if data.get("disable_link_preview")
             else t("preview_on", lang)
         )
+        ignore_keywords = str(data.get("ignore_keywords", ""))
+        ignore_keywords_note = (
+            t("ignore_keywords_yes_note", lang, keywords=ignore_keywords)
+            if ignore_keywords
+            else t("ignore_keywords_no_note", lang)
+        )
         delay_minutes = int(data.get("delay_minutes", 0))
         delay_note = (
             t("delay_yes_note", lang, minutes=delay_minutes)
@@ -1197,6 +1258,7 @@ async def _finish_subscription(
             delete_note=delete_note,
             delete_fail_note=delete_fail_note,
             preview_note=preview_note,
+            ignore_keywords_note=ignore_keywords_note,
             delay_note=delay_note,
             repeat_note=repeat_note,
             preview=preview,
@@ -1496,6 +1558,85 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
     return EDIT_TEMPLATE
 
 
+async def start_edit_ignore_keywords(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    current = _ignore_keywords_current_label(sub.ignore_keywords, lang)
+    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t("edit_ignore_keywords_prompt", lang, sub_id=sub_num, current=current),
+        reply_markup=ignore_keywords_keyboard(lang),
+    )
+    return EDIT_IGNORE_KEYWORDS
+
+
+async def receive_edit_ignore_keywords(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    text = (update.effective_message.text or "").strip()
+    if text in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return EDIT_IGNORE_KEYWORDS
+
+    keywords = normalize_ignore_keywords(text)
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    if not db.update_subscription(sub_id, owner_id, ignore_keywords=keywords):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def receive_edit_ignore_keywords_skip(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    db: Database = context.application.bot_data["db"]
+    owner_id = query.from_user.id
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    if not db.update_subscription(sub_id, owner_id, ignore_keywords=""):
+        await query.edit_message_text(t("sub_not_found", lang))
+    else:
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            owner_id,
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
 async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -1533,6 +1674,7 @@ async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["twitch_username"] = sub.twitch_username
     context.user_data["twitch_user_id"] = sub.twitch_user_id
     context.user_data["message_template"] = sub.message_template
+    context.user_data["ignore_keywords"] = sub.ignore_keywords
     context.user_data["disable_link_preview"] = sub.disable_link_preview
     context.user_data["suppress_repeat_minutes"] = sub.suppress_repeat_minutes
     context.user_data["wizard_edit"] = True
@@ -2113,6 +2255,8 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
+    if should_ignore_stream(sub.ignore_keywords, game, title):
+        return
     text = render_template(sub.message_template, username, game, title)
     await _send_notification(context.bot, db, sub, text)
 
@@ -2142,6 +2286,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             title = stream.get("title", "")
             for sub in db.get_enabled_by_twitch_user_id(uid):
                 if is_on_notify_cooldown(sub):
+                    continue
+                if should_ignore_stream(sub.ignore_keywords, game, title):
                     continue
                 if sub.delay_minutes > 0:
                     context.job_queue.run_once(
@@ -2419,6 +2565,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(_btn_filter("language"), start_language_change),
             MessageHandler(_btn_filter("broadcast"), admin_broadcast_start),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
+            CallbackQueryHandler(start_edit_ignore_keywords, pattern=r"^edit_f:\d+:ignore_keywords$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
             CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
             CallbackQueryHandler(start_edit_repeat, pattern=r"^edit_f:\d+:repeat$"),
@@ -2434,6 +2581,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template),
+            ],
+            IGNORE_KEYWORDS: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_ignore_keywords),
             ],
             LINK_PREVIEW: [
                 _wiz_cancel,
@@ -2463,6 +2618,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             EDIT_TEMPLATE: [
                 _wiz_cancel,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template),
+            ],
+            EDIT_IGNORE_KEYWORDS: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_edit_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_ignore_keywords),
             ],
             EDIT_DELAY: [
                 _wiz_cancel,
