@@ -153,6 +153,12 @@ python main.py
 
 Подписки живут в Aiven и не сбрасываются при рестарте Render.
 
+### VPS (автодеплой)
+
+При пуше в main GitHub Actions по SSH обновляет сервер (scripts/vps-deploy.sh: git pull + docker compose -f compose.vps.yml up -d --build). Нужны secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY.
+
+Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
+
 ### Локально / Docker
 
 `DATABASE_URL` не задавайте — используется SQLite (`DATABASE_PATH`, volume в `compose.yml`).
