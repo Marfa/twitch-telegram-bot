@@ -6,3 +6,8 @@ __pycache__/
 venv/
 data/
 *.db
+migration_dump.sql
+migration_vps_status.txt
+.tmp_*
+*.pem
+*.key

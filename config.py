@@ -34,13 +34,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
-STATUS_CHECK_INTERVAL = int(os.getenv("STATUS_CHECK_INTERVAL", "1800"))
-RENDER_STATUS_RSS = os.getenv(
-    "RENDER_STATUS_RSS", "https://status.render.com/history.rss"
-)
-AIVEN_STATUS_RSS = os.getenv(
-    "AIVEN_STATUS_RSS", "https://status.aiven.io/feed.rss"
-)
 MAX_SUBSCRIPTIONS_PER_OWNER = int(os.getenv("MAX_SUBSCRIPTIONS_PER_OWNER", "25"))
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None

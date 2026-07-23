@@ -23,10 +23,9 @@ docker compose up -d --build
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
 | System alerts | Toggle admin “bot update” and “bot availability” broadcasts |
-| Hosting status | Render maintenance and Aiven outage alerts (RSS) |
 | Admin | Scheduled broadcast, DeepL auto-translate, statistics |
 | Commands | `/start`, `/help`, `/cancel` |
-| Deploy | Render Free + Aiven PostgreSQL, Fly.io, Docker |
+| Deploy | VPS (Docker), Fly.io, Render + PostgreSQL |
 
 ## Quick Start
 
@@ -180,12 +179,7 @@ fly deploy
 | `DATABASE_PATH` | SQLite path (default `data/bot.db`) |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
 | `PORT` | Health-check port (set by Render) |
-| `STATUS_CHECK_INTERVAL` | Status RSS poll interval, seconds (default 1800) |
-| `RENDER_STATUS_RSS` | Render RSS (default status.render.com) |
-| `AIVEN_STATUS_RSS` | Aiven RSS (default status.aiven.io) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
-
-The bot sends **Render planned maintenance** and **Aiven outage** alerts to users with availability notifications enabled.
 
 ## Architecture
 
@@ -196,7 +190,6 @@ The bot sends **Render planned maintenance** and **Aiven outage** alerts to user
 | `twitch.py` | Helix API, templates |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `render_status.py` | Render and Aiven RSS |
 | `health.py` | `/health` for Render and UptimeRobot |
 | `db.py` | SQLite or PostgreSQL |
 

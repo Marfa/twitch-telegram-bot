@@ -23,10 +23,9 @@ docker compose up -d --build
 | Подписки | Список, вкл/выкл, редактирование всех полей, удаление |
 | Расписание стримов | Мастер **📅 Создать расписание** — текст на неделю для публикации |
 | Системные оповещения | Вкл/выкл рассылок об обновлениях и доступности бота |
-| Статус хостинга | Уведомления о работах Render и сбоях Aiven (RSS) |
 | Админка | Рассылка с отложенной отправкой, авто-перевод DeepL, статистика |
 | Команды | `/start`, `/help`, `/cancel` |
-| Deploy | Render Free + Aiven PostgreSQL, Fly.io, Docker |
+| Deploy | VPS (Docker), Fly.io, Render + PostgreSQL |
 
 ## Quick Start
 
@@ -180,12 +179,7 @@ fly deploy
 | `DATABASE_PATH` | Путь к SQLite (по умолчанию `data/bot.db`) |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Лимит подписок на пользователя (по умолчанию 25) |
 | `PORT` | Health-check (Render задаёт сам) |
-| `STATUS_CHECK_INTERVAL` | Опрос RSS статусов, сек (по умолчанию 1800) |
-| `RENDER_STATUS_RSS` | RSS Render (по умолчанию status.render.com) |
-| `AIVEN_STATUS_RSS` | RSS Aiven (по умолчанию status.aiven.io) |
 | `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя |
-
-Бот присылает уведомления о **запланированных работах Render** и **сбоях Aiven** пользователям с включёнными оповещениями о доступности.
 
 ## Архитектура
 
@@ -196,7 +190,6 @@ fly deploy
 | `twitch.py` | Helix API, шаблоны |
 | `translate.py` | DeepL для админ-рассылок |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `render_status.py` | RSS Render и Aiven |
 | `health.py` | `/health` для Render и UptimeRobot |
 | `db.py` | SQLite или PostgreSQL |
 

@@ -161,10 +161,6 @@ class Database(Protocol):
 
     def get_all_owner_ids(self) -> list[int]: ...
 
-    def is_status_seen(self, guid: str) -> bool: ...
-
-    def mark_status_seen(self, guid: str) -> None: ...
-
     def upsert_user(self, user_id: int) -> None: ...
 
     def count_new_users_since(self, since: datetime) -> int: ...
@@ -258,14 +254,6 @@ class SqliteDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_subs_owner_id
                 ON subscriptions(owner_id)
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS render_status_seen (
-                    guid TEXT PRIMARY KEY,
-                    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
-                )
                 """
             )
             conn.execute(
@@ -530,20 +518,6 @@ class SqliteDatabase:
                 "SELECT DISTINCT owner_id FROM subscriptions ORDER BY owner_id"
             ).fetchall()
         return [int(r["owner_id"]) for r in rows]
-
-    def is_status_seen(self, guid: str) -> bool:
-        with self._conn() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM render_status_seen WHERE guid = ?", (guid,)
-            ).fetchone()
-        return row is not None
-
-    def mark_status_seen(self, guid: str) -> None:
-        with self._conn() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO render_status_seen (guid) VALUES (?)",
-                (guid,),
-            )
 
     def upsert_user(self, user_id: int) -> None:
         with self._conn() as conn:
@@ -951,14 +925,6 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS render_status_seen (
-                    guid TEXT PRIMARY KEY,
-                    seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            cur.execute(
-                """
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
                     locale TEXT,
@@ -1254,26 +1220,6 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return [int(r["owner_id"]) for r in rows]
-
-    def is_status_seen(self, guid: str) -> bool:
-        with self._conn() as conn:
-            cur = self._cursor(conn)
-            cur.execute(
-                "SELECT 1 FROM render_status_seen WHERE guid = %s", (guid,)
-            )
-            row = cur.fetchone()
-        return row is not None
-
-    def mark_status_seen(self, guid: str) -> None:
-        with self._conn() as conn:
-            cur = self._cursor(conn)
-            cur.execute(
-                """
-                INSERT INTO render_status_seen (guid) VALUES (%s)
-                ON CONFLICT DO NOTHING
-                """,
-                (guid,),
-            )
 
     def upsert_user(self, user_id: int) -> None:
         with self._conn() as conn:

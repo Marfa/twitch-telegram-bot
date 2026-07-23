@@ -66,12 +66,6 @@ from i18n import (
     wizard_menu,
 )
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
-from render_status import (
-    StatusItem,
-    fetch_render_status,
-    is_aiven_outage,
-    is_planned_maintenance,
-)
 from twitch import (
     TwitchClient,
     normalize_ignore_keywords,
@@ -2792,103 +2786,6 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         last_live[uid] = is_live
 
 
-async def _notify_status_items(
-    context: ContextTypes.DEFAULT_TYPE,
-    items: list[StatusItem],
-    message_key: str,
-) -> None:
-    db: Database = context.application.bot_data["db"]
-    user_ids = db.get_availability_recipients()
-    if not user_ids:
-        return
-
-    for item in items:
-        body = item.description[:600] + ("…" if len(item.description) > 600 else "")
-        for user_id in user_ids:
-            lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
-            text = t(
-                message_key,
-                lang,
-                title=item.title,
-                body=body,
-                link=item.link,
-            )
-            try:
-                await context.bot.send_message(
-                    user_id,
-                    text,
-                    disable_web_page_preview=True,
-                )
-            except Forbidden as exc:
-                if "blocked" in str(exc).lower():
-                    db.set_bot_blocked(user_id, True)
-                else:
-                    logger.warning("Cannot notify user %s: %s", user_id, exc)
-            except BadRequest as exc:
-                logger.warning("Cannot notify user %s: %s", user_id, exc)
-
-
-async def _check_status_rss(
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    rss_url: str,
-    seeded_key: str,
-    matches,
-    message_key: str,
-    log_label: str,
-) -> None:
-    db: Database = context.application.bot_data["db"]
-    seeded = context.application.bot_data.setdefault(seeded_key, False)
-
-    try:
-        items = await asyncio.to_thread(fetch_render_status, rss_url)
-    except Exception:
-        logger.exception("%s status RSS fetch failed", log_label)
-        return
-
-    new_items: list[StatusItem] = []
-    for item in items:
-        if db.is_status_seen(item.guid):
-            continue
-        db.mark_status_seen(item.guid)
-        if not seeded:
-            continue
-        if matches(item):
-            new_items.append(item)
-
-    context.application.bot_data[seeded_key] = True
-    if not new_items:
-        return
-
-    await _notify_status_items(context, new_items, message_key)
-
-
-async def check_render_status(context: ContextTypes.DEFAULT_TYPE) -> None:
-    from config import RENDER_STATUS_RSS
-
-    await _check_status_rss(
-        context,
-        rss_url=RENDER_STATUS_RSS,
-        seeded_key="render_status_seeded",
-        matches=is_planned_maintenance,
-        message_key="render_maintenance",
-        log_label="Render",
-    )
-
-
-async def check_aiven_status(context: ContextTypes.DEFAULT_TYPE) -> None:
-    from config import AIVEN_STATUS_RSS
-
-    await _check_status_rss(
-        context,
-        rss_url=AIVEN_STATUS_RSS,
-        seeded_key="aiven_status_seeded",
-        matches=is_aiven_outage,
-        message_key="aiven_outage",
-        log_label="Aiven",
-    )
-
-
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     for item in db.get_pending_scheduled_broadcasts():
@@ -3207,20 +3104,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     app.add_handler(conv, group=1)
 
-    from config import CHECK_INTERVAL, DATABASE_URL, STATUS_CHECK_INTERVAL
+    from config import CHECK_INTERVAL
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
-    app.job_queue.run_repeating(
-        check_render_status, interval=STATUS_CHECK_INTERVAL, first=30
-    )
     app.job_queue.run_repeating(
         weekly_new_users_report,
         interval=7 * 24 * 3600,
         first=_seconds_until_next_weekly_report(),
     )
-    if DATABASE_URL:
-        app.job_queue.run_repeating(
-            check_aiven_status, interval=STATUS_CHECK_INTERVAL, first=45
-        )
     return app

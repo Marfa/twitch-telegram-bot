@@ -308,21 +308,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_preview_menu": "Disable link preview in notifications?",
         "preview_yes": "✅ Off (no preview)",
         "preview_no": "❌ On (show preview)",
-        "render_maintenance": (
-            "⚠️ Render: planned maintenance\n"
-            "The bot may be unavailable.\n\n"
-            "{title}\n{body}\n\n"
-            "{link}"
-        ),
-        "aiven_outage": (
-            "⚠️ Aiven: service disruption\n"
-            "Subscriptions may be unavailable.\n\n"
-            "{title}\n{body}\n\n"
-            "{link}"
-        ),
         "conflict_polling": (
-            "Polling conflict — two bot instances may be running "
-            "(Render + local?). Keep only one."
+            "Polling conflict — two bot instances may be running. Keep only one."
         ),
         "unhandled_error": "Unhandled error: {err}",
         "broadcast_prompt": (
@@ -691,21 +678,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_preview_menu": "Отключить превью ссылок в уведомлениях?",
         "preview_yes": "✅ Выкл (без превью)",
         "preview_no": "❌ Вкл (с превью)",
-        "render_maintenance": (
-            "⚠️ Render: запланированы работы\n"
-            "Бот может быть недоступен.\n\n"
-            "{title}\n{body}\n\n"
-            "{link}"
-        ),
-        "aiven_outage": (
-            "⚠️ Aiven: сбой в работе\n"
-            "Подписки могут быть недоступны.\n\n"
-            "{title}\n{body}\n\n"
-            "{link}"
-        ),
         "conflict_polling": (
-            "Конфликт polling — возможно, запущено два экземпляра бота "
-            "(Render + локально?). Оставляем один."
+            "Конфликт polling — возможно, запущено два экземпляра бота. Оставьте один."
         ),
         "unhandled_error": "Необработанная ошибка: {err}",
         "broadcast_prompt": "Выберите тип оповещения:",
