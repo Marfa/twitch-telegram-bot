@@ -2839,6 +2839,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     last_live: dict[str, bool] = context.application.bot_data.setdefault("last_live", {})
+    # After restart memory is empty; first successful poll only seeds state so
+    # already-live streams are not treated as fresh starts.
+    primed = bool(context.application.bot_data.get("last_live_primed"))
 
     user_ids = db.get_unique_twitch_user_ids()
     if not user_ids:
@@ -2850,30 +2853,46 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Twitch poll failed")
         return
 
+    went_live = live_transitions(last_live, user_ids, live_streams, primed=primed)
+    context.application.bot_data["last_live_primed"] = True
+
+    for uid in went_live:
+        stream = live_streams[uid]
+        username = stream.get("user_login", stream.get("user_name", ""))
+        game = stream.get("game_name", "")
+        title = stream.get("title", "")
+        for sub in db.get_enabled_by_twitch_user_id(uid):
+            if is_on_notify_cooldown(sub):
+                continue
+            if should_ignore_stream(sub.ignore_keywords, game, title):
+                continue
+            if sub.delay_minutes > 0:
+                context.job_queue.run_once(
+                    _send_delayed_notification,
+                    when=sub.delay_minutes * 60,
+                    data={"sub_id": sub.id},
+                    name=f"delay_{sub.id}",
+                )
+                continue
+            text = render_template(sub.message_template, username, game, title)
+            await _send_notification(context.bot, db, sub, text)
+
+
+def live_transitions(
+    last_live: dict[str, bool],
+    user_ids: list[str],
+    live_ids: set[str] | dict,
+    *,
+    primed: bool,
+) -> list[str]:
+    """Update last_live; return uids that went offline→online when primed."""
+    went_live: list[str] = []
     for uid in user_ids:
-        is_live = uid in live_streams
-        was_live = last_live.get(uid, False)
-        if is_live and not was_live:
-            stream = live_streams[uid]
-            username = stream.get("user_login", stream.get("user_name", ""))
-            game = stream.get("game_name", "")
-            title = stream.get("title", "")
-            for sub in db.get_enabled_by_twitch_user_id(uid):
-                if is_on_notify_cooldown(sub):
-                    continue
-                if should_ignore_stream(sub.ignore_keywords, game, title):
-                    continue
-                if sub.delay_minutes > 0:
-                    context.job_queue.run_once(
-                        _send_delayed_notification,
-                        when=sub.delay_minutes * 60,
-                        data={"sub_id": sub.id},
-                        name=f"delay_{sub.id}",
-                    )
-                    continue
-                text = render_template(sub.message_template, username, game, title)
-                await _send_notification(context.bot, db, sub, text)
+        is_live = uid in live_ids
+        if primed and is_live and not last_live.get(uid, False):
+            went_live.append(uid)
         last_live[uid] = is_live
+    return went_live
 
 
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2961,6 +2980,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["db"] = db
     app.bot_data["twitch"] = twitch
     app.bot_data["last_live"] = {}
+    app.bot_data["last_live_primed"] = False
     app.add_error_handler(error_handler)
 
     app.add_handler(

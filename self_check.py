@@ -10,7 +10,7 @@ from links import parse_telegram_topic_link, chat_ref_to_id
 from render_deploy import _service_id
 from twitch import TwitchClient, find_placeholder_typos, normalize_ignore_keywords, render_template, should_ignore_stream
 from translate import build_translations, translate_text
-from bot import _is_link_preview_disabled, _message_link
+from bot import _is_link_preview_disabled, _message_link, live_transitions
 from db import SqliteDatabase, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
 from telegram import LinkPreviewOptions, Message
@@ -28,6 +28,16 @@ def main() -> None:
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+
+    state: dict[str, bool] = {}
+    assert live_transitions(state, ["1", "2"], {"1": {}}, primed=False) == []
+    assert state == {"1": True, "2": False}
+    assert live_transitions(state, ["1", "2"], {"1": {}}, primed=True) == []
+    assert live_transitions(state, ["1", "2"], {"1": {}, "2": {}}, primed=True) == ["2"]
+    assert state["2"] is True
+    assert live_transitions(state, ["1", "2"], {}, primed=True) == []
+    assert state == {"1": False, "2": False}
+    assert live_transitions(state, ["1"], {"1": {}}, primed=True) == ["1"]
 
     assert find_placeholder_typos("{username} {game} {name}") == []
     assert find_placeholder_typos("{game)") == [("{game)", "{game}")]
