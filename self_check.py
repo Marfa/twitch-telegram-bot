@@ -103,6 +103,9 @@ def main() -> None:
     assert "{game}" in normalized
     assert "{name}" in normalized
     assert _normalize_template("{username}\n{game}\n{name}") == "{username}\n{game}\n{name}"
+    assert "{name}" in _normalize_template("live!\nТестовый стрим")
+    assert "Тестовый" not in _normalize_template("live!\nТестовый стрим")
+    assert "Test stream" not in _normalize_template("hi\nTest stream")
 
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "test.db")

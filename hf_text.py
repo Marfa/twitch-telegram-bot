@@ -39,12 +39,16 @@ def generate_alert_template(*, locale: str, channel: str = "") -> str:
         "Reply with ONLY the template text — no quotes, no markdown fences, no explanation. "
         "You MUST include these placeholders exactly (with curly braces): "
         "{username}, {game}, {name}. "
-        "Keep it short: 2–4 lines. Match the requested language."
+        "Keep it short: 2–4 lines. Match the requested language. "
+        "Do NOT invent sample stream titles or demo labels. "
+        "Never write phrases like «Тестовый стрим», «Test stream», «test stream», "
+        "«пример», «example», or any fake title text — use {name} instead."
     )
     user = (
         f"Language: {lang_name}\n"
         f"Twitch channel (for context only, still use {{username}} placeholder): {channel or 'streamer'}\n"
-        "Write a lively live announcement template."
+        "Write a lively live announcement template. "
+        "Use placeholders only — no real or sample stream titles."
     )
     model = (
         os.getenv("HF_TEXT_MODEL", "").strip()
@@ -90,6 +94,11 @@ def _normalize_template(text: str) -> str:
     text = re.sub(r"^```(?:\w+)?\n?", "", text)
     text = re.sub(r"\n?```$", "", text)
     text = text.strip().strip('"').strip("'")
+    # Drop demo titles the model sometimes hardcodes instead of {name}.
+    text = re.sub(r"(?i)\bтестовый\s+стрим\b!?", "{name}", text)
+    text = re.sub(r"(?i)\btest\s+stream\b!?", "{name}", text)
+    text = re.sub(r"(\{name\}\s*){2,}", "{name}", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     # Ensure required placeholders exist even if the model drops one.
     missing = [p for p in _PLACEHOLDERS if p not in text]
     if missing:
