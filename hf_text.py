@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import re
 
 import requests
@@ -15,6 +16,22 @@ logger = logging.getLogger(__name__)
 _HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 _PLACEHOLDERS = ("{username}", "{game}", "{name}")
 
+# Used when HF Inference credits are exhausted (402) or the API is down.
+_FALLBACK_RU = (
+    "{username} в эфире!\n{name}\nКатегория: {game}",
+    "🔴 {username} начал стрим\n{name}\nИгра: {game}",
+    "{username} онлайн!\n«{name}»\n{game}",
+    "Стрим начался: {username}\n{name}\nКатегория — {game}",
+    "Гоу смотреть {username}!\n{name}\n{game}",
+)
+_FALLBACK_EN = (
+    "{username} is live!\n{name}\nCategory: {game}",
+    "🔴 {username} started streaming\n{name}\nPlaying: {game}",
+    "{username} is online!\n“{name}”\n{game}",
+    "Stream started: {username}\n{name}\nCategory — {game}",
+    "Come watch {username}!\n{name}\n{game}",
+)
+
 
 def _resolve_token() -> str:
     # Read env at call time so Docker/runtime secrets are picked up.
@@ -25,8 +42,21 @@ def _resolve_token() -> str:
     )
 
 
+def _local_template(locale: str) -> str:
+    pool = _FALLBACK_RU if str(locale).lower().startswith("ru") else _FALLBACK_EN
+    return random.choice(pool)
+
+
 def generate_alert_template(*, locale: str, channel: str = "") -> str:
     """Generate a Twitch live-alert template with {username}/{game}/{name}."""
+    try:
+        return _hf_generate(locale=locale, channel=channel)
+    except Exception as exc:
+        logger.warning("HF template generation unavailable (%s); using local fallback", exc)
+        return _normalize_template(_local_template(locale))
+
+
+def _hf_generate(*, locale: str, channel: str = "") -> str:
     token = _resolve_token()
     if not token:
         raise RuntimeError("HF_TOKEN / HUGGING_FACE_API is not configured")

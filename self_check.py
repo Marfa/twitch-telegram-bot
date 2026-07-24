@@ -107,6 +107,16 @@ def main() -> None:
     assert "Тестовый" not in _normalize_template("live!\nТестовый стрим")
     assert "Test stream" not in _normalize_template("hi\nTest stream")
 
+    from hf_text import _local_template, generate_alert_template
+    local_ru = _local_template("ru")
+    assert "{username}" in local_ru and "{game}" in local_ru and "{name}" in local_ru
+    # With no usable HF token, generation must still return a template via fallback.
+    import os as _os
+    _os.environ["HF_TOKEN"] = ""
+    _os.environ["HUGGING_FACE_API"] = "not-a-real-token"
+    fallback = generate_alert_template(locale="ru", channel="marfapr")
+    assert "{username}" in fallback and "{name}" in fallback
+
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "test.db")
         db.upsert_user(1)
