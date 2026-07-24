@@ -412,19 +412,25 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
 
 
 async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
-    await update.effective_message.reply_text(
-        t("link_preview_prompt", lang),
-        reply_markup=link_preview_keyboard(lang),
-    )
+    chat_id = update.effective_user.id
+    text = t("link_preview_prompt", lang)
+    markup = link_preview_keyboard(lang)
+    if update.callback_query:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
     _set_wizard_back(context, LINK_PREVIEW)
     return LINK_PREVIEW
 
 
 async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
-    await update.effective_message.reply_text(
-        t("delay_prompt", lang),
-        reply_markup=delay_keyboard(lang),
-    )
+    chat_id = update.effective_user.id
+    text = t("delay_prompt", lang)
+    markup = delay_keyboard(lang)
+    if update.callback_query:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
     _set_wizard_back(context, DELAY_SEND)
     return DELAY_SEND
 
@@ -479,6 +485,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == LINK_PREVIEW:
         return await _go_ignore_keywords_prompt(update, context, lang)
     if state == DELAY_SEND:
+        if context.user_data.get("image_file_id"):
+            return await _go_ignore_keywords_prompt(update, context, lang)
         return await _go_link_preview_prompt(update, context, lang)
     if state == DELAY_MINUTES:
         return await _go_delay_prompt(update, context, lang)
@@ -565,6 +573,7 @@ def _help_text(lang: str) -> str:
         lang,
         btn_new=btn("new", lang),
         btn_manage=btn("manage", lang),
+        btn_create_schedule=btn("create_schedule", lang),
         btn_feedback=btn("feedback", lang),
     )
 
@@ -593,9 +602,17 @@ def _format_sub_line(
         settings.append(t("sub_list_ignore_no", lang))
     settings.append(
         t("sub_list_preview_off", lang)
-        if sub.disable_link_preview
+        if sub.disable_link_preview or sub.image_file_id
         else t("sub_list_preview_on", lang)
     )
+    if sub.image_file_id:
+        pos = (sub.image_position or "").strip()
+        if pos == "after":
+            settings.append(t("sub_list_image_after", lang))
+        else:
+            settings.append(t("sub_list_image_before", lang))
+    else:
+        settings.append(t("sub_list_image_no", lang))
     settings.append(
         t("sub_list_delay", lang, minutes=sub.delay_minutes)
         if sub.delay_minutes > 0
@@ -681,6 +698,55 @@ def _message_link(chat_id: int, message_id: int, thread_id: int | None = None) -
     return f"https://t.me/c/{internal}/{message_id}"
 
 
+async def _deliver_alert_content(
+    bot,
+    *,
+    chat_id: int,
+    text: str,
+    thread_id: int | None = None,
+    image_file_id: str | None = None,
+    image_position: str = "",
+    disable_link_preview: bool = False,
+):
+    """Send alert text, optionally with image above/below. Returns the primary message."""
+    thread_kwargs: dict = {}
+    if thread_id:
+        thread_kwargs["message_thread_id"] = thread_id
+
+    file_id = image_file_id
+    position = (image_position or "").strip()
+    # Image posts always disable link preview (caption has no separate preview toggle).
+    if file_id and position in ("before", "after"):
+        disable_link_preview = True
+
+    if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
+        return await bot.send_photo(
+            chat_id=chat_id,
+            photo=file_id,
+            caption=text,
+            show_caption_above_media=(position == "after"),
+            **thread_kwargs,
+        )
+    if file_id and position in ("before", "after"):
+        if position == "before":
+            await bot.send_photo(chat_id=chat_id, photo=file_id, **thread_kwargs)
+            text_kwargs: dict = {"chat_id": chat_id, "text": text, **thread_kwargs}
+            if disable_link_preview:
+                text_kwargs["disable_web_page_preview"] = True
+            return await bot.send_message(**text_kwargs)
+        text_kwargs = {"chat_id": chat_id, "text": text, **thread_kwargs}
+        if disable_link_preview:
+            text_kwargs["disable_web_page_preview"] = True
+        msg = await bot.send_message(**text_kwargs)
+        await bot.send_photo(chat_id=chat_id, photo=file_id, **thread_kwargs)
+        return msg
+
+    kwargs: dict = {"chat_id": chat_id, "text": text, **thread_kwargs}
+    if disable_link_preview:
+        kwargs["disable_web_page_preview"] = True
+    return await bot.send_message(**kwargs)
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -712,61 +778,16 @@ async def _send_notification(
                         notify_exc,
                     )
 
-    thread_kwargs: dict = {}
-    if sub.thread_id:
-        thread_kwargs["message_thread_id"] = sub.thread_id
-
     try:
-        msg = None
-        file_id = sub.image_file_id
-        position = (sub.image_position or "").strip()
-
-        if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
-            # One post: photo + template text as caption (no separate text message).
-            # before = image on top (caption below); after = image at bottom (caption above).
-            msg = await bot.send_photo(
-                chat_id=sub.chat_id,
-                photo=file_id,
-                caption=text,
-                show_caption_above_media=(position == "after"),
-                **thread_kwargs,
-            )
-        elif file_id and position in ("before", "after"):
-            # Caption too long for Telegram — fall back to two messages.
-            if position == "before":
-                await bot.send_photo(
-                    chat_id=sub.chat_id,
-                    photo=file_id,
-                    **thread_kwargs,
-                )
-                text_kwargs: dict = {
-                    "chat_id": sub.chat_id,
-                    "text": text,
-                    **thread_kwargs,
-                }
-                if sub.disable_link_preview:
-                    text_kwargs["disable_web_page_preview"] = True
-                msg = await bot.send_message(**text_kwargs)
-            else:
-                text_kwargs = {
-                    "chat_id": sub.chat_id,
-                    "text": text,
-                    **thread_kwargs,
-                }
-                if sub.disable_link_preview:
-                    text_kwargs["disable_web_page_preview"] = True
-                msg = await bot.send_message(**text_kwargs)
-                await bot.send_photo(
-                    chat_id=sub.chat_id,
-                    photo=file_id,
-                    **thread_kwargs,
-                )
-        else:
-            kwargs: dict = {"chat_id": sub.chat_id, "text": text, **thread_kwargs}
-            if sub.disable_link_preview:
-                kwargs["disable_web_page_preview"] = True
-            msg = await bot.send_message(**kwargs)
-
+        msg = await _deliver_alert_content(
+            bot,
+            chat_id=sub.chat_id,
+            text=text,
+            thread_id=sub.thread_id,
+            image_file_id=sub.image_file_id,
+            image_position=sub.image_position,
+            disable_link_preview=bool(sub.disable_link_preview) or bool(sub.image_file_id),
+        )
         if msg and sub.delete_previous and sub.dest_type != "dm":
             db.set_last_message_id(sub.id, msg.message_id)
         if sub.suppress_repeat_minutes > 0:
@@ -1174,12 +1195,13 @@ async def _save_edit_image(
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     file_id = context.user_data.get("image_file_id") or None
     position = str(context.user_data.get("image_position") or "") if file_id else ""
-    if not db.update_subscription(
-        sub_id,
-        owner_id,
-        image_file_id=file_id,
-        image_position=position,
-    ):
+    fields: dict = {
+        "image_file_id": file_id,
+        "image_position": position,
+    }
+    if file_id:
+        fields["disable_link_preview"] = True
+    if not db.update_subscription(sub_id, owner_id, **fields):
         await context.bot.send_message(owner_id, t("sub_not_found", lang))
     else:
         await context.bot.send_message(
@@ -1209,6 +1231,32 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         reply_markup=image_ask_keyboard(lang),
     )
     return IMAGE_ASK
+
+
+async def delete_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    owner_id = query.from_user.id
+    if not db.update_subscription(
+        sub_id,
+        owner_id,
+        image_file_id=None,
+        image_position="",
+    ):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        owner_id,
+        t("edit_updated", lang, sub_id=sub_num),
+        reply_markup=_menu(lang, owner_id),
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 async def _save_edit_template(
@@ -1246,6 +1294,15 @@ async def _save_edit_template(
     return ConversationHandler.END
 
 
+async def _go_after_ignore_keywords(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    if context.user_data.get("image_file_id"):
+        context.user_data["disable_link_preview"] = True
+        return await _go_delay_prompt(update, context, lang)
+    return await _go_link_preview_prompt(update, context, lang)
+
+
 async def receive_ignore_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     text = (update.effective_message.text or "").strip()
@@ -1254,12 +1311,7 @@ async def receive_ignore_keywords(update: Update, context: ContextTypes.DEFAULT_
         return IGNORE_KEYWORDS
 
     context.user_data["ignore_keywords"] = normalize_ignore_keywords(text)
-    await update.effective_message.reply_text(
-        t("link_preview_prompt", lang),
-        reply_markup=link_preview_keyboard(lang),
-    )
-    _set_wizard_back(context, LINK_PREVIEW)
-    return LINK_PREVIEW
+    return await _go_after_ignore_keywords(update, context, lang)
 
 
 async def receive_ignore_keywords_skip(
@@ -1270,14 +1322,7 @@ async def receive_ignore_keywords_skip(
     lang = _user_lang(context, query.from_user.id)
     context.user_data["ignore_keywords"] = ""
     await query.edit_message_text("✓")
-    await context.bot.send_message(
-        query.from_user.id,
-        t("link_preview_prompt", lang),
-        reply_markup=link_preview_keyboard(lang),
-    )
-    _set_wizard_back(context, LINK_PREVIEW)
-    return LINK_PREVIEW
-
+    return await _go_after_ignore_keywords(update, context, lang)
 
 async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -1725,7 +1770,8 @@ async def _finish_subscription(
                 thread_id=thread_id,
                 delete_previous=delete_previous,
                 notify_delete_fail=notify_delete_fail,
-                disable_link_preview=bool(data.get("disable_link_preview", False)),
+                disable_link_preview=bool(data.get("disable_link_preview", False))
+                or bool(data.get("image_file_id")),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
@@ -1772,11 +1818,20 @@ async def _finish_subscription(
                     else t("delete_fail_no_note", lang)
                 )
             )
+        has_image = bool(data.get("image_file_id"))
+        preview_disabled = bool(data.get("disable_link_preview", False)) or has_image
         preview_note = (
-            t("preview_off", lang)
-            if data.get("disable_link_preview")
-            else t("preview_on", lang)
+            t("preview_off", lang) if preview_disabled else t("preview_on", lang)
         )
+        if has_image:
+            pos = str(data.get("image_position") or "")
+            image_note = (
+                t("image_after_note", lang)
+                if pos == "after"
+                else t("image_before_note", lang)
+            )
+        else:
+            image_note = t("image_no_note", lang)
         ignore_keywords = str(data.get("ignore_keywords", ""))
         ignore_keywords_note = (
             t("ignore_keywords_yes_note", lang, keywords=ignore_keywords)
@@ -1806,11 +1861,22 @@ async def _finish_subscription(
             delete_note=delete_note,
             delete_fail_note=delete_fail_note,
             preview_note=preview_note,
+            image_note=image_note,
             ignore_keywords_note=ignore_keywords_note,
             delay_note=delay_note,
             repeat_note=repeat_note,
-            preview=preview,
         )
+        try:
+            await _deliver_alert_content(
+                context.bot,
+                chat_id=owner_id,
+                text=preview,
+                image_file_id=data.get("image_file_id") or None,
+                image_position=str(data.get("image_position") or ""),
+                disable_link_preview=preview_disabled,
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning("Cannot send setup preview to %s: %s", owner_id, exc)
 
     if update.callback_query:
         try:
@@ -2108,6 +2174,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             lang,
             dest_type=sub.dest_type,
             delete_previous=sub.delete_previous,
+            has_image=bool(sub.image_file_id),
         ),
     )
 
@@ -2278,7 +2345,11 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(
             t("edit_menu", lang, sub_id=_owner_sub_number(db, query.from_user.id, sub_id), username=sub.twitch_username),
             reply_markup=edit_options_keyboard(
-                sub_id, lang, dest_type=sub.dest_type, delete_previous=sub.delete_previous
+                sub_id,
+                lang,
+                dest_type=sub.dest_type,
+                delete_previous=sub.delete_previous,
+                has_image=bool(sub.image_file_id),
             ),
         )
         return
@@ -3388,6 +3459,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(start_sb_edit_time, pattern=r"^sb_edit_f:\d+:time$"),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
             CallbackQueryHandler(start_edit_image, pattern=r"^edit_f:\d+:image$"),
+            CallbackQueryHandler(delete_edit_image, pattern=r"^edit_f:\d+:image_del$"),
             CallbackQueryHandler(start_edit_ignore_keywords, pattern=r"^edit_f:\d+:ignore_keywords$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
             CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
@@ -3551,11 +3623,32 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         fallbacks=[
             CommandHandler("cancel", cancel),
             CommandHandler("help", help_command),
+            MessageHandler(_btn_filter("wizard_cancel"), cancel),
         ],
         allow_reentry=True,
+        name="main_conversation",
     )
 
     app.add_handler(conv, group=1)
+
+    async def orphan_wizard_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        # After deploy, wizard ReplyKeyboard may remain while conversation state is gone.
+        try:
+            key = conv._get_key(update)
+        except Exception:
+            key = None
+        if key is not None and key in conv._conversations:
+            return
+        user_id = update.effective_user.id
+        lang = _user_lang(context, user_id)
+        context.user_data.clear()
+        await update.effective_message.reply_text(
+            t("cancelled", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+
+    app.add_handler(MessageHandler(_btn_filter("wizard_cancel"), orphan_wizard_nav), group=0)
+    app.add_handler(MessageHandler(_btn_filter("wizard_back"), orphan_wizard_nav), group=0)
 
     from config import CHECK_INTERVAL
 

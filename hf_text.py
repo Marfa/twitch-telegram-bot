@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 import requests
@@ -15,11 +16,21 @@ _HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 _PLACEHOLDERS = ("{username}", "{game}", "{name}")
 
 
+def _resolve_token() -> str:
+    # Read env at call time so Docker/runtime secrets are picked up.
+    return (
+        os.getenv("HF_TOKEN", "").strip()
+        or os.getenv("HUGGING_FACE_API", "").strip()
+        or (HF_TOKEN or "").strip()
+    )
+
+
 def generate_alert_template(*, locale: str, channel: str = "") -> str:
     """Generate a Twitch live-alert template with {username}/{game}/{name}."""
-    if not HF_TOKEN:
+    token = _resolve_token()
+    if not token:
         raise RuntimeError("HF_TOKEN / HUGGING_FACE_API is not configured")
-    if not HF_TOKEN.startswith("hf_"):
+    if not token.startswith("hf_"):
         raise RuntimeError("HF token must start with hf_")
 
     lang_name = "Russian" if str(locale).lower().startswith("ru") else "English"
@@ -35,14 +46,19 @@ def generate_alert_template(*, locale: str, channel: str = "") -> str:
         f"Twitch channel (for context only, still use {{username}} placeholder): {channel or 'streamer'}\n"
         "Write a lively live announcement template."
     )
+    model = (
+        os.getenv("HF_TEXT_MODEL", "").strip()
+        or HF_TEXT_MODEL
+        or "Qwen/Qwen2.5-7B-Instruct"
+    )
     response = requests.post(
         _HF_CHAT_URL,
         headers={
-            "Authorization": f"Bearer {HF_TOKEN}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
         json={
-            "model": HF_TEXT_MODEL,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -64,6 +80,8 @@ def generate_alert_template(*, locale: str, channel: str = "") -> str:
     text = (
         ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
     ).strip()
+    if not text:
+        raise RuntimeError("HF returned an empty template")
     return _normalize_template(text)
 
 

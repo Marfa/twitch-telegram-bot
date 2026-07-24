@@ -156,6 +156,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_repeat_mute": "• Repeat notifications: suppress {minutes} min",
         "sub_list_ignore_yes": "• Ignore keywords: {keywords}",
         "sub_list_ignore_no": "• Ignore keywords: none",
+        "sub_list_image_no": "• Image: none",
+        "sub_list_image_before": "• Image: at the beginning",
+        "sub_list_image_after": "• Image: at the end",
+        "image_no_note": "Image: none",
+        "image_before_note": "Image: at the beginning",
+        "image_after_note": "Image: at the end",
         "dest_prompt": "Where should notifications be sent?",
         "dest_dm": "📩 To DM",
         "dest_channel": "📢 To channel",
@@ -235,10 +241,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n"
             "{preview_note}\n"
+            "{image_note}\n"
             "{ignore_keywords_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n\n"
-            "Sample message:\n{preview}\n\n"
             "When {twitch_username} goes live — I'll send a notification.\n"
             "Help: /help"
         ),
@@ -271,13 +277,18 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "help": (
             "Available commands:\n"
-            "/start — set up a stream subscription\n"
+            "/start — open the main menu / set up a subscription\n"
             "/help — show this help\n"
-            "/cancel — cancel current setup\n\n"
-            "Menu buttons:\n"
-            "• {btn_new}\n"
-            "• {btn_manage} — list, edit, delete\n"
-            "• {btn_feedback}"
+            "/cancel — cancel the current wizard\n\n"
+            "Menu:\n"
+            "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
+            "• {btn_manage} — list, enable/disable, edit, delete\n"
+            "• {btn_create_schedule} — weekly stream schedule\n"
+            "• {btn_feedback}\n\n"
+            "Message template placeholders: {{username}}, {{game}}, {{name}}.\n"
+            "«I'm feeling lucky» can draft a template with AI.\n"
+            "If an image is attached, link previews are disabled automatically.\n"
+            "After a bot update, tap /start if the menu stops responding."
         ),
         "no_subs": (
             "No subscriptions yet.\n\n"
@@ -297,6 +308,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_menu": "Subscription #{sub_id} — {username}\n\nWhat to change?",
         "edit_template": "📝 Message template",
         "edit_image": "🖼 Update image",
+        "edit_image_add": "🖼 Add image",
+        "edit_image_update": "🖼 Update image",
+        "edit_image_delete": "🗑 Remove image",
         "edit_ignore_keywords": "🚫 Ignore keywords",
         "edit_dest": "📍 Destination",
         "edit_delete_old": "🗑 Delete old messages",
@@ -556,6 +570,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_repeat_mute": "• Повторные уведомления: заглушка {minutes} мин.",
         "sub_list_ignore_yes": "• Игнорировать ключевые слова: {keywords}",
         "sub_list_ignore_no": "• Игнорировать ключевые слова: нет",
+        "sub_list_image_no": "• Изображение: нет",
+        "sub_list_image_before": "• Изображение: в начале",
+        "sub_list_image_after": "• Изображение: в конце",
+        "image_no_note": "Изображение: нет",
+        "image_before_note": "Изображение: в начале",
+        "image_after_note": "Изображение: в конце",
         "dest_prompt": "Куда отправлять уведомления?",
         "dest_dm": "📩 В личку",
         "dest_channel": "📢 В канал",
@@ -638,10 +658,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n"
             "{preview_note}\n"
+            "{image_note}\n"
             "{ignore_keywords_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n\n"
-            "Пример сообщения:\n{preview}\n\n"
             "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n"
             "Справка: /help"
         ),
@@ -674,13 +694,18 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "help": (
             "Доступные команды:\n"
-            "/start — настроить подписку на стрим\n"
-            "/help — показать эту справку\n"
-            "/cancel — отменить текущую настройку\n\n"
-            "Кнопки меню:\n"
-            "• {btn_new}\n"
-            "• {btn_manage} — список, редактирование, удаление\n"
-            "• {btn_feedback}"
+            "/start — главное меню / настройка подписки\n"
+            "/help — эта справка\n"
+            "/cancel — отменить текущий мастер\n\n"
+            "Меню:\n"
+            "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
+            "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
+            "• {btn_create_schedule} — расписание стримов на неделю\n"
+            "• {btn_feedback}\n\n"
+            "Ключевые слова шаблона: {{username}}, {{game}}, {{name}}.\n"
+            "«Мне повезёт» может сгенерировать шаблон через ИИ.\n"
+            "Если есть изображение, превью ссылок отключается автоматически.\n"
+            "После обновления бота нажмите /start, если меню перестало отвечать."
         ),
         "no_subs": (
             "Подписок пока нет.\n\n"
@@ -700,6 +725,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_menu": "Подписка #{sub_id} — {username}\n\nЧто изменить?",
         "edit_template": "📝 Шаблон сообщения",
         "edit_image": "🖼 Обновить изображение",
+        "edit_image_add": "🖼 Добавить изображение",
+        "edit_image_update": "🖼 Обновить изображение",
+        "edit_image_delete": "🗑 Удалить изображение",
         "edit_ignore_keywords": "🚫 Игнорировать ключевые слова",
         "edit_dest": "📍 Куда отправлять",
         "edit_delete_old": "🗑 Удалять старые",
@@ -1299,16 +1327,36 @@ def edit_options_keyboard(
     *,
     dest_type: str = "dm",
     delete_previous: bool = False,
+    has_image: bool = False,
 ) -> InlineKeyboardMarkup:
+    image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
     rows = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
-        [InlineKeyboardButton(t("edit_image", lang), callback_data=f"edit_f:{sub_id}:image")],
-        [InlineKeyboardButton(t("edit_ignore_keywords", lang), callback_data=f"edit_f:{sub_id}:ignore_keywords")],
-        [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")],
-        [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
-        [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
-        [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
+        [InlineKeyboardButton(image_label, callback_data=f"edit_f:{sub_id}:image")],
     ]
+    if has_image:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("edit_image_delete", lang),
+                    callback_data=f"edit_f:{sub_id}:image_del",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(t("edit_ignore_keywords", lang), callback_data=f"edit_f:{sub_id}:ignore_keywords")]
+    )
+    if not has_image:
+        rows.append(
+            [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")]
+        )
+    rows.extend(
+        [
+            [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
+            [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
+            [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
+        ]
+    )
     if dest_type != "dm":
         rows.append(
             [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")]
