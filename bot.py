@@ -63,11 +63,13 @@ from i18n import (
     subscriptions_menu,
     sys_notifications_keyboard,
     t,
+    template_typo_keyboard,
     wizard_menu,
 )
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
 from twitch import (
     TwitchClient,
+    find_placeholder_typos,
     normalize_ignore_keywords,
     render_template,
     should_ignore_stream,
@@ -82,6 +84,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     LANG_SELECT,
     CHANNEL,
     TEMPLATE,
+    TEMPLATE_TYPO_CONFIRM,
     IGNORE_KEYWORDS,
     LINK_PREVIEW,
     DELAY_SEND,
@@ -104,7 +107,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_CONFIRM,
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
-) = range(25)
+) = range(26)
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 
@@ -414,6 +417,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     lang = _user_lang(context, update.effective_user.id)
     state = context.user_data.get("wizard_back_state")
     if state == TEMPLATE:
+        context.user_data.pop("pending_template", None)
+        context.user_data.pop("pending_template_preview_disabled", None)
         return await _go_channel_prompt(update, context, lang)
     if state == IGNORE_KEYWORDS:
         return await _go_template_prompt(update, context, lang)
@@ -837,8 +842,103 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.effective_message.reply_text(t("template_empty", lang))
         return TEMPLATE
 
+    if await _offer_template_typo_fix(update, context, lang, template):
+        return TEMPLATE_TYPO_CONFIRM
+
     context.user_data["message_template"] = template
     return await _go_ignore_keywords_prompt(update, context, lang)
+
+
+async def _offer_template_typo_fix(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    template: str,
+) -> bool:
+    typos = find_placeholder_typos(template)
+    if not typos:
+        return False
+    lines = "\n".join(
+        t(
+            "template_typo_item",
+            lang,
+            found=html.escape(found),
+            suggested=html.escape(suggested),
+        )
+        for found, suggested in typos
+    )
+    context.user_data["pending_template"] = template
+    await update.effective_message.reply_text(
+        t("template_typo_prompt", lang, typos=lines),
+        parse_mode=ParseMode.HTML,
+        reply_markup=template_typo_keyboard(lang),
+    )
+    return True
+
+
+async def receive_template_typo_confirm(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    fix = query.data.endswith(":1")
+    template = context.user_data.pop("pending_template", "")
+    is_edit = bool(context.user_data.get("edit_sub_id"))
+
+    if fix:
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            query.from_user.id,
+            t("template_typo_resend", lang),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_wizard(lang, back=not is_edit),
+        )
+        if not is_edit:
+            _set_wizard_back(context, TEMPLATE)
+        return EDIT_TEMPLATE if is_edit else TEMPLATE
+
+    await query.edit_message_text("✓")
+    if is_edit:
+        return await _save_edit_template(update, context, lang, template)
+
+    context.user_data["message_template"] = template
+    return await _go_ignore_keywords_prompt(update, context, lang)
+
+
+async def _save_edit_template(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    template: str,
+) -> int:
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    preview_disabled = context.user_data.pop("pending_template_preview_disabled", None)
+    if preview_disabled is None and update.effective_message:
+        preview_disabled = _is_link_preview_disabled(update.effective_message)
+    if preview_disabled is None:
+        preview_disabled = False
+    if not db.update_subscription(
+        sub_id,
+        owner_id,
+        message_template=template,
+        disable_link_preview=bool(preview_disabled),
+    ):
+        await context.bot.send_message(owner_id, t("sub_not_found", lang))
+    else:
+        await context.bot.send_message(
+            owner_id,
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 async def receive_ignore_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1037,23 +1137,13 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
         await update.effective_message.reply_text(t("template_empty", lang))
         return EDIT_TEMPLATE
 
-    db: Database = context.application.bot_data["db"]
-    owner_id = update.effective_user.id
-    sub_num = _owner_sub_number(db, owner_id, sub_id)
-    if not db.update_subscription(
-        sub_id,
-        owner_id,
-        message_template=template,
-        disable_link_preview=_is_link_preview_disabled(update.effective_message),
-    ):
-        await update.effective_message.reply_text(t("sub_not_found", lang))
-    else:
-        await update.effective_message.reply_text(
-            t("edit_updated", lang, sub_id=sub_num),
-            reply_markup=_menu(lang, owner_id),
-        )
-    context.user_data.clear()
-    return ConversationHandler.END
+    context.user_data["pending_template_preview_disabled"] = _is_link_preview_disabled(
+        update.effective_message
+    )
+    if await _offer_template_typo_fix(update, context, lang, template):
+        return TEMPLATE_TYPO_CONFIRM
+
+    return await _save_edit_template(update, context, lang, template)
 
 
 async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2980,6 +3070,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template),
+            ],
+            TEMPLATE_TYPO_CONFIRM: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(receive_template_typo_confirm, pattern=r"^template_typo:[01]$"),
             ],
             IGNORE_KEYWORDS: [
                 _wiz_cancel,

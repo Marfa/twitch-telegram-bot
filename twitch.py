@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from difflib import get_close_matches
 from typing import Any
 
 import requests
@@ -96,6 +97,38 @@ def render_template(
         .replace("{game}", game or "—")
         .replace("{name}", name or "—")
     )
+
+
+_TEMPLATE_PLACEHOLDERS = ("username", "game", "name")
+# Brace-ish tokens: {game}, {game), (game}, [name}, {User_Name}, …
+_PLACEHOLDER_CANDIDATE_RE = re.compile(
+    r"[{(\[]\s*([A-Za-z_][A-Za-z0-9_\-]*)\s*[})\]]"
+)
+
+
+def find_placeholder_typos(template: str) -> list[tuple[str, str]]:
+    """Return [(found_token, suggested_placeholder), ...] for likely typos."""
+    results: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for match in _PLACEHOLDER_CANDIDATE_RE.finditer(template):
+        token = match.group(0)
+        if "{" not in token and "}" not in token:
+            continue
+        if token in ("{username}", "{game}", "{name}"):
+            continue
+        if token in seen:
+            continue
+        inner = match.group(1).lower().replace("-", "").replace("_", "")
+        if inner in _TEMPLATE_PLACEHOLDERS:
+            suggested = f"{{{inner}}}"
+        else:
+            close = get_close_matches(inner, list(_TEMPLATE_PLACEHOLDERS), n=1, cutoff=0.7)
+            if not close:
+                continue
+            suggested = f"{{{close[0]}}}"
+        seen.add(token)
+        results.append((token, suggested))
+    return results
 
 
 def normalize_ignore_keywords(text: str) -> str:

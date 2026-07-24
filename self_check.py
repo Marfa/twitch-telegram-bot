@@ -8,7 +8,7 @@ from unittest.mock import patch
 from config import parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
 from render_deploy import _service_id
-from twitch import TwitchClient, normalize_ignore_keywords, render_template, should_ignore_stream
+from twitch import TwitchClient, find_placeholder_typos, normalize_ignore_keywords, render_template, should_ignore_stream
 from translate import build_translations, translate_text
 from bot import _is_link_preview_disabled, _message_link
 from db import SqliteDatabase, _normalize_pg_url, open_database
@@ -28,6 +28,17 @@ def main() -> None:
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+
+    assert find_placeholder_typos("{username} {game} {name}") == []
+    assert find_placeholder_typos("{game)") == [("{game)", "{game}")]
+    assert find_placeholder_typos("(game}") == [("(game}", "{game}")]
+    assert find_placeholder_typos("{Game}") == [("{Game}", "{game}")]
+    assert find_placeholder_typos("{gama}") == [("{gama}", "{game}")]
+    assert find_placeholder_typos("{user_name}") == [("{user_name}", "{username}")]
+    assert ("{nam}", "{name}") in find_placeholder_typos("hi {nam}!")
+    assert find_placeholder_typos("Play (game) tonight") == []
+    assert find_placeholder_typos("{username} is live, {game)") == [("{game)", "{game}")]
+    assert find_placeholder_typos("{ game }") == [("{ game }", "{game}")]
 
     assert normalize_ignore_keywords("foo, bar , baz") == "foo, bar, baz"
     assert normalize_ignore_keywords("") == ""

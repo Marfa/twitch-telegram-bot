@@ -86,6 +86,16 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Category: {{game}}</code>"
         ),
         "template_empty": "Template cannot be empty.",
+        "template_typo_prompt": (
+            "Possible typo in placeholders:\n"
+            "{typos}\n\n"
+            "Fix it?"
+        ),
+        "template_typo_item": "• <code>{found}</code> → <code>{suggested}</code>",
+        "template_typo_resend": (
+            "Send a corrected message template.\n\n"
+            "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
+        ),
         "ignore_keywords_prompt": (
             "<b>Ignore keywords</b>\n\n"
             "Specify keywords in the stream title or category that will prevent "
@@ -453,6 +463,16 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Категория: {{game}}</code>"
         ),
         "template_empty": "Шаблон не может быть пустым.",
+        "template_typo_prompt": (
+            "Похоже, опечатка в ключевых словах:\n"
+            "{typos}\n\n"
+            "Исправить?"
+        ),
+        "template_typo_item": "• <code>{found}</code> → <code>{suggested}</code>",
+        "template_typo_resend": (
+            "Отправьте исправленный шаблон сообщения.\n\n"
+            "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
+        ),
         "ignore_keywords_prompt": (
             "<b>Игнорировать ключевые слова</b>\n\n"
             "Укажите ключевые слова в названии стрима или игре, при наличии которых "
@@ -1031,6 +1051,15 @@ def stream_schedule_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("stream_schedule_yes", lang), callback_data="stream_sched:confirm:1")],
             [InlineKeyboardButton(t("stream_schedule_no", lang), callback_data="stream_sched:confirm:0")],
+        ]
+    )
+
+
+def template_typo_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("delay_yes", lang), callback_data="template_typo:1")],
+            [InlineKeyboardButton(t("delay_no", lang), callback_data="template_typo:0")],
         ]
     )
 
