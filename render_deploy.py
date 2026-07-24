@@ -162,42 +162,22 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         level=logging.INFO,
     )
-    _load_dotenv()
-
-    parser = argparse.ArgumentParser(description="Deploy latest commit to Render")
-    parser.add_argument(
-        "--commit",
-        default="",
-        help="Git commit SHA (default: HEAD)",
-    )
-    parser.add_argument(
-        "--service-id",
-        default=os.getenv("RENDER_SERVICE_ID", ""),
-        help="Render service ID",
-    )
+    # Deploy target is VPS via GitHub Actions; keep this script as a no-op
+    # so accidental runs do not hit Render or spam Telegram errors.
+    parser = argparse.ArgumentParser(description="Deploy latest commit to Render (disabled)")
+    parser.add_argument("--commit", default="", help="Ignored (Render deploy disabled)")
+    parser.add_argument("--service-id", default="", help="Ignored (Render deploy disabled)")
     parser.add_argument(
         "--no-notify",
         action="store_true",
-        help="Skip Telegram notification to admin",
+        help="Ignored (Render deploy disabled)",
     )
-    args = parser.parse_args(argv)
-
-    commit_id = args.commit.strip() or git_head_commit()
-    try:
-        return run_deploy(commit_id, service_id=args.service_id, notify=not args.no_notify)
-    except Exception as exc:
-        short = _short_commit(commit_id)
-        logger.exception("Deploy flow failed")
-        if not args.no_notify:
-            try:
-                notify_admins(
-                    f"❌ Render: не удалось задеплоить\n"
-                    f"Коммит: {short}\n"
-                    f"Ошибка: {type(exc).__name__}"
-                )
-            except Exception:
-                logger.exception("Failed to notify admin about deploy error")
-        return 1
+    parser.parse_args(argv)
+    logger.warning(
+        "Render deploy is disabled. Production deploy: push to main "
+        "(GitHub Actions → scripts/vps-deploy.sh)."
+    )
+    return 0
 
 
 if __name__ == "__main__":
