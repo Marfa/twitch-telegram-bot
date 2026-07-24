@@ -575,6 +575,7 @@ def _help_text(lang: str) -> str:
         btn_manage=btn("manage", lang),
         btn_create_schedule=btn("create_schedule", lang),
         btn_feedback=btn("feedback", lang),
+        btn_settings=btn("settings", lang),
     )
 
 
@@ -1121,12 +1122,12 @@ async def lucky_full_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
-    if not context.user_data.get("message_template"):
-        await query.edit_message_text(t("template_empty", lang))
-        return TEMPLATE
     context.user_data.pop("lucky_quick", None)
+    context.user_data.pop("message_template", None)
+    context.user_data.pop("image_file_id", None)
+    context.user_data["image_position"] = ""
     await query.edit_message_text("✓")
-    return await _go_image_ask_prompt(update, context, lang)
+    return await _go_template_prompt(update, context, lang)
 
 
 async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3371,6 +3372,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("feedback"), report_problem),
         group=0,
     )
+    app.add_handler(CommandHandler("feedback", report_problem), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("manage"), open_subscriptions_menu),
         group=0,
@@ -3417,6 +3419,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("settings"), open_settings_menu),
         group=0,
     )
+    app.add_handler(CommandHandler("settings", open_settings_menu), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("sys_notifications"), open_sys_notifications_menu),
         group=0,
@@ -3451,6 +3454,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         entry_points=[
             CommandHandler("start", start),
             CommandHandler("help", help_command),
+            CommandHandler("schedule", start_stream_schedule),
             MessageHandler(_btn_filter("new"), start_new_subscription),
             MessageHandler(_btn_filter("create_schedule"), start_stream_schedule),
             MessageHandler(_btn_filter("language"), start_language_change),

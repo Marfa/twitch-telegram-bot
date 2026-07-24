@@ -238,13 +238,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "✅ Setup complete!\n\n"
             "Subscription #{sub_id} created.\n"
             "Twitch channel: {twitch_username}\n"
-            "Notifications: {dest}{thread_note}\n"
-            "{delete_note}{delete_fail_note}\n"
-            "{preview_note}\n"
             "{image_note}\n"
             "{ignore_keywords_note}\n"
+            "{preview_note}\n"
             "{delay_note}\n"
-            "{repeat_note}\n\n"
+            "{repeat_note}\n"
+            "Notifications: {dest}{thread_note}\n"
+            "{delete_note}{delete_fail_note}\n\n"
             "When {twitch_username} goes live — I'll send a notification.\n"
             "Help: /help"
         ),
@@ -279,16 +279,16 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Available commands:\n"
             "/start — open the main menu / set up a subscription\n"
             "/help — show this help\n"
-            "/cancel — cancel the current wizard\n\n"
+            "/cancel — cancel the current wizard\n"
+            "/schedule — create a stream schedule\n"
+            "/feedback — report a problem\n"
+            "/settings — open settings\n\n"
             "Menu:\n"
             "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
             "• {btn_create_schedule} — weekly stream schedule\n"
-            "• {btn_feedback}\n\n"
-            "Message template placeholders: {{username}}, {{game}}, {{name}}.\n"
-            "«I'm feeling lucky» can draft a template with AI.\n"
-            "If an image is attached, link previews are disabled automatically.\n"
-            "After a bot update, tap /start if the menu stops responding."
+            "• {btn_feedback}\n"
+            "• {btn_settings}"
         ),
         "no_subs": (
             "No subscriptions yet.\n\n"
@@ -353,8 +353,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "edit_delete_fail_menu": "Notify about problems deleting the message?",
         "edit_preview_menu": "Disable link preview in notifications?",
-        "preview_yes": "✅ Off (no preview)",
-        "preview_no": "❌ On (show preview)",
+        "preview_yes": "❌ Off (no preview)",
+        "preview_no": "✅ On (show preview)",
         "conflict_polling": (
             "Polling conflict — two bot instances may be running. Keep only one."
         ),
@@ -655,13 +655,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "✅ Настройка завершена!\n\n"
             "Подписка #{sub_id} создана.\n"
             "Канал Twitch: {twitch_username}\n"
-            "Уведомления: {dest}{thread_note}\n"
-            "{delete_note}{delete_fail_note}\n"
-            "{preview_note}\n"
             "{image_note}\n"
             "{ignore_keywords_note}\n"
+            "{preview_note}\n"
             "{delay_note}\n"
-            "{repeat_note}\n\n"
+            "{repeat_note}\n"
+            "Уведомления: {dest}{thread_note}\n"
+            "{delete_note}{delete_fail_note}\n\n"
             "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n"
             "Справка: /help"
         ),
@@ -696,16 +696,16 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Доступные команды:\n"
             "/start — главное меню / настройка подписки\n"
             "/help — эта справка\n"
-            "/cancel — отменить текущий мастер\n\n"
+            "/cancel — отменить текущий мастер\n"
+            "/schedule — создать расписание стримов\n"
+            "/feedback — сообщить о проблеме\n"
+            "/settings — настройки\n\n"
             "Меню:\n"
             "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
             "• {btn_create_schedule} — расписание стримов на неделю\n"
-            "• {btn_feedback}\n\n"
-            "Ключевые слова шаблона: {{username}}, {{game}}, {{name}}.\n"
-            "«Мне повезёт» может сгенерировать шаблон через ИИ.\n"
-            "Если есть изображение, превью ссылок отключается автоматически.\n"
-            "После обновления бота нажмите /start, если меню перестало отвечать."
+            "• {btn_feedback}\n"
+            "• {btn_settings}"
         ),
         "no_subs": (
             "Подписок пока нет.\n\n"
@@ -770,8 +770,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "edit_delete_fail_menu": "Сообщать о проблемах при удалении сообщения?",
         "edit_preview_menu": "Отключить превью ссылок в уведомлениях?",
-        "preview_yes": "✅ Выкл (без превью)",
-        "preview_no": "❌ Вкл (с превью)",
+        "preview_yes": "❌ Выкл (без превью)",
+        "preview_no": "✅ Вкл (с превью)",
         "conflict_polling": (
             "Конфликт polling — возможно, запущено два экземпляра бота. Оставьте один."
         ),
