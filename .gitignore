@@ -11,3 +11,5 @@ migration_vps_status.txt
 .tmp_*
 *.pem
 *.key
+backups/
+*.sql.gz

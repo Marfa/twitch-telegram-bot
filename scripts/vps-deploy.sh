@@ -26,6 +26,18 @@ rm -f /tmp/twitch-telegram-bot.env.bak
 
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 
+# Nightly Postgres dump (7 newest files under /var/backups/twitch-telegram-bot)
+if [[ -f scripts/pg-backup.sh ]]; then
+  install -m 755 scripts/pg-backup.sh /usr/local/sbin/twitch-telegram-bot-pg-backup
+  cat >/etc/cron.d/twitch-telegram-bot-pg-backup <<EOF
+# Nightly dump of twitch-telegram-bot Postgres (keep 7)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+0 3 * * * root APP_DIR=$APP_DIR /usr/local/sbin/twitch-telegram-bot-pg-backup >>/var/log/twitch-telegram-bot-pg-backup.log 2>&1
+EOF
+  chmod 644 /etc/cron.d/twitch-telegram-bot-pg-backup
+fi
+
 # Wait briefly for health
 for _ in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
