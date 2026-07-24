@@ -92,11 +92,12 @@ def main() -> None:
         assert tr("edit_image", loc)
         assert "Изображение можно добавить" in tr("channel_found", "ru", display_name="x") or loc != "ru"
         assert "You can add an image" in tr("channel_found", "en", display_name="x") or loc != "en"
-        feedback = tr("feedback", loc, github="https://example.com", bot_version="abc1234", user_id=42)
-        assert "abc1234" in feedback
+        feedback = tr("feedback", loc, github="https://example.com", user_id=42)
         assert "42" in feedback
-        assert "<code>abc1234</code>" in feedback
         assert "<code>42</code>" in feedback
+        assert "bot_version" not in feedback
+        assert "Версия бота" not in feedback
+        assert "Bot version" not in feedback
 
     normalized = _normalize_template("Streamer online!")
     assert "{username}" in normalized

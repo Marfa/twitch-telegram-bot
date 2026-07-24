@@ -2004,15 +2004,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from config import BOT_VERSION
-
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
-    version = BOT_VERSION[:7] if len(BOT_VERSION) >= 7 else BOT_VERSION
     await update.effective_message.reply_text(
-        t("feedback", lang, github=GITHUB_ISSUES_URL, bot_version=version, user_id=user_id),
+        t("feedback", lang, github=GITHUB_ISSUES_URL, user_id=user_id),
         reply_markup=_menu(lang, user_id),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
@@ -3635,6 +3632,26 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     app.add_handler(conv, group=1)
 
+    def _clear_stuck_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            key = conv._get_key(update)
+        except Exception:
+            return
+        if key in conv._conversations:
+            del conv._conversations[key]
+            context.user_data.clear()
+
+    async def wake_stuck_on_menu_callback(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        # Inline menu buttons (edit/list/etc.) must break a stuck wizard conversation.
+        _clear_stuck_conversation(update, context)
+
+    async def wake_stuck_on_menu_message(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        _clear_stuck_conversation(update, context)
+
     async def orphan_wizard_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # After deploy, wizard ReplyKeyboard may remain while conversation state is gone.
         try:
@@ -3651,6 +3668,40 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             reply_markup=_menu(lang, user_id),
         )
 
+    # group=-1 runs before menu/conversation handlers and clears a stuck wizard.
+    app.add_handler(
+        CallbackQueryHandler(
+            wake_stuck_on_menu_callback,
+            pattern=(
+                r"^(edit:\d+$|edit_f:|edit_set:|toggle:|delete:\d+$|"
+                r"sb_edit|sb_delete:|sys_updates:|sys_availability:)"
+            ),
+        ),
+        group=-1,
+    )
+    app.add_handler(
+        MessageHandler(
+            (
+                _btn_filter("feedback")
+                | _btn_filter("manage")
+                | _btn_filter("list")
+                | _btn_filter("edit")
+                | _btn_filter("delete")
+                | _btn_filter("settings")
+                | _btn_filter("new")
+                | _btn_filter("create_schedule")
+                | _btn_filter("back")
+                | _btn_filter("language")
+                | _btn_filter("sys_notifications")
+                | _btn_filter("admin")
+                | _btn_filter("broadcast")
+                | _btn_filter("scheduled_broadcasts")
+                | _btn_filter("stats")
+            ),
+            wake_stuck_on_menu_message,
+        ),
+        group=-1,
+    )
     app.add_handler(MessageHandler(_btn_filter("wizard_cancel"), orphan_wizard_nav), group=0)
     app.add_handler(MessageHandler(_btn_filter("wizard_back"), orphan_wizard_nav), group=0)
 
