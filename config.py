@@ -53,6 +53,13 @@ def parse_admin_user_ids(raw: str | None = None) -> frozenset[int]:
 
 ADMIN_USER_IDS = parse_admin_user_ids()
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
+HF_TOKEN = (
+    os.getenv("HF_TOKEN", "").strip()
+    or os.getenv("HUGGING_FACE_API", "").strip()
+)
+HF_TEXT_MODEL = os.getenv("HF_TEXT_MODEL", "Qwen/Qwen2.5-7B-Instruct").strip() or (
+    "Qwen/Qwen2.5-7B-Instruct"
+)
 BOT_VERSION = (
     os.getenv("RENDER_GIT_COMMIT")
     or os.getenv("BOT_VERSION")

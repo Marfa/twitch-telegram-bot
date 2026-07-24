@@ -203,4 +203,4 @@ Twitch Helix poll ~60 s, Telegram polling, no public webhook.
 
 Built with Cursor
 
-Support: [Telegram Tribute](https://t.me/tribute/app?startapp=dBlc) · [Crypto](https://nowpayments.io/donation/themarfa)
+Support: [Donate](https://www.donationalerts.com/r/themarfa) · [Crypto](https://nowpayments.io/donation/themarfa) · [Telegram Tribute](https://t.me/tribute/app?startapp=dBlc)

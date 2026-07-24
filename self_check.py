@@ -13,6 +13,7 @@ from translate import build_translations, translate_text
 from bot import _is_link_preview_disabled, _message_link, live_transitions
 from db import SqliteDatabase, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
+from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
 
 
@@ -85,11 +86,23 @@ def main() -> None:
         assert btn("settings", loc)
         assert btn("language", loc)
         assert tr("start_welcome", loc)
+        assert tr("lucky_btn", loc)
+        assert tr("lucky_hint", loc)
+        assert tr("image_ask", loc)
+        assert tr("edit_image", loc)
+        assert "Изображение можно добавить" in tr("channel_found", "ru", display_name="x") or loc != "ru"
+        assert "You can add an image" in tr("channel_found", "en", display_name="x") or loc != "en"
         feedback = tr("feedback", loc, github="https://example.com", bot_version="abc1234", user_id=42)
         assert "abc1234" in feedback
         assert "42" in feedback
         assert "<code>abc1234</code>" in feedback
         assert "<code>42</code>" in feedback
+
+    normalized = _normalize_template("Streamer online!")
+    assert "{username}" in normalized
+    assert "{game}" in normalized
+    assert "{name}" in normalized
+    assert _normalize_template("{username}\n{game}\n{name}") == "{username}\n{game}\n{name}"
 
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "test.db")
@@ -136,6 +149,20 @@ def main() -> None:
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.ignore_keywords == "foo, bar"
+        assert sub.image_file_id is None
+        assert sub.image_position == ""
+        assert db.update_subscription(
+            sub_id, 1, image_file_id="AgAC_test_file", image_position="before"
+        )
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.image_file_id == "AgAC_test_file"
+        assert sub.image_position == "before"
+        assert db.update_subscription(sub_id, 1, image_file_id=None, image_position="")
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.image_file_id is None
+        assert sub.image_position == ""
         assert db.count_new_users_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
         assert db.count_new_users_since(datetime.now(timezone.utc) + timedelta(days=1)) == 0
         db.set_notify_cooldown(sub_id, 5)

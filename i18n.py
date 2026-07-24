@@ -83,8 +83,30 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Example:\n"
             "<code>{{username}} is live!\n"
             "{{name}}\n"
-            "Category: {{game}}</code>"
+            "Category: {{game}}</code>\n\n"
+            "You can add an image on the next step"
         ),
+        "lucky_btn": "🎲 I'm feeling lucky",
+        "lucky_hint": "Or generate a template automatically:",
+        "lucky_generating": "Generating a template…",
+        "lucky_failed": "Could not generate a template. Try again or write your own.",
+        "lucky_preview": (
+            "Generated template:\n"
+            "<code>{template}</code>\n\n"
+            "Example:\n"
+            "<code>{preview}</code>"
+        ),
+        "lucky_continue": "✅ Continue",
+        "lucky_again": "🎲 I'm feeling lucky",
+        "lucky_full_wizard": "🛠 Full wizard",
+        "image_ask": "Add an image?",
+        "image_add": "🖼 Add",
+        "image_skip": "Skip ⏭",
+        "image_send_prompt": "Send an image to the bot.",
+        "image_need_photo": "Please send an image (photo).",
+        "image_position_prompt": "Show the image at the beginning or at the end of the post?",
+        "image_position_before": "⬆️ At the beginning",
+        "image_position_after": "⬇️ At the end",
         "template_empty": "Template cannot be empty.",
         "template_typo_prompt": (
             "Possible typo in placeholders:\n"
@@ -274,6 +296,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_pick": "Choose a subscription to edit:",
         "edit_menu": "Subscription #{sub_id} — {username}\n\nWhat to change?",
         "edit_template": "📝 Message template",
+        "edit_image": "🖼 Update image",
         "edit_ignore_keywords": "🚫 Ignore keywords",
         "edit_dest": "📍 Destination",
         "edit_delete_old": "🗑 Delete old messages",
@@ -460,8 +483,30 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Пример:\n"
             "<code>{{username}} в эфире!\n"
             "{{name}}\n"
-            "Категория: {{game}}</code>"
+            "Категория: {{game}}</code>\n\n"
+            "Изображение можно добавить на следующем шаге"
         ),
+        "lucky_btn": "🎲 Мне повезёт",
+        "lucky_hint": "Или сгенерировать шаблон автоматически:",
+        "lucky_generating": "Генерирую шаблон…",
+        "lucky_failed": "Не удалось сгенерировать шаблон. Попробуйте ещё раз или напишите свой.",
+        "lucky_preview": (
+            "Сгенерированный шаблон:\n"
+            "<code>{template}</code>\n\n"
+            "Пример:\n"
+            "<code>{preview}</code>"
+        ),
+        "lucky_continue": "✅ Продолжить",
+        "lucky_again": "🎲 Мне повезёт",
+        "lucky_full_wizard": "🛠 Перейти к полному мастеру",
+        "image_ask": "Добавить изображение?",
+        "image_add": "🖼 Добавить",
+        "image_skip": "Пропустить ⏭",
+        "image_send_prompt": "Отправьте изображение боту",
+        "image_need_photo": "Пожалуйста, отправьте изображение (фото).",
+        "image_position_prompt": "Отображать картинку в начале или конце поста?",
+        "image_position_before": "⬆️ В начале",
+        "image_position_after": "⬇️ В конце",
         "template_empty": "Шаблон не может быть пустым.",
         "template_typo_prompt": (
             "Похоже, опечатка в ключевых словах:\n"
@@ -654,6 +699,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_pick": "Выберите подписку для редактирования:",
         "edit_menu": "Подписка #{sub_id} — {username}\n\nЧто изменить?",
         "edit_template": "📝 Шаблон сообщения",
+        "edit_image": "🖼 Обновить изображение",
         "edit_ignore_keywords": "🚫 Игнорировать ключевые слова",
         "edit_dest": "📍 Куда отправлять",
         "edit_delete_old": "🗑 Удалять старые",
@@ -1064,6 +1110,50 @@ def template_typo_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def lucky_start_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(t("lucky_btn", lang), callback_data="lucky:go")]]
+    )
+
+
+def lucky_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("lucky_continue", lang), callback_data="lucky:continue")],
+            [InlineKeyboardButton(t("lucky_again", lang), callback_data="lucky:go")],
+            [InlineKeyboardButton(t("lucky_full_wizard", lang), callback_data="lucky:full")],
+        ]
+    )
+
+
+def image_ask_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("image_add", lang), callback_data="image_ask:add")],
+            [InlineKeyboardButton(t("image_skip", lang), callback_data="image_ask:skip")],
+        ]
+    )
+
+
+def image_position_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("image_position_before", lang),
+                    callback_data="image_pos:before",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("image_position_after", lang),
+                    callback_data="image_pos:after",
+                )
+            ],
+        ]
+    )
+
+
 def stream_schedule_day_keyboard(
     lang: str, *, show_finish: bool, show_skip: bool = True
 ) -> InlineKeyboardMarkup | None:
@@ -1212,6 +1302,7 @@ def edit_options_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
+        [InlineKeyboardButton(t("edit_image", lang), callback_data=f"edit_f:{sub_id}:image")],
         [InlineKeyboardButton(t("edit_ignore_keywords", lang), callback_data=f"edit_f:{sub_id}:ignore_keywords")],
         [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")],
         [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],

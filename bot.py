@@ -48,8 +48,12 @@ from i18n import (
     edit_bool_keyboard,
     edit_options_keyboard,
     ignore_keywords_keyboard,
+    image_ask_keyboard,
+    image_position_keyboard,
     language_keyboard,
     link_preview_keyboard,
+    lucky_preview_keyboard,
+    lucky_start_keyboard,
     main_menu,
     repeat_keyboard,
     schedule_keyboard,
@@ -75,16 +79,22 @@ from twitch import (
     should_ignore_stream,
 )
 from translate import build_translations
+from hf_text import generate_alert_template
 
 logger = logging.getLogger(__name__)
 
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
+_TELEGRAM_CAPTION_LIMIT = 1024
 
 (
     LANG_SELECT,
     CHANNEL,
     TEMPLATE,
     TEMPLATE_TYPO_CONFIRM,
+    IMAGE_ASK,
+    IMAGE_UPLOAD,
+    IMAGE_POSITION,
+    LUCKY_PREVIEW,
     IGNORE_KEYWORDS,
     LINK_PREVIEW,
     DELAY_SEND,
@@ -107,7 +117,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_CONFIRM,
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
-) = range(26)
+) = range(30)
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 
@@ -359,13 +369,36 @@ async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 
 async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
+    display = context.user_data.get("twitch_username", "")
     await update.effective_message.reply_text(
-        t("channel_found", lang, display_name=html.escape(context.user_data.get("twitch_username", ""))),
+        t("channel_found", lang, display_name=html.escape(display)),
         parse_mode=ParseMode.HTML,
         reply_markup=_wizard(lang),
     )
+    await update.effective_message.reply_text(
+        t("lucky_hint", lang),
+        reply_markup=lucky_start_keyboard(lang),
+    )
     _set_wizard_back(context, TEMPLATE)
     return TEMPLATE
+
+
+async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
+    target = update.effective_message or update.callback_query.message
+    chat_id = update.effective_user.id
+    if update.callback_query:
+        await context.bot.send_message(
+            chat_id,
+            t("image_ask", lang),
+            reply_markup=image_ask_keyboard(lang),
+        )
+    else:
+        await target.reply_text(
+            t("image_ask", lang),
+            reply_markup=image_ask_keyboard(lang),
+        )
+    _set_wizard_back(context, IMAGE_ASK)
+    return IMAGE_ASK
 
 
 async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
@@ -420,8 +453,29 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         context.user_data.pop("pending_template", None)
         context.user_data.pop("pending_template_preview_disabled", None)
         return await _go_channel_prompt(update, context, lang)
-    if state == IGNORE_KEYWORDS:
+    if state == IMAGE_ASK:
+        if context.user_data.get("edit_sub_id"):
+            owner_id = update.effective_user.id
+            context.user_data.clear()
+            await update.effective_message.reply_text(
+                t("cancelled", lang),
+                reply_markup=_menu(lang, owner_id),
+            )
+            return ConversationHandler.END
         return await _go_template_prompt(update, context, lang)
+    if state == IMAGE_UPLOAD:
+        return await _go_image_ask_prompt(update, context, lang)
+    if state == IMAGE_POSITION:
+        await update.effective_message.reply_text(
+            t("image_send_prompt", lang),
+            reply_markup=_wizard(lang, back=not bool(context.user_data.get("edit_sub_id"))),
+        )
+        _set_wizard_back(context, IMAGE_UPLOAD)
+        return IMAGE_UPLOAD
+    if state == LUCKY_PREVIEW:
+        return await _go_template_prompt(update, context, lang)
+    if state == IGNORE_KEYWORDS:
+        return await _go_image_ask_prompt(update, context, lang)
     if state == LINK_PREVIEW:
         return await _go_ignore_keywords_prompt(update, context, lang)
     if state == DELAY_SEND:
@@ -436,6 +490,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == REPEAT_MUTE_MINUTES:
         return await _go_repeat_prompt(update, context, lang)
     if state == DEST_TYPE:
+        if context.user_data.get("lucky_quick"):
+            return await _show_lucky_preview(update, context, lang)
         return await _go_repeat_prompt(update, context, lang)
     if state == DEST_CHAT:
         return await _go_dest_prompt(update, context, lang)
@@ -656,14 +712,62 @@ async def _send_notification(
                         notify_exc,
                     )
 
-    kwargs: dict = {"chat_id": sub.chat_id, "text": text}
+    thread_kwargs: dict = {}
     if sub.thread_id:
-        kwargs["message_thread_id"] = sub.thread_id
-    if sub.disable_link_preview:
-        kwargs["disable_web_page_preview"] = True
+        thread_kwargs["message_thread_id"] = sub.thread_id
+
     try:
-        msg = await bot.send_message(**kwargs)
-        if sub.delete_previous and sub.dest_type != "dm":
+        msg = None
+        file_id = sub.image_file_id
+        position = (sub.image_position or "").strip()
+
+        if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
+            # One post: photo + template text as caption (no separate text message).
+            # before = image on top (caption below); after = image at bottom (caption above).
+            msg = await bot.send_photo(
+                chat_id=sub.chat_id,
+                photo=file_id,
+                caption=text,
+                show_caption_above_media=(position == "after"),
+                **thread_kwargs,
+            )
+        elif file_id and position in ("before", "after"):
+            # Caption too long for Telegram — fall back to two messages.
+            if position == "before":
+                await bot.send_photo(
+                    chat_id=sub.chat_id,
+                    photo=file_id,
+                    **thread_kwargs,
+                )
+                text_kwargs: dict = {
+                    "chat_id": sub.chat_id,
+                    "text": text,
+                    **thread_kwargs,
+                }
+                if sub.disable_link_preview:
+                    text_kwargs["disable_web_page_preview"] = True
+                msg = await bot.send_message(**text_kwargs)
+            else:
+                text_kwargs = {
+                    "chat_id": sub.chat_id,
+                    "text": text,
+                    **thread_kwargs,
+                }
+                if sub.disable_link_preview:
+                    text_kwargs["disable_web_page_preview"] = True
+                msg = await bot.send_message(**text_kwargs)
+                await bot.send_photo(
+                    chat_id=sub.chat_id,
+                    photo=file_id,
+                    **thread_kwargs,
+                )
+        else:
+            kwargs: dict = {"chat_id": sub.chat_id, "text": text, **thread_kwargs}
+            if sub.disable_link_preview:
+                kwargs["disable_web_page_preview"] = True
+            msg = await bot.send_message(**kwargs)
+
+        if msg and sub.delete_previous and sub.dest_type != "dm":
             db.set_last_message_id(sub.id, msg.message_id)
         if sub.suppress_repeat_minutes > 0:
             db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
@@ -828,6 +932,10 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parse_mode=ParseMode.HTML,
         reply_markup=_wizard(lang),
     )
+    await update.effective_message.reply_text(
+        t("lucky_hint", lang),
+        reply_markup=lucky_start_keyboard(lang),
+    )
     _set_wizard_back(context, TEMPLATE)
     return TEMPLATE
 
@@ -846,7 +954,8 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return TEMPLATE_TYPO_CONFIRM
 
     context.user_data["message_template"] = template
-    return await _go_ignore_keywords_prompt(update, context, lang)
+    context.user_data.pop("lucky_quick", None)
+    return await _go_image_ask_prompt(update, context, lang)
 
 
 async def _offer_template_typo_fix(
@@ -903,7 +1012,203 @@ async def receive_template_typo_confirm(
         return await _save_edit_template(update, context, lang, template)
 
     context.user_data["message_template"] = template
+    context.user_data.pop("lucky_quick", None)
+    return await _go_image_ask_prompt(update, context, lang)
+
+
+async def _show_lucky_preview(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    template = context.user_data.get("message_template") or ""
+    username = context.user_data.get("twitch_username") or "username"
+    preview = render_template(
+        template,
+        username,
+        "Just Chatting",
+        t("preview_stream", lang),
+    )
+    text = t(
+        "lucky_preview",
+        lang,
+        template=html.escape(template),
+        preview=html.escape(preview),
+    )
+    markup = lucky_preview_keyboard(lang)
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(
+                text, parse_mode=ParseMode.HTML, reply_markup=markup
+            )
+        except BadRequest:
+            await context.bot.send_message(
+                update.effective_user.id,
+                text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
+    else:
+        await update.effective_message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
+    _set_wizard_back(context, LUCKY_PREVIEW)
+    return LUCKY_PREVIEW
+
+
+async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    await query.edit_message_text(t("lucky_generating", lang))
+    channel = str(context.user_data.get("twitch_username") or "")
+    try:
+        template = await asyncio.to_thread(
+            generate_alert_template, locale=lang, channel=channel
+        )
+    except Exception:
+        logger.exception("Lucky template generation failed")
+        await context.bot.send_message(
+            query.from_user.id,
+            t("lucky_failed", lang),
+            reply_markup=lucky_start_keyboard(lang),
+        )
+        _set_wizard_back(context, TEMPLATE)
+        return TEMPLATE
+
+    context.user_data["message_template"] = template
+    return await _show_lucky_preview(update, context, lang)
+
+
+async def lucky_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if not context.user_data.get("message_template"):
+        await query.edit_message_text(t("template_empty", lang))
+        return TEMPLATE
+    context.user_data["lucky_quick"] = True
+    context.user_data.setdefault("ignore_keywords", "")
+    context.user_data.setdefault("disable_link_preview", False)
+    context.user_data.setdefault("delay_minutes", 0)
+    context.user_data.setdefault("suppress_repeat_minutes", 0)
+    context.user_data.pop("image_file_id", None)
+    context.user_data["image_position"] = ""
+    await query.edit_message_text("✓")
+    return await _prompt_dest_step(update, context, lang)
+
+
+async def lucky_full_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if not context.user_data.get("message_template"):
+        await query.edit_message_text(t("template_empty", lang))
+        return TEMPLATE
+    context.user_data.pop("lucky_quick", None)
+    await query.edit_message_text("✓")
+    return await _go_image_ask_prompt(update, context, lang)
+
+
+async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    action = query.data.split(":", 1)[1]
+    is_edit = bool(context.user_data.get("edit_sub_id"))
+
+    if action == "skip":
+        context.user_data["image_file_id"] = None
+        context.user_data["image_position"] = ""
+        await query.edit_message_text("✓")
+        if is_edit:
+            return await _save_edit_image(update, context, lang)
+        return await _go_ignore_keywords_prompt(update, context, lang)
+
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t("image_send_prompt", lang),
+        reply_markup=_wizard(lang, back=not is_edit),
+    )
+    _set_wizard_back(context, IMAGE_UPLOAD)
+    return IMAGE_UPLOAD
+
+
+async def receive_image_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    message = update.effective_message
+    photo = message.photo
+    if not photo:
+        await message.reply_text(t("image_need_photo", lang))
+        return IMAGE_UPLOAD
+    context.user_data["image_file_id"] = photo[-1].file_id
+    await message.reply_text(
+        t("image_position_prompt", lang),
+        reply_markup=image_position_keyboard(lang),
+    )
+    _set_wizard_back(context, IMAGE_POSITION)
+    return IMAGE_POSITION
+
+
+async def receive_image_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    position = query.data.split(":", 1)[1]
+    if position not in ("before", "after"):
+        return IMAGE_POSITION
+    context.user_data["image_position"] = position
+    await query.edit_message_text("✓")
+    if context.user_data.get("edit_sub_id"):
+        return await _save_edit_image(update, context, lang)
     return await _go_ignore_keywords_prompt(update, context, lang)
+
+
+async def _save_edit_image(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    file_id = context.user_data.get("image_file_id") or None
+    position = str(context.user_data.get("image_position") or "") if file_id else ""
+    if not db.update_subscription(
+        sub_id,
+        owner_id,
+        image_file_id=file_id,
+        image_position=position,
+    ):
+        await context.bot.send_message(owner_id, t("sub_not_found", lang))
+    else:
+        await context.bot.send_message(
+            owner_id,
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    if not db.get_subscription(sub_id, query.from_user.id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t("image_ask", lang),
+        reply_markup=image_ask_keyboard(lang),
+    )
+    return IMAGE_ASK
 
 
 async def _save_edit_template(
@@ -1316,6 +1621,12 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     context.user_data["pending_chat_id"] = chat_id
     context.user_data["pending_thread_id"] = thread_id
+    if context.user_data.get("lucky_quick"):
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        return await _finish_subscription(
+            update, context, update.effective_user.id, chat_id, thread_id
+        )
     await message.reply_text(
         t("delete_old_text", lang),
         reply_markup=delete_old_keyboard(lang),
@@ -1418,6 +1729,8 @@ async def _finish_subscription(
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
+                image_file_id=data.get("image_file_id") or None,
+                image_position=str(data.get("image_position") or ""),
             )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -3074,6 +3387,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(start_sb_edit_text, pattern=r"^sb_edit_f:\d+:text$"),
             CallbackQueryHandler(start_sb_edit_time, pattern=r"^sb_edit_f:\d+:time$"),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
+            CallbackQueryHandler(start_edit_image, pattern=r"^edit_f:\d+:image$"),
             CallbackQueryHandler(start_edit_ignore_keywords, pattern=r"^edit_f:\d+:ignore_keywords$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
             CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
@@ -3089,12 +3403,36 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             TEMPLATE: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(lucky_generate, pattern=r"^lucky:go$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template),
             ],
             TEMPLATE_TYPO_CONFIRM: [
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(receive_template_typo_confirm, pattern=r"^template_typo:[01]$"),
+            ],
+            IMAGE_ASK: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(receive_image_ask, pattern=r"^image_ask:(add|skip)$"),
+            ],
+            IMAGE_UPLOAD: [
+                _wiz_cancel,
+                _wiz_back,
+                MessageHandler(filters.PHOTO, receive_image_upload),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_image_upload),
+            ],
+            IMAGE_POSITION: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(receive_image_position, pattern=r"^image_pos:(before|after)$"),
+            ],
+            LUCKY_PREVIEW: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(lucky_generate, pattern=r"^lucky:go$"),
+                CallbackQueryHandler(lucky_continue, pattern=r"^lucky:continue$"),
+                CallbackQueryHandler(lucky_full_wizard, pattern=r"^lucky:full$"),
             ],
             IGNORE_KEYWORDS: [
                 _wiz_cancel,

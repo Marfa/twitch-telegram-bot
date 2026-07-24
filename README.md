@@ -215,4 +215,4 @@ fly deploy
 
 Код подготовлен с помощью Cursor
 
-Поддержка: [Telegram Tribute](https://t.me/tribute/app?startapp=dBlc) · [Криптой](https://nowpayments.io/donation/themarfa)
+Поддержка проекта: [Донат](https://www.donationalerts.com/r/themarfa) · [Донат криптой](https://nowpayments.io/donation/themarfa) · [Telegram Tribute](https://t.me/tribute/app?startapp=dBlc)

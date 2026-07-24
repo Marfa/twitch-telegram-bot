@@ -46,6 +46,8 @@ class Subscription:
     delay_minutes: int
     suppress_repeat_minutes: int
     ignore_keywords: str
+    image_file_id: str | None
+    image_position: str
     notify_cooldown_until: str | None
     last_message_id: int | None
 
@@ -60,6 +62,13 @@ class ScheduledBroadcast:
 
 
 def _row_to_sub(row: Any) -> Subscription:
+    keys = set(row.keys())
+    image_file_id = None
+    if "image_file_id" in keys and row["image_file_id"]:
+        image_file_id = str(row["image_file_id"])
+    image_position = ""
+    if "image_position" in keys and row["image_position"]:
+        image_position = str(row["image_position"])
     return Subscription(
         id=row["id"],
         owner_id=row["owner_id"],
@@ -76,6 +85,8 @@ def _row_to_sub(row: Any) -> Subscription:
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
         ignore_keywords=str(row["ignore_keywords"] or ""),
+        image_file_id=image_file_id,
+        image_position=image_position if image_file_id else "",
         notify_cooldown_until=(
             row["notify_cooldown_until"].isoformat()
             if row["notify_cooldown_until"] is not None
@@ -133,6 +144,8 @@ class Database(Protocol):
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         ignore_keywords: str = "",
+        image_file_id: str | None = None,
+        image_position: str = "",
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
@@ -296,6 +309,12 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN ignore_keywords TEXT NOT NULL DEFAULT ''"
             )
+        if "image_file_id" not in cols:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN image_file_id TEXT")
+        if "image_position" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN image_position TEXT NOT NULL DEFAULT ''"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -343,6 +362,8 @@ class SqliteDatabase:
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         ignore_keywords: str = "",
+        image_file_id: str | None = None,
+        image_position: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -351,8 +372,9 @@ class SqliteDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    delay_minutes, suppress_repeat_minutes, ignore_keywords
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delay_minutes, suppress_repeat_minutes, ignore_keywords,
+                    image_file_id, image_position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -368,6 +390,8 @@ class SqliteDatabase:
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     ignore_keywords,
+                    image_file_id or None,
+                    (image_position or "") if image_file_id else "",
                 ),
             )
             return int(cur.lastrowid)
@@ -446,6 +470,8 @@ class SqliteDatabase:
             "delay_minutes",
             "suppress_repeat_minutes",
             "ignore_keywords",
+            "image_file_id",
+            "image_position",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -458,6 +484,10 @@ class SqliteDatabase:
             elif key in ("delay_minutes", "suppress_repeat_minutes"):
                 values.append(max(0, int(value)))
             elif key == "ignore_keywords":
+                values.append(str(value or ""))
+            elif key == "image_file_id":
+                values.append(str(value) if value else None)
+            elif key == "image_position":
                 values.append(str(value or ""))
             else:
                 values.append(value)
@@ -964,6 +994,18 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS image_file_id TEXT
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS image_position TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -1020,6 +1062,8 @@ class PostgresDatabase:
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         ignore_keywords: str = "",
+        image_file_id: str | None = None,
+        image_position: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -1029,8 +1073,9 @@ class PostgresDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    delay_minutes, suppress_repeat_minutes, ignore_keywords
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delay_minutes, suppress_repeat_minutes, ignore_keywords,
+                    image_file_id, image_position
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1047,6 +1092,8 @@ class PostgresDatabase:
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     ignore_keywords,
+                    image_file_id or None,
+                    (image_position or "") if image_file_id else "",
                 ),
             )
             row = cur.fetchone()
@@ -1137,6 +1184,8 @@ class PostgresDatabase:
             "delay_minutes",
             "suppress_repeat_minutes",
             "ignore_keywords",
+            "image_file_id",
+            "image_position",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1149,6 +1198,10 @@ class PostgresDatabase:
             elif key in ("delay_minutes", "suppress_repeat_minutes"):
                 values.append(max(0, int(value)))
             elif key == "ignore_keywords":
+                values.append(str(value or ""))
+            elif key == "image_file_id":
+                values.append(str(value) if value else None)
+            elif key == "image_position":
                 values.append(str(value or ""))
             else:
                 values.append(value)
