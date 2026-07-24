@@ -60,6 +60,14 @@ HF_TOKEN = (
 HF_TEXT_MODEL = os.getenv("HF_TEXT_MODEL", "Qwen/Qwen2.5-7B-Instruct").strip() or (
     "Qwen/Qwen2.5-7B-Instruct"
 )
+GROQ_API_KEY = (
+    os.getenv("GROQ_API_KEY", "").strip()
+    or os.getenv("GROQ_API", "").strip()
+    or os.getenv("GROK_API", "").strip()
+)
+GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "llama-3.1-8b-instant").strip() or (
+    "llama-3.1-8b-instant"
+)
 BOT_VERSION = (
     os.getenv("RENDER_GIT_COMMIT")
     or os.getenv("BOT_VERSION")

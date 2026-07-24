@@ -1,4 +1,4 @@
-"""Hugging Face chat completions for alert templates (same pattern as ghost-text-prepper)."""
+"""LLM chat completions for alert templates (Groq → HF → local fallback)."""
 
 from __future__ import annotations
 
@@ -9,14 +9,15 @@ import re
 
 import requests
 
-from config import HF_TEXT_MODEL, HF_TOKEN
+from config import GROQ_API_KEY, GROQ_TEXT_MODEL, HF_TEXT_MODEL, HF_TOKEN
 
 logger = logging.getLogger(__name__)
 
+_GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 _HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 _PLACEHOLDERS = ("{username}", "{game}", "{name}")
 
-# Used when HF Inference credits are exhausted (402) or the API is down.
+# Used when cloud providers are down or out of credits.
 _FALLBACK_RU = (
     "{username} в эфире!\n{name}\nКатегория: {game}",
     "🔴 {username} начал стрим\n{name}\nИгра: {game}",
@@ -33,8 +34,16 @@ _FALLBACK_EN = (
 )
 
 
-def _resolve_token() -> str:
-    # Read env at call time so Docker/runtime secrets are picked up.
+def _resolve_groq_token() -> str:
+    return (
+        os.getenv("GROQ_API_KEY", "").strip()
+        or os.getenv("GROQ_API", "").strip()
+        or os.getenv("GROK_API", "").strip()  # common typo alias
+        or (GROQ_API_KEY or "").strip()
+    )
+
+
+def _resolve_hf_token() -> str:
     return (
         os.getenv("HF_TOKEN", "").strip()
         or os.getenv("HUGGING_FACE_API", "").strip()
@@ -47,22 +56,7 @@ def _local_template(locale: str) -> str:
     return random.choice(pool)
 
 
-def generate_alert_template(*, locale: str, channel: str = "") -> str:
-    """Generate a Twitch live-alert template with {username}/{game}/{name}."""
-    try:
-        return _hf_generate(locale=locale, channel=channel)
-    except Exception as exc:
-        logger.warning("HF template generation unavailable (%s); using local fallback", exc)
-        return _normalize_template(_local_template(locale))
-
-
-def _hf_generate(*, locale: str, channel: str = "") -> str:
-    token = _resolve_token()
-    if not token:
-        raise RuntimeError("HF_TOKEN / HUGGING_FACE_API is not configured")
-    if not token.startswith("hf_"):
-        raise RuntimeError("HF token must start with hf_")
-
+def _prompt_messages(*, locale: str, channel: str) -> list[dict[str, str]]:
     lang_name = "Russian" if str(locale).lower().startswith("ru") else "English"
     system = (
         "You write Telegram notification templates for Twitch live-stream alerts. "
@@ -80,23 +74,43 @@ def _hf_generate(*, locale: str, channel: str = "") -> str:
         "Write a lively live announcement template. "
         "Use placeholders only — no real or sample stream titles."
     )
-    model = (
-        os.getenv("HF_TEXT_MODEL", "").strip()
-        or HF_TEXT_MODEL
-        or "Qwen/Qwen2.5-7B-Instruct"
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def generate_alert_template(*, locale: str, channel: str = "") -> str:
+    """Generate a Twitch live-alert template with {username}/{game}/{name}."""
+    providers = (
+        ("Groq", _groq_generate),
+        ("HF", _hf_generate),
     )
+    for name, fn in providers:
+        try:
+            return fn(locale=locale, channel=channel)
+        except Exception as exc:
+            logger.warning("%s template generation unavailable (%s)", name, exc)
+    return _normalize_template(_local_template(locale))
+
+
+def _chat_completion(
+    *,
+    url: str,
+    token: str,
+    model: str,
+    locale: str,
+    channel: str,
+) -> str:
     response = requests.post(
-        _HF_CHAT_URL,
+        url,
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
         json={
             "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": _prompt_messages(locale=locale, channel=channel),
             "max_tokens": 200,
             "temperature": 0.8,
         },
@@ -104,7 +118,8 @@ def _hf_generate(*, locale: str, channel: str = "") -> str:
     )
     if response.status_code >= 400:
         logger.warning(
-            "HF chat completions failed: %s %s",
+            "chat completions failed (%s): %s %s",
+            model,
             response.status_code,
             response.text[:300],
         )
@@ -115,8 +130,46 @@ def _hf_generate(*, locale: str, channel: str = "") -> str:
         ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
     ).strip()
     if not text:
-        raise RuntimeError("HF returned an empty template")
+        raise RuntimeError("LLM returned an empty template")
     return _normalize_template(text)
+
+
+def _groq_generate(*, locale: str, channel: str = "") -> str:
+    token = _resolve_groq_token()
+    if not token:
+        raise RuntimeError("GROQ_API_KEY / GROK_API is not configured")
+    model = (
+        os.getenv("GROQ_TEXT_MODEL", "").strip()
+        or GROQ_TEXT_MODEL
+        or "llama-3.1-8b-instant"
+    )
+    return _chat_completion(
+        url=_GROQ_CHAT_URL,
+        token=token,
+        model=model,
+        locale=locale,
+        channel=channel,
+    )
+
+
+def _hf_generate(*, locale: str, channel: str = "") -> str:
+    token = _resolve_hf_token()
+    if not token:
+        raise RuntimeError("HF_TOKEN / HUGGING_FACE_API is not configured")
+    if not token.startswith("hf_"):
+        raise RuntimeError("HF token must start with hf_")
+    model = (
+        os.getenv("HF_TEXT_MODEL", "").strip()
+        or HF_TEXT_MODEL
+        or "Qwen/Qwen2.5-7B-Instruct"
+    )
+    return _chat_completion(
+        url=_HF_CHAT_URL,
+        token=token,
+        model=model,
+        locale=locale,
+        channel=channel,
+    )
 
 
 def _normalize_template(text: str) -> str:
