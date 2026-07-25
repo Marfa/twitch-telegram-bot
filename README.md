@@ -47,11 +47,11 @@ python main.py
 ## Twitch API ключи
 
 1. [Twitch Developer Console](https://dev.twitch.tv/console) → **Register Your Application**
-2. **OAuth Redirect URLs** — `http://localhost` (для бота не используется, поле обязательное)
+2. **OAuth Redirect URLs** — `https://<ваш-сервис>/oauth/twitch/callback` (для импорта фолловов; локально — публичный HTTPS через ngrok/`PUBLIC_BASE_URL`)
 3. **Client ID** → `TWITCH_CLIENT_ID`
 4. **New Secret** → `TWITCH_CLIENT_SECRET`
 
-Бот использует **Client Credentials** — OAuth пользователя не нужен.
+Опрос стримов идёт через **Client Credentials**. Импорт подписок из Twitch — через user OAuth (`user:read:follows`).
 
 ## Использование
 
@@ -85,6 +85,17 @@ python main.py
 
 После настройки бот пришлёт **«✅ Настройка завершена!»** в личку и тестовое сообщение в выбранный чат.
 
+### Импорт из Twitch
+
+**⬇️ Импорт подписок из Twitch** — OAuth на Twitch, затем импорт каналов из `helix/channels/followed`:
+
+- шаблон по умолчанию + ссылка на канал, превью включено;
+- оповещения создаются **на паузе** (DM себе);
+- уже существующие каналы пропускаются;
+- после импорта — список и **Включить все**; тап по каналу открывает редактирование.
+
+В Twitch Console нужен Redirect URL: `https://<сервис>/oauth/twitch/callback` (см. `PUBLIC_BASE_URL`).
+
 ### Расписание стримов
 
 **📅 Создать расписание** — мастер для текста публикации на следующую неделю (с ближайшего понедельника по воскресенье):
@@ -115,6 +126,7 @@ python main.py
 | `/feedback` | Обратная связь |
 | `/settings` | Настройки |
 | ➕ Новая подписка | Ещё один канал |
+| ⬇️ Импорт подписок из Twitch | OAuth + импорт фолловов (на паузе) |
 | 📋 Управление подписками | Список, редактирование, удаление |
 | 📅 Создать расписание | Текст расписания на неделю |
 | ⚙️ Настройки | Системные уведомления и язык |
@@ -193,6 +205,7 @@ fly deploy
 | `DATABASE_URL` | PostgreSQL (Aiven). Если не задан — SQLite |
 | `DATABASE_PATH` | Путь к SQLite (по умолчанию `data/bot.db`) |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Лимит подписок на пользователя (по умолчанию 25) |
+| `PUBLIC_BASE_URL` | Публичный HTTPS origin для OAuth (`…/oauth/twitch/callback`). На Render часто хватает `RENDER_EXTERNAL_URL` |
 | `PORT` | Health-check (Render задаёт сам) |
 | `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя |
 | `GROQ_API_KEY` | Groq — основной LLM для **Мне повезёт** (алиасы: `GROQ_API`, `GROK_API`) |
@@ -212,7 +225,7 @@ fly deploy
 | `twitch.py` | Helix API, шаблоны |
 | `translate.py` | DeepL для админ-рассылок |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/health` для Render и UptimeRobot |
+| `health.py` | `/health` + Twitch OAuth callback |
 | `db.py` | SQLite или PostgreSQL, пул `lucky_templates` |
 
 Опрос Twitch Helix ~60 сек, polling Telegram, без публичного webhook.

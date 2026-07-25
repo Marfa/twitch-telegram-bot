@@ -47,11 +47,11 @@ python main.py
 ## Twitch API keys
 
 1. [Twitch Developer Console](https://dev.twitch.tv/console) → **Register Your Application**
-2. **OAuth Redirect URLs** — `http://localhost` (required field, not used by the bot)
+2. **OAuth Redirect URLs** — `https://<your-service>/oauth/twitch/callback` (for follow import; locally use public HTTPS via ngrok/`PUBLIC_BASE_URL`)
 3. **Client ID** → `TWITCH_CLIENT_ID`
 4. **New Secret** → `TWITCH_CLIENT_SECRET`
 
-The bot uses **Client Credentials** — no user OAuth flow.
+Live checks use **Client Credentials**. Follow import uses user OAuth (`user:read:follows`).
 
 ## Usage
 
@@ -85,6 +85,17 @@ Bot permissions in a group: **send messages** (admin is not required).
 
 After setup the bot sends **“✅ Setup complete!”** to DM and a test message to the chosen chat.
 
+### Import from Twitch
+
+**⬇️ Import from Twitch** — Twitch OAuth, then import from `helix/channels/followed`:
+
+- default template + channel link, link preview on;
+- alerts are created **paused** (DM to self);
+- channels you already watch are skipped;
+- after import — list and **Enable all**; tap a channel to edit.
+
+Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (see `PUBLIC_BASE_URL`).
+
 ### Stream schedule
 
 **📅 Create schedule** — wizard for publication text for the upcoming week (nearest Monday through Sunday):
@@ -115,6 +126,7 @@ Dates and month names follow the user’s language.
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Add another channel |
+| ⬇️ Import from Twitch | OAuth + import followed channels (paused) |
 | 📋 Manage subscriptions | List, edit, delete |
 | 📅 Create schedule | Weekly stream schedule text |
 | ⚙️ Settings | System notifications and language |
@@ -187,6 +199,7 @@ fly deploy
 | `DATABASE_URL` | PostgreSQL (Aiven). If unset — SQLite |
 | `DATABASE_PATH` | SQLite path (default `data/bot.db`) |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
+| `PUBLIC_BASE_URL` | Public HTTPS origin for OAuth (`…/oauth/twitch/callback`). On Render, `RENDER_EXTERNAL_URL` is often enough |
 | `PORT` | Health-check port (set by Render) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
 | `GROQ_API_KEY` | Groq — primary LLM for **I'm feeling lucky** (aliases: `GROQ_API`, `GROK_API`) |
@@ -206,7 +219,7 @@ Without Groq/HF keys, **I'm feeling lucky** still works from the local template 
 | `twitch.py` | Helix API, templates |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health` for Render and UptimeRobot |
+| `health.py` | `/health` + Twitch OAuth callback |
 | `db.py` | SQLite or PostgreSQL, `lucky_templates` pool |
 
 Twitch Helix poll ~60 s, Telegram polling, no public webhook.

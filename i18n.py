@@ -16,6 +16,7 @@ SCHEDULE_TZ = timezone(timedelta(hours=3))
 _STRINGS: dict[str, dict[str, str]] = {
     "en": {
         "btn_new": "➕ New subscription",
+        "btn_import_twitch": "⬇️ Import from Twitch",
         "btn_manage": "📋 Manage subscriptions",
         "btn_list": "📋 My subscriptions",
         "btn_edit": "✏️ Edit subscription",
@@ -284,6 +285,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/settings — open settings\n\n"
             "Menu:\n"
             "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
+            "• {btn_import_twitch} — authorize and import followed channels\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
             "• {btn_create_schedule} — weekly stream schedule\n"
             "• {btn_feedback}\n"
@@ -295,6 +297,32 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Help: /help"
         ),
         "subs_list": "Your subscriptions (tap to enable/disable):\n\n",
+        "import_oauth_prompt": (
+            "Authorize the bot on Twitch to import channels you follow.\n\n"
+            "Imported alerts are paused and use the default template with link preview on."
+        ),
+        "import_oauth_button": "Authorize on Twitch",
+        "import_oauth_unavailable": (
+            "Twitch import is not configured on this server "
+            "(set PUBLIC_BASE_URL and the OAuth redirect URL in Twitch Console)."
+        ),
+        "import_default_template": (
+            "Streamer {username} went live with {game}\n"
+            "https://www.twitch.tv/{username}"
+        ),
+        "import_success": (
+            "Import finished successfully.\n"
+            "Added: {imported}, skipped (already listed): {skipped}"
+            "{limit_note}\n\n"
+            "Your subscriptions (tap to edit; Enable all removes pause):\n\n"
+        ),
+        "import_limit_note": "\nLimit reached ({limit}): {limited} channel(s) not imported.",
+        "import_failed": "Twitch authorization failed. Try again: ⬇️ Import from Twitch.",
+        "import_denied": "Twitch authorization was cancelled.",
+        "import_empty": "No followed channels to import.",
+        "enable_all": "✅ Enable all",
+        "enable_all_done": "Enabled {count} subscription(s).",
+        "enable_all_none": "Nothing to enable — all subscriptions are already on.",
         "toggle_off": "⏸ Off",
         "toggle_on": "✅ On",
         "sub_not_found": "Subscription not found.",
@@ -428,6 +456,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "ru": {
         "btn_new": "➕ Новая подписка",
+        "btn_import_twitch": "⬇️ Импорт подписок из Twitch",
         "btn_manage": "📋 Управление подписками",
         "btn_list": "📋 Мои подписки",
         "btn_edit": "✏️ Редактировать подписку",
@@ -700,6 +729,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/settings — настройки\n\n"
             "Меню:\n"
             "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
+            "• {btn_import_twitch} — авторизация и импорт фолловов\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
             "• {btn_create_schedule} — расписание стримов на неделю\n"
             "• {btn_feedback}\n"
@@ -711,6 +741,32 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Справка: /help"
         ),
         "subs_list": "Ваши подписки (нажмите, чтобы включить/выключить):\n\n",
+        "import_oauth_prompt": (
+            "Авторизуйте бота на Twitch, чтобы импортировать каналы, на которые вы подписаны.\n\n"
+            "Импортированные оповещения будут на паузе, с шаблоном по умолчанию и включённым превью ссылок."
+        ),
+        "import_oauth_button": "Авторизоваться на Twitch",
+        "import_oauth_unavailable": (
+            "Импорт из Twitch не настроен на этом сервере "
+            "(нужны PUBLIC_BASE_URL и OAuth Redirect URL в Twitch Console)."
+        ),
+        "import_default_template": (
+            "Стример {username} вышел в эфир с игрой {game}\n"
+            "https://www.twitch.tv/{username}"
+        ),
+        "import_success": (
+            "Импорт прошёл успешно.\n"
+            "Добавлено: {imported}, пропущено (уже есть): {skipped}"
+            "{limit_note}\n\n"
+            "Ваши подписки (нажмите для редактирования; «Включить все» снимает с паузы):\n\n"
+        ),
+        "import_limit_note": "\nЛимит ({limit}): не импортировано каналов: {limited}.",
+        "import_failed": "Не удалось авторизоваться на Twitch. Попробуйте снова: ⬇️ Импорт подписок из Twitch.",
+        "import_denied": "Авторизация на Twitch отменена.",
+        "import_empty": "Нет каналов для импорта.",
+        "enable_all": "✅ Включить все",
+        "enable_all_done": "Включено подписок: {count}.",
+        "enable_all_none": "Нечего включать — все подписки уже активны.",
         "toggle_off": "⏸ Выкл",
         "toggle_on": "✅ Вкл",
         "sub_not_found": "Подписка не найдена.",
@@ -860,6 +916,7 @@ def all_btn_texts(key: str) -> set[str]:
 def all_menu_buttons() -> set[str]:
     keys = (
         "new",
+        "import_twitch",
         "manage",
         "list",
         "edit",
@@ -886,6 +943,7 @@ def all_wizard_nav_buttons() -> set[str]:
 def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(btn("new", lang))],
+        [KeyboardButton(btn("import_twitch", lang))],
         [KeyboardButton(btn("manage", lang))],
         [KeyboardButton(btn("create_schedule", lang))],
         [KeyboardButton(btn("settings", lang))],

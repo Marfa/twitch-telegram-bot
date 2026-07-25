@@ -38,6 +38,17 @@ MAX_SUBSCRIPTIONS_PER_OWNER = int(os.getenv("MAX_SUBSCRIPTIONS_PER_OWNER", "25")
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None
 RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "").strip()
+# Public HTTPS origin for Twitch OAuth redirect (Render sets RENDER_EXTERNAL_URL).
+PUBLIC_BASE_URL = (
+    os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    or os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+)
+
+
+def twitch_oauth_redirect_uri() -> str:
+    if not PUBLIC_BASE_URL:
+        return ""
+    return f"{PUBLIC_BASE_URL}/oauth/twitch/callback"
 
 
 def parse_admin_user_ids(raw: str | None = None) -> frozenset[int]:

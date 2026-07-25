@@ -6,10 +6,13 @@ import re
 import time
 from difflib import get_close_matches
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 
 from config import TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
+
+FOLLOWS_SCOPE = "user:read:follows"
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +108,72 @@ class TwitchClient:
         )
         resp.raise_for_status()
         return {s["user_id"]: s for s in resp.json().get("data", [])}
+
+    def build_authorize_url(self, *, redirect_uri: str, state: str) -> str:
+        return "https://id.twitch.tv/oauth2/authorize?" + urlencode(
+            {
+                "client_id": TWITCH_CLIENT_ID,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": FOLLOWS_SCOPE,
+                "state": state,
+            }
+        )
+
+    def exchange_code(self, code: str, *, redirect_uri: str) -> dict[str, Any]:
+        resp = self._session.post(
+            "https://id.twitch.tv/oauth2/token",
+            data={
+                "client_id": TWITCH_CLIENT_ID,
+                "client_secret": TWITCH_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_token_user(self, user_access_token: str) -> dict[str, Any] | None:
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/users",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        users = resp.json().get("data", [])
+        return users[0] if users else None
+
+    def get_followed_channels(
+        self, user_access_token: str, user_id: str
+    ) -> list[dict[str, Any]]:
+        headers = {
+            "Client-ID": TWITCH_CLIENT_ID,
+            "Authorization": f"Bearer {user_access_token}",
+        }
+        out: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, str | int] = {"user_id": user_id, "first": 100}
+            if cursor:
+                params["after"] = cursor
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/channels/followed",
+                headers=headers,
+                params=params,
+                timeout=20,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            out.extend(payload.get("data") or [])
+            cursor = (payload.get("pagination") or {}).get("cursor")
+            if not cursor:
+                break
+        return out
 
     def _igdb_headers(self) -> dict[str, str]:
         return {

@@ -8,11 +8,25 @@ from unittest.mock import patch
 from config import parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
 from render_deploy import _service_id
-from twitch import TwitchClient, find_placeholder_typos, normalize_ignore_keywords, preview_stream_title, render_template, should_ignore_stream
+from twitch import (
+    FOLLOWS_SCOPE,
+    TwitchClient,
+    find_placeholder_typos,
+    normalize_ignore_keywords,
+    preview_stream_title,
+    render_template,
+    should_ignore_stream,
+)
 from translate import build_translations, translate_text
-from bot import _is_link_preview_disabled, _message_link, live_transitions
+from bot import (
+    _is_link_preview_disabled,
+    _message_link,
+    import_followed_as_subscriptions,
+    live_transitions,
+)
 from db import SqliteDatabase, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
+from health import create_oauth_state, pop_oauth_state
 from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
 
@@ -34,6 +48,16 @@ def main() -> None:
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+    auth_url = t.build_authorize_url(
+        redirect_uri="https://example.com/oauth/twitch/callback",
+        state="abc",
+    )
+    assert "response_type=code" in auth_url
+    assert "user%3Aread%3Afollows" in auth_url or FOLLOWS_SCOPE in auth_url
+    assert "state=abc" in auth_url
+    state = create_oauth_state(42)
+    assert pop_oauth_state(state) == 42
+    assert pop_oauth_state(state) is None
     title_ru = preview_stream_title("ru", "Elden Ring")
     assert "Elden Ring" in title_ru
     assert "Тестовый" not in title_ru
@@ -201,6 +225,33 @@ def main() -> None:
         assert stats.subscriptions_total == 1
         assert stats.subscriptions_enabled == 1
         assert stats.sys_updates == 1
+        paused_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="other",
+            twitch_user_id="999",
+            message_template=tr("import_default_template", "ru"),
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            enabled=False,
+        )
+        paused = db.get_subscription(paused_id, 1)
+        assert paused is not None and paused.enabled is False
+        assert "{username}" in paused.message_template
+        assert "twitch.tv/{username}" in paused.message_template
+        imported, skipped, limited = import_followed_as_subscriptions(
+            db,
+            1,
+            [
+                {"broadcaster_id": "123", "broadcaster_login": CHANNEL},
+                {"broadcaster_id": "555", "broadcaster_login": "newbie"},
+            ],
+            template=tr("import_default_template", "en"),
+            limit=25,
+        )
+        assert imported == 1 and skipped == 1 and limited == 0
+        assert db.enable_all_subscriptions(1) >= 1
+        assert db.get_subscription(paused_id, 1).enabled is True
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")
@@ -277,7 +328,7 @@ def main() -> None:
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()
         assert restored.users == 1
-        assert restored.subscriptions_total == 1
+        assert restored.subscriptions_total == 3
         assert restored.blocked_users == 0
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1

@@ -270,6 +270,7 @@ class Database(Protocol):
         ignore_keywords: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
+        enabled: bool = True,
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
@@ -283,6 +284,8 @@ class Database(Protocol):
     def get_subscription(self, sub_id: int, owner_id: int) -> Subscription | None: ...
 
     def toggle_subscription(self, sub_id: int, owner_id: int) -> bool | None: ...
+
+    def enable_all_subscriptions(self, owner_id: int) -> int: ...
 
     def delete_subscription(self, sub_id: int, owner_id: int) -> bool: ...
 
@@ -505,6 +508,7 @@ class SqliteDatabase:
         ignore_keywords: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
+        enabled: bool = True,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -514,8 +518,8 @@ class SqliteDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, ignore_keywords,
-                    image_file_id, image_position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    image_file_id, image_position, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -533,6 +537,7 @@ class SqliteDatabase:
                     ignore_keywords,
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
+                    int(enabled),
                 ),
             )
             return int(cur.lastrowid)
@@ -590,6 +595,15 @@ class SqliteDatabase:
                 (new_state, sub_id, owner_id),
             )
         return bool(new_state)
+
+    def enable_all_subscriptions(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE subscriptions SET enabled = 1 WHERE owner_id = ? AND enabled = 0",
+                (owner_id,),
+            )
+            return int(cur.rowcount)
+
 
     def delete_subscription(self, sub_id: int, owner_id: int) -> bool:
         with self._conn() as conn:
@@ -1252,6 +1266,7 @@ class PostgresDatabase:
         ignore_keywords: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
+        enabled: bool = True,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -1262,8 +1277,8 @@ class PostgresDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, ignore_keywords,
-                    image_file_id, image_position
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    image_file_id, image_position, enabled
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1282,6 +1297,7 @@ class PostgresDatabase:
                     ignore_keywords,
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
+                    enabled,
                 ),
             )
             row = cur.fetchone()
@@ -1349,6 +1365,15 @@ class PostgresDatabase:
                 (new_state, sub_id, owner_id),
             )
         return new_state
+
+    def enable_all_subscriptions(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE subscriptions SET enabled = TRUE WHERE owner_id = %s AND enabled = FALSE",
+                (owner_id,),
+            )
+            return int(cur.rowcount)
 
     def delete_subscription(self, sub_id: int, owner_id: int) -> bool:
         with self._conn() as conn:

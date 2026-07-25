@@ -210,6 +210,49 @@ def _owner_sub_number(db: Database, owner_id: int, sub_id: int) -> int:
     return sub_id
 
 
+def import_followed_as_subscriptions(
+    db: Database,
+    owner_id: int,
+    followed: list[dict],
+    *,
+    template: str,
+    limit: int,
+) -> tuple[int, int, int]:
+    """Create paused DM subscriptions from Helix followed channels.
+
+    Returns (imported, skipped_duplicates, limited_out).
+    """
+    existing = {s.twitch_user_id for s in db.get_subscriptions_by_owner(owner_id)}
+    count = len(existing)
+    imported = skipped = limited = 0
+    for channel in followed:
+        twitch_user_id = str(channel.get("broadcaster_id") or "")
+        login = str(channel.get("broadcaster_login") or "").strip().lower()
+        if not twitch_user_id or not login:
+            continue
+        if twitch_user_id in existing:
+            skipped += 1
+            continue
+        if count >= limit:
+            limited += 1
+            continue
+        db.add_subscription(
+            owner_id=owner_id,
+            twitch_username=login,
+            twitch_user_id=twitch_user_id,
+            message_template=template,
+            dest_type="dm",
+            chat_id=owner_id,
+            thread_id=None,
+            disable_link_preview=False,
+            enabled=False,
+        )
+        existing.add(twitch_user_id)
+        count += 1
+        imported += 1
+    return imported, skipped, limited
+
+
 def _next_week_dates(today: date) -> list[date]:
     days_until_monday = (7 - today.weekday()) % 7
     if days_until_monday == 0:
@@ -573,6 +616,7 @@ def _help_text(lang: str) -> str:
         "help",
         lang,
         btn_new=btn("new", lang),
+        btn_import_twitch=btn("import_twitch", lang),
         btn_manage=btn("manage", lang),
         btn_create_schedule=btn("create_schedule", lang),
         btn_feedback=btn("feedback", lang),
@@ -2076,26 +2120,49 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
-async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data.clear()
+async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER, twitch_oauth_redirect_uri
+    from health import create_oauth_state
+
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(user_id)
-    if not subs:
+    db.upsert_user(user_id)
+    redirect_uri = twitch_oauth_redirect_uri()
+    if not redirect_uri:
         await update.effective_message.reply_text(
-            t("no_subs", lang),
-            reply_markup=subscriptions_menu(lang),
+            t("import_oauth_unavailable", lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
+    if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await update.effective_message.reply_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+            reply_markup=_menu(lang, user_id),
+        )
+        return
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    state = create_oauth_state(user_id)
+    url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
+    await update.effective_message.reply_text(
+        t("import_oauth_prompt", lang),
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(t("import_oauth_button", lang), url=url)]]
+        ),
+    )
 
+
+async def _format_subs_overview_lines(
+    bot, db: Database, owner_id: int, lang: str
+) -> tuple[list[str], list[Subscription]]:
+    subs = db.get_subscriptions_by_owner(owner_id)
     lines: list[str] = []
     for i, sub in enumerate(subs, 1):
-        chat_display = await _resolve_chat_display_name(context.bot, sub)
+        chat_display = await _resolve_chat_display_name(bot, sub)
         thread_display = None
         if sub.thread_id:
             thread_display = await _resolve_thread_display_name(
-                context.bot, sub.chat_id, sub.thread_id
+                bot, sub.chat_id, sub.thread_id
             )
         lines.append(
             _format_sub_line(
@@ -2106,6 +2173,118 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 thread_display=thread_display,
             )
         )
+    return lines, subs
+
+
+async def complete_twitch_import(
+    application: Application,
+    owner_id: int,
+    followed: list[dict] | None,
+    error: str | None,
+) -> None:
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    if error:
+        key = "import_denied" if error == "access_denied" else "import_failed"
+        await application.bot.send_message(
+            owner_id,
+            t(key, lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    if followed is None:
+        await application.bot.send_message(
+            owner_id,
+            t("import_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    imported, skipped, limited = import_followed_as_subscriptions(
+        db,
+        owner_id,
+        followed,
+        template=t("import_default_template", lang),
+        limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+    )
+    if imported == 0 and skipped == 0 and limited == 0:
+        await application.bot.send_message(
+            owner_id,
+            t("import_empty", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    limit_note = ""
+    if limited:
+        limit_note = t(
+            "import_limit_note",
+            lang,
+            limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+            limited=limited,
+        )
+    lines, subs = await _format_subs_overview_lines(
+        application.bot, db, owner_id, lang
+    )
+    header = t(
+        "import_success",
+        lang,
+        imported=imported,
+        skipped=skipped,
+        limit_note=limit_note,
+    )
+    keyboard = [
+        [InlineKeyboardButton(t("enable_all", lang), callback_data="enable_all")]
+    ]
+    keyboard.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    f"✏️ #{i} {s.twitch_username}",
+                    callback_data=f"edit:{s.id}",
+                )
+            ]
+            for i, s in enumerate(subs, 1)
+        ]
+    )
+    await application.bot.send_message(
+        owner_id,
+        header + "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    await application.bot.send_message(
+        owner_id,
+        t("menu_main", lang),
+        reply_markup=_menu(lang, owner_id),
+    )
+
+
+async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    db: Database = context.application.bot_data["db"]
+    count = db.enable_all_subscriptions(owner_id)
+    if count:
+        await query.edit_message_text(t("enable_all_done", lang, count=count))
+    else:
+        await query.edit_message_text(t("enable_all_none", lang))
+
+
+async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.clear()
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    lines, subs = await _format_subs_overview_lines(context.bot, db, user_id, lang)
+    if not subs:
+        await update.effective_message.reply_text(
+            t("no_subs", lang),
+            reply_markup=subscriptions_menu(lang),
+        )
+        return
+
     keyboard = [
         [
             InlineKeyboardButton(
@@ -3404,7 +3583,27 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
     async def post_init(application: Application) -> None:
+        from config import twitch_oauth_redirect_uri
+        from health import register_oauth_bridge
+
         await _restore_broadcast_jobs(application)
+        redirect_uri = twitch_oauth_redirect_uri()
+        if redirect_uri:
+            loop = asyncio.get_running_loop()
+
+            async def on_oauth_complete(
+                owner_id: int,
+                followed: list[dict] | None,
+                error: str | None,
+            ) -> None:
+                await complete_twitch_import(application, owner_id, followed, error)
+
+            register_oauth_bridge(
+                loop,
+                twitch=twitch,
+                redirect_uri=redirect_uri,
+                on_complete=on_oauth_complete,
+            )
 
     app = (
         Application.builder()
@@ -3425,6 +3624,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CommandHandler("feedback", report_problem), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("manage"), open_subscriptions_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("import_twitch"), start_twitch_import),
         group=0,
     )
     app.add_handler(
@@ -3480,6 +3683,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
+    app.add_handler(CallbackQueryHandler(on_enable_all, pattern=r"^enable_all$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
@@ -3726,7 +3930,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(
             wake_stuck_on_menu_callback,
             pattern=(
-                r"^(edit:\d+$|edit_f:|edit_set:|toggle:|delete:\d+$|"
+                r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
                 r"sb_edit|sb_delete:|sys_updates:|sys_availability:)"
             ),
         ),
@@ -3737,6 +3941,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             (
                 _btn_filter("feedback")
                 | _btn_filter("manage")
+                | _btn_filter("import_twitch")
                 | _btn_filter("list")
                 | _btn_filter("edit")
                 | _btn_filter("delete")
