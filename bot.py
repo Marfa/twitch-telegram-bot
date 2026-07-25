@@ -3491,10 +3491,35 @@ async def _go_sb_edit_text_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, broadcast_id: int
 ) -> None:
     user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    item = db.get_scheduled_broadcast(broadcast_id)
+    if not item:
+        await context.bot.send_message(user_id, t("scheduled_not_found", lang))
+        context.user_data.pop("sb_edit_mode", None)
+        context.user_data.pop("sb_edit_id", None)
+        return
+    current = item.text or "—"
+    markup = admin_wizard_menu(lang, back=False)
+    body = t("scheduled_edit_text_prompt", lang, id=broadcast_id, text=current)
+    if len(body) <= 4096:
+        try:
+            await context.bot.send_message(
+                user_id, body, parse_mode=ParseMode.HTML, reply_markup=markup
+            )
+            return
+        except BadRequest:
+            pass
+    # Full text may exceed one Telegram message or break HTML — send separately.
+    for i in range(0, max(len(current), 1), 4096):
+        chunk = current[i : i + 4096]
+        try:
+            await context.bot.send_message(user_id, chunk, parse_mode=ParseMode.HTML)
+        except BadRequest:
+            await context.bot.send_message(user_id, chunk)
     await context.bot.send_message(
         user_id,
-        t("scheduled_edit_text_prompt", lang, id=broadcast_id),
-        reply_markup=admin_wizard_menu(lang, back=False),
+        t("scheduled_edit_text_ask", lang, id=broadcast_id),
+        reply_markup=markup,
     )
 
 

@@ -471,6 +471,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "scheduled_edit_text": "✏️ Message text",
         "scheduled_edit_time": "🕐 Send time",
         "scheduled_edit_text_prompt": (
+            "Current text:\n{text}\n\n"
+            "Send new message text for #{id}.\n"
+            "/cancel — abort."
+        ),
+        "scheduled_edit_text_ask": (
             "Send new message text for #{id}.\n"
             "/cancel — abort."
         ),
@@ -967,6 +972,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "scheduled_edit_text": "✏️ Текст сообщения",
         "scheduled_edit_time": "🕐 Время отправки",
         "scheduled_edit_text_prompt": (
+            "Текущий текст:\n{text}\n\n"
+            "Отправьте новый текст для сообщения #{id}.\n"
+            "/cancel — отмена."
+        ),
+        "scheduled_edit_text_ask": (
             "Отправьте новый текст для сообщения #{id}.\n"
             "/cancel — отмена."
         ),
