@@ -12,8 +12,7 @@ import requests
 
 from config import TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 
-# offline_access so Twitch returns a refresh token for periodic sync
-FOLLOWS_SCOPE = "user:read:follows offline_access"
+FOLLOWS_SCOPE = "user:read:follows"
 
 logger = logging.getLogger(__name__)
 

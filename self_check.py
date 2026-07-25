@@ -53,7 +53,7 @@ def main() -> None:
     )
     assert "response_type=code" in auth_url
     assert "user%3Aread%3Afollows" in auth_url or "user:read:follows" in auth_url
-    assert "offline_access" in auth_url
+    assert "offline_access" not in auth_url
     assert "state=abc" in auth_url
     state = create_oauth_state(42, "ru")
     assert pop_oauth_state(state) == (42, "ru")

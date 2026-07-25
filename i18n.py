@@ -33,7 +33,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_back": "◀️ Main menu",
         "btn_wizard_back": "« Back",
         "btn_wizard_cancel": "Cancel",
-        "btn_sys_notifications": "🔔 System notifications",
+        "btn_sys_notifications": "🔔 System alerts",
         "btn_sys_updates": "📬 Bot update alerts",
         "btn_sync_subs": "🔄 Subscription sync",
         "menu_subs": "Manage subscriptions:",
@@ -343,7 +343,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "import_pending_expired": "Import session expired. Tap ⬇️ Import from Twitch again.",
         "sync_menu_off": (
             "Subscription sync is off.\n\n"
-            "Enable it via ⬇️ Import from Twitch → Sync."
+            "To enable it, open Import from Twitch."
         ),
         "sync_menu_on": (
             "Subscription sync is on.\n"
@@ -527,7 +527,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_back": "◀️ Главное меню",
         "btn_wizard_back": "« Назад",
         "btn_wizard_cancel": "Отмена",
-        "btn_sys_notifications": "🔔 Настройка системных уведомлений",
+        "btn_sys_notifications": "🔔 Системные уведомления",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "btn_sync_subs": "🔄 Синхронизация подписок",
         "menu_subs": "Управление подписками:",
@@ -841,7 +841,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "import_pending_expired": "Сессия импорта истекла. Нажмите ⬇️ Импорт подписок из Twitch снова.",
         "sync_menu_off": (
             "Синхронизация подписок выключена.\n\n"
-            "Включить: ⬇️ Импорт подписок из Twitch → Синхронизировать."
+            "Чтобы включить, перейдите в меню Импорт подписок из Twitch."
         ),
         "sync_menu_on": (
             "Синхронизация подписок включена.\n"
