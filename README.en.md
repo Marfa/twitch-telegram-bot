@@ -89,10 +89,10 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 
 **⬇️ Import from Twitch** — Twitch OAuth, then import from `helix/channels/followed`:
 
-- default template + channel link, link preview on;
+- default template, link preview on;
 - alerts are created **paused** (DM to self);
 - channels you already watch are skipped;
-- after import — list and **Enable all**; tap a channel to edit.
+- after import — short summary, **Enable all**, and edit buttons for new channels only.
 
 Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (see `PUBLIC_BASE_URL`).
 

@@ -238,18 +238,22 @@ def main() -> None:
         paused = db.get_subscription(paused_id, 1)
         assert paused is not None and paused.enabled is False
         assert "{username}" in paused.message_template
-        assert "twitch.tv/{username}" in paused.message_template
-        imported, skipped, limited = import_followed_as_subscriptions(
+        assert "{game}" in paused.message_template
+        assert "twitch.tv/" not in paused.message_template
+        imported, skipped, limited, new_subs = import_followed_as_subscriptions(
             db,
             1,
             [
                 {"broadcaster_id": "123", "broadcaster_login": CHANNEL},
+                {"broadcaster_id": "555", "broadcaster_login": "newbie"},
                 {"broadcaster_id": "555", "broadcaster_login": "newbie"},
             ],
             template=tr("import_default_template", "en"),
             limit=25,
         )
         assert imported == 1 and skipped == 1 and limited == 0
+        assert len(new_subs) == 1
+        assert new_subs[0].twitch_username == "newbie"
         assert db.enable_all_subscriptions(1) >= 1
         assert db.get_subscription(paused_id, 1).enabled is True
         assert stats.sys_availability == 1

@@ -298,8 +298,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "subs_list": "Your subscriptions (tap to enable/disable):\n\n",
         "import_oauth_prompt": (
-            "Authorize the bot on Twitch to import channels you follow.\n\n"
-            "Imported alerts are paused and use the default template with link preview on."
+            "Authorize the bot on Twitch to import channels you follow."
         ),
         "import_oauth_button": "Authorize on Twitch",
         "import_oauth_unavailable": (
@@ -307,14 +306,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(set PUBLIC_BASE_URL and the OAuth redirect URL in Twitch Console)."
         ),
         "import_default_template": (
-            "Streamer {username} went live with {game}\n"
-            "https://www.twitch.tv/{username}"
+            "Streamer {username} went live with {game}"
         ),
         "import_success": (
             "Import finished successfully.\n"
             "Added: {imported}, skipped (already listed): {skipped}"
-            "{limit_note}\n\n"
-            "Your subscriptions (tap to edit; Enable all removes pause):\n\n"
+            "{limit_note}"
         ),
         "import_limit_note": "\nLimit reached ({limit}): {limited} channel(s) not imported.",
         "import_failed": "Twitch authorization failed. Try again: ⬇️ Import from Twitch.",
@@ -742,8 +739,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "subs_list": "Ваши подписки (нажмите, чтобы включить/выключить):\n\n",
         "import_oauth_prompt": (
-            "Авторизуйте бота на Twitch, чтобы импортировать каналы, на которые вы подписаны.\n\n"
-            "Импортированные оповещения будут на паузе, с шаблоном по умолчанию и включённым превью ссылок."
+            "Авторизуйте бота на Twitch, чтобы импортировать каналы, на которые вы подписаны."
         ),
         "import_oauth_button": "Авторизоваться на Twitch",
         "import_oauth_unavailable": (
@@ -751,14 +747,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(нужны PUBLIC_BASE_URL и OAuth Redirect URL в Twitch Console)."
         ),
         "import_default_template": (
-            "Стример {username} вышел в эфир с игрой {game}\n"
-            "https://www.twitch.tv/{username}"
+            "Стример {username} вышел в эфир с игрой {game}"
         ),
         "import_success": (
             "Импорт прошёл успешно.\n"
             "Добавлено: {imported}, пропущено (уже есть): {skipped}"
-            "{limit_note}\n\n"
-            "Ваши подписки (нажмите для редактирования; «Включить все» снимает с паузы):\n\n"
+            "{limit_note}"
         ),
         "import_limit_note": "\nЛимит ({limit}): не импортировано каналов: {limited}.",
         "import_failed": "Не удалось авторизоваться на Twitch. Попробуйте снова: ⬇️ Импорт подписок из Twitch.",

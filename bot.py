@@ -217,26 +217,31 @@ def import_followed_as_subscriptions(
     *,
     template: str,
     limit: int,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, list[Subscription]]:
     """Create paused DM subscriptions from Helix followed channels.
 
-    Returns (imported, skipped_duplicates, limited_out).
+    Returns (imported, skipped_duplicates, limited_out, new_subs).
     """
     existing = {s.twitch_user_id for s in db.get_subscriptions_by_owner(owner_id)}
     count = len(existing)
     imported = skipped = limited = 0
+    new_subs: list[Subscription] = []
+    seen_follow: set[str] = set()
     for channel in followed:
         twitch_user_id = str(channel.get("broadcaster_id") or "")
         login = str(channel.get("broadcaster_login") or "").strip().lower()
         if not twitch_user_id or not login:
             continue
+        if twitch_user_id in seen_follow:
+            continue
+        seen_follow.add(twitch_user_id)
         if twitch_user_id in existing:
             skipped += 1
             continue
         if count >= limit:
             limited += 1
             continue
-        db.add_subscription(
+        sub_id = db.add_subscription(
             owner_id=owner_id,
             twitch_username=login,
             twitch_user_id=twitch_user_id,
@@ -247,10 +252,43 @@ def import_followed_as_subscriptions(
             disable_link_preview=False,
             enabled=False,
         )
+        sub = db.get_subscription(sub_id, owner_id)
+        if sub:
+            new_subs.append(sub)
         existing.add(twitch_user_id)
         count += 1
         imported += 1
-    return imported, skipped, limited
+    return imported, skipped, limited, new_subs
+
+
+def _import_result_keyboard(
+    lang: str, subs: list[Subscription]
+) -> InlineKeyboardMarkup:
+    """Compact post-import keyboard: Enable all + unique channels, 2 per row."""
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(t("enable_all", lang), callback_data="enable_all")]
+    ]
+    seen: set[str] = set()
+    unique: list[Subscription] = []
+    for sub in subs:
+        if sub.twitch_user_id in seen:
+            continue
+        seen.add(sub.twitch_user_id)
+        unique.append(sub)
+    row: list[InlineKeyboardButton] = []
+    for i, sub in enumerate(unique, 1):
+        row.append(
+            InlineKeyboardButton(
+                f"✏️ #{i} {sub.twitch_username}",
+                callback_data=f"edit:{sub.id}",
+            )
+        )
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
 
 
 def _next_week_dates(today: date) -> list[date]:
@@ -2201,7 +2239,7 @@ async def complete_twitch_import(
             reply_markup=_menu(lang, owner_id),
         )
         return
-    imported, skipped, limited = import_followed_as_subscriptions(
+    imported, skipped, limited, new_subs = import_followed_as_subscriptions(
         db,
         owner_id,
         followed,
@@ -2223,9 +2261,6 @@ async def complete_twitch_import(
             limit=MAX_SUBSCRIPTIONS_PER_OWNER,
             limited=limited,
         )
-    lines, subs = await _format_subs_overview_lines(
-        application.bot, db, owner_id, lang
-    )
     header = t(
         "import_success",
         lang,
@@ -2233,24 +2268,16 @@ async def complete_twitch_import(
         skipped=skipped,
         limit_note=limit_note,
     )
-    keyboard = [
-        [InlineKeyboardButton(t("enable_all", lang), callback_data="enable_all")]
-    ]
-    keyboard.extend(
-        [
-            [
-                InlineKeyboardButton(
-                    f"✏️ #{i} {s.twitch_username}",
-                    callback_data=f"edit:{s.id}",
-                )
-            ]
-            for i, s in enumerate(subs, 1)
-        ]
+    markup = (
+        _import_result_keyboard(lang, new_subs)
+        if new_subs
+        else None
     )
     await application.bot.send_message(
         owner_id,
-        header + "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        header,
+        reply_markup=markup,
+        disable_web_page_preview=True,
     )
     await application.bot.send_message(
         owner_id,
