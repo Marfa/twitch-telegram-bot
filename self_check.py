@@ -55,9 +55,23 @@ def main() -> None:
     assert "response_type=code" in auth_url
     assert "user%3Aread%3Afollows" in auth_url or FOLLOWS_SCOPE in auth_url
     assert "state=abc" in auth_url
-    state = create_oauth_state(42)
-    assert pop_oauth_state(state) == 42
+    state = create_oauth_state(42, "ru")
+    assert pop_oauth_state(state) == (42, "ru")
     assert pop_oauth_state(state) is None
+    from health import _html_page
+    from i18n import t as tr
+
+    html_ru = _html_page(
+        tr("oauth_web_done_title", "ru"),
+        tr("oauth_web_done_body", "ru"),
+    ).decode()
+    assert "Готово" in html_ru
+    assert "Telegram" in html_ru
+    html_en = _html_page(
+        tr("oauth_web_done_title", "en"),
+        tr("oauth_web_done_body", "en"),
+    ).decode()
+    assert "Done" in html_en
     title_ru = preview_stream_title("ru", "Elden Ring")
     assert "Elden Ring" in title_ru
     assert "Тестовый" not in title_ru

@@ -2180,7 +2180,7 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    state = create_oauth_state(user_id)
+    state = create_oauth_state(user_id, lang)
     url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
     await update.effective_message.reply_text(
         t("import_oauth_prompt", lang),

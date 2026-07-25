@@ -18,7 +18,8 @@ _ready = False
 _ready_lock = threading.Lock()
 
 _OAUTH_TTL_SEC = 600
-_oauth_pending: dict[str, tuple[int, float]] = {}
+# state -> (telegram_user_id, lang, expires_at)
+_oauth_pending: dict[str, tuple[int, str, float]] = {}
 _oauth_pending_lock = threading.Lock()
 
 OAuthCompleteHandler = Callable[
@@ -42,30 +43,35 @@ def is_ready() -> bool:
         return _ready
 
 
-def create_oauth_state(telegram_user_id: int) -> str:
+def create_oauth_state(telegram_user_id: int, lang: str = "en") -> str:
+    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
+
+    locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     state = secrets.token_urlsafe(24)
     expires = time.time() + _OAUTH_TTL_SEC
     with _oauth_pending_lock:
-        _oauth_pending[state] = (telegram_user_id, expires)
+        _oauth_pending[state] = (telegram_user_id, locale, expires)
         _purge_oauth_locked(time.time())
     return state
 
 
-def pop_oauth_state(state: str) -> int | None:
+def pop_oauth_state(state: str) -> tuple[int, str] | None:
+    from i18n import DEFAULT_LOCALE
+
     now = time.time()
     with _oauth_pending_lock:
         _purge_oauth_locked(now)
         item = _oauth_pending.pop(state, None)
     if not item:
         return None
-    user_id, expires = item
+    user_id, lang, expires = item
     if expires < now:
         return None
-    return user_id
+    return user_id, lang or DEFAULT_LOCALE
 
 
 def _purge_oauth_locked(now: float) -> None:
-    expired = [k for k, (_, exp) in _oauth_pending.items() if exp < now]
+    expired = [k for k, (*_, exp) in _oauth_pending.items() if exp < now]
     for k in expired:
         del _oauth_pending[k]
 
@@ -107,20 +113,35 @@ def _schedule_oauth_complete(
 
 
 def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
+    from i18n import DEFAULT_LOCALE, t
+
     err = (query.get("error") or [""])[0]
     state = (query.get("state") or [""])[0]
     code = (query.get("code") or [""])[0]
-    telegram_user_id = pop_oauth_state(state) if state else None
+    pending = pop_oauth_state(state) if state else None
+    lang = DEFAULT_LOCALE
+    telegram_user_id: int | None = None
+    if pending:
+        telegram_user_id, lang = pending
     if telegram_user_id is None:
-        body = _html_page("Session expired", "Open the bot again and tap Import.")
+        body = _html_page(
+            t("oauth_web_expired_title", lang),
+            t("oauth_web_expired_body", lang),
+        )
         return 400, body, "text/html; charset=utf-8"
     if err:
         _schedule_oauth_complete(telegram_user_id, None, err)
-        body = _html_page("Authorization cancelled", "Return to Telegram.")
+        body = _html_page(
+            t("oauth_web_cancelled_title", lang),
+            t("oauth_web_cancelled_body", lang),
+        )
         return 200, body, "text/html; charset=utf-8"
     if not code or not _oauth_twitch or not _oauth_redirect_uri:
         _schedule_oauth_complete(telegram_user_id, None, "missing_code")
-        body = _html_page("Authorization failed", "Return to Telegram and try again.")
+        body = _html_page(
+            t("oauth_web_failed_title", lang),
+            t("oauth_web_failed_body", lang),
+        )
         return 400, body, "text/html; charset=utf-8"
     try:
         token_data = _oauth_twitch.exchange_code(code, redirect_uri=_oauth_redirect_uri)
@@ -132,10 +153,16 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
     except Exception as exc:
         logger.warning("Twitch OAuth import failed: %s", exc)
         _schedule_oauth_complete(telegram_user_id, None, "twitch_api")
-        body = _html_page("Authorization failed", "Return to Telegram and try again.")
+        body = _html_page(
+            t("oauth_web_failed_title", lang),
+            t("oauth_web_failed_body", lang),
+        )
         return 500, body, "text/html; charset=utf-8"
     _schedule_oauth_complete(telegram_user_id, followed, None)
-    body = _html_page("Done", "You can close this tab and return to Telegram.")
+    body = _html_page(
+        t("oauth_web_done_title", lang),
+        t("oauth_web_done_body", lang),
+    )
     return 200, body, "text/html; charset=utf-8"
 
 
