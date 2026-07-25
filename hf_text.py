@@ -6,6 +6,7 @@ import logging
 import os
 import random
 import re
+from typing import Protocol
 
 import requests
 
@@ -17,21 +18,23 @@ _GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 _HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 _PLACEHOLDERS = ("{username}", "{game}", "{name}")
 
-# Used when cloud providers are down or out of credits.
-_FALLBACK_RU = (
+# Cold-start only: used when DB has no previously generated lucky templates yet.
+_SEED_RU = (
     "{username} в эфире!\n{name}\nКатегория: {game}",
     "🔴 {username} начал стрим\n{name}\nИгра: {game}",
     "{username} онлайн!\n«{name}»\n{game}",
-    "Стрим начался: {username}\n{name}\nКатегория — {game}",
-    "Гоу смотреть {username}!\n{name}\n{game}",
 )
-_FALLBACK_EN = (
+_SEED_EN = (
     "{username} is live!\n{name}\nCategory: {game}",
     "🔴 {username} started streaming\n{name}\nPlaying: {game}",
     "{username} is online!\n“{name}”\n{game}",
-    "Stream started: {username}\n{name}\nCategory — {game}",
-    "Come watch {username}!\n{name}\n{game}",
 )
+
+
+class LuckyTemplateStore(Protocol):
+    def add_lucky_template(self, locale: str, text: str) -> None: ...
+
+    def pick_lucky_template(self, locale: str) -> str | None: ...
 
 
 def _resolve_groq_token() -> str:
@@ -51,9 +54,17 @@ def _resolve_hf_token() -> str:
     )
 
 
-def _local_template(locale: str) -> str:
-    pool = _FALLBACK_RU if str(locale).lower().startswith("ru") else _FALLBACK_EN
+def _seed_template(locale: str) -> str:
+    pool = _SEED_RU if str(locale).lower().startswith("ru") else _SEED_EN
     return random.choice(pool)
+
+
+def _local_template(locale: str, store: LuckyTemplateStore | None = None) -> str:
+    if store is not None:
+        picked = store.pick_lucky_template(locale)
+        if picked:
+            return picked
+    return _seed_template(locale)
 
 
 def _prompt_messages(*, locale: str, channel: str) -> list[dict[str, str]]:
@@ -80,7 +91,12 @@ def _prompt_messages(*, locale: str, channel: str) -> list[dict[str, str]]:
     ]
 
 
-def generate_alert_template(*, locale: str, channel: str = "") -> str:
+def generate_alert_template(
+    *,
+    locale: str,
+    channel: str = "",
+    store: LuckyTemplateStore | None = None,
+) -> str:
     """Generate a Twitch live-alert template with {username}/{game}/{name}."""
     providers = (
         ("Groq", _groq_generate),
@@ -88,10 +104,13 @@ def generate_alert_template(*, locale: str, channel: str = "") -> str:
     )
     for name, fn in providers:
         try:
-            return fn(locale=locale, channel=channel)
+            text = fn(locale=locale, channel=channel)
+            if store is not None:
+                store.add_lucky_template(locale, text)
+            return text
         except Exception as exc:
             logger.warning("%s template generation unavailable (%s)", name, exc)
-    return _normalize_template(_local_template(locale))
+    return _normalize_template(_local_template(locale, store))
 
 
 def _chat_completion(

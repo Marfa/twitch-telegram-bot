@@ -18,13 +18,15 @@ docker compose up -d --build
 | Destinations | DM, channel, group or community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Custom text with `{username}`, `{game}`, `{name}` |
+| 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
+| Image | Optional alert image — caption above or below; link preview then off |
 | Delay after go-live | Send notification N minutes after stream start |
 | Repeat suppression | Skip repeat alerts for X minutes after the first one |
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
 | System alerts | Toggle admin “bot update” and “bot availability” broadcasts |
 | Admin | Scheduled broadcast, DeepL auto-translate, statistics |
-| Commands | `/start`, `/help`, `/cancel` |
+| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker), Fly.io, Render + PostgreSQL |
 
 ## Quick Start
@@ -60,15 +62,18 @@ On first `/start` the bot asks you to choose a language (Russian or English).
 `/start` or **➕ New subscription** — setup wizard:
 
 1. Twitch channel
-2. Message template (`{username}`, `{game}`, `{name}`)
-3. Link preview on/off
-4. Delay notification after stream start (yes/no, minutes)
-5. Allow repeat notifications (yes/no; if no — mute minutes)
-6. Destination: DM / channel / group or community
-7. For channel or group — add the bot and confirm the chat
-8. Delete previous bot message on each new stream? (yes/no)
+2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
+3. Image (add / skip; if added — position: start or end of caption)
+4. Link preview (skipped when an image is set)
+5. Delay notification after stream start (yes/no, minutes)
+6. Allow repeat notifications (yes/no; if no — mute minutes)
+7. Destination: DM / channel / group or community
+8. For channel or group — add the bot and confirm the chat
+9. Delete previous bot message on each new stream? (yes/no)
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
+
+**🎲 I'm feeling lucky** builds a template with placeholders. Chain: **Groq** (if keyed) → on failure **Hugging Face** → if both are down, a random template from the local DB pool (up to 100 recent successful generations per language). After preview: continue, try again, or full wizard.
 
 **Group or community** — send:
 - topic link: `https://t.me/c/name/30`
@@ -103,9 +108,12 @@ Dates and month names follow the user’s language.
 
 | Button / command | Action |
 |---|---|
-| `/start` | New subscription |
+| `/start` | New subscription / menu |
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
+| `/schedule` | Create schedule |
+| `/feedback` | Feedback |
+| `/settings` | Settings |
 | ➕ New subscription | Add another channel |
 | 📋 Manage subscriptions | List, edit, delete |
 | 📅 Create schedule | Weekly stream schedule text |
@@ -117,7 +125,7 @@ Dates and month names follow the user’s language.
 | ↳ 📊 Statistics | Users, subscriptions, languages |
 | 🐛 Report a problem | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
 
-**Edit subscription** — template, destination, delay, repeats, delete old messages, link preview.
+**Edit subscription** — template, image (add / update / delete), destination, delay, repeats, delete old messages, link preview (hidden when an image is set).
 
 Notification template example:
 
@@ -149,6 +157,7 @@ Bot on Render Free, data in external PostgreSQL on [Aiven](https://aiven.io/free
    - `DATABASE_URL` — Aiven URI
    - `ADMIN_USER_IDS` — comma-separated Telegram user IDs
    - `DEEPL_API_KEY` — optional, auto-translate admin broadcasts
+   - `GROQ_API_KEY` / `HF_TOKEN` — optional, **I'm feeling lucky**
 3. [UptimeRobot](https://uptimerobot.com/): **HTTP(s)** → `https://YOUR-SERVICE.onrender.com/health`, interval **5 min**
 
 Subscriptions persist in Aiven across Render restarts.
@@ -180,6 +189,12 @@ fly deploy
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
 | `PORT` | Health-check port (set by Render) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
+| `GROQ_API_KEY` | Groq — primary LLM for **I'm feeling lucky** (aliases: `GROQ_API`, `GROK_API`) |
+| `GROQ_TEXT_MODEL` | Groq model (default `llama-3.1-8b-instant`) |
+| `HF_TOKEN` | Hugging Face — fallback LLM (alias: `HUGGING_FACE_API`) |
+| `HF_TEXT_MODEL` | HF model (default `Qwen/Qwen2.5-7B-Instruct`) |
+
+Without Groq/HF keys, **I'm feeling lucky** still works from the local template pool in the DB.
 
 ## Architecture
 
@@ -187,11 +202,12 @@ fly deploy
 |---|---|
 | `bot.py` | Wizard, menu, notifications, admin broadcast, schedule |
 | `i18n.py` | Strings and keyboards (ru/en) |
+| `hf_text.py` | AI templates: Groq → HF → local pool |
 | `twitch.py` | Helix API, templates |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health` for Render and UptimeRobot |
-| `db.py` | SQLite or PostgreSQL |
+| `db.py` | SQLite or PostgreSQL, `lucky_templates` pool |
 
 Twitch Helix poll ~60 s, Telegram polling, no public webhook.
 

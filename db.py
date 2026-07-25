@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -10,6 +11,129 @@ from typing import Any, Iterator, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
+
+LUCKY_TEMPLATE_LIMIT = 100
+
+
+def build_lucky_seed_templates(locale: str) -> list[str]:
+    """Build a full fallback pool (100) for a locale — used to seed empty DBs."""
+    if str(locale).lower().startswith("ru"):
+        heads = (
+            "{username} в эфире!",
+            "🔴 {username} начал стрим",
+            "{username} онлайн!",
+            "Стрим начался: {username}",
+            "Гоу смотреть {username}!",
+            "⚡ {username} запустил трансляцию",
+            "{username} уже в эфире",
+            "🔴 LIVE — {username}",
+            "Залетай к {username}",
+            "Не пропусти стрим {username}",
+        )
+        middles = (
+            "{name}",
+            "«{name}»",
+            "Название: {name}",
+            "Стрим: {name}",
+            "Сейчас: {name}",
+        )
+        tails = (
+            "Категория: {game}",
+            "Игра: {game}",
+            "{game}",
+            "Категория — {game}",
+            "Играет в {game}",
+        )
+    else:
+        heads = (
+            "{username} is live!",
+            "🔴 {username} started streaming",
+            "{username} is online!",
+            "Stream started: {username}",
+            "Come watch {username}!",
+            "⚡ {username} just went live",
+            "{username} is already live",
+            "🔴 LIVE — {username}",
+            "Jump in with {username}",
+            "Don't miss {username}'s stream",
+        )
+        middles = (
+            "{name}",
+            "“{name}”",
+            "Title: {name}",
+            "Stream: {name}",
+            "Now: {name}",
+        )
+        tails = (
+            "Category: {game}",
+            "Playing: {game}",
+            "{game}",
+            "Category — {game}",
+            "Playing {game}",
+        )
+    out: list[str] = []
+    seen: set[str] = set()
+    for head in heads:
+        for middle in middles:
+            for tail in tails:
+                text = f"{head}\n{middle}\n{tail}"
+                if text in seen:
+                    continue
+                seen.add(text)
+                out.append(text)
+                if len(out) >= LUCKY_TEMPLATE_LIMIT:
+                    return out
+    return out
+
+
+def _seed_lucky_templates_sqlite(conn: sqlite3.Connection) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    for loc in ("ru", "en"):
+        rows = conn.execute(
+            "SELECT text FROM lucky_templates WHERE locale = ?",
+            (loc,),
+        ).fetchall()
+        existing = {str(r["text"]) for r in rows}
+        count = len(existing)
+        if count >= LUCKY_TEMPLATE_LIMIT:
+            continue
+        for text in build_lucky_seed_templates(loc):
+            if count >= LUCKY_TEMPLATE_LIMIT:
+                break
+            if text in existing:
+                continue
+            conn.execute(
+                "INSERT INTO lucky_templates (locale, text, created_at) VALUES (?, ?, ?)",
+                (loc, text, now),
+            )
+            existing.add(text)
+            count += 1
+
+
+def _seed_lucky_templates_pg(cur: Any) -> None:
+    for loc in ("ru", "en"):
+        cur.execute(
+            "SELECT text FROM lucky_templates WHERE locale = %s",
+            (loc,),
+        )
+        existing = {str(r["text"]) for r in cur.fetchall()}
+        count = len(existing)
+        if count >= LUCKY_TEMPLATE_LIMIT:
+            continue
+        for text in build_lucky_seed_templates(loc):
+            if count >= LUCKY_TEMPLATE_LIMIT:
+                break
+            if text in existing:
+                continue
+            cur.execute(
+                """
+                INSERT INTO lucky_templates (locale, text, created_at)
+                VALUES (%s, %s, NOW())
+                """,
+                (loc, text),
+            )
+            existing.add(text)
+            count += 1
 
 
 @dataclass
@@ -216,6 +340,10 @@ class Database(Protocol):
 
     def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None: ...
 
+    def add_lucky_template(self, locale: str, text: str) -> None: ...
+
+    def pick_lucky_template(self, locale: str) -> str | None: ...
+
     def get_bot_stats(self) -> BotStats: ...
 
 
@@ -346,6 +474,19 @@ class SqliteDatabase:
             )
             """
         )
+        # Sent broadcasts are deleted on send; purge any leftover marked-sent rows.
+        conn.execute("DELETE FROM scheduled_broadcasts WHERE sent_at IS NOT NULL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lucky_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                locale TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        _seed_lucky_templates_sqlite(conn)
 
     def add_subscription(
         self,
@@ -784,12 +925,47 @@ class SqliteDatabase:
         return cur.rowcount > 0
 
     def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM scheduled_broadcasts WHERE id = ?", (broadcast_id,))
+
+    @staticmethod
+    def _lucky_locale(locale: str) -> str:
+        return "ru" if str(locale).lower().startswith("ru") else "en"
+
+    def add_lucky_template(self, locale: str, text: str) -> None:
+        loc = self._lucky_locale(locale)
+        body = (text or "").strip()
+        if not body:
+            return
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as conn:
             conn.execute(
-                "UPDATE scheduled_broadcasts SET sent_at = ? WHERE id = ?",
-                (now, broadcast_id),
+                "INSERT INTO lucky_templates (locale, text, created_at) VALUES (?, ?, ?)",
+                (loc, body, now),
             )
+            rows = conn.execute(
+                "SELECT id FROM lucky_templates WHERE locale = ? ORDER BY id DESC",
+                (loc,),
+            ).fetchall()
+            if len(rows) > LUCKY_TEMPLATE_LIMIT:
+                old_ids = [(int(r["id"]),) for r in rows[LUCKY_TEMPLATE_LIMIT:]]
+                conn.executemany("DELETE FROM lucky_templates WHERE id = ?", old_ids)
+
+    def pick_lucky_template(self, locale: str) -> str | None:
+        loc = self._lucky_locale(locale)
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT text FROM lucky_templates
+                WHERE locale = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (loc, LUCKY_TEMPLATE_LIMIT),
+            ).fetchall()
+        if not rows:
+            return None
+        return str(random.choice(rows)["text"])
 
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:
@@ -1046,6 +1222,18 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute("DELETE FROM scheduled_broadcasts WHERE sent_at IS NOT NULL")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS lucky_templates (
+                    id SERIAL PRIMARY KEY,
+                    locale TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            _seed_lucky_templates_pg(cur)
 
     def add_subscription(
         self,
@@ -1538,13 +1726,57 @@ class PostgresDatabase:
         return deleted
 
     def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None:
-        now = datetime.now(timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("DELETE FROM scheduled_broadcasts WHERE id = %s", (broadcast_id,))
+
+    @staticmethod
+    def _lucky_locale(locale: str) -> str:
+        return "ru" if str(locale).lower().startswith("ru") else "en"
+
+    def add_lucky_template(self, locale: str, text: str) -> None:
+        loc = self._lucky_locale(locale)
+        body = (text or "").strip()
+        if not body:
+            return
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
-                "UPDATE scheduled_broadcasts SET sent_at = %s WHERE id = %s",
-                (now, broadcast_id),
+                """
+                INSERT INTO lucky_templates (locale, text, created_at)
+                VALUES (%s, %s, NOW())
+                """,
+                (loc, body),
             )
+            cur.execute(
+                "SELECT id FROM lucky_templates WHERE locale = %s ORDER BY id DESC",
+                (loc,),
+            )
+            rows = cur.fetchall()
+            if len(rows) > LUCKY_TEMPLATE_LIMIT:
+                old_ids = [int(r["id"]) for r in rows[LUCKY_TEMPLATE_LIMIT:]]
+                cur.execute(
+                    "DELETE FROM lucky_templates WHERE id = ANY(%s)",
+                    (list(old_ids),),
+                )
+
+    def pick_lucky_template(self, locale: str) -> str | None:
+        loc = self._lucky_locale(locale)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT text FROM lucky_templates
+                WHERE locale = %s
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (loc, LUCKY_TEMPLATE_LIMIT),
+            )
+            rows = cur.fetchall()
+        if not rows:
+            return None
+        return str(random.choice(rows)["text"])
 
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:

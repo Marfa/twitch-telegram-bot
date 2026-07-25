@@ -1082,9 +1082,10 @@ async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lang = _user_lang(context, query.from_user.id)
     await query.edit_message_text(t("lucky_generating", lang))
     channel = str(context.user_data.get("twitch_username") or "")
+    db: Database = context.application.bot_data["db"]
     try:
         template = await asyncio.to_thread(
-            generate_alert_template, locale=lang, channel=channel
+            generate_alert_template, locale=lang, channel=channel, store=db
         )
     except Exception:
         logger.exception("Lucky template generation failed")

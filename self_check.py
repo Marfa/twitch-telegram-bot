@@ -135,6 +135,47 @@ def main() -> None:
         assert db.get_user_locale(1) is None
         db.set_user_locale(1, "en")
         assert db.get_user_locale(1) == "en"
+        sample = "{username} live!\n{name}\n{game}"
+        db.add_lucky_template("ru", sample)
+        with db._conn() as conn:
+            texts = {
+                str(r["text"])
+                for r in conn.execute(
+                    "SELECT text FROM lucky_templates WHERE locale = 'ru'"
+                ).fetchall()
+            }
+            ru_n = conn.execute(
+                "SELECT COUNT(*) AS c FROM lucky_templates WHERE locale = 'ru'"
+            ).fetchone()["c"]
+            en_n = conn.execute(
+                "SELECT COUNT(*) AS c FROM lucky_templates WHERE locale = 'en'"
+            ).fetchone()["c"]
+        assert sample in texts
+        assert db.pick_lucky_template("en") is not None  # seeded on migrate
+        assert en_n == 100
+        assert ru_n == 100  # seeded full; add_lucky_template trims to 100
+        # Extra inserts still capped at 100.
+        for i in range(105):
+            db.add_lucky_template("ru", f"{{username}}\n{{name}}\n{{game}}\n#{i}")
+        with db._conn() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) AS c FROM lucky_templates WHERE locale = 'ru'"
+            ).fetchone()["c"]
+        assert count == 100
+        from_store = _local_template("ru", db)
+        assert "{username}" in from_store
+        # Empty cloud tokens → pick from store, not seed.
+        for k in _prev:
+            _os.environ[k] = ""
+        try:
+            via_store = generate_alert_template(locale="ru", channel="x", store=db)
+            assert "{username}" in via_store
+        finally:
+            for k, v in _prev.items():
+                if v is None:
+                    _os.environ.pop(k, None)
+                else:
+                    _os.environ[k] = v
         sub_id = db.add_subscription(
             owner_id=1,
             twitch_username=CHANNEL,
@@ -241,6 +282,17 @@ def main() -> None:
         assert item.text == "updated"
         assert db.delete_scheduled_broadcast(bid)
         assert db.get_scheduled_broadcast(bid) is None
+        bid2 = db.add_scheduled_broadcast(
+            "bot_update", "bye", "2099-01-01T00:00:00+00:00", 1
+        )
+        db.mark_scheduled_broadcast_sent(bid2)
+        assert db.get_scheduled_broadcast(bid2) is None
+        with db._conn() as conn:
+            left = conn.execute(
+                "SELECT COUNT(*) AS c FROM scheduled_broadcasts WHERE id = ?",
+                (bid2,),
+            ).fetchone()["c"]
+        assert left == 0
         assert not db.update_subscription(999, 1, message_template="x")
 
     assert parse_admin_user_ids("") == frozenset()
