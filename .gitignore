@@ -10,6 +10,7 @@ tmp/
 migration_dump.sql
 migration_vps_status.txt
 .tmp_*
+AGENTS.md
 *.pem
 *.key
 backups/
