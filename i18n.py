@@ -954,12 +954,18 @@ def all_wizard_nav_buttons() -> set[str]:
 
 def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(btn("new", lang))],
-        [KeyboardButton(btn("import_twitch", lang))],
-        [KeyboardButton(btn("manage", lang))],
-        [KeyboardButton(btn("create_schedule", lang))],
-        [KeyboardButton(btn("settings", lang))],
-        [KeyboardButton(btn("feedback", lang))],
+        [
+            KeyboardButton(btn("new", lang)),
+            KeyboardButton(btn("import_twitch", lang)),
+        ],
+        [
+            KeyboardButton(btn("manage", lang)),
+            KeyboardButton(btn("create_schedule", lang)),
+        ],
+        [
+            KeyboardButton(btn("settings", lang)),
+            KeyboardButton(btn("feedback", lang)),
+        ],
     ]
     if is_admin:
         rows.append([KeyboardButton(btn("admin", lang))])
@@ -973,8 +979,10 @@ def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("list", lang)),
                 KeyboardButton(btn("edit", lang)),
             ],
-            [KeyboardButton(btn("delete", lang))],
-            [KeyboardButton(btn("back", lang))],
+            [
+                KeyboardButton(btn("delete", lang)),
+                KeyboardButton(btn("back", lang)),
+            ],
         ],
         resize_keyboard=True,
     )
