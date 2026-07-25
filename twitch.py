@@ -12,7 +12,8 @@ import requests
 
 from config import TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 
-FOLLOWS_SCOPE = "user:read:follows"
+# offline_access so Twitch returns a refresh token for periodic sync
+FOLLOWS_SCOPE = "user:read:follows offline_access"
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,20 @@ class TwitchClient:
                 "code": code,
                 "grant_type": "authorization_code",
                 "redirect_uri": redirect_uri,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def refresh_user_token(self, refresh_token: str) -> dict[str, Any]:
+        resp = self._session.post(
+            "https://id.twitch.tv/oauth2/token",
+            data={
+                "client_id": TWITCH_CLIENT_ID,
+                "client_secret": TWITCH_CLIENT_SECRET,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
             },
             timeout=15,
         )

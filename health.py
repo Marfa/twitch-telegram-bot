@@ -22,8 +22,10 @@ _OAUTH_TTL_SEC = 600
 _oauth_pending: dict[str, tuple[int, str, float]] = {}
 _oauth_pending_lock = threading.Lock()
 
+# on_complete(telegram_user_id, followed, error, token_info)
+# token_info: access_token, refresh_token, twitch_user_id (only on success)
 OAuthCompleteHandler = Callable[
-    [int, Optional[list], Optional[str]],
+    [int, Optional[list], Optional[str], Optional[dict[str, str]]],
     Awaitable[None],
 ]
 _oauth_loop: asyncio.AbstractEventLoop | None = None
@@ -94,12 +96,13 @@ def _schedule_oauth_complete(
     telegram_user_id: int,
     followed: list[dict[str, Any]] | None,
     error: str | None,
+    token_info: dict[str, str] | None = None,
 ) -> None:
     if _oauth_loop is None or _oauth_on_complete is None:
         logger.error("OAuth complete with no bridge registered")
         return
     fut = asyncio.run_coroutine_threadsafe(
-        _oauth_on_complete(telegram_user_id, followed, error),
+        _oauth_on_complete(telegram_user_id, followed, error, token_info),
         _oauth_loop,
     )
 
@@ -146,10 +149,12 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
     try:
         token_data = _oauth_twitch.exchange_code(code, redirect_uri=_oauth_redirect_uri)
         access = token_data.get("access_token") or ""
+        refresh = token_data.get("refresh_token") or ""
         user = _oauth_twitch.get_token_user(access)
         if not user:
             raise RuntimeError("no_user")
-        followed = _oauth_twitch.get_followed_channels(access, str(user["id"]))
+        twitch_user_id = str(user["id"])
+        followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
     except Exception as exc:
         logger.warning("Twitch OAuth import failed: %s", exc)
         _schedule_oauth_complete(telegram_user_id, None, "twitch_api")
@@ -158,7 +163,12 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
             t("oauth_web_failed_body", lang),
         )
         return 500, body, "text/html; charset=utf-8"
-    _schedule_oauth_complete(telegram_user_id, followed, None)
+    token_info = {
+        "access_token": access,
+        "refresh_token": refresh,
+        "twitch_user_id": twitch_user_id,
+    }
+    _schedule_oauth_complete(telegram_user_id, followed, None, token_info)
     body = _html_page(
         t("oauth_web_done_title", lang),
         t("oauth_web_done_body", lang),

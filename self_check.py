@@ -30,6 +30,7 @@ from telegram import LinkPreviewOptions, Message
 
 
 def main() -> None:
+    os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK")
     CHANNEL = "marfapr"
     t = TwitchClient()
     assert t.parse_username(CHANNEL) == CHANNEL
@@ -51,7 +52,8 @@ def main() -> None:
         state="abc",
     )
     assert "response_type=code" in auth_url
-    assert "user%3Aread%3Afollows" in auth_url or FOLLOWS_SCOPE in auth_url
+    assert "user%3Aread%3Afollows" in auth_url or "user:read:follows" in auth_url
+    assert "offline_access" in auth_url
     assert "state=abc" in auth_url
     state = create_oauth_state(42, "ru")
     assert pop_oauth_state(state) == (42, "ru")
@@ -131,8 +133,11 @@ def main() -> None:
     for loc in SUPPORTED_LOCALES:
         assert btn("new", loc)
         assert btn("settings", loc)
+        assert btn("sync_subs", loc)
         assert btn("language", loc)
         assert tr("start_welcome", loc)
+        assert tr("import_mode_prompt", loc)
+        assert tr("sync_menu_off", loc)
         assert tr("lucky_btn", loc)
         assert tr("lucky_hint", loc)
         assert tr("image_ask", loc)
@@ -252,7 +257,7 @@ def main() -> None:
         assert "{username}" in paused.message_template
         assert "{game}" in paused.message_template
         assert "twitch.tv/" not in paused.message_template
-        imported, skipped, limited, new_subs = import_followed_as_subscriptions(
+        imported, skipped, limited, removed, new_subs = import_followed_as_subscriptions(
             db,
             1,
             [
@@ -263,11 +268,62 @@ def main() -> None:
             template=tr("import_default_template", "en"),
             limit=25,
         )
-        assert imported == 1 and skipped == 1 and limited == 0
+        assert imported == 1 and skipped == 1 and limited == 0 and removed == 0
         assert len(new_subs) == 1
         assert new_subs[0].twitch_username == "newbie"
+        assert new_subs[0].from_twitch_sync is True
+        assert paused.from_twitch_sync is False
+        # Prune: remove sync-origin "newbie" when follows only keep CHANNEL
+        imported2, skipped2, limited2, removed2, _ = import_followed_as_subscriptions(
+            db,
+            1,
+            [{"broadcaster_id": "123", "broadcaster_login": CHANNEL}],
+            template=tr("import_default_template", "en"),
+            limit=25,
+            prune_missing=True,
+        )
+        assert imported2 == 0 and skipped2 == 1 and removed2 == 1
+        assert db.get_subscription(new_subs[0].id, 1) is None
+        assert db.get_subscription(paused_id, 1) is not None  # manual kept
         assert db.enable_all_subscriptions(1) >= 1
         assert db.get_subscription(paused_id, 1).enabled is True
+        assert db.get_twitch_sync(1) is None
+        db.upsert_twitch_sync(
+            owner_id=1,
+            twitch_user_id="tw1",
+            refresh_token="rtok",
+            period_days=7,
+            next_sync_at="2020-01-01T00:00:00+00:00",
+        )
+        # Ciphertext at rest
+        with db._conn() as conn:
+            raw = conn.execute(
+                "SELECT refresh_token FROM twitch_sync WHERE owner_id = 1"
+            ).fetchone()["refresh_token"]
+        assert str(raw).startswith("enc:v1:")
+        assert "rtok" not in str(raw)
+        sync = db.get_twitch_sync(1)
+        assert sync is not None
+        assert sync.period_days == 7
+        assert sync.refresh_token == "rtok"
+        due = db.get_due_twitch_syncs("2020-01-02T00:00:00+00:00")
+        assert len(due) == 1 and due[0].owner_id == 1
+        assert due[0].refresh_token == "rtok"
+        assert db.set_twitch_sync_period(1, 14, "2030-01-01T00:00:00+00:00")
+        assert db.get_twitch_sync(1).period_days == 14
+        assert db.get_due_twitch_syncs("2020-01-02T00:00:00+00:00") == []
+        db.update_twitch_sync_tokens(
+            1,
+            "rtok2",
+            last_sync_at="2026-01-01T00:00:00+00:00",
+            next_sync_at="2030-06-01T00:00:00+00:00",
+        )
+        assert db.get_twitch_sync(1).refresh_token == "rtok2"
+        assert db.delete_twitch_sync(1) is True
+        assert db.get_twitch_sync(1) is None
+        from token_crypto import encrypt_secret, decrypt_secret
+
+        assert decrypt_secret(encrypt_secret("secret-token")) == "secret-token"
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")
@@ -344,7 +400,7 @@ def main() -> None:
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()
         assert restored.users == 1
-        assert restored.subscriptions_total == 3
+        assert restored.subscriptions_total == 2
         assert restored.blocked_users == 0
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1

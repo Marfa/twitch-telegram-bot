@@ -174,6 +174,7 @@ class Subscription:
     image_position: str
     notify_cooldown_until: str | None
     last_message_id: int | None
+    from_twitch_sync: bool
 
 
 @dataclass
@@ -183,6 +184,33 @@ class ScheduledBroadcast:
     text: str
     scheduled_at: str
     created_by: int
+
+
+@dataclass
+class TwitchSync:
+    owner_id: int
+    twitch_user_id: str
+    refresh_token: str
+    period_days: int
+    next_sync_at: str
+    last_sync_at: str | None
+
+
+def _row_to_twitch_sync(row: Any) -> TwitchSync:
+    last = row["last_sync_at"]
+    if last is not None and not isinstance(last, str):
+        last = last.isoformat()
+    next_at = row["next_sync_at"]
+    if next_at is not None and not isinstance(next_at, str):
+        next_at = next_at.isoformat()
+    return TwitchSync(
+        owner_id=int(row["owner_id"]),
+        twitch_user_id=str(row["twitch_user_id"]),
+        refresh_token=str(row["refresh_token"]),
+        period_days=int(row["period_days"]),
+        next_sync_at=str(next_at),
+        last_sync_at=str(last) if last else None,
+    )
 
 
 def _row_to_sub(row: Any) -> Subscription:
@@ -218,6 +246,9 @@ def _row_to_sub(row: Any) -> Subscription:
             else row["notify_cooldown_until"]
         ),
         last_message_id=row["last_message_id"],
+        from_twitch_sync=bool(row["from_twitch_sync"])
+        if "from_twitch_sync" in keys
+        else False,
     )
 
 
@@ -271,6 +302,7 @@ class Database(Protocol):
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
+        from_twitch_sync: bool = False,
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
@@ -348,6 +380,39 @@ class Database(Protocol):
     def pick_lucky_template(self, locale: str) -> str | None: ...
 
     def get_bot_stats(self) -> BotStats: ...
+
+    def upsert_twitch_sync(
+        self,
+        owner_id: int,
+        twitch_user_id: str,
+        refresh_token: str,
+        period_days: int,
+        next_sync_at: str,
+        last_sync_at: str | None = None,
+    ) -> None: ...
+
+    def get_twitch_sync(self, owner_id: int) -> TwitchSync | None: ...
+
+    def delete_twitch_sync(self, owner_id: int) -> bool: ...
+
+    def set_twitch_sync_period(
+        self, owner_id: int, period_days: int, next_sync_at: str
+    ) -> bool: ...
+
+    def update_twitch_sync_tokens(
+        self,
+        owner_id: int,
+        refresh_token: str,
+        *,
+        last_sync_at: str,
+        next_sync_at: str,
+    ) -> None: ...
+
+    def get_due_twitch_syncs(self, now_iso: str) -> list[TwitchSync]: ...
+
+    def delete_synced_subscriptions_missing(
+        self, owner_id: int, keep_twitch_user_ids: set[str]
+    ) -> int: ...
 
 
 class SqliteDatabase:
@@ -446,6 +511,10 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN image_position TEXT NOT NULL DEFAULT ''"
             )
+        if "from_twitch_sync" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN from_twitch_sync INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -489,6 +558,18 @@ class SqliteDatabase:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS twitch_sync (
+                owner_id INTEGER PRIMARY KEY,
+                twitch_user_id TEXT NOT NULL,
+                refresh_token TEXT NOT NULL,
+                period_days INTEGER NOT NULL,
+                next_sync_at TEXT NOT NULL,
+                last_sync_at TEXT
+            )
+            """
+        )
         _seed_lucky_templates_sqlite(conn)
 
     def add_subscription(
@@ -509,6 +590,7 @@ class SqliteDatabase:
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
+        from_twitch_sync: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -518,8 +600,8 @@ class SqliteDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, ignore_keywords,
-                    image_file_id, image_position, enabled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    image_file_id, image_position, enabled, from_twitch_sync
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -538,6 +620,7 @@ class SqliteDatabase:
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
                     int(enabled),
+                    int(from_twitch_sync),
                 ),
             )
             return int(cur.lastrowid)
@@ -1088,6 +1171,141 @@ class SqliteDatabase:
             locale_unset=int(locale_unset),
         )
 
+    def upsert_twitch_sync(
+        self,
+        owner_id: int,
+        twitch_user_id: str,
+        refresh_token: str,
+        period_days: int,
+        next_sync_at: str,
+        last_sync_at: str | None = None,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO twitch_sync (
+                    owner_id, twitch_user_id, refresh_token,
+                    period_days, next_sync_at, last_sync_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    twitch_user_id = excluded.twitch_user_id,
+                    refresh_token = excluded.refresh_token,
+                    period_days = excluded.period_days,
+                    next_sync_at = excluded.next_sync_at,
+                    last_sync_at = excluded.last_sync_at
+                """,
+                (
+                    owner_id,
+                    twitch_user_id,
+                    enc,
+                    period_days,
+                    next_sync_at,
+                    last_sync_at,
+                ),
+            )
+
+    def get_twitch_sync(self, owner_id: int) -> TwitchSync | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM twitch_sync WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return None
+        sync = _row_to_twitch_sync(row)
+        sync.refresh_token = decrypt_secret(sync.refresh_token)
+        return sync
+
+    def delete_twitch_sync(self, owner_id: int) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM twitch_sync WHERE owner_id = ?",
+                (owner_id,),
+            )
+            return cur.rowcount > 0
+
+    def set_twitch_sync_period(
+        self, owner_id: int, period_days: int, next_sync_at: str
+    ) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE twitch_sync
+                SET period_days = ?, next_sync_at = ?
+                WHERE owner_id = ?
+                """,
+                (period_days, next_sync_at, owner_id),
+            )
+            return cur.rowcount > 0
+
+    def update_twitch_sync_tokens(
+        self,
+        owner_id: int,
+        refresh_token: str,
+        *,
+        last_sync_at: str,
+        next_sync_at: str,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE twitch_sync
+                SET refresh_token = ?, last_sync_at = ?, next_sync_at = ?
+                WHERE owner_id = ?
+                """,
+                (enc, last_sync_at, next_sync_at, owner_id),
+            )
+
+    def get_due_twitch_syncs(self, now_iso: str) -> list[TwitchSync]:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM twitch_sync
+                WHERE next_sync_at <= ?
+                ORDER BY next_sync_at
+                """,
+                (now_iso,),
+            ).fetchall()
+        out: list[TwitchSync] = []
+        for r in rows:
+            sync = _row_to_twitch_sync(r)
+            sync.refresh_token = decrypt_secret(sync.refresh_token)
+            out.append(sync)
+        return out
+
+    def delete_synced_subscriptions_missing(
+        self, owner_id: int, keep_twitch_user_ids: set[str]
+    ) -> int:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, twitch_user_id FROM subscriptions
+                WHERE owner_id = ? AND from_twitch_sync = 1
+                """,
+                (owner_id,),
+            ).fetchall()
+            to_delete = [
+                int(r["id"])
+                for r in rows
+                if str(r["twitch_user_id"]) not in keep_twitch_user_ids
+            ]
+            for sub_id in to_delete:
+                conn.execute(
+                    "DELETE FROM subscriptions WHERE id = ? AND owner_id = ?",
+                    (sub_id, owner_id),
+                )
+            return len(to_delete)
+
 
 class PostgresDatabase:
     def __init__(self, database_url: str) -> None:
@@ -1196,6 +1414,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS from_twitch_sync BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -1247,6 +1471,18 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS twitch_sync (
+                    owner_id BIGINT PRIMARY KEY,
+                    twitch_user_id TEXT NOT NULL,
+                    refresh_token TEXT NOT NULL,
+                    period_days INTEGER NOT NULL,
+                    next_sync_at TIMESTAMPTZ NOT NULL,
+                    last_sync_at TIMESTAMPTZ
+                )
+                """
+            )
             _seed_lucky_templates_pg(cur)
 
     def add_subscription(
@@ -1267,6 +1503,7 @@ class PostgresDatabase:
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
+        from_twitch_sync: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -1277,8 +1514,8 @@ class PostgresDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, ignore_keywords,
-                    image_file_id, image_position, enabled
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    image_file_id, image_position, enabled, from_twitch_sync
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1298,6 +1535,7 @@ class PostgresDatabase:
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
                     enabled,
+                    from_twitch_sync,
                 ),
             )
             row = cur.fetchone()
@@ -1925,6 +2163,153 @@ class PostgresDatabase:
             locale_ru=locale_ru,
             locale_unset=locale_unset,
         )
+
+    def upsert_twitch_sync(
+        self,
+        owner_id: int,
+        twitch_user_id: str,
+        refresh_token: str,
+        period_days: int,
+        next_sync_at: str,
+        last_sync_at: str | None = None,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO twitch_sync (
+                    owner_id, twitch_user_id, refresh_token,
+                    period_days, next_sync_at, last_sync_at
+                ) VALUES (%s, %s, %s, %s, %s::timestamptz, %s::timestamptz)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    refresh_token = EXCLUDED.refresh_token,
+                    period_days = EXCLUDED.period_days,
+                    next_sync_at = EXCLUDED.next_sync_at,
+                    last_sync_at = EXCLUDED.last_sync_at
+                """,
+                (
+                    owner_id,
+                    twitch_user_id,
+                    enc,
+                    period_days,
+                    next_sync_at,
+                    last_sync_at,
+                ),
+            )
+
+    def get_twitch_sync(self, owner_id: int) -> TwitchSync | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM twitch_sync WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        sync = _row_to_twitch_sync(row)
+        sync.refresh_token = decrypt_secret(sync.refresh_token)
+        return sync
+
+    def delete_twitch_sync(self, owner_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM twitch_sync WHERE owner_id = %s",
+                (owner_id,),
+            )
+            return cur.rowcount > 0
+
+    def set_twitch_sync_period(
+        self, owner_id: int, period_days: int, next_sync_at: str
+    ) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE twitch_sync
+                SET period_days = %s, next_sync_at = %s::timestamptz
+                WHERE owner_id = %s
+                """,
+                (period_days, next_sync_at, owner_id),
+            )
+            return cur.rowcount > 0
+
+    def update_twitch_sync_tokens(
+        self,
+        owner_id: int,
+        refresh_token: str,
+        *,
+        last_sync_at: str,
+        next_sync_at: str,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE twitch_sync
+                SET refresh_token = %s,
+                    last_sync_at = %s::timestamptz,
+                    next_sync_at = %s::timestamptz
+                WHERE owner_id = %s
+                """,
+                (enc, last_sync_at, next_sync_at, owner_id),
+            )
+
+    def get_due_twitch_syncs(self, now_iso: str) -> list[TwitchSync]:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM twitch_sync
+                WHERE next_sync_at <= %s::timestamptz
+                ORDER BY next_sync_at
+                """,
+                (now_iso,),
+            )
+            rows = cur.fetchall()
+        out: list[TwitchSync] = []
+        for r in rows:
+            sync = _row_to_twitch_sync(r)
+            sync.refresh_token = decrypt_secret(sync.refresh_token)
+            out.append(sync)
+        return out
+
+    def delete_synced_subscriptions_missing(
+        self, owner_id: int, keep_twitch_user_ids: set[str]
+    ) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, twitch_user_id FROM subscriptions
+                WHERE owner_id = %s AND from_twitch_sync = TRUE
+                """,
+                (owner_id,),
+            )
+            rows = cur.fetchall()
+            to_delete = [
+                int(r["id"])
+                for r in rows
+                if str(r["twitch_user_id"]) not in keep_twitch_user_ids
+            ]
+            for sub_id in to_delete:
+                cur.execute(
+                    "DELETE FROM subscriptions WHERE id = %s AND owner_id = %s",
+                    (sub_id, owner_id),
+                )
+            return len(to_delete)
 
 
 def open_database(path: Path, database_url: str | None = None) -> Database:

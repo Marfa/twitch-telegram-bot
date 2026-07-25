@@ -35,6 +35,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_cancel": "Cancel",
         "btn_sys_notifications": "🔔 System notifications",
         "btn_sys_updates": "📬 Bot update alerts",
+        "btn_sync_subs": "🔄 Subscription sync",
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
         "menu_admin": "Admin panel:",
@@ -312,12 +313,55 @@ _STRINGS: dict[str, dict[str, str]] = {
         "import_success": (
             "Import finished successfully.\n"
             "Added: {imported}, skipped (already listed): {skipped}"
-            "{limit_note}"
+            "{removed_note}{limit_note}"
         ),
         "import_limit_note": "\nLimit reached ({limit}): {limited} channel(s) not imported.",
+        "import_removed_note": "\nRemoved (unfollowed): {removed}",
         "import_failed": "Twitch authorization failed. Try again: ⬇️ Import from Twitch.",
         "import_denied": "Twitch authorization was cancelled.",
         "import_empty": "No followed channels to import.",
+        "import_mode_prompt": (
+            "Authorization successful.\n\n"
+            "Sync subscriptions periodically, or run a one-time import?"
+        ),
+        "import_mode_sync": "🔄 Sync",
+        "import_mode_once": "⬇️ One-time import",
+        "import_sync_days_prompt": (
+            "How often should the bot sync follows from Twitch?\n"
+            "Send a number of days (1–365)."
+        ),
+        "import_sync_days_invalid": "Send an integer from 1 to 365.",
+        "import_sync_enabled": (
+            "Sync enabled every {days} day(s).\n"
+            "New follows will be added as paused DM alerts; unfollowed sync "
+            "imports will be removed. Manually added subscriptions are never touched."
+        ),
+        "import_sync_no_refresh": (
+            "Twitch did not return a refresh token. "
+            "One-time import only — try Sync again after reconnecting."
+        ),
+        "import_pending_expired": "Import session expired. Tap ⬇️ Import from Twitch again.",
+        "sync_menu_off": (
+            "Subscription sync is off.\n\n"
+            "Enable it via ⬇️ Import from Twitch → Sync."
+        ),
+        "sync_menu_on": (
+            "Subscription sync is on.\n"
+            "Period: every {days} day(s).\n"
+            "Next sync: {next_at}"
+        ),
+        "sync_change_period": "⏱ Change period",
+        "sync_disable": "⏹ Disable sync",
+        "sync_disabled": "Sync disabled. Twitch token removed.",
+        "sync_period_updated": "Sync period updated: every {days} day(s).",
+        "sync_job_done": (
+            "Twitch sync: added {imported}, skipped {skipped}"
+            "{removed_note}{limit_note}"
+        ),
+        "sync_job_failed": (
+            "Twitch sync failed (token expired or revoked). "
+            "Sync disabled — authorize again via Import."
+        ),
         "oauth_web_done_title": "Done",
         "oauth_web_done_body": "You can close this tab and return to Telegram.",
         "oauth_web_expired_title": "Session expired",
@@ -335,7 +379,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_enabled": "Subscription #{sub_id} enabled.",
         "sub_disabled": "Subscription #{sub_id} disabled.",
         "no_subs_short": "No subscriptions.",
-        "delete_pick": "Choose a subscription to delete:",
+        "delete_pick": "Choose subscriptions to delete (tap to select):",
+        "delete_go": "🗑 Delete selected ({count})",
+        "delete_clear": "Clear selection",
+        "delete_none": "Nothing selected.",
+        "subs_deleted": "Deleted subscriptions: {count}.",
         "sub_deleted": "Subscription #{sub_id} deleted.",
         "edit_pick": "Choose a subscription to edit:",
         "edit_menu": "Subscription #{sub_id} — {username}\n\nWhat to change?",
@@ -481,6 +529,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_cancel": "Отмена",
         "btn_sys_notifications": "🔔 Настройка системных уведомлений",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
+        "btn_sync_subs": "🔄 Синхронизация подписок",
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
         "menu_admin": "Админка:",
@@ -762,12 +811,55 @@ _STRINGS: dict[str, dict[str, str]] = {
         "import_success": (
             "Импорт прошёл успешно.\n"
             "Добавлено: {imported}, пропущено (уже есть): {skipped}"
-            "{limit_note}"
+            "{removed_note}{limit_note}"
         ),
         "import_limit_note": "\nЛимит ({limit}): не импортировано каналов: {limited}.",
+        "import_removed_note": "\nУдалено (отписка): {removed}",
         "import_failed": "Не удалось авторизоваться на Twitch. Попробуйте снова: ⬇️ Импорт подписок из Twitch.",
         "import_denied": "Авторизация на Twitch отменена.",
         "import_empty": "Нет каналов для импорта.",
+        "import_mode_prompt": (
+            "Авторизация прошла успешно.\n\n"
+            "Синхронизировать подписки периодически или выполнить одноразовый импорт?"
+        ),
+        "import_mode_sync": "🔄 Синхронизировать",
+        "import_mode_once": "⬇️ Одноразовый импорт",
+        "import_sync_days_prompt": (
+            "Как часто сверять фолловы Twitch с ботом?\n"
+            "Отправьте число дней (1–365)."
+        ),
+        "import_sync_days_invalid": "Отправьте целое число от 1 до 365.",
+        "import_sync_enabled": (
+            "Синхронизация включена раз в {days} дн.\n"
+            "Новые фолловы добавятся как выключенные оповещения в личку; "
+            "отфолловленные импорты удалятся. Вручную добавленные подписки не трогаются."
+        ),
+        "import_sync_no_refresh": (
+            "Twitch не вернул refresh token. "
+            "Доступен только одноразовый импорт — попробуйте синхронизацию снова."
+        ),
+        "import_pending_expired": "Сессия импорта истекла. Нажмите ⬇️ Импорт подписок из Twitch снова.",
+        "sync_menu_off": (
+            "Синхронизация подписок выключена.\n\n"
+            "Включить: ⬇️ Импорт подписок из Twitch → Синхронизировать."
+        ),
+        "sync_menu_on": (
+            "Синхронизация подписок включена.\n"
+            "Период: раз в {days} дн.\n"
+            "Следующая сверка: {next_at}"
+        ),
+        "sync_change_period": "⏱ Изменить период",
+        "sync_disable": "⏹ Отключить синхронизацию",
+        "sync_disabled": "Синхронизация отключена. Токен Twitch удалён.",
+        "sync_period_updated": "Период синхронизации: раз в {days} дн.",
+        "sync_job_done": (
+            "Синхронизация Twitch: добавлено {imported}, пропущено {skipped}"
+            "{removed_note}{limit_note}"
+        ),
+        "sync_job_failed": (
+            "Синхронизация Twitch не удалась (токен истёк или отозван). "
+            "Синхронизация отключена — авторизуйтесь снова через Импорт."
+        ),
         "oauth_web_done_title": "Готово",
         "oauth_web_done_body": "Можете закрыть эту вкладку и вернуться в Telegram.",
         "oauth_web_expired_title": "Сессия истекла",
@@ -785,7 +877,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_enabled": "Подписка #{sub_id} включена.",
         "sub_disabled": "Подписка #{sub_id} выключена.",
         "no_subs_short": "Подписок нет.",
-        "delete_pick": "Выберите подписку для удаления:",
+        "delete_pick": "Выберите подписки для удаления (нажмите, чтобы отметить):",
+        "delete_go": "🗑 Удалить выбранные ({count})",
+        "delete_clear": "Сбросить выбор",
+        "delete_none": "Ничего не выбрано.",
+        "subs_deleted": "Удалено подписок: {count}.",
         "sub_deleted": "Подписка #{sub_id} удалена.",
         "edit_pick": "Выберите подписку для редактирования:",
         "edit_menu": "Подписка #{sub_id} — {username}\n\nЧто изменить?",
@@ -944,6 +1040,7 @@ def all_menu_buttons() -> set[str]:
         "stats",
         "back",
         "sys_notifications",
+        "sync_subs",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
@@ -991,11 +1088,34 @@ def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
 def settings_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(btn("sys_notifications", lang))],
-            [KeyboardButton(btn("language", lang))],
-            [KeyboardButton(btn("back", lang))],
+            [
+                KeyboardButton(btn("sync_subs", lang)),
+                KeyboardButton(btn("sys_notifications", lang)),
+            ],
+            [
+                KeyboardButton(btn("language", lang)),
+                KeyboardButton(btn("back", lang)),
+            ],
         ],
         resize_keyboard=True,
+    )
+
+
+def import_mode_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("import_mode_sync", lang), callback_data="import_mode:sync")],
+            [InlineKeyboardButton(t("import_mode_once", lang), callback_data="import_mode:once")],
+        ]
+    )
+
+
+def sync_settings_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("sync_change_period", lang), callback_data="sync:period")],
+            [InlineKeyboardButton(t("sync_disable", lang), callback_data="sync:disable")],
+        ]
     )
 
 

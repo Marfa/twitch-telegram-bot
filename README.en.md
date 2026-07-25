@@ -18,7 +18,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Delay after go-live | Send notification N minutes after stream start |
 | Repeat suppression | Skip repeat alerts for X minutes after the first one |
 | Subscriptions | List, edit all fields, enable/disable, delete |
-| Import from Twitch | OAuth → follows as paused alerts; duplicates skipped |
+| Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
 | System alerts | Toggle admin “bot update” and “bot availability” broadcasts |
 | Admin | Scheduled broadcast, DeepL auto-translate, statistics |
@@ -83,12 +83,11 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 
 ### Import from Twitch
 
-**⬇️ Import from Twitch** — Twitch OAuth, then import from `helix/channels/followed`:
+**⬇️ Import from Twitch** — Twitch OAuth, then choose **one-time import** or **sync**:
 
-- default template, link preview on;
-- alerts are created **paused** (DM to self);
-- channels you already watch are skipped;
-- after import — short summary, **Enable all**, and edit buttons for new channels only.
+- one-time — same as before, token not stored;
+- sync — period in days, refresh token stored encrypted; each run adds new follows and removes unfollowed imports (manual subscriptions untouched);
+- alerts are created **paused** (DM to self); Settings → **Subscription sync** (change period / disable).
 
 Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (see `PUBLIC_BASE_URL`).
 
@@ -122,7 +121,7 @@ Dates and month names follow the user’s language.
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Add another channel |
-| ⬇️ Import from Twitch | OAuth + import followed channels (paused) |
+| ⬇️ Import from Twitch | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete |
 | 📅 Create schedule | Weekly stream schedule text |
 | ⚙️ Settings | System notifications and language |
@@ -173,6 +172,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
 | `PUBLIC_BASE_URL` | Public HTTPS origin for OAuth (`…/oauth/twitch/callback`) |
+| `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
 | `GROQ_API_KEY` | Groq — primary LLM for **I'm feeling lucky** (aliases: `GROQ_API`, `GROK_API`) |

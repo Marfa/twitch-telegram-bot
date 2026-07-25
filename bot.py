@@ -50,6 +50,7 @@ from i18n import (
     ignore_keywords_keyboard,
     image_ask_keyboard,
     image_position_keyboard,
+    import_mode_keyboard,
     language_keyboard,
     link_preview_keyboard,
     lucky_preview_keyboard,
@@ -65,6 +66,7 @@ from i18n import (
     format_stream_schedule_prompt_date,
     format_stream_schedule_result,
     subscriptions_menu,
+    sync_settings_keyboard,
     sys_notifications_keyboard,
     t,
     template_typo_keyboard,
@@ -118,7 +120,12 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     STREAM_SCHEDULE_CONFIRM,
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
-) = range(30)
+    SYNC_DAYS,
+) = range(31)
+
+_PENDING_IMPORT_TTL_SEC = 1800
+_SYNC_PERIOD_MIN = 1
+_SYNC_PERIOD_MAX = 365
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 
@@ -217,16 +224,21 @@ def import_followed_as_subscriptions(
     *,
     template: str,
     limit: int,
-) -> tuple[int, int, int, list[Subscription]]:
+    prune_missing: bool = False,
+) -> tuple[int, int, int, int, list[Subscription]]:
     """Create paused DM subscriptions from Helix followed channels.
 
-    Returns (imported, skipped_duplicates, limited_out, new_subs).
+    New rows are marked from_twitch_sync=True. When prune_missing=True, sync-origin
+    subs absent from follows are deleted (manual subs never touched).
+    Returns (imported, skipped, limited, removed, new_subs).
     """
-    existing = {s.twitch_user_id for s in db.get_subscriptions_by_owner(owner_id)}
+    existing_subs = db.get_subscriptions_by_owner(owner_id)
+    existing = {s.twitch_user_id for s in existing_subs}
     count = len(existing)
     imported = skipped = limited = 0
     new_subs: list[Subscription] = []
     seen_follow: set[str] = set()
+    follow_ids: set[str] = set()
     for channel in followed:
         twitch_user_id = str(channel.get("broadcaster_id") or "")
         login = str(channel.get("broadcaster_login") or "").strip().lower()
@@ -235,6 +247,7 @@ def import_followed_as_subscriptions(
         if twitch_user_id in seen_follow:
             continue
         seen_follow.add(twitch_user_id)
+        follow_ids.add(twitch_user_id)
         if twitch_user_id in existing:
             skipped += 1
             continue
@@ -251,6 +264,7 @@ def import_followed_as_subscriptions(
             thread_id=None,
             disable_link_preview=False,
             enabled=False,
+            from_twitch_sync=True,
         )
         sub = db.get_subscription(sub_id, owner_id)
         if sub:
@@ -258,7 +272,10 @@ def import_followed_as_subscriptions(
         existing.add(twitch_user_id)
         count += 1
         imported += 1
-    return imported, skipped, limited, new_subs
+    removed = 0
+    if prune_missing:
+        removed = db.delete_synced_subscriptions_missing(owner_id, follow_ids)
+    return imported, skipped, limited, removed, new_subs
 
 
 def _import_result_keyboard(
@@ -2214,14 +2231,138 @@ async def _format_subs_overview_lines(
     return lines, subs
 
 
+async def _deliver_import_result(
+    application: Application,
+    owner_id: int,
+    lang: str,
+    imported: int,
+    skipped: int,
+    limited: int,
+    new_subs: list[Subscription],
+    *,
+    removed: int = 0,
+) -> None:
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if imported == 0 and skipped == 0 and limited == 0 and removed == 0:
+        await application.bot.send_message(
+            owner_id,
+            t("import_empty", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    limit_note = ""
+    if limited:
+        limit_note = t(
+            "import_limit_note",
+            lang,
+            limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+            limited=limited,
+        )
+    removed_note = ""
+    if removed:
+        removed_note = t("import_removed_note", lang, removed=removed)
+    header = t(
+        "import_success",
+        lang,
+        imported=imported,
+        skipped=skipped,
+        limit_note=limit_note,
+        removed_note=removed_note,
+    )
+    markup = _import_result_keyboard(lang, new_subs) if new_subs else None
+    await application.bot.send_message(
+        owner_id,
+        header,
+        reply_markup=markup,
+        disable_web_page_preview=True,
+    )
+    await application.bot.send_message(
+        owner_id,
+        t("menu_main", lang),
+        reply_markup=_menu(lang, owner_id),
+    )
+
+
+def _pending_imports(application: Application) -> dict[int, dict]:
+    return application.bot_data.setdefault("pending_imports", {})
+
+
+def _store_pending_import(
+    application: Application,
+    owner_id: int,
+    followed: list[dict],
+    token_info: dict[str, str] | None,
+) -> None:
+    _pending_imports(application)[owner_id] = {
+        "followed": followed,
+        "token_info": token_info or {},
+        "expires": datetime.now(timezone.utc).timestamp() + _PENDING_IMPORT_TTL_SEC,
+    }
+
+
+def _pop_pending_import(application: Application, owner_id: int) -> dict | None:
+    pending = _pending_imports(application).pop(owner_id, None)
+    if not pending:
+        return None
+    if pending["expires"] < datetime.now(timezone.utc).timestamp():
+        return None
+    return pending
+
+
+def _peek_pending_import(application: Application, owner_id: int) -> dict | None:
+    pending = _pending_imports(application).get(owner_id)
+    if not pending:
+        return None
+    if pending["expires"] < datetime.now(timezone.utc).timestamp():
+        _pending_imports(application).pop(owner_id, None)
+        return None
+    return pending
+
+
+def _next_sync_iso(period_days: int, *, from_dt: datetime | None = None) -> str:
+    base = from_dt or datetime.now(timezone.utc)
+    return (base + timedelta(days=period_days)).isoformat()
+
+
+def _format_sync_next(next_sync_at: str) -> str:
+    try:
+        dt = datetime.fromisoformat(next_sync_at.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(SCHEDULE_TZ).strftime("%d.%m.%Y %H:%M MSK")
+    except ValueError:
+        return next_sync_at
+
+
+async def _run_followed_import(
+    application: Application,
+    owner_id: int,
+    followed: list[dict],
+    *,
+    prune_missing: bool = False,
+) -> tuple[int, int, int, int, list[Subscription]]:
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    return import_followed_as_subscriptions(
+        db,
+        owner_id,
+        followed,
+        template=t("import_default_template", lang),
+        limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+        prune_missing=prune_missing,
+    )
+
+
 async def complete_twitch_import(
     application: Application,
     owner_id: int,
     followed: list[dict] | None,
     error: str | None,
+    token_info: dict[str, str] | None = None,
 ) -> None:
-    from config import MAX_SUBSCRIPTIONS_PER_OWNER
-
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
@@ -2239,51 +2380,262 @@ async def complete_twitch_import(
             reply_markup=_menu(lang, owner_id),
         )
         return
-    imported, skipped, limited, new_subs = import_followed_as_subscriptions(
-        db,
+    _store_pending_import(application, owner_id, followed, token_info)
+    await application.bot.send_message(
         owner_id,
-        followed,
-        template=t("import_default_template", lang),
-        limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+        t("import_mode_prompt", lang),
+        reply_markup=import_mode_keyboard(lang),
     )
-    if imported == 0 and skipped == 0 and limited == 0:
-        await application.bot.send_message(
-            owner_id,
-            t("import_empty", lang),
-            reply_markup=_menu(lang, owner_id),
+
+
+async def on_import_mode_once(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    pending = _pop_pending_import(context.application, owner_id)
+    if not pending:
+        await query.edit_message_text(t("import_pending_expired", lang))
+        return
+    await query.edit_message_text(t("import_mode_once", lang))
+    imported, skipped, limited, removed, new_subs = await _run_followed_import(
+        context.application, owner_id, pending["followed"]
+    )
+    await _deliver_import_result(
+        context.application, owner_id, lang, imported, skipped, limited, new_subs,
+        removed=removed,
+    )
+
+
+async def on_import_mode_sync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    pending = _peek_pending_import(context.application, owner_id)
+    if not pending:
+        await query.edit_message_text(t("import_pending_expired", lang))
+        return ConversationHandler.END
+    refresh = (pending.get("token_info") or {}).get("refresh_token") or ""
+    if not refresh:
+        pending = _pop_pending_import(context.application, owner_id)
+        await query.edit_message_text(t("import_sync_no_refresh", lang))
+        imported, skipped, limited, removed, new_subs = await _run_followed_import(
+            context.application, owner_id, pending["followed"]
+        )
+        await _deliver_import_result(
+            context.application, owner_id, lang, imported, skipped, limited, new_subs,
+            removed=removed,
+        )
+        return ConversationHandler.END
+    context.user_data["sync_days_mode"] = "import"
+    await query.edit_message_text(t("import_mode_sync", lang))
+    await context.bot.send_message(
+        owner_id,
+        t("import_sync_days_prompt", lang),
+        reply_markup=_wizard(lang, back=False),
+    )
+    return SYNC_DAYS
+
+
+async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    raw = (update.effective_message.text or "").strip()
+    if raw in all_menu_buttons() or raw in all_wizard_nav_buttons():
+        return ConversationHandler.END
+    if not raw.isdigit() or not (_SYNC_PERIOD_MIN <= int(raw) <= _SYNC_PERIOD_MAX):
+        await update.effective_message.reply_text(t("import_sync_days_invalid", lang))
+        return SYNC_DAYS
+    days = int(raw)
+    mode = context.user_data.get("sync_days_mode", "import")
+    db: Database = context.application.bot_data["db"]
+    now = datetime.now(timezone.utc)
+    next_at = _next_sync_iso(days, from_dt=now)
+
+    if mode == "settings":
+        if not db.set_twitch_sync_period(user_id, days, next_at):
+            await update.effective_message.reply_text(
+                t("sync_menu_off", lang),
+                reply_markup=settings_menu(lang),
+            )
+            return ConversationHandler.END
+        await update.effective_message.reply_text(
+            t("sync_period_updated", lang, days=days),
+            reply_markup=settings_menu(lang),
+        )
+        context.user_data.pop("sync_days_mode", None)
+        return ConversationHandler.END
+
+    pending = _pop_pending_import(context.application, user_id)
+    if not pending:
+        await update.effective_message.reply_text(
+            t("import_pending_expired", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return ConversationHandler.END
+    token_info = pending.get("token_info") or {}
+    refresh = token_info.get("refresh_token") or ""
+    twitch_user_id = token_info.get("twitch_user_id") or ""
+    if not refresh or not twitch_user_id:
+        await update.effective_message.reply_text(t("import_sync_no_refresh", lang))
+        imported, skipped, limited, removed, new_subs = await _run_followed_import(
+            context.application, user_id, pending["followed"]
+        )
+        await _deliver_import_result(
+            context.application, user_id, lang, imported, skipped, limited, new_subs,
+            removed=removed,
+        )
+        return ConversationHandler.END
+
+    db.upsert_twitch_sync(
+        owner_id=user_id,
+        twitch_user_id=twitch_user_id,
+        refresh_token=refresh,
+        period_days=days,
+        next_sync_at=next_at,
+        last_sync_at=now.isoformat(),
+    )
+    await update.effective_message.reply_text(
+        t("import_sync_enabled", lang, days=days),
+    )
+    imported, skipped, limited, removed, new_subs = await _run_followed_import(
+        context.application, user_id, pending["followed"]
+    )
+    await _deliver_import_result(
+        context.application, user_id, lang, imported, skipped, limited, new_subs,
+        removed=removed,
+    )
+    context.user_data.pop("sync_days_mode", None)
+    return ConversationHandler.END
+
+
+async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    sync = db.get_twitch_sync(user_id)
+    if not sync:
+        await update.effective_message.reply_text(
+            t("sync_menu_off", lang),
+            reply_markup=settings_menu(lang),
         )
         return
-    limit_note = ""
-    if limited:
-        limit_note = t(
-            "import_limit_note",
+    await update.effective_message.reply_text(
+        t(
+            "sync_menu_on",
             lang,
+            days=sync.period_days,
+            next_at=_format_sync_next(sync.next_sync_at),
+        ),
+        reply_markup=sync_settings_keyboard(lang),
+    )
+
+
+async def on_sync_disable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.delete_twitch_sync(user_id)
+    await query.edit_message_text(t("sync_disabled", lang))
+
+
+async def on_sync_change_period(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not db.get_twitch_sync(user_id):
+        await query.edit_message_text(t("sync_menu_off", lang))
+        return ConversationHandler.END
+    context.user_data["sync_days_mode"] = "settings"
+    await query.edit_message_text(t("sync_change_period", lang))
+    await context.bot.send_message(
+        user_id,
+        t("import_sync_days_prompt", lang),
+        reply_markup=_wizard(lang, back=False),
+    )
+    return SYNC_DAYS
+
+
+async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic job: add-only sync of Twitch follows for users with stored tokens."""
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    now = datetime.now(timezone.utc)
+    due = db.get_due_twitch_syncs(now.isoformat())
+    for row in due:
+        lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
+        try:
+            token_data = await asyncio.to_thread(
+                twitch.refresh_user_token, row.refresh_token
+            )
+            access = token_data.get("access_token") or ""
+            refresh = token_data.get("refresh_token") or row.refresh_token
+            followed = await asyncio.to_thread(
+                twitch.get_followed_channels, access, row.twitch_user_id
+            )
+        except Exception:
+            logger.exception("Twitch sync failed for owner %s", row.owner_id)
+            db.delete_twitch_sync(row.owner_id)
+            try:
+                await context.bot.send_message(
+                    row.owner_id,
+                    t("sync_job_failed", lang),
+                    reply_markup=_menu(lang, row.owner_id),
+                )
+            except Exception:
+                logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
+            continue
+
+        imported, skipped, limited, removed, _new = import_followed_as_subscriptions(
+            db,
+            row.owner_id,
+            followed,
+            template=t("import_default_template", lang),
             limit=MAX_SUBSCRIPTIONS_PER_OWNER,
-            limited=limited,
+            prune_missing=True,
         )
-    header = t(
-        "import_success",
-        lang,
-        imported=imported,
-        skipped=skipped,
-        limit_note=limit_note,
-    )
-    markup = (
-        _import_result_keyboard(lang, new_subs)
-        if new_subs
-        else None
-    )
-    await application.bot.send_message(
-        owner_id,
-        header,
-        reply_markup=markup,
-        disable_web_page_preview=True,
-    )
-    await application.bot.send_message(
-        owner_id,
-        t("menu_main", lang),
-        reply_markup=_menu(lang, owner_id),
-    )
+        next_at = _next_sync_iso(row.period_days, from_dt=now)
+        db.update_twitch_sync_tokens(
+            row.owner_id,
+            refresh,
+            last_sync_at=now.isoformat(),
+            next_sync_at=next_at,
+        )
+        if imported or limited or removed:
+            limit_note = ""
+            if limited:
+                limit_note = t(
+                    "import_limit_note",
+                    lang,
+                    limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+                    limited=limited,
+                )
+            removed_note = ""
+            if removed:
+                removed_note = t("import_removed_note", lang, removed=removed)
+            try:
+                await context.bot.send_message(
+                    row.owner_id,
+                    t(
+                        "sync_job_done",
+                        lang,
+                        imported=imported,
+                        skipped=skipped,
+                        limit_note=limit_note,
+                        removed_note=removed_note,
+                    ),
+                    reply_markup=_menu(lang, row.owner_id),
+                )
+            except Exception:
+                logger.exception("Cannot notify owner %s about sync result", row.owner_id)
 
 
 async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2625,19 +2977,93 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             reply_markup=subscriptions_menu(lang),
         )
         return
-
-    keyboard = [
-        [InlineKeyboardButton(f"🗑 #{i} {s.twitch_username}", callback_data=f"delete:{s.id}")]
-        for i, s in enumerate(subs, 1)
-    ]
+    context.user_data["delete_selected"] = set()
     await update.effective_message.reply_text(
         t("delete_pick", lang),
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=_delete_pick_keyboard(lang, subs, set()),
     )
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=subscriptions_menu(lang),
     )
+
+
+def _delete_pick_keyboard(
+    lang: str, subs: list[Subscription], selected: set[int]
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, s in enumerate(subs, 1):
+        mark = "✅ " if s.id in selected else ""
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{mark}🗑 #{i} {s.twitch_username}",
+                    callback_data=f"delete_sel:{s.id}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("delete_go", lang, count=len(selected)),
+                callback_data="delete_go",
+            )
+        ]
+    )
+    if selected:
+        rows.append(
+            [InlineKeyboardButton(t("delete_clear", lang), callback_data="delete_clear")]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+async def on_delete_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    sub_id = int(query.data.split(":", 1)[1])
+    selected: set[int] = context.user_data.setdefault("delete_selected", set())
+    if sub_id in selected:
+        selected.discard(sub_id)
+    else:
+        selected.add(sub_id)
+    db: Database = context.application.bot_data["db"]
+    subs = db.get_subscriptions_by_owner(user_id)
+    await query.edit_message_reply_markup(
+        reply_markup=_delete_pick_keyboard(lang, subs, selected)
+    )
+
+
+async def on_delete_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    context.user_data["delete_selected"] = set()
+    db: Database = context.application.bot_data["db"]
+    subs = db.get_subscriptions_by_owner(user_id)
+    await query.edit_message_reply_markup(
+        reply_markup=_delete_pick_keyboard(lang, subs, set())
+    )
+
+
+async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    selected: set[int] = set(context.user_data.get("delete_selected") or ())
+    if not selected:
+        await query.answer(t("delete_none", lang), show_alert=True)
+        return
+    await query.answer()
+    db: Database = context.application.bot_data["db"]
+    deleted = 0
+    for sub_id in list(selected):
+        if db.delete_subscription(sub_id, user_id):
+            deleted += 1
+    context.user_data["delete_selected"] = set()
+    await query.edit_message_text(t("subs_deleted", lang, count=deleted))
 
 
 async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2653,19 +3079,6 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     key = "sub_enabled" if new_state else "sub_disabled"
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text(t(key, lang, sub_id=sub_num))
-
-
-async def on_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    sub_id = int(query.data.split(":", 1)[1])
-    db: Database = context.application.bot_data["db"]
-    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
-    if db.delete_subscription(sub_id, query.from_user.id):
-        await query.edit_message_text(t("sub_deleted", lang, sub_id=sub_num))
-    else:
-        await query.edit_message_text(t("sub_not_found", lang))
 
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3123,6 +3536,7 @@ async def start_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not db.get_scheduled_broadcast(broadcast_id):
         await query.edit_message_text(t("scheduled_not_found", lang))
         return ConversationHandler.END
+    context.user_data.clear()
     context.user_data["sb_edit_id"] = broadcast_id
     await query.edit_message_text("✓")
     return await _go_sb_edit_text_prompt(update, context, lang, broadcast_id)
@@ -3139,9 +3553,36 @@ async def start_sb_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not db.get_scheduled_broadcast(broadcast_id):
         await query.edit_message_text(t("scheduled_not_found", lang))
         return ConversationHandler.END
+    context.user_data.clear()
     context.user_data["sb_edit_id"] = broadcast_id
     await query.edit_message_text("✓")
     return await _go_sb_edit_time_prompt(update, context, lang, broadcast_id)
+
+
+def _set_conversation_state(
+    context: ContextTypes.DEFAULT_TYPE, update: Update, state: int
+) -> None:
+    conv = context.application.bot_data.get("main_conv")
+    if conv is None:
+        return
+    try:
+        key = conv._get_key(update)
+    except Exception:
+        return
+    conv._conversations[key] = state
+
+
+async def on_sb_edit_text_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """group=0 entry — ConversationHandler alone was blocked by wake_stuck matching sb_edit_f."""
+    state = await start_sb_edit_text(update, context)
+    if state != ConversationHandler.END:
+        _set_conversation_state(context, update, state)
+
+
+async def on_sb_edit_time_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = await start_sb_edit_time(update, context)
+    if state != ConversationHandler.END:
+        _set_conversation_state(context, update, state)
 
 
 async def receive_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3622,8 +4063,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 owner_id: int,
                 followed: list[dict] | None,
                 error: str | None,
+                token_info: dict[str, str] | None = None,
             ) -> None:
-                await complete_twitch_import(application, owner_id, followed, error)
+                await complete_twitch_import(
+                    application, owner_id, followed, error, token_info
+                )
 
             register_oauth_bridge(
                 loop,
@@ -3690,6 +4134,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_sb_edit_pick, pattern=r"^sb_edit:\d+$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_sb_edit_text_click, pattern=r"^sb_edit_f:\d+:text$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_sb_edit_time_click, pattern=r"^sb_edit_f:\d+:time$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_sb_delete, pattern=r"^sb_delete:\d+$"), group=0)
     app.add_handler(
         ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
@@ -3699,7 +4151,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("settings"), open_settings_menu),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(_btn_filter("sync_subs"), open_sync_settings),
+        group=0,
+    )
     app.add_handler(CommandHandler("settings", open_settings_menu), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_import_mode_once, pattern=r"^import_mode:once$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_sync_disable, pattern=r"^sync:disable$"),
+        group=0,
+    )
     app.add_handler(
         MessageHandler(_btn_filter("sys_notifications"), open_sys_notifications_menu),
         group=0,
@@ -3711,7 +4175,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(CallbackQueryHandler(on_enable_all, pattern=r"^enable_all$"), group=0)
-    app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^delete:"), group=0)
+    app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(
@@ -3740,8 +4206,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(_btn_filter("create_schedule"), start_stream_schedule),
             MessageHandler(_btn_filter("language"), start_language_change),
             MessageHandler(_btn_filter("broadcast_new"), admin_broadcast_start),
-            CallbackQueryHandler(start_sb_edit_text, pattern=r"^sb_edit_f:\d+:text$"),
-            CallbackQueryHandler(start_sb_edit_time, pattern=r"^sb_edit_f:\d+:time$"),
+            CallbackQueryHandler(on_import_mode_sync, pattern=r"^import_mode:sync$"),
+            CallbackQueryHandler(on_sync_change_period, pattern=r"^sync:period$"),
             CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
             CallbackQueryHandler(start_edit_image, pattern=r"^edit_f:\d+:image$"),
             CallbackQueryHandler(delete_edit_image, pattern=r"^edit_f:\d+:image_del$"),
@@ -3904,6 +4370,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(stream_schedule_finish_callback, pattern=r"^stream_sched:finish$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_time),
             ],
+            SYNC_DAYS: [
+                _wiz_cancel,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sync_days),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
@@ -3915,6 +4385,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     app.add_handler(conv, group=1)
+    app.bot_data["main_conv"] = conv
 
     def _clear_stuck_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
@@ -3958,7 +4429,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             wake_stuck_on_menu_callback,
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
-                r"sb_edit|sb_delete:|sys_updates:|sys_availability:)"
+                r"delete_sel:|delete_go$|delete_clear$|"
+                r"sb_edit:\d+$|sb_delete:|sys_updates:|sys_availability:|"
+                r"import_mode:|sync:)"
             ),
         ),
         group=-1,
@@ -3978,6 +4451,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("back")
                 | _btn_filter("language")
                 | _btn_filter("sys_notifications")
+                | _btn_filter("sync_subs")
                 | _btn_filter("admin")
                 | _btn_filter("broadcast")
                 | _btn_filter("scheduled_broadcasts")
@@ -3994,6 +4468,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
+    app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
     app.job_queue.run_repeating(
         weekly_new_users_report,
         interval=7 * 24 * 3600,
