@@ -2590,6 +2590,31 @@ async def _send_admin_broadcast(
     return sent, failed, blocked, len(user_ids)
 
 
+async def _report_broadcast_done(
+    context: ContextTypes.DEFAULT_TYPE,
+    admin_id: int,
+    *,
+    sent: int,
+    failed: int,
+    blocked: int,
+    total: int,
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+    text = t(
+        "broadcast_done",
+        lang,
+        sent=sent,
+        failed=failed,
+        blocked=blocked,
+        total=total,
+    )
+    try:
+        await context.bot.send_message(admin_id, text)
+    except (BadRequest, Forbidden) as exc:
+        logger.warning("Cannot send broadcast stats to admin %s: %s", admin_id, exc)
+
+
 async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = update.my_chat_member
     if result is None or result.chat.type != ChatType.PRIVATE:
@@ -2677,17 +2702,21 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             context, msg_type, text, source_lang=lang
         )
         context.user_data.clear()
-        await query.edit_message_text(
-            t(
-                "broadcast_done",
-                lang,
-                sent=sent,
-                failed=failed,
-                blocked=blocked,
-                total=total,
-            )
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
+        await _report_broadcast_done(
+            context,
+            user_id,
+            sent=sent,
+            failed=failed,
+            blocked=blocked,
+            total=total,
         )
-        await context.bot.send_message(user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu(lang))
+        await context.bot.send_message(
+            user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu(lang)
+        )
         return ConversationHandler.END
 
     if data == "sched:apply":
@@ -2709,15 +2738,17 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             )
             db.mark_scheduled_broadcast_sent(broadcast_id)
             context.user_data.clear()
-            await query.edit_message_text(
-                t(
-                    "broadcast_done",
-                    lang,
-                    sent=sent,
-                    failed=failed,
-                    blocked=blocked,
-                    total=total,
-                )
+            try:
+                await query.edit_message_text("✓")
+            except BadRequest:
+                pass
+            await _report_broadcast_done(
+                context,
+                user_id,
+                sent=sent,
+                failed=failed,
+                blocked=blocked,
+                total=total,
             )
         else:
             context.job_queue.run_once(
@@ -2751,10 +2782,18 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not item:
         return
     source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-    await _send_admin_broadcast(
+    sent, failed, blocked, total = await _send_admin_broadcast(
         context, item.msg_type, item.text, source_lang=source_lang
     )
     db.mark_scheduled_broadcast_sent(broadcast_id)
+    await _report_broadcast_done(
+        context,
+        item.created_by,
+        sent=sent,
+        failed=failed,
+        blocked=blocked,
+        total=total,
+    )
 
 
 async def admin_scheduled_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3037,15 +3076,17 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
             )
             db.mark_scheduled_broadcast_sent(int(broadcast_id))
             _cancel_broadcast_job(context.application.job_queue, int(broadcast_id))
-            await query.edit_message_text(
-                t(
-                    "broadcast_done",
-                    lang,
-                    sent=sent,
-                    failed=failed,
-                    blocked=blocked,
-                    total=total,
-                )
+            try:
+                await query.edit_message_text("✓")
+            except BadRequest:
+                pass
+            await _report_broadcast_done(
+                context,
+                user_id,
+                sent=sent,
+                failed=failed,
+                blocked=blocked,
+                total=total,
             )
         elif db.update_scheduled_broadcast(int(broadcast_id), scheduled_at=scheduled_at):
             _schedule_broadcast_job(
@@ -3285,10 +3326,18 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
     db: Database = context.application.bot_data["db"]
     for item in db.get_pending_scheduled_broadcasts():
         source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-        await _send_admin_broadcast(
+        sent, failed, blocked, total = await _send_admin_broadcast(
             context, item.msg_type, item.text, source_lang=source_lang
         )
         db.mark_scheduled_broadcast_sent(item.id)
+        await _report_broadcast_done(
+            context,
+            item.created_by,
+            sent=sent,
+            failed=failed,
+            blocked=blocked,
+            total=total,
+        )
 
 
 def _seconds_until_next_weekly_report() -> float:
