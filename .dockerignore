@@ -9,7 +9,6 @@ __pycache__
 data
 *.db
 .cursor
-fly.toml
 compose.yml
 README.md
 self_check.py

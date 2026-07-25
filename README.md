@@ -23,7 +23,7 @@ English: [README.en.md](README.en.md)
 | Системные оповещения | Вкл/выкл рассылок об обновлениях и доступности бота |
 | Админка | Рассылка с отложенной отправкой, авто-перевод DeepL, статистика |
 | Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
-| Deploy | VPS (Docker), Fly.io |
+| Deploy | VPS (Docker) |
 
 ## Quick Start
 
@@ -156,15 +156,6 @@ python main.py
 ### Локально / Docker
 
 `DATABASE_URL` не задавайте — используется SQLite (`DATABASE_PATH`, volume в `compose.yml`).
-
-### Fly.io (данные на volume)
-
-```bash
-fly launch --no-deploy
-fly volumes create bot_data --size 1
-fly secrets set TELEGRAM_BOT_TOKEN=... TWITCH_CLIENT_ID=... TWITCH_CLIENT_SECRET=...
-fly deploy
-```
 
 ## Переменные окружения
 

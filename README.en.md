@@ -23,7 +23,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | System alerts | Toggle admin “bot update” and “bot availability” broadcasts |
 | Admin | Scheduled broadcast, DeepL auto-translate, statistics |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
-| Deploy | VPS (Docker), Fly.io |
+| Deploy | VPS (Docker) |
 
 ## Quick Start
 
@@ -156,15 +156,6 @@ VPS Postgres comes from `compose.vps.yml`; set `PUBLIC_BASE_URL` for OAuth (e.g.
 ### Local / Docker
 
 Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compose.yml`).
-
-### Fly.io (data on volume)
-
-```bash
-fly launch --no-deploy
-fly volumes create bot_data --size 1
-fly secrets set TELEGRAM_BOT_TOKEN=... TWITCH_CLIENT_ID=... TWITCH_CLIENT_SECRET=...
-fly deploy
-```
 
 ## Environment variables
 
