@@ -178,6 +178,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Add the bot to the group or community.\n\n"
             "Bot permissions:\n"
             "• Send messages (required)\n"
+            "• Delete own messages (for “delete old”)\n"
             "• Admin is not required if members can post\n\n"
             "Send one of:\n"
             "• Topic link: https://t.me/c/name/30\n"
@@ -189,7 +190,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_old_text": (
             "Delete the bot's previous message when a new stream starts?\n\n"
             "If enabled, the bot deletes its last message in this chat before sending a new one.\n"
-            "In channels the bot needs permission to delete messages.\n"
+            "In channels and groups the bot needs permission to delete its own messages.\n"
             "Telegram allows deleting only messages younger than ~48 hours."
         ),
         "delete_old_yes": "✅ Yes, delete",
@@ -624,6 +625,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Добавьте бота в группу или сообщество.\n\n"
             "Права бота:\n"
             "• Отправка сообщений (обязательно)\n"
+            "• Удаление своих сообщений (для «удалять старые»)\n"
             "• Администратор не нужен, если участникам разрешено писать\n\n"
             "Отправьте одно из:\n"
             "• Ссылку на тему: https://t.me/c/название/30\n"
@@ -635,7 +637,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_old_text": (
             "Удалять предыдущее сообщение бота при новом стриме?\n\n"
             "Если включено — перед новым уведомлением бот удалит своё прошлое в этом чате.\n"
-            "В канале боту нужно право удалять сообщения.\n"
+            "В канале и группе боту нужно право удалять свои сообщения.\n"
             "Telegram позволяет удалять только сообщения младше ~48 часов."
         ),
         "delete_old_yes": "✅ Да, удалять",

@@ -6,11 +6,6 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 
 Русский: [README.md](README.md)
 
-```bash
-cp .env.example .env
-docker compose up -d --build
-```
-
 | Feature | How it works |
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` to set up |
@@ -82,7 +77,7 @@ Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscripti
 - group ID (`-100…`)
 - forwarded message from the group (“Forwarded from: …”)
 
-Bot permissions in a group: **send messages** (admin is not required).
+Bot permissions in a group: **send messages** (admin is not required). Also needs permission to **delete its own messages**.
 
 After setup the bot sends **“✅ Setup complete!”** to DM and a test message to the chosen chat.
 
