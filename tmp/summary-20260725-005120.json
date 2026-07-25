@@ -1,0 +1,4 @@
+{
+  "summary": "Committed and pushed only DB backup changes: scripts/pg-backup.sh, scripts/vps-deploy.sh cron install, .gitignore (backups/*.sql.gz). Commit 612822a on main. Left unrelated WIP (bot.py, db.py, i18n, hf_text, etc.) unstaged.",
+  "current_status": "Nightly Postgres backup is on origin/main; VPS auto-deploy via Actions should pick it up. Other local feature work remains uncommitted."
+}

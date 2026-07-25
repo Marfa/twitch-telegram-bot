@@ -1,0 +1,4 @@
+{
+  "summary": "Thoroughly mapped the Twitch→Telegram subscription (оповещение) create/edit flow: ConversationHandler states in bot.py, i18n RU strings for channel_found/template step, Subscription.message_template DB field with no image/photo columns or send_photo usage, and edit_options_keyboard structure. Identified hook points for an image wizard step, «Мне повезёт» button, and editor image update.",
+  "current_status": "Codebase exploration complete; no code changes. Ready for image/lucky-template feature design against documented hook points."
+}

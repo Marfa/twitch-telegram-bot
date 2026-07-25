@@ -1,0 +1,4 @@
+{
+  "summary": "Committed and pushed all feature changes to origin/main as 5350347: repeat mute, wizard navigation, system notification settings, scheduled admin broadcasts, DB migrations, README updates, and self_check extensions. tmp/ was intentionally excluded from the commit.",
+  "current_status": "Changes are live on https://github.com/Marfa/twitch-telegram-bot main. Aiven DB will auto-migrate on next bot deploy/restart."
+}

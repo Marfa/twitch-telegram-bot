@@ -1,0 +1,4 @@
+{
+  "summary": "Dropped render_status_seen on VPS Postgres (confirmed 4 tables left). Confirmed OAuth is not stored in DB: pending states live in health.py memory (~10 min TTL); user access tokens used only during follow-import callback; app Client Credentials token kept in TwitchClient memory.",
+  "current_status": "VPS DB cleaned of leftover render_status_seen. OAuth remains ephemeral in-process only."
+}

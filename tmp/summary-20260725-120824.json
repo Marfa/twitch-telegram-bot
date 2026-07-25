@@ -1,0 +1,4 @@
+{
+  "summary": "Answered whether the bot can fetch a Twitch account's follow/subscription list by username: currently no — TwitchClient only uses client_credentials and exposes get_user/get_live_streams; Helix requires a user OAuth token (user:read:follows for follows, user:read:subscriptions for paid subs) and cannot list another user's private lists from username alone.",
+  "current_status": "twitch-telegram-bot notifies Telegram chats when watched Twitch channels go live; no Twitch user OAuth or follow/subscription listing is implemented."
+}

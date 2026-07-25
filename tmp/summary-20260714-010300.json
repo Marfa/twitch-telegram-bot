@@ -1,0 +1,4 @@
+{
+  "summary": "Updated self_check.py to use marfapr channel in parse_username, render_template, and DB subscription tests; added www.twitch.tv URL case. Explained preview_stream is not a menu—it appears in setup_done sample message after completing subscription wizard.",
+  "current_status": "self_check passes. Local changes: i18n channel_not_parsed + self_check marfapr; not committed."
+}

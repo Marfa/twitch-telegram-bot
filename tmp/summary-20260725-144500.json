@@ -1,0 +1,4 @@
+{
+  "summary": "Inspected live VPS Postgres: 5 tables — users (7), subscriptions (11), lucky_templates (200), scheduled_broadcasts (0), render_status_seen (39 leftover). Summarized what each stores for the user.",
+  "current_status": "Production DB on VPS holds bot users, Twitch→Telegram subscriptions, lucky notification templates, empty scheduled broadcasts, and stale render_status_seen rows."
+}

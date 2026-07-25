@@ -1,0 +1,4 @@
+{
+  "summary": "Fixed missing admin broadcast stats: after send (now/job/poller) bot always DMs creator with broadcast_done via _report_broadcast_done; no longer relies only on editing the schedule message.",
+  "current_status": "Fix ready locally; not committed/pushed unless asked."
+}

@@ -1,0 +1,4 @@
+{
+  "summary": "Removed bot version from feedback text. Inline edit/menu callbacks and reply-menu buttons now clear a stuck ConversationHandler state (group -1) so they wake the bot after hangs/deploys.",
+  "current_status": "Fixes ready locally; not pushed unless user asks."
+}

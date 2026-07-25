@@ -1,0 +1,4 @@
+{
+  "summary": "Added Twitch follow-import row to the features tables in README.md and README.en.md.",
+  "current_status": "README feature tables mention Import from Twitch; change is local until commit."
+}

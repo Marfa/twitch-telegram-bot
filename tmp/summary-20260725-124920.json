@@ -1,0 +1,4 @@
+{
+  "summary": "Added Twitch user OAuth and follow import: main-menu button «Import from Twitch», Helix channels/followed via /oauth/twitch/callback on the health server, paused DM subscriptions with default template + preview, skip duplicates, post-import list with Enable all and edit-on-tap; updated i18n/README/self_check.",
+  "current_status": "Feature implemented and self_check passes. Deploy needs Twitch Console Redirect URL https://<service>/oauth/twitch/callback and PUBLIC_BASE_URL (or RENDER_EXTERNAL_URL)."
+}

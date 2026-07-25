@@ -1,0 +1,4 @@
+{
+  "summary": "Clarified notification media: template text from the format step is the post body; image is attached in one send_photo with caption (before=image on top, after=caption above media). No separate text-only message when caption fits. Fall back to two messages only if caption exceeds 1024 chars.",
+  "current_status": "Send path matches intended UX (text from template + image above/below as one post). Uncommitted changes remain."
+}

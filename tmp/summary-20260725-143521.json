@@ -1,0 +1,4 @@
+{
+  "summary": "User asked whether the bot can get a VOD download link from a twitch.tv/videos/... URL. Answered no: the bot only notifies about live stream starts; it has no VOD/download logic, Helix Videos API usage, or download URL support. Noted that such a URL would be misparsed as username \"videos\", and that Twitch Helix does not expose direct download links anyway.",
+  "current_status": "twitch-telegram-bot remains a live-stream notification bot; no VOD download capability exists or was requested to be added."
+}

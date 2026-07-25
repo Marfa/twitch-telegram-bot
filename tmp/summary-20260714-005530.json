@@ -1,0 +1,4 @@
+{
+  "summary": "Moved wizard Back/Cancel to reply keyboard only; added Cancel on channel step and Back+Cancel on template step; fixed Yes-above-No order in delay keyboard; renamed repeat_no to «Нет»; per-user subscription numbers in list/edit/delete/toggle messages.",
+  "current_status": "Changes implemented locally; self_check passes. Not committed/pushed unless user asks."
+}

@@ -1,0 +1,4 @@
+{
+  "summary": "Answered how long Aiven rebalance/maintenance takes: depends on plan; free single-node PostgreSQL can be minutes; HA PG switchover is seconds; optional extension updates for twitch bot likely short given tiny DB.",
+  "current_status": "main at d425f4e; no code changes this turn."
+}

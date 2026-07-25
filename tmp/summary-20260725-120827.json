@@ -1,0 +1,4 @@
+{
+  "summary": "Lucky quick path: enable link preview only if channel was entered as Twitch URL (channel_input_was_url); otherwise disable_link_preview=True. Added TwitchClient.is_twitch_url + self_check.",
+  "current_status": "Small lucky preview-flag fix ready locally; not committed."
+}

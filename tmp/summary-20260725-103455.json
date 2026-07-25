@@ -1,0 +1,4 @@
+{
+  "summary": "Committed and pushed lucky_templates DB pool (seed 100/locale), delete-on-send broadcasts, README updates for images/lucky/Groq/HF.",
+  "current_status": "On origin/main; VPS deploy should seed lucky_templates and purge sent broadcasts."
+}

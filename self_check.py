@@ -3,11 +3,9 @@ from pathlib import Path
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
 
 from config import parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
-from render_deploy import _service_id
 from twitch import (
     FOLLOWS_SCOPE,
     TwitchClient,
@@ -381,17 +379,6 @@ def main() -> None:
     assert translate_text("hello", target_lang="en", source_lang="en") == "hello"
     assert build_translations("hello", "en", {"en"}) == {"en": "hello"}
     assert build_translations("hello", "en", {"en", "ru"})["en"] == "hello"
-
-    with patch.dict(os.environ, {"RENDER_SERVICE_ID": "srv-test123"}, clear=False):
-        assert _service_id("") == "srv-test123"
-    assert _service_id("srv-cli456") == "srv-cli456"
-    with patch("render_deploy._load_dotenv", lambda path=Path(".env"): None):
-        with patch.dict(os.environ, {}, clear=True):
-            try:
-                _service_id("")
-                raise AssertionError("expected missing RENDER_SERVICE_ID")
-            except RuntimeError:
-                pass
 
     print("ok")
 

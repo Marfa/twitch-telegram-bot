@@ -1,0 +1,4 @@
+{
+  "summary": "Explained official Twitch Helix API capabilities based on current docs: streams/users/follows (what the bot uses), videos metadata (no VOD download), clips with official download URLs, EventSub, chat/moderation, channel points, schedule, search, and other broadcaster tools. Clarified that only clips have official download links, not VODs.",
+  "current_status": "Informational answer only; no code changes. Bot still uses a small subset (users, streams, follows, IGDB)."
+}

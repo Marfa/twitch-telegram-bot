@@ -1,0 +1,4 @@
+{
+  "summary": "Connected to Hostkey VPS via Invapi (server 209640, IP 152.114.195.134) and SSH. Confirmed hardware: 2 vCPU Xeon E5-2680 v2, 1.8 GiB RAM (~1.2 GiB available), 58 GB disk (~51 GB free), no GPU, no swap, Ubuntu 24.04. Existing load includes docker, jirahelper coordinator, and uvicorn. Verdict: Qwen2.5-7B-Instruct cannot run locally even quantized; only tiny CPU models (≤0.5B) are borderline and impractical. Recommended using the existing HuggingFace API key for Inference API instead of local hosting.",
+  "current_status": "VPS feasibility analysis complete. Local Qwen2.5-7B is not viable on current Hostkey nano (2GB/no GPU). Next step if needed: choose HF Inference API / upgrade VPS (≥16 GB RAM or GPU) / run a tiny GGUF with swap as a last resort."
+}

@@ -1,0 +1,4 @@
+{
+  "summary": "Updated import UX texts and keyboard (short success, no template Twitch URL, only new unique channels, 2-column buttons). Pushed e9b62be to main for auto-deploy.",
+  "current_status": "Import UI fixes on main; GitHub Actions should redeploy VPS automatically."
+}

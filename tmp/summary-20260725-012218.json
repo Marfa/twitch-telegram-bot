@@ -1,0 +1,4 @@
+{
+  "summary": "Updated HF lucky prompt to forbid demo titles like «Тестовый стрим»/«Test stream», and strip/replace them with {name} in _normalize_template; added self_check coverage.",
+  "current_status": "Fix ready locally, not pushed unless user asks."
+}

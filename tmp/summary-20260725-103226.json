@@ -1,0 +1,4 @@
+{
+  "summary": "Seeded lucky_templates on migrate: 100 RU + 100 EN combinatorial templates, fills up to 100 per locale if below limit. self_check updated.",
+  "current_status": "Lucky pool seeded in code/migrate; awaiting commit/push for VPS to fill production DB."
+}

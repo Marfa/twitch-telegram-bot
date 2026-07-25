@@ -23,11 +23,12 @@ docker compose up -d --build
 | Delay after go-live | Send notification N minutes after stream start |
 | Repeat suppression | Skip repeat alerts for X minutes after the first one |
 | Subscriptions | List, edit all fields, enable/disable, delete |
+| Import from Twitch | OAuth → follows as paused alerts; duplicates skipped |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
 | System alerts | Toggle admin “bot update” and “bot availability” broadcasts |
 | Admin | Scheduled broadcast, DeepL auto-translate, statistics |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
-| Deploy | VPS (Docker), Fly.io, Render + PostgreSQL |
+| Deploy | VPS (Docker), Fly.io |
 
 ## Quick Start
 
@@ -149,30 +150,13 @@ Category: {game}
 
 ## Deploy
 
-### Render Free + Aiven PostgreSQL (free tier, persistent subscriptions)
+### VPS (auto-deploy)
 
-Bot on Render Free, data in external PostgreSQL on [Aiven](https://aiven.io/free-postgresql-database) (no card required).
+On push to main, GitHub Actions SSHs to the server (`scripts/vps-deploy.sh`: git pull + `docker compose -f compose.vps.yml up -d --build`). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
-**1. Aiven**
+Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
-1. Sign up at [aiven.io](https://aiven.io)
-2. **Create service** → PostgreSQL → **Free** plan
-3. Copy **Service URI** (`postgres://…`)
-
-**2. Render**
-
-1. GitHub → [Render Blueprint](https://dashboard.render.com/) (`render.yaml`)
-2. Secrets:
-   - `TELEGRAM_BOT_TOKEN`
-   - `TWITCH_CLIENT_ID`
-   - `TWITCH_CLIENT_SECRET`
-   - `DATABASE_URL` — Aiven URI
-   - `ADMIN_USER_IDS` — comma-separated Telegram user IDs
-   - `DEEPL_API_KEY` — optional, auto-translate admin broadcasts
-   - `GROQ_API_KEY` / `HF_TOKEN` — optional, **I'm feeling lucky**
-3. [UptimeRobot](https://uptimerobot.com/): **HTTP(s)** → `https://YOUR-SERVICE.onrender.com/health`, interval **5 min**
-
-Subscriptions persist in Aiven across Render restarts.
+VPS Postgres comes from `compose.vps.yml`; set `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`).
 
 ### Local / Docker
 
@@ -196,11 +180,11 @@ fly deploy
 | `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
 | `ADMIN_USER_IDS` | Admin Telegram user IDs (comma-separated) |
 | `CHECK_INTERVAL` | Twitch poll interval, seconds (default 60) |
-| `DATABASE_URL` | PostgreSQL (Aiven). If unset — SQLite |
+| `DATABASE_URL` | PostgreSQL. If unset — SQLite |
 | `DATABASE_PATH` | SQLite path (default `data/bot.db`) |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
-| `PUBLIC_BASE_URL` | Public HTTPS origin for OAuth (`…/oauth/twitch/callback`). On Render, `RENDER_EXTERNAL_URL` is often enough |
-| `PORT` | Health-check port (set by Render) |
+| `PUBLIC_BASE_URL` | Public HTTPS origin for OAuth (`…/oauth/twitch/callback`) |
+| `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
 | `GROQ_API_KEY` | Groq — primary LLM for **I'm feeling lucky** (aliases: `GROQ_API`, `GROK_API`) |
 | `GROQ_TEXT_MODEL` | Groq model (default `llama-3.1-8b-instant`) |

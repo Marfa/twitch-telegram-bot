@@ -1,0 +1,4 @@
+{
+  "summary": "Committed and pushed OAuth follow-import (6a55051). Deploy VPS succeeded; https://bot.themarfa.name/health ok and /oauth/twitch/callback now serves the OAuth handler (400 Session expired for bad state).",
+  "current_status": "Twitch import feature is live end-to-end: subdomain, Twitch redirect, and deployed callback. Ready for users to use Import from Twitch in the bot."
+}

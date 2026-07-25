@@ -1,0 +1,4 @@
+{
+  "summary": "Verified Twitch Console redirect: authorize URL for https://bot.themarfa.name/oauth/twitch/callback reaches Twitch login (redirect URI OK). Subdomain /health is ok and PUBLIC_BASE_URL is set, but VPS still lacks OAuth code so /oauth/twitch/callback returns 404 until deploy.",
+  "current_status": "Twitch OAuth redirect registered correctly. Import feature blocked only by undeployed local OAuth code."
+}

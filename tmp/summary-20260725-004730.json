@@ -1,0 +1,4 @@
+{
+  "summary": "Checked Hostkey InvAPI and SSH on VPS 152.114.195.134 for DB backups. Hostkey backup_list is empty and backup schedule is disabled (all days 0). On the VPS, Postgres for twitch-telegram-bot is live; the only SQL file is /opt/twitch-telegram-bot/migration_dump.sql (16K, Jul 23, one-off Aiven migration dump). No cron/systemd timers for pg_dump; /var/backups holds only dpkg package metadata.",
+  "current_status": "Bot DB runs on VPS Postgres without automated backups. Only a one-time migration dump exists; Hostkey disk backups are not configured."
+}

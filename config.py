@@ -14,10 +14,7 @@ def load_dotenv(path: Path | None = None) -> None:
             continue
         key, _, value = line.partition("=")
         key, value = key.strip(), value.strip()
-        if key == "render":
-            os.environ.setdefault("RENDER_API_KEY", value)
-        else:
-            os.environ.setdefault(key, value)
+        os.environ.setdefault(key, value)
 
 
 load_dotenv()
@@ -37,12 +34,7 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 MAX_SUBSCRIPTIONS_PER_OWNER = int(os.getenv("MAX_SUBSCRIPTIONS_PER_OWNER", "25"))
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None
-RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "").strip()
-# Public HTTPS origin for Twitch OAuth redirect (Render sets RENDER_EXTERNAL_URL).
-PUBLIC_BASE_URL = (
-    os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
-    or os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-)
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 
 
 def twitch_oauth_redirect_uri() -> str:
@@ -79,11 +71,7 @@ GROQ_API_KEY = (
 GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "llama-3.1-8b-instant").strip() or (
     "llama-3.1-8b-instant"
 )
-BOT_VERSION = (
-    os.getenv("RENDER_GIT_COMMIT")
-    or os.getenv("BOT_VERSION")
-    or "dev"
-).strip() or "dev"
+BOT_VERSION = (os.getenv("BOT_VERSION") or "dev").strip() or "dev"
 
 
 def validate() -> None:

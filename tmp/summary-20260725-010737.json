@@ -1,0 +1,4 @@
+{
+  "summary": "Fixed stuck wizard after VPS deploy (orphan Back/Cancel), image listing and editor Add/Update/Delete, auto-disable/skip link preview with images, DM preview on create, updated /help, HF token added to VPS .env and code reads token at runtime. Pushed to main.",
+  "current_status": "Changes pushed to origin/main; VPS already has HUGGING_FACE_API. Await Actions auto-deploy for code; user should /start after update."
+}
