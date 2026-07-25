@@ -147,11 +147,13 @@ python main.py
 
 ### VPS (автодеплой)
 
-При пуше в main GitHub Actions по SSH обновляет сервер (`scripts/vps-deploy.sh`: git pull + `docker compose -f compose.vps.yml up -d --build`). Нужны secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+Репозиторий на сервере: `/opt/twitch-telegram-bot` (рядом лежит `.env`).
+
+При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, проверка `/health`, cron ночного pg-backup. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 
-На VPS Postgres в `compose.vps.yml`; для OAuth задайте `PUBLIC_BASE_URL` (например `https://bot.themarfa.name`).
+В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`) и `PUBLIC_BASE_URL` для OAuth (например `https://bot.themarfa.name`).
 
 ### Локально / Docker
 
@@ -166,8 +168,9 @@ python main.py
 | `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
 | `ADMIN_USER_IDS` | Telegram user ID админов (через запятую) |
 | `CHECK_INTERVAL` | Опрос Twitch, сек (по умолчанию 60) |
-| `DATABASE_URL` | PostgreSQL. Если не задан — SQLite |
-| `DATABASE_PATH` | Путь к SQLite (по умолчанию `data/bot.db`) |
+| `POSTGRES_PASSWORD` | Пароль Postgres на VPS (`compose.vps.yml`) |
+| `DATABASE_URL` | PostgreSQL. Если не задан — SQLite (`compose.vps.yml` задаёт сам) |
+| `DATABASE_PATH` | SQLite: локально `data/bot.db`, в Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Лимит подписок на пользователя (по умолчанию 25) |
 | `PUBLIC_BASE_URL` | Публичный HTTPS origin для OAuth (`…/oauth/twitch/callback`) |
 | `PORT` | Порт health/OAuth (по умолчанию 8080) |

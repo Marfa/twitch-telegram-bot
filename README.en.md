@@ -147,11 +147,13 @@ Category: {game}
 
 ### VPS (auto-deploy)
 
-On push to main, GitHub Actions SSHs to the server (`scripts/vps-deploy.sh`: git pull + `docker compose -f compose.vps.yml up -d --build`). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+Server checkout: `/opt/twitch-telegram-bot` (with `.env` beside it).
+
+On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, `/health` check, nightly pg-backup cron. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
-VPS Postgres comes from `compose.vps.yml`; set `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`).
+VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`) and `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`).
 
 ### Local / Docker
 
@@ -166,8 +168,9 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
 | `ADMIN_USER_IDS` | Admin Telegram user IDs (comma-separated) |
 | `CHECK_INTERVAL` | Twitch poll interval, seconds (default 60) |
-| `DATABASE_URL` | PostgreSQL. If unset — SQLite |
-| `DATABASE_PATH` | SQLite path (default `data/bot.db`) |
+| `POSTGRES_PASSWORD` | Postgres password on VPS (`compose.vps.yml`) |
+| `DATABASE_URL` | PostgreSQL. If unset — SQLite (`compose.vps.yml` sets it) |
+| `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
 | `PUBLIC_BASE_URL` | Public HTTPS origin for OAuth (`…/oauth/twitch/callback`) |
 | `PORT` | Health/OAuth port (default 8080) |
