@@ -351,7 +351,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Next sync: {next_at}"
         ),
         "sync_change_period": "⏱ Change period",
-        "sync_disable": "⏹ Disable sync",
+        "sync_disable": "⏸ Disable sync",
         "sync_disabled": "Sync disabled. Twitch token removed.",
         "sync_period_updated": "Sync period updated: every {days} day(s).",
         "sync_job_done": (
@@ -849,7 +849,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Следующая сверка: {next_at}"
         ),
         "sync_change_period": "⏱ Изменить период",
-        "sync_disable": "⏹ Отключить синхронизацию",
+        "sync_disable": "⏸ Отключить синхронизацию",
         "sync_disabled": "Синхронизация отключена. Токен Twitch удалён.",
         "sync_period_updated": "Период синхронизации: раз в {days} дн.",
         "sync_job_done": (

@@ -19,6 +19,7 @@ from translate import build_translations, translate_text
 from bot import (
     _is_link_preview_disabled,
     _message_link,
+    _parse_sb_edit_f_id,
     import_followed_as_subscriptions,
     live_transitions,
 )
@@ -431,6 +432,10 @@ def main() -> None:
 
     assert parse_admin_user_ids("") == frozenset()
     assert parse_admin_user_ids("123, 456") == frozenset({123, 456})
+    assert _parse_sb_edit_f_id("sb_edit_f:42:text") == 42
+    assert _parse_sb_edit_f_id("sb_edit_f:7:time") == 7
+    assert "⏸" in tr("sync_disable", "ru")
+    assert "⏸" in tr("toggle_off", "ru")
 
     assert translate_text("hello", target_lang="en", source_lang="en") == "hello"
     assert build_translations("hello", "en", {"en"}) == {"en": "hello"}

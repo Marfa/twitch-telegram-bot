@@ -3535,13 +3535,18 @@ def _clear_main_conversation(
         del conv._conversations[key]
 
 
+def _parse_sb_edit_f_id(callback_data: str) -> int:
+    # sb_edit_f:{id}:text|time — id is parts[1], not parts[2]
+    return int(callback_data.split(":")[1])
+
+
 async def on_sb_edit_text_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     if not _is_admin(query.from_user.id):
         return
     lang = _user_lang(context, query.from_user.id)
-    broadcast_id = int(query.data.split(":")[2])
+    broadcast_id = _parse_sb_edit_f_id(query.data)
     db: Database = context.application.bot_data["db"]
     if not db.get_scheduled_broadcast(broadcast_id):
         await query.edit_message_text(t("scheduled_not_found", lang))
@@ -3563,7 +3568,7 @@ async def on_sb_edit_time_click(update: Update, context: ContextTypes.DEFAULT_TY
     if not _is_admin(query.from_user.id):
         return
     lang = _user_lang(context, query.from_user.id)
-    broadcast_id = int(query.data.split(":")[2])
+    broadcast_id = _parse_sb_edit_f_id(query.data)
     db: Database = context.application.bot_data["db"]
     if not db.get_scheduled_broadcast(broadcast_id):
         await query.edit_message_text(t("scheduled_not_found", lang))
@@ -4434,7 +4439,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
                 r"delete_sel:|delete_go$|delete_clear$|"
-                r"sb_edit:\d+$|sb_delete:|sys_updates:|sys_availability:|"
+                r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
+                r"sys_updates:|sys_availability:|"
                 r"import_mode:|sync:)"
             ),
         ),
