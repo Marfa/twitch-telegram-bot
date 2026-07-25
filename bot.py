@@ -3617,7 +3617,10 @@ async def receive_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def on_sb_sched_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
     if context.user_data.get("sb_edit_mode") != "schedule":
+        if query:
+            await query.answer()
         return
     await admin_sb_schedule_callback(update, context)
 
@@ -4152,10 +4155,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_sb_sched_callback, pattern=r"^sb_sched:"),
         group=0,
     )
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sb_edit_text),
-        group=0,
-    )
     app.add_handler(CallbackQueryHandler(on_sb_delete, pattern=r"^sb_delete:\d+$"), group=0)
     app.add_handler(
         ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
@@ -4468,6 +4467,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(MessageHandler(_btn_filter("wizard_cancel"), orphan_wizard_nav), group=0)
     app.add_handler(MessageHandler(_btn_filter("wizard_back"), orphan_wizard_nav), group=0)
+    # After all menu ReplyKeyboard handlers — must not steal Settings/etc.
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            receive_sb_edit_text,
+            block=False,
+        ),
+        group=0,
+    )
 
     from config import CHECK_INTERVAL
 
