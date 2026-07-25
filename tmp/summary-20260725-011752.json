@@ -1,4 +1,0 @@
-{
-  "summary": "Fixed swapped preview on/off icons, reordered setup_done to match wizard steps, lucky full-wizard returns to template step, trimmed /help and added /schedule /feedback /settings commands.",
-  "current_status": "UX/help fixes ready locally, not committed/pushed unless user asks."
-}

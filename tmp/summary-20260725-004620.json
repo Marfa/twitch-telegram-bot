@@ -1,4 +1,0 @@
-{
-  "summary": "Pulled latest main, then implemented alert image support and «Мне повезёт» AI template generation. Added DB fields image_file_id/image_position, wizard steps Add/Skip → photo → begin/end, editor button «Обновить изображение», HF chat completions via requests (ghost-text-prepper pattern, Qwen2.5-7B-Instruct), and lucky quick-path Continue→dest→finish. self_check passes.",
-  "current_status": "Feature code is in working tree (uncommitted). Needs HF_TOKEN or HUGGING_FACE_API in runtime env for lucky generation. Ready for user review / commit when asked."
-}

@@ -1,4 +1,0 @@
-{
-  "summary": "Root cause: scheduled/job/poller broadcast paths never sent broadcast_done to admin. Added _report_broadcast_done and wired all send paths (now, apply-immediate, job, poller, sb edit). Stats go as a new DM.",
-  "current_status": "Fix verified with self_check; awaiting commit/push."
-}

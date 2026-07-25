@@ -1,4 +1,0 @@
-{
-  "summary": "Lucky preview now fills {game}/{name} from IGDB (Twitch client credentials) + game-based stream title templates; fallback game list if IGDB fails. README updated. self_check ok. Not committed.",
-  "current_status": "IGDB lucky-preview feature ready locally; awaiting commit/push."
-}

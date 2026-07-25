@@ -1,4 +1,0 @@
-{
-  "summary": "Re-checked Cloudflare token: /user/tokens/verify still returns Invalid API Token, but zones and DNS APIs succeed — zone themarfa.name active, DNS readable (21 records). Token is usable for subdomain setup; verify endpoint was a false negative.",
-  "current_status": "Cloudflare DNS access confirmed for themarfa.name. VPS SSH still blocked locally; subdomain not created yet pending SSH and chosen hostname."
-}

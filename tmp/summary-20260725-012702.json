@@ -1,4 +1,0 @@
-{
-  "summary": "Root cause of lucky failure was HF 402 monthly credits depleted. Added local template fallback when HF fails, committed and pushed so VPS keeps «Мне повезёт» working.",
-  "current_status": "On origin/main. AI via HF resumes after buying credits/PRO; until then local variants are used."
-}

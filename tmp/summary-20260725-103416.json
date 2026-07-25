@@ -1,4 +1,0 @@
-{
-  "summary": "Updated README.md and README.en.md: image alerts, I'm feeling lucky / Мне повезёт, Groq→HF→local pool, related env vars, wizard steps, commands, hf_text in architecture. Cursor/donate lines kept.",
-  "current_status": "Docs updated locally with prior lucky/broadcast code changes still uncommitted unless already committed."
-}

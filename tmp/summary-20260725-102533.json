@@ -1,4 +1,0 @@
-{
-  "summary": "Answered: local lucky fallback templates are hardcoded tuples in hf_text.py (_FALLBACK_RU/_FALLBACK_EN), not DB. Admin scheduled broadcasts stay in scheduled_broadcasts with sent_at set; immediate send-now does not persist text to DB.",
-  "current_status": "Informational only; no code changes."
-}

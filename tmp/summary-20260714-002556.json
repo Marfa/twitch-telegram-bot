@@ -1,4 +1,0 @@
-{
-  "summary": "Cloned twitch-telegram-bot and implemented all 14 requested features: repeat-notification wizard step with mute minutes and cooldown logic; renamed delay prompt; Back/Cancel/Main menu navigation in create/edit wizards; system notifications settings with bot-update toggle; admin broadcast with type selection (Bot updates), datetime picker (MSK), scheduled jobs, and filtered recipients; DB migrations for suppress_repeat_minutes, notify_cooldown_until, receive_bot_updates, scheduled_broadcasts; updated self_check.py and README files. self_check.py passes.",
-  "current_status": "All features implemented locally in /Users/Blogger/Cursor/twitch-telegram-bot. Ready for manual bot testing and git commit/push when requested."
-}

@@ -1,4 +1,0 @@
-{
-  "summary": "Committed and pushed: removed bot version from feedback; menu/inline buttons wake stuck ConversationHandler (group -1). Files: bot.py, i18n.py, self_check.py. README already had Cursor/donate lines.",
-  "current_status": "Changes on origin/main; VPS should auto-deploy if configured."
-}

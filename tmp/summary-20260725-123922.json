@@ -1,4 +1,0 @@
-{
-  "summary": "Committed and pushed broadcast stats fix (7531b6f parent → new): _report_broadcast_done on all admin send paths.",
-  "current_status": "On origin/main; VPS should auto-deploy."
-}

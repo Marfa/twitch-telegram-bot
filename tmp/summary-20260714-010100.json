@@ -1,4 +1,0 @@
-{
-  "summary": "Updated channel_not_parsed examples in i18n.py (en/ru) from ninja to marfapr with https://www.twitch.tv/marfapr. Answered user about other user-visible defaults in bot strings and README.",
-  "current_status": "i18n change local only; not committed. User can ask to push."
-}

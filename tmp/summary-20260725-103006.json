@@ -1,4 +1,0 @@
-{
-  "summary": "Lucky fallback now uses DB table lucky_templates (last 100 per locale from successful Groq/HF gens); seed templates only if empty. Admin broadcasts deleted on send via mark_scheduled_broadcast_sent→DELETE; migrate purges rows with sent_at set. self_check ok.",
-  "current_status": "Local changes ready; not committed/pushed unless user asks."
-}

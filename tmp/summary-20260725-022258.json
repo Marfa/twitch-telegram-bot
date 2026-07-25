@@ -1,4 +1,0 @@
-{
-  "summary": "Finished both UX fixes: bot version removed from feedback (self_check asserts it); inline edit buttons and reply-menu buttons clear stuck ConversationHandler state via group=-1 wake handlers before normal handlers run. Import and self_check pass. Ready to push when asked.",
-  "current_status": "Local changes complete; not committed/pushed unless user requests."
-}

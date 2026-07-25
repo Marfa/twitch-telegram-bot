@@ -1,4 +1,0 @@
-{
-  "summary": "Changed alert media send path: photo is always sent without caption; text goes as a separate Telegram message before or after based on image_position. Confirmed HUGGING_FACE_API from .env is already mapped to HF_TOKEN in config.",
-  "current_status": "Image+text send behavior updated (photo-only media, no caption). Lucky AI uses existing HUGGING_FACE_API. Changes still uncommitted."
-}

@@ -1,4 +1,0 @@
-{
-  "summary": "Answered with Twitch Developer Console URL and clarified that OAuth redirect needs the bot’s public HTTPS origin (Render service URL or PUBLIC_BASE_URL); placeholder https://<service> is not a real address until deploy.",
-  "current_status": "Twitch follow-import feature is in code; OAuth will work only after a public callback URL is known and registered in Twitch Console."
-}

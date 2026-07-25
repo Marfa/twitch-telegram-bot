@@ -1,4 +1,0 @@
-{
-  "summary": "Localized Twitch OAuth callback HTML by bot language: OAuth state now stores locale; Done/cancelled/failed/expired pages use ru/en i18n strings. Pushed df065fb.",
-  "current_status": "OAuth callback page follows Telegram bot language after VPS auto-deploy."
-}

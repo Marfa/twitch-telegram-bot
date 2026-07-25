@@ -1,4 +1,0 @@
-{
-  "summary": "Thoroughly explored the twitch-telegram-bot codebase for Twitch OAuth + import-followed-channels planning. Mapped main/subscriptions menus and i18n keys, add_subscription defaults (enabled=1 via DB, no default message_template), list/edit/toggle callback flows, ConversationHandler entry points/states in bot.py, health.py HTTP server (only / and /health — OAuth callback can be added), Client Credentials-only Twitch auth with no user OAuth/redirect handling, Docker/Render PORT=8080 startup, lucky-seed templates vs user-required templates, dual-locale i18n pattern, and MAX_SUBSCRIPTIONS_PER_OWNER=25 hard stop at create time.",
-  "current_status": "Exploration report complete; no code changes. Ready for OAuth + followed-channel import design against documented integration points."
-}

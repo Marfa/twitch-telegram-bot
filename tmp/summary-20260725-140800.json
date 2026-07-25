@@ -1,4 +1,0 @@
-{
-  "summary": "Tried to set up bot subdomain: VPS 152.114.195.134 is up (health ok on :8080, nginx on 80/443) but Cloudflare token is Invalid API Token (401), Hostkey token invalid (403), and local SSH to root@VPS is Permission denied — blocked until valid CF token and SSH access are provided.",
-  "current_status": "OAuth import code ready; public HTTPS subdomain not configured yet. Need working Cloudflare DNS token for themarfa.name and VPS SSH (GitHub secret VPS_SSH_KEY exists for Actions but not locally)."
-}

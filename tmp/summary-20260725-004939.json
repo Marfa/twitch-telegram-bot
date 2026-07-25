@@ -1,4 +1,0 @@
-{
-  "summary": "Added nightly Postgres backup: scripts/pg-backup.sh dumps via docker compose, keeps 7 newest .sql.gz under /var/backups/twitch-telegram-bot; vps-deploy.sh installs /usr/local/sbin binary + cron.d at 03:00. Installed and verified on VPS (test dump bot-20260724-214934.sql.gz ok).",
-  "current_status": "Nightly DB backups live on VPS. Repo changes are local until commit/push; cron and /usr/local/sbin copy already active on the server."
-}

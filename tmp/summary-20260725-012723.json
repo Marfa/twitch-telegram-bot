@@ -1,4 +1,0 @@
-{
-  "summary": "Advised on free LLM API alternatives to depleted HF Inference credits: Groq (best fit), Gemini, OpenRouter free models; local fallback already in place. Offered to wire Groq if user wants.",
-  "current_status": "Lucky button works via local templates after HF 402; AI generation needs new free provider or HF top-up."
-}

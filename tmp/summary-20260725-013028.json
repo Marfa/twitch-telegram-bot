@@ -1,4 +1,0 @@
-{
-  "summary": "Wired Groq as primary lucky-template provider (GROK_API/GROQ_API_KEY), with HF then local fallback. Added key to VPS .env, committed and pushed.",
-  "current_status": "On origin/main. After auto-deploy, «Мне повезёт» should use Groq. Key is already on the VPS."
-}

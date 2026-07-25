@@ -1,4 +1,0 @@
-{
-  "summary": "UI fixes: system notifications toggle moved inline under header with ✅/❌ toggle on click; removed Back/Cancel from reply keyboard (inline wizard nav only, main menu at bottom); updated repeat prompt text; fixed duplicate repeat_mute_prompt message; setup_done now shows per-user subscription number instead of global DB id.",
-  "current_status": "Changes applied locally, self_check passes. Not yet committed/pushed unless user asks."
-}

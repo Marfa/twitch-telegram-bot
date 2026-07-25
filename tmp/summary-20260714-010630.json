@@ -1,4 +1,0 @@
-{
-  "summary": "Answered Aiven optional update question: bot uses plain PostgreSQL only (no TimescaleDB/rum/pgrouting); updates are safe for app/data but may cause brief DB downtime during maintenance.",
-  "current_status": "Local uncommitted: i18n channel_not_parsed marfapr, self_check marfapr."
-}

@@ -1,4 +1,0 @@
-{
-  "summary": "Fixed duplicate broadcast_text_prompt in admin broadcast flow: admin_select_type and sched:back now edit inline message to ✓ and send the prompt once with admin_menu reply keyboard.",
-  "current_status": "Broadcast text prompt duplicate fixed locally; prior UI fixes uncommitted unless user pushed separately."
-}

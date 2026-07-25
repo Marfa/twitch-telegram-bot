@@ -1,4 +1,0 @@
-{
-  "summary": "Set up bot.themarfa.name: Cloudflare A→152.114.195.134, nginx+Let’s Encrypt on VPS, PUBLIC_BASE_URL=https://bot.themarfa.name. Health OK over HTTPS; /oauth/twitch/callback still 404 until OAuth code is committed and deployed to main.",
-  "current_status": "Public HTTPS subdomain ready. Twitch OAuth import code exists only locally (uncommitted); needs push/deploy before import button works end-to-end."
-}

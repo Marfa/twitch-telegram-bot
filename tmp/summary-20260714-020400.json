@@ -1,4 +1,0 @@
-{
-  "summary": "Added receive_availability_updates DB flag and UI toggle; Render/Aiven RSS now respect opt-in; admin broadcast type availability added; renamed sys_updates_label; pushed 48d68ae.",
-  "current_status": "main at 48d68ae on origin. self_check passes."
-}

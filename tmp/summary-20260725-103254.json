@@ -1,4 +1,0 @@
-{
-  "summary": "Filled lucky_templates via migrate seed: 100 RU + 100 EN combinatorial templates; tops up to 100 per locale if below limit. self_check passes.",
-  "current_status": "Seed ready locally; production fills on next bot start after deploy."
-}

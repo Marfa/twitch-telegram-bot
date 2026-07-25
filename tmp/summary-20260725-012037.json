@@ -1,4 +1,0 @@
-{
-  "summary": "Explained the HF chat prompt used by «Мне повезёт»: system + user messages from hf_text.generate_alert_template (locale language, channel name, placeholders {username}/{game}/{name}).",
-  "current_status": "No code changes; bot on main with prior UX/help push."
-}
