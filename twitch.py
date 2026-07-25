@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import re
 import time
 from difflib import get_close_matches
@@ -17,6 +18,22 @@ TWITCH_URL_RE = re.compile(
     re.IGNORECASE,
 )
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
+
+_IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
+_IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
+_IGDB_WHERE = "version_parent = null & name != null"
+_FALLBACK_GAMES = (
+    "Elden Ring",
+    "Cyberpunk 2077",
+    "Counter-Strike 2",
+    "Dota 2",
+    "League of Legends",
+    "Minecraft",
+    "GTA V",
+    "The Witcher 3",
+    "Baldur's Gate 3",
+    "Just Chatting",
+)
 
 
 class TwitchClient:
@@ -36,6 +53,10 @@ class TwitchClient:
         if USERNAME_RE.match(cleaned):
             return cleaned
         return None
+
+    @staticmethod
+    def is_twitch_url(text: str) -> bool:
+        return bool(TWITCH_URL_RE.search((text or "").strip()))
 
     def _ensure_token(self) -> str:
         if self._token and time.time() < self._token_expires - 60:
@@ -84,6 +105,90 @@ class TwitchClient:
         )
         resp.raise_for_status()
         return {s["user_id"]: s for s in resp.json().get("data", [])}
+
+    def _igdb_headers(self) -> dict[str, str]:
+        return {
+            "Client-ID": TWITCH_CLIENT_ID,
+            "Authorization": f"Bearer {self._ensure_token()}",
+            "Accept": "application/json",
+        }
+
+    def random_igdb_game_name(self) -> str:
+        """Pick a random main-game title from IGDB (Twitch credentials)."""
+        try:
+            return self._random_igdb_game_name()
+        except Exception as exc:
+            logger.warning("IGDB random game unavailable (%s)", exc)
+            return random.choice(_FALLBACK_GAMES)
+
+    def _random_igdb_game_name(self) -> str:
+        headers = self._igdb_headers()
+        count = 0
+        try:
+            count_resp = self._session.post(
+                _IGDB_COUNT_URL,
+                headers=headers,
+                data=f"where {_IGDB_WHERE};",
+                timeout=15,
+            )
+            if count_resp.ok:
+                count = int(count_resp.json().get("count") or 0)
+        except Exception as exc:
+            logger.warning("IGDB count failed (%s)", exc)
+
+        max_offset = max(0, min(count - 1, 200_000)) if count else 20_000
+        for _ in range(4):
+            offset = random.randint(0, max_offset)
+            body = (
+                f"fields name;\n"
+                f"where {_IGDB_WHERE};\n"
+                f"sort id asc;\n"
+                f"limit 1;\n"
+                f"offset {offset};"
+            )
+            resp = self._session.post(
+                _IGDB_GAMES_URL,
+                headers=headers,
+                data=body,
+                timeout=15,
+            )
+            if resp.status_code == 400 and offset > 0:
+                max_offset = max(0, offset // 2)
+                continue
+            resp.raise_for_status()
+            rows = resp.json()
+            if isinstance(rows, list) and rows:
+                name = str(rows[0].get("name") or "").strip()
+                if name:
+                    return name
+            if offset == 0:
+                break
+            max_offset = max(0, offset // 2)
+        return random.choice(_FALLBACK_GAMES)
+
+
+def preview_stream_title(locale: str, game: str) -> str:
+    """Build a sample stream title from an IGDB/Twitch game name (not 'Test stream')."""
+    g = (game or "").strip() or "Just Chatting"
+    if str(locale).lower().startswith("ru"):
+        return random.choice(
+            (
+                f"Играю в {g}",
+                f"{g} — прохождение",
+                f"Стрим по {g}",
+                f"{g}: первый взгляд",
+                f"Залетаем в {g}",
+            )
+        )
+    return random.choice(
+        (
+            f"Playing {g}",
+            f"{g} playthrough",
+            f"Streaming {g}",
+            f"First look at {g}",
+            f"Chilling with {g}",
+        )
+    )
 
 
 def render_template(

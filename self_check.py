@@ -8,7 +8,7 @@ from unittest.mock import patch
 from config import parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
 from render_deploy import _service_id
-from twitch import TwitchClient, find_placeholder_typos, normalize_ignore_keywords, render_template, should_ignore_stream
+from twitch import TwitchClient, find_placeholder_typos, normalize_ignore_keywords, preview_stream_title, render_template, should_ignore_stream
 from translate import build_translations, translate_text
 from bot import _is_link_preview_disabled, _message_link, live_transitions
 from db import SqliteDatabase, _normalize_pg_url, open_database
@@ -26,9 +26,20 @@ def main() -> None:
     assert t.parse_username("https://m.twitch.tv/marfapr") == CHANNEL
     assert t.parse_username("@marfapr") == CHANNEL
     assert t.parse_username("not valid!!!") is None
+    assert t.is_twitch_url("https://www.twitch.tv/marfapr")
+    assert t.is_twitch_url("https://m.twitch.tv/marfapr")
+    assert t.is_twitch_url("twitch.tv/marfapr")
+    assert not t.is_twitch_url("marfapr")
+    assert not t.is_twitch_url("@marfapr")
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+    title_ru = preview_stream_title("ru", "Elden Ring")
+    assert "Elden Ring" in title_ru
+    assert "Тестовый" not in title_ru
+    title_en = preview_stream_title("en", "Elden Ring")
+    assert "Elden Ring" in title_en
+    assert "Test stream" not in title_en
 
     state: dict[str, bool] = {}
     assert live_transitions(state, ["1", "2"], {"1": {}}, primed=False) == []

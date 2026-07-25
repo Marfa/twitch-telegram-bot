@@ -75,6 +75,7 @@ from twitch import (
     TwitchClient,
     find_placeholder_typos,
     normalize_ignore_keywords,
+    preview_stream_title,
     render_template,
     should_ignore_stream,
 )
@@ -949,6 +950,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     context.user_data["twitch_username"] = user["login"]
     context.user_data["twitch_user_id"] = user["id"]
+    context.user_data["channel_input_was_url"] = twitch.is_twitch_url(text)
     await update.effective_message.reply_text(
         t("channel_found", lang, display_name=html.escape(user["display_name"])),
         parse_mode=ParseMode.HTML,
@@ -1043,12 +1045,10 @@ async def _show_lucky_preview(
 ) -> int:
     template = context.user_data.get("message_template") or ""
     username = context.user_data.get("twitch_username") or "username"
-    preview = render_template(
-        template,
-        username,
-        "Just Chatting",
-        t("preview_stream", lang),
-    )
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    game = await asyncio.to_thread(twitch.random_igdb_game_name)
+    stream_title = preview_stream_title(lang, game)
+    preview = render_template(template, username, game, stream_title)
     text = t(
         "lucky_preview",
         lang,
@@ -1110,7 +1110,10 @@ async def lucky_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return TEMPLATE
     context.user_data["lucky_quick"] = True
     context.user_data.setdefault("ignore_keywords", "")
-    context.user_data.setdefault("disable_link_preview", False)
+    # Link preview on only when the channel was entered as a Twitch URL.
+    context.user_data["disable_link_preview"] = not bool(
+        context.user_data.get("channel_input_was_url")
+    )
     context.user_data.setdefault("delay_minutes", 0)
     context.user_data.setdefault("suppress_repeat_minutes", 0)
     context.user_data.pop("image_file_id", None)
