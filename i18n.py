@@ -83,15 +83,15 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{username}}</code> — channel name\n"
             "• <code>{{game}}</code> — stream category\n"
             "• <code>{{name}}</code> — stream title\n\n"
-            "Full list: {placeholders_link}\n\n"
+            "{placeholders_link}\n\n"
             "Example:\n"
             "<code>{{username}} is live!\n"
             "{{name}}\n"
             "Category: {{game}}</code>\n\n"
             "You can add an image on the next step"
         ),
-        "placeholders_link_label": "full list",
-        "placeholders_link_unavailable": "not available on this server",
+        "placeholders_link_label": "Full list",
+        "placeholders_link_unavailable": "Full list (not available on this server)",
         "placeholders_page_title": "Message placeholders",
         "placeholders_page_intro": (
             "Use these keywords in the notification template "
@@ -151,7 +151,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Send a corrected message template.\n\n"
             "Example: <code>{{username}}</code>, <code>{{game}}</code>, "
             "<code>{{name}}</code>\n"
-            "Full list: {placeholders_link}"
+            "{placeholders_link}"
         ),
         "ignore_keywords_prompt": (
             "<b>Ignore keywords</b>\n\n"
@@ -481,7 +481,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{username}}</code> — channel name\n"
             "• <code>{{game}}</code> — stream category\n"
             "• <code>{{name}}</code> — stream title\n\n"
-            "Full list: {placeholders_link}"
+            "{placeholders_link}"
         ),
         "edit_ignore_keywords_prompt": (
             "Subscription #{sub_id}\n"
@@ -653,15 +653,15 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{username}}</code> — имя канала\n"
             "• <code>{{game}}</code> — категория стрима\n"
             "• <code>{{name}}</code> — название стрима\n\n"
-            "Полный список: {placeholders_link}\n\n"
+            "{placeholders_link}\n\n"
             "Пример:\n"
             "<code>{{username}} в эфире!\n"
             "{{name}}\n"
             "Категория: {{game}}</code>\n\n"
             "Изображение можно добавить на следующем шаге"
         ),
-        "placeholders_link_label": "полный список",
-        "placeholders_link_unavailable": "недоступен на этом сервере",
+        "placeholders_link_label": "Полный список",
+        "placeholders_link_unavailable": "Полный список (недоступен на этом сервере)",
         "placeholders_page_title": "Ключевые слова шаблона",
         "placeholders_page_intro": (
             "Используйте эти ключевые слова в шаблоне уведомления "
@@ -721,7 +721,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Отправьте исправленный шаблон сообщения.\n\n"
             "Пример: <code>{{username}}</code>, <code>{{game}}</code>, "
             "<code>{{name}}</code>\n"
-            "Полный список: {placeholders_link}"
+            "{placeholders_link}"
         ),
         "ignore_keywords_prompt": (
             "<b>Игнорировать ключевые слова</b>\n\n"
@@ -1054,7 +1054,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{username}}</code> — имя канала\n"
             "• <code>{{game}}</code> — категория стрима\n"
             "• <code>{{name}}</code> — название стрима\n\n"
-            "Полный список: {placeholders_link}"
+            "{placeholders_link}"
         ),
         "edit_ignore_keywords_prompt": (
             "Подписка #{sub_id}\n"
