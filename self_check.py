@@ -20,6 +20,7 @@ from bot import (
     _is_link_preview_disabled,
     _message_link,
     _parse_sb_edit_f_id,
+    _parse_segment_start,
     import_followed_as_subscriptions,
     live_transitions,
 )
@@ -48,6 +49,32 @@ def main() -> None:
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+    rich = render_template(
+        "{username} {viewer_count} {tags} {is_mature} {game_id}",
+        "x",
+        "Game",
+        "Title",
+        stream={
+            "viewer_count": 42,
+            "tags": ["a", "b"],
+            "is_mature": True,
+            "game_id": "509658",
+            "id": "99",
+            "type": "live",
+            "started_at": "2026-01-01T00:00:00Z",
+            "thumbnail_url": "https://example.com/{width}x{height}.jpg",
+            "language": "en",
+        },
+    )
+    assert "42" in rich and "a, b" in rich and "18+" in rich and "509658" in rich
+    thumb = render_template(
+        "{thumbnail_url}",
+        "x",
+        stream={"thumbnail_url": "https://cdn/{width}x{height}.jpg"},
+    )
+    assert "480x270" in thumb
+    assert "{game}" not in render_template("{game_id}", "u", "G", "N", stream={"game_id": "1"})
+    assert render_template("{game_id}", "u", "G", "N", stream={"game_id": "1"}) == "1"
     auth_url = t.build_authorize_url(
         redirect_uri="https://example.com/oauth/twitch/callback",
         state="abc",
@@ -116,6 +143,10 @@ def main() -> None:
     assert chat_ref_to_id("1234567890") == -1001234567890
     assert _message_link(-1001234567890, 42) == "https://t.me/c/1234567890/42"
     assert _message_link(-1001234567890, 42, 7) == "https://t.me/c/1234567890/7/42"
+    start = _parse_segment_start({"start_time": "2030-01-01T12:00:00Z"})
+    assert start is not None
+    assert start.year == 2030
+    assert _parse_segment_start({"start_time": "bad"}) is None
 
     pg_url = _normalize_pg_url("postgres://user:pass@host:1234/db")
     assert pg_url.startswith("postgresql://")
@@ -143,8 +174,22 @@ def main() -> None:
         assert tr("lucky_hint", loc)
         assert tr("image_ask", loc)
         assert tr("edit_image", loc)
-        assert "Изображение можно добавить" in tr("channel_found", "ru", display_name="x") or loc != "ru"
-        assert "You can add an image" in tr("channel_found", "en", display_name="x") or loc != "en"
+        assert tr("schedule_reminder_prompt", loc)
+        assert tr("schedule_reminder_minutes_prompt", loc)
+        assert tr("schedule_reminder_alert", loc, username="x", minutes=5, title="t")
+        assert tr("edit_schedule_reminder", loc)
+        assert tr("edit_schedule_reminder_no_schedule", loc)
+        assert tr("channel_dup_prompt", loc)
+        found = tr(
+            "channel_found",
+            loc,
+            display_name="x",
+            placeholders_link="LINK",
+        )
+        assert "LINK" in found
+        assert "{username}" in found or "{{username}}" not in found
+        assert "Изображение можно добавить" in found or loc != "ru"
+        assert "You can add an image" in found or loc != "en"
         feedback = tr("feedback", loc, github="https://example.com", user_id=42)
         assert "42" in feedback
         assert "<code>42</code>" in feedback
@@ -358,6 +403,32 @@ def main() -> None:
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.suppress_repeat_minutes == 30
+        assert sub.schedule_reminder_minutes == 0
+        assert sub.schedule_reminder_configured is False
+        assert db.update_subscription(sub_id, 1, schedule_reminder_minutes=15)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.schedule_reminder_minutes == 15
+        assert sub.schedule_reminder_configured is False
+        assert db.update_subscription(
+            sub_id, 1, schedule_reminder_configured=True, schedule_reminder_minutes=15
+        )
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.schedule_reminder_configured is True
+        assert db.update_subscription(sub_id, 1, schedule_reminder_minutes=0)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.schedule_reminder_minutes == 0
+        assert sub.schedule_reminder_configured is True
+        assert sub.last_schedule_reminder_segment_id is None
+        db.set_last_schedule_reminder_segment(sub_id, "seg-abc")
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.last_schedule_reminder_segment_id == "seg-abc"
+        assert db.get_unique_schedule_reminder_twitch_ids() == []
+        assert db.update_subscription(sub_id, 1, schedule_reminder_minutes=10)
+        assert db.get_unique_schedule_reminder_twitch_ids() == [sub.twitch_user_id]
         assert sub.notify_delete_fail is False
         assert db.update_subscription(sub_id, 1, notify_delete_fail=True)
         sub = db.get_subscription(sub_id, 1)

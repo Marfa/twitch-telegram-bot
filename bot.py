@@ -40,6 +40,7 @@ from i18n import (
     all_wizard_nav_buttons,
     broadcast_menu,
     btn,
+    channel_dup_keyboard,
     delete_old_keyboard,
     delete_fail_notify_keyboard,
     dest_keyboard,
@@ -56,8 +57,10 @@ from i18n import (
     lucky_preview_keyboard,
     lucky_start_keyboard,
     main_menu,
+    placeholders_link_html,
     repeat_keyboard,
     schedule_keyboard,
+    schedule_reminder_keyboard,
     scheduled_edit_keyboard,
     scheduled_list_keyboard,
     settings_menu,
@@ -92,6 +95,7 @@ _TELEGRAM_CAPTION_LIMIT = 1024
 (
     LANG_SELECT,
     CHANNEL,
+    CHANNEL_DUP,
     TEMPLATE,
     TEMPLATE_TYPO_CONFIRM,
     IMAGE_ASK,
@@ -104,6 +108,8 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     DELAY_MINUTES,
     REPEAT_ALLOW,
     REPEAT_MUTE_MINUTES,
+    SCHEDULE_REMINDER_ASK,
+    SCHEDULE_REMINDER_MINUTES,
     DEST_TYPE,
     DEST_CHAT,
     DELETE_OLD,
@@ -112,6 +118,7 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     EDIT_IGNORE_KEYWORDS,
     EDIT_DELAY,
     EDIT_REPEAT,
+    EDIT_SCHEDULE_REMINDER,
     ADMIN_MSG_TYPE,
     ADMIN_MSG_TEXT,
     ADMIN_MSG_SCHEDULE,
@@ -121,7 +128,7 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
     SYNC_DAYS,
-) = range(31)
+) = range(35)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -140,6 +147,12 @@ def _repeat_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
         return t("edit_repeat_current_allow", lang)
     return t("edit_repeat_current_mute", lang, minutes=minutes)
+
+
+def _schedule_reminder_current_label(minutes: int, lang: str) -> str:
+    if minutes <= 0:
+        return t("edit_schedule_reminder_current_off", lang)
+    return t("edit_schedule_reminder_current", lang, minutes=minutes)
 
 
 def _ignore_keywords_current_label(keywords: str, lang: str) -> str:
@@ -443,6 +456,20 @@ async def _prompt_repeat_step(
     return REPEAT_ALLOW
 
 
+async def _prompt_schedule_reminder_ask(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    text = t("schedule_reminder_prompt", lang)
+    markup = schedule_reminder_keyboard(lang)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    context.user_data["schedule_reminder_offered"] = True
+    _set_wizard_back(context, SCHEDULE_REMINDER_ASK)
+    return SCHEDULE_REMINDER_ASK
+
+
 async def _prompt_dest_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, *, edit: bool = False
 ) -> int:
@@ -470,16 +497,44 @@ async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 
 async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
-    display = context.user_data.get("twitch_username", "")
-    await update.effective_message.reply_text(
-        t("channel_found", lang, display_name=html.escape(display)),
-        parse_mode=ParseMode.HTML,
-        reply_markup=_wizard(lang),
+    display = (
+        context.user_data.get("twitch_display_name")
+        or context.user_data.get("twitch_username", "")
     )
-    await update.effective_message.reply_text(
-        t("lucky_hint", lang),
-        reply_markup=lucky_start_keyboard(lang),
+    target = update.effective_message
+    if update.callback_query and not target:
+        target = update.callback_query.message
+    chat_id = update.effective_user.id
+    text = t(
+        "channel_found",
+        lang,
+        display_name=html.escape(display),
+        placeholders_link=placeholders_link_html(lang),
     )
+    if update.callback_query:
+        await context.bot.send_message(
+            chat_id,
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_wizard(lang),
+            disable_web_page_preview=True,
+        )
+        await context.bot.send_message(
+            chat_id,
+            t("lucky_hint", lang),
+            reply_markup=lucky_start_keyboard(lang),
+        )
+    else:
+        await target.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_wizard(lang),
+            disable_web_page_preview=True,
+        )
+        await target.reply_text(
+            t("lucky_hint", lang),
+            reply_markup=lucky_start_keyboard(lang),
+        )
     _set_wizard_back(context, TEMPLATE)
     return TEMPLATE
 
@@ -549,6 +604,44 @@ async def _go_repeat_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     return await _prompt_repeat_step(update, context, lang)
 
 
+async def _go_schedule_reminder_ask(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    return await _prompt_schedule_reminder_ask(update, context, lang)
+
+
+async def _go_schedule_reminder_minutes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    await update.effective_message.reply_text(
+        t("schedule_reminder_minutes_prompt", lang),
+        reply_markup=_wizard(lang),
+    )
+    _set_wizard_back(context, SCHEDULE_REMINDER_MINUTES)
+    return SCHEDULE_REMINDER_MINUTES
+
+
+async def _go_after_repeat(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """After repeat step: offer schedule reminders if Twitch schedule exists."""
+    context.user_data.setdefault("schedule_reminder_minutes", 0)
+    context.user_data.setdefault("schedule_reminder_configured", False)
+    context.user_data.pop("schedule_reminder_offered", None)
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    uid = str(context.user_data.get("twitch_user_id") or "")
+    has_schedule = False
+    if uid:
+        try:
+            has_schedule = await asyncio.to_thread(twitch.has_channel_schedule, uid)
+        except Exception:
+            logger.exception("Twitch schedule check failed for %s", uid)
+    if not has_schedule:
+        _set_wizard_back(context, DEST_TYPE)
+        return await _prompt_dest_step(update, context, lang)
+    return await _prompt_schedule_reminder_ask(update, context, lang)
+
+
 async def _go_dest_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     return await _prompt_dest_step(update, context, lang)
 
@@ -559,6 +652,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == TEMPLATE:
         context.user_data.pop("pending_template", None)
         context.user_data.pop("pending_template_preview_disabled", None)
+        return await _go_channel_prompt(update, context, lang)
+    if state == CHANNEL_DUP:
         return await _go_channel_prompt(update, context, lang)
     if state == IMAGE_ASK:
         if context.user_data.get("edit_sub_id"):
@@ -598,9 +693,17 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return await _go_delay_prompt(update, context, lang)
     if state == REPEAT_MUTE_MINUTES:
         return await _go_repeat_prompt(update, context, lang)
+    if state == SCHEDULE_REMINDER_ASK:
+        return await _go_repeat_prompt(update, context, lang)
+    if state == SCHEDULE_REMINDER_MINUTES:
+        return await _go_schedule_reminder_ask(update, context, lang)
     if state == DEST_TYPE:
         if context.user_data.get("lucky_quick"):
             return await _show_lucky_preview(update, context, lang)
+        if context.user_data.get("schedule_reminder_offered"):
+            if int(context.user_data.get("schedule_reminder_minutes", 0)) > 0:
+                return await _go_schedule_reminder_minutes(update, context, lang)
+            return await _go_schedule_reminder_ask(update, context, lang)
         return await _go_repeat_prompt(update, context, lang)
     if state == DEST_CHAT:
         return await _go_dest_prompt(update, context, lang)
@@ -693,9 +796,19 @@ def _format_sub_line(
     chat_display: str | None = None,
     thread_display: str | None = None,
 ) -> str:
+    # Order matches create wizard: image → ignore → preview → delay → repeat
+    # → schedule reminder → dest → delete.
     status = "✅" if sub.enabled else "⏸"
     chat_label = chat_display if chat_display is not None else str(sub.chat_id)
     settings: list[str] = []
+    if sub.image_file_id:
+        pos = (sub.image_position or "").strip()
+        if pos == "after":
+            settings.append(t("sub_list_image_after", lang))
+        else:
+            settings.append(t("sub_list_image_before", lang))
+    else:
+        settings.append(t("sub_list_image_no", lang))
     if sub.ignore_keywords.strip():
         settings.append(
             t("sub_list_ignore_yes", lang, keywords=sub.ignore_keywords)
@@ -707,14 +820,6 @@ def _format_sub_line(
         if sub.disable_link_preview or sub.image_file_id
         else t("sub_list_preview_on", lang)
     )
-    if sub.image_file_id:
-        pos = (sub.image_position or "").strip()
-        if pos == "after":
-            settings.append(t("sub_list_image_after", lang))
-        else:
-            settings.append(t("sub_list_image_before", lang))
-    else:
-        settings.append(t("sub_list_image_no", lang))
     settings.append(
         t("sub_list_delay", lang, minutes=sub.delay_minutes)
         if sub.delay_minutes > 0
@@ -725,6 +830,12 @@ def _format_sub_line(
         if sub.suppress_repeat_minutes > 0
         else t("sub_list_repeat_allow", lang)
     )
+    if sub.schedule_reminder_configured:
+        settings.append(
+            t("sub_list_schedule_reminder", lang, minutes=sub.schedule_reminder_minutes)
+            if sub.schedule_reminder_minutes > 0
+            else t("sub_list_schedule_reminder_none", lang)
+        )
     settings.append(
         t(
             "sub_list_dest",
@@ -1050,18 +1161,65 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     context.user_data["twitch_username"] = user["login"]
     context.user_data["twitch_user_id"] = user["id"]
+    context.user_data["twitch_display_name"] = user.get("display_name") or user["login"]
     context.user_data["channel_input_was_url"] = twitch.is_twitch_url(text)
-    await update.effective_message.reply_text(
-        t("channel_found", lang, display_name=html.escape(user["display_name"])),
-        parse_mode=ParseMode.HTML,
-        reply_markup=_wizard(lang),
+
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    existing = next(
+        (
+            s
+            for s in db.get_subscriptions_by_owner(owner_id)
+            if s.twitch_user_id == user["id"]
+        ),
+        None,
     )
-    await update.effective_message.reply_text(
-        t("lucky_hint", lang),
-        reply_markup=lucky_start_keyboard(lang),
-    )
-    _set_wizard_back(context, TEMPLATE)
-    return TEMPLATE
+    if existing:
+        await update.effective_message.reply_text(
+            t("channel_dup_prompt", lang),
+            reply_markup=channel_dup_keyboard(lang, existing.id),
+        )
+        context.user_data["dup_sub_id"] = existing.id
+        _set_wizard_back(context, CHANNEL_DUP)
+        return CHANNEL_DUP
+
+    return await _go_template_prompt(update, context, lang)
+
+
+async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    parts = query.data.split(":")
+    if parts[1] == "edit":
+        sub_id = int(parts[2])
+        db: Database = context.application.bot_data["db"]
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        context.user_data.clear()
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+        await query.edit_message_text(
+            t("edit_menu", lang, sub_id=sub_num, username=sub.twitch_username),
+            reply_markup=edit_options_keyboard(
+                sub_id,
+                lang,
+                dest_type=sub.dest_type,
+                delete_previous=sub.delete_previous,
+                has_image=bool(sub.image_file_id),
+                schedule_reminder_configured=sub.schedule_reminder_configured,
+            ),
+        )
+        await context.bot.send_message(
+            query.from_user.id,
+            t("menu_subs", lang),
+            reply_markup=_menu(lang, query.from_user.id),
+        )
+        return ConversationHandler.END
+
+    await query.edit_message_text("✓")
+    return await _go_template_prompt(update, context, lang)
 
 
 async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1123,9 +1281,14 @@ async def receive_template_typo_confirm(
         await query.edit_message_text("✓")
         await context.bot.send_message(
             query.from_user.id,
-            t("template_typo_resend", lang),
+            t(
+                "template_typo_resend",
+                lang,
+                placeholders_link=placeholders_link_html(lang),
+            ),
             parse_mode=ParseMode.HTML,
             reply_markup=_wizard(lang, back=not is_edit),
+            disable_web_page_preview=True,
         )
         if not is_edit:
             _set_wizard_back(context, TEMPLATE)
@@ -1216,6 +1379,8 @@ async def lucky_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     context.user_data.setdefault("delay_minutes", 0)
     context.user_data.setdefault("suppress_repeat_minutes", 0)
+    context.user_data.setdefault("schedule_reminder_minutes", 0)
+    context.user_data.setdefault("schedule_reminder_configured", False)
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
     await query.edit_message_text("✓")
@@ -1483,8 +1648,7 @@ async def receive_repeat_allow(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = _user_lang(context, query.from_user.id)
     if query.data.endswith(":1"):
         context.user_data["suppress_repeat_minutes"] = 0
-        _set_wizard_back(context, DEST_TYPE)
-        return await _prompt_dest_step(update, context, lang)
+        return await _go_after_repeat(update, context, lang)
     await query.edit_message_text("✓")
     await context.bot.send_message(
         query.from_user.id,
@@ -1505,6 +1669,45 @@ async def receive_repeat_mute_minutes(update: Update, context: ContextTypes.DEFA
         await update.effective_message.reply_text(t("repeat_mute_invalid", lang))
         return REPEAT_MUTE_MINUTES
     context.user_data["suppress_repeat_minutes"] = int(raw)
+    return await _go_after_repeat(update, context, lang)
+
+
+async def receive_schedule_reminder_ask(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data.endswith(":0"):
+        context.user_data["schedule_reminder_minutes"] = 0
+        context.user_data["schedule_reminder_configured"] = False
+        _set_wizard_back(context, DEST_TYPE)
+        return await _prompt_dest_step(update, context, lang)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t("schedule_reminder_minutes_prompt", lang),
+        reply_markup=_wizard(lang),
+    )
+    _set_wizard_back(context, SCHEDULE_REMINDER_MINUTES)
+    return SCHEDULE_REMINDER_MINUTES
+
+
+async def receive_schedule_reminder_minutes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (update.effective_message.text or "").strip()
+    if raw in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return SCHEDULE_REMINDER_MINUTES
+    if not raw.isdigit() or int(raw) < 1:
+        await update.effective_message.reply_text(
+            t("schedule_reminder_minutes_invalid", lang)
+        )
+        return SCHEDULE_REMINDER_MINUTES
+    context.user_data["schedule_reminder_minutes"] = int(raw)
+    context.user_data["schedule_reminder_configured"] = True
     _set_wizard_back(context, DEST_TYPE)
     return await _prompt_dest_step(update, context, lang)
 
@@ -1568,6 +1771,99 @@ async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE)
     owner_id = update.effective_user.id
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(sub_id, owner_id, delay_minutes=delay_minutes):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def start_edit_schedule_reminder(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub or not sub.schedule_reminder_configured:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+
+    has_schedule = True
+    try:
+        has_schedule = await asyncio.to_thread(
+            twitch.has_channel_schedule, sub.twitch_user_id
+        )
+    except Exception:
+        logger.exception(
+            "Twitch schedule check failed for edit sub %s", sub.twitch_user_id
+        )
+        # ponytail: on API failure keep current setting; only disable on confirmed 404/absent
+        has_schedule = True
+
+    if not has_schedule:
+        db.update_subscription(
+            sub_id, query.from_user.id, schedule_reminder_minutes=0
+        )
+        await query.edit_message_text(
+            t("edit_schedule_reminder_no_schedule", lang),
+        )
+        await context.bot.send_message(
+            query.from_user.id,
+            t("edit_updated", lang, sub_id=_owner_sub_number(db, query.from_user.id, sub_id)),
+            reply_markup=_menu(lang, query.from_user.id),
+        )
+        return ConversationHandler.END
+
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    current = _schedule_reminder_current_label(sub.schedule_reminder_minutes, lang)
+    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t(
+            "edit_schedule_reminder_prompt",
+            lang,
+            sub_id=sub_num,
+            current=current,
+        ),
+        reply_markup=_wizard(lang, back=False),
+    )
+    return EDIT_SCHEDULE_REMINDER
+
+
+async def receive_edit_schedule_reminder(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    raw = (update.effective_message.text or "").strip()
+    if raw in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return EDIT_SCHEDULE_REMINDER
+    if not raw.isdigit():
+        await update.effective_message.reply_text(
+            t("edit_schedule_reminder_invalid", lang)
+        )
+        return EDIT_SCHEDULE_REMINDER
+
+    minutes = int(raw)
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    if not db.update_subscription(
+        sub_id, owner_id, schedule_reminder_minutes=minutes
+    ):
         await update.effective_message.reply_text(t("sub_not_found", lang))
     else:
         await update.effective_message.reply_text(
@@ -1879,6 +2175,13 @@ async def _finish_subscription(
                 or bool(data.get("image_file_id")),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
+                schedule_reminder_minutes=int(
+                    data.get("schedule_reminder_minutes", 0)
+                ),
+                schedule_reminder_configured=bool(
+                    data.get("schedule_reminder_configured")
+                )
+                or int(data.get("schedule_reminder_minutes", 0)) > 0,
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
@@ -1955,6 +2258,12 @@ async def _finish_subscription(
             if suppress > 0
             else t("repeat_yes_note", lang)
         )
+        remind = int(data.get("schedule_reminder_minutes", 0))
+        schedule_reminder_note = (
+            t("schedule_reminder_yes_note", lang, minutes=remind)
+            if remind > 0
+            else t("schedule_reminder_no_note", lang)
+        )
         user_sub_num = _owner_sub_number(db, owner_id, sub_id)
         text = t(
             "setup_done",
@@ -1970,6 +2279,7 @@ async def _finish_subscription(
             ignore_keywords_note=ignore_keywords_note,
             delay_note=delay_note,
             repeat_note=repeat_note,
+            schedule_reminder_note=schedule_reminder_note,
         )
         try:
             await _deliver_alert_content(
@@ -2739,6 +3049,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             dest_type=sub.dest_type,
             delete_previous=sub.delete_previous,
             has_image=bool(sub.image_file_id),
+            schedule_reminder_configured=sub.schedule_reminder_configured,
         ),
     )
 
@@ -2758,9 +3069,15 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text("✓")
     await context.bot.send_message(
         query.from_user.id,
-        t("edit_template_prompt", lang, sub_id=sub_num),
+        t(
+            "edit_template_prompt",
+            lang,
+            sub_id=sub_num,
+            placeholders_link=placeholders_link_html(lang),
+        ),
         parse_mode=ParseMode.HTML,
         reply_markup=_wizard(lang, back=False),
+        disable_web_page_preview=True,
     )
     return EDIT_TEMPLATE
 
@@ -2914,6 +3231,7 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 dest_type=sub.dest_type,
                 delete_previous=sub.delete_previous,
                 has_image=bool(sub.image_file_id),
+                schedule_reminder_configured=sub.schedule_reminder_configured,
             ),
         )
         return
@@ -3949,7 +4267,9 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     title = stream.get("title", "")
     if should_ignore_stream(sub.ignore_keywords, game, title):
         return
-    text = render_template(sub.message_template, username, game, title)
+    text = render_template(
+        sub.message_template, username, game, title, stream=stream
+    )
     await _send_notification(context.bot, db, sub, text)
 
 
@@ -3992,8 +4312,80 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     name=f"delay_{sub.id}",
                 )
                 continue
-            text = render_template(sub.message_template, username, game, title)
+            text = render_template(
+                sub.message_template, username, game, title, stream=stream
+            )
             await _send_notification(context.bot, db, sub, text)
+
+
+def _parse_segment_start(segment: dict) -> datetime | None:
+    raw = segment.get("start_time")
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    user_ids = db.get_unique_schedule_reminder_twitch_ids()
+    if not user_ids:
+        return
+    now = datetime.now(timezone.utc)
+    for uid in user_ids:
+        try:
+            segments = await asyncio.to_thread(twitch.get_schedule_segments, uid)
+        except Exception:
+            logger.exception("Twitch schedule poll failed for %s", uid)
+            continue
+        for sub in db.get_enabled_by_twitch_user_id(uid):
+            remind_before = int(sub.schedule_reminder_minutes or 0)
+            if remind_before <= 0:
+                continue
+            for segment in segments:
+                if segment.get("canceled_until"):
+                    continue
+                seg_id = str(segment.get("id") or "")
+                if not seg_id or seg_id == sub.last_schedule_reminder_segment_id:
+                    continue
+                start = _parse_segment_start(segment)
+                if start is None or start <= now:
+                    continue
+                minutes_left = int((start - now).total_seconds() // 60)
+                if minutes_left > remind_before:
+                    continue
+                username = sub.twitch_username
+                title = str(segment.get("title") or "—")
+                lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                text = t(
+                    "schedule_reminder_alert",
+                    lang,
+                    username=username,
+                    minutes=max(1, minutes_left),
+                    title=title,
+                )
+                try:
+                    send_kwargs: dict = {
+                        "chat_id": sub.chat_id,
+                        "text": text,
+                        "disable_web_page_preview": True,
+                    }
+                    if sub.thread_id:
+                        send_kwargs["message_thread_id"] = sub.thread_id
+                    await context.bot.send_message(**send_kwargs)
+                except (BadRequest, Forbidden) as exc:
+                    logger.warning(
+                        "Schedule reminder failed for sub %s: %s", sub.id, exc
+                    )
+                    continue
+                db.set_last_schedule_reminder_segment(sub.id, seg_id)
+                break
 
 
 def live_transitions(
@@ -4263,6 +4655,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
             CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
             CallbackQueryHandler(start_edit_repeat, pattern=r"^edit_f:\d+:repeat$"),
+            CallbackQueryHandler(
+                start_edit_schedule_reminder, pattern=r"^edit_f:\d+:sched_remind$"
+            ),
             CallbackQueryHandler(start_edit_repeat_mute, pattern=r"^edit_set:\d+:repeat:0$"),
         ],
         states={
@@ -4270,6 +4665,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CHANNEL: [
                 _wiz_cancel,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel),
+            ],
+            CHANNEL_DUP: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_channel_dup, pattern=r"^dup:(edit:\d+|continue)$"
+                ),
             ],
             TEMPLATE: [
                 _wiz_cancel,
@@ -4338,6 +4740,20 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_repeat_mute_minutes),
             ],
+            SCHEDULE_REMINDER_ASK: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_schedule_reminder_ask, pattern=r"^sched_remind:"
+                ),
+            ],
+            SCHEDULE_REMINDER_MINUTES: [
+                _wiz_cancel,
+                _wiz_back,
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_schedule_reminder_minutes
+                ),
+            ],
             EDIT_TEMPLATE: [
                 _wiz_cancel,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template),
@@ -4356,6 +4772,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             EDIT_REPEAT: [
                 _wiz_cancel,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_repeat),
+            ],
+            EDIT_SCHEDULE_REMINDER: [
+                _wiz_cancel,
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_edit_schedule_reminder
+                ),
             ],
             DEST_TYPE: [
                 _wiz_cancel,
@@ -4516,6 +4938,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     from config import CHECK_INTERVAL
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
+    app.job_queue.run_repeating(check_schedule_reminders, interval=60, first=25)
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
     app.job_queue.run_repeating(

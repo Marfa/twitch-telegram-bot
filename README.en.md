@@ -12,11 +12,12 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
 | Destinations | DM, channel, group or community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
-| Message template | Custom text with `{username}`, `{game}`, `{name}` |
+| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delay after go-live | Send notification N minutes after stream start |
 | Repeat suppression | Skip repeat alerts for X minutes after the first one |
+| Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
@@ -57,17 +58,21 @@ On first `/start` the bot asks you to choose a language (Russian or English).
 
 `/start` or **➕ New subscription** — setup wizard:
 
-1. Twitch channel
+1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
 3. Image (add / skip; if added — position: start or end of caption)
-4. Link preview (skipped when an image is set)
-5. Delay notification after stream start (yes/no, minutes)
-6. Allow repeat notifications (yes/no; if no — mute minutes)
-7. Destination: DM / channel / group or community
-8. For channel or group — add the bot and confirm the chat
-9. Delete previous bot message on each new stream? (yes/no)
+4. Ignore keywords (optional)
+5. Link preview (skipped when an image is set)
+6. Delay notification after stream start (yes/no, minutes)
+7. Allow repeat notifications (yes/no; if no — mute minutes)
+8. Twitch schedule reminders (if the streamer has a schedule)
+9. Destination: DM / channel / group or community
+10. For channel or group — add the bot and confirm the chat
+11. Delete previous bot message on each new stream? (yes/no)
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
+
+**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`).
 
 **🎲 I'm feeling lucky** builds a template with placeholders. Chain: **Groq** (if keyed) → on failure **Hugging Face** → if both are down, a random template from the local DB pool (up to 100 recent successful generations per language). The Example block fills in a random [IGDB](https://api-docs.igdb.com/) game (same Twitch API credentials) and a stream title derived from it. After preview: continue, try again, or full wizard.
 
@@ -132,7 +137,7 @@ Dates and month names follow the user’s language.
 | ↳ 📊 Statistics | Users, subscriptions, languages |
 | 🐛 Report a problem | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
 
-**Edit subscription** — template, image (add / update / delete), destination, delay, repeats, delete old messages, link preview (hidden when an image is set).
+**Edit subscription** — same order as creation: template, image, ignore keywords, link preview (hidden when an image is set), delay, repeats, schedule reminders (if enabled at creation), destination, delete old messages.
 
 Notification template example:
 
@@ -171,7 +176,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `DATABASE_URL` | PostgreSQL. If unset — SQLite (`compose.vps.yml` sets it) |
 | `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
-| `PUBLIC_BASE_URL` | Public HTTPS origin for OAuth (`…/oauth/twitch/callback`) |
+| `PUBLIC_BASE_URL` | Public HTTPS origin: OAuth (`…/oauth/twitch/callback`) and placeholder docs (`…/placeholders`). Prod: `https://bot.themarfa.name` |
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
@@ -192,7 +197,7 @@ Without Groq/HF keys, **I'm feeling lucky** still works from the local template 
 | `twitch.py` | Helix API, templates |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health` + Twitch OAuth callback |
+| `health.py` | `/health`, `/placeholders`, Twitch OAuth callback |
 | `db.py` | SQLite or PostgreSQL, `lucky_templates` pool |
 
 Twitch Helix poll ~60 s, Telegram polling, no public webhook.

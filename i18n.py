@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from datetime import date, datetime, timedelta, timezone
 
 from telegram import (
@@ -78,16 +79,46 @@ _STRINGS: dict[str, dict[str, str]] = {
         "channel_not_found": 'Channel "{username}" not found on Twitch. Try again.',
         "channel_found": (
             "Channel: {display_name}\n\n"
-            "Set the message format. Available placeholders:\n"
+            "Set the message format. Example placeholders:\n"
             "• <code>{{username}}</code> — channel name\n"
             "• <code>{{game}}</code> — stream category\n"
             "• <code>{{name}}</code> — stream title\n\n"
+            "Full list: {placeholders_link}\n\n"
             "Example:\n"
             "<code>{{username}} is live!\n"
             "{{name}}\n"
             "Category: {{game}}</code>\n\n"
             "You can add an image on the next step"
         ),
+        "placeholders_link_label": "full list",
+        "placeholders_link_unavailable": "not available on this server",
+        "placeholders_page_title": "Message placeholders",
+        "placeholders_page_intro": (
+            "Use these keywords in the notification template "
+            "(curly braces required):"
+        ),
+        "placeholders_page_body": (
+            "<ul>"
+            "<li><code>{username}</code> — channel login</li>"
+            "<li><code>{game}</code> — stream category name</li>"
+            "<li><code>{name}</code> — stream title</li>"
+            "<li><code>{started_at}</code> — stream start time (UTC)</li>"
+            "<li><code>{viewer_count}</code> — viewers at poll time</li>"
+            "<li><code>{thumbnail_url}</code> — preview image URL</li>"
+            "<li><code>{tags}</code> — stream tags</li>"
+            "<li><code>{language}</code> — stream language</li>"
+            "<li><code>{is_mature}</code> — 18+ flag</li>"
+            "<li><code>{game_id}</code> — category ID</li>"
+            "<li><code>{id}</code> — stream ID</li>"
+            "<li><code>{type}</code> — usually live</li>"
+            "</ul>"
+        ),
+        "channel_dup_prompt": (
+            "An alert for this streamer is already set up. "
+            "Open the editor or continue creating a new one?"
+        ),
+        "channel_dup_edit": "✏️ Open editor",
+        "channel_dup_continue": "➡️ Continue",
         "lucky_btn": "🎲 I'm feeling lucky",
         "lucky_hint": "Or generate a template automatically:",
         "lucky_generating": "Generating a template…",
@@ -118,7 +149,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "template_typo_item": "• <code>{found}</code> → <code>{suggested}</code>",
         "template_typo_resend": (
             "Send a corrected message template.\n\n"
-            "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
+            "Example: <code>{{username}}</code>, <code>{{game}}</code>, "
+            "<code>{{name}}</code>\n"
+            "Full list: {placeholders_link}"
         ),
         "ignore_keywords_prompt": (
             "<b>Ignore keywords</b>\n\n"
@@ -145,6 +178,24 @@ _STRINGS: dict[str, dict[str, str]] = {
         "repeat_mute_invalid": "Enter a positive number of minutes, e.g. 30.",
         "repeat_yes_note": "Repeat notifications: yes",
         "repeat_no_note": "Suppress repeats: {minutes} min after first alert",
+        "schedule_reminder_prompt": (
+            "This streamer has a Twitch schedule. Set reminders for upcoming streams?"
+        ),
+        "schedule_reminder_yes": "✅ Yes",
+        "schedule_reminder_no": "❌ No",
+        "schedule_reminder_minutes_prompt": (
+            "How many minutes before the stream should I remind you?"
+        ),
+        "schedule_reminder_minutes_invalid": (
+            "Enter a positive number of minutes, e.g. 30."
+        ),
+        "schedule_reminder_yes_note": "Stream reminder: {minutes} min before",
+        "schedule_reminder_no_note": "Stream reminder: no",
+        "schedule_reminder_alert": (
+            "⏰ {username} is scheduled to go live in {minutes} min.\n"
+            "{title}\n"
+            "https://twitch.tv/{username}"
+        ),
         "sub_list_dest": "• Destination: {dest} ({chat_id})",
         "sub_list_thread": "• Topic: {thread_id}",
         "sub_list_delete_yes": "• Delete old messages: yes",
@@ -156,6 +207,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_delay_none": "• Delayed send: no",
         "sub_list_repeat_allow": "• Repeat notifications: allowed",
         "sub_list_repeat_mute": "• Repeat notifications: suppress {minutes} min",
+        "sub_list_schedule_reminder": "• Stream reminder: {minutes} min before",
+        "sub_list_schedule_reminder_none": "• Stream reminder: no",
         "sub_list_ignore_yes": "• Ignore keywords: {keywords}",
         "sub_list_ignore_no": "• Ignore keywords: none",
         "sub_list_image_no": "• Image: none",
@@ -246,6 +299,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{preview_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n"
+            "{schedule_reminder_note}\n"
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n\n"
             "When {twitch_username} goes live — I'll send a notification.\n"
@@ -399,6 +453,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_link_preview": "🔗 Link preview",
         "edit_delay": "⏱ Delay send",
         "edit_repeat": "🔁 Repeat notifications",
+        "edit_schedule_reminder": "📅 Stream reminders",
+        "edit_schedule_reminder_prompt": (
+            "Subscription #{sub_id}\n"
+            "Current: {current}\n\n"
+            "Enter minutes before stream start (0 — disable reminders):"
+        ),
+        "edit_schedule_reminder_current_off": "off",
+        "edit_schedule_reminder_current": "{minutes} min before",
+        "edit_schedule_reminder_invalid": "Enter 0 or a positive number of minutes.",
+        "edit_schedule_reminder_no_schedule": (
+            "This streamer no longer has a Twitch schedule.\n"
+            "Schedule reminders have been disabled."
+        ),
         "edit_repeat_menu": "If the stream is interrupted, repeat notifications will not be sent.",
         "edit_repeat_mute_prompt": (
             "Subscription #{sub_id}\n"
@@ -410,7 +477,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_repeat_invalid": "Enter 0 or a positive number of minutes.",
         "edit_template_prompt": (
             "Send a new message template for subscription #{sub_id}.\n\n"
-            "Placeholders: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
+            "Example placeholders:\n"
+            "• <code>{{username}}</code> — channel name\n"
+            "• <code>{{game}}</code> — stream category\n"
+            "• <code>{{name}}</code> — stream title\n\n"
+            "Full list: {placeholders_link}"
         ),
         "edit_ignore_keywords_prompt": (
             "Subscription #{sub_id}\n"
@@ -578,16 +649,46 @@ _STRINGS: dict[str, dict[str, str]] = {
         "channel_not_found": "Канал «{username}» не найден на Twitch. Попробуйте ещё раз.",
         "channel_found": (
             "Канал: {display_name}\n\n"
-            "Задайте формат сообщения. Доступные ключевые слова:\n"
+            "Задайте формат сообщения. Пример ключевых слов:\n"
             "• <code>{{username}}</code> — имя канала\n"
             "• <code>{{game}}</code> — категория стрима\n"
             "• <code>{{name}}</code> — название стрима\n\n"
+            "Полный список: {placeholders_link}\n\n"
             "Пример:\n"
             "<code>{{username}} в эфире!\n"
             "{{name}}\n"
             "Категория: {{game}}</code>\n\n"
             "Изображение можно добавить на следующем шаге"
         ),
+        "placeholders_link_label": "полный список",
+        "placeholders_link_unavailable": "недоступен на этом сервере",
+        "placeholders_page_title": "Ключевые слова шаблона",
+        "placeholders_page_intro": (
+            "Используйте эти ключевые слова в шаблоне уведомления "
+            "(обязательны фигурные скобки):"
+        ),
+        "placeholders_page_body": (
+            "<ul>"
+            "<li><code>{username}</code> — логин канала</li>"
+            "<li><code>{game}</code> — название категории</li>"
+            "<li><code>{name}</code> — название стрима</li>"
+            "<li><code>{started_at}</code> — время старта (UTC)</li>"
+            "<li><code>{viewer_count}</code> — зрители на момент запроса</li>"
+            "<li><code>{thumbnail_url}</code> — URL превью кадра</li>"
+            "<li><code>{tags}</code> — теги стрима</li>"
+            "<li><code>{language}</code> — язык стрима</li>"
+            "<li><code>{is_mature}</code> — метка 18+</li>"
+            "<li><code>{game_id}</code> — ID категории</li>"
+            "<li><code>{id}</code> — ID стрима</li>"
+            "<li><code>{type}</code> — обычно live</li>"
+            "</ul>"
+        ),
+        "channel_dup_prompt": (
+            "Уже есть настроенное оповещение для этого стримера. "
+            "Хотите перейти к редактированию или продолжить?"
+        ),
+        "channel_dup_edit": "✏️ Перейти к редактированию",
+        "channel_dup_continue": "➡️ Продолжить",
         "lucky_btn": "🎲 Мне повезёт",
         "lucky_hint": "Или сгенерировать шаблон автоматически:",
         "lucky_generating": "Генерирую шаблон…",
@@ -618,7 +719,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "template_typo_item": "• <code>{found}</code> → <code>{suggested}</code>",
         "template_typo_resend": (
             "Отправьте исправленный шаблон сообщения.\n\n"
-            "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
+            "Пример: <code>{{username}}</code>, <code>{{game}}</code>, "
+            "<code>{{name}}</code>\n"
+            "Полный список: {placeholders_link}"
         ),
         "ignore_keywords_prompt": (
             "<b>Игнорировать ключевые слова</b>\n\n"
@@ -645,6 +748,24 @@ _STRINGS: dict[str, dict[str, str]] = {
         "repeat_mute_invalid": "Введите положительное число минут, например 30.",
         "repeat_yes_note": "Повторные уведомления: да",
         "repeat_no_note": "Заглушка повторов: {minutes} мин. после первого",
+        "schedule_reminder_prompt": (
+            "У стримера есть расписание. Настроить напоминания о предстоящих стримах?"
+        ),
+        "schedule_reminder_yes": "✅ Да",
+        "schedule_reminder_no": "❌ Нет",
+        "schedule_reminder_minutes_prompt": (
+            "За сколько минут напомнить до начала стрима?"
+        ),
+        "schedule_reminder_minutes_invalid": (
+            "Введите положительное число минут, например 30."
+        ),
+        "schedule_reminder_yes_note": "Напоминание о стриме: за {minutes} мин.",
+        "schedule_reminder_no_note": "Напоминание о стриме: нет",
+        "schedule_reminder_alert": (
+            "⏰ Через {minutes} мин. стрим {username}\n"
+            "{title}\n"
+            "https://twitch.tv/{username}"
+        ),
         "sub_list_dest": "• Куда: {dest} ({chat_id})",
         "sub_list_thread": "• Тема: {thread_id}",
         "sub_list_delete_yes": "• Удалять старые: да",
@@ -656,6 +777,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_delay_none": "• Отложенная отправка: нет",
         "sub_list_repeat_allow": "• Повторные уведомления: разрешены",
         "sub_list_repeat_mute": "• Повторные уведомления: заглушка {minutes} мин.",
+        "sub_list_schedule_reminder": "• Напоминание о стриме: за {minutes} мин.",
+        "sub_list_schedule_reminder_none": "• Напоминание о стриме: нет",
         "sub_list_ignore_yes": "• Игнорировать ключевые слова: {keywords}",
         "sub_list_ignore_no": "• Игнорировать ключевые слова: нет",
         "sub_list_image_no": "• Изображение: нет",
@@ -749,6 +872,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{preview_note}\n"
             "{delay_note}\n"
             "{repeat_note}\n"
+            "{schedule_reminder_note}\n"
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n\n"
             "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n"
@@ -902,6 +1026,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_link_preview": "🔗 Превью ссылок",
         "edit_delay": "⏱ Задержка отправки",
         "edit_repeat": "🔁 Повторные уведомления",
+        "edit_schedule_reminder": "📅 Напоминания о стримах",
+        "edit_schedule_reminder_prompt": (
+            "Подписка #{sub_id}\n"
+            "Сейчас: {current}\n\n"
+            "Укажите за сколько минут напомнить до стрима (0 — отключить):"
+        ),
+        "edit_schedule_reminder_current_off": "выкл.",
+        "edit_schedule_reminder_current": "за {minutes} мин.",
+        "edit_schedule_reminder_invalid": "Введите 0 или положительное число минут.",
+        "edit_schedule_reminder_no_schedule": (
+            "У стримера больше нет расписания на Twitch.\n"
+            "Напоминания по расписанию отключены."
+        ),
         "edit_repeat_menu": "Если стрим прервался, повторные уведомления не будут отправляться",
         "edit_repeat_mute_prompt": (
             "Подписка #{sub_id}\n"
@@ -913,7 +1050,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_repeat_invalid": "Введите 0 или положительное число минут.",
         "edit_template_prompt": (
             "Отправьте новый шаблон для подписки #{sub_id}.\n\n"
-            "Ключевые слова: <code>{{username}}</code>, <code>{{game}}</code>, <code>{{name}}</code>"
+            "Пример ключевых слов:\n"
+            "• <code>{{username}}</code> — имя канала\n"
+            "• <code>{{game}}</code> — категория стрима\n"
+            "• <code>{{name}}</code> — название стрима\n\n"
+            "Полный список: {placeholders_link}"
         ),
         "edit_ignore_keywords_prompt": (
             "Подписка #{sub_id}\n"
@@ -1021,6 +1162,42 @@ def t(key: str, lang: str, **kwargs: object) -> str:
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     text = _STRINGS[locale].get(key) or _STRINGS[DEFAULT_LOCALE][key]
     return text.format(**kwargs) if kwargs else text
+
+
+def placeholders_list_url(lang: str) -> str:
+    from config import PUBLIC_BASE_URL
+
+    if not PUBLIC_BASE_URL:
+        return ""
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    return f"{PUBLIC_BASE_URL}/placeholders?lang={loc}"
+
+
+def placeholders_link_html(lang: str) -> str:
+    url = placeholders_list_url(lang)
+    if not url:
+        return html.escape(t("placeholders_link_unavailable", lang))
+    label = html.escape(t("placeholders_link_label", lang))
+    return f'<a href="{html.escape(url)}">{label}</a>'
+
+
+def channel_dup_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("channel_dup_edit", lang),
+                    callback_data=f"dup:edit:{sub_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("channel_dup_continue", lang),
+                    callback_data="dup:continue",
+                )
+            ],
+        ]
+    )
 
 
 def btn(key: str, lang: str) -> str:
@@ -1232,6 +1409,25 @@ def repeat_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("repeat_yes", lang), callback_data="repeat:1")],
             [InlineKeyboardButton(t("repeat_no", lang), callback_data="repeat:0")],
+        ]
+    )
+
+
+def schedule_reminder_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("schedule_reminder_yes", lang),
+                    callback_data="sched_remind:1",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("schedule_reminder_no", lang),
+                    callback_data="sched_remind:0",
+                )
+            ],
         ]
     )
 
@@ -1534,7 +1730,10 @@ def edit_options_keyboard(
     dest_type: str = "dm",
     delete_previous: bool = False,
     has_image: bool = False,
+    schedule_reminder_configured: bool = False,
 ) -> InlineKeyboardMarkup:
+    # Same order as create wizard: template → image → ignore → preview → delay
+    # → repeat → schedule reminder → dest → delete.
     image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
     rows = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
@@ -1560,8 +1759,19 @@ def edit_options_keyboard(
         [
             [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
             [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
-            [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")],
         ]
+    )
+    if schedule_reminder_configured:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("edit_schedule_reminder", lang),
+                    callback_data=f"edit_f:{sub_id}:sched_remind",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")]
     )
     if dest_type != "dm":
         rows.append(

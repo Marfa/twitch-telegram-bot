@@ -187,6 +187,24 @@ def _html_page(title: str, message: str) -> bytes:
     ).encode("utf-8")
 
 
+def _placeholders_page(lang: str) -> bytes:
+    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, t
+
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    title = html.escape(t("placeholders_page_title", loc))
+    intro = html.escape(t("placeholders_page_intro", loc))
+    # Body already contains safe HTML tags from i18n; tokens use literal braces.
+    body = t("placeholders_page_body", loc)
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "</head><body style='font-family:sans-serif;max-width:40rem;"
+        "margin:2rem auto;padding:0 1rem;line-height:1.5'>"
+        f"<h1>{title}</h1><p>{intro}</p>{body}</body></html>"
+    ).encode("utf-8")
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     def _path_only(self) -> str:
         return urlparse(self.path).path
@@ -201,6 +219,16 @@ class _HealthHandler(BaseHTTPRequestHandler):
             status, body, content_type = _handle_twitch_oauth(query)
             self.send_response(status)
             self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/placeholders":
+            query = parse_qs(urlparse(self.path).query)
+            lang = (query.get("lang") or ["en"])[0]
+            body = _placeholders_page(lang)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

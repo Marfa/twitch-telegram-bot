@@ -169,11 +169,14 @@ class Subscription:
     disable_link_preview: bool
     delay_minutes: int
     suppress_repeat_minutes: int
+    schedule_reminder_minutes: int
+    schedule_reminder_configured: bool
     ignore_keywords: str
     image_file_id: str | None
     image_position: str
     notify_cooldown_until: str | None
     last_message_id: int | None
+    last_schedule_reminder_segment_id: str | None
     from_twitch_sync: bool
 
 
@@ -236,6 +239,12 @@ def _row_to_sub(row: Any) -> Subscription:
         disable_link_preview=bool(row["disable_link_preview"]),
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
+        schedule_reminder_minutes=int(row["schedule_reminder_minutes"] or 0)
+        if "schedule_reminder_minutes" in keys
+        else 0,
+        schedule_reminder_configured=bool(row["schedule_reminder_configured"])
+        if "schedule_reminder_configured" in keys
+        else False,
         ignore_keywords=str(row["ignore_keywords"] or ""),
         image_file_id=image_file_id,
         image_position=image_position if image_file_id else "",
@@ -246,6 +255,12 @@ def _row_to_sub(row: Any) -> Subscription:
             else row["notify_cooldown_until"]
         ),
         last_message_id=row["last_message_id"],
+        last_schedule_reminder_segment_id=(
+            str(row["last_schedule_reminder_segment_id"])
+            if "last_schedule_reminder_segment_id" in keys
+            and row["last_schedule_reminder_segment_id"]
+            else None
+        ),
         from_twitch_sync=bool(row["from_twitch_sync"])
         if "from_twitch_sync" in keys
         else False,
@@ -298,6 +313,8 @@ class Database(Protocol):
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
+        schedule_reminder_minutes: int = 0,
+        schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
@@ -309,11 +326,17 @@ class Database(Protocol):
 
     def set_notify_cooldown(self, sub_id: int, minutes: int) -> None: ...
 
+    def set_last_schedule_reminder_segment(
+        self, sub_id: int, segment_id: str
+    ) -> None: ...
+
     def get_subscription_by_id(self, sub_id: int) -> Subscription | None: ...
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]: ...
 
     def get_subscription(self, sub_id: int, owner_id: int) -> Subscription | None: ...
+
+    def get_unique_schedule_reminder_twitch_ids(self) -> list[str]: ...
 
     def toggle_subscription(self, sub_id: int, owner_id: int) -> bool | None: ...
 
@@ -515,6 +538,27 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN from_twitch_sync INTEGER NOT NULL DEFAULT 0"
             )
+        if "schedule_reminder_minutes" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN schedule_reminder_minutes "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_schedule_reminder_segment_id" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN last_schedule_reminder_segment_id TEXT"
+            )
+        if "schedule_reminder_configured" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN schedule_reminder_configured "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET schedule_reminder_configured = 1
+                WHERE schedule_reminder_minutes > 0
+                """
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -586,6 +630,8 @@ class SqliteDatabase:
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
+        schedule_reminder_minutes: int = 0,
+        schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
@@ -599,9 +645,10 @@ class SqliteDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    delay_minutes, suppress_repeat_minutes, ignore_keywords,
+                    delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
+                    schedule_reminder_configured, ignore_keywords,
                     image_file_id, image_position, enabled, from_twitch_sync
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -616,6 +663,8 @@ class SqliteDatabase:
                     int(disable_link_preview),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
+                    max(0, int(schedule_reminder_minutes)),
+                    int(bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0),
                     ignore_keywords,
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
@@ -649,6 +698,13 @@ class SqliteDatabase:
             conn.execute(
                 "UPDATE subscriptions SET notify_cooldown_until = ? WHERE id = ?",
                 (until_iso, sub_id),
+            )
+
+    def set_last_schedule_reminder_segment(self, sub_id: int, segment_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE subscriptions SET last_schedule_reminder_segment_id = ? WHERE id = ?",
+                (segment_id, sub_id),
             )
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]:
@@ -707,6 +763,8 @@ class SqliteDatabase:
             "disable_link_preview",
             "delay_minutes",
             "suppress_repeat_minutes",
+            "schedule_reminder_minutes",
+            "schedule_reminder_configured",
             "ignore_keywords",
             "image_file_id",
             "image_position",
@@ -717,9 +775,18 @@ class SqliteDatabase:
             if key not in allowed:
                 continue
             updates.append(f"{key} = ?")
-            if key in ("delete_previous", "notify_delete_fail", "disable_link_preview"):
+            if key in (
+                "delete_previous",
+                "notify_delete_fail",
+                "disable_link_preview",
+                "schedule_reminder_configured",
+            ):
                 values.append(int(bool(value)))
-            elif key in ("delay_minutes", "suppress_repeat_minutes"):
+            elif key in (
+                "delay_minutes",
+                "suppress_repeat_minutes",
+                "schedule_reminder_minutes",
+            ):
                 values.append(max(0, int(value)))
             elif key == "ignore_keywords":
                 values.append(str(value or ""))
@@ -764,6 +831,17 @@ class SqliteDatabase:
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
                 WHERE enabled = 1
+                """
+            ).fetchall()
+        return [r["twitch_user_id"] for r in rows]
+
+    def get_unique_schedule_reminder_twitch_ids(self) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT twitch_user_id
+                FROM subscriptions
+                WHERE enabled = 1 AND schedule_reminder_minutes > 0
                 """
             ).fetchall()
         return [r["twitch_user_id"] for r in rows]
@@ -1420,6 +1498,33 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS schedule_reminder_minutes INTEGER NOT NULL DEFAULT 0
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS last_schedule_reminder_segment_id TEXT
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS schedule_reminder_configured
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                UPDATE subscriptions
+                SET schedule_reminder_configured = TRUE
+                WHERE schedule_reminder_minutes > 0
+                  AND schedule_reminder_configured = FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -1499,6 +1604,8 @@ class PostgresDatabase:
         disable_link_preview: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
+        schedule_reminder_minutes: int = 0,
+        schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
@@ -1513,9 +1620,10 @@ class PostgresDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    delay_minutes, suppress_repeat_minutes, ignore_keywords,
+                    delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
+                    schedule_reminder_configured, ignore_keywords,
                     image_file_id, image_position, enabled, from_twitch_sync
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1531,6 +1639,8 @@ class PostgresDatabase:
                     disable_link_preview,
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
+                    max(0, int(schedule_reminder_minutes)),
+                    bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0,
                     ignore_keywords,
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
@@ -1569,6 +1679,14 @@ class PostgresDatabase:
             cur.execute(
                 "UPDATE subscriptions SET notify_cooldown_until = %s WHERE id = %s",
                 (until_iso, sub_id),
+            )
+
+    def set_last_schedule_reminder_segment(self, sub_id: int, segment_id: str) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE subscriptions SET last_schedule_reminder_segment_id = %s WHERE id = %s",
+                (segment_id, sub_id),
             )
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]:
@@ -1634,6 +1752,8 @@ class PostgresDatabase:
             "disable_link_preview",
             "delay_minutes",
             "suppress_repeat_minutes",
+            "schedule_reminder_minutes",
+            "schedule_reminder_configured",
             "ignore_keywords",
             "image_file_id",
             "image_position",
@@ -1644,9 +1764,18 @@ class PostgresDatabase:
             if key not in allowed:
                 continue
             updates.append(f"{key} = %s")
-            if key in ("delete_previous", "notify_delete_fail", "disable_link_preview"):
+            if key in (
+                "delete_previous",
+                "notify_delete_fail",
+                "disable_link_preview",
+                "schedule_reminder_configured",
+            ):
                 values.append(bool(value))
-            elif key in ("delay_minutes", "suppress_repeat_minutes"):
+            elif key in (
+                "delay_minutes",
+                "suppress_repeat_minutes",
+                "schedule_reminder_minutes",
+            ):
                 values.append(max(0, int(value)))
             elif key == "ignore_keywords":
                 values.append(str(value or ""))
@@ -1697,6 +1826,19 @@ class PostgresDatabase:
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
                 WHERE enabled = TRUE
+                """
+            )
+            rows = cur.fetchall()
+        return [r["twitch_user_id"] for r in rows]
+
+    def get_unique_schedule_reminder_twitch_ids(self) -> list[str]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT DISTINCT twitch_user_id
+                FROM subscriptions
+                WHERE enabled = TRUE AND schedule_reminder_minutes > 0
                 """
             )
             rows = cur.fetchall()

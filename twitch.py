@@ -109,6 +109,36 @@ class TwitchClient:
         resp.raise_for_status()
         return {s["user_id"]: s for s in resp.json().get("data", [])}
 
+    def has_channel_schedule(self, broadcaster_id: str) -> bool:
+        """True if the broadcaster has a Twitch stream schedule (404 = none)."""
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/schedule",
+            headers=self._headers(),
+            params={"broadcaster_id": broadcaster_id, "first": 1},
+            timeout=15,
+        )
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        return True
+
+    def get_schedule_segments(
+        self, broadcaster_id: str, *, first: int = 20
+    ) -> list[dict[str, Any]]:
+        """Upcoming schedule segments; empty if no schedule."""
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/schedule",
+            headers=self._headers(),
+            params={"broadcaster_id": broadcaster_id, "first": max(1, min(25, first))},
+            timeout=15,
+        )
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        data = resp.json().get("data") or {}
+        segments = data.get("segments") or []
+        return [s for s in segments if isinstance(s, dict)]
+
     def build_authorize_url(self, *, redirect_uri: str, state: str) -> str:
         return "https://id.twitch.tv/oauth2/authorize?" + urlencode(
             {
@@ -277,17 +307,89 @@ def preview_stream_title(locale: str, game: str) -> str:
 def render_template(
     template: str,
     username: str,
+    game: str = "",
+    name: str = "",
+    stream: dict[str, Any] | None = None,
+) -> str:
+    """Fill template placeholders from channel + optional Helix stream payload."""
+    values = _template_values(username, game, name, stream)
+    out = template
+    # Longer keys first so {game_id} is not partially eaten by {game}.
+    for key in sorted(values, key=len, reverse=True):
+        out = out.replace(f"{{{key}}}", values[key])
+    return out
+
+
+def _template_values(
+    username: str,
     game: str,
     name: str,
-) -> str:
-    return (
-        template.replace("{username}", username)
-        .replace("{game}", game or "—")
-        .replace("{name}", name or "—")
-    )
+    stream: dict[str, Any] | None,
+) -> dict[str, str]:
+    values: dict[str, str] = {
+        "username": username or "",
+        "game": game or "—",
+        "name": name or "—",
+        "started_at": "—",
+        "viewer_count": "—",
+        "thumbnail_url": "—",
+        "tags": "—",
+        "language": "—",
+        "is_mature": "—",
+        "game_id": "—",
+        "id": "—",
+        "type": "—",
+    }
+    if not stream:
+        return values
+    started = stream.get("started_at")
+    if started:
+        values["started_at"] = str(started)
+    if stream.get("viewer_count") is not None:
+        values["viewer_count"] = str(stream.get("viewer_count"))
+    thumb = str(stream.get("thumbnail_url") or "")
+    if thumb:
+        values["thumbnail_url"] = thumb.replace("{width}", "480").replace(
+            "{height}", "270"
+        )
+    tags = stream.get("tags") or []
+    if isinstance(tags, list) and tags:
+        values["tags"] = ", ".join(str(t) for t in tags if t)
+    lang = stream.get("language")
+    if lang:
+        values["language"] = str(lang)
+    if "is_mature" in stream:
+        values["is_mature"] = "18+" if stream.get("is_mature") else "—"
+    if stream.get("game_id"):
+        values["game_id"] = str(stream.get("game_id"))
+    if stream.get("id"):
+        values["id"] = str(stream.get("id"))
+    if stream.get("type"):
+        values["type"] = str(stream.get("type"))
+    if stream.get("game_name") and not game:
+        values["game"] = str(stream.get("game_name"))
+    if stream.get("title") and not name:
+        values["name"] = str(stream.get("title"))
+    if stream.get("user_login") and not username:
+        values["username"] = str(stream.get("user_login"))
+    return values
 
 
-_TEMPLATE_PLACEHOLDERS = ("username", "game", "name")
+_TEMPLATE_PLACEHOLDERS = (
+    "username",
+    "game",
+    "name",
+    "started_at",
+    "viewer_count",
+    "thumbnail_url",
+    "tags",
+    "language",
+    "is_mature",
+    "game_id",
+    "id",
+    "type",
+)
+_KNOWN_PLACEHOLDER_TOKENS = frozenset(f"{{{p}}}" for p in _TEMPLATE_PLACEHOLDERS)
 # Brace-ish tokens: {game}, {game), (game}, [name}, {User_Name}, …
 _PLACEHOLDER_CANDIDATE_RE = re.compile(
     r"[{(\[]\s*([A-Za-z_][A-Za-z0-9_\-]*)\s*[})\]]"
@@ -302,7 +404,7 @@ def find_placeholder_typos(template: str) -> list[tuple[str, str]]:
         token = match.group(0)
         if "{" not in token and "}" not in token:
             continue
-        if token in ("{username}", "{game}", "{name}"):
+        if token in _KNOWN_PLACEHOLDER_TOKENS:
             continue
         if token in seen:
             continue
