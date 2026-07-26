@@ -225,9 +225,11 @@ def import_followed_as_subscriptions(
     template: str,
     limit: int,
     prune_missing: bool = False,
+    enabled: bool = False,
 ) -> tuple[int, int, int, int, list[Subscription]]:
-    """Create paused DM subscriptions from Helix followed channels.
+    """Create DM subscriptions from Helix followed channels.
 
+    Import path keeps enabled=False (paused). Periodic sync passes enabled=True.
     New rows are marked from_twitch_sync=True. When prune_missing=True, sync-origin
     subs absent from follows are deleted (manual subs never touched).
     Returns (imported, skipped, limited, removed, new_subs).
@@ -263,7 +265,7 @@ def import_followed_as_subscriptions(
             chat_id=owner_id,
             thread_id=None,
             disable_link_preview=False,
-            enabled=False,
+            enabled=enabled,
             from_twitch_sync=True,
         )
         sub = db.get_subscription(sub_id, owner_id)
@@ -2340,6 +2342,7 @@ async def _run_followed_import(
     followed: list[dict],
     *,
     prune_missing: bool = False,
+    enabled: bool = False,
 ) -> tuple[int, int, int, int, list[Subscription]]:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
@@ -2352,6 +2355,7 @@ async def _run_followed_import(
         template=t("import_default_template", lang),
         limit=MAX_SUBSCRIPTIONS_PER_OWNER,
         prune_missing=prune_missing,
+        enabled=enabled,
     )
 
 
@@ -2562,7 +2566,7 @@ async def on_sync_change_period(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Periodic job: add-only sync of Twitch follows for users with stored tokens."""
+    """Periodic job: sync Twitch follows; new channels are enabled by default."""
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
     db: Database = context.application.bot_data["db"]
@@ -2600,6 +2604,7 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
             template=t("import_default_template", lang),
             limit=MAX_SUBSCRIPTIONS_PER_OWNER,
             prune_missing=True,
+            enabled=True,
         )
         next_at = _next_sync_iso(row.period_days, from_dt=now)
         db.update_twitch_sync_tokens(

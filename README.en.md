@@ -86,8 +86,8 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 **⬇️ Import from Twitch** — Twitch OAuth, then choose **one-time import** or **sync**:
 
 - one-time — same as before, token not stored;
-- sync — period in days, refresh token stored encrypted; each run adds new follows and removes unfollowed imports (manual subscriptions untouched);
-- alerts are created **paused** (DM to self); Settings → **Subscription sync** (change period / disable).
+- sync — period in days, refresh token stored encrypted; each run adds new follows (**enabled**) and removes unfollowed imports (manual subscriptions untouched);
+- on import, alerts are created **paused** (DM to self); Settings → **Subscription sync** (change period / disable).
 
 Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (see `PUBLIC_BASE_URL`).
 

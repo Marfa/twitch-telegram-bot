@@ -273,7 +273,24 @@ def main() -> None:
         assert len(new_subs) == 1
         assert new_subs[0].twitch_username == "newbie"
         assert new_subs[0].from_twitch_sync is True
+        assert new_subs[0].enabled is False  # import stays paused
         assert paused.from_twitch_sync is False
+        # Sync path: new follows are enabled
+        imported_sync, _, _, _, sync_subs = import_followed_as_subscriptions(
+            db,
+            1,
+            [
+                {"broadcaster_id": "123", "broadcaster_login": CHANNEL},
+                {"broadcaster_id": "777", "broadcaster_login": "synced"},
+            ],
+            template=tr("import_default_template", "en"),
+            limit=25,
+            enabled=True,
+        )
+        assert imported_sync == 1 and len(sync_subs) == 1
+        assert sync_subs[0].twitch_username == "synced"
+        assert sync_subs[0].enabled is True
+        assert sync_subs[0].from_twitch_sync is True
         # Prune: remove sync-origin "newbie" when follows only keep CHANNEL
         imported2, skipped2, limited2, removed2, _ = import_followed_as_subscriptions(
             db,
@@ -283,8 +300,9 @@ def main() -> None:
             limit=25,
             prune_missing=True,
         )
-        assert imported2 == 0 and skipped2 == 1 and removed2 == 1
+        assert imported2 == 0 and skipped2 == 1 and removed2 == 2  # newbie + synced
         assert db.get_subscription(new_subs[0].id, 1) is None
+        assert db.get_subscription(sync_subs[0].id, 1) is None
         assert db.get_subscription(paused_id, 1) is not None  # manual kept
         assert db.enable_all_subscriptions(1) >= 1
         assert db.get_subscription(paused_id, 1).enabled is True
