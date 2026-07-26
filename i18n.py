@@ -135,6 +135,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "image_ask": "Add an image?",
         "image_add": "🖼 Add",
         "image_skip": "Skip ⏭",
+        "edit_image_prompt": "Change the image for this subscription?",
+        "edit_image_replace": "🖼 Replace",
+        "edit_image_keep": "Leave as is",
         "image_send_prompt": "Send an image to the bot.",
         "image_need_photo": "Please send an image (photo).",
         "image_position_prompt": "Show the image at the beginning or at the end of the post?",
@@ -705,6 +708,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "image_ask": "Добавить изображение?",
         "image_add": "🖼 Добавить",
         "image_skip": "Пропустить ⏭",
+        "edit_image_prompt": "Изменить изображение для этой подписки?",
+        "edit_image_replace": "🖼 Заменить",
+        "edit_image_keep": "Оставить как есть",
         "image_send_prompt": "Отправьте изображение боту",
         "image_need_photo": "Пожалуйста, отправьте изображение (фото).",
         "image_position_prompt": "Отображать картинку в начале или конце поста?",
@@ -1565,6 +1571,33 @@ def image_ask_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def image_edit_keyboard(lang: str, *, has_image: bool) -> InlineKeyboardMarkup:
+    if has_image:
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("edit_image_replace", lang),
+                        callback_data="image_ask:add",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        t("edit_image_delete", lang),
+                        callback_data="image_ask:delete",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        t("edit_image_keep", lang),
+                        callback_data="image_ask:keep",
+                    )
+                ],
+            ]
+        )
+    return image_ask_keyboard(lang)
+
+
 def image_position_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -1734,6 +1767,7 @@ def edit_options_keyboard(
 ) -> InlineKeyboardMarkup:
     # Same order as create wizard: template → image → ignore → preview → delay
     # → repeat → schedule reminder → dest → delete.
+    # Schedule reminder only if configured at creation (unchanged policy).
     image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
     rows = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],

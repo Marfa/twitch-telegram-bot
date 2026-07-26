@@ -50,6 +50,7 @@ from i18n import (
     edit_options_keyboard,
     ignore_keywords_keyboard,
     image_ask_keyboard,
+    image_edit_keyboard,
     image_position_keyboard,
     import_mode_keyboard,
     language_keyboard,
@@ -542,16 +543,21 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     target = update.effective_message or update.callback_query.message
     chat_id = update.effective_user.id
+    has_image = bool(
+        context.user_data.get("edit_sub_id") and context.user_data.get("edit_has_image")
+    )
+    prompt = t("edit_image_prompt", lang) if has_image else t("image_ask", lang)
+    markup = image_edit_keyboard(lang, has_image=has_image)
     if update.callback_query:
         await context.bot.send_message(
             chat_id,
-            t("image_ask", lang),
-            reply_markup=image_ask_keyboard(lang),
+            prompt,
+            reply_markup=markup,
         )
     else:
         await target.reply_text(
-            t("image_ask", lang),
-            reply_markup=image_ask_keyboard(lang),
+            prompt,
+            reply_markup=markup,
         )
     _set_wizard_back(context, IMAGE_ASK)
     return IMAGE_ASK
@@ -1406,6 +1412,25 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     action = query.data.split(":", 1)[1]
     is_edit = bool(context.user_data.get("edit_sub_id"))
 
+    if action == "keep":
+        await query.edit_message_text("✓")
+        owner_id = query.from_user.id
+        context.user_data.clear()
+        await context.bot.send_message(
+            owner_id,
+            "✓",
+            reply_markup=_menu(lang, owner_id),
+        )
+        return ConversationHandler.END
+
+    if action == "delete":
+        context.user_data["image_file_id"] = None
+        context.user_data["image_position"] = ""
+        await query.edit_message_text("✓")
+        if is_edit:
+            return await _save_edit_image(update, context, lang)
+        return await _go_ignore_keywords_prompt(update, context, lang)
+
     if action == "skip":
         context.user_data["image_file_id"] = None
         context.user_data["image_position"] = ""
@@ -1489,16 +1514,22 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not db.get_subscription(sub_id, query.from_user.id):
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
+    has_image = bool(sub.image_file_id)
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
+    context.user_data["edit_has_image"] = has_image
+    if has_image:
+        context.user_data["image_file_id"] = sub.image_file_id
+        context.user_data["image_position"] = sub.image_position or ""
     await query.edit_message_text("✓")
     await context.bot.send_message(
         query.from_user.id,
-        t("image_ask", lang),
-        reply_markup=image_ask_keyboard(lang),
+        t("edit_image_prompt", lang) if has_image else t("image_ask", lang),
+        reply_markup=image_edit_keyboard(lang, has_image=has_image),
     )
     return IMAGE_ASK
 
@@ -4687,7 +4718,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             IMAGE_ASK: [
                 _wiz_cancel,
                 _wiz_back,
-                CallbackQueryHandler(receive_image_ask, pattern=r"^image_ask:(add|skip)$"),
+                CallbackQueryHandler(
+                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep)$"
+                ),
             ],
             IMAGE_UPLOAD: [
                 _wiz_cancel,
