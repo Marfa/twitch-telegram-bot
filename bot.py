@@ -1059,25 +1059,15 @@ async def _prompt_language(update: Update) -> int:
     return LANG_SELECT
 
 
-async def _begin_setup_message(
+async def _send_welcome(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     user_id = update.effective_user.id
-    db: Database = context.application.bot_data["db"]
-    from config import MAX_SUBSCRIPTIONS_PER_OWNER
-
-    if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
-        await update.effective_message.reply_text(
-            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
-            reply_markup=_menu(lang, user_id),
-        )
-        return ConversationHandler.END
     await update.effective_message.reply_text(
         t("start_welcome", lang),
-        reply_markup=_wizard(lang, back=False),
+        reply_markup=_menu(lang, user_id),
     )
-    _set_wizard_back(context, CHANNEL)
-    return CHANNEL
+    return ConversationHandler.END
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1087,9 +1077,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db.upsert_user(user_id)
     lang = db.get_user_locale(user_id)
     if not lang:
-        context.user_data["after_lang"] = "setup"
+        context.user_data["after_lang"] = "welcome"
         return await _prompt_language(update)
-    return await _begin_setup_message(update, context, lang)
+    return await _send_welcome(update, context, lang)
 
 
 async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1101,7 +1091,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     db: Database = context.application.bot_data["db"]
     db.set_user_locale(query.from_user.id, lang)
     await query.edit_message_text(t("lang_set", lang))
-    after = context.user_data.pop("after_lang", "setup")
+    after = context.user_data.pop("after_lang", "welcome")
     if after == "help":
         await context.bot.send_message(
             query.from_user.id,
@@ -1116,22 +1106,12 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             reply_markup=settings_menu(lang),
         )
         return ConversationHandler.END
-    from config import MAX_SUBSCRIPTIONS_PER_OWNER
-
-    if len(db.get_subscriptions_by_owner(query.from_user.id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
-        await context.bot.send_message(
-            query.from_user.id,
-            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
-            reply_markup=_menu(lang, query.from_user.id),
-        )
-        return ConversationHandler.END
     await context.bot.send_message(
         query.from_user.id,
         t("start_welcome", lang),
-        reply_markup=_wizard(lang, back=False),
+        reply_markup=_menu(lang, query.from_user.id),
     )
-    _set_wizard_back(context, CHANNEL)
-    return CHANNEL
+    return ConversationHandler.END
 
 
 async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
