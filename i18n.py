@@ -45,10 +45,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "lang_pick": "Choose your language:",
         "lang_set": "Language set to English.",
         "start_welcome": (
-            "Hi! I send notifications when Twitch streams go live.\n\n"
-            "Commands: /help\n"
-            "/start does not delete your subscriptions — it starts a new setup.\n\n"
-            "Enter a Twitch channel: link, mobile link, or username."
+            "Hi! I send notifications when Twitch streams go live.\n"
+            "Commands help: /help\n"
+            "Tap New subscription to add a new subscription."
         ),
         "new_sub_prompt": "Enter a Twitch channel: link, mobile link, or username.",
         "finish_setup_first": "Finish the subscription setup or tap /cancel.",
@@ -223,8 +222,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{schedule_reminder_note}\n"
             "Notifications: {dest}{thread_note}\n\n"
             "Upcoming stream reminders are on.\n"
-            "Go-live notifications are off.\n"
-            "Help: /help"
+            "Go-live notifications are off."
         ),
         "sub_list_dest": "• Destination: {dest} ({chat_id})",
         "sub_list_thread": "• Topic: {thread_id}",
@@ -332,8 +330,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{schedule_reminder_note}\n"
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n\n"
-            "When {twitch_username} goes live — I'll send a notification.\n"
-            "Help: /help"
+            "When {twitch_username} goes live — I'll send a notification.\n\n"
+            "To avoid duplicate alerts, you can manually turn off Twitch "
+            "notifications in settings: "
+            "https://www.twitch.tv/settings/notifications"
         ),
         "thread_note": "\nTopic: {thread_id}",
         "delete_yes": "Delete old messages: yes",
@@ -644,10 +644,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "lang_pick": "Выберите язык / Choose your language:",
         "lang_set": "Язык: русский.",
         "start_welcome": (
-            "Привет! Я присылаю уведомления о старте стримов на Twitch.\n\n"
+            "Привет! Я присылаю уведомления о старте стримов на Twitch.\n"
             "Справка по командам: /help\n"
-            "/start не удаляет ваши подписки — только запускает новую настройку.\n\n"
-            "Укажите канал Twitch: ссылку, мобильную ссылку или username."
+            "Нажмите кнопку Новая подписка, чтобы добавить новую подписку."
         ),
         "new_sub_prompt": "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
         "finish_setup_first": "Сначала завершите настройку подписки или нажмите /cancel.",
@@ -823,8 +822,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{schedule_reminder_note}\n"
             "Уведомления: {dest}{thread_note}\n\n"
             "Напоминания о предстоящих стримах включены.\n"
-            "Оповещения о начале стрима отключены.\n"
-            "Справка: /help"
+            "Оповещения о начале стрима отключены."
         ),
         "sub_list_dest": "• Куда: {dest} ({chat_id})",
         "sub_list_thread": "• Тема: {thread_id}",
@@ -935,8 +933,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{schedule_reminder_note}\n"
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n\n"
-            "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n"
-            "Справка: /help"
+            "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n\n"
+            "Чтобы избежать дублирования оповещений, вы можете вручную "
+            "отключить оповещения Twitch в разделе настроек: "
+            "https://www.twitch.tv/settings/notifications"
         ),
         "thread_note": "\nТема: {thread_id}",
         "delete_yes": "Удалять старые сообщения: да",
