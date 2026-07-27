@@ -1,6 +1,6 @@
 # Twitch → Telegram stream notifications
 
-**Stream goes live — the bot notifies wherever you choose.** One-minute setup in Telegram.
+**Go-live, upcoming, or stream end — the bot notifies wherever you choose.** Setup in Telegram.
 
 Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 
@@ -8,15 +8,16 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 
 | Feature | How it works |
 |---|---|
-| Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` to set up |
+| Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
+| Alert types | Stream start · upcoming (Twitch schedule) · stream end |
 | Destinations | DM, channel, group or community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
 | Image | Optional alert image — caption above or below; link preview then off |
-| Delay after go-live | Send notification N minutes after stream start |
-| Repeat suppression | Skip repeat alerts for X minutes after the first one |
+| Delayed send | N minutes after go-live or after going offline (Helix re-check before send) |
+| Repeat suppression | For stream start: skip repeats for X minutes after the first alert |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
@@ -52,23 +53,32 @@ Live checks use **Client Credentials**. Follow import uses user OAuth (`user:rea
 
 ## Usage
 
-On first `/start` the bot asks you to choose a language (Russian or English).
+On first `/start` the bot asks for a language (Russian or English), then shows the welcome text and **main menu**.
 
 ### New subscription
 
-`/start` or **➕ New subscription** — setup wizard:
+**➕ New subscription** — pick an alert type first:
+
+| Type | What it does |
+|---|---|
+| Stream start | Notify when the channel goes live |
+| Upcoming stream | Remind N minutes ahead if the streamer has a Twitch schedule (error if none) |
+| Stream end | Notify when the stream ends (same wizard, no repeat-suppression step) |
+
+Then the wizard (for stream start / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
 3. Image (add / skip; if added — position: start or end of caption)
 4. Ignore keywords (optional)
 5. Link preview (skipped when an image is set)
-6. Delay notification after stream start (yes/no, minutes)
-7. Allow repeat notifications (yes/no; if no — mute minutes)
-8. Twitch schedule reminders (if the streamer has a schedule)
-9. Destination: DM / channel / group or community
-10. For channel or group — add the bot and confirm the chat
-11. Delete previous bot message on each new stream? (yes/no)
+6. Delay send (yes/no, minutes) — after go-live or after offline; Helix is re-checked before send
+7. Allow repeat notifications (**stream start** only; yes/no; if no — mute minutes)
+8. Destination: DM / channel / group or community
+9. For channel or group — add the bot and confirm the chat
+10. Delete previous bot message on each new alert? (yes/no)
+
+For **upcoming stream**, after the channel and schedule check — template and settings, then reminder minutes and destination (no “do you want reminders?” ask).
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
@@ -119,13 +129,13 @@ Dates and month names follow the user’s language.
 
 | Button / command | Action |
 |---|---|
-| `/start` | New subscription / menu |
+| `/start` | Main menu |
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Create schedule |
 | `/feedback` | Feedback |
 | `/settings` | Settings |
-| ➕ New subscription | Add another channel |
+| ➕ New subscription | Alert type → wizard |
 | ⬇️ Import from Twitch | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete |
 | 📅 Create schedule | Weekly stream schedule text |

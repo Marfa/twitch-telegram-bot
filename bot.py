@@ -466,6 +466,16 @@ async def _prompt_repeat_step(
     return REPEAT_ALLOW
 
 
+async def _continue_after_delay(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """After delay step: skip repeat mute for stream-end alerts."""
+    context.user_data.setdefault("suppress_repeat_minutes", 0)
+    if context.user_data.get("alert_type") == "end":
+        return await _go_after_repeat(update, context, lang)
+    return await _prompt_repeat_step(update, context, lang)
+
+
 async def _prompt_schedule_reminder_ask(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
@@ -756,6 +766,11 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return await _show_lucky_preview(update, context, lang)
         if context.user_data.get("alert_type") == "upcoming":
             return await _go_schedule_reminder_minutes(update, context, lang)
+        if context.user_data.get("alert_type") == "end":
+            after = context.user_data.get("after_delay_state", DELAY_SEND)
+            if after == DELAY_MINUTES:
+                return await _go_delay_minutes_prompt(update, context, lang)
+            return await _go_delay_prompt(update, context, lang)
         if context.user_data.get("schedule_reminder_offered"):
             if int(context.user_data.get("schedule_reminder_minutes", 0)) > 0:
                 return await _go_schedule_reminder_minutes(update, context, lang)
@@ -1723,8 +1738,7 @@ async def receive_delay_send(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return DELAY_MINUTES
     context.user_data["delay_minutes"] = 0
     context.user_data["after_delay_state"] = DELAY_SEND
-    _set_wizard_back(context, REPEAT_ALLOW)
-    return await _prompt_repeat_step(update, context, lang)
+    return await _continue_after_delay(update, context, lang)
 
 
 async def receive_delay_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1738,8 +1752,7 @@ async def receive_delay_minutes(update: Update, context: ContextTypes.DEFAULT_TY
         return DELAY_MINUTES
     context.user_data["delay_minutes"] = int(raw)
     context.user_data["after_delay_state"] = DELAY_MINUTES
-    _set_wizard_back(context, REPEAT_ALLOW)
-    return await _prompt_repeat_step(update, context, lang)
+    return await _continue_after_delay(update, context, lang)
 
 
 async def receive_repeat_allow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
