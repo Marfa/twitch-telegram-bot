@@ -13,6 +13,7 @@ import requests
 from config import TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 
 FOLLOWS_SCOPE = "user:read:follows"
+SCHEDULE_SCOPE = "channel:manage:schedule"
 
 logger = logging.getLogger(__name__)
 
@@ -139,13 +140,19 @@ class TwitchClient:
         segments = data.get("segments") or []
         return [s for s in segments if isinstance(s, dict)]
 
-    def build_authorize_url(self, *, redirect_uri: str, state: str) -> str:
+    def build_authorize_url(
+        self,
+        *,
+        redirect_uri: str,
+        state: str,
+        scopes: str | None = None,
+    ) -> str:
         return "https://id.twitch.tv/oauth2/authorize?" + urlencode(
             {
                 "client_id": TWITCH_CLIENT_ID,
                 "redirect_uri": redirect_uri,
                 "response_type": "code",
-                "scope": FOLLOWS_SCOPE,
+                "scope": scopes or FOLLOWS_SCOPE,
                 "state": state,
             }
         )
@@ -218,6 +225,54 @@ class TwitchClient:
             if not cursor:
                 break
         return out
+
+    def search_categories(self, query: str) -> list[dict[str, Any]]:
+        """Search Twitch categories/games by name. Returns list of {id, name, ...}."""
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/search/categories",
+            headers=self._headers(),
+            params={"query": query, "first": 1},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data") or []
+
+    def create_schedule_segment(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        *,
+        start_time: str,
+        timezone: str,
+        duration: int = 120,
+        title: str = "",
+        category_id: str = "",
+        is_recurring: bool = False,
+    ) -> dict[str, Any]:
+        """Create a schedule segment. Raises on error."""
+        body: dict[str, Any] = {
+            "start_time": start_time,
+            "timezone": timezone,
+            "duration": duration,
+            "is_recurring": is_recurring,
+        }
+        if title:
+            body["title"] = title[:140]
+        if category_id:
+            body["category_id"] = category_id
+        resp = self._session.post(
+            "https://api.twitch.tv/helix/schedule/segment",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+                "Content-Type": "application/json",
+            },
+            params={"broadcaster_id": broadcaster_id},
+            json=body,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     def _igdb_headers(self) -> dict[str, str]:
         return {

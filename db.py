@@ -171,6 +171,7 @@ class Subscription:
     suppress_repeat_minutes: int
     schedule_reminder_minutes: int
     schedule_reminder_configured: bool
+    notify_on_live: bool
     ignore_keywords: str
     image_file_id: str | None
     image_position: str
@@ -245,6 +246,7 @@ def _row_to_sub(row: Any) -> Subscription:
         schedule_reminder_configured=bool(row["schedule_reminder_configured"])
         if "schedule_reminder_configured" in keys
         else False,
+        notify_on_live=bool(row["notify_on_live"]) if "notify_on_live" in keys else True,
         ignore_keywords=str(row["ignore_keywords"] or ""),
         image_file_id=image_file_id,
         image_position=image_position if image_file_id else "",
@@ -320,6 +322,7 @@ class Database(Protocol):
         image_position: str = "",
         enabled: bool = True,
         from_twitch_sync: bool = False,
+        notify_on_live: bool = True,
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
@@ -559,6 +562,10 @@ class SqliteDatabase:
                 WHERE schedule_reminder_minutes > 0
                 """
             )
+        if "notify_on_live" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN notify_on_live INTEGER NOT NULL DEFAULT 1"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -637,6 +644,7 @@ class SqliteDatabase:
         image_position: str = "",
         enabled: bool = True,
         from_twitch_sync: bool = False,
+        notify_on_live: bool = True,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -647,8 +655,9 @@ class SqliteDatabase:
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords,
-                    image_file_id, image_position, enabled, from_twitch_sync
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    image_file_id, image_position, enabled, from_twitch_sync,
+                    notify_on_live
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -670,6 +679,7 @@ class SqliteDatabase:
                     (image_position or "") if image_file_id else "",
                     int(enabled),
                     int(from_twitch_sync),
+                    int(bool(notify_on_live)),
                 ),
             )
             return int(cur.lastrowid)
@@ -765,6 +775,7 @@ class SqliteDatabase:
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
             "schedule_reminder_configured",
+            "notify_on_live",
             "ignore_keywords",
             "image_file_id",
             "image_position",
@@ -780,6 +791,7 @@ class SqliteDatabase:
                 "notify_delete_fail",
                 "disable_link_preview",
                 "schedule_reminder_configured",
+                "notify_on_live",
             ):
                 values.append(int(bool(value)))
             elif key in (
@@ -830,7 +842,7 @@ class SqliteDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = 1
+                WHERE enabled = 1 AND notify_on_live = 1
                 """
             ).fetchall()
         return [r["twitch_user_id"] for r in rows]
@@ -1525,6 +1537,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS notify_on_live BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -1611,6 +1629,7 @@ class PostgresDatabase:
         image_position: str = "",
         enabled: bool = True,
         from_twitch_sync: bool = False,
+        notify_on_live: bool = True,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -1622,8 +1641,9 @@ class PostgresDatabase:
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords,
-                    image_file_id, image_position, enabled, from_twitch_sync
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    image_file_id, image_position, enabled, from_twitch_sync,
+                    notify_on_live
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1646,6 +1666,7 @@ class PostgresDatabase:
                     (image_position or "") if image_file_id else "",
                     enabled,
                     from_twitch_sync,
+                    bool(notify_on_live),
                 ),
             )
             row = cur.fetchone()
@@ -1754,6 +1775,7 @@ class PostgresDatabase:
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
             "schedule_reminder_configured",
+            "notify_on_live",
             "ignore_keywords",
             "image_file_id",
             "image_position",
@@ -1769,6 +1791,7 @@ class PostgresDatabase:
                 "notify_delete_fail",
                 "disable_link_preview",
                 "schedule_reminder_configured",
+                "notify_on_live",
             ):
                 values.append(bool(value))
             elif key in (
@@ -1825,7 +1848,7 @@ class PostgresDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = TRUE
+                WHERE enabled = TRUE AND notify_on_live = TRUE
                 """
             )
             rows = cur.fetchall()

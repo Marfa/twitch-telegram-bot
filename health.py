@@ -45,19 +45,21 @@ def is_ready() -> bool:
         return _ready
 
 
-def create_oauth_state(telegram_user_id: int, lang: str = "en") -> str:
+def create_oauth_state(
+    telegram_user_id: int, lang: str = "en", *, purpose: str = "import"
+) -> str:
     from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
 
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     state = secrets.token_urlsafe(24)
     expires = time.time() + _OAUTH_TTL_SEC
     with _oauth_pending_lock:
-        _oauth_pending[state] = (telegram_user_id, locale, expires)
+        _oauth_pending[state] = (telegram_user_id, locale, expires, purpose)
         _purge_oauth_locked(time.time())
     return state
 
 
-def pop_oauth_state(state: str) -> tuple[int, str] | None:
+def pop_oauth_state(state: str) -> tuple[int, str, str] | None:
     from i18n import DEFAULT_LOCALE
 
     now = time.time()
@@ -66,14 +68,18 @@ def pop_oauth_state(state: str) -> tuple[int, str] | None:
         item = _oauth_pending.pop(state, None)
     if not item:
         return None
-    user_id, lang, expires = item
+    if len(item) == 3:
+        user_id, lang, expires = item
+        purpose = "import"
+    else:
+        user_id, lang, expires, purpose = item
     if expires < now:
         return None
-    return user_id, lang or DEFAULT_LOCALE
+    return user_id, lang or DEFAULT_LOCALE, purpose
 
 
 def _purge_oauth_locked(now: float) -> None:
-    expired = [k for k, (*_, exp) in _oauth_pending.items() if exp < now]
+    expired = [k for k, v in _oauth_pending.items() if v[2] < now]
     for k in expired:
         del _oauth_pending[k]
 
@@ -124,8 +130,9 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
     pending = pop_oauth_state(state) if state else None
     lang = DEFAULT_LOCALE
     telegram_user_id: int | None = None
+    purpose = "import"
     if pending:
-        telegram_user_id, lang = pending
+        telegram_user_id, lang, purpose = pending
     if telegram_user_id is None:
         body = _html_page(
             t("oauth_web_expired_title", lang),
@@ -154,9 +161,12 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         if not user:
             raise RuntimeError("no_user")
         twitch_user_id = str(user["id"])
-        followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
+        if purpose == "schedule":
+            followed = []
+        else:
+            followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
     except Exception as exc:
-        logger.warning("Twitch OAuth import failed: %s", exc)
+        logger.warning("Twitch OAuth failed (purpose=%s): %s", purpose, exc)
         _schedule_oauth_complete(telegram_user_id, None, "twitch_api")
         body = _html_page(
             t("oauth_web_failed_title", lang),
@@ -167,6 +177,7 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         "access_token": access,
         "refresh_token": refresh,
         "twitch_user_id": twitch_user_id,
+        "purpose": purpose,
     }
     _schedule_oauth_complete(telegram_user_id, followed, None, token_info)
     body = _html_page(

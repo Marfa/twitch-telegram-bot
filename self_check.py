@@ -8,6 +8,7 @@ from config import parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
 from twitch import (
     FOLLOWS_SCOPE,
+    SCHEDULE_SCOPE,
     TwitchClient,
     find_placeholder_typos,
     normalize_ignore_keywords,
@@ -84,8 +85,10 @@ def main() -> None:
     assert "offline_access" not in auth_url
     assert "state=abc" in auth_url
     state = create_oauth_state(42, "ru")
-    assert pop_oauth_state(state) == (42, "ru")
+    assert pop_oauth_state(state) == (42, "ru", "import")
     assert pop_oauth_state(state) is None
+    state2 = create_oauth_state(42, "en", purpose="schedule")
+    assert pop_oauth_state(state2) == (42, "en", "schedule")
     from health import _html_page
     from i18n import t as tr
 
@@ -180,6 +183,8 @@ def main() -> None:
         assert tr("schedule_reminder_prompt", loc)
         assert tr("schedule_reminder_minutes_prompt", loc)
         assert tr("schedule_reminder_alert", loc, username="x", minutes=5, title="t")
+        assert tr("schedule_live_add_prompt", loc)
+        assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
         assert tr("edit_schedule_reminder", loc)
         assert tr("edit_schedule_reminder_no_schedule", loc)
         assert tr("channel_dup_prompt", loc)
@@ -432,6 +437,14 @@ def main() -> None:
         assert db.get_unique_schedule_reminder_twitch_ids() == []
         assert db.update_subscription(sub_id, 1, schedule_reminder_minutes=10)
         assert db.get_unique_schedule_reminder_twitch_ids() == [sub.twitch_user_id]
+        assert sub.notify_on_live is True
+        assert db.update_subscription(sub_id, 1, notify_on_live=False)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.notify_on_live is False
+        assert sub.twitch_user_id not in db.get_unique_twitch_user_ids()
+        assert db.update_subscription(sub_id, 1, notify_on_live=True)
+        assert sub.twitch_user_id in db.get_unique_twitch_user_ids()
         assert sub.notify_delete_fail is False
         assert db.update_subscription(sub_id, 1, notify_delete_fail=True)
         sub = db.get_subscription(sub_id, 1)

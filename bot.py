@@ -62,11 +62,13 @@ from i18n import (
     repeat_keyboard,
     schedule_keyboard,
     schedule_reminder_keyboard,
+    schedule_live_add_keyboard,
     scheduled_edit_keyboard,
     scheduled_list_keyboard,
     settings_menu,
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
+    stream_schedule_publish_keyboard,
     format_stream_schedule_prompt_date,
     format_stream_schedule_result,
     subscriptions_menu,
@@ -115,6 +117,7 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     DEST_CHAT,
     DELETE_OLD,
     DELETE_FAIL_NOTIFY,
+    SCHEDULE_LIVE_ASK,
     EDIT_TEMPLATE,
     EDIT_IGNORE_KEYWORDS,
     EDIT_DELAY,
@@ -128,8 +131,9 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     STREAM_SCHEDULE_CONFIRM,
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
+    STREAM_SCHEDULE_PUBLISH,
     SYNC_DAYS,
-) = range(35)
+) = range(37)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -403,21 +407,24 @@ async def _finish_stream_schedule(
 ) -> int:
     user_id = update.effective_user.id
     entries: list[dict] = context.user_data.get("stream_schedule_entries", [])
-    context.user_data.clear()
     text = format_stream_schedule_result(entries, lang) if entries else "—"
     if update.callback_query:
         await update.callback_query.edit_message_text("✓")
-        await context.bot.send_message(
-            user_id,
-            text,
-            reply_markup=_menu(lang, user_id),
-        )
+        await context.bot.send_message(user_id, text)
     else:
-        await update.effective_message.reply_text(
-            text,
-            reply_markup=_menu(lang, user_id),
+        await update.effective_message.reply_text(text)
+    if not entries:
+        context.user_data.clear()
+        await context.bot.send_message(
+            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
-    return ConversationHandler.END
+        return ConversationHandler.END
+    await context.bot.send_message(
+        user_id,
+        t("stream_schedule_publish_prompt", lang),
+        reply_markup=stream_schedule_publish_keyboard(lang),
+    )
+    return STREAM_SCHEDULE_PUBLISH
 
 
 async def _advance_stream_schedule_day(
@@ -634,6 +641,9 @@ async def _go_after_repeat(
     context.user_data.setdefault("schedule_reminder_minutes", 0)
     context.user_data.setdefault("schedule_reminder_configured", False)
     context.user_data.pop("schedule_reminder_offered", None)
+    if context.user_data.get("skip_schedule_check"):
+        _set_wizard_back(context, DEST_TYPE)
+        return await _prompt_dest_step(update, context, lang)
     twitch: TwitchClient = context.application.bot_data["twitch"]
     uid = str(context.user_data.get("twitch_user_id") or "")
     has_schedule = False
@@ -1712,8 +1722,10 @@ async def receive_schedule_reminder_ask(
     if query.data.endswith(":0"):
         context.user_data["schedule_reminder_minutes"] = 0
         context.user_data["schedule_reminder_configured"] = False
+        context.user_data.pop("notify_on_live", None)
         _set_wizard_back(context, DEST_TYPE)
         return await _prompt_dest_step(update, context, lang)
+    context.user_data["notify_on_live"] = False
     await query.edit_message_text("✓")
     await context.bot.send_message(
         query.from_user.id,
@@ -1741,6 +1753,78 @@ async def receive_schedule_reminder_minutes(
     context.user_data["schedule_reminder_configured"] = True
     _set_wizard_back(context, DEST_TYPE)
     return await _prompt_dest_step(update, context, lang)
+
+
+_LIVE_ADDON_CLEAR_KEYS = (
+    "message_template",
+    "pending_template",
+    "pending_template_preview_disabled",
+    "image_file_id",
+    "image_position",
+    "ignore_keywords",
+    "disable_link_preview",
+    "delay_minutes",
+    "suppress_repeat_minutes",
+    "dest_type",
+    "delete_previous",
+    "notify_delete_fail",
+    "pending_chat_id",
+    "pending_thread_id",
+    "lucky_quick",
+    "channel_input_was_url",
+)
+
+
+async def receive_schedule_live_add(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    owner_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    sub_id = context.user_data.get("pending_live_sub_id")
+    sub = db.get_subscription(sub_id, owner_id) if sub_id else None
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if query.data.endswith(":0"):
+        await query.edit_message_text("✓")
+        user_sub_num = _owner_sub_number(db, owner_id, sub.id)
+        thread_note = (
+            t("thread_note", lang, thread_id=sub.thread_id) if sub.thread_id else ""
+        )
+        remind = int(sub.schedule_reminder_minutes or 0)
+        text = t(
+            "setup_schedule_only_done",
+            lang,
+            sub_id=user_sub_num,
+            twitch_username=sub.twitch_username,
+            schedule_reminder_note=t(
+                "schedule_reminder_yes_note", lang, minutes=remind
+            ),
+            dest=dest_label(sub.dest_type, lang),
+            thread_note=thread_note,
+        )
+        await context.bot.send_message(owner_id, text, reply_markup=_menu(lang, owner_id))
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    await query.edit_message_text("✓")
+    context.user_data["edit_sub_id"] = sub.id
+    context.user_data["live_addon_pass"] = True
+    context.user_data["skip_schedule_check"] = True
+    context.user_data["notify_on_live"] = True
+    context.user_data["twitch_username"] = sub.twitch_username
+    context.user_data["twitch_user_id"] = sub.twitch_user_id
+    context.user_data["schedule_reminder_minutes"] = sub.schedule_reminder_minutes
+    context.user_data["schedule_reminder_configured"] = sub.schedule_reminder_configured
+    context.user_data.pop("pending_live_sub_id", None)
+    for key in _LIVE_ADDON_CLEAR_KEYS:
+        context.user_data.pop(key, None)
+    return await _go_template_prompt(update, context, lang)
 
 
 async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2157,12 +2241,42 @@ async def _finish_subscription(
     lang = _user_lang(context, owner_id)
     data = dict(context.user_data)
     edit_sub_id = data.get("edit_sub_id")
+    live_addon = bool(data.get("live_addon_pass"))
     dest_type = data["dest_type"]
     delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
     notify_delete_fail = bool(data.get("notify_delete_fail", False)) and delete_previous
+    notify_on_live = bool(data.get("notify_on_live", True))
 
     try:
-        if edit_sub_id:
+        if edit_sub_id and live_addon:
+            ok = db.update_subscription(
+                edit_sub_id,
+                owner_id,
+                message_template=data["message_template"],
+                dest_type=dest_type,
+                chat_id=chat_id,
+                thread_id=thread_id,
+                delete_previous=delete_previous,
+                notify_delete_fail=notify_delete_fail,
+                disable_link_preview=bool(data.get("disable_link_preview", False))
+                or bool(data.get("image_file_id")),
+                delay_minutes=int(data.get("delay_minutes", 0)),
+                suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
+                ignore_keywords=str(data.get("ignore_keywords", "")),
+                image_file_id=data.get("image_file_id") or None,
+                image_position=str(data.get("image_position") or ""),
+                notify_on_live=True,
+            )
+            if not ok:
+                await context.bot.send_message(
+                    owner_id,
+                    t("sub_not_found", lang),
+                    reply_markup=_menu(lang, owner_id),
+                )
+                context.user_data.clear()
+                return ConversationHandler.END
+            sub_id = edit_sub_id
+        elif edit_sub_id:
             ok = db.update_subscription(
                 edit_sub_id,
                 owner_id,
@@ -2216,6 +2330,7 @@ async def _finish_subscription(
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
+                notify_on_live=notify_on_live,
             )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -2228,9 +2343,36 @@ async def _finish_subscription(
         return ConversationHandler.END
 
     db.upsert_user(owner_id)
+
+    schedule_only_pending = (
+        not edit_sub_id
+        and not notify_on_live
+        and int(data.get("schedule_reminder_minutes", 0)) > 0
+    )
+    if schedule_only_pending:
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text(
+                    t(
+                        "sub_created_short",
+                        lang,
+                        sub_id=_owner_sub_number(db, owner_id, sub_id),
+                    )
+                )
+            except BadRequest:
+                pass
+        context.user_data.clear()
+        context.user_data["pending_live_sub_id"] = sub_id
+        await context.bot.send_message(
+            owner_id,
+            t("schedule_live_add_prompt", lang),
+            reply_markup=schedule_live_add_keyboard(lang),
+        )
+        return SCHEDULE_LIVE_ASK
+
     context.user_data.clear()
 
-    if edit_sub_id:
+    if edit_sub_id and not live_addon:
         text = t("edit_updated", lang, sub_id=sub_id)
     else:
         preview = render_template(
@@ -2326,7 +2468,7 @@ async def _finish_subscription(
 
     if update.callback_query:
         try:
-            msg_key = "sub_created_short" if not edit_sub_id else "edit_updated"
+            msg_key = "sub_created_short" if not edit_sub_id or live_addon else "edit_updated"
             await update.callback_query.edit_message_text(
                 t(msg_key, lang, sub_id=_owner_sub_number(db, owner_id, sub_id))
             )
@@ -2425,6 +2567,167 @@ async def stream_schedule_finish_callback(
     lang = _user_lang(context, query.from_user.id)
     context.user_data.pop("stream_schedule_game", None)
     return await _finish_stream_schedule(update, context, lang)
+
+
+def _pending_schedule_publishes(application: Application) -> dict[int, list[dict]]:
+    return application.bot_data.setdefault("pending_schedule_publishes", {})
+
+
+async def stream_schedule_publish_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from config import twitch_oauth_redirect_uri
+    from health import create_oauth_state
+    from twitch import SCHEDULE_SCOPE, TwitchClient
+
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    publish = query.data.split(":")[-1] == "1"
+    entries = context.user_data.get("stream_schedule_entries", [])
+    if not publish or not entries:
+        context.user_data.clear()
+        await query.edit_message_text(t("cancelled", lang) if not publish else "—")
+        await context.bot.send_message(
+            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        )
+        return ConversationHandler.END
+
+    _pending_schedule_publishes(context.application)[user_id] = [
+        {"date": e["date"].isoformat(), "time": e["time"], "game": e["game"]}
+        for e in entries
+    ]
+    context.user_data.clear()
+
+    redirect_uri = twitch_oauth_redirect_uri()
+    if not redirect_uri:
+        await query.edit_message_text(t("stream_schedule_publish_auth_unavailable", lang))
+        await context.bot.send_message(
+            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        )
+        return ConversationHandler.END
+
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    state = create_oauth_state(user_id, lang, purpose="schedule")
+    url = twitch.build_authorize_url(
+        redirect_uri=redirect_uri, state=state, scopes=SCHEDULE_SCOPE
+    )
+    await query.edit_message_text(
+        t("stream_schedule_publish_auth", lang),
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(t("stream_schedule_publish_auth_button", lang), url=url)]]
+        ),
+    )
+    return ConversationHandler.END
+
+
+async def _complete_schedule_publish(
+    application: Application,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+) -> None:
+    from twitch import TwitchClient
+
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    if error:
+        await application.bot.send_message(
+            owner_id,
+            t("stream_schedule_publish_fail", lang, error=error),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+
+    entries = _pending_schedule_publishes(application).pop(owner_id, None)
+    if not entries or not token_info:
+        await application.bot.send_message(
+            owner_id,
+            t("stream_schedule_publish_fail", lang, error="no data"),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+
+    access = token_info.get("access_token", "")
+    twitch_user_id = token_info.get("twitch_user_id", "")
+    refresh = token_info.get("refresh_token", "")
+    twitch: TwitchClient = application.bot_data["twitch"]
+
+    ok_count = 0
+    errors: list[str] = []
+    tz_name = str(SCHEDULE_TZ)
+    for entry in entries:
+        start_iso = f"{entry['date']}T{entry['time']}:00"
+        game_text = entry.get("game", "")
+        category_id = ""
+        if game_text:
+            try:
+                cats = twitch.search_categories(game_text)
+                if cats:
+                    category_id = cats[0]["id"]
+            except Exception:
+                pass
+        try:
+            twitch.create_schedule_segment(
+                access,
+                twitch_user_id,
+                start_time=start_iso,
+                timezone=tz_name,
+                title=game_text or "",
+                category_id=category_id,
+            )
+            ok_count += 1
+        except Exception as exc:
+            errors.append(f"{entry['date']}: {exc}")
+
+    total = len(entries)
+    if ok_count == total:
+        text = t("stream_schedule_publish_ok", lang)
+    elif ok_count > 0:
+        text = t("stream_schedule_publish_partial", lang, ok=ok_count, total=total, errors="; ".join(errors))
+    else:
+        text = t("stream_schedule_publish_fail", lang, error="; ".join(errors))
+
+    buttons = []
+    if refresh:
+        buttons.append([InlineKeyboardButton(
+            t("stream_schedule_save_token", lang),
+            callback_data=f"sched_save_token:{owner_id}",
+        )])
+        application.bot_data.setdefault("pending_schedule_tokens", {})[owner_id] = {
+            "refresh_token": refresh,
+            "twitch_user_id": twitch_user_id,
+        }
+    markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
+    await application.bot.send_message(owner_id, text, reply_markup=markup)
+
+
+async def schedule_save_token_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    pending = context.application.bot_data.get("pending_schedule_tokens", {}).pop(user_id, None)
+    if not pending:
+        await query.edit_message_reply_markup(None)
+        return
+    db: Database = context.application.bot_data["db"]
+    db.upsert_twitch_sync(
+        owner_id=user_id,
+        twitch_user_id=pending["twitch_user_id"],
+        refresh_token=pending["refresh_token"],
+        period_days=0,
+        next_sync_at="9999-12-31T00:00:00+00:00",
+    )
+    await query.edit_message_text(
+        query.message.text + "\n\n" + t("stream_schedule_token_saved", lang)
+    )
+    await context.bot.send_message(
+        user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+    )
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2707,6 +3010,10 @@ async def complete_twitch_import(
     error: str | None,
     token_info: dict[str, str] | None = None,
 ) -> None:
+    purpose = (token_info or {}).get("purpose", "import")
+    if purpose == "schedule":
+        await _complete_schedule_publish(application, owner_id, error, token_info)
+        return
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
@@ -4262,7 +4569,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     sub = db.get_subscription_by_id(sub_id)
-    if not sub or not sub.enabled:
+    if not sub or not sub.enabled or not sub.notify_on_live:
         return
 
     try:
@@ -4331,6 +4638,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         game = stream.get("game_name", "")
         title = stream.get("title", "")
         for sub in db.get_enabled_by_twitch_user_id(uid):
+            if not sub.notify_on_live:
+                continue
             if is_on_notify_cooldown(sub):
                 continue
             if should_ignore_stream(sub.ignore_keywords, game, title):
@@ -4649,6 +4958,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
+    app.add_handler(CallbackQueryHandler(schedule_save_token_callback, pattern=r"^sched_save_token:"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(
@@ -4832,6 +5142,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(receive_delete_fail_notify, pattern=r"^delete_fail:"),
             ],
+            SCHEDULE_LIVE_ASK: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_schedule_live_add, pattern=r"^sched_live:"
+                ),
+            ],
             ADMIN_MSG_TYPE: [
                 _wiz_cancel,
                 CallbackQueryHandler(admin_select_type, pattern=r"^admin_type:"),
@@ -4863,6 +5179,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(stream_schedule_skip_callback, pattern=r"^stream_sched:skip$"),
                 CallbackQueryHandler(stream_schedule_finish_callback, pattern=r"^stream_sched:finish$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_time),
+            ],
+            STREAM_SCHEDULE_PUBLISH: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    stream_schedule_publish_callback, pattern=r"^stream_sched:publish:"
+                ),
             ],
             SYNC_DAYS: [
                 _wiz_cancel,

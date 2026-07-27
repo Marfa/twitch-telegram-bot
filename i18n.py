@@ -70,6 +70,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_no_stream": "No stream planned",
         "stream_schedule_finish": "Finish schedule",
         "stream_schedule_line": "- {date} {time} {game}",
+        "stream_schedule_publish_prompt": "Publish schedule on Twitch?",
+        "stream_schedule_publish_yes": "✅ Publish on Twitch",
+        "stream_schedule_publish_no": "❌ No",
+        "stream_schedule_publish_auth": "Authorize the bot to manage your Twitch schedule.",
+        "stream_schedule_publish_auth_button": "Authorize on Twitch",
+        "stream_schedule_publish_auth_unavailable": "Twitch schedule publishing is not configured (set PUBLIC_BASE_URL).",
+        "stream_schedule_publish_ok": "✅ Schedule published on Twitch!",
+        "stream_schedule_publish_fail": "❌ Failed to publish schedule: {error}",
+        "stream_schedule_publish_partial": "⚠️ Published {ok}/{total} segments. Errors: {errors}",
+        "stream_schedule_save_token": "💾 Save authorization",
+        "stream_schedule_token_saved": "Authorization data saved. Next time you won't need to re-authorize.",
         "channel_not_parsed": (
             "Could not parse the channel. Examples:\n"
             "• marfapr\n"
@@ -198,6 +209,22 @@ _STRINGS: dict[str, dict[str, str]] = {
             "⏰ {username} is scheduled to go live in {minutes} min.\n"
             "{title}\n"
             "https://twitch.tv/{username}"
+        ),
+        "schedule_live_add_prompt": (
+            "Upcoming stream reminders are configured.\n"
+            "Do you want to set up go-live notifications too?"
+        ),
+        "schedule_live_add_yes": "✅ Yes",
+        "schedule_live_add_no": "❌ No",
+        "setup_schedule_only_done": (
+            "✅ Setup complete!\n\n"
+            "Subscription #{sub_id} created.\n"
+            "Twitch channel: {twitch_username}\n"
+            "{schedule_reminder_note}\n"
+            "Notifications: {dest}{thread_note}\n\n"
+            "Upcoming stream reminders are on.\n"
+            "Go-live notifications are off.\n"
+            "Help: /help"
         ),
         "sub_list_dest": "• Destination: {dest} ({chat_id})",
         "sub_list_thread": "• Topic: {thread_id}",
@@ -643,6 +670,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_no_stream": "Стрим не планируется",
         "stream_schedule_finish": "Завершить создание расписания",
         "stream_schedule_line": "- {date} {time} {game}",
+        "stream_schedule_publish_prompt": "Опубликовать расписание на Twitch?",
+        "stream_schedule_publish_yes": "✅ Опубликовать на Twitch",
+        "stream_schedule_publish_no": "❌ Нет",
+        "stream_schedule_publish_auth": "Авторизуйте бота для управления расписанием на Twitch.",
+        "stream_schedule_publish_auth_button": "Авторизоваться на Twitch",
+        "stream_schedule_publish_auth_unavailable": "Публикация расписания не настроена (нужен PUBLIC_BASE_URL).",
+        "stream_schedule_publish_ok": "✅ Расписание опубликовано на Twitch!",
+        "stream_schedule_publish_fail": "❌ Не удалось опубликовать расписание: {error}",
+        "stream_schedule_publish_partial": "⚠️ Опубликовано {ok}/{total} сегментов. Ошибки: {errors}",
+        "stream_schedule_save_token": "💾 Сохранить авторизацию",
+        "stream_schedule_token_saved": "Данные авторизации сохранены. В следующий раз повторная авторизация не потребуется.",
         "channel_not_parsed": (
             "Не удалось распознать канал. Примеры:\n"
             "• marfapr\n"
@@ -771,6 +809,22 @@ _STRINGS: dict[str, dict[str, str]] = {
             "⏰ Через {minutes} мин. стрим {username}\n"
             "{title}\n"
             "https://twitch.tv/{username}"
+        ),
+        "schedule_live_add_prompt": (
+            "Оповещение о предстоящих стримах настроено.\n"
+            "Хотите настроить оповещение о начале стримов?"
+        ),
+        "schedule_live_add_yes": "✅ Да",
+        "schedule_live_add_no": "❌ Нет",
+        "setup_schedule_only_done": (
+            "✅ Настройка завершена!\n\n"
+            "Подписка #{sub_id} создана.\n"
+            "Канал Twitch: {twitch_username}\n"
+            "{schedule_reminder_note}\n"
+            "Уведомления: {dest}{thread_note}\n\n"
+            "Напоминания о предстоящих стримах включены.\n"
+            "Оповещения о начале стрима отключены.\n"
+            "Справка: /help"
         ),
         "sub_list_dest": "• Куда: {dest} ({chat_id})",
         "sub_list_thread": "• Тема: {thread_id}",
@@ -1438,6 +1492,25 @@ def schedule_reminder_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def schedule_live_add_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("schedule_live_add_yes", lang),
+                    callback_data="sched_live:1",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("schedule_live_add_no", lang),
+                    callback_data="sched_live:0",
+                )
+            ],
+        ]
+    )
+
+
 def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -1533,6 +1606,15 @@ def stream_schedule_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("stream_schedule_yes", lang), callback_data="stream_sched:confirm:1")],
             [InlineKeyboardButton(t("stream_schedule_no", lang), callback_data="stream_sched:confirm:0")],
+        ]
+    )
+
+
+def stream_schedule_publish_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("stream_schedule_publish_yes", lang), callback_data="stream_sched:publish:1")],
+            [InlineKeyboardButton(t("stream_schedule_publish_no", lang), callback_data="stream_sched:publish:0")],
         ]
     )
 
