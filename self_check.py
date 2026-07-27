@@ -111,14 +111,19 @@ def main() -> None:
     assert "Test stream" not in title_en
 
     state: dict[str, bool] = {}
-    assert live_transitions(state, ["1", "2"], {"1": {}}, primed=False) == []
+    assert live_transitions(state, ["1", "2"], {"1": {}}, primed=False) == ([], [])
     assert state == {"1": True, "2": False}
-    assert live_transitions(state, ["1", "2"], {"1": {}}, primed=True) == []
-    assert live_transitions(state, ["1", "2"], {"1": {}, "2": {}}, primed=True) == ["2"]
+    assert live_transitions(state, ["1", "2"], {"1": {}}, primed=True) == ([], [])
+    assert live_transitions(state, ["1", "2"], {"1": {}, "2": {}}, primed=True) == (
+        ["2"],
+        [],
+    )
     assert state["2"] is True
-    assert live_transitions(state, ["1", "2"], {}, primed=True) == []
+    assert live_transitions(state, ["1", "2"], {}, primed=True) == ([], ["1", "2"])
     assert state == {"1": False, "2": False}
-    assert live_transitions(state, ["1"], {"1": {}}, primed=True) == ["1"]
+    assert live_transitions(state, ["1"], {"1": {}}, primed=True) == (["1"], [])
+    assert live_transitions(state, ["1"], {}, primed=True) == ([], ["1"])
+    assert state["1"] is False
 
     assert find_placeholder_typos("{username} {game} {name}") == []
     assert find_placeholder_typos("{game)") == [("{game)", "{game}")]
@@ -185,6 +190,31 @@ def main() -> None:
         assert tr("schedule_reminder_alert", loc, username="x", minutes=5, title="t")
         assert tr("schedule_live_add_prompt", loc)
         assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
+        assert tr("alert_type_prompt", loc)
+        assert tr("alert_type_live", loc)
+        assert tr("alert_type_upcoming", loc)
+        assert tr("alert_type_end", loc)
+        assert tr("alert_type_no_schedule", loc)
+        assert tr("alert_note_live", loc, twitch_username="x")
+        assert tr("alert_note_end", loc, twitch_username="x")
+        done = tr(
+            "setup_done",
+            loc,
+            sub_id=1,
+            twitch_username="x",
+            image_note="",
+            ignore_keywords_note="",
+            preview_note="",
+            delay_note="",
+            repeat_note="",
+            schedule_reminder_note="",
+            dest="d",
+            thread_note="",
+            delete_note="",
+            delete_fail_note="",
+            alert_note="ALERT_NOTE_OK",
+        )
+        assert "ALERT_NOTE_OK" in done
         assert tr("edit_schedule_reminder", loc)
         assert tr("edit_schedule_reminder_no_schedule", loc)
         assert tr("channel_dup_prompt", loc)
@@ -438,13 +468,35 @@ def main() -> None:
         assert db.update_subscription(sub_id, 1, schedule_reminder_minutes=10)
         assert db.get_unique_schedule_reminder_twitch_ids() == [sub.twitch_user_id]
         assert sub.notify_on_live is True
+        assert sub.notify_on_end is False
         assert db.update_subscription(sub_id, 1, notify_on_live=False)
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.notify_on_live is False
         assert sub.twitch_user_id not in db.get_unique_twitch_user_ids()
-        assert db.update_subscription(sub_id, 1, notify_on_live=True)
+        assert db.update_subscription(sub_id, 1, notify_on_end=True)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.notify_on_end is True
         assert sub.twitch_user_id in db.get_unique_twitch_user_ids()
+        assert db.update_subscription(sub_id, 1, notify_on_end=False, notify_on_live=True)
+        assert sub.twitch_user_id in db.get_unique_twitch_user_ids()
+        end_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="ender",
+            twitch_user_id="end-uid",
+            message_template="ended {username}",
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            notify_on_live=False,
+            notify_on_end=True,
+        )
+        end_sub = db.get_subscription(end_id, 1)
+        assert end_sub is not None
+        assert end_sub.notify_on_end is True
+        assert end_sub.notify_on_live is False
+        assert "end-uid" in db.get_unique_twitch_user_ids()
         assert sub.notify_delete_fail is False
         assert db.update_subscription(sub_id, 1, notify_delete_fail=True)
         sub = db.get_subscription(sub_id, 1)
@@ -506,7 +558,7 @@ def main() -> None:
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()
         assert restored.users == 1
-        assert restored.subscriptions_total == 2
+        assert restored.subscriptions_total == 3
         assert restored.blocked_users == 0
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1

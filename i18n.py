@@ -50,6 +50,25 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Tap New subscription to add a new subscription."
         ),
         "new_sub_prompt": "Enter a Twitch channel: link, mobile link, or username.",
+        "alert_type_prompt": (
+            "Here you can set up different Twitch stream alerts. "
+            "Choose which alert type to configure:\n"
+            "- when a stream starts\n"
+            "- for an upcoming stream, if the streamer has a schedule\n"
+            "- when a stream ends"
+        ),
+        "alert_type_live": "Stream start",
+        "alert_type_upcoming": "Upcoming stream",
+        "alert_type_end": "Stream end",
+        "alert_type_no_schedule": (
+            "This channel has no Twitch schedule. Choose another channel "
+            "or a different alert type."
+        ),
+        "alert_note_live": "When {twitch_username} goes live — I'll send a notification.",
+        "alert_note_end": "When {twitch_username} ends a stream — I'll send a notification.",
+        "sub_list_alert_live": "• Alert: stream start",
+        "sub_list_alert_end": "• Alert: stream end",
+        "sub_list_alert_upcoming": "• Alert: upcoming stream reminder",
         "finish_setup_first": "Finish the subscription setup or tap /cancel.",
         "stream_schedule_intro": (
             "Use this menu to build text for publishing your weekly schedule, starting on Monday.\n\n"
@@ -330,7 +349,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{schedule_reminder_note}\n"
             "Notifications: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n\n"
-            "When {twitch_username} goes live — I'll send a notification.\n\n"
+            "{alert_note}\n\n"
             "To avoid duplicate alerts, you can manually turn off Twitch "
             "notifications in settings: "
             "https://www.twitch.tv/settings/notifications"
@@ -649,6 +668,25 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Нажмите кнопку Новая подписка, чтобы добавить новую подписку."
         ),
         "new_sub_prompt": "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
+        "alert_type_prompt": (
+            "Здесь можно настроить различные оповещения о стримах на Twitch. "
+            "Выберите какой тип оповещения настроить:\n"
+            "- о начале стрима\n"
+            "- о предстоящем стриме, если у стримера есть расписание\n"
+            "- об окончании стрима"
+        ),
+        "alert_type_live": "Начало стрима",
+        "alert_type_upcoming": "Предстоящий стрим",
+        "alert_type_end": "Окончание стрима",
+        "alert_type_no_schedule": (
+            "У этого канала нет расписания на Twitch. Укажите другой канал "
+            "или выберите другой тип оповещения."
+        ),
+        "alert_note_live": "Когда {twitch_username} начнёт стрим — пришлю уведомление.",
+        "alert_note_end": "Когда {twitch_username} закончит стрим — пришлю уведомление.",
+        "sub_list_alert_live": "• Оповещение: начало стрима",
+        "sub_list_alert_end": "• Оповещение: окончание стрима",
+        "sub_list_alert_upcoming": "• Оповещение: напоминание о предстоящем стриме",
         "finish_setup_first": "Сначала завершите настройку подписки или нажмите /cancel.",
         "stream_schedule_intro": (
             "С помощью этого меню вы можете сформировать текст для публикации "
@@ -933,7 +971,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{schedule_reminder_note}\n"
             "Уведомления: {dest}{thread_note}\n"
             "{delete_note}{delete_fail_note}\n\n"
-            "Когда {twitch_username} начнёт стрим — пришлю уведомление.\n\n"
+            "{alert_note}\n\n"
             "Чтобы избежать дублирования оповещений, вы можете вручную "
             "отключить оповещения Twitch в разделе настроек: "
             "https://www.twitch.tv/settings/notifications"
@@ -1486,6 +1524,31 @@ def schedule_reminder_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     t("schedule_reminder_no", lang),
                     callback_data="sched_remind:0",
+                )
+            ],
+        ]
+    )
+
+
+def alert_type_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("alert_type_live", lang),
+                    callback_data="alert_type:live",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("alert_type_upcoming", lang),
+                    callback_data="alert_type:upcoming",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("alert_type_end", lang),
+                    callback_data="alert_type:end",
                 )
             ],
         ]

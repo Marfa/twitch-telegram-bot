@@ -35,6 +35,7 @@ from i18n import (
     admin_menu,
     admin_type_keyboard,
     admin_wizard_menu,
+    alert_type_keyboard,
     all_btn_texts,
     all_menu_buttons,
     all_wizard_nav_buttons,
@@ -97,6 +98,7 @@ _TELEGRAM_CAPTION_LIMIT = 1024
 
 (
     LANG_SELECT,
+    ALERT_TYPE,
     CHANNEL,
     CHANNEL_DUP,
     TEMPLATE,
@@ -133,7 +135,7 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     STREAM_SCHEDULE_TIME,
     STREAM_SCHEDULE_PUBLISH,
     SYNC_DAYS,
-) = range(37)
+) = range(38)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -496,12 +498,36 @@ async def _prompt_dest_step(
 
 
 async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
+    has_alert_type = bool(context.user_data.get("alert_type"))
     await update.effective_message.reply_text(
         t("new_sub_prompt", lang),
-        reply_markup=_wizard(lang, back=False),
+        reply_markup=_wizard(lang, back=has_alert_type),
     )
     _set_wizard_back(context, CHANNEL)
     return CHANNEL
+
+
+async def _go_alert_type_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    chat_id = update.effective_user.id
+    text = t("alert_type_prompt", lang)
+    if update.callback_query:
+        await context.bot.send_message(
+            chat_id, text, reply_markup=_wizard(lang, back=False)
+        )
+        await context.bot.send_message(
+            chat_id, "⬇️", reply_markup=alert_type_keyboard(lang)
+        )
+    else:
+        await update.effective_message.reply_text(
+            text, reply_markup=_wizard(lang, back=False)
+        )
+        await update.effective_message.reply_text(
+            "⬇️", reply_markup=alert_type_keyboard(lang)
+        )
+    _set_wizard_back(context, ALERT_TYPE)
+    return ALERT_TYPE
 
 
 async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
@@ -644,6 +670,10 @@ async def _go_after_repeat(
     if context.user_data.get("skip_schedule_check"):
         _set_wizard_back(context, DEST_TYPE)
         return await _prompt_dest_step(update, context, lang)
+    if context.user_data.get("alert_type") == "upcoming":
+        context.user_data["notify_on_live"] = False
+        context.user_data["notify_on_end"] = False
+        return await _go_schedule_reminder_minutes(update, context, lang)
     twitch: TwitchClient = context.application.bot_data["twitch"]
     uid = str(context.user_data.get("twitch_user_id") or "")
     has_schedule = False
@@ -665,6 +695,12 @@ async def _go_dest_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, la
 async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     state = context.user_data.get("wizard_back_state")
+    if state == CHANNEL:
+        context.user_data.pop("twitch_username", None)
+        context.user_data.pop("twitch_user_id", None)
+        context.user_data.pop("twitch_display_name", None)
+        context.user_data.pop("channel_input_was_url", None)
+        return await _go_alert_type_prompt(update, context, lang)
     if state == TEMPLATE:
         context.user_data.pop("pending_template", None)
         context.user_data.pop("pending_template_preview_disabled", None)
@@ -712,10 +748,14 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == SCHEDULE_REMINDER_ASK:
         return await _go_repeat_prompt(update, context, lang)
     if state == SCHEDULE_REMINDER_MINUTES:
+        if context.user_data.get("alert_type") == "upcoming":
+            return await _go_repeat_prompt(update, context, lang)
         return await _go_schedule_reminder_ask(update, context, lang)
     if state == DEST_TYPE:
         if context.user_data.get("lucky_quick"):
             return await _show_lucky_preview(update, context, lang)
+        if context.user_data.get("alert_type") == "upcoming":
+            return await _go_schedule_reminder_minutes(update, context, lang)
         if context.user_data.get("schedule_reminder_offered"):
             if int(context.user_data.get("schedule_reminder_minutes", 0)) > 0:
                 return await _go_schedule_reminder_minutes(update, context, lang)
@@ -817,6 +857,12 @@ def _format_sub_line(
     status = "✅" if sub.enabled else "⏸"
     chat_label = chat_display if chat_display is not None else str(sub.chat_id)
     settings: list[str] = []
+    if sub.notify_on_end:
+        settings.append(t("sub_list_alert_end", lang))
+    elif sub.schedule_reminder_minutes > 0 and not sub.notify_on_live:
+        settings.append(t("sub_list_alert_upcoming", lang))
+    else:
+        settings.append(t("sub_list_alert_live", lang))
     if sub.image_file_id:
         pos = (sub.image_position or "").strip()
         if pos == "after":
@@ -1127,12 +1173,29 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=_menu(lang, user_id),
         )
         return ConversationHandler.END
-    await update.effective_message.reply_text(
-        t("new_sub_prompt", lang),
-        reply_markup=_wizard(lang, back=False),
-    )
-    _set_wizard_back(context, CHANNEL)
-    return CHANNEL
+    return await _go_alert_type_prompt(update, context, lang)
+
+
+async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    kind = query.data.split(":", 1)[1]
+    if kind not in ("live", "upcoming", "end"):
+        return ALERT_TYPE
+    context.user_data["alert_type"] = kind
+    context.user_data["notify_on_end"] = kind == "end"
+    if kind in ("live", "end"):
+        context.user_data["skip_schedule_check"] = True
+        context.user_data["notify_on_live"] = kind == "live"
+        if kind == "end":
+            context.user_data["notify_on_live"] = False
+    else:
+        context.user_data.pop("skip_schedule_check", None)
+        context.user_data["notify_on_live"] = False
+        context.user_data["notify_on_end"] = False
+    await query.edit_message_text("✓")
+    return await _go_channel_prompt(update, context, lang)
 
 
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1159,6 +1222,18 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["twitch_user_id"] = user["id"]
     context.user_data["twitch_display_name"] = user.get("display_name") or user["login"]
     context.user_data["channel_input_was_url"] = twitch.is_twitch_url(text)
+
+    if context.user_data.get("alert_type") == "upcoming":
+        has_schedule = False
+        try:
+            has_schedule = await asyncio.to_thread(
+                twitch.has_channel_schedule, user["id"]
+            )
+        except Exception:
+            logger.exception("Twitch schedule check failed for %s", user["id"])
+        if not has_schedule:
+            await update.effective_message.reply_text(t("alert_type_no_schedule", lang))
+            return CHANNEL
 
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
@@ -1380,6 +1455,10 @@ async def lucky_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
     await query.edit_message_text("✓")
+    if context.user_data.get("alert_type") == "upcoming":
+        context.user_data["notify_on_live"] = False
+        context.user_data["notify_on_end"] = False
+        return await _go_schedule_reminder_minutes(update, context, lang)
     return await _prompt_dest_step(update, context, lang)
 
 
@@ -2225,7 +2304,19 @@ async def _finish_subscription(
     dest_type = data["dest_type"]
     delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
     notify_delete_fail = bool(data.get("notify_delete_fail", False)) and delete_previous
-    notify_on_live = bool(data.get("notify_on_live", True))
+    alert_type = str(data.get("alert_type") or "")
+    notify_on_end = bool(data.get("notify_on_end", False)) or alert_type == "end"
+    if alert_type == "live":
+        notify_on_live = True
+        notify_on_end = False
+    elif alert_type == "end":
+        notify_on_live = False
+        notify_on_end = True
+    elif alert_type == "upcoming":
+        notify_on_live = False
+        notify_on_end = False
+    else:
+        notify_on_live = bool(data.get("notify_on_live", True))
 
     try:
         if edit_sub_id and live_addon:
@@ -2311,6 +2402,7 @@ async def _finish_subscription(
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
                 notify_on_live=notify_on_live,
+                notify_on_end=notify_on_end,
             )
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -2327,9 +2419,10 @@ async def _finish_subscription(
     schedule_only_pending = (
         not edit_sub_id
         and not notify_on_live
+        and not notify_on_end
         and int(data.get("schedule_reminder_minutes", 0)) > 0
     )
-    if schedule_only_pending:
+    if schedule_only_pending and alert_type != "upcoming":
         if update.callback_query:
             try:
                 await update.callback_query.edit_message_text(
@@ -2354,6 +2447,23 @@ async def _finish_subscription(
 
     if edit_sub_id and not live_addon:
         text = t("edit_updated", lang, sub_id=sub_id)
+    elif schedule_only_pending:
+        thread_note = (
+            t("thread_note", lang, thread_id=thread_id) if thread_id else ""
+        )
+        remind = int(data.get("schedule_reminder_minutes", 0))
+        user_sub_num = _owner_sub_number(db, owner_id, sub_id)
+        text = t(
+            "setup_schedule_only_done",
+            lang,
+            sub_id=user_sub_num,
+            twitch_username=data["twitch_username"],
+            schedule_reminder_note=t(
+                "schedule_reminder_yes_note", lang, minutes=remind
+            ),
+            dest=dest_label(dest_type, lang),
+            thread_note=thread_note,
+        )
     else:
         preview = render_template(
             data["message_template"],
@@ -2417,6 +2527,11 @@ async def _finish_subscription(
             if remind > 0
             else t("schedule_reminder_no_note", lang)
         )
+        alert_note = t(
+            "alert_note_end" if notify_on_end else "alert_note_live",
+            lang,
+            twitch_username=data["twitch_username"],
+        )
         user_sub_num = _owner_sub_number(db, owner_id, sub_id)
         text = t(
             "setup_done",
@@ -2433,6 +2548,7 @@ async def _finish_subscription(
             delay_note=delay_note,
             repeat_note=repeat_note,
             schedule_reminder_note=schedule_reminder_note,
+            alert_note=alert_note,
         )
         try:
             await _deliver_alert_content(
@@ -4591,6 +4707,30 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     await _send_notification(context.bot, db, sub, text)
 
 
+async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
+    sub_id = context.job.data["sub_id"]
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    sub = db.get_subscription_by_id(sub_id)
+    if not sub or not sub.enabled or not sub.notify_on_end:
+        return
+
+    try:
+        live_streams = await asyncio.to_thread(
+            twitch.get_live_streams, [sub.twitch_user_id]
+        )
+    except Exception:
+        logger.exception("Twitch poll failed for delayed end notification sub %s", sub_id)
+        return
+
+    if sub.twitch_user_id in live_streams:
+        return
+    if is_on_notify_cooldown(sub):
+        return
+    text = render_template(sub.message_template, sub.twitch_username, "—", "—")
+    await _send_notification(context.bot, db, sub, text)
+
+
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
@@ -4609,7 +4749,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Twitch poll failed")
         return
 
-    went_live = live_transitions(last_live, user_ids, live_streams, primed=primed)
+    went_live, went_offline = live_transitions(
+        last_live, user_ids, live_streams, primed=primed
+    )
     context.application.bot_data["last_live_primed"] = True
 
     for uid in went_live:
@@ -4635,6 +4777,23 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             text = render_template(
                 sub.message_template, username, game, title, stream=stream
             )
+            await _send_notification(context.bot, db, sub, text)
+
+    for uid in went_offline:
+        for sub in db.get_enabled_by_twitch_user_id(uid):
+            if not sub.notify_on_end:
+                continue
+            if is_on_notify_cooldown(sub):
+                continue
+            if sub.delay_minutes > 0:
+                context.job_queue.run_once(
+                    _send_delayed_end_notification,
+                    when=sub.delay_minutes * 60,
+                    data={"sub_id": sub.id},
+                    name=f"delay_end_{sub.id}",
+                )
+                continue
+            text = render_template(sub.message_template, sub.twitch_username, "—", "—")
             await _send_notification(context.bot, db, sub, text)
 
 
@@ -4714,15 +4873,20 @@ def live_transitions(
     live_ids: set[str] | dict,
     *,
     primed: bool,
-) -> list[str]:
-    """Update last_live; return uids that went offline→online when primed."""
+) -> tuple[list[str], list[str]]:
+    """Update last_live; return (went_live, went_offline) when primed."""
     went_live: list[str] = []
+    went_offline: list[str] = []
     for uid in user_ids:
         is_live = uid in live_ids
-        if primed and is_live and not last_live.get(uid, False):
-            went_live.append(uid)
+        was_live = last_live.get(uid, False)
+        if primed:
+            if is_live and not was_live:
+                went_live.append(uid)
+            if was_live and not is_live:
+                went_offline.append(uid)
         last_live[uid] = is_live
-    return went_live
+    return went_live, went_offline
 
 
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4983,8 +5147,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ],
         states={
             LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
+            ALERT_TYPE: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_alert_type, pattern=r"^alert_type:(live|upcoming|end)$"
+                ),
+            ],
             CHANNEL: [
                 _wiz_cancel,
+                _wiz_back,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel),
             ],
             CHANNEL_DUP: [
