@@ -3151,7 +3151,7 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         t("import_sync_enabled", lang, days=days),
     )
     imported, skipped, limited, removed, new_subs = await _run_followed_import(
-        context.application, user_id, pending["followed"]
+        context.application, user_id, pending["followed"], enabled=True
     )
     await _deliver_import_result(
         context.application, user_id, lang, imported, skipped, limited, new_subs,

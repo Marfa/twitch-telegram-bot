@@ -417,7 +417,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "import_sync_days_invalid": "Send an integer from 1 to 365.",
         "import_sync_enabled": (
             "Sync enabled every {days} day(s).\n"
-            "New follows will be added as paused DM alerts; unfollowed sync "
+            "New follows will be added as enabled DM alerts; unfollowed sync "
             "imports will be removed. Manually added subscriptions are never touched."
         ),
         "import_sync_no_refresh": (
@@ -1020,7 +1020,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "import_sync_days_invalid": "Отправьте целое число от 1 до 365.",
         "import_sync_enabled": (
             "Синхронизация включена раз в {days} дн.\n"
-            "Новые фолловы добавятся как выключенные оповещения в личку; "
+            "Новые фолловы добавятся как включённые оповещения в личку; "
             "отфолловленные импорты удалятся. Вручную добавленные подписки не трогаются."
         ),
         "import_sync_no_refresh": (
