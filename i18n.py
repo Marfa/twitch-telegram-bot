@@ -1553,6 +1553,12 @@ def alert_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                     callback_data="alert_type:end",
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang),
+                    callback_data="alert_type:cancel",
+                )
+            ],
         ]
     )
 

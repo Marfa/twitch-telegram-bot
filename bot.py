@@ -566,20 +566,11 @@ async def _go_alert_type_prompt(
 ) -> int:
     chat_id = update.effective_user.id
     text = t("alert_type_prompt", lang)
+    markup = alert_type_keyboard(lang)
     if update.callback_query:
-        await context.bot.send_message(
-            chat_id, text, reply_markup=_wizard(lang, back=False)
-        )
-        await context.bot.send_message(
-            chat_id, "⬇️", reply_markup=alert_type_keyboard(lang)
-        )
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
     else:
-        await update.effective_message.reply_text(
-            text, reply_markup=_wizard(lang, back=False)
-        )
-        await update.effective_message.reply_text(
-            "⬇️", reply_markup=alert_type_keyboard(lang)
-        )
+        await update.effective_message.reply_text(text, reply_markup=markup)
     _set_wizard_back(context, ALERT_TYPE)
     return ALERT_TYPE
 
@@ -5206,6 +5197,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
             ALERT_TYPE: [
                 _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
                 CallbackQueryHandler(
                     receive_alert_type, pattern=r"^alert_type:(live|upcoming|end)$"
                 ),
