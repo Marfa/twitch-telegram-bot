@@ -284,7 +284,7 @@ def import_followed_as_subscriptions(
             dest_type="dm",
             chat_id=owner_id,
             thread_id=None,
-            disable_link_preview=False,
+            disable_link_preview=True,
             enabled=enabled,
             from_twitch_sync=True,
         )
@@ -298,6 +298,50 @@ def import_followed_as_subscriptions(
     if prune_missing:
         removed = db.delete_synced_subscriptions_missing(owner_id, follow_ids)
     return imported, skipped, limited, removed, new_subs
+
+
+LEGACY_IMPORT_TEMPLATES = frozenset(
+    {
+        "Streamer {username} went live with {game}",
+        "Стример {username} вышел в эфир с игрой {game}",
+    }
+)
+
+
+def migrate_import_sync_subscriptions(
+    db: Database, *, dry_run: bool = False
+) -> tuple[int, int]:
+    """Refresh import/sync subs still on the legacy default template; disable link preview.
+
+    Returns (templates_updated, preview_updated).
+    """
+    templates_updated = preview_updated = 0
+    for owner_id in db.get_all_owner_ids():
+        locale = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+        lang = "ru" if str(locale).lower().startswith("ru") else "en"
+        new_template = t("import_default_template", lang)
+        for sub in db.get_subscriptions_by_owner(owner_id):
+            if not sub.from_twitch_sync:
+                continue
+            fields: dict[str, object] = {}
+            if sub.message_template in LEGACY_IMPORT_TEMPLATES:
+                fields["message_template"] = new_template
+            if not sub.disable_link_preview:
+                fields["disable_link_preview"] = True
+            if not fields:
+                continue
+            if dry_run:
+                if "message_template" in fields:
+                    templates_updated += 1
+                if "disable_link_preview" in fields:
+                    preview_updated += 1
+                continue
+            if db.update_subscription(sub.id, owner_id, **fields):
+                if "message_template" in fields:
+                    templates_updated += 1
+                if "disable_link_preview" in fields:
+                    preview_updated += 1
+    return templates_updated, preview_updated
 
 
 def _import_result_keyboard(

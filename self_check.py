@@ -24,6 +24,7 @@ from bot import (
     _parse_segment_start,
     import_followed_as_subscriptions,
     live_transitions,
+    migrate_import_sync_subscriptions,
 )
 from db import SqliteDatabase, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
@@ -340,7 +341,7 @@ def main() -> None:
         assert paused is not None and paused.enabled is False
         assert "{username}" in paused.message_template
         assert "{game}" in paused.message_template
-        assert "twitch.tv/" not in paused.message_template
+        assert "https://twitch.tv/{username}" in paused.message_template
         imported, skipped, limited, removed, new_subs = import_followed_as_subscriptions(
             db,
             1,
@@ -357,6 +358,7 @@ def main() -> None:
         assert new_subs[0].twitch_username == "newbie"
         assert new_subs[0].from_twitch_sync is True
         assert new_subs[0].enabled is False  # import stays paused
+        assert new_subs[0].disable_link_preview is True
         assert paused.from_twitch_sync is False
         # Sync path: new follows are enabled
         imported_sync, _, _, _, sync_subs = import_followed_as_subscriptions(
@@ -374,6 +376,7 @@ def main() -> None:
         assert sync_subs[0].twitch_username == "synced"
         assert sync_subs[0].enabled is True
         assert sync_subs[0].from_twitch_sync is True
+        assert sync_subs[0].disable_link_preview is True
         # Prune: remove sync-origin "newbie" when follows only keep CHANNEL
         imported2, skipped2, limited2, removed2, _ = import_followed_as_subscriptions(
             db,
@@ -387,6 +390,40 @@ def main() -> None:
         assert db.get_subscription(new_subs[0].id, 1) is None
         assert db.get_subscription(sync_subs[0].id, 1) is None
         assert db.get_subscription(paused_id, 1) is not None  # manual kept
+        db.set_user_locale(1, "ru")
+        legacy_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="legacy",
+            twitch_user_id="888",
+            message_template="Стример {username} вышел в эфир с игрой {game}",
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            enabled=True,
+            from_twitch_sync=True,
+        )
+        preview_only_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="preview",
+            twitch_user_id="889",
+            message_template=tr("import_default_template", "en"),
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            enabled=True,
+            from_twitch_sync=True,
+        )
+        templates, previews = migrate_import_sync_subscriptions(db)
+        assert templates == 1 and previews == 2
+        legacy = db.get_subscription(legacy_id, 1)
+        preview_only = db.get_subscription(preview_only_id, 1)
+        assert legacy is not None and preview_only is not None
+        assert legacy.message_template == tr("import_default_template", "ru")
+        assert legacy.disable_link_preview is True
+        assert preview_only.message_template == tr("import_default_template", "en")
+        assert preview_only.disable_link_preview is True
+        dry_templates, dry_previews = migrate_import_sync_subscriptions(db, dry_run=True)
+        assert dry_templates == 0 and dry_previews == 0
         assert db.enable_all_subscriptions(1) >= 1
         assert db.get_subscription(paused_id, 1).enabled is True
         assert db.get_twitch_sync(1) is None
@@ -558,7 +595,7 @@ def main() -> None:
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()
         assert restored.users == 1
-        assert restored.subscriptions_total == 3
+        assert restored.subscriptions_total == 5
         assert restored.blocked_users == 0
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1

@@ -42,6 +42,10 @@ fi
 for _ in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
     echo "health: ok"
+    if [[ -f scripts/migrate-import-template.py ]]; then
+      echo "migration: running import/sync template update..."
+      docker compose -f "$COMPOSE_FILE" exec -T bot python scripts/migrate-import-template.py
+    fi
     docker compose -f "$COMPOSE_FILE" ps
     exit 0
   fi

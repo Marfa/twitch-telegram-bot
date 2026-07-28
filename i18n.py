@@ -411,7 +411,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(set PUBLIC_BASE_URL and the OAuth redirect URL in Twitch Console)."
         ),
         "import_default_template": (
-            "Streamer {username} went live with {game}"
+            "Streamer {username} went live with {game}\n"
+            "https://twitch.tv/{username}"
         ),
         "import_success": (
             "Import finished successfully.\n"
@@ -1033,7 +1034,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(нужны PUBLIC_BASE_URL и OAuth Redirect URL в Twitch Console)."
         ),
         "import_default_template": (
-            "Стример {username} вышел в эфир с игрой {game}"
+            "Стример {username} вышел в эфир с игрой {game}\n"
+            "https://twitch.tv/{username}"
         ),
         "import_success": (
             "Импорт прошёл успешно.\n"
