@@ -1,0 +1,33 @@
+name: Deploy Payment Bot
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy paymentbot over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            APP_DIR=/opt/paymentbot
+            if [[ ! -d "$APP_DIR/.git" ]]; then
+              git clone https://github.com/Marfa/paymentbot.git "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            git fetch --prune origin
+            git reset --hard origin/main
+            cat > .env <<EOF
+            TELEGRAM_BOT_TOKEN=${{ secrets.PAYMENTBOT_TELEGRAM_BOT_TOKEN }}
+            ADMIN_USER_IDS=${{ secrets.PAYMENTBOT_ADMIN_USER_IDS }}
+            EOF
+            chmod 600 .env
+            bash deploy/install.sh
