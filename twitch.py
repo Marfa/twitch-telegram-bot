@@ -484,10 +484,20 @@ def normalize_ignore_keywords(text: str) -> str:
 def should_ignore_stream(ignore_keywords: str, game: str, title: str) -> bool:
     if not ignore_keywords.strip():
         return False
-    game_lower = (game or "").lower()
-    title_lower = (title or "").lower()
+    game_text = game or ""
+    title_text = title or ""
     for raw in ignore_keywords.split(","):
-        keyword = raw.strip().lower()
-        if keyword and (keyword in game_lower or keyword in title_lower):
+        keyword = raw.strip()
+        if not keyword:
+            continue
+        try:
+            pattern = re.compile(keyword, re.IGNORECASE)
+        except re.error:
+            # ponytail: invalid regex → literal substring; ceiling: no user-facing validation
+            needle = keyword.lower()
+            if needle in game_text.lower() or needle in title_text.lower():
+                return True
+            continue
+        if pattern.search(game_text) or pattern.search(title_text):
             return True
     return False

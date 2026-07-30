@@ -189,7 +189,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<b>Ignore keywords</b>\n\n"
             "Specify keywords in the stream title or category that will prevent "
             "the notification from being sent.\n\n"
-            "If multiple words, separate them with commas.\n\n"
+            "If multiple words, separate them with commas.\n"
+            "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n\n"
             "Send the list or tap Skip."
         ),
         "ignore_keywords_skip": "Skip ⏭",
@@ -537,6 +538,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Subscription #{sub_id}\n"
             "Current: {current}\n\n"
             "Send keywords separated by commas.\n"
+            "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n"
             "Empty message or Skip — disable the filter."
         ),
         "ignore_keywords_current_none": "none",
@@ -809,7 +811,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<b>Игнорировать ключевые слова</b>\n\n"
             "Укажите ключевые слова в названии стрима или игре, при наличии которых "
             "оповещение не будет отправляться.\n\n"
-            "Если несколько слов, укажите их через запятую.\n\n"
+            "Если несколько слов, укажите их через запятую.\n"
+            "Поддерживается regexp (без учёта регистра), например "
+            "<code>just.?chatting|irl</code>.\n\n"
             "Отправьте список слов или нажмите «Пропустить»."
         ),
         "ignore_keywords_skip": "Пропустить ⏭",
@@ -1160,6 +1164,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Подписка #{sub_id}\n"
             "Сейчас: {current}\n\n"
             "Отправьте ключевые слова через запятую.\n"
+            "Поддерживается regexp (без учёта регистра), например "
+            "<code>just.?chatting|irl</code>.\n"
             "Пустое сообщение или «Пропустить» — отключить фильтр."
         ),
         "ignore_keywords_current_none": "нет",

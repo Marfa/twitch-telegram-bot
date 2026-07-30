@@ -144,6 +144,11 @@ def main() -> None:
     assert should_ignore_stream("stream", "Just Chatting", "My Foo stream")
     assert not should_ignore_stream("foo, bar", "Just Chatting", "Playing games")
     assert not should_ignore_stream("", "Just Chatting", "Foo")
+    assert should_ignore_stream(r"just.?chatting", "Just Chatting", "Playing games")
+    assert should_ignore_stream(r"foo|bar", "Just Chatting", "My bar stream")
+    assert should_ignore_stream(r"^Just", "Just Chatting", "Playing games")
+    assert not should_ignore_stream(r"^Chatting", "Just Chatting", "Playing games")
+    assert should_ignore_stream("(unclosed", "foo (unclosed bar", "title")  # invalid re → literal
 
     link = parse_telegram_topic_link("https://t.me/c/themarfa_gaming/30")
     assert link is not None
