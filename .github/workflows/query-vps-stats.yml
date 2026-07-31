@@ -19,33 +19,6 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/twitch-telegram-bot
-            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 <<'SQL'
-            SELECT
-              (SELECT COUNT(*) FROM users WHERE COALESCE(bot_blocked, FALSE) = FALSE) AS users,
-              (SELECT COUNT(*) FROM subscriptions s
-                 LEFT JOIN users u ON u.user_id = s.owner_id
-                 WHERE COALESCE(u.bot_blocked, FALSE) = FALSE) AS subscriptions,
-              (SELECT COUNT(DISTINCT s.owner_id) FROM subscriptions s
-                 LEFT JOIN users u ON u.user_id = s.owner_id
-                 WHERE COALESCE(u.bot_blocked, FALSE) = FALSE) AS owners_with_subs;
-            SELECT
-              ROUND(AVG(cnt)::numeric, 2) AS avg_among_owners,
-              ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cnt))::numeric, 2) AS median,
-              MAX(cnt) AS max_subs,
-              MIN(cnt) AS min_subs
-            FROM (
-              SELECT s.owner_id, COUNT(*)::int AS cnt
-              FROM subscriptions s
-              LEFT JOIN users u ON u.user_id = s.owner_id
-              WHERE COALESCE(u.bot_blocked, FALSE) = FALSE
-              GROUP BY s.owner_id
-            ) t;
-            SELECT
-              ROUND(
-                (SELECT COUNT(*)::numeric FROM subscriptions s
-                   LEFT JOIN users u ON u.user_id = s.owner_id
-                   WHERE COALESCE(u.bot_blocked, FALSE) = FALSE)
-                /
-                NULLIF((SELECT COUNT(*) FROM users WHERE COALESCE(bot_blocked, FALSE) = FALSE), 0)
-              , 2) AS avg_all_users;
-            SQL
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "SELECT (SELECT COUNT(*) FROM users WHERE COALESCE(bot_blocked, FALSE) = FALSE) AS users, (SELECT COUNT(*) FROM subscriptions s LEFT JOIN users u ON u.user_id = s.owner_id WHERE COALESCE(u.bot_blocked, FALSE) = FALSE) AS subscriptions, (SELECT COUNT(DISTINCT s.owner_id) FROM subscriptions s LEFT JOIN users u ON u.user_id = s.owner_id WHERE COALESCE(u.bot_blocked, FALSE) = FALSE) AS owners_with_subs;"
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "SELECT ROUND(AVG(cnt)::numeric, 2) AS avg_among_owners, ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cnt))::numeric, 2) AS median, MAX(cnt) AS max_subs, MIN(cnt) AS min_subs FROM (SELECT s.owner_id, COUNT(*)::int AS cnt FROM subscriptions s LEFT JOIN users u ON u.user_id = s.owner_id WHERE COALESCE(u.bot_blocked, FALSE) = FALSE GROUP BY s.owner_id) t;"
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "SELECT ROUND((SELECT COUNT(*)::numeric FROM subscriptions s LEFT JOIN users u ON u.user_id = s.owner_id WHERE COALESCE(u.bot_blocked, FALSE) = FALSE) / NULLIF((SELECT COUNT(*) FROM users WHERE COALESCE(bot_blocked, FALSE) = FALSE), 0), 2) AS avg_all_users;"
