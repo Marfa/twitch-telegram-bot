@@ -27,10 +27,11 @@ from telegram.ext import (
     filters,
 )
 
-from db import BotStats, Database, Subscription, is_on_notify_cooldown
+from db import BotStats, Database, Subscription, TwitchSync, is_on_notify_cooldown
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
+    SCHEDULE_TZ_NAME,
     SUPPORTED_LOCALES,
     admin_menu,
     admin_type_keyboard,
@@ -883,7 +884,6 @@ def _help_text(lang: str) -> str:
         btn_new=btn("new", lang),
         btn_import_twitch=btn("import_twitch", lang),
         btn_manage=btn("manage", lang),
-        btn_create_schedule=btn("create_schedule", lang),
         btn_feedback=btn("feedback", lang),
         btn_settings=btn("settings", lang),
     )
@@ -2625,8 +2625,14 @@ async def _finish_subscription(
 
 async def start_stream_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
-    context.user_data.clear()
     lang = _user_lang(context, user_id)
+    if not _is_admin(user_id):
+        await update.effective_message.reply_text(
+            t("menu_main", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return ConversationHandler.END
+    context.user_data.clear()
     await update.effective_message.reply_text(
         t("stream_schedule_intro", lang),
         parse_mode=ParseMode.HTML,
@@ -2800,9 +2806,11 @@ async def _complete_schedule_publish(
 
     ok_count = 0
     errors: list[str] = []
-    tz_name = str(SCHEDULE_TZ)
     for entry in entries:
-        start_iso = f"{entry['date']}T{entry['time']}:00"
+        hour, minute = (int(x) for x in entry["time"].split(":", 1))
+        y, m, d = (int(x) for x in entry["date"].split("-", 2))
+        local_dt = datetime(y, m, d, hour, minute, tzinfo=SCHEDULE_TZ)
+        start_iso = local_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         game_text = entry.get("game", "")
         category_id = ""
         if game_text:
@@ -2817,7 +2825,7 @@ async def _complete_schedule_publish(
                 access,
                 twitch_user_id,
                 start_time=start_iso,
-                timezone=tz_name,
+                timezone=SCHEDULE_TZ_NAME,
                 title=game_text or "",
                 category_id=category_id,
             )
@@ -3311,7 +3319,7 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
     sync = db.get_twitch_sync(user_id)
-    if not sync:
+    if not sync or sync.period_days <= 0:
         await update.effective_message.reply_text(
             t("sync_menu_off", lang),
             reply_markup=settings_menu(lang),
@@ -3357,66 +3365,99 @@ async def on_sync_change_period(update: Update, context: ContextTypes.DEFAULT_TY
     return SYNC_DAYS
 
 
-async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Periodic job: sync Twitch follows; new channels are enabled by default."""
+async def _sync_owner_follows(
+    application: Application,
+    row: TwitchSync,
+    *,
+    advance_schedule: bool = True,
+) -> tuple[int, int, int, int] | None:
+    """Run one follow sync. Returns (imported, skipped, limited, removed) or None on auth failure."""
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
+    now = datetime.now(timezone.utc)
+    try:
+        token_data = await asyncio.to_thread(
+            twitch.refresh_user_token, row.refresh_token
+        )
+        access = token_data.get("access_token") or ""
+        refresh = token_data.get("refresh_token") or row.refresh_token
+        followed = await asyncio.to_thread(
+            twitch.get_followed_channels, access, row.twitch_user_id
+        )
+    except Exception:
+        logger.exception("Twitch sync failed for owner %s", row.owner_id)
+        db.delete_twitch_sync(row.owner_id)
+        try:
+            await application.bot.send_message(
+                row.owner_id,
+                t("sync_job_failed", lang),
+                reply_markup=_menu(lang, row.owner_id),
+            )
+        except Exception:
+            logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
+        return None
+
+    imported, skipped, limited, removed, _new = import_followed_as_subscriptions(
+        db,
+        row.owner_id,
+        followed,
+        template=t("import_default_template", lang),
+        limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+        prune_missing=True,
+        enabled=True,
+    )
+    if advance_schedule and row.period_days > 0:
+        next_at = _next_sync_iso(row.period_days, from_dt=now)
+    else:
+        next_at = row.next_sync_at
+    db.update_twitch_sync_tokens(
+        row.owner_id,
+        refresh,
+        last_sync_at=now.isoformat(),
+        next_sync_at=next_at,
+    )
+    return imported, skipped, limited, removed
+
+
+def _sync_result_notes(
+    lang: str, *, limited: int, removed: int
+) -> tuple[str, str]:
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    limit_note = ""
+    if limited:
+        limit_note = t(
+            "import_limit_note",
+            lang,
+            limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+            limited=limited,
+        )
+    removed_note = ""
+    if removed:
+        removed_note = t("import_removed_note", lang, removed=removed)
+    return limit_note, removed_note
+
+
+async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic job: sync Twitch follows; new channels are enabled by default."""
     db: Database = context.application.bot_data["db"]
-    twitch: TwitchClient = context.application.bot_data["twitch"]
     now = datetime.now(timezone.utc)
     due = db.get_due_twitch_syncs(now.isoformat())
     for row in due:
-        lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
-        try:
-            token_data = await asyncio.to_thread(
-                twitch.refresh_user_token, row.refresh_token
-            )
-            access = token_data.get("access_token") or ""
-            refresh = token_data.get("refresh_token") or row.refresh_token
-            followed = await asyncio.to_thread(
-                twitch.get_followed_channels, access, row.twitch_user_id
-            )
-        except Exception:
-            logger.exception("Twitch sync failed for owner %s", row.owner_id)
-            db.delete_twitch_sync(row.owner_id)
-            try:
-                await context.bot.send_message(
-                    row.owner_id,
-                    t("sync_job_failed", lang),
-                    reply_markup=_menu(lang, row.owner_id),
-                )
-            except Exception:
-                logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
+        if row.period_days <= 0:
             continue
-
-        imported, skipped, limited, removed, _new = import_followed_as_subscriptions(
-            db,
-            row.owner_id,
-            followed,
-            template=t("import_default_template", lang),
-            limit=MAX_SUBSCRIPTIONS_PER_OWNER,
-            prune_missing=True,
-            enabled=True,
-        )
-        next_at = _next_sync_iso(row.period_days, from_dt=now)
-        db.update_twitch_sync_tokens(
-            row.owner_id,
-            refresh,
-            last_sync_at=now.isoformat(),
-            next_sync_at=next_at,
-        )
+        result = await _sync_owner_follows(context.application, row)
+        if result is None:
+            continue
+        imported, skipped, limited, removed = result
         if imported or limited or removed:
-            limit_note = ""
-            if limited:
-                limit_note = t(
-                    "import_limit_note",
-                    lang,
-                    limit=MAX_SUBSCRIPTIONS_PER_OWNER,
-                    limited=limited,
-                )
-            removed_note = ""
-            if removed:
-                removed_note = t("import_removed_note", lang, removed=removed)
+            lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
+            limit_note, removed_note = _sync_result_notes(
+                lang, limited=limited, removed=removed
+            )
             try:
                 await context.bot.send_message(
                     row.owner_id,
@@ -3432,6 +3473,42 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
             except Exception:
                 logger.exception("Cannot notify owner %s about sync result", row.owner_id)
+
+
+async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    sync = db.get_twitch_sync(user_id)
+    if not sync or sync.period_days <= 0:
+        await query.edit_message_text(t("sync_menu_off", lang))
+        return
+    await query.edit_message_text(t("sync_now_running", lang))
+    result = await _sync_owner_follows(context.application, sync, advance_schedule=True)
+    if result is None:
+        return
+    imported, skipped, limited, removed = result
+    limit_note, removed_note = _sync_result_notes(
+        lang, limited=limited, removed=removed
+    )
+    if imported or limited or removed:
+        text = t(
+            "sync_now_ok",
+            lang,
+            imported=imported,
+            skipped=skipped,
+            limit_note=limit_note,
+            removed_note=removed_note,
+        )
+    else:
+        text = t("sync_now_none", lang)
+    await context.bot.send_message(
+        user_id,
+        text,
+        reply_markup=settings_menu(lang),
+    )
 
 
 async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5148,6 +5225,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_sync_disable, pattern=r"^sync:disable$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_sync_now, pattern=r"^sync:now$"),
         group=0,
     )
     app.add_handler(

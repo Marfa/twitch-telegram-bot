@@ -250,10 +250,11 @@ class TwitchClient:
         is_recurring: bool = False,
     ) -> dict[str, Any]:
         """Create a schedule segment. Raises on error."""
+        # Twitch requires duration as a string and timezone in IANA form.
         body: dict[str, Any] = {
             "start_time": start_time,
             "timezone": timezone,
-            "duration": duration,
+            "duration": str(duration),
             "is_recurring": is_recurring,
         }
         if title:
@@ -271,7 +272,17 @@ class TwitchClient:
             json=body,
             timeout=15,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            detail = resp.text
+            try:
+                err = resp.json()
+                detail = err.get("message") or err.get("error") or detail
+            except Exception:
+                pass
+            raise requests.HTTPError(
+                f"{resp.status_code} Client Error: {detail} for url: {resp.url}",
+                response=resp,
+            )
         return resp.json()
 
     def _igdb_headers(self) -> dict[str, str]:

@@ -13,6 +13,8 @@ from telegram import (
 SUPPORTED_LOCALES = ("en", "ru")
 DEFAULT_LOCALE = "en"
 SCHEDULE_TZ = timezone(timedelta(hours=3))
+# IANA name for Twitch Helix schedule API (must not be "UTC+03:00").
+SCHEDULE_TZ_NAME = "Europe/Moscow"
 
 _STRINGS: dict[str, dict[str, str]] = {
     "en": {
@@ -386,14 +388,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/start — open the main menu / set up a subscription\n"
             "/help — show this help\n"
             "/cancel — cancel the current wizard\n"
-            "/schedule — create a stream schedule\n"
             "/feedback — report a problem\n"
             "/settings — open settings\n\n"
             "Menu:\n"
             "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
             "• {btn_import_twitch} — authorize and import followed channels\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
-            "• {btn_create_schedule} — weekly stream schedule\n"
             "• {btn_feedback}\n"
             "• {btn_settings}"
         ),
@@ -456,9 +456,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Next sync: {next_at}"
         ),
         "sync_change_period": "⏱ Change period",
+        "sync_now": "🔄 Sync now",
         "sync_disable": "⏸ Disable sync",
         "sync_disabled": "Sync disabled. Twitch token removed.",
         "sync_period_updated": "Sync period updated: every {days} day(s).",
+        "sync_now_running": "Syncing follows from Twitch…",
+        "sync_now_ok": (
+            "Sync finished.\n"
+            "Added: {imported}, skipped: {skipped}"
+            "{removed_note}{limit_note}"
+        ),
+        "sync_now_none": "Sync finished. No changes.",
         "sync_job_done": (
             "Twitch sync: added {imported}, skipped {skipped}"
             "{removed_note}{limit_note}"
@@ -1019,14 +1027,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/start — главное меню / настройка подписки\n"
             "/help — эта справка\n"
             "/cancel — отменить текущий мастер\n"
-            "/schedule — создать расписание стримов\n"
             "/feedback — сообщить о проблеме\n"
             "/settings — настройки\n\n"
             "Меню:\n"
             "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
             "• {btn_import_twitch} — авторизация и импорт фолловов\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
-            "• {btn_create_schedule} — расписание стримов на неделю\n"
             "• {btn_feedback}\n"
             "• {btn_settings}"
         ),
@@ -1089,9 +1095,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Следующая сверка: {next_at}"
         ),
         "sync_change_period": "⏱ Изменить период",
+        "sync_now": "🔄 Синхронизировать сейчас",
         "sync_disable": "⏸ Отключить синхронизацию",
         "sync_disabled": "Синхронизация отключена. Токен Twitch удалён.",
         "sync_period_updated": "Период синхронизации: раз в {days} дн.",
+        "sync_now_running": "Синхронизирую подписки с Twitch…",
+        "sync_now_ok": (
+            "Синхронизация завершена.\n"
+            "Добавлено: {imported}, пропущено: {skipped}"
+            "{removed_note}{limit_note}"
+        ),
+        "sync_now_none": "Синхронизация завершена. Изменений нет.",
         "sync_job_done": (
             "Синхронизация Twitch: добавлено {imported}, пропущено {skipped}"
             "{removed_note}{limit_note}"
@@ -1364,10 +1378,9 @@ def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
         ],
         [
             KeyboardButton(btn("manage", lang)),
-            KeyboardButton(btn("create_schedule", lang)),
+            KeyboardButton(btn("settings", lang)),
         ],
         [
-            KeyboardButton(btn("settings", lang)),
             KeyboardButton(btn("feedback", lang)),
         ],
     ]
@@ -1420,6 +1433,7 @@ def import_mode_keyboard(lang: str) -> InlineKeyboardMarkup:
 def sync_settings_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton(t("sync_now", lang), callback_data="sync:now")],
             [InlineKeyboardButton(t("sync_change_period", lang), callback_data="sync:period")],
             [InlineKeyboardButton(t("sync_disable", lang), callback_data="sync:disable")],
         ]
@@ -1433,6 +1447,7 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("broadcast", lang)),
                 KeyboardButton(btn("stats", lang)),
             ],
+            [KeyboardButton(btn("create_schedule", lang))],
             [KeyboardButton(btn("back", lang))],
         ],
         resize_keyboard=True,
