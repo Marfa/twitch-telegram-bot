@@ -3578,13 +3578,27 @@ async def start_edit_ignore_keywords(
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
+    has_keywords = bool(sub.ignore_keywords.strip())
     current = _ignore_keywords_current_label(sub.ignore_keywords, lang)
+    if has_keywords:
+        current = f"<code>{html.escape(current)}</code>"
+    hint = t(
+        "edit_ignore_keywords_hint_cancel" if has_keywords else "edit_ignore_keywords_hint_skip",
+        lang,
+    )
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text("✓")
     await context.bot.send_message(
         query.from_user.id,
-        t("edit_ignore_keywords_prompt", lang, sub_id=sub_num, current=current),
-        reply_markup=ignore_keywords_keyboard(lang),
+        t(
+            "edit_ignore_keywords_prompt",
+            lang,
+            sub_id=sub_num,
+            current=current,
+            hint=hint,
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=ignore_keywords_keyboard(lang, as_cancel=has_keywords),
     )
     return EDIT_IGNORE_KEYWORDS
 
@@ -5306,6 +5320,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     receive_edit_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
                 ),
+                CallbackQueryHandler(cancel, pattern=r"^ignore_keywords:cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_ignore_keywords),
             ],
             EDIT_DELAY: [

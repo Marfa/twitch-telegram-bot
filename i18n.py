@@ -539,8 +539,15 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Current: {current}\n\n"
             "Send keywords separated by commas.\n"
             "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n"
+            "{hint}"
+        ),
+        "edit_ignore_keywords_hint_skip": (
             "Empty message or Skip — disable the filter."
         ),
+        "edit_ignore_keywords_hint_cancel": (
+            "Cancel — leave unchanged. Empty message — disable the filter."
+        ),
+        "ignore_keywords_cancel": "Cancel",
         "ignore_keywords_current_none": "none",
         "edit_updated": "✅ Subscription #{sub_id} updated.",
         "edit_delay_prompt": (
@@ -1166,8 +1173,15 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Отправьте ключевые слова через запятую.\n"
             "Поддерживается regexp (без учёта регистра), например "
             "<code>just.?chatting|irl</code>.\n"
+            "{hint}"
+        ),
+        "edit_ignore_keywords_hint_skip": (
             "Пустое сообщение или «Пропустить» — отключить фильтр."
         ),
+        "edit_ignore_keywords_hint_cancel": (
+            "«Отмена» — без изменений. Пустое сообщение — отключить фильтр."
+        ),
+        "ignore_keywords_cancel": "Отмена",
         "ignore_keywords_current_none": "нет",
         "edit_updated": "✅ Подписка #{sub_id} обновлена.",
         "edit_delay_prompt": (
@@ -1493,7 +1507,18 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def ignore_keywords_keyboard(lang: str) -> InlineKeyboardMarkup:
+def ignore_keywords_keyboard(lang: str, *, as_cancel: bool = False) -> InlineKeyboardMarkup:
+    if as_cancel:
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("ignore_keywords_cancel", lang),
+                        callback_data="ignore_keywords:cancel",
+                    )
+                ]
+            ]
+        )
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("ignore_keywords_skip", lang), callback_data="ignore_keywords:skip")],
