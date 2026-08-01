@@ -19,11 +19,47 @@ jobs:
           script: |
             set -eu
             SNIP=/etc/nginx/snippets/freshrss-ytcdn.conf
-            echo "=== before ==="
-            ls -la "$SNIP" /etc/nginx/snippets/ 2>/dev/null || true
-            echo "----- $SNIP -----"
-            cat "$SNIP"
-            echo "----- includes -----"
-            grep -rn 'freshrss-ytcdn\|i.ytimg\|ytimg\|proxy_pass' /etc/nginx/sites-enabled/ /etc/nginx/sites-available/ /etc/nginx/snippets/ 2>/dev/null || true
-            echo "----- resolver in nginx -----"
-            grep -rn 'resolver ' /etc/nginx/ 2>/dev/null || true
+            cp -a "$SNIP" "${SNIP}.bak.$(date +%s)"
+            python3 - <<'PY'
+            from pathlib import Path
+            path = Path("/etc/nginx/snippets/freshrss-ytcdn.conf")
+            text = path.read_text()
+            print("=== BEFORE ===")
+            print(text)
+            # Replace literal proxy_pass https://host/... with variable form so nginx
+            # does not resolve upstream hostnames at config-load / reload time.
+            import re
+            def repl(m):
+                host = m.group(1)
+                rest = m.group(2)  # path after host, may be empty or /vi/ etc
+                var = host.replace(".", "_").replace("-", "_")
+                return (
+                    f"    resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;\n"
+                    f"    set ${var} https://{host};\n"
+                    f"    proxy_pass ${var}{rest};"
+                )
+            new, n = re.subn(
+                r"^[ \t]*proxy_pass\s+https://([A-Za-z0-9.-]+)(/[^;]*);",
+                repl,
+                text,
+                flags=re.M,
+            )
+            if n == 0:
+                raise SystemExit("no proxy_pass https://host lines found to rewrite")
+            # Avoid duplicating resolver if already present in same location after rewrite
+            # (keep simple: one resolver per location block is fine)
+            path.write_text(new)
+            print(f"=== REWROTE {n} proxy_pass lines ===")
+            print(new)
+            PY
+            nginx -t
+            systemctl reload nginx
+            systemctl is-active nginx
+            echo "=== health ==="
+            curl -fsS https://bot.themarfa.name/health
+            echo
+            # Smoke: ytcdn location should still route (may 404 from YT, but not nginx crash)
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 5 "https://feeds.themarfa.name/ytcdn/i/vi/dQw4w9WgXcQ/hqdefault.jpg" || true)
+            echo "ytcdn smoke http_code=$code"
+            # Prove config no longer depends on startup DNS for those hosts:
+            grep -n 'proxy_pass\|set \|resolver' "$SNIP"
