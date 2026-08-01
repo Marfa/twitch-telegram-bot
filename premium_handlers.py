@@ -17,7 +17,6 @@ from i18n import (
     DEFAULT_LOCALE,
     btn,
     main_menu,
-    premium_actions_keyboard,
     t,
 )
 from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
@@ -62,19 +61,15 @@ def premium_screen_text(db: Database, user_id: int, lang: str) -> str:
 async def send_premium_screen(
     bot, user_id: int, lang: str, db: Database, *, edit_message=None
 ) -> None:
-    st = prem.get_status(db, user_id)
-    show_cancel = bool(st.stars_charge_id) and st.stars_active and not st.stars_canceled
     text = premium_screen_text(db, user_id, lang)
-    markup = premium_actions_keyboard(lang, show_cancel=show_cancel)
     if edit_message is not None:
         await edit_message.edit_text(
-            text, reply_markup=markup, disable_web_page_preview=True
+            text, reply_markup=None, disable_web_page_preview=True
         )
         return
     await bot.send_message(
         user_id,
         text,
-        reply_markup=markup,
         disable_web_page_preview=True,
     )
 

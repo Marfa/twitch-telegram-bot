@@ -63,7 +63,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Active Twitch subscription to https://www.twitch.tv/{channel}\n\n"
             "{status}"
         ),
-        "premium_status_permanent": "Status: permanent Premium (legacy).",
+        "premium_status_permanent": "Status: free premium.",
         "premium_status_stars": "Status: Stars active until {until}.",
         "premium_status_stars_canceled": (
             "Status: Stars active until {until} (auto-renew canceled)."
@@ -760,7 +760,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Активная подписка Twitch на https://www.twitch.tv/{channel}\n\n"
             "{status}"
         ),
-        "premium_status_permanent": "Статус: постоянный премиум (для текущих пользователей).",
+        "premium_status_permanent": "Статус: бесплатный премиум.",
         "premium_status_stars": "Статус: Stars активны до {until}.",
         "premium_status_stars_canceled": (
             "Статус: Stars активны до {until} (автопродление отключено)."
