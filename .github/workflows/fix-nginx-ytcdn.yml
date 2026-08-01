@@ -7,7 +7,8 @@ jobs:
   fix:
     runs-on: ubuntu-latest
     steps:
-      - name: Harden freshrss ytcdn upstream
+      - name: Dump current snippet
+        id: dump
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -15,51 +16,96 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
           script_stop: true
-          command_timeout: 3m
+          command_timeout: 1m
+          script: |
+            set -eu
+            echo "B64_START"
+            base64 -w0 /etc/nginx/snippets/freshrss-ytcdn.conf
+            echo
+            echo "B64_END"
+      - name: Show decoded snippet
+        run: |
+          # Extract from previous step is awkward; re-fetch via second SSH below
+          true
+      - name: Install hardened snippet
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 2m
           script: |
             set -eu
             SNIP=/etc/nginx/snippets/freshrss-ytcdn.conf
             cp -a "$SNIP" "${SNIP}.bak.$(date +%s)"
-            python3 - <<'PY'
-            from pathlib import Path
-            path = Path("/etc/nginx/snippets/freshrss-ytcdn.conf")
-            text = path.read_text()
-            print("=== BEFORE ===")
-            print(text)
-            # Replace literal proxy_pass https://host/... with variable form so nginx
-            # does not resolve upstream hostnames at config-load / reload time.
-            import re
-            def repl(m):
-                host = m.group(1)
-                rest = m.group(2)  # path after host, may be empty or /vi/ etc
-                var = host.replace(".", "_").replace("-", "_")
-                return (
-                    f"    resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;\n"
-                    f"    set ${var} https://{host};\n"
-                    f"    proxy_pass ${var}{rest};"
-                )
-            new, n = re.subn(
-                r"^[ \t]*proxy_pass\s+https://([A-Za-z0-9.-]+)(/[^;]*);",
-                repl,
-                text,
-                flags=re.M,
-            )
-            if n == 0:
-                raise SystemExit("no proxy_pass https://host lines found to rewrite")
-            # Avoid duplicating resolver if already present in same location after rewrite
-            # (keep simple: one resolver per location block is fine)
-            path.write_text(new)
-            print(f"=== REWROTE {n} proxy_pass lines ===")
-            print(new)
-            PY
+            # Runtime DNS via variables: nginx must start even if YT CDN is briefly unresolvable.
+            # URI rewrite keeps /ytcdn/{i,i1,i2,i3,img}/vi/... -> https://HOST/vi/...
+            cat >"$SNIP" <<'EOF'
+            # YouTube thumbnail proxy for FreshRSS.
+            # Uses variables + resolver so reload/start does not hard-fail on DNS.
+            location /ytcdn/i/vi/ {
+                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
+                set $yt_i_host i.ytimg.com;
+                proxy_ssl_server_name on;
+                proxy_set_header Host $yt_i_host;
+                proxy_pass https://$yt_i_host/vi/;
+                add_header X-Content-Type-Options nosniff always;
+                add_header Access-Control-Allow-Origin *;
+                expires 1d;
+            }
+            location /ytcdn/i1/vi/ {
+                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
+                set $yt_i1_host i1.ytimg.com;
+                proxy_ssl_server_name on;
+                proxy_set_header Host $yt_i1_host;
+                proxy_pass https://$yt_i1_host/vi/;
+                add_header X-Content-Type-Options nosniff always;
+                add_header Access-Control-Allow-Origin *;
+                expires 1d;
+            }
+            location /ytcdn/i2/vi/ {
+                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
+                set $yt_i2_host i2.ytimg.com;
+                proxy_ssl_server_name on;
+                proxy_set_header Host $yt_i2_host;
+                proxy_pass https://$yt_i2_host/vi/;
+                add_header X-Content-Type-Options nosniff always;
+                add_header Access-Control-Allow-Origin *;
+                expires 1d;
+            }
+            location /ytcdn/i3/vi/ {
+                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
+                set $yt_i3_host i3.ytimg.com;
+                proxy_ssl_server_name on;
+                proxy_set_header Host $yt_i3_host;
+                proxy_pass https://$yt_i3_host/vi/;
+                add_header X-Content-Type-Options nosniff always;
+                add_header Access-Control-Allow-Origin *;
+                expires 1d;
+            }
+            location /ytcdn/img/vi/ {
+                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
+                set $yt_img_host i.ytimg.com;
+                proxy_ssl_server_name on;
+                proxy_set_header Host $yt_img_host;
+                proxy_pass https://$yt_img_host/vi/;
+                add_header X-Content-Type-Options nosniff always;
+                add_header Access-Control-Allow-Origin *;
+                expires 1d;
+            }
+            EOF
+            # strip leading spaces from heredoc indentation (4 spaces from YAML)
+            sed -i 's/^            //' "$SNIP"
+            echo "=== new snippet ==="
+            cat -A "$SNIP"
             nginx -t
             systemctl reload nginx
             systemctl is-active nginx
-            echo "=== health ==="
+            curl -fsS https://127.0.0.1/health -H 'Host: bot.themarfa.name' || curl -kfsS https://127.0.0.1/health -H 'Host: bot.themarfa.name'
+            echo
             curl -fsS https://bot.themarfa.name/health
             echo
-            # Smoke: ytcdn location should still route (may 404 from YT, but not nginx crash)
-            code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 5 "https://feeds.themarfa.name/ytcdn/i/vi/dQw4w9WgXcQ/hqdefault.jpg" || true)
-            echo "ytcdn smoke http_code=$code"
-            # Prove config no longer depends on startup DNS for those hosts:
-            grep -n 'proxy_pass\|set \|resolver' "$SNIP"
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 "https://feeds.themarfa.name/ytcdn/i/vi/dQw4w9WgXcQ/hqdefault.jpg" || echo fail)
+            echo "ytcdn_smoke=$code"

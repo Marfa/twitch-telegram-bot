@@ -1,0 +1,19 @@
+name: Dump ytcdn snippet
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Base64 dump freshrss-ytcdn.conf
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 1m
+          script: base64 -w0 /etc/nginx/snippets/freshrss-ytcdn.conf; echo
