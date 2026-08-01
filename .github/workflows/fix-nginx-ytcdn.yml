@@ -1,0 +1,29 @@
+name: Fix nginx ytcdn
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden freshrss ytcdn upstream
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 3m
+          script: |
+            set -eu
+            SNIP=/etc/nginx/snippets/freshrss-ytcdn.conf
+            echo "=== before ==="
+            ls -la "$SNIP" /etc/nginx/snippets/ 2>/dev/null || true
+            echo "----- $SNIP -----"
+            cat "$SNIP"
+            echo "----- includes -----"
+            grep -rn 'freshrss-ytcdn\|i.ytimg\|ytimg\|proxy_pass' /etc/nginx/sites-enabled/ /etc/nginx/sites-available/ /etc/nginx/snippets/ 2>/dev/null || true
+            echo "----- resolver in nginx -----"
+            grep -rn 'resolver ' /etc/nginx/ 2>/dev/null || true
