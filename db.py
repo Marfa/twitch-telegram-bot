@@ -1794,10 +1794,10 @@ class PostgresDatabase:
                     WHERE table_schema = 'public'
                       AND table_name = 'users'
                       AND column_name = 'premium_permanent'
-                )
+                ) AS had_col
                 """
             )
-            had_premium = bool(cur.fetchone()[0])
+            had_premium = bool(cur.fetchone()["had_col"])
             cur.execute(
                 """
                 ALTER TABLE users
