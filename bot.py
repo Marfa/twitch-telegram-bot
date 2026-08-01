@@ -5027,6 +5027,7 @@ def _format_stats(stats: BotStats, lang: str) -> str:
         subscriptions_disabled=stats.subscriptions_disabled,
         unique_owners=stats.unique_owners,
         unique_twitch_channels=stats.unique_twitch_channels,
+        premium_paid=stats.premium_paid,
         sys_updates=stats.sys_updates,
         sys_availability=stats.sys_availability,
         blocked_users=stats.blocked_users,

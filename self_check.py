@@ -331,7 +331,10 @@ def main() -> None:
         assert stats.users == 1
         assert stats.subscriptions_total == 1
         assert stats.subscriptions_enabled == 1
+        assert stats.premium_paid == 0
         assert stats.sys_updates == 1
+        db.set_premium_stars(1, charge_id="c", until_unix=10**12, canceled=False)
+        assert db.get_bot_stats().premium_paid == 1
         paused_id = db.add_subscription(
             owner_id=1,
             twitch_username="other",

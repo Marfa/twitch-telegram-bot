@@ -145,6 +145,7 @@ class BotStats:
     subscriptions_disabled: int
     unique_owners: int
     unique_twitch_channels: int
+    premium_paid: int
     sys_updates: int
     sys_availability: int
     blocked_users: int
@@ -1484,6 +1485,17 @@ class SqliteDatabase:
                   AND COALESCE(bot_blocked, 0) = 0
                 """
             ).fetchone()["c"]
+            premium_paid = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE COALESCE(bot_blocked, 0) = 0
+                  AND (
+                    COALESCE(premium_stars_until, 0)
+                      > CAST(strftime('%s', 'now') AS INTEGER)
+                    OR COALESCE(premium_twitch_active, 0) = 1
+                  )
+                """
+            ).fetchone()["c"]
         return BotStats(
             users=int(users),
             notify_users=int(notify),
@@ -1492,6 +1504,7 @@ class SqliteDatabase:
             subscriptions_disabled=int(subs_total) - int(subs_enabled),
             unique_owners=int(unique_owners),
             unique_twitch_channels=int(unique_twitch),
+            premium_paid=int(premium_paid),
             sys_updates=int(sys_updates),
             sys_availability=int(sys_availability),
             blocked_users=int(blocked_users),
@@ -2790,6 +2803,18 @@ class PostgresDatabase:
                 """
             )
             locale_unset = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE COALESCE(bot_blocked, FALSE) = FALSE
+                  AND (
+                    COALESCE(premium_stars_until, 0)
+                      > EXTRACT(EPOCH FROM NOW())::BIGINT
+                    OR COALESCE(premium_twitch_active, FALSE) = TRUE
+                  )
+                """
+            )
+            premium_paid = int(cur.fetchone()["c"])
         return BotStats(
             users=users,
             notify_users=notify,
@@ -2798,6 +2823,7 @@ class PostgresDatabase:
             subscriptions_disabled=subs_total - subs_enabled,
             unique_owners=unique_owners,
             unique_twitch_channels=unique_twitch,
+            premium_paid=premium_paid,
             sys_updates=sys_updates,
             sys_availability=sys_availability,
             blocked_users=blocked_users,
