@@ -39,8 +39,71 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sys_notifications": "🔔 System alerts",
         "btn_sys_updates": "📬 Bot update alerts",
         "btn_sync_subs": "🔄 Subscription sync",
+        "btn_premium": "⭐ Premium",
+        "btn_premium_pay": "Pay with Stars",
+        "btn_premium_marfapr": "Create marfapr alert",
+        "btn_premium_cancel_stars": "Cancel Stars subscription",
+        "btn_premium_get": "Get Premium",
+        "btn_premium_skip": "Skip",
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
+        "premium_title": (
+            "⭐ Premium\n\n"
+            "Benefits:\n"
+            "• More than {free_limit} active alerts (inactive unlimited)\n"
+            "• Twitch follow sync\n"
+            "• All alert types (free: live start only)\n"
+            "• Ignore keywords\n"
+            "• Delayed send\n"
+            "• Repeat notifications\n"
+            "• Delete previous messages\n"
+            "• Notify on delete failures\n\n"
+            "How to get Premium:\n"
+            "• {stars} Telegram Stars / month, or\n"
+            "• Active Twitch subscription to https://www.twitch.tv/{channel}\n\n"
+            "{status}"
+        ),
+        "premium_status_permanent": "Status: permanent Premium (legacy).",
+        "premium_status_stars": "Status: Stars active until {until}.",
+        "premium_status_stars_canceled": (
+            "Status: Stars active until {until} (auto-renew canceled)."
+        ),
+        "premium_status_twitch": "Status: Twitch sub to {channel} verified.",
+        "premium_status_none": "Status: free plan.",
+        "premium_gate": "⭐ This step requires Premium.\nGet Premium or {action}.",
+        "premium_gate_action_skip": "skip this step",
+        "premium_gate_action_cancel": "cancel",
+        "premium_pay_title": "Bot Premium",
+        "premium_pay_description": "Monthly Premium ({stars} Stars)",
+        "premium_pay_done": "Premium activated. Thank you!",
+        "premium_pay_link": "Open the invoice to pay with Stars:",
+        "premium_cancel_done": (
+            "Stars auto-renew canceled. Premium stays until the end of the paid period."
+        ),
+        "premium_cancel_none": "No active Stars subscription to cancel.",
+        "premium_marfapr_need_sub": (
+            "No active Twitch subscription to {channel} found.\n"
+            "Subscribe at https://www.twitch.tv/{channel} and try again."
+        ),
+        "premium_marfapr_ok": (
+            "Twitch subscription verified. Premium unlocked.\n"
+            "Alert for {channel} is ready."
+        ),
+        "premium_marfapr_ok_exists": (
+            "Twitch subscription verified. Premium unlocked.\n"
+            "You already have an alert for {channel}."
+        ),
+        "premium_marfapr_oauth": (
+            "Link Twitch to verify your subscription to {channel}:"
+        ),
+        "premium_active_limit": (
+            "Free plan allows up to {limit} active alerts.\n"
+            "Disable one or get Premium."
+        ),
+        "premium_created_disabled": (
+            "Alert created as paused: free plan allows {limit} active alerts. "
+            "Enable it after upgrading or pausing another."
+        ),
         "menu_admin": "Admin panel:",
         "menu_broadcast": "Broadcast:",
         "menu_main": "Main menu",
@@ -673,8 +736,71 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sys_notifications": "🔔 Системные уведомления",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "btn_sync_subs": "🔄 Синхронизация подписок",
+        "btn_premium": "⭐ Премиум",
+        "btn_premium_pay": "Оплатить подписку",
+        "btn_premium_marfapr": "Создать подписку на marfapr",
+        "btn_premium_cancel_stars": "Отменить подписку Stars",
+        "btn_premium_get": "Оформить премиум",
+        "btn_premium_skip": "Пропустить",
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
+        "premium_title": (
+            "⭐ Премиум\n\n"
+            "Возможности:\n"
+            "• Активных подписок больше {free_limit} (неактивные без лимита)\n"
+            "• Синхронизация подписок с Twitch\n"
+            "• Все типы оповещений (без премиума — только о начале стрима)\n"
+            "• Игнорировать ключевые слова\n"
+            "• Отложенная отправка\n"
+            "• Повторные уведомления\n"
+            "• Удалять старые сообщения\n"
+            "• Сообщать о проблемах удаления\n\n"
+            "Как получить:\n"
+            "• {stars} Telegram Stars в месяц, или\n"
+            "• Активная подписка Twitch на https://www.twitch.tv/{channel}\n\n"
+            "{status}"
+        ),
+        "premium_status_permanent": "Статус: постоянный премиум (для текущих пользователей).",
+        "premium_status_stars": "Статус: Stars активны до {until}.",
+        "premium_status_stars_canceled": (
+            "Статус: Stars активны до {until} (автопродление отключено)."
+        ),
+        "premium_status_twitch": "Статус: подписка Twitch на {channel} подтверждена.",
+        "premium_status_none": "Статус: бесплатный план.",
+        "premium_gate": "⭐ Этот шаг доступен в премиуме.\nОформите премиум или {action}.",
+        "premium_gate_action_skip": "пропустите шаг",
+        "premium_gate_action_cancel": "отмените",
+        "premium_pay_title": "Премиум бота",
+        "premium_pay_description": "Премиум на месяц ({stars} Stars)",
+        "premium_pay_done": "Премиум активирован. Спасибо!",
+        "premium_pay_link": "Откройте счёт для оплаты Stars:",
+        "premium_cancel_done": (
+            "Автопродление Stars отключено. Премиум действует до конца оплаченного периода."
+        ),
+        "premium_cancel_none": "Нет активной подписки Stars для отмены.",
+        "premium_marfapr_need_sub": (
+            "Активная подписка Twitch на {channel} не найдена.\n"
+            "Оформите её на https://www.twitch.tv/{channel} и попробуйте снова."
+        ),
+        "premium_marfapr_ok": (
+            "Подписка Twitch подтверждена. Премиум открыт.\n"
+            "Оповещение на {channel} создано."
+        ),
+        "premium_marfapr_ok_exists": (
+            "Подписка Twitch подтверждена. Премиум открыт.\n"
+            "Оповещение на {channel} у вас уже есть."
+        ),
+        "premium_marfapr_oauth": (
+            "Привяжите Twitch, чтобы проверить подписку на {channel}:"
+        ),
+        "premium_active_limit": (
+            "На бесплатном плане не больше {limit} активных оповещений.\n"
+            "Отключите одно или оформите премиум."
+        ),
+        "premium_created_disabled": (
+            "Оповещение создано на паузе: на бесплатном плане лимит {limit} активных. "
+            "Включите после апгрейда или паузы другого."
+        ),
         "menu_admin": "Админка:",
         "menu_broadcast": "Рассылка:",
         "menu_main": "Главное меню",
@@ -1362,6 +1488,7 @@ def all_menu_buttons() -> set[str]:
         "back",
         "sys_notifications",
         "sync_subs",
+        "premium",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
@@ -1409,16 +1536,62 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [
+                KeyboardButton(btn("premium", lang)),
                 KeyboardButton(btn("sync_subs", lang)),
-                KeyboardButton(btn("sys_notifications", lang)),
             ],
             [
+                KeyboardButton(btn("sys_notifications", lang)),
                 KeyboardButton(btn("language", lang)),
+            ],
+            [
                 KeyboardButton(btn("back", lang)),
             ],
         ],
         resize_keyboard=True,
     )
+
+
+def premium_actions_keyboard(lang: str, *, show_cancel: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(btn("premium_pay", lang), callback_data="premium:pay")],
+        [
+            InlineKeyboardButton(
+                btn("premium_marfapr", lang), callback_data="premium:marfapr"
+            )
+        ],
+    ]
+    if show_cancel:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_cancel_stars", lang), callback_data="premium:cancel"
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def premium_gate_keyboard(lang: str, *, first_step: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(btn("premium_get", lang), callback_data="premium_gate:get")],
+    ]
+    if first_step:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="premium_gate:cancel"
+                )
+            ]
+        )
+    else:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_skip", lang), callback_data="premium_gate:skip"
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def import_mode_keyboard(lang: str) -> InlineKeyboardMarkup:

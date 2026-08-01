@@ -388,6 +388,36 @@ class Database(Protocol):
 
     def set_saved_schedule(self, user_id: int, hour: int, minute: int) -> None: ...
 
+    def count_enabled_subscriptions(self, owner_id: int) -> int: ...
+
+    def get_premium_status(self, user_id: int) -> Any: ...
+
+    def set_premium_stars(
+        self,
+        user_id: int,
+        *,
+        charge_id: str,
+        until_unix: int,
+        canceled: bool,
+    ) -> None: ...
+
+    def set_premium_stars_canceled(self, user_id: int, canceled: bool) -> None: ...
+
+    def set_premium_twitch(
+        self,
+        user_id: int,
+        *,
+        active: bool,
+        twitch_user_id: str | None = None,
+        refresh_token: str | None = None,
+    ) -> None: ...
+
+    def set_premium_twitch_refresh(self, user_id: int, refresh_token: str) -> None: ...
+
+    def get_premium_twitch_refresh(self, user_id: int) -> str | None: ...
+
+    def list_premium_twitch_user_ids(self) -> list[int]: ...
+
     def add_scheduled_broadcast(
         self, msg_type: str, text: str, scheduled_at: str, created_by: int
     ) -> int: ...
@@ -592,6 +622,29 @@ class SqliteDatabase:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_hour INTEGER")
         if "saved_schedule_minute" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_minute INTEGER")
+        if "premium_permanent" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN premium_permanent INTEGER NOT NULL DEFAULT 0"
+            )
+            # Grandfather everyone who already used the bot before Premium existed.
+            conn.execute("UPDATE users SET premium_permanent = 1")
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO users (user_id, premium_permanent)
+                SELECT DISTINCT owner_id, 1 FROM subscriptions
+                """
+            )
+        for col, decl in (
+            ("premium_stars_charge_id", "TEXT NOT NULL DEFAULT ''"),
+            ("premium_stars_until", "INTEGER NOT NULL DEFAULT 0"),
+            ("premium_stars_canceled", "INTEGER NOT NULL DEFAULT 0"),
+            ("premium_twitch_user_id", "TEXT NOT NULL DEFAULT ''"),
+            ("premium_twitch_refresh", "TEXT NOT NULL DEFAULT ''"),
+            ("premium_twitch_active", "INTEGER NOT NULL DEFAULT 0"),
+            ("premium_twitch_checked_at", "TEXT"),
+        ):
+            if col not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
@@ -1016,6 +1069,152 @@ class SqliteDatabase:
                 """,
                 (user_id, hour, minute),
             )
+
+    def count_enabled_subscriptions(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM subscriptions WHERE owner_id = ? AND enabled = 1",
+                (owner_id,),
+            ).fetchone()
+        return int(row["c"])
+
+    def get_premium_status(self, user_id: int):
+        from premium import PremiumStatus
+
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT premium_permanent, premium_stars_until, premium_stars_charge_id,
+                       premium_stars_canceled, premium_twitch_active, premium_twitch_user_id
+                FROM users WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return PremiumStatus(False, 0, "", False, False, "")
+        return PremiumStatus(
+            permanent=bool(row["premium_permanent"]),
+            stars_until=int(row["premium_stars_until"] or 0),
+            stars_charge_id=row["premium_stars_charge_id"] or "",
+            stars_canceled=bool(row["premium_stars_canceled"]),
+            twitch_active=bool(row["premium_twitch_active"]),
+            twitch_user_id=row["premium_twitch_user_id"] or "",
+        )
+
+    def set_premium_stars(
+        self,
+        user_id: int,
+        *,
+        charge_id: str,
+        until_unix: int,
+        canceled: bool,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (
+                    user_id, premium_stars_charge_id, premium_stars_until, premium_stars_canceled
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_stars_charge_id = excluded.premium_stars_charge_id,
+                    premium_stars_until = excluded.premium_stars_until,
+                    premium_stars_canceled = excluded.premium_stars_canceled
+                """,
+                (user_id, charge_id, int(until_unix), int(bool(canceled))),
+            )
+
+    def set_premium_stars_canceled(self, user_id: int, canceled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_stars_canceled)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_stars_canceled = excluded.premium_stars_canceled
+                """,
+                (user_id, int(bool(canceled))),
+            )
+
+    def set_premium_twitch(
+        self,
+        user_id: int,
+        *,
+        active: bool,
+        twitch_user_id: str | None = None,
+        refresh_token: str | None = None,
+    ) -> None:
+        from datetime import datetime, timezone
+
+        from token_crypto import encrypt_secret
+
+        checked = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        enc = encrypt_secret(refresh_token) if refresh_token else None
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT premium_twitch_user_id, premium_twitch_refresh FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            uid = twitch_user_id if twitch_user_id is not None else (
+                (row["premium_twitch_user_id"] if row else "") or ""
+            )
+            ref = enc if enc is not None else ((row["premium_twitch_refresh"] if row else "") or "")
+            conn.execute(
+                """
+                INSERT INTO users (
+                    user_id, premium_twitch_active, premium_twitch_user_id,
+                    premium_twitch_refresh, premium_twitch_checked_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_twitch_active = excluded.premium_twitch_active,
+                    premium_twitch_user_id = excluded.premium_twitch_user_id,
+                    premium_twitch_refresh = excluded.premium_twitch_refresh,
+                    premium_twitch_checked_at = excluded.premium_twitch_checked_at
+                """,
+                (user_id, int(bool(active)), uid, ref, checked),
+            )
+
+    def set_premium_twitch_refresh(self, user_id: int, refresh_token: str) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_twitch_refresh)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_twitch_refresh = excluded.premium_twitch_refresh
+                """,
+                (user_id, enc),
+            )
+
+    def get_premium_twitch_refresh(self, user_id: int) -> str | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT premium_twitch_refresh FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row or not row["premium_twitch_refresh"]:
+            return None
+        try:
+            return decrypt_secret(row["premium_twitch_refresh"])
+        except Exception:
+            return None
+
+    def list_premium_twitch_user_ids(self) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id FROM users
+                WHERE COALESCE(premium_twitch_refresh, '') != ''
+                   OR COALESCE(premium_twitch_active, 0) = 1
+                """
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]
 
     def add_scheduled_broadcast(
         self, msg_type: str, text: str, scheduled_at: str, created_by: int
@@ -1590,6 +1789,46 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'users'
+                      AND column_name = 'premium_permanent'
+                )
+                """
+            )
+            had_premium = bool(cur.fetchone()[0])
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS premium_permanent BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            for col_sql in (
+                "premium_stars_charge_id TEXT NOT NULL DEFAULT ''",
+                "premium_stars_until BIGINT NOT NULL DEFAULT 0",
+                "premium_stars_canceled BOOLEAN NOT NULL DEFAULT FALSE",
+                "premium_twitch_user_id TEXT NOT NULL DEFAULT ''",
+                "premium_twitch_refresh TEXT NOT NULL DEFAULT ''",
+                "premium_twitch_active BOOLEAN NOT NULL DEFAULT FALSE",
+                "premium_twitch_checked_at TIMESTAMPTZ",
+            ):
+                cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
+            if not had_premium:
+                cur.execute("UPDATE users SET premium_permanent = TRUE")
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, premium_permanent)
+                    SELECT DISTINCT s.owner_id, TRUE
+                    FROM subscriptions s
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM users u WHERE u.user_id = s.owner_id
+                    )
+                    ON CONFLICT (user_id) DO UPDATE SET premium_permanent = TRUE
+                    """
+                )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
                     id SERIAL PRIMARY KEY,
                     msg_type TEXT NOT NULL,
@@ -2055,6 +2294,164 @@ class PostgresDatabase:
                 """,
                 (user_id, hour, minute),
             )
+
+    def count_enabled_subscriptions(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM subscriptions WHERE owner_id = %s AND enabled = TRUE",
+                (owner_id,),
+            )
+            return int(cur.fetchone()["c"])
+
+    def get_premium_status(self, user_id: int):
+        from premium import PremiumStatus
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT premium_permanent, premium_stars_until, premium_stars_charge_id,
+                       premium_stars_canceled, premium_twitch_active, premium_twitch_user_id
+                FROM users WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return PremiumStatus(False, 0, "", False, False, "")
+        return PremiumStatus(
+            permanent=bool(row["premium_permanent"]),
+            stars_until=int(row["premium_stars_until"] or 0),
+            stars_charge_id=row["premium_stars_charge_id"] or "",
+            stars_canceled=bool(row["premium_stars_canceled"]),
+            twitch_active=bool(row["premium_twitch_active"]),
+            twitch_user_id=row["premium_twitch_user_id"] or "",
+        )
+
+    def set_premium_stars(
+        self,
+        user_id: int,
+        *,
+        charge_id: str,
+        until_unix: int,
+        canceled: bool,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (
+                    user_id, premium_stars_charge_id, premium_stars_until, premium_stars_canceled
+                )
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_stars_charge_id = EXCLUDED.premium_stars_charge_id,
+                    premium_stars_until = EXCLUDED.premium_stars_until,
+                    premium_stars_canceled = EXCLUDED.premium_stars_canceled
+                """,
+                (user_id, charge_id, int(until_unix), bool(canceled)),
+            )
+
+    def set_premium_stars_canceled(self, user_id: int, canceled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_stars_canceled)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_stars_canceled = EXCLUDED.premium_stars_canceled
+                """,
+                (user_id, bool(canceled)),
+            )
+
+    def set_premium_twitch(
+        self,
+        user_id: int,
+        *,
+        active: bool,
+        twitch_user_id: str | None = None,
+        refresh_token: str | None = None,
+    ) -> None:
+        from datetime import datetime, timezone
+
+        from token_crypto import encrypt_secret
+
+        checked = datetime.now(timezone.utc)
+        enc = encrypt_secret(refresh_token) if refresh_token else None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT premium_twitch_user_id, premium_twitch_refresh FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            uid = twitch_user_id if twitch_user_id is not None else (
+                (row["premium_twitch_user_id"] if row else "") or ""
+            )
+            ref = enc if enc is not None else ((row["premium_twitch_refresh"] if row else "") or "")
+            cur.execute(
+                """
+                INSERT INTO users (
+                    user_id, premium_twitch_active, premium_twitch_user_id,
+                    premium_twitch_refresh, premium_twitch_checked_at
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_twitch_active = EXCLUDED.premium_twitch_active,
+                    premium_twitch_user_id = EXCLUDED.premium_twitch_user_id,
+                    premium_twitch_refresh = EXCLUDED.premium_twitch_refresh,
+                    premium_twitch_checked_at = EXCLUDED.premium_twitch_checked_at
+                """,
+                (user_id, bool(active), uid, ref, checked),
+            )
+
+    def set_premium_twitch_refresh(self, user_id: int, refresh_token: str) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_twitch_refresh)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_twitch_refresh = EXCLUDED.premium_twitch_refresh
+                """,
+                (user_id, enc),
+            )
+
+    def get_premium_twitch_refresh(self, user_id: int) -> str | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT premium_twitch_refresh FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row or not row["premium_twitch_refresh"]:
+            return None
+        try:
+            return decrypt_secret(row["premium_twitch_refresh"])
+        except Exception:
+            return None
+
+    def list_premium_twitch_user_ids(self) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id FROM users
+                WHERE COALESCE(premium_twitch_refresh, '') != ''
+                   OR COALESCE(premium_twitch_active, FALSE) = TRUE
+                """
+            )
+            rows = cur.fetchall()
+        return [int(r["user_id"]) for r in rows]
 
     def add_scheduled_broadcast(
         self, msg_type: str, text: str, scheduled_at: str, created_by: int

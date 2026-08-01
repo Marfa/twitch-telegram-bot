@@ -24,9 +24,11 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler,
     MessageHandler,
+    PreCheckoutQueryHandler,
     filters,
 )
 
+import premium as prem
 from db import BotStats, Database, Subscription, TwitchSync, is_on_notify_cooldown
 from i18n import (
     DEFAULT_LOCALE,
@@ -61,6 +63,7 @@ from i18n import (
     lucky_start_keyboard,
     main_menu,
     placeholders_link_html,
+    premium_gate_keyboard,
     repeat_keyboard,
     schedule_keyboard,
     schedule_reminder_keyboard,
@@ -136,7 +139,8 @@ _TELEGRAM_CAPTION_LIMIT = 1024
     STREAM_SCHEDULE_TIME,
     STREAM_SCHEDULE_PUBLISH,
     SYNC_DAYS,
-) = range(38)
+    PREMIUM_GATE,
+) = range(39)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -497,6 +501,12 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
 async def _prompt_repeat_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, *, edit: bool = False
 ) -> int:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not prem.is_premium(db, user_id):
+        return await _show_premium_gate(
+            update, context, feature="repeat", first_step=False
+        )
     if update.callback_query:
         await update.callback_query.edit_message_text(
             t("repeat_prompt", lang),
@@ -509,6 +519,83 @@ async def _prompt_repeat_step(
         )
     _set_wizard_back(context, REPEAT_ALLOW)
     return REPEAT_ALLOW
+
+
+async def _show_premium_gate(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    feature: str,
+    first_step: bool,
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    context.user_data["premium_gate_feature"] = feature
+    context.user_data["premium_gate_first"] = first_step
+    action = t(
+        "premium_gate_action_cancel" if first_step else "premium_gate_action_skip",
+        lang,
+    )
+    text = t("premium_gate", lang, action=action)
+    markup = premium_gate_keyboard(lang, first_step=first_step)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    return PREMIUM_GATE
+
+
+async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    from premium_handlers import send_premium_screen
+
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    action = query.data.split(":", 1)[1]
+    feature = context.user_data.get("premium_gate_feature", "")
+    first = bool(context.user_data.get("premium_gate_first"))
+    db: Database = context.application.bot_data["db"]
+
+    if action == "get":
+        await query.edit_message_text("✓")
+        await send_premium_screen(context.bot, user_id, lang, db)
+        await context.bot.send_message(
+            user_id,
+            t("menu_settings", lang),
+            reply_markup=settings_menu(lang),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if action == "cancel" or (first and action == "skip"):
+        await query.edit_message_text("✓")
+        return await cancel(update, context)
+
+    await query.edit_message_text("✓")
+    if feature == "ignore_keywords":
+        context.user_data["ignore_keywords"] = ""
+        return await _go_after_ignore_keywords(update, context, lang)
+    if feature == "delay":
+        context.user_data["delay_minutes"] = 0
+        return await _continue_after_delay(update, context, lang)
+    if feature == "repeat":
+        context.user_data["suppress_repeat_minutes"] = 0
+        return await _go_after_repeat(update, context, lang)
+    if feature == "delete_old":
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        chat_id = context.user_data.get("pending_chat_id", user_id)
+        thread_id = context.user_data.get("pending_thread_id")
+        return await _finish_subscription(update, context, user_id, chat_id, thread_id)
+    if feature == "delete_fail":
+        context.user_data["notify_delete_fail"] = False
+        chat_id = context.user_data.get("pending_chat_id", user_id)
+        thread_id = context.user_data.get("pending_thread_id")
+        return await _finish_subscription(update, context, user_id, chat_id, thread_id)
+    if feature in ("active_limit", "sync", "alert_type"):
+        return await cancel(update, context)
+    return await _prompt_dest_step(update, context, lang)
 
 
 async def _continue_after_delay(
@@ -643,6 +730,11 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
+    db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, update.effective_user.id):
+        return await _show_premium_gate(
+            update, context, feature="ignore_keywords", first_step=False
+        )
     await update.effective_message.reply_text(
         t("ignore_keywords_prompt", lang),
         parse_mode=ParseMode.HTML,
@@ -665,6 +757,11 @@ async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
+    db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, update.effective_user.id):
+        return await _show_premium_gate(
+            update, context, feature="delay", first_step=False
+        )
     chat_id = update.effective_user.id
     text = t("delay_prompt", lang)
     markup = delay_keyboard(lang)
@@ -1223,6 +1320,9 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=_menu(lang, user_id),
         )
         return ConversationHandler.END
+    if not prem.can_enable_more(db, user_id):
+        # Still allow creating paused alerts; warn via gate only when enabling.
+        pass
     return await _go_alert_type_prompt(update, context, lang)
 
 
@@ -1233,6 +1333,12 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     kind = query.data.split(":", 1)[1]
     if kind not in ("live", "upcoming", "end"):
         return ALERT_TYPE
+    db: Database = context.application.bot_data["db"]
+    if kind != "live" and not prem.is_premium(db, query.from_user.id):
+        context.user_data["alert_type"] = kind
+        return await _show_premium_gate(
+            update, context, feature="alert_type", first_step=True
+        )
     context.user_data["alert_type"] = kind
     context.user_data["notify_on_end"] = kind == "end"
     if kind in ("live", "end"):
@@ -1749,12 +1855,8 @@ async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     context.user_data["disable_link_preview"] = query.data.endswith(":1")
-    await query.edit_message_text(
-        t("delay_prompt", lang),
-        reply_markup=delay_keyboard(lang),
-    )
-    _set_wizard_back(context, DELAY_SEND)
-    return DELAY_SEND
+    await query.edit_message_text("✓")
+    return await _go_delay_prompt(update, context, lang)
 
 
 async def receive_delay_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1940,6 +2042,14 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, query.from_user.id):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, query.from_user.id, lang, db)
+        return ConversationHandler.END
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
@@ -1963,6 +2073,14 @@ async def start_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, query.from_user.id):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, query.from_user.id, lang, db)
+        return ConversationHandler.END
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
@@ -2295,10 +2413,29 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return await _finish_subscription(
             update, context, update.effective_user.id, chat_id, thread_id
         )
-    await message.reply_text(
-        t("delete_old_text", lang),
-        reply_markup=delete_old_keyboard(lang),
-    )
+    return await _prompt_delete_old(update, context, lang)
+
+
+async def _prompt_delete_old(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, update.effective_user.id):
+        return await _show_premium_gate(
+            update, context, feature="delete_old", first_step=False
+        )
+    target = update.effective_message
+    if target:
+        await target.reply_text(
+            t("delete_old_text", lang),
+            reply_markup=delete_old_keyboard(lang),
+        )
+    else:
+        await context.bot.send_message(
+            update.effective_user.id,
+            t("delete_old_text", lang),
+            reply_markup=delete_old_keyboard(lang),
+        )
     _set_wizard_back(context, DELETE_OLD)
     return DELETE_OLD
 
@@ -2315,6 +2452,11 @@ async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE)
         thread_id = context.user_data.get("pending_thread_id")
         return await _finish_subscription(
             update, context, query.from_user.id, chat_id, thread_id
+        )
+    db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, query.from_user.id):
+        return await _show_premium_gate(
+            update, context, feature="delete_fail", first_step=False
         )
     await query.edit_message_text(
         t("delete_fail_notify_text", lang),
@@ -2425,6 +2567,9 @@ async def _finish_subscription(
                 )
                 context.user_data.clear()
                 return ConversationHandler.END
+            create_enabled = True
+            if not prem.can_enable_more(db, owner_id):
+                create_enabled = False
             sub_id = db.add_subscription(
                 owner_id=owner_id,
                 twitch_username=data["twitch_username"],
@@ -2449,9 +2594,12 @@ async def _finish_subscription(
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
+                enabled=create_enabled,
                 notify_on_live=notify_on_live,
                 notify_on_end=notify_on_end,
             )
+            if not create_enabled:
+                context.user_data["premium_created_disabled"] = True
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
         await context.bot.send_message(
@@ -2491,6 +2639,7 @@ async def _finish_subscription(
         )
         return SCHEDULE_LIVE_ASK
 
+    created_disabled = bool(context.user_data.pop("premium_created_disabled", False))
     context.user_data.clear()
 
     if edit_sub_id and not live_addon:
@@ -2620,6 +2769,11 @@ async def _finish_subscription(
             pass
 
     await context.bot.send_message(owner_id, text, reply_markup=_menu(lang, owner_id))
+    if created_disabled:
+        await context.bot.send_message(
+            owner_id,
+            t("premium_created_disabled", lang, limit=prem.free_active_limit()),
+        )
     return ConversationHandler.END
 
 
@@ -3166,6 +3320,11 @@ async def complete_twitch_import(
     if purpose == "schedule":
         await _complete_schedule_publish(application, owner_id, error, token_info)
         return
+    if purpose == "premium":
+        from premium_handlers import complete_premium_oauth
+
+        await complete_premium_oauth(application, owner_id, error, token_info)
+        return
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
@@ -3215,6 +3374,11 @@ async def on_import_mode_sync(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     owner_id = query.from_user.id
     lang = _user_lang(context, owner_id)
+    db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, owner_id):
+        return await _show_premium_gate(
+            update, context, feature="sync", first_step=True
+        )
     pending = _peek_pending_import(context.application, owner_id)
     if not pending:
         await query.edit_message_text(t("import_pending_expired", lang))
@@ -3318,6 +3482,14 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
+    if not prem.is_premium(db, user_id):
+        from premium_handlers import send_premium_screen
+
+        await update.effective_message.reply_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, user_id, lang, db)
+        return
     sync = db.get_twitch_sync(user_id)
     if not sync or sync.period_days <= 0:
         await update.effective_message.reply_text(
@@ -3649,6 +3821,14 @@ async def start_edit_ignore_keywords(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
+    if not prem.is_premium(db, query.from_user.id):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, query.from_user.id, lang, db)
+        return ConversationHandler.END
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
@@ -3807,6 +3987,16 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 schedule_reminder_configured=sub.schedule_reminder_configured,
             ),
         )
+        return
+    if field in ("delete_old", "delete_fail", "repeat") and not prem.is_premium(
+        db, query.from_user.id
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, query.from_user.id, lang, db)
         return
     menu_keys = {
         "delete_old": "edit_delete_old_menu",
@@ -3967,6 +4157,18 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription_by_id(sub_id)
+    if sub is None or sub.owner_id != query.from_user.id:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if not sub.enabled and not prem.can_enable_more(db, query.from_user.id):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_active_limit", lang, limit=prem.free_active_limit())
+        )
+        await send_premium_screen(context.bot, query.from_user.id, lang, db)
+        return
     new_state = db.toggle_subscription(sub_id, query.from_user.id)
     if new_state is None:
         await query.edit_message_text(t("sub_not_found", lang))
@@ -4702,6 +4904,38 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def open_premium_from_settings(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from premium_handlers import open_premium_menu
+
+    await open_premium_menu(update, context)
+
+
+async def on_premium_callback_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from premium_handlers import on_premium_callback
+
+    await on_premium_callback(update, context)
+
+
+async def precheckout_premium_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from premium_handlers import precheckout_premium
+
+    await precheckout_premium(update, context)
+
+
+async def successful_premium_payment_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from premium_handlers import successful_premium_payment
+
+    await successful_premium_payment(update, context)
+
+
 async def start_language_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -5215,6 +5449,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("premium"), open_premium_from_settings),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("sync_subs"), open_sync_settings),
         group=0,
     )
@@ -5241,6 +5479,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_premium_callback_router, pattern=r"^premium:(pay|cancel|marfapr)$"),
+        group=0,
+    )
+    app.add_handler(
+        PreCheckoutQueryHandler(precheckout_premium_router),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_premium_payment_router),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_enable_all, pattern=r"^enable_all$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
@@ -5295,6 +5545,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
                 CallbackQueryHandler(
                     receive_alert_type, pattern=r"^alert_type:(live|upcoming|end)$"
+                ),
+            ],
+            PREMIUM_GATE: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    on_premium_gate, pattern=r"^premium_gate:(get|skip|cancel)$"
                 ),
             ],
             CHANNEL: [
@@ -5544,7 +5800,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_sel:|delete_go$|delete_clear$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|"
-                r"import_mode:|sync:)"
+                r"import_mode:|sync:|premium:)"
             ),
         ),
         group=-1,
@@ -5559,6 +5815,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("edit")
                 | _btn_filter("delete")
                 | _btn_filter("settings")
+                | _btn_filter("premium")
                 | _btn_filter("new")
                 | _btn_filter("create_schedule")
                 | _btn_filter("back")
@@ -5587,11 +5844,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     from config import CHECK_INTERVAL
+    from premium_handlers import refresh_premium_twitch_job
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
     app.job_queue.run_repeating(check_schedule_reminders, interval=60, first=25)
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
+    app.job_queue.run_repeating(refresh_premium_twitch_job, interval=3600, first=120)
     app.job_queue.run_repeating(
         weekly_new_users_report,
         interval=7 * 24 * 3600,

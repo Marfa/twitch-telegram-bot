@@ -640,6 +640,21 @@ def main() -> None:
     assert build_translations("hello", "en", {"en"}) == {"en": "hello"}
     assert build_translations("hello", "en", {"en", "ru"})["en"] == "hello"
 
+    import premium as prem
+    from premium import apply_stars_payment, invoice_payload, parse_invoice_payload
+
+    assert parse_invoice_payload(invoice_payload(7)) == 7
+    assert parse_invoice_payload("other") is None
+    assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
+    assert tr("btn_premium", "en")
+    with tempfile.TemporaryDirectory() as d:
+        db = SqliteDatabase(Path(d) / "premium.db")
+        db.upsert_user(1)
+        assert not prem.is_premium(db, 1)
+        apply_stars_payment(db, 1, charge_id="chg", until_unix=10**12)
+        assert prem.is_premium(db, 1)
+        assert db.count_enabled_subscriptions(1) == 0
+
     print("ok")
 
 

@@ -14,6 +14,7 @@ from config import TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 
 FOLLOWS_SCOPE = "user:read:follows"
 SCHEDULE_SCOPE = "channel:manage:schedule"
+SUBSCRIPTIONS_SCOPE = "user:read:subscriptions"
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,28 @@ class TwitchClient:
         resp.raise_for_status()
         users = resp.json().get("data", [])
         return users[0] if users else None
+
+    def check_user_subscription(
+        self,
+        user_access_token: str,
+        *,
+        broadcaster_id: str,
+        user_id: str,
+    ) -> bool:
+        """True if user_id has an active paid Twitch sub to broadcaster_id."""
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/subscriptions/user",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+            },
+            params={"broadcaster_id": broadcaster_id, "user_id": user_id},
+            timeout=15,
+        )
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        return bool(resp.json().get("data"))
 
     def get_followed_channels(
         self, user_access_token: str, user_id: str
