@@ -3562,14 +3562,15 @@ async def _sync_owner_follows(
     except Exception:
         logger.exception("Twitch sync failed for owner %s", row.owner_id)
         db.delete_twitch_sync(row.owner_id)
-        try:
-            await application.bot.send_message(
-                row.owner_id,
-                t("sync_job_failed", lang),
-                reply_markup=_menu(lang, row.owner_id),
-            )
-        except Exception:
-            logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
+        if db.get_receive_sync_updates(row.owner_id):
+            try:
+                await application.bot.send_message(
+                    row.owner_id,
+                    t("sync_job_failed", lang),
+                    reply_markup=_menu(lang, row.owner_id),
+                )
+            except Exception:
+                logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
         return None
 
     imported, skipped, limited, removed, _new = import_followed_as_subscriptions(
@@ -3626,6 +3627,8 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
         imported, skipped, limited, removed = result
         if imported or limited or removed:
+            if not db.get_receive_sync_updates(row.owner_id):
+                continue
             lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
             limit_note, removed_note = _sync_result_notes(
                 lang, limited=limited, removed=removed
@@ -4958,6 +4961,7 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
             lang,
             updates_enabled=db.get_receive_bot_updates(user_id),
             availability_enabled=db.get_receive_availability_updates(user_id),
+            sync_enabled=db.get_receive_sync_updates(user_id),
         ),
     )
 
@@ -4972,6 +4976,7 @@ async def _refresh_sys_notifications_menu(
             lang,
             updates_enabled=db.get_receive_bot_updates(user_id),
             availability_enabled=db.get_receive_availability_updates(user_id),
+            sync_enabled=db.get_receive_sync_updates(user_id),
         ),
     )
 
@@ -4997,6 +5002,17 @@ async def on_sys_availability_toggle(update: Update, context: ContextTypes.DEFAU
     db.set_receive_availability_updates(
         user_id, not db.get_receive_availability_updates(user_id)
     )
+    await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+
+async def on_sys_sync_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    db.set_receive_sync_updates(user_id, not db.get_receive_sync_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
 
@@ -5478,6 +5494,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_sys_availability_toggle, pattern=r"^sys_availability:toggle$"),
         group=0,
     )
+    app.add_handler(
+        CallbackQueryHandler(on_sys_sync_toggle, pattern=r"^sys_sync:toggle$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_premium_callback_router, pattern=r"^premium:(pay|cancel|marfapr)$"),
@@ -5799,7 +5819,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
                 r"delete_sel:|delete_go$|delete_clear$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
-                r"sys_updates:|sys_availability:|"
+                r"sys_updates:|sys_availability:|sys_sync:|"
                 r"import_mode:|sync:|premium:)"
             ),
         ),

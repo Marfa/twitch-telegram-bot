@@ -696,6 +696,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sys_notifications_menu": "System notifications:",
         "sys_updates_label": "Bot update notifications",
         "sys_availability_label": "Bot availability alerts",
+        "sys_sync_label": "Sync notifications",
         "bot_stats": (
             "📊 Bot statistics\n\n"
             "Users: {users}\n"
@@ -1397,6 +1398,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sys_notifications_menu": "Настройка системных уведомлений:",
         "sys_updates_label": "Оповещения об обновлении бота",
         "sys_availability_label": "Оповещения о доступности бота",
+        "sys_sync_label": "Оповещения о синхронизации",
         "bot_stats": (
             "📊 Статистика бота\n\n"
             "Пользователей: {users}\n"
@@ -1825,9 +1827,11 @@ def sys_notifications_keyboard(
     *,
     updates_enabled: bool,
     availability_enabled: bool,
+    sync_enabled: bool,
 ) -> InlineKeyboardMarkup:
     updates_mark = "✅ " if updates_enabled else "❌ "
     availability_mark = "✅ " if availability_enabled else "❌ "
+    sync_mark = "✅ " if sync_enabled else "❌ "
     return InlineKeyboardMarkup(
         [
             [
@@ -1840,6 +1844,12 @@ def sys_notifications_keyboard(
                 InlineKeyboardButton(
                     availability_mark + t("sys_availability_label", lang),
                     callback_data="sys_availability:toggle",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    sync_mark + t("sys_sync_label", lang),
+                    callback_data="sys_sync:toggle",
                 )
             ],
         ]

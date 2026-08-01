@@ -580,6 +580,10 @@ def main() -> None:
         db.set_receive_availability_updates(1, False)
         assert db.get_receive_availability_updates(1) is False
         assert 1 not in db.get_availability_recipients()
+        assert db.get_receive_sync_updates(1) is True
+        db.set_receive_sync_updates(1, False)
+        assert db.get_receive_sync_updates(1) is False
+        db.set_receive_sync_updates(1, True)
         db.set_receive_bot_updates(1, True)
         db.set_receive_availability_updates(1, True)
         db.set_bot_blocked(1, True)
