@@ -1,0 +1,52 @@
+name: Fix VPS proxy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnose and restart HTTP proxy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 3m
+          script: |
+            set -euo pipefail
+            echo "=== listeners 80/443/8080 ==="
+            ss -lntp | grep -E ':80 |:443 |:8080 ' || true
+            echo "=== which proxy ==="
+            command -v nginx || true
+            command -v caddy || true
+            systemctl is-active nginx 2>/dev/null || true
+            systemctl is-active caddy 2>/dev/null || true
+            systemctl is-enabled nginx 2>/dev/null || true
+            systemctl is-enabled caddy 2>/dev/null || true
+            echo "=== docker bot health ==="
+            curl -fsS http://127.0.0.1:8080/health || echo "bot :8080 DOWN"
+            echo
+            echo "=== restart proxy ==="
+            if systemctl list-unit-files | grep -q '^caddy\.service'; then
+              systemctl restart caddy
+              systemctl --no-pager --full status caddy || true
+            elif systemctl list-unit-files | grep -q '^nginx\.service'; then
+              nginx -t
+              systemctl restart nginx
+              systemctl --no-pager --full status nginx || true
+            else
+              echo "ERROR: neither caddy nor nginx unit found"
+              ls /etc/nginx/sites-enabled 2>/dev/null || true
+              ls /etc/caddy 2>/dev/null || true
+              exit 1
+            fi
+            sleep 2
+            echo "=== after restart listeners ==="
+            ss -lntp | grep -E ':80 |:443 |:8080 ' || true
+            echo "=== local https health ==="
+            curl -kfsS https://127.0.0.1/health || curl -fsS http://127.0.0.1/health || echo "proxy still DOWN"
+            echo
