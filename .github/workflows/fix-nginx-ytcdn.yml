@@ -7,27 +7,7 @@ jobs:
   fix:
     runs-on: ubuntu-latest
     steps:
-      - name: Dump current snippet
-        id: dump
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 1m
-          script: |
-            set -eu
-            echo "B64_START"
-            base64 -w0 /etc/nginx/snippets/freshrss-ytcdn.conf
-            echo
-            echo "B64_END"
-      - name: Show decoded snippet
-        run: |
-          # Extract from previous step is awkward; re-fetch via second SSH below
-          true
-      - name: Install hardened snippet
+      - name: Install hardened freshrss-ytcdn.conf
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -40,71 +20,12 @@ jobs:
             set -eu
             SNIP=/etc/nginx/snippets/freshrss-ytcdn.conf
             cp -a "$SNIP" "${SNIP}.bak.$(date +%s)"
-            # Runtime DNS via variables: nginx must start even if YT CDN is briefly unresolvable.
-            # URI rewrite keeps /ytcdn/{i,i1,i2,i3,img}/vi/... -> https://HOST/vi/...
-            cat >"$SNIP" <<'EOF'
-            # YouTube thumbnail proxy for FreshRSS.
-            # Uses variables + resolver so reload/start does not hard-fail on DNS.
-            location /ytcdn/i/vi/ {
-                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
-                set $yt_i_host i.ytimg.com;
-                proxy_ssl_server_name on;
-                proxy_set_header Host $yt_i_host;
-                proxy_pass https://$yt_i_host/vi/;
-                add_header X-Content-Type-Options nosniff always;
-                add_header Access-Control-Allow-Origin *;
-                expires 1d;
-            }
-            location /ytcdn/i1/vi/ {
-                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
-                set $yt_i1_host i1.ytimg.com;
-                proxy_ssl_server_name on;
-                proxy_set_header Host $yt_i1_host;
-                proxy_pass https://$yt_i1_host/vi/;
-                add_header X-Content-Type-Options nosniff always;
-                add_header Access-Control-Allow-Origin *;
-                expires 1d;
-            }
-            location /ytcdn/i2/vi/ {
-                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
-                set $yt_i2_host i2.ytimg.com;
-                proxy_ssl_server_name on;
-                proxy_set_header Host $yt_i2_host;
-                proxy_pass https://$yt_i2_host/vi/;
-                add_header X-Content-Type-Options nosniff always;
-                add_header Access-Control-Allow-Origin *;
-                expires 1d;
-            }
-            location /ytcdn/i3/vi/ {
-                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
-                set $yt_i3_host i3.ytimg.com;
-                proxy_ssl_server_name on;
-                proxy_set_header Host $yt_i3_host;
-                proxy_pass https://$yt_i3_host/vi/;
-                add_header X-Content-Type-Options nosniff always;
-                add_header Access-Control-Allow-Origin *;
-                expires 1d;
-            }
-            location /ytcdn/img/vi/ {
-                resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
-                set $yt_img_host i.ytimg.com;
-                proxy_ssl_server_name on;
-                proxy_set_header Host $yt_img_host;
-                proxy_pass https://$yt_img_host/vi/;
-                add_header X-Content-Type-Options nosniff always;
-                add_header Access-Control-Allow-Origin *;
-                expires 1d;
-            }
-            EOF
-            # strip leading spaces from heredoc indentation (4 spaces from YAML)
-            sed -i 's/^            //' "$SNIP"
-            echo "=== new snippet ==="
-            cat -A "$SNIP"
+            echo 'IyBZb3VUdWJlIHRodW1ibmFpbCBwcm94eSBmb3IgRnJlc2hSU1MuCiMgVmFyaWFibGVzICsgcmVzb2x2ZXI6IG5naW54IHN0YXJ0L3JlbG9hZCBtdXN0IG5vdCBkZXBlbmQgb24gWVQgQ0ROIEROUy4KbG9jYXRpb24gL3l0Y2RuL2kvdmkvIHsKICAgIHJlc29sdmVyIDEuMS4xLjEgOC44LjguOCB2YWxpZD0zMDBzIGlwdjY9b2ZmOwogICAgc2V0ICR5dF9pX2hvc3QgaS55dGltZy5jb207CiAgICBwcm94eV9zc2xfc2VydmVyX25hbWUgb247CiAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJHl0X2lfaG9zdDsKICAgIHByb3h5X3NldF9oZWFkZXIgUmVmZXJlciBodHRwczovL3d3dy55b3V0dWJlLmNvbS87CiAgICBwcm94eV9oaWRlX2hlYWRlciBTZXQtQ29va2llOwogICAgcHJveHlfcGFzcyBodHRwczovLyR5dF9pX2hvc3QvdmkvOwogICAgYWRkX2hlYWRlciBYLUNvbnRlbnQtVHlwZS1PcHRpb25zIG5vc25pZmYgYWx3YXlzOwogICAgYWRkX2hlYWRlciBBY2Nlc3MtQ29udHJvbC1BbGxvdy1PcmlnaW4gKjsKICAgIGV4cGlyZXMgMWQ7Cn0KbG9jYXRpb24gL3l0Y2RuL2kxL3ZpLyB7CiAgICByZXNvbHZlciAxLjEuMS4xIDguOC44LjggdmFsaWQ9MzAwcyBpcHY2PW9mZjsKICAgIHNldCAkeXRfaTFfaG9zdCBpMS55dGltZy5jb207CiAgICBwcm94eV9zc2xfc2VydmVyX25hbWUgb247CiAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJHl0X2kxX2hvc3Q7CiAgICBwcm94eV9zZXRfaGVhZGVyIFJlZmVyZXIgaHR0cHM6Ly93d3cueW91dHViZS5jb20vOwogICAgcHJveHlfaGlkZV9oZWFkZXIgU2V0LUNvb2tpZTsKICAgIHByb3h5X3Bhc3MgaHR0cHM6Ly8keXRfaTFfaG9zdC92aS87CiAgICBhZGRfaGVhZGVyIFgtQ29udGVudC1UeXBlLU9wdGlvbnMgbm9zbmlmZiBhbHdheXM7CiAgICBhZGRfaGVhZGVyIEFjY2Vzcy1Db250cm9sLUFsbG93LU9yaWdpbiAqOwogICAgZXhwaXJlcyAxZDsKfQpsb2NhdGlvbiAveXRjZG4vaTIvdmkvIHsKICAgIHJlc29sdmVyIDEuMS4xLjEgOC44LjguOCB2YWxpZD0zMDBzIGlwdjY9b2ZmOwogICAgc2V0ICR5dF9pMl9ob3N0IGkyLnl0aW1nLmNvbTsKICAgIHByb3h5X3NzbF9zZXJ2ZXJfbmFtZSBvbjsKICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkeXRfaTJfaG9zdDsKICAgIHByb3h5X3NldF9oZWFkZXIgUmVmZXJlciBodHRwczovL3d3dy55b3V0dWJlLmNvbS87CiAgICBwcm94eV9oaWRlX2hlYWRlciBTZXQtQ29va2llOwogICAgcHJveHlfcGFzcyBodHRwczovLyR5dF9pMl9ob3N0L3ZpLzsKICAgIGFkZF9oZWFkZXIgWC1Db250ZW50LVR5cGUtT3B0aW9ucyBub3NuaWZmIGFsd2F5czsKICAgIGFkZF9oZWFkZXIgQWNjZXNzLUNvbnRyb2wtQWxsb3ctT3JpZ2luICo7CiAgICBleHBpcmVzIDFkOwp9CmxvY2F0aW9uIC95dGNkbi9pMy92aS8gewogICAgcmVzb2x2ZXIgMS4xLjEuMSA4LjguOC44IHZhbGlkPTMwMHMgaXB2Nj1vZmY7CiAgICBzZXQgJHl0X2kzX2hvc3QgaTMueXRpbWcuY29tOwogICAgcHJveHlfc3NsX3NlcnZlcl9uYW1lIG9uOwogICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICR5dF9pM19ob3N0OwogICAgcHJveHlfc2V0X2hlYWRlciBSZWZlcmVyIGh0dHBzOi8vd3d3LnlvdXR1YmUuY29tLzsKICAgIHByb3h5X2hpZGVfaGVhZGVyIFNldC1Db29raWU7CiAgICBwcm94eV9wYXNzIGh0dHBzOi8vJHl0X2kzX2hvc3QvdmkvOwogICAgYWRkX2hlYWRlciBYLUNvbnRlbnQtVHlwZS1PcHRpb25zIG5vc25pZmYgYWx3YXlzOwogICAgYWRkX2hlYWRlciBBY2Nlc3MtQ29udHJvbC1BbGxvdy1PcmlnaW4gKjsKICAgIGV4cGlyZXMgMWQ7Cn0KbG9jYXRpb24gL3l0Y2RuL2ltZy92aS8gewogICAgcmVzb2x2ZXIgMS4xLjEuMSA4LjguOC44IHZhbGlkPTMwMHMgaXB2Nj1vZmY7CiAgICBzZXQgJHl0X2ltZ19ob3N0IGltZy55b3V0dWJlLmNvbTsKICAgIHByb3h5X3NzbF9zZXJ2ZXJfbmFtZSBvbjsKICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkeXRfaW1nX2hvc3Q7CiAgICBwcm94eV9zZXRfaGVhZGVyIFJlZmVyZXIgaHR0cHM6Ly93d3cueW91dHViZS5jb20vOwogICAgcHJveHlfaGlkZV9oZWFkZXIgU2V0LUNvb2tpZTsKICAgIHByb3h5X3Bhc3MgaHR0cHM6Ly8keXRfaW1nX2hvc3QvdmkvOwogICAgYWRkX2hlYWRlciBYLUNvbnRlbnQtVHlwZS1PcHRpb25zIG5vc25pZmYgYWx3YXlzOwogICAgYWRkX2hlYWRlciBBY2Nlc3MtQ29udHJvbC1BbGxvdy1PcmlnaW4gKjsKICAgIGV4cGlyZXMgMWQ7Cn0=' | base64 -d > "$SNIP"
+            echo "=== installed ==="
+            cat "$SNIP"
             nginx -t
             systemctl reload nginx
             systemctl is-active nginx
-            curl -fsS https://127.0.0.1/health -H 'Host: bot.themarfa.name' || curl -kfsS https://127.0.0.1/health -H 'Host: bot.themarfa.name'
-            echo
             curl -fsS https://bot.themarfa.name/health
             echo
             code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 "https://feeds.themarfa.name/ytcdn/i/vi/dQw4w9WgXcQ/hqdefault.jpg" || echo fail)
