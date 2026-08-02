@@ -45,8 +45,59 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_cancel_stars": "Cancel Stars subscription",
         "btn_premium_get": "Get Premium",
         "btn_premium_skip": "Skip",
+        "btn_partner": "🤝 Partner program",
+        "btn_partner_stats": "📈 My stats",
+        "btn_partner_link": "🔗 Get link",
+        "btn_partner_withdraw": "💸 Request withdrawal",
+        "btn_partner_withdrawals": "📋 My requests",
+        "btn_back_settings": "◀️ Settings",
+        "btn_admin_withdrawals": "💸 Withdrawals",
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
+        "menu_partner": "Partner program:",
+        "partner_intro": (
+            "Invite friends with your link. You get {percent}% of every Stars Premium "
+            "payment they make.\n"
+            "Withdrawal is manual; minimum {min_stars} Stars."
+        ),
+        "partner_stats": (
+            "Invited: {invited}\n"
+            "Their Stars payments: {payments}\n"
+            "Available to withdraw: {available} Stars"
+        ),
+        "partner_link": "Your partner link:\n{link}",
+        "partner_withdraw_ok": (
+            "Withdrawal request #{id} for {amount} Stars sent to the admin."
+        ),
+        "partner_withdraw_min": (
+            "Minimum withdrawal is {min_stars} Stars. Available: {available}."
+        ),
+        "partner_withdraw_admin": (
+            "Partner withdrawal request #{id}\n"
+            "User: <code>{user_id}</code>\n"
+            "Amount: {amount} Stars"
+        ),
+        "partner_withdrawals_empty": "No withdrawal requests yet.",
+        "partner_withdrawals_title": "Your withdrawal requests:",
+        "partner_withdrawal_line": "#{id} — {amount} Stars — {status}",
+        "partner_wd_status_pending": "pending",
+        "partner_wd_status_paid": "paid",
+        "partner_wd_status_rejected": "rejected",
+        "partner_wd_paid_user": (
+            "Your withdrawal request #{id} for {amount} Stars was marked as paid."
+        ),
+        "partner_wd_rejected_user": (
+            "Your withdrawal request #{id} for {amount} Stars was rejected. "
+            "The amount was returned to your balance."
+        ),
+        "admin_withdrawals_empty": "No pending withdrawal requests.",
+        "admin_withdrawals_title": "Pending withdrawals:",
+        "admin_withdrawal_line": "#{id} — user <code>{user_id}</code> — {amount} Stars",
+        "btn_wd_paid": "✅ Paid",
+        "btn_wd_reject": "❌ Reject",
+        "admin_wd_resolved_paid": "Request #{id} marked as paid.",
+        "admin_wd_resolved_rejected": "Request #{id} rejected, balance restored.",
+        "admin_wd_already": "Request #{id} is already resolved ({status}).",
         "premium_title": (
             "⭐ Premium\n\n"
             "Benefits:\n"
@@ -372,7 +423,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "delete_fail_yes_note": "Notify on delete failure: yes",
         "delete_fail_no_note": "Notify on delete failure: no",
-        "weekly_new_users": "New users: {count}",
+        "weekly_new_users": "New users: {count}\nPaid users (Stars): {paid}",
+        "broadcast_footer": "—\n{type}. You can turn these off in Settings.",
         "group_not_found": "Group not found. Add the bot and check the link.",
         "dest_not_found_channel": "Channel not found. Check @username.",
         "dest_not_found_group": "Group not found. Check @username.",
@@ -744,8 +796,59 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_cancel_stars": "Отменить подписку Stars",
         "btn_premium_get": "Оформить премиум",
         "btn_premium_skip": "Пропустить",
+        "btn_partner": "🤝 Партнёрка",
+        "btn_partner_stats": "📈 Моя статистика",
+        "btn_partner_link": "🔗 Получить ссылку",
+        "btn_partner_withdraw": "💸 Запросить вывод",
+        "btn_partner_withdrawals": "📋 Мои заявки",
+        "btn_back_settings": "◀️ Настройки",
+        "btn_admin_withdrawals": "💸 Выводы",
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
+        "menu_partner": "Партнёрская программа:",
+        "partner_intro": (
+            "Приглашайте друзей по своей ссылке. Вы получаете {percent}% от каждой "
+            "оплаты Stars Premium приглашённых.\n"
+            "Вывод вручную, минимум {min_stars} Stars."
+        ),
+        "partner_stats": (
+            "Приглашено: {invited}\n"
+            "Оплат Stars у них: {payments}\n"
+            "Доступно к выводу: {available} Stars"
+        ),
+        "partner_link": "Ваша партнёрская ссылка:\n{link}",
+        "partner_withdraw_ok": (
+            "Заявка на вывод #{id} на {amount} Stars отправлена администратору."
+        ),
+        "partner_withdraw_min": (
+            "Минимум для вывода — {min_stars} Stars. Доступно: {available}."
+        ),
+        "partner_withdraw_admin": (
+            "Заявка на вывод партнёра #{id}\n"
+            "Пользователь: <code>{user_id}</code>\n"
+            "Сумма: {amount} Stars"
+        ),
+        "partner_withdrawals_empty": "Заявок на вывод пока нет.",
+        "partner_withdrawals_title": "Ваши заявки на вывод:",
+        "partner_withdrawal_line": "#{id} — {amount} Stars — {status}",
+        "partner_wd_status_pending": "в ожидании",
+        "partner_wd_status_paid": "выплачено",
+        "partner_wd_status_rejected": "отклонено",
+        "partner_wd_paid_user": (
+            "Заявка на вывод #{id} на {amount} Stars отмечена как выплаченная."
+        ),
+        "partner_wd_rejected_user": (
+            "Заявка на вывод #{id} на {amount} Stars отклонена. "
+            "Сумма возвращена на баланс."
+        ),
+        "admin_withdrawals_empty": "Нет заявок на вывод в ожидании.",
+        "admin_withdrawals_title": "Заявки на вывод:",
+        "admin_withdrawal_line": "#{id} — пользователь <code>{user_id}</code> — {amount} Stars",
+        "btn_wd_paid": "✅ Выплачено",
+        "btn_wd_reject": "❌ Отклонить",
+        "admin_wd_resolved_paid": "Заявка #{id} отмечена как выплаченная.",
+        "admin_wd_resolved_rejected": "Заявка #{id} отклонена, баланс возвращён.",
+        "admin_wd_already": "Заявка #{id} уже обработана ({status}).",
         "premium_title": (
             "⭐ Премиум\n\n"
             "Возможности:\n"
@@ -1073,7 +1176,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "delete_fail_yes_note": "Сообщать о проблемах удаления: да",
         "delete_fail_no_note": "Сообщать о проблемах удаления: нет",
-        "weekly_new_users": "Новых пользователей: {count}",
+        "weekly_new_users": "Новых пользователей: {count}\nПлатных (Stars): {paid}",
+        "broadcast_footer": "—\n{type}. Можно отключить в настройках",
         "group_not_found": "Группа не найдена. Добавьте бота и проверьте ссылку.",
         "dest_not_found_channel": "Канал не найден. Проверьте @username.",
         "dest_not_found_group": "Группа не найдена. Проверьте @username.",
@@ -1493,6 +1597,13 @@ def all_menu_buttons() -> set[str]:
         "sys_notifications",
         "sync_subs",
         "premium",
+        "partner",
+        "partner_stats",
+        "partner_link",
+        "partner_withdraw",
+        "partner_withdrawals",
+        "back_settings",
+        "admin_withdrawals",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
@@ -1548,7 +1659,29 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("language", lang)),
             ],
             [
+                KeyboardButton(btn("partner", lang)),
+            ],
+            [
                 KeyboardButton(btn("back", lang)),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def partner_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton(btn("partner_stats", lang)),
+                KeyboardButton(btn("partner_link", lang)),
+            ],
+            [
+                KeyboardButton(btn("partner_withdraw", lang)),
+                KeyboardButton(btn("partner_withdrawals", lang)),
+            ],
+            [
+                KeyboardButton(btn("back_settings", lang)),
             ],
         ],
         resize_keyboard=True,
@@ -1624,10 +1757,30 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("broadcast", lang)),
                 KeyboardButton(btn("stats", lang)),
             ],
-            [KeyboardButton(btn("create_schedule", lang))],
+            [
+                KeyboardButton(btn("admin_withdrawals", lang)),
+                KeyboardButton(btn("create_schedule", lang)),
+            ],
             [KeyboardButton(btn("back", lang))],
         ],
         resize_keyboard=True,
+    )
+
+
+def withdrawal_actions_keyboard(withdrawal_id: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("btn_wd_paid", lang),
+                    callback_data=f"ref_wd:paid:{withdrawal_id}",
+                ),
+                InlineKeyboardButton(
+                    t("btn_wd_reject", lang),
+                    callback_data=f"ref_wd:reject:{withdrawal_id}",
+                ),
+            ]
+        ]
     )
 
 

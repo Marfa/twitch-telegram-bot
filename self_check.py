@@ -661,6 +661,58 @@ def main() -> None:
         apply_stars_payment(db, 1, charge_id="chg", until_unix=10**12)
         assert prem.is_premium(db, 1)
         assert db.count_enabled_subscriptions(1) == 0
+        assert db.count_stars_payers_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
+
+    with tempfile.TemporaryDirectory() as d:
+        db = SqliteDatabase(Path(d) / "ref.db")
+        db.upsert_user(10)
+        db.upsert_user(20)
+        assert db.set_referred_by(20, 10) is True
+        assert db.set_referred_by(20, 11) is False  # already set
+        assert db.get_referred_by(20) == 10
+        assert db.set_referred_by(10, 10) is False  # self
+        apply_stars_payment(
+            db, 20, charge_id="pay1", until_unix=10**12, stars_paid=100
+        )
+        stats = db.get_referral_stats(10)
+        assert stats.invited == 1
+        assert stats.payments == 1
+        assert stats.available_stars == 10
+        # Same charge must not double-credit.
+        apply_stars_payment(
+            db, 20, charge_id="pay1", until_unix=10**12, stars_paid=100
+        )
+        assert db.get_referral_stats(10).available_stars == 10
+        apply_stars_payment(
+            db, 20, charge_id="pay2", until_unix=10**12, stars_paid=5000
+        )
+        assert db.get_referral_stats(10).available_stars == 510
+        assert db.request_referral_withdrawal(10, 9999) is None  # over available
+        wid = db.request_referral_withdrawal(10, 510)
+        assert wid is not None
+        assert db.get_referral_stats(10).available_stars == 0
+        listed = db.list_referral_withdrawals(10)
+        assert len(listed) == 1 and listed[0].id == wid
+        pending = db.list_pending_referral_withdrawals()
+        assert any(p.id == wid for p in pending)
+        paid = db.resolve_referral_withdrawal(wid, "paid")
+        assert paid is not None and paid.status == "paid"
+        assert db.resolve_referral_withdrawal(wid, "rejected") is None
+        assert db.list_pending_referral_withdrawals() == []
+        # Reject restores available balance.
+        apply_stars_payment(
+            db, 20, charge_id="pay3", until_unix=10**12, stars_paid=1000
+        )
+        wid2 = db.request_referral_withdrawal(10, 100)
+        assert wid2 is not None
+        assert db.get_referral_stats(10).available_stars == 0
+        rejected = db.resolve_referral_withdrawal(wid2, "rejected")
+        assert rejected is not None and rejected.status == "rejected"
+        assert db.get_referral_stats(10).available_stars == 100
+        assert tr("weekly_new_users", "ru", count=1, paid=2)
+        assert "настройках" in tr("broadcast_footer", "ru", type="x")
+        assert "Settings" in tr("broadcast_footer", "en", type="x")
+        assert "Partner" in tr("btn_partner", "en") or "🤝" in tr("btn_partner", "en")
 
     print("ok")
 

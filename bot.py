@@ -63,6 +63,7 @@ from i18n import (
     lucky_start_keyboard,
     main_menu,
     placeholders_link_html,
+    partner_menu,
     premium_gate_keyboard,
     repeat_keyboard,
     schedule_keyboard,
@@ -78,6 +79,7 @@ from i18n import (
     format_stream_schedule_result,
     subscriptions_menu,
     sync_settings_keyboard,
+    withdrawal_actions_keyboard,
     sys_notifications_keyboard,
     t,
     template_typo_keyboard,
@@ -1268,11 +1270,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     db.upsert_user(user_id)
+    _apply_referral_start_arg(db, user_id, context.args)
     lang = db.get_user_locale(user_id)
     if not lang:
         context.user_data["after_lang"] = "welcome"
         return await _prompt_language(update)
     return await _send_welcome(update, context, lang)
+
+
+def _apply_referral_start_arg(db: Database, user_id: int, args: list[str] | None) -> None:
+    if not args:
+        return
+    raw = (args[0] or "").strip()
+    if not raw.startswith("ref_"):
+        return
+    try:
+        referrer_id = int(raw[4:])
+    except ValueError:
+        return
+    db.set_referred_by(user_id, referrer_id)
 
 
 async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4286,7 +4302,13 @@ async def _send_admin_broadcast(
     sent = failed = blocked = 0
     for uid in user_ids:
         locale = user_locales[uid]
-        message = translations.get(locale, text)
+        body = translations.get(locale, text)
+        footer = t(
+            "broadcast_footer",
+            locale,
+            type=_broadcast_type_label(msg_type, locale),
+        )
+        message = f"{body}\n\n{footer}"
         try:
             try:
                 await context.bot.send_message(
@@ -4907,6 +4929,237 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def open_partner_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from config import REFERRAL_COMMISSION_PERCENT, REFERRAL_WITHDRAW_MIN_STARS
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    await update.effective_message.reply_text(
+        t(
+            "partner_intro",
+            lang,
+            percent=REFERRAL_COMMISSION_PERCENT,
+            min_stars=REFERRAL_WITHDRAW_MIN_STARS,
+        ),
+        reply_markup=partner_menu(lang),
+    )
+
+
+async def partner_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    stats = db.get_referral_stats(user_id)
+    await update.effective_message.reply_text(
+        t(
+            "partner_stats",
+            lang,
+            invited=stats.invited,
+            payments=stats.payments,
+            available=stats.available_stars,
+        ),
+        reply_markup=partner_menu(lang),
+    )
+
+
+async def partner_show_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    username = context.bot.username or ""
+    if not username:
+        me = await context.bot.get_me()
+        username = me.username or ""
+    link = f"https://t.me/{username}?start=ref_{user_id}" if username else f"ref_{user_id}"
+    await update.effective_message.reply_text(
+        t("partner_link", lang, link=link),
+        reply_markup=partner_menu(lang),
+    )
+
+
+async def partner_request_withdraw(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from config import ADMIN_USER_IDS, REFERRAL_WITHDRAW_MIN_STARS
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    stats = db.get_referral_stats(user_id)
+    available = stats.available_stars
+    if available < REFERRAL_WITHDRAW_MIN_STARS:
+        await update.effective_message.reply_text(
+            t(
+                "partner_withdraw_min",
+                lang,
+                min_stars=REFERRAL_WITHDRAW_MIN_STARS,
+                available=available,
+            ),
+            reply_markup=partner_menu(lang),
+        )
+        return
+    request_id = db.request_referral_withdrawal(user_id, available)
+    if request_id is None:
+        await update.effective_message.reply_text(
+            t(
+                "partner_withdraw_min",
+                lang,
+                min_stars=REFERRAL_WITHDRAW_MIN_STARS,
+                available=available,
+            ),
+            reply_markup=partner_menu(lang),
+        )
+        return
+    await update.effective_message.reply_text(
+        t("partner_withdraw_ok", lang, id=request_id, amount=available),
+        reply_markup=partner_menu(lang),
+    )
+    for admin_id in ADMIN_USER_IDS:
+        admin_lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        try:
+            await context.bot.send_message(
+                admin_id,
+                t(
+                    "partner_withdraw_admin",
+                    admin_lang,
+                    id=request_id,
+                    user_id=user_id,
+                    amount=available,
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=withdrawal_actions_keyboard(request_id, admin_lang),
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning("Cannot notify admin %s about withdrawal: %s", admin_id, exc)
+
+
+def _partner_wd_status_label(status: str, lang: str) -> str:
+    mapping = {
+        "pending": "partner_wd_status_pending",
+        "paid": "partner_wd_status_paid",
+        "rejected": "partner_wd_status_rejected",
+    }
+    key = mapping.get(status)
+    return t(key, lang) if key else status
+
+
+async def partner_show_withdrawals(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    items = db.list_referral_withdrawals(user_id, limit=20)
+    if not items:
+        await update.effective_message.reply_text(
+            t("partner_withdrawals_empty", lang),
+            reply_markup=partner_menu(lang),
+        )
+        return
+    lines = [t("partner_withdrawals_title", lang)]
+    for item in items:
+        lines.append(
+            t(
+                "partner_withdrawal_line",
+                lang,
+                id=item.id,
+                amount=item.amount,
+                status=_partner_wd_status_label(item.status, lang),
+            )
+        )
+    await update.effective_message.reply_text(
+        "\n".join(lines),
+        reply_markup=partner_menu(lang),
+    )
+
+
+async def admin_show_withdrawals(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    items = db.list_pending_referral_withdrawals()
+    if not items:
+        await update.effective_message.reply_text(
+            t("admin_withdrawals_empty", lang),
+            reply_markup=admin_menu(lang),
+        )
+        return
+    await update.effective_message.reply_text(
+        t("admin_withdrawals_title", lang),
+        reply_markup=admin_menu(lang),
+    )
+    for item in items:
+        await update.effective_message.reply_text(
+            t(
+                "admin_withdrawal_line",
+                lang,
+                id=item.id,
+                user_id=item.user_id,
+                amount=item.amount,
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=withdrawal_actions_keyboard(item.id, lang),
+        )
+
+
+async def on_referral_withdrawal_action(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    admin_id = query.from_user.id
+    if not _is_admin(admin_id):
+        return
+    lang = _user_lang(context, admin_id)
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        return
+    _, action, raw_id = parts
+    try:
+        withdrawal_id = int(raw_id)
+    except ValueError:
+        return
+    new_status = "paid" if action == "paid" else "rejected" if action == "reject" else ""
+    if not new_status:
+        return
+    db: Database = context.application.bot_data["db"]
+    item = db.resolve_referral_withdrawal(withdrawal_id, new_status)
+    if item is None:
+        existing = db.get_referral_withdrawal(withdrawal_id)
+        status_label = (
+            _partner_wd_status_label(existing.status, lang) if existing else "?"
+        )
+        await query.edit_message_text(
+            t("admin_wd_already", lang, id=withdrawal_id, status=status_label)
+        )
+        return
+    admin_key = (
+        "admin_wd_resolved_paid" if new_status == "paid" else "admin_wd_resolved_rejected"
+    )
+    await query.edit_message_text(t(admin_key, lang, id=item.id))
+    user_lang = db.get_user_locale(item.user_id) or DEFAULT_LOCALE
+    user_key = (
+        "partner_wd_paid_user" if new_status == "paid" else "partner_wd_rejected_user"
+    )
+    try:
+        await context.bot.send_message(
+            item.user_id,
+            t(user_key, user_lang, id=item.id, amount=item.amount),
+        )
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot notify user %s about withdrawal %s: %s",
+            item.user_id,
+            item.id,
+            exc,
+        )
+
+
 async def open_premium_from_settings(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -5317,14 +5570,15 @@ async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     since = datetime.now(timezone.utc) - timedelta(days=7)
     count = db.count_new_users_since(since)
-    if count <= 0:
+    paid = db.count_stars_payers_since(since)
+    if count <= 0 and paid <= 0:
         return
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
         try:
             await context.bot.send_message(
                 admin_id,
-                t("weekly_new_users", lang, count=count),
+                t("weekly_new_users", lang, count=count, paid=paid),
             )
         except (BadRequest, Forbidden) as exc:
             logger.warning("Cannot send weekly report to admin %s: %s", admin_id, exc)
@@ -5467,6 +5721,40 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("premium"), open_premium_from_settings),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("partner"), open_partner_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("partner_stats"), partner_show_stats),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("partner_link"), partner_show_link),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("partner_withdraw"), partner_request_withdraw),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("partner_withdrawals"), partner_show_withdrawals),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("back_settings"), open_settings_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("admin_withdrawals"), admin_show_withdrawals),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_referral_withdrawal_action, pattern=r"^ref_wd:(paid|reject):\d+$"
+        ),
         group=0,
     )
     app.add_handler(
@@ -5821,7 +6109,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_sel:|delete_go$|delete_clear$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_sync:|"
-                r"import_mode:|sync:|premium:)"
+                r"import_mode:|sync:|premium:|ref_wd:)"
             ),
         ),
         group=-1,
@@ -5837,6 +6125,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("delete")
                 | _btn_filter("settings")
                 | _btn_filter("premium")
+                | _btn_filter("partner")
+                | _btn_filter("partner_stats")
+                | _btn_filter("partner_link")
+                | _btn_filter("partner_withdraw")
+                | _btn_filter("partner_withdrawals")
+                | _btn_filter("back_settings")
+                | _btn_filter("admin_withdrawals")
                 | _btn_filter("new")
                 | _btn_filter("create_schedule")
                 | _btn_filter("back")

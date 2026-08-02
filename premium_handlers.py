@@ -265,6 +265,7 @@ async def successful_premium_payment(
         user_id,
         charge_id=payment.telegram_payment_charge_id,
         until_unix=until,
+        stars_paid=int(payment.total_amount or prem.stars_price()),
     )
     await msg.reply_text(t("premium_pay_done", lang))
 

@@ -155,6 +155,23 @@ class BotStats:
 
 
 @dataclass
+class ReferralStats:
+    invited: int
+    payments: int
+    available_stars: int
+
+
+@dataclass
+class ReferralWithdrawal:
+    id: int
+    user_id: int
+    amount: int
+    status: str
+    created_at: str
+    resolved_at: str | None
+
+
+@dataclass
 class Subscription:
     id: int
     owner_id: int
@@ -216,6 +233,23 @@ def _row_to_twitch_sync(row: Any) -> TwitchSync:
         period_days=int(row["period_days"]),
         next_sync_at=str(next_at),
         last_sync_at=str(last) if last else None,
+    )
+
+
+def _row_to_referral_withdrawal(row: Any) -> ReferralWithdrawal:
+    created = row["created_at"]
+    if created is not None and not isinstance(created, str):
+        created = created.isoformat()
+    resolved = row["resolved_at"]
+    if resolved is not None and not isinstance(resolved, str):
+        resolved = resolved.isoformat()
+    return ReferralWithdrawal(
+        id=int(row["id"]),
+        user_id=int(row["user_id"]),
+        amount=int(row["amount"]),
+        status=str(row["status"]),
+        created_at=str(created or ""),
+        resolved_at=str(resolved) if resolved else None,
     )
 
 
@@ -366,6 +400,38 @@ class Database(Protocol):
     def upsert_user(self, user_id: int) -> None: ...
 
     def count_new_users_since(self, since: datetime) -> int: ...
+
+    def count_stars_payers_since(self, since: datetime) -> int: ...
+
+    def set_referred_by(self, user_id: int, referrer_id: int) -> bool: ...
+
+    def get_referred_by(self, user_id: int) -> int | None: ...
+
+    def add_referral_credit(
+        self,
+        *,
+        referrer_id: int,
+        invitee_id: int,
+        charge_id: str,
+        stars_paid: int,
+        commission_stars: int,
+    ) -> bool: ...
+
+    def get_referral_stats(self, user_id: int) -> ReferralStats: ...
+
+    def request_referral_withdrawal(self, user_id: int, amount: int) -> int | None: ...
+
+    def get_referral_withdrawal(self, withdrawal_id: int) -> ReferralWithdrawal | None: ...
+
+    def list_referral_withdrawals(
+        self, user_id: int, *, limit: int = 20
+    ) -> list[ReferralWithdrawal]: ...
+
+    def list_pending_referral_withdrawals(self) -> list[ReferralWithdrawal]: ...
+
+    def resolve_referral_withdrawal(
+        self, withdrawal_id: int, status: str
+    ) -> ReferralWithdrawal | None: ...
 
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None: ...
 
@@ -651,9 +717,48 @@ class SqliteDatabase:
             ("premium_twitch_refresh", "TEXT NOT NULL DEFAULT ''"),
             ("premium_twitch_active", "INTEGER NOT NULL DEFAULT 0"),
             ("premium_twitch_checked_at", "TEXT"),
+            ("premium_stars_paid_at", "TEXT"),
+            ("referred_by", "INTEGER"),
         ):
             if col not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS referral_credits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                referrer_id INTEGER NOT NULL,
+                invitee_id INTEGER NOT NULL,
+                charge_id TEXT NOT NULL UNIQUE,
+                stars_paid INTEGER NOT NULL,
+                commission_stars INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_referral_credits_referrer
+            ON referral_credits(referrer_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS referral_withdrawals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                resolved_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_referral_withdrawals_user
+            ON referral_withdrawals(user_id)
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
@@ -970,6 +1075,212 @@ class SqliteDatabase:
             ).fetchone()
         return int(row["n"]) if row else 0
 
+    def count_stars_payers_since(self, since: datetime) -> int:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        since_s = since_utc.strftime("%Y-%m-%d %H:%M:%S")
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM users
+                WHERE premium_stars_paid_at IS NOT NULL
+                  AND premium_stars_paid_at >= ?
+                """,
+                (since_s,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def set_referred_by(self, user_id: int, referrer_id: int) -> bool:
+        if user_id == referrer_id or referrer_id <= 0:
+            return False
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO users (user_id) VALUES (?) ON CONFLICT(user_id) DO NOTHING",
+                (user_id,),
+            )
+            cur = conn.execute(
+                """
+                UPDATE users
+                SET referred_by = ?
+                WHERE user_id = ?
+                  AND (referred_by IS NULL OR referred_by = 0)
+                """,
+                (referrer_id, user_id),
+            )
+            return cur.rowcount > 0
+
+    def get_referred_by(self, user_id: int) -> int | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT referred_by FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row or row["referred_by"] is None:
+            return None
+        value = int(row["referred_by"])
+        return value if value > 0 else None
+
+    def add_referral_credit(
+        self,
+        *,
+        referrer_id: int,
+        invitee_id: int,
+        charge_id: str,
+        stars_paid: int,
+        commission_stars: int,
+    ) -> bool:
+        if referrer_id <= 0 or invitee_id <= 0 or not charge_id:
+            return False
+        if commission_stars <= 0 or stars_paid <= 0:
+            return False
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO referral_credits (
+                        referrer_id, invitee_id, charge_id, stars_paid, commission_stars
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        referrer_id,
+                        invitee_id,
+                        charge_id,
+                        int(stars_paid),
+                        int(commission_stars),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                return False
+        return True
+
+    def get_referral_stats(self, user_id: int) -> ReferralStats:
+        with self._conn() as conn:
+            invited = conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE referred_by = ?",
+                (user_id,),
+            ).fetchone()["n"]
+            payments = conn.execute(
+                "SELECT COUNT(*) AS n FROM referral_credits WHERE referrer_id = ?",
+                (user_id,),
+            ).fetchone()["n"]
+            earned = conn.execute(
+                """
+                SELECT COALESCE(SUM(commission_stars), 0) AS n
+                FROM referral_credits WHERE referrer_id = ?
+                """,
+                (user_id,),
+            ).fetchone()["n"]
+            withdrawn = conn.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS n
+                FROM referral_withdrawals
+                WHERE user_id = ? AND status IN ('pending', 'paid')
+                """,
+                (user_id,),
+            ).fetchone()["n"]
+        available = max(0, int(earned) - int(withdrawn))
+        return ReferralStats(
+            invited=int(invited),
+            payments=int(payments),
+            available_stars=available,
+        )
+
+    def request_referral_withdrawal(self, user_id: int, amount: int) -> int | None:
+        amount = int(amount)
+        if amount <= 0:
+            return None
+        with self._conn() as conn:
+            earned = conn.execute(
+                """
+                SELECT COALESCE(SUM(commission_stars), 0) AS n
+                FROM referral_credits WHERE referrer_id = ?
+                """,
+                (user_id,),
+            ).fetchone()["n"]
+            withdrawn = conn.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS n
+                FROM referral_withdrawals
+                WHERE user_id = ? AND status IN ('pending', 'paid')
+                """,
+                (user_id,),
+            ).fetchone()["n"]
+            available = int(earned) - int(withdrawn)
+            if amount > available:
+                return None
+            cur = conn.execute(
+                """
+                INSERT INTO referral_withdrawals (user_id, amount, status)
+                VALUES (?, ?, 'pending')
+                """,
+                (user_id, amount),
+            )
+            return int(cur.lastrowid)
+
+    def get_referral_withdrawal(self, withdrawal_id: int) -> ReferralWithdrawal | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, user_id, amount, status, created_at, resolved_at
+                FROM referral_withdrawals WHERE id = ?
+                """,
+                (withdrawal_id,),
+            ).fetchone()
+        return _row_to_referral_withdrawal(row) if row else None
+
+    def list_referral_withdrawals(
+        self, user_id: int, *, limit: int = 20
+    ) -> list[ReferralWithdrawal]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, amount, status, created_at, resolved_at
+                FROM referral_withdrawals
+                WHERE user_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, int(limit)),
+            ).fetchall()
+        return [_row_to_referral_withdrawal(r) for r in rows]
+
+    def list_pending_referral_withdrawals(self) -> list[ReferralWithdrawal]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, amount, status, created_at, resolved_at
+                FROM referral_withdrawals
+                WHERE status = 'pending'
+                ORDER BY id ASC
+                """
+            ).fetchall()
+        return [_row_to_referral_withdrawal(r) for r in rows]
+
+    def resolve_referral_withdrawal(
+        self, withdrawal_id: int, status: str
+    ) -> ReferralWithdrawal | None:
+        if status not in ("paid", "rejected"):
+            return None
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE referral_withdrawals
+                SET status = ?, resolved_at = datetime('now')
+                WHERE id = ? AND status = 'pending'
+                """,
+                (status, withdrawal_id),
+            )
+            if cur.rowcount <= 0:
+                return None
+            row = conn.execute(
+                """
+                SELECT id, user_id, amount, status, created_at, resolved_at
+                FROM referral_withdrawals WHERE id = ?
+                """,
+                (withdrawal_id,),
+            ).fetchone()
+        return _row_to_referral_withdrawal(row) if row else None
+
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
         with self._conn() as conn:
             conn.execute(
@@ -1143,13 +1454,15 @@ class SqliteDatabase:
             conn.execute(
                 """
                 INSERT INTO users (
-                    user_id, premium_stars_charge_id, premium_stars_until, premium_stars_canceled
+                    user_id, premium_stars_charge_id, premium_stars_until,
+                    premium_stars_canceled, premium_stars_paid_at
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(user_id) DO UPDATE SET
                     premium_stars_charge_id = excluded.premium_stars_charge_id,
                     premium_stars_until = excluded.premium_stars_until,
-                    premium_stars_canceled = excluded.premium_stars_canceled
+                    premium_stars_canceled = excluded.premium_stars_canceled,
+                    premium_stars_paid_at = datetime('now')
                 """,
                 (user_id, charge_id, int(until_unix), int(bool(canceled))),
             )
@@ -1860,6 +2173,8 @@ class PostgresDatabase:
                 "premium_twitch_refresh TEXT NOT NULL DEFAULT ''",
                 "premium_twitch_active BOOLEAN NOT NULL DEFAULT FALSE",
                 "premium_twitch_checked_at TIMESTAMPTZ",
+                "premium_stars_paid_at TIMESTAMPTZ",
+                "referred_by BIGINT",
             ):
                 cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
             if not had_premium:
@@ -1875,6 +2190,43 @@ class PostgresDatabase:
                     ON CONFLICT (user_id) DO UPDATE SET premium_permanent = TRUE
                     """
                 )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS referral_credits (
+                    id SERIAL PRIMARY KEY,
+                    referrer_id BIGINT NOT NULL,
+                    invitee_id BIGINT NOT NULL,
+                    charge_id TEXT NOT NULL UNIQUE,
+                    stars_paid INTEGER NOT NULL,
+                    commission_stars INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_referral_credits_referrer
+                ON referral_credits(referrer_id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS referral_withdrawals (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    amount INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    resolved_at TIMESTAMPTZ
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_referral_withdrawals_user
+                ON referral_withdrawals(user_id)
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
@@ -2220,6 +2572,229 @@ class PostgresDatabase:
             row = cur.fetchone()
         return int(row["n"]) if row else 0
 
+    def count_stars_payers_since(self, since: datetime) -> int:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n FROM users
+                WHERE premium_stars_paid_at IS NOT NULL
+                  AND premium_stars_paid_at >= %s
+                """,
+                (since_utc,),
+            )
+            row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
+    def set_referred_by(self, user_id: int, referrer_id: int) -> bool:
+        if user_id == referrer_id or referrer_id <= 0:
+            return False
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id) VALUES (%s)
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                (user_id,),
+            )
+            cur.execute(
+                """
+                UPDATE users
+                SET referred_by = %s
+                WHERE user_id = %s
+                  AND (referred_by IS NULL OR referred_by = 0)
+                """,
+                (referrer_id, user_id),
+            )
+            return cur.rowcount > 0
+
+    def get_referred_by(self, user_id: int) -> int | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT referred_by FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row or row["referred_by"] is None:
+            return None
+        value = int(row["referred_by"])
+        return value if value > 0 else None
+
+    def add_referral_credit(
+        self,
+        *,
+        referrer_id: int,
+        invitee_id: int,
+        charge_id: str,
+        stars_paid: int,
+        commission_stars: int,
+    ) -> bool:
+        if referrer_id <= 0 or invitee_id <= 0 or not charge_id:
+            return False
+        if commission_stars <= 0 or stars_paid <= 0:
+            return False
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO referral_credits (
+                    referrer_id, invitee_id, charge_id, stars_paid, commission_stars
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (charge_id) DO NOTHING
+                RETURNING id
+                """,
+                (
+                    referrer_id,
+                    invitee_id,
+                    charge_id,
+                    int(stars_paid),
+                    int(commission_stars),
+                ),
+            )
+            return cur.fetchone() is not None
+
+    def get_referral_stats(self, user_id: int) -> ReferralStats:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE referred_by = %s",
+                (user_id,),
+            )
+            invited = cur.fetchone()["n"]
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM referral_credits WHERE referrer_id = %s",
+                (user_id,),
+            )
+            payments = cur.fetchone()["n"]
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(commission_stars), 0) AS n
+                FROM referral_credits WHERE referrer_id = %s
+                """,
+                (user_id,),
+            )
+            earned = cur.fetchone()["n"]
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS n
+                FROM referral_withdrawals
+                WHERE user_id = %s AND status IN ('pending', 'paid')
+                """,
+                (user_id,),
+            )
+            withdrawn = cur.fetchone()["n"]
+        available = max(0, int(earned) - int(withdrawn))
+        return ReferralStats(
+            invited=int(invited),
+            payments=int(payments),
+            available_stars=available,
+        )
+
+    def request_referral_withdrawal(self, user_id: int, amount: int) -> int | None:
+        amount = int(amount)
+        if amount <= 0:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(commission_stars), 0) AS n
+                FROM referral_credits WHERE referrer_id = %s
+                """,
+                (user_id,),
+            )
+            earned = cur.fetchone()["n"]
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS n
+                FROM referral_withdrawals
+                WHERE user_id = %s AND status IN ('pending', 'paid')
+                """,
+                (user_id,),
+            )
+            withdrawn = cur.fetchone()["n"]
+            available = int(earned) - int(withdrawn)
+            if amount > available:
+                return None
+            cur.execute(
+                """
+                INSERT INTO referral_withdrawals (user_id, amount, status)
+                VALUES (%s, %s, 'pending')
+                RETURNING id
+                """,
+                (user_id, amount),
+            )
+            row = cur.fetchone()
+            return int(row["id"]) if row else None
+
+    def get_referral_withdrawal(self, withdrawal_id: int) -> ReferralWithdrawal | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, user_id, amount, status, created_at, resolved_at
+                FROM referral_withdrawals WHERE id = %s
+                """,
+                (withdrawal_id,),
+            )
+            row = cur.fetchone()
+        return _row_to_referral_withdrawal(row) if row else None
+
+    def list_referral_withdrawals(
+        self, user_id: int, *, limit: int = 20
+    ) -> list[ReferralWithdrawal]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, user_id, amount, status, created_at, resolved_at
+                FROM referral_withdrawals
+                WHERE user_id = %s
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (user_id, int(limit)),
+            )
+            rows = cur.fetchall()
+        return [_row_to_referral_withdrawal(r) for r in rows]
+
+    def list_pending_referral_withdrawals(self) -> list[ReferralWithdrawal]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, user_id, amount, status, created_at, resolved_at
+                FROM referral_withdrawals
+                WHERE status = 'pending'
+                ORDER BY id ASC
+                """
+            )
+            rows = cur.fetchall()
+        return [_row_to_referral_withdrawal(r) for r in rows]
+
+    def resolve_referral_withdrawal(
+        self, withdrawal_id: int, status: str
+    ) -> ReferralWithdrawal | None:
+        if status not in ("paid", "rejected"):
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE referral_withdrawals
+                SET status = %s, resolved_at = NOW()
+                WHERE id = %s AND status = 'pending'
+                RETURNING id, user_id, amount, status, created_at, resolved_at
+                """,
+                (status, withdrawal_id),
+            )
+            row = cur.fetchone()
+        return _row_to_referral_withdrawal(row) if row else None
+
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -2414,13 +2989,15 @@ class PostgresDatabase:
             cur.execute(
                 """
                 INSERT INTO users (
-                    user_id, premium_stars_charge_id, premium_stars_until, premium_stars_canceled
+                    user_id, premium_stars_charge_id, premium_stars_until,
+                    premium_stars_canceled, premium_stars_paid_at
                 )
-                VALUES (%s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, NOW())
                 ON CONFLICT (user_id) DO UPDATE SET
                     premium_stars_charge_id = EXCLUDED.premium_stars_charge_id,
                     premium_stars_until = EXCLUDED.premium_stars_until,
-                    premium_stars_canceled = EXCLUDED.premium_stars_canceled
+                    premium_stars_canceled = EXCLUDED.premium_stars_canceled,
+                    premium_stars_paid_at = NOW()
                 """,
                 (user_id, charge_id, int(until_unix), bool(canceled)),
             )

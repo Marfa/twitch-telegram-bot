@@ -23,7 +23,9 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
 | System alerts | Toggle admin “bot update” and “bot availability” broadcasts |
-| Admin | Scheduled broadcast, DeepL auto-translate, statistics |
+| Premium | Stars subscription or Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) — more active alerts, sync, all alert types |
+| Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
+| Admin | Scheduled broadcast with type footer, DeepL, statistics, withdrawal handling |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -139,13 +141,30 @@ Dates and month names follow the user’s language.
 | ⬇️ Import from Twitch | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete |
 | 📅 Create schedule | Weekly stream schedule text |
-| ⚙️ Settings | System notifications and language |
-| ↳ 🔔 System notifications | Bot update and availability alerts |
+| ⚙️ Settings | Premium, sync, system alerts, language, partner program |
+| ↳ ⭐ Premium | Stars or free via Twitch channel sub |
+| ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
+| ↳ 🔔 System notifications | Bot update, availability, and sync alerts |
 | ↳ 🌐 Language | Russian / English |
-| ⚙️ Admin | Broadcast, stats (`ADMIN_USER_IDS` only) |
-| ↳ 📣 Broadcast | “Bot updates” or “Bot availability”, scheduled send |
-| ↳ 📊 Statistics | Users, subscriptions, languages |
+| ⚙️ Admin | Broadcast, stats, withdrawals (`ADMIN_USER_IDS` only) |
+| ↳ 📣 Broadcast | “Bot updates” or “Bot availability”, scheduled send; footer with type and how to disable in Settings |
+| ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
+| ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium |
 | 🐛 Report a problem | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
+
+### Partner program
+
+In **⚙️ Settings → 🤝 Partner program**:
+
+1. **Get link** — `t.me/<bot>?start=ref_<your_id>`
+2. Invitee opens the link → referrer is bound once
+3. Each **Stars Premium** payment / renewal by the invitee credits **10%** Stars to the partner balance
+4. **Request withdrawal** — full available balance if ≥ 500 Stars; admin gets a request with action buttons
+5. **My requests** — statuses: pending / paid / rejected
+
+Commission applies only to Stars Premium (not Twitch-sub Premium or external donations). Telegram Bot API cannot transfer Stars to users — the admin pays out manually and marks the request in the bot.
+
+Weekly admin report: new users + Stars payers for the week.
 
 **Edit subscription** — same order as creation: template, image, ignore keywords, link preview (hidden when an image is set), delay, repeats, schedule reminders (if enabled at creation), destination, delete old messages.
 
@@ -186,6 +205,12 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `DATABASE_URL` | PostgreSQL. If unset — SQLite (`compose.vps.yml` sets it) |
 | `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
+| `PREMIUM_FREE_ACTIVE_LIMIT` | Active alerts without Premium (default 5) |
+| `PREMIUM_STARS_AMOUNT` | Stars subscription price (default 100) |
+| `PREMIUM_SUBSCRIPTION_PERIOD` | Stars subscription period, seconds (default 2592000 ≈ 30 days) |
+| `PREMIUM_TWITCH_LOGIN` | Twitch login for free Premium via sub (default `marfapr`) |
+| `REFERRAL_COMMISSION_PERCENT` | Partner commission on Stars Premium, % (default 10) |
+| `REFERRAL_WITHDRAW_MIN_STARS` | Minimum withdrawal request, Stars (default 500) |
 | `PUBLIC_BASE_URL` | Public HTTPS origin: OAuth (`…/oauth/twitch/callback`) and placeholder docs (`…/placeholders`). Prod: `https://bot.themarfa.name` |
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
@@ -201,14 +226,15 @@ Without Groq/HF keys, **I'm feeling lucky** still works from the local template 
 
 | Module | Role |
 |---|---|
-| `bot.py` | Wizard, menu, notifications, admin broadcast, schedule |
+| `bot.py` | Wizard, menu, notifications, admin broadcast, partner program, schedule |
 | `i18n.py` | Strings and keyboards (ru/en) |
+| `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `hf_text.py` | AI templates: Groq → HF → local pool |
 | `twitch.py` | Helix API, templates |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health`, `/placeholders`, Twitch OAuth callback |
-| `db.py` | SQLite or PostgreSQL, `lucky_templates` pool |
+| `db.py` | SQLite or PostgreSQL, `lucky_templates` pool, referrals |
 
 Twitch Helix poll ~60 s, Telegram polling, no public webhook.
 

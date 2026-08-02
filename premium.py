@@ -94,12 +94,46 @@ def apply_stars_payment(
     *,
     charge_id: str,
     until_unix: int,
+    stars_paid: int | None = None,
 ) -> None:
     db.set_premium_stars(
         user_id,
         charge_id=charge_id,
         until_unix=until_unix,
         canceled=False,
+    )
+    credit_referral_commission(
+        db,
+        invitee_id=user_id,
+        charge_id=charge_id,
+        stars_paid=stars_paid if stars_paid is not None else stars_price(),
+    )
+
+
+def credit_referral_commission(
+    db: Database,
+    *,
+    invitee_id: int,
+    charge_id: str,
+    stars_paid: int,
+) -> bool:
+    from config import REFERRAL_COMMISSION_PERCENT
+
+    referrer_id = db.get_referred_by(invitee_id)
+    if not referrer_id:
+        return False
+    paid = int(stars_paid)
+    if paid <= 0 or not charge_id:
+        return False
+    commission = paid * int(REFERRAL_COMMISSION_PERCENT) // 100
+    if commission <= 0:
+        return False
+    return db.add_referral_credit(
+        referrer_id=referrer_id,
+        invitee_id=invitee_id,
+        charge_id=charge_id,
+        stars_paid=paid,
+        commission_stars=commission,
     )
 
 
