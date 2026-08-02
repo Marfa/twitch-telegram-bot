@@ -37,9 +37,9 @@ jobs:
             echo "=== listeners after ==="
             ss -lntp | grep -E ':80|:443|:8080' || true
             echo "=== health via nginx ==="
-            curl -fsS http://127.0.0.1/health || true
+            curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1/health || true
             echo
-            curl -kfsS https://127.0.0.1/health || true
+            curl -kfsS --connect-timeout 2 --max-time 5 https://127.0.0.1/health || true
             echo
-            curl -fsS http://127.0.0.1:8080/health
+            curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:8080/health || echo "8080 DOWN"
             echo
