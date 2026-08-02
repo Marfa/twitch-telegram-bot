@@ -652,6 +652,9 @@ def main() -> None:
 
     assert parse_invoice_payload(invoice_payload(7)) == 7
     assert parse_invoice_payload("other") is None
+    from config import FREE_CHAT_ID
+
+    assert FREE_CHAT_ID == -1002155969539
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
     assert tr("btn_premium", "en")
     with tempfile.TemporaryDirectory() as d:
@@ -662,6 +665,11 @@ def main() -> None:
         assert prem.is_premium(db, 1)
         assert db.count_enabled_subscriptions(1) == 0
         assert db.count_stars_payers_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
+        # Status helper: free-chat maps to free-premium wording without naming the chat
+        from premium_handlers import _status_text
+
+        assert "бесплатный премиум" in _status_text(db, 2, "ru", free_chat=True)
+        assert "бесплатный план" in _status_text(db, 2, "ru", free_chat=False)
 
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "ref.db")

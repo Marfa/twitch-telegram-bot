@@ -505,7 +505,7 @@ async def _prompt_repeat_step(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not prem.is_premium(db, user_id):
+    if not await prem.has_premium(context.bot, db, user_id):
         return await _show_premium_gate(
             update, context, feature="repeat", first_step=False
         )
@@ -733,7 +733,7 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, update.effective_user.id):
+    if not await prem.has_premium(context.bot, db, update.effective_user.id):
         return await _show_premium_gate(
             update, context, feature="ignore_keywords", first_step=False
         )
@@ -760,7 +760,7 @@ async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_
 
 async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, update.effective_user.id):
+    if not await prem.has_premium(context.bot, db, update.effective_user.id):
         return await _show_premium_gate(
             update, context, feature="delay", first_step=False
         )
@@ -1336,7 +1336,7 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=_menu(lang, user_id),
         )
         return ConversationHandler.END
-    if not prem.can_enable_more(db, user_id):
+    if not await prem.can_enable_more_async(context.bot, db, user_id):
         # Still allow creating paused alerts; warn via gate only when enabling.
         pass
     return await _go_alert_type_prompt(update, context, lang)
@@ -1350,7 +1350,7 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if kind not in ("live", "upcoming", "end"):
         return ALERT_TYPE
     db: Database = context.application.bot_data["db"]
-    if kind != "live" and not prem.is_premium(db, query.from_user.id):
+    if kind != "live" and not await prem.has_premium(context.bot, db, query.from_user.id):
         context.user_data["alert_type"] = kind
         return await _show_premium_gate(
             update, context, feature="alert_type", first_step=True
@@ -2058,7 +2058,7 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, query.from_user.id):
+    if not await prem.has_premium(context.bot, db, query.from_user.id):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -2089,7 +2089,7 @@ async def start_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, query.from_user.id):
+    if not await prem.has_premium(context.bot, db, query.from_user.id):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -2436,7 +2436,7 @@ async def _prompt_delete_old(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, update.effective_user.id):
+    if not await prem.has_premium(context.bot, db, update.effective_user.id):
         return await _show_premium_gate(
             update, context, feature="delete_old", first_step=False
         )
@@ -2470,7 +2470,7 @@ async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE)
             update, context, query.from_user.id, chat_id, thread_id
         )
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, query.from_user.id):
+    if not await prem.has_premium(context.bot, db, query.from_user.id):
         return await _show_premium_gate(
             update, context, feature="delete_fail", first_step=False
         )
@@ -2584,7 +2584,7 @@ async def _finish_subscription(
                 context.user_data.clear()
                 return ConversationHandler.END
             create_enabled = True
-            if not prem.can_enable_more(db, owner_id):
+            if not await prem.can_enable_more_async(context.bot, db, owner_id):
                 create_enabled = False
             sub_id = db.add_subscription(
                 owner_id=owner_id,
@@ -3391,7 +3391,7 @@ async def on_import_mode_sync(update: Update, context: ContextTypes.DEFAULT_TYPE
     owner_id = query.from_user.id
     lang = _user_lang(context, owner_id)
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, owner_id):
+    if not await prem.has_premium(context.bot, db, owner_id):
         return await _show_premium_gate(
             update, context, feature="sync", first_step=True
         )
@@ -3498,7 +3498,7 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    if not prem.is_premium(db, user_id):
+    if not await prem.has_premium(context.bot, db, user_id):
         from premium_handlers import send_premium_screen
 
         await update.effective_message.reply_text(
@@ -3840,7 +3840,7 @@ async def start_edit_ignore_keywords(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not prem.is_premium(db, query.from_user.id):
+    if not await prem.has_premium(context.bot, db, query.from_user.id):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -4007,8 +4007,8 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ),
         )
         return
-    if field in ("delete_old", "delete_fail", "repeat") and not prem.is_premium(
-        db, query.from_user.id
+    if field in ("delete_old", "delete_fail", "repeat") and not await prem.has_premium(
+        context.bot, db, query.from_user.id
     ):
         from premium_handlers import send_premium_screen
 
@@ -4180,7 +4180,7 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if sub is None or sub.owner_id != query.from_user.id:
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    if not sub.enabled and not prem.can_enable_more(db, query.from_user.id):
+    if not sub.enabled and not await prem.can_enable_more_async(context.bot, db, query.from_user.id):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(

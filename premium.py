@@ -1,4 +1,4 @@
-"""Premium entitlement: permanent flag, Stars subscription, or Twitch sub to marfapr."""
+"""Premium entitlement: permanent, Stars, Twitch sub, or free-chat membership."""
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from config import (
+    FREE_CHAT_ID,
     PREMIUM_FREE_ACTIVE_LIMIT,
     PREMIUM_STARS_AMOUNT,
     PREMIUM_SUBSCRIPTION_PERIOD,
@@ -15,6 +16,8 @@ from config import (
 )
 
 if TYPE_CHECKING:
+    from telegram import Bot
+
     from db import Database
     from twitch import TwitchClient
 
@@ -59,7 +62,35 @@ def get_status(db: Database, user_id: int) -> PremiumStatus:
 
 
 def is_premium(db: Database, user_id: int) -> bool:
+    """DB-backed premium only (permanent / Stars / Twitch). Prefer has_premium in handlers."""
     return get_status(db, user_id).is_premium
+
+
+async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
+    from telegram.constants import ChatMemberStatus
+
+    if FREE_CHAT_ID is None:
+        return False
+    try:
+        member = await bot.get_chat_member(FREE_CHAT_ID, user_id)
+    except Exception:
+        logger.exception("getChatMember failed for %s in %s", user_id, FREE_CHAT_ID)
+        return False
+    status = member.status
+    if status == ChatMemberStatus.RESTRICTED:
+        return bool(getattr(member, "is_member", True))
+    return status in {
+        ChatMemberStatus.CREATOR,
+        ChatMemberStatus.ADMINISTRATOR,
+        ChatMemberStatus.MEMBER,
+        ChatMemberStatus.RESTRICTED,
+    }
+
+
+async def has_premium(bot: Bot, db: Database, user_id: int) -> bool:
+    if is_premium(db, user_id):
+        return True
+    return await is_free_chat_member(bot, user_id)
 
 
 def free_active_limit() -> int:
@@ -80,6 +111,12 @@ def twitch_channel_login() -> str:
 
 def can_enable_more(db: Database, user_id: int) -> bool:
     if is_premium(db, user_id):
+        return True
+    return db.count_enabled_subscriptions(user_id) < PREMIUM_FREE_ACTIVE_LIMIT
+
+
+async def can_enable_more_async(bot: Bot, db: Database, user_id: int) -> bool:
+    if await has_premium(bot, db, user_id):
         return True
     return db.count_enabled_subscriptions(user_id) < PREMIUM_FREE_ACTIVE_LIMIT
 

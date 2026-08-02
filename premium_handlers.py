@@ -24,7 +24,9 @@ from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
 logger = logging.getLogger(__name__)
 
 
-def _status_text(db: Database, user_id: int, lang: str) -> str:
+def _status_text(
+    db: Database, user_id: int, lang: str, *, free_chat: bool = False
+) -> str:
     st = prem.get_status(db, user_id)
     channel = prem.twitch_channel_login()
     if st.permanent:
@@ -42,26 +44,31 @@ def _status_text(db: Database, user_id: int, lang: str) -> str:
         parts.append(t(key, lang, until=until))
     if st.twitch_active:
         parts.append(t("premium_status_twitch", lang, channel=channel))
-    if not parts:
-        return t("premium_status_none", lang)
-    return "\n".join(parts)
+    if parts:
+        return "\n".join(parts)
+    if free_chat:
+        return t("premium_status_permanent", lang)
+    return t("premium_status_none", lang)
 
 
-def premium_screen_text(db: Database, user_id: int, lang: str) -> str:
+def premium_screen_text(
+    db: Database, user_id: int, lang: str, *, free_chat: bool = False
+) -> str:
     return t(
         "premium_title",
         lang,
         free_limit=prem.free_active_limit(),
         stars=prem.stars_price(),
         channel=prem.twitch_channel_login(),
-        status=_status_text(db, user_id, lang),
+        status=_status_text(db, user_id, lang, free_chat=free_chat),
     )
 
 
 async def send_premium_screen(
     bot, user_id: int, lang: str, db: Database, *, edit_message=None
 ) -> None:
-    text = premium_screen_text(db, user_id, lang)
+    free_chat = await prem.is_free_chat_member(bot, user_id)
+    text = premium_screen_text(db, user_id, lang, free_chat=free_chat)
     if edit_message is not None:
         await edit_message.edit_text(
             text, reply_markup=None, disable_web_page_preview=True
