@@ -1,0 +1,50 @@
+name: Fix VPS bot
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnose and restart bot container
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -eu
+            cd /opt/twitch-telegram-bot
+            echo "=== compose ps ==="
+            docker compose -f compose.vps.yml ps -a || true
+            echo "=== listeners ==="
+            ss -lntp | grep -E ':80 |:443 |:8080 ' || true
+            echo "=== local 8080 (3s) ==="
+            curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:8080/health || echo "8080 DOWN"
+            echo
+            echo "=== bot logs ==="
+            docker compose -f compose.vps.yml logs --tail=60 bot || true
+            echo "=== restart stack ==="
+            docker compose -f compose.vps.yml up -d --remove-orphans
+            echo "=== wait health ==="
+            ok=0
+            for i in $(seq 1 30); do
+              if curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                echo "health ok after ${i} tries"
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            docker compose -f compose.vps.yml ps -a
+            if [ "$ok" != 1 ]; then
+              echo "ERROR: bot health still down"
+              docker compose -f compose.vps.yml logs --tail=80 bot || true
+              exit 1
+            fi
+            curl -fsS --connect-timeout 3 --max-time 5 https://bot.themarfa.name/health
+            echo
