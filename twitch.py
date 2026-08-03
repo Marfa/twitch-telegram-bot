@@ -535,3 +535,44 @@ def should_ignore_stream(ignore_keywords: str, game: str, title: str) -> bool:
         if pattern.search(game_text) or pattern.search(title_text):
             return True
     return False
+
+
+TWITCH_STATUS_URL = "https://status.twitch.com/api/v2/summary.json"
+
+
+def fetch_twitch_status_summary(session: requests.Session | None = None) -> dict[str, Any]:
+    """Fetch Twitch Statuspage summary JSON (status.twitch.com)."""
+    http = session if session is not None else requests
+    response = http.get(TWITCH_STATUS_URL, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError("Twitch status summary is not an object")
+    return data
+
+
+def twitch_status_fingerprint(
+    summary: dict[str, Any],
+) -> tuple[str, tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """Comparable snapshot: indicator, components, active incidents."""
+    status = summary.get("status") or {}
+    indicator = str(status.get("indicator") or "none")
+    components: list[tuple[str, str]] = []
+    for comp in summary.get("components") or []:
+        if not isinstance(comp, dict) or comp.get("group"):
+            continue
+        name = str(comp.get("name") or "").strip()
+        if not name:
+            continue
+        components.append((name, str(comp.get("status") or "operational")))
+    components.sort(key=lambda item: item[0].lower())
+    incidents: list[tuple[str, str]] = []
+    for incident in summary.get("incidents") or []:
+        if not isinstance(incident, dict):
+            continue
+        incident_id = str(incident.get("id") or "").strip()
+        if not incident_id:
+            continue
+        incidents.append((incident_id, str(incident.get("status") or "")))
+    incidents.sort(key=lambda item: item[0])
+    return indicator, tuple(components), tuple(incidents)

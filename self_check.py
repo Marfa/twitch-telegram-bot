@@ -15,9 +15,11 @@ from twitch import (
     preview_stream_title,
     render_template,
     should_ignore_stream,
+    twitch_status_fingerprint,
 )
 from translate import build_translations, translate_text
 from bot import (
+    _format_twitch_status_message,
     _is_link_preview_disabled,
     _message_link,
     _parse_sb_edit_f_id,
@@ -721,6 +723,42 @@ def main() -> None:
         assert "настройках" in tr("broadcast_footer", "ru", type="x")
         assert "Settings" in tr("broadcast_footer", "en", type="x")
         assert "Partner" in tr("btn_partner", "en") or "🤝" in tr("btn_partner", "en")
+
+    status_ok = {
+        "status": {"indicator": "none", "description": "All Systems Operational"},
+        "components": [
+            {"name": "Chat", "status": "operational", "group": False},
+            {"name": "Login", "status": "operational", "group": False},
+            {"name": "Group", "status": "major_outage", "group": True},
+        ],
+        "incidents": [],
+    }
+    status_bad = {
+        "status": {"indicator": "major", "description": "Partial System Outage"},
+        "components": [
+            {"name": "Chat", "status": "partial_outage", "group": False},
+            {"name": "Login", "status": "operational", "group": False},
+        ],
+        "incidents": [
+            {"id": "abc", "name": "Chat issues", "status": "investigating"},
+        ],
+    }
+    fp_ok = twitch_status_fingerprint(status_ok)
+    fp_bad = twitch_status_fingerprint(status_bad)
+    assert fp_ok[0] == "none"
+    assert ("Chat", "operational") in fp_ok[1]
+    assert all(name != "Group" for name, _ in fp_ok[1])
+    assert fp_ok != fp_bad
+    assert fp_bad[0] == "major"
+    assert ("abc", "investigating") in fp_bad[2]
+    msg_ru = _format_twitch_status_message("ru", status_bad)
+    assert "Twitch Status" in msg_ru
+    assert "Chat" in msg_ru
+    assert "status.twitch.com" in msg_ru
+    msg_ok = _format_twitch_status_message("en", status_ok)
+    assert "All Systems Operational" in msg_ok
+    assert tr("broadcast_started", "ru")
+    assert "status.twitch.com" in tr("sys_notifications_menu", "ru")
 
     print("ok")
 

@@ -711,6 +711,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Failed: {failed}\n"
             "Total recipients: {total}"
         ),
+        "broadcast_started": (
+            "Broadcast started. The bot keeps working; stats arrive when it finishes."
+        ),
         "broadcast_scheduled": (
             "Message scheduled.\n"
             "Send time: {when}\n"
@@ -745,10 +748,27 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_apply": "Apply time",
         "schedule_show_calendar": "🗓 Show calendar",
         "schedule_minutes_header": "——— Select minutes ———",
-        "sys_notifications_menu": "System notifications:",
+        "sys_notifications_menu": (
+            "System notifications:\n\n"
+            "Availability alerts also cover Twitch outages "
+            "(status.twitch.com)."
+        ),
         "sys_updates_label": "Bot update notifications",
-        "sys_availability_label": "Bot availability alerts",
+        "sys_availability_label": "Bot / Twitch availability alerts",
         "sys_sync_label": "Sync notifications",
+        "twitch_status_title": "📡 Twitch Status",
+        "twitch_indicator_none": "✅ All Systems Operational",
+        "twitch_indicator_minor": "⚠️ Minor issues",
+        "twitch_indicator_major": "🟠 Major issues",
+        "twitch_indicator_critical": "🔴 Critical outage",
+        "twitch_indicator_maintenance": "🛠 Maintenance",
+        "twitch_comp_operational": "Operational",
+        "twitch_comp_degraded": "Degraded Performance",
+        "twitch_comp_partial": "Partial Outage",
+        "twitch_comp_major": "Major Outage",
+        "twitch_comp_maintenance": "Maintenance",
+        "twitch_status_affected": "Affected components:",
+        "twitch_status_incidents": "Incidents:",
         "bot_stats": (
             "📊 Bot statistics\n\n"
             "Users: {users}\n"
@@ -1466,6 +1486,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Ошибок: {failed}\n"
             "Всего получателей: {total}"
         ),
+        "broadcast_started": (
+            "Рассылка запущена. Бот продолжает работать; статистика придёт по завершении."
+        ),
         "broadcast_scheduled": (
             "Сообщение запланировано.\n"
             "Время отправки: {when}\n"
@@ -1500,10 +1523,27 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_apply": "Применить время",
         "schedule_show_calendar": "🗓 Показать календарь",
         "schedule_minutes_header": "——— Выберите минуты ———",
-        "sys_notifications_menu": "Настройка системных уведомлений:",
+        "sys_notifications_menu": (
+            "Настройка системных уведомлений:\n\n"
+            "Оповещения о доступности также включают падения Twitch "
+            "(status.twitch.com)."
+        ),
         "sys_updates_label": "Оповещения об обновлении бота",
-        "sys_availability_label": "Оповещения о доступности бота",
+        "sys_availability_label": "Оповещения о доступности (бот / Twitch)",
         "sys_sync_label": "Оповещения о синхронизации",
+        "twitch_status_title": "📡 Twitch Status",
+        "twitch_indicator_none": "✅ Все системы в норме",
+        "twitch_indicator_minor": "⚠️ Незначительные проблемы",
+        "twitch_indicator_major": "🟠 Серьёзные проблемы",
+        "twitch_indicator_critical": "🔴 Критический сбой",
+        "twitch_indicator_maintenance": "🛠 Техработы",
+        "twitch_comp_operational": "Работает",
+        "twitch_comp_degraded": "Снижена производительность",
+        "twitch_comp_partial": "Частичный сбой",
+        "twitch_comp_major": "Крупный сбой",
+        "twitch_comp_maintenance": "Техработы",
+        "twitch_status_affected": "Затронутые компоненты:",
+        "twitch_status_incidents": "Инциденты:",
         "bot_stats": (
             "📊 Статистика бота\n\n"
             "Пользователей: {users}\n"

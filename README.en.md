@@ -22,10 +22,10 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
-| System alerts | Toggle admin “bot update” and “bot availability” broadcasts |
+| System alerts | Toggle admin broadcasts; Twitch outages from status.twitch.com |
 | Premium | Stars subscription or Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) — more active alerts, sync, all alert types |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
-| Admin | Scheduled broadcast with type footer, DeepL, statistics, withdrawal handling |
+| Admin | Background broadcast with type footer, DeepL, statistics, withdrawal handling |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -144,7 +144,7 @@ Dates and month names follow the user’s language.
 | ⚙️ Settings | Premium, sync, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
-| ↳ 🔔 System notifications | Bot update, availability, and sync alerts |
+| ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
 | ↳ 🌐 Language | Russian / English |
 | ⚙️ Admin | Broadcast, stats, withdrawals (`ADMIN_USER_IDS` only) |
 | ↳ 📣 Broadcast | “Bot updates” or “Bot availability”, scheduled send; footer with type and how to disable in Settings |
@@ -226,17 +226,17 @@ Without Groq/HF keys, **I'm feeling lucky** still works from the local template 
 
 | Module | Role |
 |---|---|
-| `bot.py` | Wizard, menu, notifications, admin broadcast, partner program, schedule |
+| `bot.py` | Wizard, menu, notifications, admin broadcast, Twitch Status, partner program, schedule |
 | `i18n.py` | Strings and keyboards (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `hf_text.py` | AI templates: Groq → HF → local pool |
-| `twitch.py` | Helix API, templates |
+| `twitch.py` | Helix API, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health`, `/placeholders`, Twitch OAuth callback |
 | `db.py` | SQLite or PostgreSQL, `lucky_templates` pool, referrals |
 
-Twitch Helix poll ~60 s, Telegram polling, no public webhook.
+Twitch Helix poll ~60 s, Statuspage ~120 s, Telegram polling, no public webhook.
 
 ## License
 

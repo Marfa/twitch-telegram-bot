@@ -15,7 +15,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
-from telegram.error import BadRequest, Conflict, Forbidden
+from telegram.error import BadRequest, Conflict, Forbidden, RetryAfter
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -88,11 +88,13 @@ from i18n import (
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
 from twitch import (
     TwitchClient,
+    fetch_twitch_status_summary,
     find_placeholder_typos,
     normalize_ignore_keywords,
     preview_stream_title,
     render_template,
     should_ignore_stream,
+    twitch_status_fingerprint,
 )
 from translate import build_translations
 from hf_text import generate_alert_template
@@ -100,7 +102,25 @@ from hf_text import generate_alert_template
 logger = logging.getLogger(__name__)
 
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
+TWITCH_STATUS_PAGE_URL = "https://status.twitch.com/"
 _TELEGRAM_CAPTION_LIMIT = 1024
+# Soft pacing for mass DM sends — keeps under Telegram flood limits.
+_BROADCAST_SEND_PAUSE = 0.05
+
+_TWITCH_INDICATOR_KEYS = {
+    "none": "twitch_indicator_none",
+    "minor": "twitch_indicator_minor",
+    "major": "twitch_indicator_major",
+    "critical": "twitch_indicator_critical",
+    "maintenance": "twitch_indicator_maintenance",
+}
+_TWITCH_COMPONENT_KEYS = {
+    "operational": "twitch_comp_operational",
+    "degraded_performance": "twitch_comp_degraded",
+    "partial_outage": "twitch_comp_partial",
+    "major_outage": "twitch_comp_major",
+    "under_maintenance": "twitch_comp_maintenance",
+}
 
 (
     LANG_SELECT,
@@ -4273,6 +4293,63 @@ def _schedule_to_utc_iso(schedule: dict) -> str:
     return local_dt.astimezone(timezone.utc).isoformat()
 
 
+def _claim_broadcast_send(bot_data: dict, broadcast_id: int) -> bool:
+    """Prevent double-send if a job and the pending poll race."""
+    sending: set[int] = bot_data.setdefault("sending_broadcasts", set())
+    if broadcast_id in sending:
+        return False
+    sending.add(broadcast_id)
+    return True
+
+
+def _release_broadcast_send(bot_data: dict, broadcast_id: int) -> None:
+    sending = bot_data.get("sending_broadcasts")
+    if isinstance(sending, set):
+        sending.discard(broadcast_id)
+
+
+async def _send_dm_html(
+    bot,
+    db: Database,
+    uid: int,
+    message: str,
+) -> str:
+    """Send one DM. Returns 'sent', 'blocked', or 'failed'."""
+    try:
+        try:
+            await bot.send_message(uid, message, parse_mode=ParseMode.HTML)
+        except BadRequest:
+            # Plain legacy text or translation broke tags — send without parse_mode.
+            await bot.send_message(uid, message)
+        return "sent"
+    except RetryAfter as exc:
+        await asyncio.sleep(float(exc.retry_after) + 0.5)
+        try:
+            try:
+                await bot.send_message(uid, message, parse_mode=ParseMode.HTML)
+            except BadRequest:
+                await bot.send_message(uid, message)
+            return "sent"
+        except Forbidden as retry_exc:
+            if "blocked" in str(retry_exc).lower():
+                db.set_bot_blocked(uid, True)
+                return "blocked"
+            logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
+            return "failed"
+        except (BadRequest, RetryAfter) as retry_exc:
+            logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
+            return "failed"
+    except Forbidden as exc:
+        if "blocked" in str(exc).lower():
+            db.set_bot_blocked(uid, True)
+            return "blocked"
+        logger.warning("Broadcast to %s failed: %s", uid, exc)
+        return "failed"
+    except BadRequest as exc:
+        logger.warning("Broadcast to %s failed: %s", uid, exc)
+        return "failed"
+
+
 async def _send_admin_broadcast(
     context: ContextTypes.DEFAULT_TYPE,
     msg_type: str,
@@ -4309,25 +4386,14 @@ async def _send_admin_broadcast(
             type=_broadcast_type_label(msg_type, locale),
         )
         message = f"{body}\n\n{footer}"
-        try:
-            try:
-                await context.bot.send_message(
-                    uid, message, parse_mode=ParseMode.HTML
-                )
-            except BadRequest:
-                # Plain legacy text or translation broke tags — send without parse_mode.
-                await context.bot.send_message(uid, message)
+        result = await _send_dm_html(context.bot, db, uid, message)
+        if result == "sent":
             sent += 1
-        except Forbidden as exc:
-            if "blocked" in str(exc).lower():
-                db.set_bot_blocked(uid, True)
-                blocked += 1
-            else:
-                failed += 1
-                logger.warning("Broadcast to %s failed: %s", uid, exc)
-        except BadRequest as exc:
+        elif result == "blocked":
+            blocked += 1
+        else:
             failed += 1
-            logger.warning("Broadcast to %s failed: %s", uid, exc)
+        await asyncio.sleep(_BROADCAST_SEND_PAUSE)
     return sent, failed, blocked, len(user_ids)
 
 
@@ -4439,21 +4505,20 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
     msg_type = context.user_data.get("admin_msg_type", "bot_update")
     text = context.user_data.get("admin_msg_text", "")
     if data == "sched:now":
-        sent, failed, blocked, total = await _send_admin_broadcast(
-            context, msg_type, text, source_lang=lang
-        )
+        # Offload to job queue so the conversation handler returns immediately
+        # and the bot keeps processing other updates while the mass send runs.
+        scheduled_at = datetime.now(timezone.utc).isoformat()
+        broadcast_id = db.add_scheduled_broadcast(msg_type, text, scheduled_at, user_id)
         context.user_data.clear()
         try:
-            await query.edit_message_text("✓")
+            await query.edit_message_text(t("broadcast_started", lang))
         except BadRequest:
             pass
-        await _report_broadcast_done(
-            context,
-            user_id,
-            sent=sent,
-            failed=failed,
-            blocked=blocked,
-            total=total,
+        context.job_queue.run_once(
+            _run_scheduled_broadcast,
+            when=0,
+            data={"broadcast_id": broadcast_id},
+            name=_broadcast_job_name(broadcast_id),
         )
         await context.bot.send_message(
             user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu(lang)
@@ -4473,36 +4538,29 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
             - datetime.now(timezone.utc)
         ).total_seconds()
+        context.user_data.clear()
         if when <= 0:
-            sent, failed, blocked, total = await _send_admin_broadcast(
-                context, msg_type, text, source_lang=lang
-            )
-            db.mark_scheduled_broadcast_sent(broadcast_id)
-            context.user_data.clear()
             try:
-                await query.edit_message_text("✓")
+                await query.edit_message_text(t("broadcast_started", lang))
             except BadRequest:
                 pass
-            await _report_broadcast_done(
-                context,
-                user_id,
-                sent=sent,
-                failed=failed,
-                blocked=blocked,
-                total=total,
+            context.job_queue.run_once(
+                _run_scheduled_broadcast,
+                when=0,
+                data={"broadcast_id": broadcast_id},
+                name=_broadcast_job_name(broadcast_id),
             )
         else:
             context.job_queue.run_once(
                 _run_scheduled_broadcast,
                 when=when,
                 data={"broadcast_id": broadcast_id},
-                name=f"broadcast_{broadcast_id}",
+                name=_broadcast_job_name(broadcast_id),
             )
             when_local = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00")).astimezone(
                 SCHEDULE_TZ
             )
             when_label = when_local.strftime("%d.%m.%Y %H:%M MSK")
-            context.user_data.clear()
             await query.edit_message_text(
                 t("broadcast_scheduled", lang, when=when_label)
             )
@@ -4514,27 +4572,33 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
     broadcast_id = context.job.data["broadcast_id"]
-    db: Database = context.application.bot_data["db"]
-    pending = db.get_pending_scheduled_broadcasts()
-    item = next((b for b in pending if b.id == broadcast_id), None)
-    if not item:
-        unsent = db.get_unsent_scheduled_broadcasts()
-        item = next((b for b in unsent if b.id == broadcast_id), None)
-    if not item:
+    bot_data = context.application.bot_data
+    if not _claim_broadcast_send(bot_data, broadcast_id):
         return
-    source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-    sent, failed, blocked, total = await _send_admin_broadcast(
-        context, item.msg_type, item.text, source_lang=source_lang
-    )
-    db.mark_scheduled_broadcast_sent(broadcast_id)
-    await _report_broadcast_done(
-        context,
-        item.created_by,
-        sent=sent,
-        failed=failed,
-        blocked=blocked,
-        total=total,
-    )
+    db: Database = bot_data["db"]
+    try:
+        pending = db.get_pending_scheduled_broadcasts()
+        item = next((b for b in pending if b.id == broadcast_id), None)
+        if not item:
+            unsent = db.get_unsent_scheduled_broadcasts()
+            item = next((b for b in unsent if b.id == broadcast_id), None)
+        if not item:
+            return
+        source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+        sent, failed, blocked, total = await _send_admin_broadcast(
+            context, item.msg_type, item.text, source_lang=source_lang
+        )
+        db.mark_scheduled_broadcast_sent(broadcast_id)
+        await _report_broadcast_done(
+            context,
+            item.created_by,
+            sent=sent,
+            failed=failed,
+            blocked=blocked,
+            total=total,
+        )
+    finally:
+        _release_broadcast_send(bot_data, broadcast_id)
 
 
 async def admin_scheduled_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4879,23 +4943,16 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
             - datetime.now(timezone.utc)
         ).total_seconds()
         if when <= 0:
-            source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-            sent, failed, blocked, total = await _send_admin_broadcast(
-                context, item.msg_type, item.text, source_lang=source_lang
-            )
-            db.mark_scheduled_broadcast_sent(int(broadcast_id))
             _cancel_broadcast_job(context.application.job_queue, int(broadcast_id))
             try:
-                await query.edit_message_text("✓")
+                await query.edit_message_text(t("broadcast_started", lang))
             except BadRequest:
                 pass
-            await _report_broadcast_done(
-                context,
-                user_id,
-                sent=sent,
-                failed=failed,
-                blocked=blocked,
-                total=total,
+            context.application.job_queue.run_once(
+                _run_scheduled_broadcast,
+                when=0,
+                data={"broadcast_id": int(broadcast_id)},
+                name=_broadcast_job_name(int(broadcast_id)),
             )
         elif db.update_scheduled_broadcast(int(broadcast_id), scheduled_at=scheduled_at):
             _schedule_broadcast_job(
@@ -5534,20 +5591,111 @@ def live_transitions(
 
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
+    bot_data = context.application.bot_data
     for item in db.get_pending_scheduled_broadcasts():
-        source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-        sent, failed, blocked, total = await _send_admin_broadcast(
-            context, item.msg_type, item.text, source_lang=source_lang
-        )
-        db.mark_scheduled_broadcast_sent(item.id)
-        await _report_broadcast_done(
-            context,
-            item.created_by,
-            sent=sent,
-            failed=failed,
-            blocked=blocked,
-            total=total,
-        )
+        if not _claim_broadcast_send(bot_data, item.id):
+            continue
+        try:
+            source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+            sent, failed, blocked, total = await _send_admin_broadcast(
+                context, item.msg_type, item.text, source_lang=source_lang
+            )
+            db.mark_scheduled_broadcast_sent(item.id)
+            await _report_broadcast_done(
+                context,
+                item.created_by,
+                sent=sent,
+                failed=failed,
+                blocked=blocked,
+                total=total,
+            )
+        finally:
+            _release_broadcast_send(bot_data, item.id)
+
+
+def _twitch_status_label(lang: str, status: str) -> str:
+    key = _TWITCH_COMPONENT_KEYS.get(status)
+    if key:
+        return t(key, lang)
+    return status.replace("_", " ")
+
+
+def _twitch_indicator_label(lang: str, indicator: str) -> str:
+    key = _TWITCH_INDICATOR_KEYS.get(indicator)
+    if key:
+        return t(key, lang)
+    return indicator
+
+
+def _format_twitch_status_message(lang: str, summary: dict) -> str:
+    status = summary.get("status") or {}
+    indicator = str(status.get("indicator") or "none")
+    headline = _twitch_indicator_label(lang, indicator)
+    lines = [
+        t("twitch_status_title", lang),
+        "",
+        headline,
+    ]
+    affected = [
+        comp
+        for comp in summary.get("components") or []
+        if isinstance(comp, dict)
+        and not comp.get("group")
+        and str(comp.get("status") or "operational") != "operational"
+    ]
+    if affected:
+        lines.append("")
+        lines.append(t("twitch_status_affected", lang))
+        for comp in affected:
+            name = html.escape(str(comp.get("name") or "?"))
+            label = html.escape(_twitch_status_label(lang, str(comp.get("status") or "")))
+            lines.append(f"• <b>{name}</b> — {label}")
+    incidents = [
+        inc for inc in summary.get("incidents") or [] if isinstance(inc, dict)
+    ]
+    if incidents:
+        lines.append("")
+        lines.append(t("twitch_status_incidents", lang))
+        for inc in incidents:
+            name = html.escape(str(inc.get("name") or "?").strip() or "?")
+            lines.append(f"• {name}")
+    lines.append("")
+    lines.append(f'<a href="{TWITCH_STATUS_PAGE_URL}">{TWITCH_STATUS_PAGE_URL}</a>')
+    return "\n".join(lines)
+
+
+async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll status.twitch.com; notify availability opt-in users on changes."""
+    try:
+        summary = await asyncio.to_thread(fetch_twitch_status_summary)
+        fingerprint = twitch_status_fingerprint(summary)
+    except Exception as exc:
+        logger.warning("Twitch status poll failed: %s", exc)
+        return
+
+    bot_data = context.application.bot_data
+    previous = bot_data.get("twitch_status_fingerprint")
+    bot_data["twitch_status_fingerprint"] = fingerprint
+    if previous is None:
+        # First poll after start — baseline only, no spam.
+        return
+    if fingerprint == previous:
+        return
+
+    db: Database = bot_data["db"]
+    user_ids = db.get_availability_recipients()
+    if not user_ids:
+        return
+
+    messages = {
+        locale: _format_twitch_status_message(locale, summary)
+        for locale in SUPPORTED_LOCALES
+    }
+    for uid in user_ids:
+        locale = db.get_user_locale(uid) or DEFAULT_LOCALE
+        message = messages.get(locale) or messages[DEFAULT_LOCALE]
+        await _send_dm_html(context.bot, db, uid, message)
+        await asyncio.sleep(_BROADCAST_SEND_PAUSE)
 
 
 def _seconds_until_next_weekly_report() -> float:
@@ -5650,6 +5798,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["twitch"] = twitch
     app.bot_data["last_live"] = {}
     app.bot_data["last_live_primed"] = False
+    app.bot_data["twitch_status_fingerprint"] = None
+    app.bot_data["sending_broadcasts"] = set()
     app.add_error_handler(error_handler)
 
     app.add_handler(
@@ -6165,6 +6315,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
     app.job_queue.run_repeating(check_schedule_reminders, interval=60, first=25)
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
+    app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
     app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
     app.job_queue.run_repeating(refresh_premium_twitch_job, interval=3600, first=120)
     app.job_queue.run_repeating(
