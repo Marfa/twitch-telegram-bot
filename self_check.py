@@ -30,6 +30,7 @@ from bot import (
     _parse_watch_viewers,
     import_followed_as_subscriptions,
     live_transitions,
+    category_change_events,
     migrate_import_sync_subscriptions,
 )
 from db import (
@@ -162,6 +163,20 @@ def main() -> None:
     assert live_transitions(state, ["1"], {}, primed=True) == ([], ["1"])
     assert state["1"] is False
 
+    games: dict[str, str] = {}
+    streams = {"1": {"game_id": "111"}}
+    assert category_change_events(games, ["1"], streams, primed=False) == []
+    assert games == {"1": "111"}
+    assert category_change_events(games, ["1"], streams, primed=True) == []
+    streams = {"1": {"game_id": "222"}}
+    assert category_change_events(games, ["1"], streams, primed=True) == ["1"]
+    assert games["1"] == "222"
+    assert category_change_events(games, ["1"], {}, primed=True) == []
+    assert "1" not in games
+    streams = {"1": {"game_id": "222"}}
+    assert category_change_events(games, ["1"], streams, primed=True) == []
+    assert games["1"] == "222"
+
     assert find_placeholder_typos("{username} {game} {name}") == []
     assert find_placeholder_typos("{game)") == [("{game)", "{game}")]
     assert find_placeholder_typos("(game}") == [("(game}", "{game}")]
@@ -287,11 +302,21 @@ def main() -> None:
         assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
         assert tr("alert_type_prompt", loc)
         assert tr("alert_type_live", loc)
+        assert tr("alert_type_category", loc)
         assert tr("alert_type_upcoming", loc)
         assert tr("alert_type_end", loc)
         assert tr("alert_type_no_schedule", loc)
         assert tr("alert_note_live", loc, twitch_username="x")
+        assert tr("alert_note_category", loc, twitch_username="x")
         assert tr("alert_note_end", loc, twitch_username="x")
+        assert tr("delete_old_text_category", loc)
+        assert tr("delete_sibling_text", loc)
+        assert tr("sub_list_alert_category", loc)
+        assert tr("edit_delete_other", loc)
+        assert tr("edit_delete_other_menu", loc)
+        assert tr("edit_delete_old_menu_category", loc)
+        assert tr("sub_list_delete_other_yes", loc)
+        assert tr("sub_list_delete_other_no", loc)
         done = tr(
             "setup_done",
             loc,
@@ -654,6 +679,30 @@ def main() -> None:
         assert end_sub.notify_on_end is True
         assert end_sub.notify_on_live is False
         assert "end-uid" in db.get_unique_twitch_user_ids()
+        cat_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="changer",
+            twitch_user_id="cat-uid",
+            message_template="now {game}",
+            dest_type="channel",
+            chat_id=-100,
+            thread_id=None,
+            notify_on_live=False,
+            notify_on_end=False,
+            notify_on_category_change=True,
+            delete_other_alerts=True,
+        )
+        cat_sub = db.get_subscription(cat_id, 1)
+        assert cat_sub is not None
+        assert cat_sub.notify_on_category_change is True
+        assert cat_sub.notify_on_live is False
+        assert cat_sub.delete_other_alerts is True
+        assert "cat-uid" in db.get_unique_twitch_user_ids()
+        assert db.update_subscription(cat_id, 1, notify_on_category_change=False)
+        cat_sub = db.get_subscription(cat_id, 1)
+        assert cat_sub is not None
+        assert cat_sub.notify_on_category_change is False
+        assert "cat-uid" not in db.get_unique_twitch_user_ids()
         assert sub.notify_delete_fail is False
         assert db.update_subscription(sub_id, 1, notify_delete_fail=True)
         sub = db.get_subscription(sub_id, 1)
@@ -719,7 +768,7 @@ def main() -> None:
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()
         assert restored.users == 1
-        assert restored.subscriptions_total == 5
+        assert restored.subscriptions_total == 6
         assert restored.blocked_users == 0
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1

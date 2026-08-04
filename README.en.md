@@ -1,6 +1,6 @@
 # Twitch → Telegram stream notifications
 
-**Go-live, upcoming, or stream end — the bot notifies wherever you choose.** Setup in Telegram.
+**Go-live, category change, upcoming, or stream end — the bot notifies wherever you choose.** Setup in Telegram.
 
 Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 
@@ -18,14 +18,14 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
-| Alert types | Stream start · upcoming (Twitch schedule) · stream end |
+| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
 | Destinations | DM, channel, group or community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
 | 🎲 What to watch? | Saved filters to pick, new search, multi-select delete like subscriptions; categories → tags → viewers → language → mature |
 | Image | Optional alert image — caption above or below; link preview then off |
-| Delayed send | N minutes after go-live or after going offline (Helix re-check before send) |
+| Delayed send | N minutes after go-live, category change, or going offline (Helix re-check before send) |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Subscriptions | List, edit all fields, enable/disable, delete |
@@ -73,21 +73,22 @@ On first `/start` the bot asks for a language (Russian or English), then shows t
 | Type | What it does |
 |---|---|
 | Stream start | Notify when the channel goes live |
+| Category change | Watches the stream start silently; notifies on every category change until the stream ends (no repeat-suppression step; **Premium**) |
 | Upcoming stream | Remind N minutes ahead if the streamer has a Twitch schedule (error if none) |
 | Stream end | Notify when the stream ends (same wizard, no repeat-suppression step) |
 
-Then the wizard (for stream start / stream end):
+Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
 3. Image (add / skip; if added — position: start or end of caption)
 4. Ignore keywords (optional)
 5. Link preview (skipped when an image is set)
-6. Delay send (yes/no, minutes) — after go-live or after offline; Helix is re-checked before send
+6. Delay send (yes/no, minutes) — after go-live, category change, or after offline; Helix is re-checked before send
 7. Allow repeat notifications (**stream start** only; yes/no; if no — mute minutes)
 8. Destination: DM / channel / group or community
 9. For channel or group — add the bot and confirm the chat
-10. Delete previous bot message on each new alert? (yes/no)
+10. Delete previous bot message on each new alert? (yes/no; for category change defaults to its own alerts only; if other subs for the same streamer share the destination — asks whether to delete those too)
 
 For **upcoming stream**, after the channel and schedule check — template and settings, then reminder minutes and destination (no “do you want reminders?” ask).
 
@@ -199,7 +200,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit subscription** — same order as creation: template, image, ignore keywords, link preview (hidden when an image is set), delay, repeats, schedule reminders (if enabled at creation), destination, delete old messages.
+**Edit subscription** — same order as creation: template, image, ignore keywords, link preview (hidden when an image is set), delay, repeats (not for category change or stream end), schedule reminders (if enabled at creation), destination, delete old messages. For **category change** with delete enabled — a separate «delete other alerts too» option.
 
 Notification template example:
 

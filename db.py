@@ -318,6 +318,7 @@ class Subscription:
     schedule_reminder_configured: bool
     notify_on_live: bool
     notify_on_end: bool
+    notify_on_category_change: bool
     ignore_keywords: str
     image_file_id: str | None
     image_position: str
@@ -325,6 +326,7 @@ class Subscription:
     last_message_id: int | None
     last_schedule_reminder_segment_id: str | None
     from_twitch_sync: bool
+    delete_other_alerts: bool
 
 
 @dataclass
@@ -411,6 +413,9 @@ def _row_to_sub(row: Any) -> Subscription:
         else False,
         notify_on_live=bool(row["notify_on_live"]) if "notify_on_live" in keys else True,
         notify_on_end=bool(row["notify_on_end"]) if "notify_on_end" in keys else False,
+        notify_on_category_change=bool(row["notify_on_category_change"])
+        if "notify_on_category_change" in keys
+        else False,
         ignore_keywords=str(row["ignore_keywords"] or ""),
         image_file_id=image_file_id,
         image_position=image_position if image_file_id else "",
@@ -429,6 +434,9 @@ def _row_to_sub(row: Any) -> Subscription:
         ),
         from_twitch_sync=bool(row["from_twitch_sync"])
         if "from_twitch_sync" in keys
+        else False,
+        delete_other_alerts=bool(row["delete_other_alerts"])
+        if "delete_other_alerts" in keys
         else False,
     )
 
@@ -488,9 +496,11 @@ class Database(Protocol):
         from_twitch_sync: bool = False,
         notify_on_live: bool = True,
         notify_on_end: bool = False,
+        notify_on_category_change: bool = False,
+        delete_other_alerts: bool = False,
     ) -> int: ...
 
-    def set_last_message_id(self, sub_id: int, message_id: int) -> None: ...
+    def set_last_message_id(self, sub_id: int, message_id: int | None) -> None: ...
 
     def set_notify_cooldown(self, sub_id: int, minutes: int) -> None: ...
 
@@ -817,6 +827,16 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN notify_on_end INTEGER NOT NULL DEFAULT 0"
             )
+        if "notify_on_category_change" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN notify_on_category_change "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "delete_other_alerts" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN delete_other_alerts "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -965,6 +985,8 @@ class SqliteDatabase:
         from_twitch_sync: bool = False,
         notify_on_live: bool = True,
         notify_on_end: bool = False,
+        notify_on_category_change: bool = False,
+        delete_other_alerts: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -976,8 +998,9 @@ class SqliteDatabase:
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords,
                     image_file_id, image_position, enabled, from_twitch_sync,
-                    notify_on_live, notify_on_end
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    notify_on_live, notify_on_end, notify_on_category_change,
+                    delete_other_alerts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1001,6 +1024,8 @@ class SqliteDatabase:
                     int(from_twitch_sync),
                     int(bool(notify_on_live)),
                     int(bool(notify_on_end)),
+                    int(bool(notify_on_category_change)),
+                    int(bool(delete_other_alerts)),
                 ),
             )
             return int(cur.lastrowid)
@@ -1013,7 +1038,7 @@ class SqliteDatabase:
             ).fetchone()
         return _row_to_sub(row) if row else None
 
-    def set_last_message_id(self, sub_id: int, message_id: int) -> None:
+    def set_last_message_id(self, sub_id: int, message_id: int | None) -> None:
         with self._conn() as conn:
             conn.execute(
                 "UPDATE subscriptions SET last_message_id = ? WHERE id = ?",
@@ -1098,6 +1123,8 @@ class SqliteDatabase:
             "schedule_reminder_configured",
             "notify_on_live",
             "notify_on_end",
+            "notify_on_category_change",
+            "delete_other_alerts",
             "ignore_keywords",
             "image_file_id",
             "image_position",
@@ -1115,6 +1142,8 @@ class SqliteDatabase:
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",
+                "notify_on_category_change",
+                "delete_other_alerts",
             ):
                 values.append(int(bool(value)))
             elif key in (
@@ -1165,7 +1194,11 @@ class SqliteDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = 1 AND (notify_on_live = 1 OR notify_on_end = 1)
+                WHERE enabled = 1 AND (
+                    notify_on_live = 1
+                    OR notify_on_end = 1
+                    OR notify_on_category_change = 1
+                )
                 """
             ).fetchall()
         return [r["twitch_user_id"] for r in rows]
@@ -2313,6 +2346,20 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS notify_on_category_change
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS delete_other_alerts
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -2492,6 +2539,8 @@ class PostgresDatabase:
         from_twitch_sync: bool = False,
         notify_on_live: bool = True,
         notify_on_end: bool = False,
+        notify_on_category_change: bool = False,
+        delete_other_alerts: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -2504,8 +2553,9 @@ class PostgresDatabase:
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords,
                     image_file_id, image_position, enabled, from_twitch_sync,
-                    notify_on_live, notify_on_end
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    notify_on_live, notify_on_end, notify_on_category_change,
+                    delete_other_alerts
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -2530,6 +2580,8 @@ class PostgresDatabase:
                     from_twitch_sync,
                     bool(notify_on_live),
                     bool(notify_on_end),
+                    bool(notify_on_category_change),
+                    bool(delete_other_alerts),
                 ),
             )
             row = cur.fetchone()
@@ -2545,7 +2597,7 @@ class PostgresDatabase:
             row = cur.fetchone()
         return _row_to_sub(row) if row else None
 
-    def set_last_message_id(self, sub_id: int, message_id: int) -> None:
+    def set_last_message_id(self, sub_id: int, message_id: int | None) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -2640,6 +2692,8 @@ class PostgresDatabase:
             "schedule_reminder_configured",
             "notify_on_live",
             "notify_on_end",
+            "notify_on_category_change",
+            "delete_other_alerts",
             "ignore_keywords",
             "image_file_id",
             "image_position",
@@ -2657,6 +2711,8 @@ class PostgresDatabase:
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",
+                "notify_on_category_change",
+                "delete_other_alerts",
             ):
                 values.append(bool(value))
             elif key in (
@@ -2713,7 +2769,11 @@ class PostgresDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = TRUE AND (notify_on_live = TRUE OR notify_on_end = TRUE)
+                WHERE enabled = TRUE AND (
+                    notify_on_live = TRUE
+                    OR notify_on_end = TRUE
+                    OR notify_on_category_change = TRUE
+                )
                 """
             )
             rows = cur.fetchall()

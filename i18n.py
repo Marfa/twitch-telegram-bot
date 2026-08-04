@@ -267,10 +267,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Here you can set up different Twitch stream alerts. "
             "Choose which alert type to configure:\n"
             "- when a stream starts\n"
+            "- when the stream category changes (no start alert; every change until the stream ends)\n"
             "- for an upcoming stream, if the streamer has a schedule\n"
             "- when a stream ends"
         ),
         "alert_type_live": "Stream start",
+        "alert_type_category": "Category change",
         "alert_type_upcoming": "Upcoming stream",
         "alert_type_end": "Stream end",
         "alert_type_no_schedule": (
@@ -278,8 +280,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "or a different alert type."
         ),
         "alert_note_live": "When {twitch_username} goes live — I'll send a notification.",
+        "alert_note_category": (
+            "When {twitch_username} changes the stream category — I'll send a notification "
+            "(every change until the stream ends; no alert when the stream starts)."
+        ),
         "alert_note_end": "When {twitch_username} ends a stream — I'll send a notification.",
         "sub_list_alert_live": "• Alert: stream start",
+        "sub_list_alert_category": "• Alert: category change",
         "sub_list_alert_end": "• Alert: stream end",
         "sub_list_alert_upcoming": "• Alert: upcoming stream reminder",
         "finish_setup_first": "Finish the subscription setup or tap /cancel.",
@@ -462,6 +469,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_delete_yes": "• Delete old messages: yes",
         "sub_list_delete_no": "• Delete old messages: no",
         "sub_list_delete_fail": "• Notify on delete failure: yes",
+        "sub_list_delete_other_yes": "• Delete other alerts: yes",
+        "sub_list_delete_other_no": "• Delete other alerts: category-change only",
         "sub_list_preview_on": "• Link preview: on",
         "sub_list_preview_off": "• Link preview: off",
         "sub_list_delay": "• Delayed send: {minutes} min",
@@ -508,6 +517,18 @@ _STRINGS: dict[str, dict[str, str]] = {
             "In channels and groups the bot needs permission to delete its own messages.\n"
             "Telegram allows deleting only messages younger than ~48 hours."
         ),
+        "delete_old_text_category": (
+            "Delete the bot's previous category-change message when the category changes again?\n\n"
+            "By default only category-change alerts are deleted — other bot notifications are left alone.\n"
+            "In channels and groups the bot needs permission to delete its own messages.\n"
+            "Telegram allows deleting only messages younger than ~48 hours."
+        ),
+        "delete_sibling_text": (
+            "You already have subscriptions that will send alerts for this streamer "
+            "to the same destination. Delete other notifications too?"
+        ),
+        "delete_sibling_yes": "✅ Yes — delete all",
+        "delete_sibling_no": "❌ No — only category changes",
         "delete_old_yes": "✅ Yes, delete",
         "delete_old_no": "❌ No",
         "delete_fail_notify_text": (
@@ -571,6 +592,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "thread_note": "\nTopic: {thread_id}",
         "delete_yes": "Delete old messages: yes",
+        "delete_yes_category": "Delete old messages: category-change only",
+        "delete_yes_all": "Delete old messages: all bot alerts",
         "delete_no": "Delete old messages: no",
         "preview_off": "Link preview: off",
         "preview_on": "Link preview: on",
@@ -722,6 +745,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_dest": "📍 Destination",
         "edit_delete_old": "🗑 Delete old messages",
         "edit_delete_fail_notify": "⚠️ Notify on delete failure",
+        "edit_delete_other": "🗑 Delete other alerts too",
         "edit_link_preview": "🔗 Link preview",
         "edit_delay": "⏱ Delay send",
         "edit_repeat": "🔁 Repeat notifications",
@@ -783,7 +807,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Delete old messages on new stream?\n\n"
             "Telegram allows deleting only messages younger than ~48 hours."
         ),
+        "edit_delete_old_menu_category": (
+            "Delete the previous category-change message on the next change?\n\n"
+            "By default only category-change alerts are deleted. "
+            "Use «Delete other alerts too» to also remove other bot notifications.\n"
+            "Telegram allows deleting only messages younger than ~48 hours."
+        ),
         "edit_delete_fail_menu": "Notify about problems deleting the message?",
+        "edit_delete_other_menu": (
+            "Delete other bot notifications for this streamer "
+            "in the same destination too?"
+        ),
         "edit_preview_menu": "Disable link preview in notifications?",
         "preview_yes": "❌ Off (no preview)",
         "preview_no": "✅ On (show preview)",
@@ -1136,10 +1170,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Здесь можно настроить различные оповещения о стримах на Twitch. "
             "Выберите какой тип оповещения настроить:\n"
             "- о начале стрима\n"
+            "- о смене категории (без оповещения о старте; при каждой смене до конца стрима)\n"
             "- о предстоящем стриме, если у стримера есть расписание\n"
             "- об окончании стрима"
         ),
         "alert_type_live": "Начало стрима",
+        "alert_type_category": "Смена категории",
         "alert_type_upcoming": "Предстоящий стрим",
         "alert_type_end": "Окончание стрима",
         "alert_type_no_schedule": (
@@ -1147,8 +1183,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "или выберите другой тип оповещения."
         ),
         "alert_note_live": "Когда {twitch_username} начнёт стрим — пришлю уведомление.",
+        "alert_note_category": (
+            "Когда {twitch_username} сменит категорию стрима — пришлю уведомление "
+            "(при каждой смене до конца стрима; о начале стрима не пишу)."
+        ),
         "alert_note_end": "Когда {twitch_username} закончит стрим — пришлю уведомление.",
         "sub_list_alert_live": "• Оповещение: начало стрима",
+        "sub_list_alert_category": "• Оповещение: смена категории",
         "sub_list_alert_end": "• Оповещение: окончание стрима",
         "sub_list_alert_upcoming": "• Оповещение: напоминание о предстоящем стриме",
         "finish_setup_first": "Сначала завершите настройку подписки или нажмите /cancel.",
@@ -1333,6 +1374,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_delete_yes": "• Удалять старые: да",
         "sub_list_delete_no": "• Удалять старые: нет",
         "sub_list_delete_fail": "• Сообщать о проблемах удаления: да",
+        "sub_list_delete_other_yes": "• Удалять другие оповещения: да",
+        "sub_list_delete_other_no": "• Удалять другие оповещения: только смена категории",
         "sub_list_preview_on": "• Превью ссылок: включено",
         "sub_list_preview_off": "• Превью ссылок: выключено",
         "sub_list_delay": "• Отложенная отправка: {minutes} мин.",
@@ -1379,6 +1422,19 @@ _STRINGS: dict[str, dict[str, str]] = {
             "В канале и группе боту нужно право удалять свои сообщения.\n"
             "Telegram позволяет удалять только сообщения младше ~48 часов."
         ),
+        "delete_old_text_category": (
+            "Удалять предыдущее сообщение бота при следующей смене категории?\n\n"
+            "По умолчанию удаляются только оповещения о смене категории — "
+            "другие оповещения бота не трогаются.\n"
+            "В канале и группе боту нужно право удалять свои сообщения.\n"
+            "Telegram позволяет удалять только сообщения младше ~48 часов."
+        ),
+        "delete_sibling_text": (
+            "У вас уже есть подписки, по которым бот будет отправлять оповещения. "
+            "Удалять другие уведомления?"
+        ),
+        "delete_sibling_yes": "✅ Да — удалять все",
+        "delete_sibling_no": "❌ Нет — только смену категории",
         "delete_old_yes": "✅ Да, удалять",
         "delete_old_no": "❌ Нет",
         "delete_fail_notify_text": (
@@ -1445,6 +1501,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "thread_note": "\nТема: {thread_id}",
         "delete_yes": "Удалять старые сообщения: да",
+        "delete_yes_category": "Удалять старые сообщения: только смена категории",
+        "delete_yes_all": "Удалять старые сообщения: все оповещения",
         "delete_no": "Удалять старые сообщения: нет",
         "preview_off": "Превью ссылок: выключено",
         "preview_on": "Превью ссылок: включено",
@@ -1596,6 +1654,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_dest": "📍 Куда отправлять",
         "edit_delete_old": "🗑 Удалять старые",
         "edit_delete_fail_notify": "⚠️ Сообщать о проблемах удаления",
+        "edit_delete_other": "🗑 Удалять и другие оповещения",
         "edit_link_preview": "🔗 Превью ссылок",
         "edit_delay": "⏱ Задержка отправки",
         "edit_repeat": "🔁 Повторные уведомления",
@@ -1658,7 +1717,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Удалять старые сообщения при новом стриме?\n\n"
             "Telegram позволяет удалять только сообщения младше ~48 часов."
         ),
+        "edit_delete_old_menu_category": (
+            "Удалять предыдущее сообщение о смене категории при следующей смене?\n\n"
+            "По умолчанию удаляются только оповещения о смене категории. "
+            "Пункт «Удалять и другие оповещения» — чтобы убирать и остальные сообщения бота.\n"
+            "Telegram позволяет удалять только сообщения младше ~48 часов."
+        ),
         "edit_delete_fail_menu": "Сообщать о проблемах при удалении сообщения?",
+        "edit_delete_other_menu": (
+            "Удалять и другие оповещения бота по этому стримеру "
+            "в том же месте публикации?"
+        ),
         "edit_preview_menu": "Отключить превью ссылок в уведомлениях?",
         "preview_yes": "❌ Выкл (без превью)",
         "preview_no": "✅ Вкл (с превью)",
@@ -2315,6 +2384,12 @@ def alert_type_keyboard(lang: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    t("alert_type_category", lang),
+                    callback_data="alert_type:category",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     t("alert_type_upcoming", lang),
                     callback_data="alert_type:upcoming",
                 )
@@ -2329,6 +2404,25 @@ def alert_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     btn("wizard_cancel", lang),
                     callback_data="alert_type:cancel",
+                )
+            ],
+        ]
+    )
+
+
+def delete_sibling_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("delete_sibling_yes", lang),
+                    callback_data="delete_sibling:1",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("delete_sibling_no", lang),
+                    callback_data="delete_sibling:0",
                 )
             ],
         ]
@@ -2697,10 +2791,13 @@ def edit_options_keyboard(
     delete_previous: bool = False,
     has_image: bool = False,
     schedule_reminder_configured: bool = False,
+    notify_on_category_change: bool = False,
+    notify_on_end: bool = False,
 ) -> InlineKeyboardMarkup:
     # Same order as create wizard: template → image → ignore → preview → delay
     # → repeat → schedule reminder → dest → delete.
     # Schedule reminder only if configured at creation (unchanged policy).
+    # Repeat is skipped for category-change / stream-end (same as create).
     image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
     rows = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
@@ -2722,12 +2819,13 @@ def edit_options_keyboard(
         rows.append(
             [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")]
         )
-    rows.extend(
-        [
-            [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")],
-            [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")],
-        ]
+    rows.append(
+        [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")]
     )
+    if not notify_on_category_change and not notify_on_end:
+        rows.append(
+            [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")]
+        )
     if schedule_reminder_configured:
         rows.append(
             [
@@ -2753,6 +2851,15 @@ def edit_options_keyboard(
                     )
                 ]
             )
+            if notify_on_category_change:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t("edit_delete_other", lang),
+                            callback_data=f"edit_f:{sub_id}:delete_other",
+                        )
+                    ]
+                )
     return InlineKeyboardMarkup(rows)
 
 
@@ -2784,6 +2891,23 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
                     InlineKeyboardButton(
                         t("delete_fail_no", lang),
                         callback_data=f"edit_set:{sub_id}:delete_fail:0",
+                    )
+                ],
+            ]
+        )
+    if field == "delete_other":
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("delete_sibling_yes", lang),
+                        callback_data=f"edit_set:{sub_id}:delete_other:1",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        t("delete_sibling_no", lang),
+                        callback_data=f"edit_set:{sub_id}:delete_other:0",
                     )
                 ],
             ]

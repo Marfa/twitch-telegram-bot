@@ -55,6 +55,7 @@ from i18n import (
     channel_dup_keyboard,
     delete_old_keyboard,
     delete_fail_notify_keyboard,
+    delete_sibling_keyboard,
     dest_keyboard,
     dest_label,
     delay_keyboard,
@@ -191,7 +192,8 @@ _TWITCH_COMPONENT_KEYS = {
     WATCH_LANGUAGE,
     WATCH_MATURE,
     WATCH_SAVE,
-) = range(47)
+    DELETE_SIBLING_ALERTS,
+) = range(48)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -641,6 +643,7 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if feature == "delete_old":
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
+        context.user_data["delete_other_alerts"] = False
         chat_id = context.user_data.get("pending_chat_id", user_id)
         thread_id = context.user_data.get("pending_thread_id")
         return await _finish_subscription(update, context, user_id, chat_id, thread_id)
@@ -657,9 +660,9 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def _continue_after_delay(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    """After delay step: skip repeat mute for stream-end alerts."""
+    """After delay step: skip repeat mute for stream-end / category-change alerts."""
     context.user_data.setdefault("suppress_repeat_minutes", 0)
-    if context.user_data.get("alert_type") == "end":
+    if context.user_data.get("alert_type") in ("end", "category"):
         return await _go_after_repeat(update, context, lang)
     return await _prompt_repeat_step(update, context, lang)
 
@@ -955,7 +958,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return await _show_lucky_preview(update, context, lang)
         if context.user_data.get("alert_type") == "upcoming":
             return await _go_schedule_reminder_minutes(update, context, lang)
-        if context.user_data.get("alert_type") == "end":
+        if context.user_data.get("alert_type") in ("end", "category"):
             after = context.user_data.get("after_delay_state", DELAY_SEND)
             if after == DELAY_MINUTES:
                 return await _go_delay_minutes_prompt(update, context, lang)
@@ -978,9 +981,23 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, DEST_CHAT)
         return DEST_CHAT
-    if state == DELETE_FAIL_NOTIFY:
+    if state == DELETE_SIBLING_ALERTS:
         await update.effective_message.reply_text(
-            t("delete_old_text", lang),
+            _delete_old_prompt_text(context, lang),
+            reply_markup=delete_old_keyboard(lang),
+        )
+        _set_wizard_back(context, DELETE_OLD)
+        return DELETE_OLD
+    if state == DELETE_FAIL_NOTIFY:
+        if context.user_data.get("delete_sibling_asked"):
+            await update.effective_message.reply_text(
+                t("delete_sibling_text", lang),
+                reply_markup=delete_sibling_keyboard(lang),
+            )
+            _set_wizard_back(context, DELETE_SIBLING_ALERTS)
+            return DELETE_SIBLING_ALERTS
+        await update.effective_message.reply_text(
+            _delete_old_prompt_text(context, lang),
             reply_markup=delete_old_keyboard(lang),
         )
         _set_wizard_back(context, DELETE_OLD)
@@ -1075,6 +1092,8 @@ def _format_sub_line(
     settings: list[str] = []
     if sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
+    elif sub.notify_on_category_change:
+        settings.append(t("sub_list_alert_category", lang))
     elif sub.schedule_reminder_minutes > 0 and not sub.notify_on_live:
         settings.append(t("sub_list_alert_upcoming", lang))
     else:
@@ -1103,11 +1122,12 @@ def _format_sub_line(
         if sub.delay_minutes > 0
         else t("sub_list_delay_none", lang)
     )
-    settings.append(
-        t("sub_list_repeat_mute", lang, minutes=sub.suppress_repeat_minutes)
-        if sub.suppress_repeat_minutes > 0
-        else t("sub_list_repeat_allow", lang)
-    )
+    if not sub.notify_on_category_change:
+        settings.append(
+            t("sub_list_repeat_mute", lang, minutes=sub.suppress_repeat_minutes)
+            if sub.suppress_repeat_minutes > 0
+            else t("sub_list_repeat_allow", lang)
+        )
     if sub.schedule_reminder_configured:
         settings.append(
             t("sub_list_schedule_reminder", lang, minutes=sub.schedule_reminder_minutes)
@@ -1133,6 +1153,12 @@ def _format_sub_line(
         )
         if sub.delete_previous and sub.notify_delete_fail:
             settings.append(t("sub_list_delete_fail", lang))
+        if sub.delete_previous and sub.notify_on_category_change:
+            settings.append(
+                t("sub_list_delete_other_yes", lang)
+                if sub.delete_other_alerts
+                else t("sub_list_delete_other_no", lang)
+            )
     return (
         f"{status} #{sub_num} — {sub.twitch_username}\n"
         + "\n".join(f"   {line}" for line in settings)
@@ -1244,30 +1270,52 @@ async def _send_notification(
     sub: Subscription,
     text: str,
 ) -> None:
-    if sub.delete_previous and sub.last_message_id and sub.dest_type != "dm":
-        try:
-            await bot.delete_message(chat_id=sub.chat_id, message_id=sub.last_message_id)
-        except (BadRequest, Forbidden) as exc:
-            logger.warning(
-                "Cannot delete message %s in %s: %s",
-                sub.last_message_id,
-                sub.chat_id,
-                exc,
-            )
-            if sub.notify_delete_fail:
-                lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-                link = _message_link(sub.chat_id, sub.last_message_id, sub.thread_id)
-                try:
-                    await bot.send_message(
-                        sub.owner_id,
-                        t("delete_fail_notice", lang, link=link),
-                    )
-                except (BadRequest, Forbidden) as notify_exc:
-                    logger.warning(
-                        "Cannot notify owner %s about delete failure: %s",
-                        sub.owner_id,
-                        notify_exc,
-                    )
+    if sub.delete_previous and sub.dest_type != "dm":
+        to_delete: list[tuple[int, int]] = []
+        seen_msg: set[int] = set()
+        if sub.last_message_id and sub.last_message_id not in seen_msg:
+            to_delete.append((sub.id, sub.last_message_id))
+            seen_msg.add(sub.last_message_id)
+        if sub.delete_other_alerts:
+            for sibling in db.get_enabled_by_twitch_user_id(sub.twitch_user_id):
+                if sibling.id == sub.id:
+                    continue
+                if sibling.owner_id != sub.owner_id:
+                    continue
+                if sibling.chat_id != sub.chat_id:
+                    continue
+                if (sibling.thread_id or None) != (sub.thread_id or None):
+                    continue
+                if not sibling.last_message_id or sibling.last_message_id in seen_msg:
+                    continue
+                to_delete.append((sibling.id, sibling.last_message_id))
+                seen_msg.add(sibling.last_message_id)
+        for owner_sub_id, message_id in to_delete:
+            try:
+                await bot.delete_message(chat_id=sub.chat_id, message_id=message_id)
+                if owner_sub_id != sub.id:
+                    db.set_last_message_id(owner_sub_id, None)
+            except (BadRequest, Forbidden) as exc:
+                logger.warning(
+                    "Cannot delete message %s in %s: %s",
+                    message_id,
+                    sub.chat_id,
+                    exc,
+                )
+                if sub.notify_delete_fail:
+                    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                    link = _message_link(sub.chat_id, message_id, sub.thread_id)
+                    try:
+                        await bot.send_message(
+                            sub.owner_id,
+                            t("delete_fail_notice", lang, link=link),
+                        )
+                    except (BadRequest, Forbidden) as notify_exc:
+                        logger.warning(
+                            "Cannot notify owner %s about delete failure: %s",
+                            sub.owner_id,
+                            notify_exc,
+                        )
 
     try:
         msg = await _deliver_alert_content(
@@ -1414,20 +1462,24 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     kind = query.data.split(":", 1)[1]
-    if kind not in ("live", "upcoming", "end"):
+    if kind not in ("live", "category", "upcoming", "end"):
         return ALERT_TYPE
     db: Database = context.application.bot_data["db"]
-    if kind != "live" and not await prem.has_premium(context.bot, db, query.from_user.id):
+    if kind != "live" and not await prem.has_premium(
+        context.bot, db, query.from_user.id
+    ):
         context.user_data["alert_type"] = kind
         return await _show_premium_gate(
             update, context, feature="alert_type", first_step=True
         )
     context.user_data["alert_type"] = kind
     context.user_data["notify_on_end"] = kind == "end"
-    if kind in ("live", "end"):
+    context.user_data["notify_on_category_change"] = kind == "category"
+    context.user_data["delete_other_alerts"] = False
+    if kind in ("live", "end", "category"):
         context.user_data["skip_schedule_check"] = True
         context.user_data["notify_on_live"] = kind == "live"
-        if kind == "end":
+        if kind in ("end", "category"):
             context.user_data["notify_on_live"] = False
     else:
         context.user_data.pop("skip_schedule_check", None)
@@ -1512,14 +1564,7 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
         sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
         await query.edit_message_text(
             t("edit_menu", lang, sub_id=sub_num, username=sub.twitch_username),
-            reply_markup=edit_options_keyboard(
-                sub_id,
-                lang,
-                dest_type=sub.dest_type,
-                delete_previous=sub.delete_previous,
-                has_image=bool(sub.image_file_id),
-                schedule_reminder_configured=sub.schedule_reminder_configured,
-            ),
+            reply_markup=_edit_options_for_sub(sub, lang),
         )
         await context.bot.send_message(
             query.from_user.id,
@@ -2507,20 +2552,91 @@ async def _prompt_delete_old(
         return await _show_premium_gate(
             update, context, feature="delete_old", first_step=False
         )
+    text = _delete_old_prompt_text(context, lang)
     target = update.effective_message
     if target:
         await target.reply_text(
-            t("delete_old_text", lang),
+            text,
             reply_markup=delete_old_keyboard(lang),
         )
     else:
         await context.bot.send_message(
             update.effective_user.id,
-            t("delete_old_text", lang),
+            text,
             reply_markup=delete_old_keyboard(lang),
         )
     _set_wizard_back(context, DELETE_OLD)
     return DELETE_OLD
+
+
+def _delete_old_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
+    if context.user_data.get("alert_type") == "category":
+        return t("delete_old_text_category", lang)
+    return t("delete_old_text", lang)
+
+
+def _has_sibling_publication_subs(
+    db: Database,
+    owner_id: int,
+    twitch_user_id: str,
+    chat_id: int,
+    thread_id: int | None,
+    *,
+    exclude_sub_id: int | None = None,
+) -> bool:
+    for sub in db.get_subscriptions_by_owner(owner_id):
+        if exclude_sub_id is not None and sub.id == exclude_sub_id:
+            continue
+        if sub.twitch_user_id != twitch_user_id:
+            continue
+        if sub.chat_id != chat_id:
+            continue
+        if (sub.thread_id or None) != (thread_id or None):
+            continue
+        return True
+    return False
+
+
+def _edit_options_for_sub(sub: Subscription, lang: str) -> InlineKeyboardMarkup:
+    return edit_options_keyboard(
+        sub.id,
+        lang,
+        dest_type=sub.dest_type,
+        delete_previous=sub.delete_previous,
+        has_image=bool(sub.image_file_id),
+        schedule_reminder_configured=sub.schedule_reminder_configured,
+        notify_on_category_change=sub.notify_on_category_change,
+        notify_on_end=sub.notify_on_end,
+    )
+
+
+def _alert_type_from_sub(sub: Subscription) -> str:
+    if sub.notify_on_category_change:
+        return "category"
+    if sub.notify_on_end:
+        return "end"
+    if sub.schedule_reminder_minutes > 0 and not sub.notify_on_live:
+        return "upcoming"
+    return "live"
+
+
+async def _prompt_delete_fail_notify(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await prem.has_premium(context.bot, db, user_id):
+        return await _show_premium_gate(
+            update, context, feature="delete_fail", first_step=False
+        )
+    text = t("delete_fail_notify_text", lang)
+    markup = delete_fail_notify_keyboard(lang)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    _set_wizard_back(context, DELETE_FAIL_NOTIFY)
+    return DELETE_FAIL_NOTIFY
 
 
 async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2529,24 +2645,49 @@ async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = _user_lang(context, query.from_user.id)
     delete_previous = query.data.endswith(":1")
     context.user_data["delete_previous"] = delete_previous
+    context.user_data.pop("delete_sibling_asked", None)
     if not delete_previous:
         context.user_data["notify_delete_fail"] = False
+        context.user_data["delete_other_alerts"] = False
         chat_id = context.user_data["pending_chat_id"]
         thread_id = context.user_data.get("pending_thread_id")
         return await _finish_subscription(
             update, context, query.from_user.id, chat_id, thread_id
         )
-    db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, query.from_user.id):
-        return await _show_premium_gate(
-            update, context, feature="delete_fail", first_step=False
-        )
-    await query.edit_message_text(
-        t("delete_fail_notify_text", lang),
-        reply_markup=delete_fail_notify_keyboard(lang),
-    )
-    _set_wizard_back(context, DELETE_FAIL_NOTIFY)
-    return DELETE_FAIL_NOTIFY
+    if context.user_data.get("alert_type") == "category":
+        db: Database = context.application.bot_data["db"]
+        chat_id = context.user_data["pending_chat_id"]
+        thread_id = context.user_data.get("pending_thread_id")
+        twitch_user_id = str(context.user_data.get("twitch_user_id") or "")
+        if twitch_user_id and _has_sibling_publication_subs(
+            db,
+            query.from_user.id,
+            twitch_user_id,
+            chat_id,
+            thread_id,
+            exclude_sub_id=context.user_data.get("edit_sub_id"),
+        ):
+            context.user_data["delete_sibling_asked"] = True
+            await query.edit_message_text(
+                t("delete_sibling_text", lang),
+                reply_markup=delete_sibling_keyboard(lang),
+            )
+            _set_wizard_back(context, DELETE_SIBLING_ALERTS)
+            return DELETE_SIBLING_ALERTS
+        context.user_data["delete_other_alerts"] = False
+    else:
+        context.user_data["delete_other_alerts"] = False
+    return await _prompt_delete_fail_notify(update, context, lang)
+
+
+async def receive_delete_sibling(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    context.user_data["delete_other_alerts"] = query.data.endswith(":1")
+    return await _prompt_delete_fail_notify(update, context, lang)
 
 
 async def receive_delete_fail_notify(
@@ -2579,15 +2720,30 @@ async def _finish_subscription(
     notify_delete_fail = bool(data.get("notify_delete_fail", False)) and delete_previous
     alert_type = str(data.get("alert_type") or "")
     notify_on_end = bool(data.get("notify_on_end", False)) or alert_type == "end"
+    notify_on_category_change = (
+        bool(data.get("notify_on_category_change", False)) or alert_type == "category"
+    )
+    delete_other_alerts = (
+        bool(data.get("delete_other_alerts", False))
+        and delete_previous
+        and notify_on_category_change
+    )
     if alert_type == "live":
         notify_on_live = True
         notify_on_end = False
+        notify_on_category_change = False
     elif alert_type == "end":
         notify_on_live = False
         notify_on_end = True
+        notify_on_category_change = False
+    elif alert_type == "category":
+        notify_on_live = False
+        notify_on_end = False
+        notify_on_category_change = True
     elif alert_type == "upcoming":
         notify_on_live = False
         notify_on_end = False
+        notify_on_category_change = False
     else:
         notify_on_live = bool(data.get("notify_on_live", True))
 
@@ -2629,6 +2785,7 @@ async def _finish_subscription(
                 thread_id=thread_id,
                 delete_previous=delete_previous,
                 notify_delete_fail=notify_delete_fail,
+                delete_other_alerts=delete_other_alerts,
             )
             if not ok:
                 await context.bot.send_message(
@@ -2666,7 +2823,11 @@ async def _finish_subscription(
                 disable_link_preview=bool(data.get("disable_link_preview", False))
                 or bool(data.get("image_file_id")),
                 delay_minutes=int(data.get("delay_minutes", 0)),
-                suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
+                suppress_repeat_minutes=(
+                    0
+                    if notify_on_category_change
+                    else int(data.get("suppress_repeat_minutes", 0))
+                ),
                 schedule_reminder_minutes=int(
                     data.get("schedule_reminder_minutes", 0)
                 ),
@@ -2680,6 +2841,8 @@ async def _finish_subscription(
                 enabled=create_enabled,
                 notify_on_live=notify_on_live,
                 notify_on_end=notify_on_end,
+                notify_on_category_change=notify_on_category_change,
+                delete_other_alerts=delete_other_alerts,
             )
             if not create_enabled:
                 context.user_data["premium_created_disabled"] = True
@@ -2699,6 +2862,7 @@ async def _finish_subscription(
         not edit_sub_id
         and not notify_on_live
         and not notify_on_end
+        and not notify_on_category_change
         and int(data.get("schedule_reminder_minutes", 0)) > 0
     )
     if schedule_only_pending and alert_type != "upcoming":
@@ -2759,6 +2923,12 @@ async def _finish_subscription(
             if delete_previous
             else t("delete_no", lang)
         )
+        if delete_previous and notify_on_category_change:
+            delete_note = (
+                t("delete_yes_all", lang)
+                if delete_other_alerts
+                else t("delete_yes_category", lang)
+            )
         delete_fail_note = ""
         if delete_previous:
             delete_fail_note = (
@@ -2796,22 +2966,32 @@ async def _finish_subscription(
             else t("delay_no_note", lang)
         )
         suppress = int(data.get("suppress_repeat_minutes", 0))
-        repeat_note = (
-            t("repeat_no_note", lang, minutes=suppress)
-            if suppress > 0
-            else t("repeat_yes_note", lang)
-        )
+        if notify_on_category_change:
+            repeat_note = ""
+        else:
+            repeat_note = (
+                t("repeat_no_note", lang, minutes=suppress)
+                if suppress > 0
+                else t("repeat_yes_note", lang)
+            )
         remind = int(data.get("schedule_reminder_minutes", 0))
         schedule_reminder_note = (
             t("schedule_reminder_yes_note", lang, minutes=remind)
             if remind > 0
             else t("schedule_reminder_no_note", lang)
         )
-        alert_note = t(
-            "alert_note_end" if notify_on_end else "alert_note_live",
-            lang,
-            twitch_username=data["twitch_username"],
-        )
+        if notify_on_category_change:
+            alert_note = t(
+                "alert_note_category",
+                lang,
+                twitch_username=data["twitch_username"],
+            )
+        else:
+            alert_note = t(
+                "alert_note_end" if notify_on_end else "alert_note_live",
+                lang,
+                twitch_username=data["twitch_username"],
+            )
         user_sub_num = _owner_sub_number(db, owner_id, sub_id)
         text = t(
             "setup_done",
@@ -4643,14 +4823,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text(
         t("edit_menu", lang, sub_id=sub_num, username=sub.twitch_username),
-        reply_markup=edit_options_keyboard(
-            sub_id,
-            lang,
-            dest_type=sub.dest_type,
-            delete_previous=sub.delete_previous,
-            has_image=bool(sub.image_file_id),
-            schedule_reminder_configured=sub.schedule_reminder_configured,
-        ),
+        reply_markup=_edit_options_for_sub(sub, lang),
     )
 
 
@@ -4823,6 +4996,11 @@ async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["ignore_keywords"] = sub.ignore_keywords
     context.user_data["disable_link_preview"] = sub.disable_link_preview
     context.user_data["suppress_repeat_minutes"] = sub.suppress_repeat_minutes
+    context.user_data["alert_type"] = _alert_type_from_sub(sub)
+    context.user_data["notify_on_live"] = sub.notify_on_live
+    context.user_data["notify_on_end"] = sub.notify_on_end
+    context.user_data["notify_on_category_change"] = sub.notify_on_category_change
+    context.user_data["delete_other_alerts"] = sub.delete_other_alerts
     context.user_data["wizard_edit"] = True
     await query.edit_message_text(
         t("dest_prompt", lang),
@@ -4844,20 +5022,31 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    if field in ("delete_old", "delete_fail") and sub.dest_type == "dm":
+    if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
         await query.edit_message_text(
-            t("edit_menu", lang, sub_id=_owner_sub_number(db, query.from_user.id, sub_id), username=sub.twitch_username),
-            reply_markup=edit_options_keyboard(
-                sub_id,
+            t(
+                "edit_menu",
                 lang,
-                dest_type=sub.dest_type,
-                delete_previous=sub.delete_previous,
-                has_image=bool(sub.image_file_id),
-                schedule_reminder_configured=sub.schedule_reminder_configured,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=sub.twitch_username,
             ),
+            reply_markup=_edit_options_for_sub(sub, lang),
         )
         return
-    if field in ("delete_old", "delete_fail", "repeat") and not await prem.has_premium(
+    if field == "delete_other" and (
+        not sub.notify_on_category_change or not sub.delete_previous
+    ):
+        await query.edit_message_text(
+            t(
+                "edit_menu",
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=sub.twitch_username,
+            ),
+            reply_markup=_edit_options_for_sub(sub, lang),
+        )
+        return
+    if field in ("delete_old", "delete_fail", "delete_other", "repeat") and not await prem.has_premium(
         context.bot, db, query.from_user.id
     ):
         from premium_handlers import send_premium_screen
@@ -4867,14 +5056,19 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         await send_premium_screen(context.bot, query.from_user.id, lang, db)
         return
-    menu_keys = {
-        "delete_old": "edit_delete_old_menu",
-        "delete_fail": "edit_delete_fail_menu",
-        "preview": "edit_preview_menu",
-        "repeat": "edit_repeat_menu",
-    }
+    if field == "delete_old" and sub.notify_on_category_change:
+        menu_key = "edit_delete_old_menu_category"
+    else:
+        menu_keys = {
+            "delete_old": "edit_delete_old_menu",
+            "delete_fail": "edit_delete_fail_menu",
+            "delete_other": "edit_delete_other_menu",
+            "preview": "edit_preview_menu",
+            "repeat": "edit_repeat_menu",
+        }
+        menu_key = menu_keys[field]
     await query.edit_message_text(
-        t(menu_keys[field], lang),
+        t(menu_key, lang),
         reply_markup=edit_bool_keyboard(sub_id, field, lang),
     )
 
@@ -4892,18 +5086,24 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    if field in ("delete_old", "delete_fail") and sub.dest_type == "dm":
+    if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
         await query.edit_message_text(t("sub_not_found", lang))
         return
     if field == "delete_old":
         kwargs: dict = {"delete_previous": value}
         if not value:
             kwargs["notify_delete_fail"] = False
+            kwargs["delete_other_alerts"] = False
     elif field == "delete_fail":
         if not sub.delete_previous:
             await query.edit_message_text(t("sub_not_found", lang))
             return
         kwargs = {"notify_delete_fail": value}
+    elif field == "delete_other":
+        if not sub.notify_on_category_change or not sub.delete_previous:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return
+        kwargs = {"delete_other_alerts": value}
     elif field == "preview":
         kwargs = {"disable_link_preview": value}
     elif field == "repeat":
@@ -6261,10 +6461,47 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
     await _send_notification(context.bot, db, sub, text)
 
 
+async def _send_delayed_category_notification(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    sub_id = context.job.data["sub_id"]
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    sub = db.get_subscription_by_id(sub_id)
+    if not sub or not sub.enabled or not sub.notify_on_category_change:
+        return
+
+    try:
+        live_streams = await asyncio.to_thread(
+            twitch.get_live_streams, [sub.twitch_user_id]
+        )
+    except Exception:
+        logger.exception(
+            "Twitch poll failed for delayed category notification sub %s", sub_id
+        )
+        return
+
+    if sub.twitch_user_id not in live_streams:
+        return
+    if is_on_notify_cooldown(sub):
+        return
+    stream = live_streams[sub.twitch_user_id]
+    username = stream.get("user_login", stream.get("user_name", ""))
+    game = stream.get("game_name", "")
+    title = stream.get("title", "")
+    if should_ignore_stream(sub.ignore_keywords, game, title):
+        return
+    text = render_template(
+        sub.message_template, username, game, title, stream=stream
+    )
+    await _send_notification(context.bot, db, sub, text)
+
+
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     last_live: dict[str, bool] = context.application.bot_data.setdefault("last_live", {})
+    last_games: dict[str, str] = context.application.bot_data.setdefault("last_games", {})
     # After restart memory is empty; first successful poll only seeds state so
     # already-live streams are not treated as fresh starts.
     primed = bool(context.application.bot_data.get("last_live_primed"))
@@ -6281,6 +6518,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     went_live, went_offline = live_transitions(
         last_live, user_ids, live_streams, primed=primed
+    )
+    category_changed = category_change_events(
+        last_games, user_ids, live_streams, primed=primed
     )
     context.application.bot_data["last_live_primed"] = True
 
@@ -6324,6 +6564,32 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
                 continue
             text = render_template(sub.message_template, sub.twitch_username, "—", "—")
+            await _send_notification(context.bot, db, sub, text)
+
+    for uid in category_changed:
+        stream = live_streams[uid]
+        username = stream.get("user_login", stream.get("user_name", ""))
+        game = stream.get("game_name", "")
+        title = stream.get("title", "")
+        for sub in db.get_enabled_by_twitch_user_id(uid):
+            if not sub.notify_on_category_change:
+                continue
+            if is_on_notify_cooldown(sub):
+                continue
+            if should_ignore_stream(sub.ignore_keywords, game, title):
+                continue
+            if sub.delay_minutes > 0:
+                game_id = str(stream.get("game_id") or "")
+                context.job_queue.run_once(
+                    _send_delayed_category_notification,
+                    when=sub.delay_minutes * 60,
+                    data={"sub_id": sub.id},
+                    name=f"delay_cat_{sub.id}_{game_id}",
+                )
+                continue
+            text = render_template(
+                sub.message_template, username, game, title, stream=stream
+            )
             await _send_notification(context.bot, db, sub, text)
 
 
@@ -6417,6 +6683,27 @@ def live_transitions(
                 went_offline.append(uid)
         last_live[uid] = is_live
     return went_live, went_offline
+
+
+def category_change_events(
+    last_games: dict[str, str],
+    user_ids: list[str],
+    live_streams: dict[str, dict],
+    *,
+    primed: bool,
+) -> list[str]:
+    """Update last_games; return uids whose game_id changed while live (when primed)."""
+    changed: list[str] = []
+    for uid in user_ids:
+        if uid not in live_streams:
+            last_games.pop(uid, None)
+            continue
+        game_id = str(live_streams[uid].get("game_id") or "")
+        prev = last_games.get(uid)
+        if primed and prev is not None and game_id != prev:
+            changed.append(uid)
+        last_games[uid] = game_id
+    return changed
 
 
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6790,14 +7077,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|preview|repeat)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|repeat)$",
         ),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(
             on_edit_set,
-            pattern=r"^edit_set:\d+:(delete_old|delete_fail|preview):[01]$|^edit_set:\d+:repeat:1$",
+            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview):[01]$|^edit_set:\d+:repeat:1$",
         ),
         group=0,
     )
@@ -6836,7 +7123,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
                 CallbackQueryHandler(
-                    receive_alert_type, pattern=r"^alert_type:(live|upcoming|end)$"
+                    receive_alert_type, pattern=r"^alert_type:(live|category|upcoming|end)$"
                 ),
             ],
             PREMIUM_GATE: [
@@ -6980,6 +7267,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:"),
+            ],
+            DELETE_SIBLING_ALERTS: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_delete_sibling, pattern=r"^delete_sibling:"
+                ),
             ],
             DELETE_FAIL_NOTIFY: [
                 _wiz_cancel,
