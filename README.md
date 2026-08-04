@@ -6,6 +6,14 @@
 
 English: [README.en.md](README.en.md)
 
+| Главное меню | Типы оповещений |
+|---|---|
+| ![Главное меню](assets/gallery/ph-gallery-01-main-menu.ru.png) | ![Типы оповещений](assets/gallery/ph-gallery-02-alert-types.ru.png) |
+| Шаблон + плейсхолдеры | 🎲 Мне повезёт |
+| ![Шаблон](assets/gallery/ph-gallery-03-templates.ru.png) | ![Мне повезёт](assets/gallery/ph-gallery-04-feeling-lucky.ru.png) |
+| Куда слать | Импорт из Twitch |
+| ![Куда слать](assets/gallery/ph-gallery-05-destinations.ru.png) | ![Импорт из Twitch](assets/gallery/ph-gallery-06-import-twitch.ru.png) |
+
 | Возможность | Как работает |
 |---|---|
 | Готовый бот | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню |

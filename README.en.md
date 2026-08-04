@@ -6,6 +6,14 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 
 Русский: [README.md](README.md)
 
+| Main menu | Alert types |
+|---|---|
+| ![Main menu](assets/gallery/ph-gallery-01-main-menu.png) | ![Alert types](assets/gallery/ph-gallery-02-alert-types.png) |
+| Custom template + placeholders | 🎲 I'm feeling lucky |
+| ![Template](assets/gallery/ph-gallery-03-templates.png) | ![I'm feeling lucky](assets/gallery/ph-gallery-04-feeling-lucky.png) |
+| Destination | Import from Twitch |
+| ![Destination](assets/gallery/ph-gallery-05-destinations.png) | ![Import from Twitch](assets/gallery/ph-gallery-06-import-twitch.png) |
+
 | Feature | How it works |
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
