@@ -29,6 +29,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_settings": "⚙️ Settings",
         "btn_language": "🌐 Language",
         "btn_admin": "⚙️ Admin",
+        "btn_demo": "🎬 Demo mode",
         "btn_broadcast": "📣 Broadcast",
         "btn_broadcast_new": "➕ New broadcast",
         "btn_scheduled_broadcasts": "📅 Scheduled messages",
@@ -253,6 +254,26 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Enable it after upgrading or pausing another."
         ),
         "menu_admin": "Admin panel:",
+        "demo_on": (
+            "🎬 Demo mode ON.\n\n"
+            "You see the bot as a regular free user (no Premium).\n"
+            "Demo subscriptions are ready — try the menus.\n"
+            "Everything created or changed here is discarded when you exit.\n"
+            "Tap Demo mode again to exit."
+        ),
+        "demo_off": (
+            "🎬 Demo mode OFF.\n\n"
+            "Demo subscriptions removed. Your real subscriptions are unchanged."
+        ),
+        "demo_seed_template": (
+            "{username} is live! (demo)\n"
+            "{name}\n"
+            "Category: {game}"
+        ),
+        "demo_seed_template_2": (
+            "🔴 DEMO — {username}\n"
+            "{game}"
+        ),
         "menu_broadcast": "Broadcast:",
         "menu_main": "Main menu",
         "lang_pick": "Choose your language:",
@@ -932,6 +953,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_settings": "⚙️ Настройки",
         "btn_language": "🌐 Выбор языка",
         "btn_admin": "⚙️ Админка",
+        "btn_demo": "🎬 Демо режим",
         "btn_broadcast": "📣 Рассылка",
         "btn_broadcast_new": "➕ Новая рассылка",
         "btn_scheduled_broadcasts": "📅 Запланированные сообщения",
@@ -1156,6 +1178,26 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Включите после апгрейда или паузы другого."
         ),
         "menu_admin": "Админка:",
+        "demo_on": (
+            "🎬 Демо режим включён.\n\n"
+            "Вы видите бота как обычный пользователь без Premium.\n"
+            "Демо-подписки уже созданы — можно пробовать меню.\n"
+            "Всё созданное и изменённое здесь сбросится при выходе.\n"
+            "Нажмите «Демо режим» ещё раз, чтобы выйти."
+        ),
+        "demo_off": (
+            "🎬 Демо режим выключен.\n\n"
+            "Демо-подписки удалены. Ваши настоящие подписки не тронуты."
+        ),
+        "demo_seed_template": (
+            "{username} в эфире! (демо)\n"
+            "{name}\n"
+            "Категория: {game}"
+        ),
+        "demo_seed_template_2": (
+            "🔴 ДЕМО — {username}\n"
+            "{game}"
+        ),
         "menu_broadcast": "Рассылка:",
         "menu_main": "Главное меню",
         "lang_pick": "Выберите язык / Choose your language:",
@@ -1894,6 +1936,7 @@ def all_menu_buttons() -> set[str]:
         "settings",
         "language",
         "admin",
+        "demo",
         "broadcast",
         "broadcast_new",
         "scheduled_broadcasts",
@@ -1918,7 +1961,9 @@ def all_wizard_nav_buttons() -> set[str]:
     return {btn(k, loc) for k in ("wizard_back", "wizard_cancel") for loc in SUPPORTED_LOCALES}
 
 
-def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
+def main_menu(
+    lang: str, *, is_admin: bool = False, demo_active: bool = False
+) -> ReplyKeyboardMarkup:
     rows = [
         [
             KeyboardButton(btn("new", lang)),
@@ -1933,7 +1978,9 @@ def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
             KeyboardButton(btn("feedback", lang)),
         ],
     ]
-    if is_admin:
+    if demo_active:
+        rows.append([KeyboardButton(btn("demo", lang))])
+    elif is_admin:
         rows.append([KeyboardButton(btn("admin", lang))])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
@@ -2068,6 +2115,7 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("admin_withdrawals", lang)),
                 KeyboardButton(btn("create_schedule", lang)),
             ],
+            [KeyboardButton(btn("demo", lang))],
             [KeyboardButton(btn("back", lang))],
         ],
         resize_keyboard=True,

@@ -29,6 +29,7 @@ from telegram.ext import (
 )
 
 import premium as prem
+import demo_mode
 from db import (
     BotStats,
     Database,
@@ -294,10 +295,20 @@ def _scheduled_text_preview(text: str, limit: int = 120) -> str:
 
 
 def _owner_sub_number(db: Database, owner_id: int, sub_id: int) -> int:
-    for index, sub in enumerate(db.get_subscriptions_by_owner(owner_id), 1):
+    for index, sub in enumerate(_subs_for_owner(db, owner_id), 1):
         if sub.id == sub_id:
             return index
     return sub_id
+
+
+def _subs_for_owner(db: Database, owner_id: int) -> list[Subscription]:
+    """Real subs normally; only demo rows while Demo mode is on."""
+    demo = demo_mode.is_active(owner_id)
+    return [s for s in db.get_subscriptions_by_owner(owner_id) if s.is_demo is demo]
+
+
+def _sub_in_current_mode(sub: Subscription, owner_id: int) -> bool:
+    return sub.is_demo is demo_mode.is_active(owner_id)
 
 
 def import_followed_as_subscriptions(
@@ -309,6 +320,7 @@ def import_followed_as_subscriptions(
     limit: int,
     prune_missing: bool = False,
     enabled: bool = False,
+    is_demo: bool = False,
 ) -> tuple[int, int, int, int, list[Subscription]]:
     """Create DM subscriptions from Helix followed channels.
 
@@ -317,7 +329,9 @@ def import_followed_as_subscriptions(
     subs absent from follows are deleted (manual subs never touched).
     Returns (imported, skipped, limited, removed, new_subs).
     """
-    existing_subs = db.get_subscriptions_by_owner(owner_id)
+    existing_subs = [
+        s for s in db.get_subscriptions_by_owner(owner_id) if s.is_demo is is_demo
+    ]
     existing = {s.twitch_user_id for s in existing_subs}
     count = len(existing)
     imported = skipped = limited = 0
@@ -350,6 +364,7 @@ def import_followed_as_subscriptions(
             disable_link_preview=True,
             enabled=enabled,
             from_twitch_sync=True,
+            is_demo=is_demo,
         )
         sub = db.get_subscription(sub_id, owner_id)
         if sub:
@@ -549,7 +564,11 @@ async def _advance_stream_schedule_day(
 
 
 def _menu(lang: str, user_id: int) -> ReplyKeyboardMarkup:
-    return main_menu(lang, is_admin=_is_admin(user_id))
+    return main_menu(
+        lang,
+        is_admin=_is_admin(user_id) and not demo_mode.is_active(user_id),
+        demo_active=demo_mode.is_active(user_id),
+    )
 
 
 def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
@@ -1054,6 +1073,10 @@ def _is_admin(user_id: int) -> bool:
     return user_id in ADMIN_USER_IDS
 
 
+def _can_use_admin_tools(user_id: int) -> bool:
+    return _is_admin(user_id) and not demo_mode.is_active(user_id)
+
+
 def _user_lang(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> str:
     db: Database = context.application.bot_data["db"]
     return db.get_user_locale(user_id) or DEFAULT_LOCALE
@@ -1445,7 +1468,7 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
     db: Database = context.application.bot_data["db"]
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
-    if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+    if len(_subs_for_owner(db, user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
         await update.effective_message.reply_text(
             t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
             reply_markup=_menu(lang, user_id),
@@ -1531,7 +1554,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     existing = next(
         (
             s
-            for s in db.get_subscriptions_by_owner(owner_id)
+            for s in _subs_for_owner(db, owner_id)
             if s.twitch_user_id == user["id"]
         ),
         None,
@@ -2584,7 +2607,7 @@ def _has_sibling_publication_subs(
     *,
     exclude_sub_id: int | None = None,
 ) -> bool:
-    for sub in db.get_subscriptions_by_owner(owner_id):
+    for sub in _subs_for_owner(db, owner_id):
         if exclude_sub_id is not None and sub.id == exclude_sub_id:
             continue
         if sub.twitch_user_id != twitch_user_id:
@@ -2799,7 +2822,7 @@ async def _finish_subscription(
         else:
             from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
-            if len(db.get_subscriptions_by_owner(owner_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+            if len(_subs_for_owner(db, owner_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
                 await context.bot.send_message(
                     owner_id,
                     t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
@@ -2843,6 +2866,7 @@ async def _finish_subscription(
                 notify_on_end=notify_on_end,
                 notify_on_category_change=notify_on_category_change,
                 delete_other_alerts=delete_other_alerts,
+                is_demo=demo_mode.is_active(owner_id),
             )
             if not create_enabled:
                 context.user_data["premium_created_disabled"] = True
@@ -4144,6 +4168,13 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     if not _is_admin(user_id):
         return
+    if demo_mode.is_active(user_id):
+        lang = _user_lang(context, user_id)
+        await update.effective_message.reply_text(
+            t("demo_on", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return
     lang = _user_lang(context, user_id)
     await update.effective_message.reply_text(
         t("menu_admin", lang),
@@ -4151,9 +4182,63 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
-async def open_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def toggle_demo_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     if not _is_admin(user_id):
+        return
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    context.user_data.clear()
+    if demo_mode.is_active(user_id):
+        db.delete_demo_subscriptions(user_id)
+        demo_mode.deactivate(user_id)
+        await update.effective_message.reply_text(
+            t("demo_off", lang),
+            reply_markup=admin_menu(lang),
+        )
+        return
+    await _enter_demo_mode(update, context, user_id, lang, db)
+
+
+async def _enter_demo_mode(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    lang: str,
+    db: Database,
+) -> None:
+    db.delete_demo_subscriptions(user_id)
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    login = prem.twitch_channel_login() or "marfapr"
+    user = await asyncio.to_thread(twitch.get_user, login)
+    if user:
+        uid = str(user["id"])
+        uname = str(user.get("login") or login).lower()
+        for template_key in ("demo_seed_template", "demo_seed_template_2"):
+            db.add_subscription(
+                owner_id=user_id,
+                twitch_username=uname,
+                twitch_user_id=uid,
+                message_template=t(template_key, lang),
+                dest_type="dm",
+                chat_id=user_id,
+                thread_id=None,
+                disable_link_preview=True,
+                enabled=True,
+                notify_on_live=True,
+                notify_on_end=False,
+                is_demo=True,
+            )
+    demo_mode.activate(user_id)
+    await update.effective_message.reply_text(
+        t("demo_on", lang),
+        reply_markup=_menu(lang, user_id),
+    )
+
+
+async def open_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _can_use_admin_tools(user_id):
         return
     context.user_data.clear()
     lang = _user_lang(context, user_id)
@@ -4187,7 +4272,7 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=_menu(lang, user_id),
         )
         return
-    if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+    if len(_subs_for_owner(db, user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
         await update.effective_message.reply_text(
             t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
             reply_markup=_menu(lang, user_id),
@@ -4207,7 +4292,7 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _format_subs_overview_lines(
     bot, db: Database, owner_id: int, lang: str
 ) -> tuple[list[str], list[Subscription]]:
-    subs = db.get_subscriptions_by_owner(owner_id)
+    subs = _subs_for_owner(db, owner_id)
     lines: list[str] = []
     for i, sub in enumerate(subs, 1):
         chat_display = await _resolve_chat_display_name(bot, sub)
@@ -4352,6 +4437,7 @@ async def _run_followed_import(
         limit=MAX_SUBSCRIPTIONS_PER_OWNER,
         prune_missing=prune_missing,
         enabled=enabled,
+        is_demo=demo_mode.is_active(owner_id),
     )
 
 
@@ -4627,6 +4713,7 @@ async def _sync_owner_follows(
         limit=MAX_SUBSCRIPTIONS_PER_OWNER,
         prune_missing=True,
         enabled=True,
+        is_demo=demo_mode.is_active(row.owner_id),
     )
     if advance_schedule and row.period_days > 0:
         next_at = _next_sync_iso(row.period_days, from_dt=now)
@@ -4738,7 +4825,9 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     owner_id = query.from_user.id
     lang = _user_lang(context, owner_id)
     db: Database = context.application.bot_data["db"]
-    count = db.enable_all_subscriptions(owner_id)
+    count = db.enable_all_subscriptions(
+        owner_id, demo=demo_mode.is_active(owner_id)
+    )
     if count:
         await query.edit_message_text(t("enable_all_done", lang, count=count))
     else:
@@ -4783,7 +4872,7 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(user_id)
+    subs = _subs_for_owner(db, user_id)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
@@ -4817,7 +4906,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
     sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
+    if not sub or not _sub_in_current_mode(sub, query.from_user.id):
         await query.edit_message_text(t("sub_not_found", lang))
         return
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
@@ -5124,7 +5213,7 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(user_id)
+    subs = _subs_for_owner(db, user_id)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
@@ -5183,7 +5272,7 @@ async def on_delete_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         selected.add(sub_id)
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(user_id)
+    subs = _subs_for_owner(db, user_id)
     await query.edit_message_reply_markup(
         reply_markup=_delete_pick_keyboard(lang, subs, selected)
     )
@@ -5196,7 +5285,7 @@ async def on_delete_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     lang = _user_lang(context, user_id)
     context.user_data["delete_selected"] = set()
     db: Database = context.application.bot_data["db"]
-    subs = db.get_subscriptions_by_owner(user_id)
+    subs = _subs_for_owner(db, user_id)
     await query.edit_message_reply_markup(
         reply_markup=_delete_pick_keyboard(lang, subs, set())
     )
@@ -5214,6 +5303,9 @@ async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     db: Database = context.application.bot_data["db"]
     deleted = 0
     for sub_id in list(selected):
+        sub = db.get_subscription(sub_id, user_id)
+        if sub is None or not _sub_in_current_mode(sub, user_id):
+            continue
         if db.delete_subscription(sub_id, user_id):
             deleted += 1
     context.user_data["delete_selected"] = set()
@@ -5227,7 +5319,11 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
     sub = db.get_subscription_by_id(sub_id)
-    if sub is None or sub.owner_id != query.from_user.id:
+    if (
+        sub is None
+        or sub.owner_id != query.from_user.id
+        or not _sub_in_current_mode(sub, query.from_user.id)
+    ):
         await query.edit_message_text(t("sub_not_found", lang))
         return
     if not sub.enabled and not await prem.can_enable_more_async(context.bot, db, query.from_user.id):
@@ -5249,7 +5345,7 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
-    if not _is_admin(user_id):
+    if not _can_use_admin_tools(user_id):
         return ConversationHandler.END
     context.user_data.clear()
     lang = _user_lang(context, user_id)
@@ -5633,7 +5729,7 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def admin_scheduled_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    if not _is_admin(user_id):
+    if not _can_use_admin_tools(user_id):
         return
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -6165,7 +6261,7 @@ async def admin_show_withdrawals(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     user_id = update.effective_user.id
-    if not _is_admin(user_id):
+    if not _can_use_admin_tools(user_id):
         return
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -6379,7 +6475,7 @@ def _format_stats(stats: BotStats, lang: str) -> str:
 
 async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    if not _is_admin(user_id):
+    if not _can_use_admin_tools(user_id):
         return
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -6934,6 +7030,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("admin"), open_admin_menu),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("demo"), toggle_demo_mode),
         group=0,
     )
     app.add_handler(

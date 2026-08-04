@@ -88,6 +88,10 @@ async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
 
 
 async def has_premium(bot: Bot, db: Database, user_id: int) -> bool:
+    from demo_mode import is_active
+
+    if is_active(user_id):
+        return False
     if is_premium(db, user_id):
         return True
     return await is_free_chat_member(bot, user_id)
@@ -110,15 +114,21 @@ def twitch_channel_login() -> str:
 
 
 def can_enable_more(db: Database, user_id: int) -> bool:
-    if is_premium(db, user_id):
+    from demo_mode import is_active
+
+    demo = is_active(user_id)
+    if not demo and is_premium(db, user_id):
         return True
-    return db.count_enabled_subscriptions(user_id) < PREMIUM_FREE_ACTIVE_LIMIT
+    return db.count_enabled_subscriptions(user_id, demo=demo) < PREMIUM_FREE_ACTIVE_LIMIT
 
 
 async def can_enable_more_async(bot: Bot, db: Database, user_id: int) -> bool:
+    from demo_mode import is_active
+
     if await has_premium(bot, db, user_id):
         return True
-    return db.count_enabled_subscriptions(user_id) < PREMIUM_FREE_ACTIVE_LIMIT
+    demo = is_active(user_id)
+    return db.count_enabled_subscriptions(user_id, demo=demo) < PREMIUM_FREE_ACTIVE_LIMIT
 
 
 async def resolve_marfapr_user(twitch: TwitchClient) -> dict[str, Any] | None:

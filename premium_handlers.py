@@ -10,6 +10,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, U
 from telegram.ext import Application, ContextTypes
 
 import premium as prem
+import demo_mode
 from config import twitch_oauth_redirect_uri
 from db import Database
 from health import create_oauth_state
@@ -176,7 +177,11 @@ async def complete_premium_oauth(
     twitch: TwitchClient = application.bot_data["twitch"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     channel = prem.twitch_channel_login()
-    menu = main_menu(lang)
+    menu = main_menu(
+        lang,
+        is_admin=False,
+        demo_active=demo_mode.is_active(owner_id),
+    )
     if error:
         await application.bot.send_message(
             owner_id, t("import_failed", lang), reply_markup=menu
@@ -210,6 +215,7 @@ async def complete_premium_oauth(
             s
             for s in db.get_subscriptions_by_owner(owner_id)
             if s.twitch_user_id == str(user["id"])
+            and s.is_demo is demo_mode.is_active(owner_id)
         ),
         None,
     )
@@ -234,6 +240,7 @@ async def complete_premium_oauth(
         enabled=True,
         notify_on_live=True,
         notify_on_end=False,
+        is_demo=demo_mode.is_active(owner_id),
     )
     await application.bot.send_message(
         owner_id,

@@ -317,6 +317,9 @@ def main() -> None:
         assert tr("edit_delete_old_menu_category", loc)
         assert tr("sub_list_delete_other_yes", loc)
         assert tr("sub_list_delete_other_no", loc)
+        assert tr("btn_demo", loc)
+        assert tr("demo_on", loc)
+        assert tr("demo_off", loc)
         done = tr(
             "setup_done",
             loc,
@@ -703,6 +706,30 @@ def main() -> None:
         assert cat_sub is not None
         assert cat_sub.notify_on_category_change is False
         assert "cat-uid" not in db.get_unique_twitch_user_ids()
+        demo_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="demochan",
+            twitch_user_id="demo-uid",
+            message_template="demo {username}",
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            notify_on_live=True,
+            is_demo=True,
+        )
+        demo_sub = db.get_subscription(demo_id, 1)
+        assert demo_sub is not None
+        assert demo_sub.is_demo is True
+        assert db.count_enabled_subscriptions(1, demo=True) >= 1
+        assert db.delete_demo_subscriptions(1) >= 1
+        assert db.get_subscription(demo_id, 1) is None
+        import demo_mode as dm
+
+        dm.activate(1)
+        from premium import can_enable_more
+
+        assert can_enable_more(db, 1) is True
+        dm.deactivate(1)
         assert sub.notify_delete_fail is False
         assert db.update_subscription(sub_id, 1, notify_delete_fail=True)
         sub = db.get_subscription(sub_id, 1)

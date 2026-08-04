@@ -34,7 +34,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | System alerts | Toggle admin broadcasts; Twitch outages from status.twitch.com |
 | Premium | Stars subscription or Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) — more active alerts, sync, all alert types |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
-| Admin | Background broadcast with type footer, DeepL, statistics, withdrawal handling |
+| Admin | Background broadcast with type footer, DeepL, statistics, withdrawal handling, **Demo mode** |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -180,10 +180,11 @@ Dates and month names follow the user’s language.
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
 | ↳ 🌐 Language | Russian / English |
-| ⚙️ Admin | Broadcast, stats, withdrawals (`ADMIN_USER_IDS` only) |
+| ⚙️ Admin | Broadcast, stats, withdrawals, demo mode (`ADMIN_USER_IDS` only) |
 | ↳ 📣 Broadcast | “Bot updates” or “Bot availability”, scheduled send; footer with type and how to disable in Settings |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
 | ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium |
+| ↳ 🎬 Demo mode | Start from Admin: free-user menu without Premium, demo subscriptions; **Admin is hidden**, «Demo mode» stays on the main menu — press again to exit and wipe all demo data |
 | 🐛 Report a problem | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
 
 ### Partner program

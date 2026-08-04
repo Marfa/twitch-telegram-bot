@@ -327,6 +327,7 @@ class Subscription:
     last_schedule_reminder_segment_id: str | None
     from_twitch_sync: bool
     delete_other_alerts: bool
+    is_demo: bool
 
 
 @dataclass
@@ -438,6 +439,7 @@ def _row_to_sub(row: Any) -> Subscription:
         delete_other_alerts=bool(row["delete_other_alerts"])
         if "delete_other_alerts" in keys
         else False,
+        is_demo=bool(row["is_demo"]) if "is_demo" in keys else False,
     )
 
 
@@ -498,6 +500,7 @@ class Database(Protocol):
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
         delete_other_alerts: bool = False,
+        is_demo: bool = False,
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None: ...
@@ -518,7 +521,7 @@ class Database(Protocol):
 
     def toggle_subscription(self, sub_id: int, owner_id: int) -> bool | None: ...
 
-    def enable_all_subscriptions(self, owner_id: int) -> int: ...
+    def enable_all_subscriptions(self, owner_id: int, *, demo: bool = False) -> int: ...
 
     def delete_subscription(self, sub_id: int, owner_id: int) -> bool: ...
 
@@ -612,7 +615,9 @@ class Database(Protocol):
 
     def delete_watch_filter(self, user_id: int, filter_id: str) -> bool: ...
 
-    def count_enabled_subscriptions(self, owner_id: int) -> int: ...
+    def count_enabled_subscriptions(self, owner_id: int, *, demo: bool = False) -> int: ...
+
+    def delete_demo_subscriptions(self, owner_id: int) -> int: ...
 
     def get_premium_status(self, user_id: int) -> Any: ...
 
@@ -837,6 +842,10 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN delete_other_alerts "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "is_demo" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -987,6 +996,7 @@ class SqliteDatabase:
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
         delete_other_alerts: bool = False,
+        is_demo: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -999,8 +1009,8 @@ class SqliteDatabase:
                     schedule_reminder_configured, ignore_keywords,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     notify_on_live, notify_on_end, notify_on_category_change,
-                    delete_other_alerts
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delete_other_alerts, is_demo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1026,6 +1036,7 @@ class SqliteDatabase:
                     int(bool(notify_on_end)),
                     int(bool(notify_on_category_change)),
                     int(bool(delete_other_alerts)),
+                    int(bool(is_demo)),
                 ),
             )
             return int(cur.lastrowid)
@@ -1091,11 +1102,14 @@ class SqliteDatabase:
             )
         return bool(new_state)
 
-    def enable_all_subscriptions(self, owner_id: int) -> int:
+    def enable_all_subscriptions(self, owner_id: int, *, demo: bool = False) -> int:
         with self._conn() as conn:
             cur = conn.execute(
-                "UPDATE subscriptions SET enabled = 1 WHERE owner_id = ? AND enabled = 0",
-                (owner_id,),
+                """
+                UPDATE subscriptions SET enabled = 1
+                WHERE owner_id = ? AND enabled = 0 AND is_demo = ?
+                """,
+                (owner_id, int(bool(demo))),
             )
             return int(cur.rowcount)
 
@@ -1643,13 +1657,24 @@ class SqliteDatabase:
         self.set_watch_filters(user_id, kept)
         return True
 
-    def count_enabled_subscriptions(self, owner_id: int) -> int:
+    def count_enabled_subscriptions(self, owner_id: int, *, demo: bool = False) -> int:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS c FROM subscriptions WHERE owner_id = ? AND enabled = 1",
-                (owner_id,),
+                """
+                SELECT COUNT(*) AS c FROM subscriptions
+                WHERE owner_id = ? AND enabled = 1 AND is_demo = ?
+                """,
+                (owner_id, int(bool(demo))),
             ).fetchone()
         return int(row["c"])
+
+    def delete_demo_subscriptions(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM subscriptions WHERE owner_id = ? AND is_demo = 1",
+                (owner_id,),
+            )
+        return int(cur.rowcount)
 
     def get_premium_status(self, user_id: int):
         from premium import PremiumStatus
@@ -2360,6 +2385,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -2541,6 +2572,7 @@ class PostgresDatabase:
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
         delete_other_alerts: bool = False,
+        is_demo: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -2554,8 +2586,8 @@ class PostgresDatabase:
                     schedule_reminder_configured, ignore_keywords,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     notify_on_live, notify_on_end, notify_on_category_change,
-                    delete_other_alerts
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delete_other_alerts, is_demo
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -2582,6 +2614,7 @@ class PostgresDatabase:
                     bool(notify_on_end),
                     bool(notify_on_category_change),
                     bool(delete_other_alerts),
+                    bool(is_demo),
                 ),
             )
             row = cur.fetchone()
@@ -2658,12 +2691,15 @@ class PostgresDatabase:
             )
         return new_state
 
-    def enable_all_subscriptions(self, owner_id: int) -> int:
+    def enable_all_subscriptions(self, owner_id: int, *, demo: bool = False) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
-                "UPDATE subscriptions SET enabled = TRUE WHERE owner_id = %s AND enabled = FALSE",
-                (owner_id,),
+                """
+                UPDATE subscriptions SET enabled = TRUE
+                WHERE owner_id = %s AND enabled = FALSE AND is_demo = %s
+                """,
+                (owner_id, bool(demo)),
             )
             return int(cur.rowcount)
 
@@ -3264,14 +3300,26 @@ class PostgresDatabase:
         self.set_watch_filters(user_id, kept)
         return True
 
-    def count_enabled_subscriptions(self, owner_id: int) -> int:
+    def count_enabled_subscriptions(self, owner_id: int, *, demo: bool = False) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
-                "SELECT COUNT(*) AS c FROM subscriptions WHERE owner_id = %s AND enabled = TRUE",
-                (owner_id,),
+                """
+                SELECT COUNT(*) AS c FROM subscriptions
+                WHERE owner_id = %s AND enabled = TRUE AND is_demo = %s
+                """,
+                (owner_id, bool(demo)),
             )
             return int(cur.fetchone()["c"])
+
+    def delete_demo_subscriptions(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM subscriptions WHERE owner_id = %s AND is_demo = TRUE",
+                (owner_id,),
+            )
+            return int(cur.rowcount)
 
     def get_premium_status(self, user_id: int):
         from premium import PremiumStatus
