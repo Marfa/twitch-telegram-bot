@@ -13,6 +13,7 @@ from twitch import (
     filter_streams_for_watch,
     find_placeholder_typos,
     normalize_ignore_keywords,
+    normalize_watch_tags,
     pick_random_streams,
     preview_stream_title,
     render_template,
@@ -180,10 +181,10 @@ def main() -> None:
     assert _parse_watch_viewers("500-100") == (100, 500)
     assert _parse_watch_viewers("nope") is None
     streams = [
-        {"user_id": "1", "viewer_count": 10, "is_mature": False},
-        {"user_id": "2", "viewer_count": 200, "is_mature": True},
-        {"user_id": "3", "viewer_count": 50, "is_mature": False},
-        {"user_id": "1", "viewer_count": 99, "is_mature": False},
+        {"user_id": "1", "viewer_count": 10, "is_mature": False, "tags": ["English"]},
+        {"user_id": "2", "viewer_count": 200, "is_mature": True, "tags": ["English", "fps"]},
+        {"user_id": "3", "viewer_count": 50, "is_mature": False, "tags": ["English", "fps"]},
+        {"user_id": "1", "viewer_count": 99, "is_mature": False, "tags": ["Русский"]},
     ]
     filtered = filter_streams_for_watch(
         streams, min_viewers=20, max_viewers=100, exclude_mature=True
@@ -191,6 +192,11 @@ def main() -> None:
     assert [s["user_id"] for s in filtered] == ["3", "1"]
     assert all(20 <= int(s["viewer_count"]) <= 100 for s in filtered)
     assert all(not s.get("is_mature") for s in filtered)
+    tagged = filter_streams_for_watch(
+        streams, min_viewers=0, exclude_mature=False, tags=["english", "FPS"]
+    )
+    assert [s["user_id"] for s in tagged] == ["2", "3"]
+    assert normalize_watch_tags(" English , fps; English ") == ["English", "fps"]
     picked = pick_random_streams(streams, 2)
     assert len(picked) == 2
     assert len({s["user_id"] for s in picked}) == 2
@@ -199,6 +205,7 @@ def main() -> None:
         min_viewers=10,
         max_viewers=None,
         language="ru",
+        tags=["English"],
         exclude_mature=True,
     )
     assert parse_watch_prefs(dump_watch_prefs(prefs)) == prefs
@@ -239,6 +246,8 @@ def main() -> None:
         assert btn("language", loc)
         assert tr("start_welcome", loc)
         assert tr("watch_cats_prompt", loc, max=5)
+        assert tr("watch_tags_prompt", loc)
+        assert tr("watch_save_prompt", loc, summary="x")
         assert tr("watch_suggest_header", loc)
         assert tr("import_mode_prompt", loc)
         assert tr("sync_menu_off", loc)
@@ -340,6 +349,7 @@ def main() -> None:
             min_viewers=50,
             max_viewers=500,
             language="en",
+            tags=["English"],
             exclude_mature=True,
         )
         db.set_watch_prefs(1, prefs)

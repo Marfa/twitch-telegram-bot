@@ -178,6 +178,7 @@ class WatchPrefs:
     min_viewers: int = 0
     max_viewers: int | None = None
     language: str | None = None
+    tags: list[str] = field(default_factory=list)
     exclude_mature: bool = True
 
 
@@ -209,11 +210,25 @@ def parse_watch_prefs(raw: str | None) -> WatchPrefs | None:
     language = str(lang).strip().lower() if lang else None
     if language == "":
         language = None
+    tags: list[str] = []
+    tags_raw = data.get("tags") or []
+    if isinstance(tags_raw, list):
+        seen: set[str] = set()
+        for item in tags_raw:
+            tag = str(item or "").strip()
+            if not tag:
+                continue
+            key = tag.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tags.append(tag)
     return WatchPrefs(
         categories=categories,
         min_viewers=max(0, min_v),
         max_viewers=max_v if max_v is None else max(0, max_v),
         language=language,
+        tags=tags,
         exclude_mature=bool(data.get("exclude_mature", True)),
     )
 

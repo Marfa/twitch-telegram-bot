@@ -566,8 +566,10 @@ def filter_streams_for_watch(
     min_viewers: int = 0,
     max_viewers: int | None = None,
     exclude_mature: bool = False,
+    tags: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Client-side filters Helix does not support as query params."""
+    need_tags = [t.strip().lower() for t in (tags or []) if t and str(t).strip()]
     out: list[dict[str, Any]] = []
     for s in streams:
         viewers = int(s.get("viewer_count") or 0)
@@ -577,7 +579,33 @@ def filter_streams_for_watch(
             continue
         if exclude_mature and bool(s.get("is_mature")):
             continue
+        if need_tags:
+            stream_tags = {
+                str(t).strip().lower()
+                for t in (s.get("tags") or [])
+                if t is not None and str(t).strip()
+            }
+            if not all(tag in stream_tags for tag in need_tags):
+                continue
         out.append(s)
+    return out
+
+
+def normalize_watch_tags(text: str, *, limit: int = 10) -> list[str]:
+    """Parse comma/semicolon-separated Twitch tags; preserve first-seen casing."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in text.replace(";", ",").split(","):
+        tag = part.strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tag)
+        if len(out) >= limit:
+            break
     return out
 
 

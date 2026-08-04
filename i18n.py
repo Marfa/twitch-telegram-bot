@@ -54,7 +54,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_admin_withdrawals": "💸 Withdrawals",
         "btn_watch": "🎲 What to watch?",
         "watch_cats_prompt": (
-            "What to watch — step 1/4\n\n"
+            "What to watch — step 1/5\n\n"
             "Type a Twitch category name (game or Just Chatting).\n"
             "You can add up to {max} categories."
         ),
@@ -70,7 +70,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_done": "Done",
         "watch_cats_clear": "Clear list",
         "watch_viewers_prompt": (
-            "What to watch — step 2/4\n\n"
+            "What to watch — step 2/5\n\n"
             "Viewer range:\n"
             "• <code>100-500</code> — min–max\n"
             "• <code>50</code> — at least 50\n"
@@ -79,7 +79,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_viewers_any": "Any",
         "watch_viewers_bad": "Send a number, a range like 100-500, or tap Any.",
         "watch_lang_prompt": (
-            "What to watch — step 3/4\n\n"
+            "What to watch — step 3/5\n\n"
             "Stream language (optional):"
         ),
         "watch_lang_any": "Any language",
@@ -88,12 +88,27 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_lang_other": "Other code…",
         "watch_lang_other_prompt": "Send a 2-letter language code (e.g. de, fr, ja):",
         "watch_lang_bad": "Send a 2-letter code like de, or go Back.",
+        "watch_tags_prompt": (
+            "What to watch — step 4/5\n\n"
+            "Stream tags (optional).\n"
+            "Send comma-separated tags; the stream must have <b>all</b> of them "
+            "(e.g. <code>English, fps</code>).\n"
+            "Or tap Skip."
+        ),
+        "watch_tags_skip": "Skip",
+        "watch_tags_bad": "Send tags separated by commas, or tap Skip.",
         "watch_mature_prompt": (
-            "What to watch — step 4/4\n\n"
+            "What to watch — step 5/5\n\n"
             "Exclude mature (18+) streams?"
         ),
         "watch_mature_exclude": "Exclude 18+",
         "watch_mature_allow": "Allow 18+",
+        "watch_save_prompt": (
+            "Save these filters for the next time you open What to watch?\n\n"
+            "{summary}"
+        ),
+        "watch_save_yes": "Save filters",
+        "watch_save_no": "Just this once",
         "watch_suggest_header": "Here's what is live now:",
         "watch_suggest_item": (
             "{n}. <b>{display}</b> (@{login})\n"
@@ -112,12 +127,14 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Filters: {cats}\n"
             "Viewers: {viewers}\n"
             "Language: {language}\n"
+            "Tags: {tags}\n"
             "Mature: {mature}"
         ),
         "watch_viewers_label_any": "any",
         "watch_viewers_label_min": "from {min}",
         "watch_viewers_label_range": "{min}–{max}",
         "watch_lang_label_any": "any",
+        "watch_tags_label_any": "any",
         "watch_mature_label_exclude": "excluded",
         "watch_mature_label_allow": "allowed",
         "menu_subs": "Manage subscriptions:",
@@ -894,7 +911,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_admin_withdrawals": "💸 Выводы",
         "btn_watch": "🎲 Что посмотреть?",
         "watch_cats_prompt": (
-            "Что посмотреть — шаг 1/4\n\n"
+            "Что посмотреть — шаг 1/5\n\n"
             "Введите название категории Twitch (игра или Just Chatting).\n"
             "Можно добавить до {max} категорий."
         ),
@@ -910,7 +927,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_done": "Готово",
         "watch_cats_clear": "Очистить список",
         "watch_viewers_prompt": (
-            "Что посмотреть — шаг 2/4\n\n"
+            "Что посмотреть — шаг 2/5\n\n"
             "Диапазон зрителей:\n"
             "• <code>100-500</code> — мин–макс\n"
             "• <code>50</code> — не меньше 50\n"
@@ -919,7 +936,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_viewers_any": "Любое",
         "watch_viewers_bad": "Отправьте число, диапазон вида 100-500 или нажмите Любое.",
         "watch_lang_prompt": (
-            "Что посмотреть — шаг 3/4\n\n"
+            "Что посмотреть — шаг 3/5\n\n"
             "Язык стрима (опционально):"
         ),
         "watch_lang_any": "Любой язык",
@@ -928,12 +945,27 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_lang_other": "Другой код…",
         "watch_lang_other_prompt": "Отправьте двухбуквенный код языка (например de, fr, ja):",
         "watch_lang_bad": "Отправьте код из 2 букв, например de, или Назад.",
+        "watch_tags_prompt": (
+            "Что посмотреть — шаг 4/5\n\n"
+            "Теги стрима (опционально).\n"
+            "Через запятую; у стрима должны быть <b>все</b> указанные теги "
+            "(например <code>русский, игры</code>).\n"
+            "Или нажмите Пропустить."
+        ),
+        "watch_tags_skip": "Пропустить",
+        "watch_tags_bad": "Отправьте теги через запятую или нажмите Пропустить.",
         "watch_mature_prompt": (
-            "Что посмотреть — шаг 4/4\n\n"
+            "Что посмотреть — шаг 5/5\n\n"
             "Исключить стримы с меткой 18+?"
         ),
         "watch_mature_exclude": "Исключить 18+",
         "watch_mature_allow": "Разрешить 18+",
+        "watch_save_prompt": (
+            "Сохранить эти фильтры для следующих запусков «Что посмотреть?»?\n\n"
+            "{summary}"
+        ),
+        "watch_save_yes": "Сохранить",
+        "watch_save_no": "Только сейчас",
         "watch_suggest_header": "Сейчас в эфире:",
         "watch_suggest_item": (
             "{n}. <b>{display}</b> (@{login})\n"
@@ -952,12 +984,14 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Фильтры: {cats}\n"
             "Зрители: {viewers}\n"
             "Язык: {language}\n"
+            "Теги: {tags}\n"
             "18+: {mature}"
         ),
         "watch_viewers_label_any": "любое",
         "watch_viewers_label_min": "от {min}",
         "watch_viewers_label_range": "{min}–{max}",
         "watch_lang_label_any": "любой",
+        "watch_tags_label_any": "любые",
         "watch_mature_label_exclude": "исключены",
         "watch_mature_label_allow": "разрешены",
         "menu_subs": "Управление подписками:",
@@ -1795,11 +1829,11 @@ def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [
             KeyboardButton(btn("new", lang)),
-            KeyboardButton(btn("watch", lang)),
+            KeyboardButton(btn("import_twitch", lang)),
         ],
         [
-            KeyboardButton(btn("import_twitch", lang)),
             KeyboardButton(btn("manage", lang)),
+            KeyboardButton(btn("watch", lang)),
         ],
         [
             KeyboardButton(btn("settings", lang)),
@@ -2056,6 +2090,23 @@ def watch_mature_keyboard(lang: str) -> InlineKeyboardMarkup:
                     t("watch_mature_allow", lang), callback_data="watch_mature:0"
                 )
             ],
+        ]
+    )
+
+
+def watch_tags_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("watch_tags_skip", lang), callback_data="watch_tags:skip")],
+        ]
+    )
+
+
+def watch_save_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("watch_save_yes", lang), callback_data="watch_save:1")],
+            [InlineKeyboardButton(t("watch_save_no", lang), callback_data="watch_save:0")],
         ]
     )
 

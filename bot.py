@@ -87,7 +87,9 @@ from i18n import (
     watch_cats_pick_keyboard,
     watch_lang_keyboard,
     watch_mature_keyboard,
+    watch_save_keyboard,
     watch_suggest_keyboard,
+    watch_tags_keyboard,
     watch_viewers_keyboard,
     wizard_menu,
 )
@@ -98,6 +100,7 @@ from twitch import (
     filter_streams_for_watch,
     find_placeholder_typos,
     normalize_ignore_keywords,
+    normalize_watch_tags,
     pick_random_streams,
     preview_stream_title,
     render_template,
@@ -173,14 +176,17 @@ _TWITCH_COMPONENT_KEYS = {
     WATCH_CATEGORIES,
     WATCH_VIEWERS,
     WATCH_LANGUAGE,
+    WATCH_TAGS,
     WATCH_MATURE,
-) = range(43)
+    WATCH_SAVE,
+) = range(45)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
 _SYNC_PERIOD_MAX = 365
 _WATCH_MAX_CATS = 5
 _WATCH_SUGGEST_N = 5
+_WATCH_MAX_TAGS = 10
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 _WATCH_VIEWERS_RE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+))?\s*$")
@@ -986,8 +992,12 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return await _go_watch_categories_prompt(update, context, lang)
     if state == WATCH_LANGUAGE:
         return await _go_watch_viewers_prompt(update, context, lang)
-    if state == WATCH_MATURE:
+    if state == WATCH_TAGS:
         return await _go_watch_language_prompt(update, context, lang)
+    if state == WATCH_MATURE:
+        return await _go_watch_tags_prompt(update, context, lang)
+    if state == WATCH_SAVE:
+        return await _go_watch_mature_prompt(update, context, lang)
     if context.user_data.get("sb_edit_mode") in ("text", "schedule"):
         context.user_data.clear()
         await update.effective_message.reply_text(
@@ -3142,12 +3152,14 @@ def _watch_viewers_label(prefs: WatchPrefs, lang: str) -> str:
 
 def _watch_prefs_summary(prefs: WatchPrefs, lang: str) -> str:
     cats = ", ".join(c["name"] for c in prefs.categories) or "—"
+    tags = ", ".join(prefs.tags) if prefs.tags else t("watch_tags_label_any", lang)
     return t(
         "watch_prefs_summary",
         lang,
         cats=cats,
         viewers=_watch_viewers_label(prefs, lang),
         language=prefs.language or t("watch_lang_label_any", lang),
+        tags=tags,
         mature=(
             t("watch_mature_label_exclude", lang)
             if prefs.exclude_mature
@@ -3208,6 +3220,7 @@ async def _fetch_watch_suggestions(
         min_viewers=prefs.min_viewers,
         max_viewers=prefs.max_viewers,
         exclude_mature=prefs.exclude_mature,
+        tags=prefs.tags,
     )
     return pick_random_streams(filtered, _WATCH_SUGGEST_N)
 
@@ -3222,6 +3235,7 @@ async def _send_watch_suggestions(
     edit_message=None,
 ) -> None:
     lang = _user_lang(context, user_id)
+    context.application.bot_data.setdefault("watch_last_prefs", {})[user_id] = prefs
     twitch: TwitchClient = context.application.bot_data["twitch"]
     try:
         streams = await _fetch_watch_suggestions(twitch, prefs)
@@ -3273,6 +3287,30 @@ async def _send_watch_suggestions(
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
+
+
+def _watch_prefs_from_user_data(context: ContextTypes.DEFAULT_TYPE) -> WatchPrefs:
+    max_v = context.user_data.get("watch_max_viewers")
+    return WatchPrefs(
+        categories=list(context.user_data.get("watch_categories") or []),
+        min_viewers=int(context.user_data.get("watch_min_viewers") or 0),
+        max_viewers=int(max_v) if max_v is not None else None,
+        language=context.user_data.get("watch_language"),
+        tags=list(context.user_data.get("watch_tags") or []),
+        exclude_mature=bool(context.user_data.get("watch_exclude_mature", True)),
+    )
+
+
+def _resolve_watch_prefs(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> WatchPrefs | None:
+    db: Database = context.application.bot_data["db"]
+    prefs = db.get_watch_prefs(user_id)
+    if prefs:
+        return prefs
+    last = context.application.bot_data.get("watch_last_prefs") or {}
+    cached = last.get(user_id)
+    return cached if isinstance(cached, WatchPrefs) else None
 
 
 async def _go_watch_categories_prompt(
@@ -3332,6 +3370,22 @@ async def _go_watch_language_prompt(
     return WATCH_LANGUAGE
 
 
+async def _go_watch_tags_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    await update.effective_message.reply_text(
+        t("watch_tags_prompt", lang),
+        reply_markup=_wizard(lang),
+        parse_mode=ParseMode.HTML,
+    )
+    await update.effective_message.reply_text(
+        t("watch_tags_skip", lang),
+        reply_markup=watch_tags_keyboard(lang),
+    )
+    _set_wizard_back(context, WATCH_TAGS)
+    return WATCH_TAGS
+
+
 async def _go_watch_mature_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
@@ -3347,22 +3401,32 @@ async def _go_watch_mature_prompt(
     return WATCH_MATURE
 
 
-async def _finish_watch_wizard(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, *, exclude_mature: bool
+async def _go_watch_save_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    prefs = _watch_prefs_from_user_data(context)
+    await update.effective_message.reply_text(
+        t("watch_save_prompt", lang, summary=_watch_prefs_summary(prefs, lang)),
+        reply_markup=_wizard(lang),
+        parse_mode=ParseMode.HTML,
+    )
+    await update.effective_message.reply_text(
+        t("watch_save_yes", lang),
+        reply_markup=watch_save_keyboard(lang),
+    )
+    _set_wizard_back(context, WATCH_SAVE)
+    return WATCH_SAVE
+
+
+async def _complete_watch_wizard(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, *, save: bool
 ) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    prefs = WatchPrefs(
-        categories=list(context.user_data.get("watch_categories") or []),
-        min_viewers=int(context.user_data.get("watch_min_viewers") or 0),
-        max_viewers=context.user_data.get("watch_max_viewers"),
-        language=context.user_data.get("watch_language"),
-        exclude_mature=exclude_mature,
-    )
-    if prefs.max_viewers is not None:
-        prefs.max_viewers = int(prefs.max_viewers)
-    db.set_watch_prefs(user_id, prefs)
+    prefs = _watch_prefs_from_user_data(context)
+    if save:
+        db.set_watch_prefs(user_id, prefs)
     context.user_data.clear()
     chat_id = update.effective_chat.id
     if update.callback_query:
@@ -3400,6 +3464,7 @@ async def start_what_to_watch(
         return ConversationHandler.END
     context.user_data.clear()
     context.user_data["watch_categories"] = []
+    context.user_data["watch_tags"] = []
     return await _go_watch_categories_prompt(update, context, lang)
 
 
@@ -3409,7 +3474,6 @@ async def start_watch_change(
     query = update.callback_query
     await query.answer()
     context.user_data["watch_force_edit"] = True
-    # Pretend message for prompts that use effective_message
     return await start_what_to_watch(update, context)
 
 
@@ -3419,8 +3483,7 @@ async def on_watch_again(
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    db: Database = context.application.bot_data["db"]
-    prefs = db.get_watch_prefs(user_id)
+    prefs = _resolve_watch_prefs(context, user_id)
     if not prefs:
         lang = _user_lang(context, user_id)
         await query.edit_message_text(t("watch_cats_need_one", lang))
@@ -3590,7 +3653,7 @@ async def receive_watch_language_callback(
             await query.edit_message_reply_markup(None)
         except BadRequest:
             pass
-        return await _go_watch_mature_prompt(update, context, lang)
+        return await _go_watch_tags_prompt(update, context, lang)
     if data in ("watch_lang:ru", "watch_lang:en"):
         context.user_data["watch_language"] = data.rsplit(":", 1)[1]
         context.user_data.pop("watch_lang_await_other", None)
@@ -3598,7 +3661,7 @@ async def receive_watch_language_callback(
             await query.edit_message_reply_markup(None)
         except BadRequest:
             pass
-        return await _go_watch_mature_prompt(update, context, lang)
+        return await _go_watch_tags_prompt(update, context, lang)
     if data == "watch_lang:other":
         context.user_data["watch_lang_await_other"] = True
         await query.edit_message_text(t("watch_lang_other_prompt", lang))
@@ -3622,7 +3685,41 @@ async def receive_watch_language_text(
         return WATCH_LANGUAGE
     context.user_data["watch_language"] = code
     context.user_data.pop("watch_lang_await_other", None)
+    return await _go_watch_tags_prompt(update, context, lang)
+
+
+async def receive_watch_tags_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    tags = normalize_watch_tags(
+        update.effective_message.text or "", limit=_WATCH_MAX_TAGS
+    )
+    if not tags:
+        await update.effective_message.reply_text(
+            t("watch_tags_bad", lang),
+            reply_markup=watch_tags_keyboard(lang),
+            parse_mode=ParseMode.HTML,
+        )
+        return WATCH_TAGS
+    context.user_data["watch_tags"] = tags
     return await _go_watch_mature_prompt(update, context, lang)
+
+
+async def receive_watch_tags_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data == "watch_tags:skip":
+        context.user_data["watch_tags"] = []
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _go_watch_mature_prompt(update, context, lang)
+    return WATCH_TAGS
 
 
 async def receive_watch_mature_callback(
@@ -3630,9 +3727,23 @@ async def receive_watch_mature_callback(
 ) -> int:
     query = update.callback_query
     await query.answer()
+    lang = _user_lang(context, query.from_user.id)
     data = query.data or ""
-    exclude = data == "watch_mature:1"
-    return await _finish_watch_wizard(update, context, exclude_mature=exclude)
+    context.user_data["watch_exclude_mature"] = data == "watch_mature:1"
+    try:
+        await query.edit_message_reply_markup(None)
+    except BadRequest:
+        pass
+    return await _go_watch_save_prompt(update, context, lang)
+
+
+async def receive_watch_save_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    save = (query.data or "") == "watch_save:1"
+    return await _complete_watch_wizard(update, context, save=save)
 
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6769,11 +6880,26 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_language_text),
             ],
+            WATCH_TAGS: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_watch_tags_callback, pattern=r"^watch_tags:"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_tags_text),
+            ],
             WATCH_MATURE: [
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_watch_mature_callback, pattern=r"^watch_mature:"
+                ),
+            ],
+            WATCH_SAVE: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_watch_save_callback, pattern=r"^watch_save:"
                 ),
             ],
         },
