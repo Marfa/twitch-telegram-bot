@@ -15,7 +15,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
-| 🎲 What to watch? | Multiple saved filters to pick from + new search; categories → tags → viewers → language → mature |
+| 🎲 What to watch? | Saved filters to pick, new search, multi-select delete like subscriptions; categories → tags → viewers → language → mature |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live or after going offline (Helix re-check before send) |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert |
@@ -99,6 +99,29 @@ Bot permissions in a group: **send messages** (admin is not required). Also need
 
 After setup the bot sends **“✅ Setup complete!”** to DM and a test message to the chosen chat.
 
+### What to watch?
+
+**🎲 What to watch?** — random live streams matching your filters (available to everyone, no Premium).
+
+If you have saved filters, the bot offers:
+
+| Action | How |
+|---|---|
+| Pick a filter | Tap the name → get several streams |
+| New search | Filter wizard from scratch |
+| Delete filters | Separate button → multi-select (same pattern as subscription delete) → delete selected |
+
+New search wizard:
+
+1. Twitch categories (up to 5)
+2. Stream tags (optional; stream must include all listed)
+3. Viewer range
+4. Stream language (optional)
+5. Exclude mature or allow
+6. Save filter for later (up to 5) or just this once
+
+After suggestions: **Suggest again** / **Filters / new search**.
+
 ### Import from Twitch
 
 **⬇️ Import from Twitch** — Twitch OAuth, then choose **one-time import** or **sync**:
@@ -139,9 +162,9 @@ Dates and month names follow the user’s language.
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
-| 🎲 What to watch? | Pick a saved filter / new search |
 | ⬇️ Import from Twitch | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete |
+| 🎲 What to watch? | Pick filter / new search / delete filters |
 | 📅 Create schedule | Weekly stream schedule text |
 | ⚙️ Settings | Premium, sync, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
@@ -228,15 +251,15 @@ Without Groq/HF keys, **I'm feeling lucky** still works from the local template 
 
 | Module | Role |
 |---|---|
-| `bot.py` | Wizard, menu, notifications, admin broadcast, Twitch Status, partner program, schedule |
+| `bot.py` | Wizard, menu, notifications, What to watch?, admin broadcast, Twitch Status, partner program, schedule |
 | `i18n.py` | Strings and keyboards (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `hf_text.py` | AI templates: Groq → HF → local pool |
-| `twitch.py` | Helix API, templates, status.twitch.com |
+| `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health`, `/placeholders`, Twitch OAuth callback |
-| `db.py` | SQLite or PostgreSQL, `lucky_templates` pool, referrals |
+| `db.py` | SQLite or PostgreSQL, `lucky_templates` pool, watch filters, referrals |
 
 Twitch Helix poll ~60 s, Statuspage ~120 s, Telegram polling, no public webhook.
 

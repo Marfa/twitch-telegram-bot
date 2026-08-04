@@ -113,8 +113,14 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Choose a saved filter or start a new search:"
         ),
         "watch_pick_new": "➕ New search",
-        "watch_pick_delete": "🗑",
+        "watch_pick_delete_btn": "🗑 Delete filters",
         "watch_pick_empty": "No saved filters left. Starting a new search.",
+        "watch_delete_pick": "Choose filters to delete (tap to select):",
+        "watch_delete_go": "🗑 Delete selected ({count})",
+        "watch_delete_clear": "Clear selection",
+        "watch_delete_none": "Nothing selected.",
+        "watch_delete_back": "« Back",
+        "watch_deleted": "Deleted filters: {count}",
         "watch_suggest_header": "Here's what is live now:",
         "watch_suggest_item": (
             "{n}. <b>{display}</b> (@{login})\n"
@@ -976,8 +982,14 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Выберите сохранённый фильтр или начните новый поиск:"
         ),
         "watch_pick_new": "➕ Новый поиск",
-        "watch_pick_delete": "🗑",
+        "watch_pick_delete_btn": "🗑 Удалить фильтры",
         "watch_pick_empty": "Сохранённых фильтров больше нет. Начинаем новый поиск.",
+        "watch_delete_pick": "Выберите фильтры для удаления (нажмите, чтобы отметить):",
+        "watch_delete_go": "🗑 Удалить выбранные ({count})",
+        "watch_delete_clear": "Сбросить выбор",
+        "watch_delete_none": "Ничего не выбрано.",
+        "watch_delete_back": "« Назад",
+        "watch_deleted": "Удалено фильтров: {count}",
         "watch_suggest_header": "Сейчас в эфире:",
         "watch_suggest_item": (
             "{n}. <b>{display}</b> (@{login})\n"
@@ -2126,18 +2138,66 @@ def watch_save_keyboard(lang: str) -> InlineKeyboardMarkup:
 def watch_pick_keyboard(lang: str, filters: list) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for f in filters:
-        name = str(getattr(f, "name", "") or "?")[:48]
+        name = str(getattr(f, "name", "") or "?")[:64]
         fid = str(getattr(f, "id", ""))
         rows.append(
-            [
-                InlineKeyboardButton(name, callback_data=f"watch_pick:{fid}"),
-                InlineKeyboardButton(
-                    t("watch_pick_delete", lang), callback_data=f"watch_del:{fid}"
-                ),
-            ]
+            [InlineKeyboardButton(name, callback_data=f"watch_pick:{fid}")]
         )
     rows.append(
         [InlineKeyboardButton(t("watch_pick_new", lang), callback_data="watch_pick:new")]
+    )
+    if filters:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("watch_pick_delete_btn", lang),
+                    callback_data="watch_pick:delete",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def watch_delete_pick_keyboard(
+    lang: str, filters: list, selected: set[str]
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, f in enumerate(filters, 1):
+        fid = str(getattr(f, "id", ""))
+        name = str(getattr(f, "name", "") or "?")[:48]
+        mark = "✅ " if fid in selected else ""
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{mark}🗑 #{i} {name}",
+                    callback_data=f"watch_del_sel:{fid}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("watch_delete_go", lang, count=len(selected)),
+                callback_data="watch_del_go",
+            )
+        ]
+    )
+    if selected:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("watch_delete_clear", lang),
+                    callback_data="watch_del_clear",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("watch_delete_back", lang),
+                callback_data="watch_del_back",
+            )
+        ]
     )
     return InlineKeyboardMarkup(rows)
 

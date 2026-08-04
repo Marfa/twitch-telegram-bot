@@ -96,6 +96,7 @@ from i18n import (
     watch_lang_keyboard,
     watch_mature_keyboard,
     watch_pick_keyboard,
+    watch_delete_pick_keyboard,
     watch_save_keyboard,
     watch_suggest_keyboard,
     watch_tags_keyboard,
@@ -183,13 +184,14 @@ _TWITCH_COMPONENT_KEYS = {
     SYNC_DAYS,
     PREMIUM_GATE,
     WATCH_PICK,
+    WATCH_DELETE,
     WATCH_CATEGORIES,
     WATCH_TAGS,
     WATCH_VIEWERS,
     WATCH_LANGUAGE,
     WATCH_MATURE,
     WATCH_SAVE,
-) = range(46)
+) = range(47)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -998,6 +1000,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, ADMIN_MSG_TEXT)
         return ADMIN_MSG_TEXT
+    if state == WATCH_DELETE:
+        return await _go_watch_pick_prompt(update, context, lang)
     if state == WATCH_TAGS:
         return await _go_watch_categories_prompt(update, context, lang)
     if state == WATCH_VIEWERS:
@@ -3553,6 +3557,17 @@ async def receive_watch_pick_callback(
         except BadRequest:
             pass
         return await _start_watch_wizard(update, context, lang)
+    if data == "watch_pick:delete":
+        filters = db.get_watch_filters(user_id)
+        if not filters:
+            return await _go_watch_pick_prompt(update, context, lang)
+        context.user_data["watch_delete_selected"] = set()
+        await query.edit_message_text(
+            t("watch_delete_pick", lang),
+            reply_markup=watch_delete_pick_keyboard(lang, filters, set()),
+        )
+        _set_wizard_back(context, WATCH_DELETE)
+        return WATCH_DELETE
     if data.startswith("watch_pick:"):
         fid = data.split(":", 1)[1]
         filters = db.get_watch_filters(user_id)
@@ -3575,31 +3590,89 @@ async def receive_watch_pick_callback(
     return WATCH_PICK
 
 
-async def receive_watch_del_callback(
+async def receive_watch_del_sel(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
     fid = (query.data or "").split(":", 1)[-1]
-    db.delete_watch_filter(user_id, fid)
+    selected: set[str] = context.user_data.setdefault("watch_delete_selected", set())
+    if fid in selected:
+        selected.discard(fid)
+    else:
+        selected.add(fid)
+    db: Database = context.application.bot_data["db"]
     filters = db.get_watch_filters(user_id)
-    if not filters:
-        try:
-            await query.edit_message_text(t("watch_pick_empty", lang))
-        except BadRequest:
-            pass
-        return await _start_watch_wizard(update, context, lang)
+    await query.edit_message_reply_markup(
+        reply_markup=watch_delete_pick_keyboard(lang, filters, selected)
+    )
+    return WATCH_DELETE
+
+
+async def receive_watch_del_clear(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    context.user_data["watch_delete_selected"] = set()
+    db: Database = context.application.bot_data["db"]
+    filters = db.get_watch_filters(user_id)
+    await query.edit_message_reply_markup(
+        reply_markup=watch_delete_pick_keyboard(lang, filters, set())
+    )
+    return WATCH_DELETE
+
+
+async def receive_watch_del_go(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    selected: set[str] = set(context.user_data.get("watch_delete_selected") or ())
+    if not selected:
+        await query.answer(t("watch_delete_none", lang), show_alert=True)
+        return WATCH_DELETE
+    await query.answer()
+    db: Database = context.application.bot_data["db"]
+    deleted = 0
+    for fid in list(selected):
+        if db.delete_watch_filter(user_id, fid):
+            deleted += 1
+    context.user_data["watch_delete_selected"] = set()
+    filters = db.get_watch_filters(user_id)
     try:
-        await query.edit_message_text(
-            t("watch_pick_prompt", lang),
-            reply_markup=watch_pick_keyboard(lang, filters),
-        )
+        await query.edit_message_text(t("watch_deleted", lang, count=deleted))
     except BadRequest:
-        return await _go_watch_pick_prompt(update, context, lang)
+        pass
+    if not filters:
+        await context.bot.send_message(
+            query.message.chat_id,
+            t("watch_pick_empty", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return await _start_watch_wizard(update, context, lang)
+    await context.bot.send_message(
+        query.message.chat_id,
+        t("watch_pick_prompt", lang),
+        reply_markup=watch_pick_keyboard(lang, filters),
+    )
+    _set_wizard_back(context, WATCH_PICK)
     return WATCH_PICK
+
+
+async def receive_watch_del_back(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    context.user_data.pop("watch_delete_selected", None)
+    return await _go_watch_pick_prompt(update, context, lang)
 
 
 async def receive_watch_category_text(
@@ -6966,8 +7039,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     receive_watch_pick_callback, pattern=r"^watch_pick:"
                 ),
+            ],
+            WATCH_DELETE: [
+                _wiz_cancel,
+                _wiz_back,
                 CallbackQueryHandler(
-                    receive_watch_del_callback, pattern=r"^watch_del:"
+                    receive_watch_del_sel, pattern=r"^watch_del_sel:"
+                ),
+                CallbackQueryHandler(receive_watch_del_go, pattern=r"^watch_del_go$"),
+                CallbackQueryHandler(
+                    receive_watch_del_clear, pattern=r"^watch_del_clear$"
+                ),
+                CallbackQueryHandler(
+                    receive_watch_del_back, pattern=r"^watch_del_back$"
                 ),
             ],
             WATCH_CATEGORIES: [

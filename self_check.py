@@ -267,6 +267,8 @@ def main() -> None:
         assert tr("watch_cats_prompt", loc, max=5)
         assert tr("watch_tags_prompt", loc)
         assert tr("watch_pick_prompt", loc)
+        assert tr("watch_pick_delete_btn", loc)
+        assert tr("watch_delete_pick", loc)
         assert tr("watch_save_prompt", loc, summary="x", max=5)
         assert tr("watch_suggest_header", loc)
         assert tr("import_mode_prompt", loc)
