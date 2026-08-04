@@ -304,11 +304,11 @@ def _owner_sub_number(db: Database, owner_id: int, sub_id: int) -> int:
 def _subs_for_owner(db: Database, owner_id: int) -> list[Subscription]:
     """Real subs normally; only demo rows while Demo mode is on."""
     demo = demo_mode.is_active(owner_id)
-    return [s for s in db.get_subscriptions_by_owner(owner_id) if s.is_demo is demo]
+    return [s for s in db.get_subscriptions_by_owner(owner_id) if bool(s.is_demo) == demo]
 
 
 def _sub_in_current_mode(sub: Subscription, owner_id: int) -> bool:
-    return sub.is_demo is demo_mode.is_active(owner_id)
+    return bool(sub.is_demo) == demo_mode.is_active(owner_id)
 
 
 def import_followed_as_subscriptions(
@@ -1202,7 +1202,33 @@ async def _resolve_chat_display_name(bot, sub: Subscription) -> str:
             return f"@{chat.username}"
     except (BadRequest, Forbidden) as exc:
         logger.debug("Cannot resolve chat name for %s: %s", sub.chat_id, exc)
+    except Exception:
+        logger.exception("Unexpected error resolving chat name for %s", sub.chat_id)
     return str(sub.chat_id)
+
+
+def _inline_btn_label(text: str, *, limit: int = 64) -> str:
+    text = " ".join(str(text).split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _split_telegram_text(text: str, *, limit: int = 4096) -> list[str]:
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    rest = text
+    while rest:
+        if len(rest) <= limit:
+            chunks.append(rest)
+            break
+        cut = rest.rfind("\n", 0, limit)
+        if cut < limit // 2:
+            cut = limit
+        chunks.append(rest[:cut])
+        rest = rest[cut:].lstrip("\n")
+    return chunks
 
 
 async def _resolve_thread_display_name(bot, chat_id: int, thread_id: int) -> str:
@@ -4295,22 +4321,104 @@ async def _format_subs_overview_lines(
     subs = _subs_for_owner(db, owner_id)
     lines: list[str] = []
     for i, sub in enumerate(subs, 1):
-        chat_display = await _resolve_chat_display_name(bot, sub)
-        thread_display = None
-        if sub.thread_id:
-            thread_display = await _resolve_thread_display_name(
-                bot, sub.chat_id, sub.thread_id
+        try:
+            chat_display = await _resolve_chat_display_name(bot, sub)
+            thread_display = None
+            if sub.thread_id:
+                thread_display = await _resolve_thread_display_name(
+                    bot, sub.chat_id, sub.thread_id
+                )
+            lines.append(
+                _format_sub_line(
+                    sub,
+                    lang,
+                    i,
+                    chat_display=chat_display,
+                    thread_display=thread_display,
+                )
             )
-        lines.append(
-            _format_sub_line(
-                sub,
-                lang,
-                i,
-                chat_display=chat_display,
-                thread_display=thread_display,
-            )
-        )
+        except Exception:
+            logger.exception("Failed to format subscription %s for list", sub.id)
+            lines.append(f"{'✅' if sub.enabled else '⏸'} #{i} — {sub.twitch_username}")
     return lines, subs
+
+
+async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.clear()
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    lines, subs = await _format_subs_overview_lines(context.bot, db, user_id, lang)
+    if not subs:
+        await update.effective_message.reply_text(
+            t("no_subs", lang),
+            reply_markup=subscriptions_menu(lang),
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    _inline_btn_label(
+                        f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
+                        f"#{i} {s.twitch_username}"
+                    ),
+                    callback_data=f"toggle:{s.id}",
+                )
+            ]
+            for i, s in enumerate(subs, 1)
+        ]
+    )
+    text = t("subs_list", lang) + "\n".join(lines)
+    chunks = _split_telegram_text(text)
+    for index, chunk in enumerate(chunks):
+        markup = keyboard if index == len(chunks) - 1 else None
+        try:
+            await update.effective_message.reply_text(chunk, reply_markup=markup)
+        except BadRequest:
+            logger.exception("Failed to send subscriptions list chunk to %s", user_id)
+            if markup is not None:
+                await update.effective_message.reply_text(
+                    t("subs_list", lang).strip() or "—",
+                    reply_markup=markup,
+                )
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=subscriptions_menu(lang),
+    )
+
+
+async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.clear()
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    subs = _subs_for_owner(db, user_id)
+    if not subs:
+        await update.effective_message.reply_text(
+            t("no_subs_short", lang),
+            reply_markup=subscriptions_menu(lang),
+        )
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                _inline_btn_label(f"✏️ #{i} {s.twitch_username}"),
+                callback_data=f"edit:{s.id}",
+            )
+        ]
+        for i, s in enumerate(subs, 1)
+    ]
+    await update.effective_message.reply_text(
+        t("edit_pick", lang),
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=subscriptions_menu(lang),
+    )
 
 
 async def _deliver_import_result(
@@ -4832,71 +4940,6 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await query.edit_message_text(t("enable_all_done", lang, count=count))
     else:
         await query.edit_message_text(t("enable_all_none", lang))
-
-
-async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data.clear()
-    user_id = update.effective_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    lines, subs = await _format_subs_overview_lines(context.bot, db, user_id, lang)
-    if not subs:
-        await update.effective_message.reply_text(
-            t("no_subs", lang),
-            reply_markup=subscriptions_menu(lang),
-        )
-        return
-
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
-                f"#{i} {s.twitch_username}",
-                callback_data=f"toggle:{s.id}",
-            )
-        ]
-        for i, s in enumerate(subs, 1)
-    ]
-    await update.effective_message.reply_text(
-        t("subs_list", lang) + "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-    await update.effective_message.reply_text(
-        t("menu_subs", lang),
-        reply_markup=subscriptions_menu(lang),
-    )
-
-
-async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data.clear()
-    user_id = update.effective_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    subs = _subs_for_owner(db, user_id)
-    if not subs:
-        await update.effective_message.reply_text(
-            t("no_subs_short", lang),
-            reply_markup=subscriptions_menu(lang),
-        )
-        return
-
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                f"✏️ #{i} {s.twitch_username}",
-                callback_data=f"edit:{s.id}",
-            )
-        ]
-        for i, s in enumerate(subs, 1)
-    ]
-    await update.effective_message.reply_text(
-        t("edit_pick", lang),
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-    await update.effective_message.reply_text(
-        t("menu_subs", lang),
-        reply_markup=subscriptions_menu(lang),
-    )
 
 
 async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
