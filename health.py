@@ -8,7 +8,7 @@ import secrets
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -235,6 +235,8 @@ def _placeholders_page(lang: str) -> bytes:
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
+    timeout = 60  # half-open clients must not hold a worker forever
+
     def _path_only(self) -> str:
         return urlparse(self.path).path
 
@@ -297,7 +299,9 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
 def start_health_server() -> None:
     port = int(os.getenv("PORT", "8080"))
-    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    # Threading so OAuth Twitch calls cannot block /health.
+    server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)
+    server.daemon_threads = True
     thread = threading.Thread(
         target=server.serve_forever,
         daemon=True,

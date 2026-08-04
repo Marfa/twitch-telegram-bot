@@ -106,6 +106,26 @@ def main() -> None:
         tr("oauth_web_done_body", "en"),
     ).decode()
     assert "Done" in html_en
+    # Threading health server: a hung client must not block /health.
+    import socket
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from health import _HealthHandler, mark_ready
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
+    httpd.daemon_threads = True
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    mark_ready()
+    hung = socket.create_connection(("127.0.0.1", port), timeout=2)
+    try:
+        assert urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health", timeout=2
+        ).read() == b"ok"
+    finally:
+        hung.close()
+        httpd.shutdown()
     title_ru = preview_stream_title("ru", "Elden Ring")
     assert "Elden Ring" in title_ru
     assert "Тестовый" not in title_ru
