@@ -1683,6 +1683,25 @@ async def receive_template_typo_confirm(
 
     if fix:
         await query.edit_message_text("✓")
+        if is_edit:
+            db: Database = context.application.bot_data["db"]
+            sub = db.get_subscription(context.user_data["edit_sub_id"], query.from_user.id)
+            if not sub:
+                await context.bot.send_message(
+                    query.from_user.id, t("sub_not_found", lang)
+                )
+                context.user_data.clear()
+                return ConversationHandler.END
+            sub_num = _owner_sub_number(db, query.from_user.id, sub.id)
+            await _prompt_edit_template(
+                bot=context.bot,
+                user_id=query.from_user.id,
+                lang=lang,
+                sub=sub,
+                sub_num=sub_num,
+                reply_markup=_wizard(lang, back=False),
+            )
+            return EDIT_TEMPLATE
         await context.bot.send_message(
             query.from_user.id,
             t(
@@ -1691,12 +1710,11 @@ async def receive_template_typo_confirm(
                 placeholders_link=placeholders_link_html(lang),
             ),
             parse_mode=ParseMode.HTML,
-            reply_markup=_wizard(lang, back=not is_edit),
+            reply_markup=_wizard(lang, back=True),
             disable_web_page_preview=True,
         )
-        if not is_edit:
-            _set_wizard_back(context, TEMPLATE)
-        return EDIT_TEMPLATE if is_edit else TEMPLATE
+        _set_wizard_back(context, TEMPLATE)
+        return TEMPLATE
 
     await query.edit_message_text("✓")
     if is_edit:
@@ -1995,6 +2013,37 @@ async def _save_edit_template(
         )
     context.user_data.clear()
     return ConversationHandler.END
+
+
+async def _prompt_edit_template(
+    *,
+    bot,
+    user_id: int,
+    lang: str,
+    sub: Subscription,
+    sub_num: int,
+    reply_markup=None,
+) -> None:
+    preview = render_template(
+        sub.message_template,
+        sub.twitch_username,
+        "Just Chatting",
+        t("preview_stream", lang),
+    )
+    await bot.send_message(
+        user_id,
+        t(
+            "edit_template_prompt",
+            lang,
+            sub_id=sub_num,
+            placeholders_link=placeholders_link_html(lang),
+            current=html.escape(sub.message_template or ""),
+            preview=html.escape(preview),
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup if reply_markup is not None else _wizard(lang, back=False),
+        disable_web_page_preview=True,
+    )
 
 
 async def _go_after_ignore_keywords(
@@ -4965,24 +5014,20 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not db.get_subscription(sub_id, query.from_user.id):
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     await query.edit_message_text("✓")
-    await context.bot.send_message(
-        query.from_user.id,
-        t(
-            "edit_template_prompt",
-            lang,
-            sub_id=sub_num,
-            placeholders_link=placeholders_link_html(lang),
-        ),
-        parse_mode=ParseMode.HTML,
-        reply_markup=_wizard(lang, back=False),
-        disable_web_page_preview=True,
+    await _prompt_edit_template(
+        bot=context.bot,
+        user_id=query.from_user.id,
+        lang=lang,
+        sub=sub,
+        sub_num=sub_num,
     )
     return EDIT_TEMPLATE
 

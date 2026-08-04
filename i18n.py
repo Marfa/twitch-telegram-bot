@@ -793,7 +793,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_repeat_current_mute": "suppress {minutes} min",
         "edit_repeat_invalid": "Enter 0 or a positive number of minutes.",
         "edit_template_prompt": (
-            "Send a new message template for subscription #{sub_id}.\n\n"
+            "Subscription #{sub_id}\n\n"
+            "Current format:\n"
+            "<code>{current}</code>\n\n"
+            "How it will look:\n"
+            "<code>{preview}</code>\n\n"
+            "Send a new message template.\n\n"
             "Example placeholders:\n"
             "• <code>{{username}}</code> — channel name\n"
             "• <code>{{game}}</code> — stream category\n"
@@ -1723,7 +1728,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "edit_repeat_current_mute": "заглушка {minutes} мин.",
         "edit_repeat_invalid": "Введите 0 или положительное число минут.",
         "edit_template_prompt": (
-            "Отправьте новый шаблон для подписки #{sub_id}.\n\n"
+            "Подписка #{sub_id}\n\n"
+            "Текущий формат:\n"
+            "<code>{current}</code>\n\n"
+            "Как будет выглядеть:\n"
+            "<code>{preview}</code>\n\n"
+            "Отправьте новый шаблон сообщения.\n\n"
             "Пример ключевых слов:\n"
             "• <code>{{username}}</code> — имя канала\n"
             "• <code>{{game}}</code> — категория стрима\n"
