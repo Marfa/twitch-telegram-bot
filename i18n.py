@@ -69,8 +69,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_need_one": "Add at least one category.",
         "watch_cats_done": "Done",
         "watch_cats_clear": "Clear list",
-        "watch_viewers_prompt": (
+        "watch_tags_prompt": (
             "What to watch — step 2/5\n\n"
+            "Stream tags (optional).\n"
+            "Send comma-separated tags; the stream must have <b>all</b> of them "
+            "(e.g. <code>English, fps</code>).\n"
+            "Or tap Skip."
+        ),
+        "watch_tags_skip": "Skip",
+        "watch_tags_bad": "Send tags separated by commas, or tap Skip.",
+        "watch_viewers_prompt": (
+            "What to watch — step 3/5\n\n"
             "Viewer range:\n"
             "• <code>100-500</code> — min–max\n"
             "• <code>50</code> — at least 50\n"
@@ -79,7 +88,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_viewers_any": "Any",
         "watch_viewers_bad": "Send a number, a range like 100-500, or tap Any.",
         "watch_lang_prompt": (
-            "What to watch — step 3/5\n\n"
+            "What to watch — step 4/5\n\n"
             "Stream language (optional):"
         ),
         "watch_lang_any": "Any language",
@@ -88,15 +97,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_lang_other": "Other code…",
         "watch_lang_other_prompt": "Send a 2-letter language code (e.g. de, fr, ja):",
         "watch_lang_bad": "Send a 2-letter code like de, or go Back.",
-        "watch_tags_prompt": (
-            "What to watch — step 4/5\n\n"
-            "Stream tags (optional).\n"
-            "Send comma-separated tags; the stream must have <b>all</b> of them "
-            "(e.g. <code>English, fps</code>).\n"
-            "Or tap Skip."
-        ),
-        "watch_tags_skip": "Skip",
-        "watch_tags_bad": "Send tags separated by commas, or tap Skip.",
         "watch_mature_prompt": (
             "What to watch — step 5/5\n\n"
             "Exclude mature (18+) streams?"
@@ -104,11 +104,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_exclude": "Exclude 18+",
         "watch_mature_allow": "Allow 18+",
         "watch_save_prompt": (
-            "Save these filters for the next time you open What to watch?\n\n"
+            "Save this as a filter for later? You can keep up to {max} filters.\n\n"
             "{summary}"
         ),
-        "watch_save_yes": "Save filters",
+        "watch_save_yes": "Save filter",
         "watch_save_no": "Just this once",
+        "watch_pick_prompt": (
+            "Choose a saved filter or start a new search:"
+        ),
+        "watch_pick_new": "➕ New search",
+        "watch_pick_delete": "🗑",
+        "watch_pick_empty": "No saved filters left. Starting a new search.",
         "watch_suggest_header": "Here's what is live now:",
         "watch_suggest_item": (
             "{n}. <b>{display}</b> (@{login})\n"
@@ -122,7 +128,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "watch_suggest_error": "Could not fetch streams from Twitch. Try again later.",
         "watch_again": "Suggest again",
-        "watch_change": "Change filters",
+        "watch_change": "Filters / new search",
         "watch_prefs_summary": (
             "Filters: {cats}\n"
             "Viewers: {viewers}\n"
@@ -926,8 +932,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_need_one": "Добавьте хотя бы одну категорию.",
         "watch_cats_done": "Готово",
         "watch_cats_clear": "Очистить список",
-        "watch_viewers_prompt": (
+        "watch_tags_prompt": (
             "Что посмотреть — шаг 2/5\n\n"
+            "Теги стрима (опционально).\n"
+            "Через запятую; у стрима должны быть <b>все</b> указанные теги "
+            "(например <code>русский, игры</code>).\n"
+            "Или нажмите Пропустить."
+        ),
+        "watch_tags_skip": "Пропустить",
+        "watch_tags_bad": "Отправьте теги через запятую или нажмите Пропустить.",
+        "watch_viewers_prompt": (
+            "Что посмотреть — шаг 3/5\n\n"
             "Диапазон зрителей:\n"
             "• <code>100-500</code> — мин–макс\n"
             "• <code>50</code> — не меньше 50\n"
@@ -936,7 +951,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_viewers_any": "Любое",
         "watch_viewers_bad": "Отправьте число, диапазон вида 100-500 или нажмите Любое.",
         "watch_lang_prompt": (
-            "Что посмотреть — шаг 3/5\n\n"
+            "Что посмотреть — шаг 4/5\n\n"
             "Язык стрима (опционально):"
         ),
         "watch_lang_any": "Любой язык",
@@ -945,15 +960,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_lang_other": "Другой код…",
         "watch_lang_other_prompt": "Отправьте двухбуквенный код языка (например de, fr, ja):",
         "watch_lang_bad": "Отправьте код из 2 букв, например de, или Назад.",
-        "watch_tags_prompt": (
-            "Что посмотреть — шаг 4/5\n\n"
-            "Теги стрима (опционально).\n"
-            "Через запятую; у стрима должны быть <b>все</b> указанные теги "
-            "(например <code>русский, игры</code>).\n"
-            "Или нажмите Пропустить."
-        ),
-        "watch_tags_skip": "Пропустить",
-        "watch_tags_bad": "Отправьте теги через запятую или нажмите Пропустить.",
         "watch_mature_prompt": (
             "Что посмотреть — шаг 5/5\n\n"
             "Исключить стримы с меткой 18+?"
@@ -961,11 +967,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_exclude": "Исключить 18+",
         "watch_mature_allow": "Разрешить 18+",
         "watch_save_prompt": (
-            "Сохранить эти фильтры для следующих запусков «Что посмотреть?»?\n\n"
+            "Сохранить как фильтр на потом? Можно хранить до {max} фильтров.\n\n"
             "{summary}"
         ),
-        "watch_save_yes": "Сохранить",
+        "watch_save_yes": "Сохранить фильтр",
         "watch_save_no": "Только сейчас",
+        "watch_pick_prompt": (
+            "Выберите сохранённый фильтр или начните новый поиск:"
+        ),
+        "watch_pick_new": "➕ Новый поиск",
+        "watch_pick_delete": "🗑",
+        "watch_pick_empty": "Сохранённых фильтров больше нет. Начинаем новый поиск.",
         "watch_suggest_header": "Сейчас в эфире:",
         "watch_suggest_item": (
             "{n}. <b>{display}</b> (@{login})\n"
@@ -979,7 +991,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "watch_suggest_error": "Не удалось получить стримы с Twitch. Попробуйте позже.",
         "watch_again": "Ещё варианты",
-        "watch_change": "Изменить фильтры",
+        "watch_change": "Фильтры / новый поиск",
         "watch_prefs_summary": (
             "Фильтры: {cats}\n"
             "Зрители: {viewers}\n"
@@ -2109,6 +2121,25 @@ def watch_save_keyboard(lang: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("watch_save_no", lang), callback_data="watch_save:0")],
         ]
     )
+
+
+def watch_pick_keyboard(lang: str, filters: list) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for f in filters:
+        name = str(getattr(f, "name", "") or "?")[:48]
+        fid = str(getattr(f, "id", ""))
+        rows.append(
+            [
+                InlineKeyboardButton(name, callback_data=f"watch_pick:{fid}"),
+                InlineKeyboardButton(
+                    t("watch_pick_delete", lang), callback_data=f"watch_del:{fid}"
+                ),
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(t("watch_pick_new", lang), callback_data="watch_pick:new")]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def watch_suggest_keyboard(lang: str) -> InlineKeyboardMarkup:

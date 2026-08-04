@@ -32,7 +32,17 @@ from bot import (
     live_transitions,
     migrate_import_sync_subscriptions,
 )
-from db import SqliteDatabase, WatchPrefs, dump_watch_prefs, parse_watch_prefs, _normalize_pg_url, open_database
+from db import (
+    SqliteDatabase,
+    WATCH_MAX_FILTERS,
+    WatchPrefs,
+    dump_watch_filters,
+    dump_watch_prefs,
+    parse_watch_filters,
+    parse_watch_prefs,
+    _normalize_pg_url,
+    open_database,
+)
 from i18n import SUPPORTED_LOCALES, btn, t as tr
 from health import create_oauth_state, pop_oauth_state
 from hf_text import _normalize_template
@@ -209,8 +219,17 @@ def main() -> None:
         exclude_mature=True,
     )
     assert parse_watch_prefs(dump_watch_prefs(prefs)) == prefs
+    legacy_list = parse_watch_filters(
+        '{"categories":[{"id":"1","name":"Just Chatting"}],"min_viewers":5,'
+        '"exclude_mature":true}'
+    )
+    assert len(legacy_list) == 1
+    assert legacy_list[0].prefs.min_viewers == 5
+    multi = parse_watch_filters(dump_watch_filters(legacy_list + legacy_list))
+    assert len(multi) == 2
     assert parse_watch_prefs("") is None
     assert parse_watch_prefs("{}") is None
+    assert WATCH_MAX_FILTERS >= 1
 
     link = parse_telegram_topic_link("https://t.me/c/themarfa_gaming/30")
     assert link is not None
@@ -247,7 +266,8 @@ def main() -> None:
         assert tr("start_welcome", loc)
         assert tr("watch_cats_prompt", loc, max=5)
         assert tr("watch_tags_prompt", loc)
-        assert tr("watch_save_prompt", loc, summary="x")
+        assert tr("watch_pick_prompt", loc)
+        assert tr("watch_save_prompt", loc, summary="x", max=5)
         assert tr("watch_suggest_header", loc)
         assert tr("import_mode_prompt", loc)
         assert tr("sync_menu_off", loc)
@@ -352,10 +372,21 @@ def main() -> None:
             tags=["English"],
             exclude_mature=True,
         )
-        db.set_watch_prefs(1, prefs)
-        assert db.get_watch_prefs(1) == prefs
+        db.add_watch_filter(1, prefs)
+        db.add_watch_filter(
+            1,
+            WatchPrefs(
+                categories=[{"id": "2", "name": "Dota 2"}],
+                exclude_mature=True,
+            ),
+        )
+        filters = db.get_watch_filters(1)
+        assert len(filters) == 2
+        assert db.get_watch_prefs(1) == filters[0].prefs
+        assert db.delete_watch_filter(1, filters[0].id)
+        assert len(db.get_watch_filters(1)) == 1
         db.clear_watch_prefs(1)
-        assert db.get_watch_prefs(1) is None
+        assert db.get_watch_filters(1) == []
         sample = "{username} live!\n{name}\n{game}"
         db.add_lucky_template("ru", sample)
         with db._conn() as conn:

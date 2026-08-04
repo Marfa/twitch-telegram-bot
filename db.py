@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -182,15 +183,22 @@ class WatchPrefs:
     exclude_mature: bool = True
 
 
-def parse_watch_prefs(raw: str | None) -> WatchPrefs | None:
-    if not raw or not str(raw).strip():
-        return None
-    try:
-        data = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
+@dataclass
+class WatchFilter:
+    id: str
+    name: str
+    prefs: WatchPrefs
+
+
+WATCH_MAX_FILTERS = 5
+
+
+def watch_filter_auto_name(prefs: WatchPrefs) -> str:
+    cats = ", ".join(c["name"] for c in prefs.categories) or "Filter"
+    return cats[:60]
+
+
+def _parse_watch_prefs_dict(data: dict[str, Any]) -> WatchPrefs | None:
     cats_raw = data.get("categories") or []
     categories: list[dict[str, str]] = []
     if isinstance(cats_raw, list):
@@ -233,8 +241,61 @@ def parse_watch_prefs(raw: str | None) -> WatchPrefs | None:
     )
 
 
+def parse_watch_prefs(raw: str | None) -> WatchPrefs | None:
+    """Legacy single-filter parse (first saved filter, or old JSON shape)."""
+    filters = parse_watch_filters(raw)
+    return filters[0].prefs if filters else None
+
+
+def parse_watch_filters(raw: str | None) -> list[WatchFilter]:
+    if not raw or not str(raw).strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    items: list[Any]
+    if isinstance(data, dict) and isinstance(data.get("filters"), list):
+        items = data["filters"]
+    elif isinstance(data, dict) and data.get("categories"):
+        # Migrate old single-prefs blob.
+        items = [data]
+    else:
+        return []
+    out: list[WatchFilter] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        prefs = _parse_watch_prefs_dict(item)
+        if not prefs:
+            continue
+        fid = str(item.get("id") or "").strip() or secrets.token_hex(4)
+        name = str(item.get("name") or "").strip() or watch_filter_auto_name(prefs)
+        out.append(WatchFilter(id=fid, name=name[:60], prefs=prefs))
+        if len(out) >= WATCH_MAX_FILTERS:
+            break
+    return out
+
+
 def dump_watch_prefs(prefs: WatchPrefs) -> str:
-    return json.dumps(asdict(prefs), ensure_ascii=False)
+    """Legacy: store as a one-item filter list."""
+    return dump_watch_filters(
+        [WatchFilter(id=secrets.token_hex(4), name=watch_filter_auto_name(prefs), prefs=prefs)]
+    )
+
+
+def dump_watch_filters(filters: list[WatchFilter]) -> str:
+    payload = {
+        "filters": [
+            {
+                "id": f.id,
+                "name": f.name,
+                **asdict(f.prefs),
+            }
+            for f in filters[:WATCH_MAX_FILTERS]
+        ]
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @dataclass
@@ -530,6 +591,16 @@ class Database(Protocol):
     def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None: ...
 
     def clear_watch_prefs(self, user_id: int) -> None: ...
+
+    def get_watch_filters(self, user_id: int) -> list[WatchFilter]: ...
+
+    def set_watch_filters(self, user_id: int, filters: list[WatchFilter]) -> None: ...
+
+    def add_watch_filter(
+        self, user_id: int, prefs: WatchPrefs, *, name: str | None = None
+    ) -> WatchFilter: ...
+
+    def delete_watch_filter(self, user_id: int, filter_id: str) -> bool: ...
 
     def count_enabled_subscriptions(self, owner_id: int) -> int: ...
 
@@ -1486,16 +1557,26 @@ class SqliteDatabase:
             )
 
     def get_watch_prefs(self, user_id: int) -> WatchPrefs | None:
+        filters = self.get_watch_filters(user_id)
+        return filters[0].prefs if filters else None
+
+    def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None:
+        self.add_watch_filter(user_id, prefs)
+
+    def clear_watch_prefs(self, user_id: int) -> None:
+        self.set_watch_filters(user_id, [])
+
+    def get_watch_filters(self, user_id: int) -> list[WatchFilter]:
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT watch_prefs FROM users WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
         if not row:
-            return None
-        return parse_watch_prefs(row["watch_prefs"])
+            return []
+        return parse_watch_filters(row["watch_prefs"])
 
-    def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None:
+    def set_watch_filters(self, user_id: int, filters: list[WatchFilter]) -> None:
         with self._conn() as conn:
             conn.execute(
                 """
@@ -1503,19 +1584,31 @@ class SqliteDatabase:
                 VALUES (?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET watch_prefs = excluded.watch_prefs
                 """,
-                (user_id, dump_watch_prefs(prefs)),
+                (user_id, dump_watch_filters(filters)),
             )
 
-    def clear_watch_prefs(self, user_id: int) -> None:
-        with self._conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO users (user_id, watch_prefs)
-                VALUES (?, '')
-                ON CONFLICT(user_id) DO UPDATE SET watch_prefs = ''
-                """,
-                (user_id,),
-            )
+    def add_watch_filter(
+        self, user_id: int, prefs: WatchPrefs, *, name: str | None = None
+    ) -> WatchFilter:
+        filters = self.get_watch_filters(user_id)
+        filt = WatchFilter(
+            id=secrets.token_hex(4),
+            name=(name or watch_filter_auto_name(prefs))[:60],
+            prefs=prefs,
+        )
+        filters.append(filt)
+        if len(filters) > WATCH_MAX_FILTERS:
+            filters = filters[-WATCH_MAX_FILTERS:]
+        self.set_watch_filters(user_id, filters)
+        return filt
+
+    def delete_watch_filter(self, user_id: int, filter_id: str) -> bool:
+        filters = self.get_watch_filters(user_id)
+        kept = [f for f in filters if f.id != filter_id]
+        if len(kept) == len(filters):
+            return False
+        self.set_watch_filters(user_id, kept)
+        return True
 
     def count_enabled_subscriptions(self, owner_id: int) -> int:
         with self._conn() as conn:
@@ -3055,6 +3148,16 @@ class PostgresDatabase:
             )
 
     def get_watch_prefs(self, user_id: int) -> WatchPrefs | None:
+        filters = self.get_watch_filters(user_id)
+        return filters[0].prefs if filters else None
+
+    def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None:
+        self.add_watch_filter(user_id, prefs)
+
+    def clear_watch_prefs(self, user_id: int) -> None:
+        self.set_watch_filters(user_id, [])
+
+    def get_watch_filters(self, user_id: int) -> list[WatchFilter]:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -3063,10 +3166,10 @@ class PostgresDatabase:
             )
             row = cur.fetchone()
         if not row:
-            return None
-        return parse_watch_prefs(row["watch_prefs"])
+            return []
+        return parse_watch_filters(row["watch_prefs"])
 
-    def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None:
+    def set_watch_filters(self, user_id: int, filters: list[WatchFilter]) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -3075,20 +3178,31 @@ class PostgresDatabase:
                 VALUES (%s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET watch_prefs = EXCLUDED.watch_prefs
                 """,
-                (user_id, dump_watch_prefs(prefs)),
+                (user_id, dump_watch_filters(filters)),
             )
 
-    def clear_watch_prefs(self, user_id: int) -> None:
-        with self._conn() as conn:
-            cur = self._cursor(conn)
-            cur.execute(
-                """
-                INSERT INTO users (user_id, watch_prefs)
-                VALUES (%s, '')
-                ON CONFLICT (user_id) DO UPDATE SET watch_prefs = ''
-                """,
-                (user_id,),
-            )
+    def add_watch_filter(
+        self, user_id: int, prefs: WatchPrefs, *, name: str | None = None
+    ) -> WatchFilter:
+        filters = self.get_watch_filters(user_id)
+        filt = WatchFilter(
+            id=secrets.token_hex(4),
+            name=(name or watch_filter_auto_name(prefs))[:60],
+            prefs=prefs,
+        )
+        filters.append(filt)
+        if len(filters) > WATCH_MAX_FILTERS:
+            filters = filters[-WATCH_MAX_FILTERS:]
+        self.set_watch_filters(user_id, filters)
+        return filt
+
+    def delete_watch_filter(self, user_id: int, filter_id: str) -> bool:
+        filters = self.get_watch_filters(user_id)
+        kept = [f for f in filters if f.id != filter_id]
+        if len(kept) == len(filters):
+            return False
+        self.set_watch_filters(user_id, kept)
+        return True
 
     def count_enabled_subscriptions(self, owner_id: int) -> int:
         with self._conn() as conn:
