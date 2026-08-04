@@ -264,6 +264,7 @@ Without Groq/HF keys, **I'm feeling lucky** still works from the local template 
 | `bot.py` | Wizard, menu, notifications, What to watch?, admin broadcast, Twitch Status, partner program, schedule |
 | `i18n.py` | Strings and keyboards (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
+| `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |
 | `hf_text.py` | AI templates: Groq → HF → local pool |
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
