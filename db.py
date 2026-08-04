@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Protocol
@@ -169,6 +170,56 @@ class ReferralWithdrawal:
     status: str
     created_at: str
     resolved_at: str | None
+
+
+@dataclass
+class WatchPrefs:
+    categories: list[dict[str, str]] = field(default_factory=list)
+    min_viewers: int = 0
+    max_viewers: int | None = None
+    language: str | None = None
+    exclude_mature: bool = True
+
+
+def parse_watch_prefs(raw: str | None) -> WatchPrefs | None:
+    if not raw or not str(raw).strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    cats_raw = data.get("categories") or []
+    categories: list[dict[str, str]] = []
+    if isinstance(cats_raw, list):
+        for c in cats_raw:
+            if not isinstance(c, dict):
+                continue
+            cid = str(c.get("id") or "").strip()
+            name = str(c.get("name") or "").strip()
+            if cid and name:
+                categories.append({"id": cid, "name": name})
+    if not categories:
+        return None
+    min_v = int(data.get("min_viewers") or 0)
+    max_raw = data.get("max_viewers")
+    max_v = int(max_raw) if max_raw is not None and str(max_raw).strip() != "" else None
+    lang = data.get("language")
+    language = str(lang).strip().lower() if lang else None
+    if language == "":
+        language = None
+    return WatchPrefs(
+        categories=categories,
+        min_viewers=max(0, min_v),
+        max_viewers=max_v if max_v is None else max(0, max_v),
+        language=language,
+        exclude_mature=bool(data.get("exclude_mature", True)),
+    )
+
+
+def dump_watch_prefs(prefs: WatchPrefs) -> str:
+    return json.dumps(asdict(prefs), ensure_ascii=False)
 
 
 @dataclass
@@ -459,6 +510,12 @@ class Database(Protocol):
 
     def set_saved_schedule(self, user_id: int, hour: int, minute: int) -> None: ...
 
+    def get_watch_prefs(self, user_id: int) -> WatchPrefs | None: ...
+
+    def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None: ...
+
+    def clear_watch_prefs(self, user_id: int) -> None: ...
+
     def count_enabled_subscriptions(self, owner_id: int) -> int: ...
 
     def get_premium_status(self, user_id: int) -> Any: ...
@@ -697,6 +754,8 @@ class SqliteDatabase:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_hour INTEGER")
         if "saved_schedule_minute" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_minute INTEGER")
+        if "watch_prefs" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN watch_prefs TEXT NOT NULL DEFAULT ''")
         if "premium_permanent" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN premium_permanent INTEGER NOT NULL DEFAULT 0"
@@ -1409,6 +1468,38 @@ class SqliteDatabase:
                     saved_schedule_minute = excluded.saved_schedule_minute
                 """,
                 (user_id, hour, minute),
+            )
+
+    def get_watch_prefs(self, user_id: int) -> WatchPrefs | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT watch_prefs FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return parse_watch_prefs(row["watch_prefs"])
+
+    def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, watch_prefs)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET watch_prefs = excluded.watch_prefs
+                """,
+                (user_id, dump_watch_prefs(prefs)),
+            )
+
+    def clear_watch_prefs(self, user_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, watch_prefs)
+                VALUES (?, '')
+                ON CONFLICT(user_id) DO UPDATE SET watch_prefs = ''
+                """,
+                (user_id,),
             )
 
     def count_enabled_subscriptions(self, owner_id: int) -> int:
@@ -2146,6 +2237,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS saved_schedule_minute INTEGER
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS watch_prefs TEXT NOT NULL DEFAULT ''
                 """
             )
             cur.execute(
@@ -2940,6 +3037,42 @@ class PostgresDatabase:
                     saved_schedule_minute = EXCLUDED.saved_schedule_minute
                 """,
                 (user_id, hour, minute),
+            )
+
+    def get_watch_prefs(self, user_id: int) -> WatchPrefs | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT watch_prefs FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return parse_watch_prefs(row["watch_prefs"])
+
+    def set_watch_prefs(self, user_id: int, prefs: WatchPrefs) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, watch_prefs)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET watch_prefs = EXCLUDED.watch_prefs
+                """,
+                (user_id, dump_watch_prefs(prefs)),
+            )
+
+    def clear_watch_prefs(self, user_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, watch_prefs)
+                VALUES (%s, '')
+                ON CONFLICT (user_id) DO UPDATE SET watch_prefs = ''
+                """,
+                (user_id,),
             )
 
     def count_enabled_subscriptions(self, owner_id: int) -> int:

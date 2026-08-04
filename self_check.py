@@ -10,8 +10,10 @@ from twitch import (
     FOLLOWS_SCOPE,
     SCHEDULE_SCOPE,
     TwitchClient,
+    filter_streams_for_watch,
     find_placeholder_typos,
     normalize_ignore_keywords,
+    pick_random_streams,
     preview_stream_title,
     render_template,
     should_ignore_stream,
@@ -24,11 +26,12 @@ from bot import (
     _message_link,
     _parse_sb_edit_f_id,
     _parse_segment_start,
+    _parse_watch_viewers,
     import_followed_as_subscriptions,
     live_transitions,
     migrate_import_sync_subscriptions,
 )
-from db import SqliteDatabase, _normalize_pg_url, open_database
+from db import SqliteDatabase, WatchPrefs, dump_watch_prefs, parse_watch_prefs, _normalize_pg_url, open_database
 from i18n import SUPPORTED_LOCALES, btn, t as tr
 from health import create_oauth_state, pop_oauth_state
 from hf_text import _normalize_template
@@ -172,6 +175,36 @@ def main() -> None:
     assert not should_ignore_stream(r"^Chatting", "Just Chatting", "Playing games")
     assert should_ignore_stream("(unclosed", "foo (unclosed bar", "title")  # invalid re → literal
 
+    assert _parse_watch_viewers("100") == (100, None)
+    assert _parse_watch_viewers("100-500") == (100, 500)
+    assert _parse_watch_viewers("500-100") == (100, 500)
+    assert _parse_watch_viewers("nope") is None
+    streams = [
+        {"user_id": "1", "viewer_count": 10, "is_mature": False},
+        {"user_id": "2", "viewer_count": 200, "is_mature": True},
+        {"user_id": "3", "viewer_count": 50, "is_mature": False},
+        {"user_id": "1", "viewer_count": 99, "is_mature": False},
+    ]
+    filtered = filter_streams_for_watch(
+        streams, min_viewers=20, max_viewers=100, exclude_mature=True
+    )
+    assert [s["user_id"] for s in filtered] == ["3", "1"]
+    assert all(20 <= int(s["viewer_count"]) <= 100 for s in filtered)
+    assert all(not s.get("is_mature") for s in filtered)
+    picked = pick_random_streams(streams, 2)
+    assert len(picked) == 2
+    assert len({s["user_id"] for s in picked}) == 2
+    prefs = WatchPrefs(
+        categories=[{"id": "1", "name": "Just Chatting"}],
+        min_viewers=10,
+        max_viewers=None,
+        language="ru",
+        exclude_mature=True,
+    )
+    assert parse_watch_prefs(dump_watch_prefs(prefs)) == prefs
+    assert parse_watch_prefs("") is None
+    assert parse_watch_prefs("{}") is None
+
     link = parse_telegram_topic_link("https://t.me/c/themarfa_gaming/30")
     assert link is not None
     assert link.chat_ref == "themarfa_gaming"
@@ -200,10 +233,13 @@ def main() -> None:
 
     for loc in SUPPORTED_LOCALES:
         assert btn("new", loc)
+        assert btn("watch", loc)
         assert btn("settings", loc)
         assert btn("sync_subs", loc)
         assert btn("language", loc)
         assert tr("start_welcome", loc)
+        assert tr("watch_cats_prompt", loc, max=5)
+        assert tr("watch_suggest_header", loc)
         assert tr("import_mode_prompt", loc)
         assert tr("sync_menu_off", loc)
         assert tr("lucky_btn", loc)
@@ -299,6 +335,17 @@ def main() -> None:
         assert db.get_user_locale(1) is None
         db.set_user_locale(1, "en")
         assert db.get_user_locale(1) == "en"
+        prefs = WatchPrefs(
+            categories=[{"id": "509658", "name": "Just Chatting"}],
+            min_viewers=50,
+            max_viewers=500,
+            language="en",
+            exclude_mature=True,
+        )
+        db.set_watch_prefs(1, prefs)
+        assert db.get_watch_prefs(1) == prefs
+        db.clear_watch_prefs(1)
+        assert db.get_watch_prefs(1) is None
         sample = "{username} live!\n{name}\n{game}"
         db.add_lucky_template("ru", sample)
         with db._conn() as conn:

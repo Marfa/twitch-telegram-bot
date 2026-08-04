@@ -15,6 +15,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
+| 🎲 What to watch? | Categories + viewers + language + mature filter → random live streams |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live or after going offline (Helix re-check before send) |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert |
@@ -138,6 +139,7 @@ Dates and month names follow the user’s language.
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
+| 🎲 What to watch? | Categories, viewers, language, mature → random live streams |
 | ⬇️ Import from Twitch | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete |
 | 📅 Create schedule | Weekly stream schedule text |

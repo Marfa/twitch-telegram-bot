@@ -52,6 +52,74 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_partner_withdrawals": "📋 My requests",
         "btn_back_settings": "◀️ Settings",
         "btn_admin_withdrawals": "💸 Withdrawals",
+        "btn_watch": "🎲 What to watch?",
+        "watch_cats_prompt": (
+            "What to watch — step 1/4\n\n"
+            "Type a Twitch category name (game or Just Chatting).\n"
+            "You can add up to {max} categories."
+        ),
+        "watch_cats_added": (
+            "Added: {name}\n"
+            "Selected ({count}/{max}): {list}\n\n"
+            "Type another category, or tap Done."
+        ),
+        "watch_cats_pick": "Pick a category:",
+        "watch_cats_not_found": "No categories found for «{query}». Try another name.",
+        "watch_cats_full": "Maximum {max} categories. Tap Done or remove one.",
+        "watch_cats_need_one": "Add at least one category.",
+        "watch_cats_done": "Done",
+        "watch_cats_clear": "Clear list",
+        "watch_viewers_prompt": (
+            "What to watch — step 2/4\n\n"
+            "Viewer range:\n"
+            "• <code>100-500</code> — min–max\n"
+            "• <code>50</code> — at least 50\n"
+            "• or tap Any"
+        ),
+        "watch_viewers_any": "Any",
+        "watch_viewers_bad": "Send a number, a range like 100-500, or tap Any.",
+        "watch_lang_prompt": (
+            "What to watch — step 3/4\n\n"
+            "Stream language (optional):"
+        ),
+        "watch_lang_any": "Any language",
+        "watch_lang_ru": "Russian",
+        "watch_lang_en": "English",
+        "watch_lang_other": "Other code…",
+        "watch_lang_other_prompt": "Send a 2-letter language code (e.g. de, fr, ja):",
+        "watch_lang_bad": "Send a 2-letter code like de, or go Back.",
+        "watch_mature_prompt": (
+            "What to watch — step 4/4\n\n"
+            "Exclude mature (18+) streams?"
+        ),
+        "watch_mature_exclude": "Exclude 18+",
+        "watch_mature_allow": "Allow 18+",
+        "watch_suggest_header": "Here's what is live now:",
+        "watch_suggest_item": (
+            "{n}. <b>{display}</b> (@{login})\n"
+            "{title}\n"
+            "🎮 {game} · 👁 {viewers}\n"
+            "https://twitch.tv/{login}"
+        ),
+        "watch_suggest_empty": (
+            "No live streams match your filters right now.\n"
+            "Try again later or change preferences."
+        ),
+        "watch_suggest_error": "Could not fetch streams from Twitch. Try again later.",
+        "watch_again": "Suggest again",
+        "watch_change": "Change filters",
+        "watch_prefs_summary": (
+            "Filters: {cats}\n"
+            "Viewers: {viewers}\n"
+            "Language: {language}\n"
+            "Mature: {mature}"
+        ),
+        "watch_viewers_label_any": "any",
+        "watch_viewers_label_min": "from {min}",
+        "watch_viewers_label_range": "{min}–{max}",
+        "watch_lang_label_any": "any",
+        "watch_mature_label_exclude": "excluded",
+        "watch_mature_label_allow": "allowed",
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
         "menu_partner": "Partner program:",
@@ -507,6 +575,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/settings — open settings\n\n"
             "Menu:\n"
             "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
+            "• {btn_watch} — random live streams by your categories and filters\n"
             "• {btn_import_twitch} — authorize and import followed channels\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
             "• {btn_feedback}\n"
@@ -823,6 +892,74 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_partner_withdrawals": "📋 Мои заявки",
         "btn_back_settings": "◀️ Настройки",
         "btn_admin_withdrawals": "💸 Выводы",
+        "btn_watch": "🎲 Что посмотреть?",
+        "watch_cats_prompt": (
+            "Что посмотреть — шаг 1/4\n\n"
+            "Введите название категории Twitch (игра или Just Chatting).\n"
+            "Можно добавить до {max} категорий."
+        ),
+        "watch_cats_added": (
+            "Добавлено: {name}\n"
+            "Выбрано ({count}/{max}): {list}\n\n"
+            "Введите ещё категорию или нажмите Готово."
+        ),
+        "watch_cats_pick": "Выберите категорию:",
+        "watch_cats_not_found": "Категории по запросу «{query}» не найдены. Попробуйте другое название.",
+        "watch_cats_full": "Максимум {max} категорий. Нажмите Готово или очистите список.",
+        "watch_cats_need_one": "Добавьте хотя бы одну категорию.",
+        "watch_cats_done": "Готово",
+        "watch_cats_clear": "Очистить список",
+        "watch_viewers_prompt": (
+            "Что посмотреть — шаг 2/4\n\n"
+            "Диапазон зрителей:\n"
+            "• <code>100-500</code> — мин–макс\n"
+            "• <code>50</code> — не меньше 50\n"
+            "• или нажмите Любое"
+        ),
+        "watch_viewers_any": "Любое",
+        "watch_viewers_bad": "Отправьте число, диапазон вида 100-500 или нажмите Любое.",
+        "watch_lang_prompt": (
+            "Что посмотреть — шаг 3/4\n\n"
+            "Язык стрима (опционально):"
+        ),
+        "watch_lang_any": "Любой язык",
+        "watch_lang_ru": "Русский",
+        "watch_lang_en": "English",
+        "watch_lang_other": "Другой код…",
+        "watch_lang_other_prompt": "Отправьте двухбуквенный код языка (например de, fr, ja):",
+        "watch_lang_bad": "Отправьте код из 2 букв, например de, или Назад.",
+        "watch_mature_prompt": (
+            "Что посмотреть — шаг 4/4\n\n"
+            "Исключить стримы с меткой 18+?"
+        ),
+        "watch_mature_exclude": "Исключить 18+",
+        "watch_mature_allow": "Разрешить 18+",
+        "watch_suggest_header": "Сейчас в эфире:",
+        "watch_suggest_item": (
+            "{n}. <b>{display}</b> (@{login})\n"
+            "{title}\n"
+            "🎮 {game} · 👁 {viewers}\n"
+            "https://twitch.tv/{login}"
+        ),
+        "watch_suggest_empty": (
+            "Сейчас нет стримов по вашим фильтрам.\n"
+            "Попробуйте позже или измените настройки."
+        ),
+        "watch_suggest_error": "Не удалось получить стримы с Twitch. Попробуйте позже.",
+        "watch_again": "Ещё варианты",
+        "watch_change": "Изменить фильтры",
+        "watch_prefs_summary": (
+            "Фильтры: {cats}\n"
+            "Зрители: {viewers}\n"
+            "Язык: {language}\n"
+            "18+: {mature}"
+        ),
+        "watch_viewers_label_any": "любое",
+        "watch_viewers_label_min": "от {min}",
+        "watch_viewers_label_range": "{min}–{max}",
+        "watch_lang_label_any": "любой",
+        "watch_mature_label_exclude": "исключены",
+        "watch_mature_label_allow": "разрешены",
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
         "menu_partner": "Партнёрская программа:",
@@ -1283,6 +1420,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "/settings — настройки\n\n"
             "Меню:\n"
             "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
+            "• {btn_watch} — случайные live-стримы по категориям и фильтрам\n"
             "• {btn_import_twitch} — авторизация и импорт фолловов\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
             "• {btn_feedback}\n"
@@ -1644,6 +1782,7 @@ def all_menu_buttons() -> set[str]:
         "partner_withdrawals",
         "back_settings",
         "admin_withdrawals",
+        "watch",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
@@ -1656,13 +1795,14 @@ def main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [
             KeyboardButton(btn("new", lang)),
+            KeyboardButton(btn("watch", lang)),
+        ],
+        [
             KeyboardButton(btn("import_twitch", lang)),
-        ],
-        [
             KeyboardButton(btn("manage", lang)),
-            KeyboardButton(btn("settings", lang)),
         ],
         [
+            KeyboardButton(btn("settings", lang)),
             KeyboardButton(btn("feedback", lang)),
         ],
     ]
@@ -1851,6 +1991,80 @@ def language_keyboard() -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton("English", callback_data="lang:en")],
             [InlineKeyboardButton("Русский", callback_data="lang:ru")],
+        ]
+    )
+
+
+def watch_cats_nav_keyboard(lang: str, *, has_cats: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_cats:
+        rows.append(
+            [InlineKeyboardButton(t("watch_cats_done", lang), callback_data="watch_cat:done")]
+        )
+        rows.append(
+            [InlineKeyboardButton(t("watch_cats_clear", lang), callback_data="watch_cat:clear")]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def watch_cats_pick_keyboard(
+    lang: str, cats: list[dict[str, str]]
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                (c.get("name") or "?")[:64],
+                callback_data=f"watch_cat:pick:{i}",
+            )
+        ]
+        for i, c in enumerate(cats)
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def watch_viewers_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("watch_viewers_any", lang), callback_data="watch_viewers:any")],
+        ]
+    )
+
+
+def watch_lang_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("watch_lang_any", lang), callback_data="watch_lang:any")],
+            [
+                InlineKeyboardButton(t("watch_lang_ru", lang), callback_data="watch_lang:ru"),
+                InlineKeyboardButton(t("watch_lang_en", lang), callback_data="watch_lang:en"),
+            ],
+            [InlineKeyboardButton(t("watch_lang_other", lang), callback_data="watch_lang:other")],
+        ]
+    )
+
+
+def watch_mature_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("watch_mature_exclude", lang), callback_data="watch_mature:1"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("watch_mature_allow", lang), callback_data="watch_mature:0"
+                )
+            ],
+        ]
+    )
+
+
+def watch_suggest_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("watch_again", lang), callback_data="watch:again")],
+            [InlineKeyboardButton(t("watch_change", lang), callback_data="watch:change")],
         ]
     )
 

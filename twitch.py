@@ -111,6 +111,29 @@ class TwitchClient:
         resp.raise_for_status()
         return {s["user_id"]: s for s in resp.json().get("data", [])}
 
+    def get_streams_by_game(
+        self,
+        game_id: str,
+        *,
+        language: str | None = None,
+        first: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Live streams in a category. Helix orders by viewer_count desc."""
+        params: dict[str, str | int] = {
+            "game_id": game_id,
+            "first": max(1, min(100, first)),
+        }
+        if language:
+            params["language"] = language.lower()
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/streams",
+            headers=self._headers(),
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return list(resp.json().get("data") or [])
+
     def has_channel_schedule(self, broadcaster_id: str) -> bool:
         """True if the broadcaster has a Twitch stream schedule (404 = none)."""
         resp = self._session.get(
@@ -249,12 +272,12 @@ class TwitchClient:
                 break
         return out
 
-    def search_categories(self, query: str) -> list[dict[str, Any]]:
+    def search_categories(self, query: str, *, first: int = 1) -> list[dict[str, Any]]:
         """Search Twitch categories/games by name. Returns list of {id, name, ...}."""
         resp = self._session.get(
             "https://api.twitch.tv/helix/search/categories",
             headers=self._headers(),
-            params={"query": query, "first": 1},
+            params={"query": query, "first": max(1, min(20, first))},
             timeout=15,
         )
         resp.raise_for_status()
@@ -535,6 +558,43 @@ def should_ignore_stream(ignore_keywords: str, game: str, title: str) -> bool:
         if pattern.search(game_text) or pattern.search(title_text):
             return True
     return False
+
+
+def filter_streams_for_watch(
+    streams: list[dict[str, Any]],
+    *,
+    min_viewers: int = 0,
+    max_viewers: int | None = None,
+    exclude_mature: bool = False,
+) -> list[dict[str, Any]]:
+    """Client-side filters Helix does not support as query params."""
+    out: list[dict[str, Any]] = []
+    for s in streams:
+        viewers = int(s.get("viewer_count") or 0)
+        if viewers < min_viewers:
+            continue
+        if max_viewers is not None and viewers > max_viewers:
+            continue
+        if exclude_mature and bool(s.get("is_mature")):
+            continue
+        out.append(s)
+    return out
+
+
+def pick_random_streams(
+    streams: list[dict[str, Any]], n: int = 5
+) -> list[dict[str, Any]]:
+    """Dedupe by user_id, then sample up to n streams."""
+    by_user: dict[str, dict[str, Any]] = {}
+    for s in streams:
+        uid = str(s.get("user_id") or "")
+        if uid and uid not in by_user:
+            by_user[uid] = s
+    unique = list(by_user.values())
+    if len(unique) <= n:
+        random.shuffle(unique)
+        return unique
+    return random.sample(unique, n)
 
 
 TWITCH_STATUS_URL = "https://status.twitch.com/api/v2/summary.json"

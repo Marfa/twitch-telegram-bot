@@ -29,7 +29,7 @@ from telegram.ext import (
 )
 
 import premium as prem
-from db import BotStats, Database, Subscription, TwitchSync, is_on_notify_cooldown
+from db import BotStats, Database, Subscription, TwitchSync, WatchPrefs, is_on_notify_cooldown
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
@@ -83,14 +83,22 @@ from i18n import (
     sys_notifications_keyboard,
     t,
     template_typo_keyboard,
+    watch_cats_nav_keyboard,
+    watch_cats_pick_keyboard,
+    watch_lang_keyboard,
+    watch_mature_keyboard,
+    watch_suggest_keyboard,
+    watch_viewers_keyboard,
     wizard_menu,
 )
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
 from twitch import (
     TwitchClient,
     fetch_twitch_status_summary,
+    filter_streams_for_watch,
     find_placeholder_typos,
     normalize_ignore_keywords,
+    pick_random_streams,
     preview_stream_title,
     render_template,
     should_ignore_stream,
@@ -162,13 +170,21 @@ _TWITCH_COMPONENT_KEYS = {
     STREAM_SCHEDULE_PUBLISH,
     SYNC_DAYS,
     PREMIUM_GATE,
-) = range(39)
+    WATCH_CATEGORIES,
+    WATCH_VIEWERS,
+    WATCH_LANGUAGE,
+    WATCH_MATURE,
+) = range(43)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
 _SYNC_PERIOD_MAX = 365
+_WATCH_MAX_CATS = 5
+_WATCH_SUGGEST_N = 5
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
+_WATCH_VIEWERS_RE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+))?\s*$")
+_WATCH_LANG_RE = re.compile(r"^[a-zA-Z]{2}$")
 
 
 def _delay_current_label(minutes: int, lang: str) -> str:
@@ -966,6 +982,12 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, ADMIN_MSG_TEXT)
         return ADMIN_MSG_TEXT
+    if state == WATCH_VIEWERS:
+        return await _go_watch_categories_prompt(update, context, lang)
+    if state == WATCH_LANGUAGE:
+        return await _go_watch_viewers_prompt(update, context, lang)
+    if state == WATCH_MATURE:
+        return await _go_watch_language_prompt(update, context, lang)
     if context.user_data.get("sb_edit_mode") in ("text", "schedule"):
         context.user_data.clear()
         await update.effective_message.reply_text(
@@ -1001,6 +1023,7 @@ def _help_text(lang: str) -> str:
         "help",
         lang,
         btn_new=btn("new", lang),
+        btn_watch=btn("watch", lang),
         btn_import_twitch=btn("import_twitch", lang),
         btn_manage=btn("manage", lang),
         btn_feedback=btn("feedback", lang),
@@ -3091,6 +3114,525 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             reply_markup=_menu(lang, user_id),
         )
     return ConversationHandler.END
+
+
+def _parse_watch_viewers(text: str) -> tuple[int, int | None] | None:
+    m = _WATCH_VIEWERS_RE.match(text.strip())
+    if not m:
+        return None
+    lo = int(m.group(1))
+    hi = int(m.group(2)) if m.group(2) is not None else None
+    if hi is not None and hi < lo:
+        lo, hi = hi, lo
+    return lo, hi
+
+
+def _watch_viewers_label(prefs: WatchPrefs, lang: str) -> str:
+    if prefs.min_viewers <= 0 and prefs.max_viewers is None:
+        return t("watch_viewers_label_any", lang)
+    if prefs.max_viewers is None:
+        return t("watch_viewers_label_min", lang, min=prefs.min_viewers)
+    return t(
+        "watch_viewers_label_range",
+        lang,
+        min=prefs.min_viewers,
+        max=prefs.max_viewers,
+    )
+
+
+def _watch_prefs_summary(prefs: WatchPrefs, lang: str) -> str:
+    cats = ", ".join(c["name"] for c in prefs.categories) or "—"
+    return t(
+        "watch_prefs_summary",
+        lang,
+        cats=cats,
+        viewers=_watch_viewers_label(prefs, lang),
+        language=prefs.language or t("watch_lang_label_any", lang),
+        mature=(
+            t("watch_mature_label_exclude", lang)
+            if prefs.exclude_mature
+            else t("watch_mature_label_allow", lang)
+        ),
+    )
+
+
+def _format_watch_suggestions(
+    streams: list[dict], prefs: WatchPrefs, lang: str
+) -> str:
+    lines = [
+        t("watch_suggest_header", lang),
+        "",
+        _watch_prefs_summary(prefs, lang),
+        "",
+    ]
+    for i, s in enumerate(streams, start=1):
+        login = html.escape(str(s.get("user_login") or ""))
+        display = html.escape(str(s.get("user_name") or login))
+        title = html.escape(str(s.get("title") or "—"))
+        game = html.escape(str(s.get("game_name") or "—"))
+        viewers = int(s.get("viewer_count") or 0)
+        lines.append(
+            t(
+                "watch_suggest_item",
+                lang,
+                n=i,
+                display=display,
+                login=login,
+                title=title,
+                game=game,
+                viewers=viewers,
+            )
+        )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+async def _fetch_watch_suggestions(
+    twitch: TwitchClient, prefs: WatchPrefs
+) -> list[dict]:
+    pooled: list[dict] = []
+    for cat in prefs.categories:
+        try:
+            batch = await asyncio.to_thread(
+                twitch.get_streams_by_game,
+                cat["id"],
+                language=prefs.language,
+                first=100,
+            )
+        except Exception:
+            logger.exception("watch streams fetch failed for game_id=%s", cat.get("id"))
+            continue
+        pooled.extend(batch)
+    filtered = filter_streams_for_watch(
+        pooled,
+        min_viewers=prefs.min_viewers,
+        max_viewers=prefs.max_viewers,
+        exclude_mature=prefs.exclude_mature,
+    )
+    return pick_random_streams(filtered, _WATCH_SUGGEST_N)
+
+
+async def _send_watch_suggestions(
+    *,
+    bot,
+    chat_id: int,
+    user_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    prefs: WatchPrefs,
+    edit_message=None,
+) -> None:
+    lang = _user_lang(context, user_id)
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    try:
+        streams = await _fetch_watch_suggestions(twitch, prefs)
+    except Exception:
+        logger.exception("watch suggestions failed")
+        text = t("watch_suggest_error", lang)
+        markup = watch_suggest_keyboard(lang)
+        if edit_message is not None:
+            try:
+                await edit_message.edit_text(text, reply_markup=markup)
+                return
+            except BadRequest:
+                pass
+        await bot.send_message(
+            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        )
+        await bot.send_message(chat_id, text, reply_markup=markup)
+        return
+
+    if not streams:
+        text = (
+            t("watch_suggest_empty", lang)
+            + "\n\n"
+            + _watch_prefs_summary(prefs, lang)
+        )
+    else:
+        text = _format_watch_suggestions(streams, prefs, lang)
+    markup = watch_suggest_keyboard(lang)
+    if edit_message is not None:
+        try:
+            await edit_message.edit_text(
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            return
+        except BadRequest:
+            pass
+    await bot.send_message(
+        chat_id,
+        t("menu_main", lang),
+        reply_markup=_menu(lang, user_id),
+    )
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+async def _go_watch_categories_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    cats = context.user_data.setdefault("watch_categories", [])
+    await update.effective_message.reply_text(
+        t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS),
+        reply_markup=_wizard(lang, back=False),
+        parse_mode=ParseMode.HTML,
+    )
+    if cats:
+        await update.effective_message.reply_text(
+            t(
+                "watch_cats_added",
+                lang,
+                name=cats[-1]["name"],
+                count=len(cats),
+                max=_WATCH_MAX_CATS,
+                list=", ".join(c["name"] for c in cats),
+            ),
+            reply_markup=watch_cats_nav_keyboard(lang, has_cats=True),
+        )
+    _set_wizard_back(context, WATCH_CATEGORIES)
+    return WATCH_CATEGORIES
+
+
+async def _go_watch_viewers_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    await update.effective_message.reply_text(
+        t("watch_viewers_prompt", lang),
+        reply_markup=_wizard(lang),
+        parse_mode=ParseMode.HTML,
+    )
+    await update.effective_message.reply_text(
+        t("watch_viewers_any", lang),
+        reply_markup=watch_viewers_keyboard(lang),
+    )
+    _set_wizard_back(context, WATCH_VIEWERS)
+    return WATCH_VIEWERS
+
+
+async def _go_watch_language_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    context.user_data.pop("watch_lang_await_other", None)
+    await update.effective_message.reply_text(
+        t("watch_lang_prompt", lang),
+        reply_markup=_wizard(lang),
+    )
+    await update.effective_message.reply_text(
+        t("watch_lang_any", lang),
+        reply_markup=watch_lang_keyboard(lang),
+    )
+    _set_wizard_back(context, WATCH_LANGUAGE)
+    return WATCH_LANGUAGE
+
+
+async def _go_watch_mature_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    await update.effective_message.reply_text(
+        t("watch_mature_prompt", lang),
+        reply_markup=_wizard(lang),
+    )
+    await update.effective_message.reply_text(
+        t("watch_mature_exclude", lang),
+        reply_markup=watch_mature_keyboard(lang),
+    )
+    _set_wizard_back(context, WATCH_MATURE)
+    return WATCH_MATURE
+
+
+async def _finish_watch_wizard(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, *, exclude_mature: bool
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    prefs = WatchPrefs(
+        categories=list(context.user_data.get("watch_categories") or []),
+        min_viewers=int(context.user_data.get("watch_min_viewers") or 0),
+        max_viewers=context.user_data.get("watch_max_viewers"),
+        language=context.user_data.get("watch_language"),
+        exclude_mature=exclude_mature,
+    )
+    if prefs.max_viewers is not None:
+        prefs.max_viewers = int(prefs.max_viewers)
+    db.set_watch_prefs(user_id, prefs)
+    context.user_data.clear()
+    chat_id = update.effective_chat.id
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+    await _send_watch_suggestions(
+        bot=context.bot,
+        chat_id=chat_id,
+        user_id=user_id,
+        context=context,
+        prefs=prefs,
+    )
+    return ConversationHandler.END
+
+
+async def start_what_to_watch(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    lang = _user_lang(context, user_id)
+    force_edit = bool(context.user_data.pop("watch_force_edit", None))
+    prefs = None if force_edit else db.get_watch_prefs(user_id)
+    if prefs:
+        await _send_watch_suggestions(
+            bot=context.bot,
+            chat_id=update.effective_chat.id,
+            user_id=user_id,
+            context=context,
+            prefs=prefs,
+        )
+        return ConversationHandler.END
+    context.user_data.clear()
+    context.user_data["watch_categories"] = []
+    return await _go_watch_categories_prompt(update, context, lang)
+
+
+async def start_watch_change(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["watch_force_edit"] = True
+    # Pretend message for prompts that use effective_message
+    return await start_what_to_watch(update, context)
+
+
+async def on_watch_again(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    prefs = db.get_watch_prefs(user_id)
+    if not prefs:
+        lang = _user_lang(context, user_id)
+        await query.edit_message_text(t("watch_cats_need_one", lang))
+        return
+    await _send_watch_suggestions(
+        bot=context.bot,
+        chat_id=query.message.chat_id,
+        user_id=user_id,
+        context=context,
+        prefs=prefs,
+        edit_message=query.message,
+    )
+
+
+async def receive_watch_category_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    cats: list[dict[str, str]] = context.user_data.setdefault("watch_categories", [])
+    if len(cats) >= _WATCH_MAX_CATS:
+        await update.effective_message.reply_text(
+            t("watch_cats_full", lang, max=_WATCH_MAX_CATS),
+            reply_markup=watch_cats_nav_keyboard(lang, has_cats=True),
+        )
+        return WATCH_CATEGORIES
+    query = (update.effective_message.text or "").strip()
+    if not query:
+        return WATCH_CATEGORIES
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    try:
+        found = await asyncio.to_thread(twitch.search_categories, query, first=5)
+    except Exception:
+        logger.exception("watch category search failed")
+        await update.effective_message.reply_text(
+            t("watch_cats_not_found", lang, query=query),
+        )
+        return WATCH_CATEGORIES
+    if not found:
+        await update.effective_message.reply_text(
+            t("watch_cats_not_found", lang, query=query),
+        )
+        return WATCH_CATEGORIES
+    if len(found) == 1:
+        return await _add_watch_category(update, context, lang, found[0])
+    context.user_data["watch_cat_candidates"] = [
+        {"id": str(c["id"]), "name": str(c.get("name") or "")} for c in found
+    ]
+    await update.effective_message.reply_text(
+        t("watch_cats_pick", lang),
+        reply_markup=watch_cats_pick_keyboard(
+            lang, context.user_data["watch_cat_candidates"]
+        ),
+    )
+    return WATCH_CATEGORIES
+
+
+async def _add_watch_category(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    cat: dict,
+) -> int:
+    cats: list[dict[str, str]] = context.user_data.setdefault("watch_categories", [])
+    entry = {"id": str(cat["id"]), "name": str(cat.get("name") or "")}
+    if not any(c["id"] == entry["id"] for c in cats):
+        cats.append(entry)
+    context.user_data.pop("watch_cat_candidates", None)
+    await update.effective_message.reply_text(
+        t(
+            "watch_cats_added",
+            lang,
+            name=entry["name"],
+            count=len(cats),
+            max=_WATCH_MAX_CATS,
+            list=", ".join(c["name"] for c in cats),
+        ),
+        reply_markup=watch_cats_nav_keyboard(lang, has_cats=True),
+    )
+    return WATCH_CATEGORIES
+
+
+async def receive_watch_category_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    data = query.data or ""
+    if data == "watch_cat:done":
+        cats = context.user_data.get("watch_categories") or []
+        if not cats:
+            await query.edit_message_text(t("watch_cats_need_one", lang))
+            return WATCH_CATEGORIES
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _go_watch_viewers_prompt(update, context, lang)
+    if data == "watch_cat:clear":
+        context.user_data["watch_categories"] = []
+        await query.edit_message_text(t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS))
+        return WATCH_CATEGORIES
+    if data.startswith("watch_cat:pick:"):
+        try:
+            idx = int(data.rsplit(":", 1)[1])
+        except ValueError:
+            return WATCH_CATEGORIES
+        candidates = context.user_data.get("watch_cat_candidates") or []
+        if idx < 0 or idx >= len(candidates):
+            return WATCH_CATEGORIES
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _add_watch_category(update, context, lang, candidates[idx])
+    return WATCH_CATEGORIES
+
+
+async def receive_watch_viewers_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    parsed = _parse_watch_viewers(update.effective_message.text or "")
+    if parsed is None:
+        await update.effective_message.reply_text(
+            t("watch_viewers_bad", lang),
+            reply_markup=watch_viewers_keyboard(lang),
+            parse_mode=ParseMode.HTML,
+        )
+        return WATCH_VIEWERS
+    lo, hi = parsed
+    context.user_data["watch_min_viewers"] = lo
+    context.user_data["watch_max_viewers"] = hi
+    return await _go_watch_language_prompt(update, context, lang)
+
+
+async def receive_watch_viewers_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data == "watch_viewers:any":
+        context.user_data["watch_min_viewers"] = 0
+        context.user_data["watch_max_viewers"] = None
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _go_watch_language_prompt(update, context, lang)
+    return WATCH_VIEWERS
+
+
+async def receive_watch_language_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = query.data or ""
+    if data == "watch_lang:any":
+        context.user_data["watch_language"] = None
+        context.user_data.pop("watch_lang_await_other", None)
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _go_watch_mature_prompt(update, context, lang)
+    if data in ("watch_lang:ru", "watch_lang:en"):
+        context.user_data["watch_language"] = data.rsplit(":", 1)[1]
+        context.user_data.pop("watch_lang_await_other", None)
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _go_watch_mature_prompt(update, context, lang)
+    if data == "watch_lang:other":
+        context.user_data["watch_lang_await_other"] = True
+        await query.edit_message_text(t("watch_lang_other_prompt", lang))
+        return WATCH_LANGUAGE
+    return WATCH_LANGUAGE
+
+
+async def receive_watch_language_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    if not context.user_data.get("watch_lang_await_other"):
+        await update.effective_message.reply_text(
+            t("watch_lang_prompt", lang),
+            reply_markup=watch_lang_keyboard(lang),
+        )
+        return WATCH_LANGUAGE
+    code = (update.effective_message.text or "").strip().lower()
+    if not _WATCH_LANG_RE.match(code):
+        await update.effective_message.reply_text(t("watch_lang_bad", lang))
+        return WATCH_LANGUAGE
+    context.user_data["watch_language"] = code
+    context.user_data.pop("watch_lang_await_other", None)
+    return await _go_watch_mature_prompt(update, context, lang)
+
+
+async def receive_watch_mature_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    exclude = data == "watch_mature:1"
+    return await _finish_watch_wizard(update, context, exclude_mature=exclude)
 
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5954,6 +6496,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_watch_again, pattern=r"^watch:again$"), group=0)
     app.add_handler(CallbackQueryHandler(schedule_save_token_callback, pattern=r"^sched_save_token:"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
@@ -5980,6 +6523,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("help", help_command),
             CommandHandler("schedule", start_stream_schedule),
             MessageHandler(_btn_filter("new"), start_new_subscription),
+            MessageHandler(_btn_filter("watch"), start_what_to_watch),
             MessageHandler(_btn_filter("create_schedule"), start_stream_schedule),
             MessageHandler(_btn_filter("language"), start_language_change),
             MessageHandler(_btn_filter("broadcast_new"), admin_broadcast_start),
@@ -5996,6 +6540,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 start_edit_schedule_reminder, pattern=r"^edit_f:\d+:sched_remind$"
             ),
             CallbackQueryHandler(start_edit_repeat_mute, pattern=r"^edit_set:\d+:repeat:0$"),
+            CallbackQueryHandler(start_watch_change, pattern=r"^watch:change$"),
         ],
         states={
             LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
@@ -6201,6 +6746,36 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sync_days),
             ],
+            WATCH_CATEGORIES: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_watch_category_callback, pattern=r"^watch_cat:"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_category_text),
+            ],
+            WATCH_VIEWERS: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_watch_viewers_callback, pattern=r"^watch_viewers:"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_viewers_text),
+            ],
+            WATCH_LANGUAGE: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_watch_language_callback, pattern=r"^watch_lang:"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_language_text),
+            ],
+            WATCH_MATURE: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_watch_mature_callback, pattern=r"^watch_mature:"
+                ),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
@@ -6259,7 +6834,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_sel:|delete_go$|delete_clear$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_sync:|"
-                r"import_mode:|sync:|premium:|ref_wd:)"
+                r"import_mode:|sync:|premium:|ref_wd:|watch:)"
             ),
         ),
         group=-1,
@@ -6283,6 +6858,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("back_settings")
                 | _btn_filter("admin_withdrawals")
                 | _btn_filter("new")
+                | _btn_filter("watch")
                 | _btn_filter("create_schedule")
                 | _btn_filter("back")
                 | _btn_filter("language")
