@@ -2077,8 +2077,8 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("sync_subs", lang)),
             ],
             [
-                KeyboardButton(btn("sys_notifications", lang)),
                 KeyboardButton(btn("ignored_words", lang)),
+                KeyboardButton(btn("sys_notifications", lang)),
             ],
             [
                 KeyboardButton(btn("language", lang)),
