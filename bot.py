@@ -258,6 +258,8 @@ def _broadcast_type_label(msg_type: str, lang: str) -> str:
         return t("broadcast_type_bot_update", lang)
     if msg_type == "availability":
         return t("broadcast_type_availability", lang)
+    if msg_type == "other":
+        return t("broadcast_type_other", lang)
     return msg_type
 
 
@@ -5659,6 +5661,10 @@ async def _send_admin_broadcast(
         user_ids = db.get_bot_update_recipients()
     elif msg_type == "availability":
         user_ids = db.get_availability_recipients()
+    elif msg_type == "other":
+        user_ids = [
+            uid for uid in db.get_notify_user_ids() if not db.is_bot_blocked(uid)
+        ]
     else:
         user_ids = [
             uid for uid in db.get_notify_user_ids() if not db.is_bot_blocked(uid)
@@ -5677,11 +5683,11 @@ async def _send_admin_broadcast(
     for uid in user_ids:
         locale = user_locales[uid]
         body = translations.get(locale, text)
-        footer = t(
-            "broadcast_footer",
-            locale,
-            type=_broadcast_type_label(msg_type, locale),
-        )
+        type_label = _broadcast_type_label(msg_type, locale)
+        if msg_type in ("bot_update", "availability"):
+            footer = t("broadcast_footer", locale, type=type_label)
+        else:
+            footer = t("broadcast_footer_other", locale, type=type_label)
         message = f"{body}\n\n{footer}"
         result = await _send_dm_html(context.bot, db, uid, message)
         if result == "sent":

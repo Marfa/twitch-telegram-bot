@@ -181,7 +181,7 @@ Dates and month names follow the user’s language.
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
 | ↳ 🌐 Language | Russian / English |
 | ⚙️ Admin | Broadcast, stats, withdrawals, demo mode (`ADMIN_USER_IDS` only) |
-| ↳ 📣 Broadcast | “Bot updates” or “Bot availability”, scheduled send; footer with type and how to disable in Settings |
+| ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, or “Other”, scheduled send; footer with type (first two also hint how to disable in Settings) |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
 | ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium |
 | ↳ 🎬 Demo mode | Start from Admin: free-user menu without Premium, demo subscriptions; **Admin is hidden**, «Demo mode» stays on the main menu — press again to exit and wipe all demo data |

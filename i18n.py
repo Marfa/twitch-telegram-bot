@@ -882,6 +882,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "broadcast_type_bot_update": "📬 Bot update notifications",
         "broadcast_type_availability": "📡 Bot availability alerts",
+        "broadcast_type_other": "📢 Other",
+        "broadcast_footer_other": "—\n{type}.",
         "broadcast_text_prompt": (
             "Send the message text (bold/italic and line breaks are kept).\n"
             "It will be auto-translated to each recipient's language.\n"
@@ -1847,6 +1849,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_prompt": "Выберите тип оповещения:",
         "broadcast_type_bot_update": "📬 Оповещения об обновлении бота",
         "broadcast_type_availability": "📡 Оповещения о доступности бота",
+        "broadcast_type_other": "📢 Прочие",
+        "broadcast_footer_other": "—\n{type}.",
         "broadcast_text_prompt": (
             "Отправьте текст сообщения (жирный/курсив и переносы сохраняются).\n"
             "Оно будет автоматически переведено на язык каждого получателя.\n"
@@ -2617,6 +2621,12 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     t("broadcast_type_availability", lang),
                     callback_data="admin_type:availability",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("broadcast_type_other", lang),
+                    callback_data="admin_type:other",
                 )
             ],
         ]

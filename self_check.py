@@ -935,6 +935,9 @@ def main() -> None:
         assert tr("weekly_new_users", "ru", count=1, paid=2)
         assert "настройках" in tr("broadcast_footer", "ru", type="x")
         assert "Settings" in tr("broadcast_footer", "en", type="x")
+        assert tr("broadcast_type_other", "ru") == "📢 Прочие"
+        assert tr("broadcast_type_other", "en") == "📢 Other"
+        assert "настройках" not in tr("broadcast_footer_other", "ru", type="x")
         assert "Partner" in tr("btn_partner", "en") or "🤝" in tr("btn_partner", "en")
 
     status_ok = {
