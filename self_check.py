@@ -490,6 +490,7 @@ def main() -> None:
         assert stats.subscriptions_enabled == 1
         assert stats.premium_paid == 0
         assert stats.sys_updates == 1
+        assert stats.sys_other == 1
         db.set_premium_stars(1, charge_id="c", until_unix=10**12, canceled=False)
         assert db.get_bot_stats().premium_paid == 1
         paused_id = db.add_subscription(
@@ -798,16 +799,22 @@ def main() -> None:
         db.set_receive_availability_updates(1, False)
         assert db.get_receive_availability_updates(1) is False
         assert 1 not in db.get_availability_recipients()
+        assert db.get_receive_other_updates(1) is True
+        db.set_receive_other_updates(1, False)
+        assert db.get_receive_other_updates(1) is False
+        assert 1 not in db.get_other_recipients()
         assert db.get_receive_sync_updates(1) is True
         db.set_receive_sync_updates(1, False)
         assert db.get_receive_sync_updates(1) is False
         db.set_receive_sync_updates(1, True)
         db.set_receive_bot_updates(1, True)
         db.set_receive_availability_updates(1, True)
+        db.set_receive_other_updates(1, True)
         db.set_bot_blocked(1, True)
         assert db.is_bot_blocked(1) is True
         assert 1 not in db.get_bot_update_recipients()
         assert 1 not in db.get_availability_recipients()
+        assert 1 not in db.get_other_recipients()
         blocked_stats = db.get_bot_stats()
         assert blocked_stats.blocked_users == 1
         assert blocked_stats.users == 0
@@ -818,6 +825,7 @@ def main() -> None:
         assert blocked_stats.unique_twitch_channels == 0
         assert blocked_stats.sys_updates == 0
         assert blocked_stats.sys_availability == 0
+        assert blocked_stats.sys_other == 0
         db.upsert_user(1)
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()

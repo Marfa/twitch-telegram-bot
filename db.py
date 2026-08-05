@@ -150,6 +150,7 @@ class BotStats:
     premium_paid: int
     sys_updates: int
     sys_availability: int
+    sys_other: int
     blocked_users: int
     locale_en: int
     locale_ru: int
@@ -588,6 +589,8 @@ class Database(Protocol):
 
     def get_availability_recipients(self) -> list[int]: ...
 
+    def get_other_recipients(self) -> list[int]: ...
+
     def get_receive_bot_updates(self, user_id: int) -> bool: ...
 
     def set_receive_bot_updates(self, user_id: int, enabled: bool) -> None: ...
@@ -595,6 +598,10 @@ class Database(Protocol):
     def get_receive_availability_updates(self, user_id: int) -> bool: ...
 
     def set_receive_availability_updates(self, user_id: int, enabled: bool) -> None: ...
+
+    def get_receive_other_updates(self, user_id: int) -> bool: ...
+
+    def set_receive_other_updates(self, user_id: int, enabled: bool) -> None: ...
 
     def get_receive_sync_updates(self, user_id: int) -> bool: ...
 
@@ -870,6 +877,10 @@ class SqliteDatabase:
         if "receive_availability_updates" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN receive_availability_updates INTEGER NOT NULL DEFAULT 1"
+            )
+        if "receive_other_updates" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN receive_other_updates INTEGER NOT NULL DEFAULT 1"
             )
         if "receive_sync_updates" not in user_cols:
             conn.execute(
@@ -1541,6 +1552,13 @@ class SqliteDatabase:
             if self.get_receive_availability_updates(uid) and not self.is_bot_blocked(uid)
         ]
 
+    def get_other_recipients(self) -> list[int]:
+        return [
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_other_updates(uid) and not self.is_bot_blocked(uid)
+        ]
+
     def get_receive_bot_updates(self, user_id: int) -> bool:
         with self._conn() as conn:
             row = conn.execute(
@@ -1578,6 +1596,27 @@ class SqliteDatabase:
                 INSERT INTO users (user_id, receive_availability_updates) VALUES (?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     receive_availability_updates = excluded.receive_availability_updates
+                """,
+                (user_id, int(enabled)),
+            )
+
+    def get_receive_other_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT receive_other_updates FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return True
+        return bool(row["receive_other_updates"])
+
+    def set_receive_other_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, receive_other_updates) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    receive_other_updates = excluded.receive_other_updates
                 """,
                 (user_id, int(enabled)),
             )
@@ -2077,6 +2116,18 @@ class SqliteDatabase:
                   AND COALESCE(u.bot_blocked, 0) = 0
                 """
             ).fetchone()["c"]
+            sys_other = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_other_updates, 1) = 1
+                  AND COALESCE(u.bot_blocked, 0) = 0
+                """
+            ).fetchone()["c"]
             blocked_users = conn.execute(
                 "SELECT COUNT(*) AS c FROM users WHERE bot_blocked = 1"
             ).fetchone()["c"]
@@ -2121,6 +2172,7 @@ class SqliteDatabase:
             premium_paid=int(premium_paid),
             sys_updates=int(sys_updates),
             sys_availability=int(sys_availability),
+            sys_other=int(sys_other),
             blocked_users=int(blocked_users),
             locale_en=int(locale_en),
             locale_ru=int(locale_ru),
@@ -2449,6 +2501,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_availability_updates BOOLEAN NOT NULL DEFAULT TRUE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS receive_other_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
             )
             cur.execute(
@@ -3206,6 +3264,13 @@ class PostgresDatabase:
             if self.get_receive_availability_updates(uid) and not self.is_bot_blocked(uid)
         ]
 
+    def get_other_recipients(self) -> list[int]:
+        return [
+            uid
+            for uid in self.get_notify_user_ids()
+            if self.get_receive_other_updates(uid) and not self.is_bot_blocked(uid)
+        ]
+
     def get_receive_bot_updates(self, user_id: int) -> bool:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -3249,6 +3314,30 @@ class PostgresDatabase:
                 INSERT INTO users (user_id, receive_availability_updates) VALUES (%s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET
                     receive_availability_updates = EXCLUDED.receive_availability_updates
+                """,
+                (user_id, enabled),
+            )
+
+    def get_receive_other_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT receive_other_updates FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return True
+        return bool(row["receive_other_updates"])
+
+    def set_receive_other_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, receive_other_updates) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    receive_other_updates = EXCLUDED.receive_other_updates
                 """,
                 (user_id, enabled),
             )
@@ -3809,6 +3898,19 @@ class PostgresDatabase:
             )
             sys_availability = int(cur.fetchone()["c"])
             cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_other_updates, TRUE) = TRUE
+                  AND COALESCE(u.bot_blocked, FALSE) = FALSE
+                """
+            )
+            sys_other = int(cur.fetchone()["c"])
+            cur.execute(
                 "SELECT COUNT(*) AS c FROM users WHERE bot_blocked = TRUE"
             )
             blocked_users = int(cur.fetchone()["c"])
@@ -3857,6 +3959,7 @@ class PostgresDatabase:
             premium_paid=premium_paid,
             sys_updates=sys_updates,
             sys_availability=sys_availability,
+            sys_other=sys_other,
             blocked_users=blocked_users,
             locale_en=locale_en,
             locale_ru=locale_ru,

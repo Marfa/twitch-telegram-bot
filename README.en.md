@@ -31,7 +31,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
-| System alerts | Toggle admin broadcasts; Twitch outages from status.twitch.com |
+| System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
 | Premium | Stars subscription or Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) — more active alerts, sync, all alert types |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer, DeepL, statistics, withdrawal handling, **Demo mode** |

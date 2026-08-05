@@ -940,6 +940,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "sys_updates_label": "Bot update notifications",
         "sys_availability_label": "Bot / Twitch availability alerts",
+        "sys_other_label": "Other notifications",
         "sys_sync_label": "Sync notifications",
         "twitch_status_title": "📡 Twitch Status",
         "twitch_indicator_none": "✅ All Systems Operational",
@@ -966,6 +967,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "System notifications:\n"
             "• Bot updates: {sys_updates}\n"
             "• Bot availability: {sys_availability}\n"
+            "• Other: {sys_other}\n"
             "• Blocked the bot: {blocked_users}\n\n"
             "Languages:\n"
             "• English: {locale_en}\n"
@@ -1906,6 +1908,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "sys_updates_label": "Оповещения об обновлении бота",
         "sys_availability_label": "Оповещения о доступности (бот / Twitch)",
+        "sys_other_label": "Прочие оповещения",
         "sys_sync_label": "Оповещения о синхронизации",
         "twitch_status_title": "📡 Twitch Status",
         "twitch_indicator_none": "✅ Все системы в норме",
@@ -1932,6 +1935,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Системные оповещения:\n"
             "• Обновление бота: {sys_updates}\n"
             "• Доступность бота: {sys_availability}\n"
+            "• Прочие: {sys_other}\n"
             "• Заблокировали бота: {blocked_users}\n\n"
             "Языки:\n"
             "• English: {locale_en}\n"
@@ -2636,10 +2640,12 @@ def sys_notifications_keyboard(
     *,
     updates_enabled: bool,
     availability_enabled: bool,
+    other_enabled: bool,
     sync_enabled: bool,
 ) -> InlineKeyboardMarkup:
     updates_mark = "✅ " if updates_enabled else "❌ "
     availability_mark = "✅ " if availability_enabled else "❌ "
+    other_mark = "✅ " if other_enabled else "❌ "
     sync_mark = "✅ " if sync_enabled else "❌ "
     return InlineKeyboardMarkup(
         [
@@ -2653,6 +2659,12 @@ def sys_notifications_keyboard(
                 InlineKeyboardButton(
                     availability_mark + t("sys_availability_label", lang),
                     callback_data="sys_availability:toggle",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    other_mark + t("sys_other_label", lang),
+                    callback_data="sys_other:toggle",
                 )
             ],
             [

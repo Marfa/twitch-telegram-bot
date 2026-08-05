@@ -5662,9 +5662,7 @@ async def _send_admin_broadcast(
     elif msg_type == "availability":
         user_ids = db.get_availability_recipients()
     elif msg_type == "other":
-        user_ids = [
-            uid for uid in db.get_notify_user_ids() if not db.is_bot_blocked(uid)
-        ]
+        user_ids = db.get_other_recipients()
     else:
         user_ids = [
             uid for uid in db.get_notify_user_ids() if not db.is_bot_blocked(uid)
@@ -6574,6 +6572,7 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
             lang,
             updates_enabled=db.get_receive_bot_updates(user_id),
             availability_enabled=db.get_receive_availability_updates(user_id),
+            other_enabled=db.get_receive_other_updates(user_id),
             sync_enabled=db.get_receive_sync_updates(user_id),
         ),
     )
@@ -6677,6 +6676,7 @@ async def _refresh_sys_notifications_menu(
             lang,
             updates_enabled=db.get_receive_bot_updates(user_id),
             availability_enabled=db.get_receive_availability_updates(user_id),
+            other_enabled=db.get_receive_other_updates(user_id),
             sync_enabled=db.get_receive_sync_updates(user_id),
         ),
     )
@@ -6706,6 +6706,17 @@ async def on_sys_availability_toggle(update: Update, context: ContextTypes.DEFAU
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
 
+async def on_sys_other_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    db.set_receive_other_updates(user_id, not db.get_receive_other_updates(user_id))
+    await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+
 async def on_sys_sync_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -6731,6 +6742,7 @@ def _format_stats(stats: BotStats, lang: str) -> str:
         premium_paid=stats.premium_paid,
         sys_updates=stats.sys_updates,
         sys_availability=stats.sys_availability,
+        sys_other=stats.sys_other,
         blocked_users=stats.blocked_users,
         locale_en=stats.locale_en,
         locale_ru=stats.locale_ru,
@@ -7416,6 +7428,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_sys_other_toggle, pattern=r"^sys_other:toggle$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_sys_sync_toggle, pattern=r"^sys_sync:toggle$"),
         group=0,
     )
@@ -7833,7 +7849,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
                 r"delete_sel:|delete_go$|delete_clear$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
-                r"sys_updates:|sys_availability:|sys_sync:|"
+                r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
                 r"import_mode:|sync:|premium:|ref_wd:|watch:)"
             ),
         ),
