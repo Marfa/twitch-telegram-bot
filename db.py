@@ -320,6 +320,7 @@ class Subscription:
     notify_on_end: bool
     notify_on_category_change: bool
     ignore_keywords: str
+    use_global_ignore: bool
     image_file_id: str | None
     image_position: str
     notify_cooldown_until: str | None
@@ -418,6 +419,9 @@ def _row_to_sub(row: Any) -> Subscription:
         if "notify_on_category_change" in keys
         else False,
         ignore_keywords=str(row["ignore_keywords"] or ""),
+        use_global_ignore=bool(row["use_global_ignore"])
+        if "use_global_ignore" in keys
+        else False,
         image_file_id=image_file_id,
         image_position=image_position if image_file_id else "",
         notify_cooldown_until=(
@@ -492,6 +496,7 @@ class Database(Protocol):
         schedule_reminder_minutes: int = 0,
         schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
+        use_global_ignore: bool = False,
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
@@ -594,6 +599,10 @@ class Database(Protocol):
     def get_receive_sync_updates(self, user_id: int) -> bool: ...
 
     def set_receive_sync_updates(self, user_id: int, enabled: bool) -> None: ...
+
+    def get_global_ignore_keywords(self, user_id: int) -> str: ...
+
+    def set_global_ignore_keywords(self, user_id: int, keywords: str) -> None: ...
 
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]: ...
 
@@ -793,6 +802,11 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN ignore_keywords TEXT NOT NULL DEFAULT ''"
             )
+        if "use_global_ignore" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN use_global_ignore "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         if "image_file_id" not in cols:
             conn.execute("ALTER TABLE subscriptions ADD COLUMN image_file_id TEXT")
         if "image_position" not in cols:
@@ -871,6 +885,11 @@ class SqliteDatabase:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_minute INTEGER")
         if "watch_prefs" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN watch_prefs TEXT NOT NULL DEFAULT ''")
+        if "global_ignore_keywords" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN global_ignore_keywords "
+                "TEXT NOT NULL DEFAULT ''"
+            )
         if "premium_permanent" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN premium_permanent INTEGER NOT NULL DEFAULT 0"
@@ -988,6 +1007,7 @@ class SqliteDatabase:
         schedule_reminder_minutes: int = 0,
         schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
+        use_global_ignore: bool = False,
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
@@ -1006,11 +1026,11 @@ class SqliteDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
-                    schedule_reminder_configured, ignore_keywords,
+                    schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1028,6 +1048,7 @@ class SqliteDatabase:
                     max(0, int(schedule_reminder_minutes)),
                     int(bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0),
                     ignore_keywords,
+                    int(bool(use_global_ignore)),
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
                     int(enabled),
@@ -1140,6 +1161,7 @@ class SqliteDatabase:
             "notify_on_category_change",
             "delete_other_alerts",
             "ignore_keywords",
+            "use_global_ignore",
             "image_file_id",
             "image_position",
         }
@@ -1158,6 +1180,7 @@ class SqliteDatabase:
                 "notify_on_end",
                 "notify_on_category_change",
                 "delete_other_alerts",
+                "use_global_ignore",
             ):
                 values.append(int(bool(value)))
             elif key in (
@@ -1578,6 +1601,27 @@ class SqliteDatabase:
                     receive_sync_updates = excluded.receive_sync_updates
                 """,
                 (user_id, int(enabled)),
+            )
+
+    def get_global_ignore_keywords(self, user_id: int) -> str:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT global_ignore_keywords FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return ""
+        return str(row["global_ignore_keywords"] or "")
+
+    def set_global_ignore_keywords(self, user_id: int, keywords: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, global_ignore_keywords) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    global_ignore_keywords = excluded.global_ignore_keywords
+                """,
+                (user_id, str(keywords or "")),
             )
 
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]:
@@ -2315,6 +2359,12 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS use_global_ignore BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS image_file_id TEXT
                 """
             )
@@ -2429,6 +2479,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS watch_prefs TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS global_ignore_keywords TEXT NOT NULL DEFAULT ''
                 """
             )
             cur.execute(
@@ -2564,6 +2620,7 @@ class PostgresDatabase:
         schedule_reminder_minutes: int = 0,
         schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
+        use_global_ignore: bool = False,
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
@@ -2583,11 +2640,11 @@ class PostgresDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
-                    schedule_reminder_configured, ignore_keywords,
+                    schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -2606,6 +2663,7 @@ class PostgresDatabase:
                     max(0, int(schedule_reminder_minutes)),
                     bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0,
                     ignore_keywords,
+                    bool(use_global_ignore),
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
                     enabled,
@@ -2731,6 +2789,7 @@ class PostgresDatabase:
             "notify_on_category_change",
             "delete_other_alerts",
             "ignore_keywords",
+            "use_global_ignore",
             "image_file_id",
             "image_position",
         }
@@ -2749,6 +2808,7 @@ class PostgresDatabase:
                 "notify_on_end",
                 "notify_on_category_change",
                 "delete_other_alerts",
+                "use_global_ignore",
             ):
                 values.append(bool(value))
             elif key in (
@@ -3215,6 +3275,30 @@ class PostgresDatabase:
                     receive_sync_updates = EXCLUDED.receive_sync_updates
                 """,
                 (user_id, enabled),
+            )
+
+    def get_global_ignore_keywords(self, user_id: int) -> str:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT global_ignore_keywords FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return ""
+        return str(row["global_ignore_keywords"] or "")
+
+    def set_global_ignore_keywords(self, user_id: int, keywords: str) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, global_ignore_keywords) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    global_ignore_keywords = EXCLUDED.global_ignore_keywords
+                """,
+                (user_id, str(keywords or "")),
             )
 
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]:

@@ -63,6 +63,7 @@ from i18n import (
     edit_bool_keyboard,
     edit_options_keyboard,
     ignore_keywords_keyboard,
+    ignored_words_keyboard,
     image_ask_keyboard,
     image_edit_keyboard,
     image_position_keyboard,
@@ -112,6 +113,7 @@ from twitch import (
     filter_streams_for_watch,
     find_placeholder_typos,
     normalize_ignore_keywords,
+    merge_ignore_keywords,
     normalize_watch_tags,
     pick_random_streams,
     preview_stream_title,
@@ -194,7 +196,8 @@ _TWITCH_COMPONENT_KEYS = {
     WATCH_MATURE,
     WATCH_SAVE,
     DELETE_SIBLING_ALERTS,
-) = range(48)
+    GLOBAL_IGNORE_KEYWORDS,
+) = range(49)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -230,6 +233,24 @@ def _ignore_keywords_current_label(keywords: str, lang: str) -> str:
     if not keywords.strip():
         return t("ignore_keywords_current_none", lang)
     return keywords
+
+
+def _effective_ignore_keywords(sub: Subscription, db: Database) -> str:
+    if not sub.use_global_ignore:
+        return sub.ignore_keywords
+    return merge_ignore_keywords(
+        sub.ignore_keywords, db.get_global_ignore_keywords(sub.owner_id)
+    )
+
+
+def _ignore_keywords_note(keywords: str, use_global: bool, lang: str) -> str:
+    if keywords.strip() and use_global:
+        return t("ignore_keywords_yes_global_note", lang, keywords=keywords)
+    if keywords.strip():
+        return t("ignore_keywords_yes_note", lang, keywords=keywords)
+    if use_global:
+        return t("ignore_keywords_global_only_note", lang)
+    return t("ignore_keywords_no_note", lang)
 
 
 def _broadcast_type_label(msg_type: str, lang: str) -> str:
@@ -652,6 +673,7 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.edit_message_text("✓")
     if feature == "ignore_keywords":
         context.user_data["ignore_keywords"] = ""
+        context.user_data["use_global_ignore"] = False
         return await _go_after_ignore_keywords(update, context, lang)
     if feature == "delay":
         context.user_data["delay_minutes"] = 0
@@ -813,10 +835,15 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
         return await _show_premium_gate(
             update, context, feature="ignore_keywords", first_step=False
         )
+    context.user_data.setdefault("use_global_ignore", False)
+    context.user_data["ignore_keywords_as_cancel"] = False
     await update.effective_message.reply_text(
         t("ignore_keywords_prompt", lang),
         parse_mode=ParseMode.HTML,
-        reply_markup=ignore_keywords_keyboard(lang),
+        reply_markup=ignore_keywords_keyboard(
+            lang,
+            use_global=bool(context.user_data.get("use_global_ignore")),
+        ),
     )
     _set_wizard_back(context, IGNORE_KEYWORDS)
     return IGNORE_KEYWORDS
@@ -1129,10 +1156,16 @@ def _format_sub_line(
             settings.append(t("sub_list_image_before", lang))
     else:
         settings.append(t("sub_list_image_no", lang))
-    if sub.ignore_keywords.strip():
+    if sub.ignore_keywords.strip() and sub.use_global_ignore:
+        settings.append(
+            t("sub_list_ignore_yes_global", lang, keywords=sub.ignore_keywords)
+        )
+    elif sub.ignore_keywords.strip():
         settings.append(
             t("sub_list_ignore_yes", lang, keywords=sub.ignore_keywords)
         )
+    elif sub.use_global_ignore:
+        settings.append(t("sub_list_ignore_global_only", lang))
     else:
         settings.append(t("sub_list_ignore_no", lang))
     settings.append(
@@ -1795,6 +1828,7 @@ async def lucky_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return TEMPLATE
     context.user_data["lucky_quick"] = True
     context.user_data.setdefault("ignore_keywords", "")
+    context.user_data.setdefault("use_global_ignore", False)
     # Link preview on only when the channel was entered as a Twitch URL.
     context.user_data["disable_link_preview"] = not bool(
         context.user_data.get("channel_input_was_url")
@@ -2076,6 +2110,36 @@ async def receive_ignore_keywords_skip(
     await query.edit_message_text("✓")
     return await _go_after_ignore_keywords(update, context, lang)
 
+
+async def receive_ignore_keywords_global_toggle(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    new_val = not bool(context.user_data.get("use_global_ignore"))
+    context.user_data["use_global_ignore"] = new_val
+    if context.user_data.get("wizard_edit") and context.user_data.get("edit_sub_id"):
+        db: Database = context.application.bot_data["db"]
+        db.update_subscription(
+            int(context.user_data["edit_sub_id"]),
+            query.from_user.id,
+            use_global_ignore=new_val,
+        )
+    await query.edit_message_reply_markup(
+        reply_markup=ignore_keywords_keyboard(
+            lang,
+            as_cancel=bool(context.user_data.get("ignore_keywords_as_cancel")),
+            use_global=new_val,
+        )
+    )
+    return (
+        EDIT_IGNORE_KEYWORDS
+        if context.user_data.get("wizard_edit")
+        else IGNORE_KEYWORDS
+    )
+
+
 async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -2197,6 +2261,7 @@ _LIVE_ADDON_CLEAR_KEYS = (
     "image_file_id",
     "image_position",
     "ignore_keywords",
+    "use_global_ignore",
     "disable_link_preview",
     "delay_minutes",
     "suppress_repeat_minutes",
@@ -2861,6 +2926,7 @@ async def _finish_subscription(
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
+                use_global_ignore=bool(data.get("use_global_ignore")),
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
                 notify_on_live=True,
@@ -2934,6 +3000,7 @@ async def _finish_subscription(
                 )
                 or int(data.get("schedule_reminder_minutes", 0)) > 0,
                 ignore_keywords=str(data.get("ignore_keywords", "")),
+                use_global_ignore=bool(data.get("use_global_ignore")),
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
                 enabled=create_enabled,
@@ -3053,10 +3120,9 @@ async def _finish_subscription(
         else:
             image_note = t("image_no_note", lang)
         ignore_keywords = str(data.get("ignore_keywords", ""))
-        ignore_keywords_note = (
-            t("ignore_keywords_yes_note", lang, keywords=ignore_keywords)
-            if ignore_keywords
-            else t("ignore_keywords_no_note", lang)
+        use_global_ignore = bool(data.get("use_global_ignore"))
+        ignore_keywords_note = _ignore_keywords_note(
+            ignore_keywords, use_global_ignore, lang
         )
         delay_minutes = int(data.get("delay_minutes", 0))
         delay_note = (
@@ -5054,7 +5120,9 @@ async def start_edit_ignore_keywords(
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
+    context.user_data["use_global_ignore"] = bool(sub.use_global_ignore)
     has_keywords = bool(sub.ignore_keywords.strip())
+    context.user_data["ignore_keywords_as_cancel"] = has_keywords
     current = _ignore_keywords_current_label(sub.ignore_keywords, lang)
     if has_keywords:
         current = f"<code>{html.escape(current)}</code>"
@@ -5074,7 +5142,11 @@ async def start_edit_ignore_keywords(
             hint=hint,
         ),
         parse_mode=ParseMode.HTML,
-        reply_markup=ignore_keywords_keyboard(lang, as_cancel=has_keywords),
+        reply_markup=ignore_keywords_keyboard(
+            lang,
+            as_cancel=has_keywords,
+            use_global=bool(sub.use_global_ignore),
+        ),
     )
     return EDIT_IGNORE_KEYWORDS
 
@@ -5096,7 +5168,12 @@ async def receive_edit_ignore_keywords(
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
     sub_num = _owner_sub_number(db, owner_id, sub_id)
-    if not db.update_subscription(sub_id, owner_id, ignore_keywords=keywords):
+    if not db.update_subscription(
+        sub_id,
+        owner_id,
+        ignore_keywords=keywords,
+        use_global_ignore=bool(context.user_data.get("use_global_ignore")),
+    ):
         await update.effective_message.reply_text(t("sub_not_found", lang))
     else:
         await update.effective_message.reply_text(
@@ -5120,7 +5197,12 @@ async def receive_edit_ignore_keywords_skip(
     db: Database = context.application.bot_data["db"]
     owner_id = query.from_user.id
     sub_num = _owner_sub_number(db, owner_id, sub_id)
-    if not db.update_subscription(sub_id, owner_id, ignore_keywords=""):
+    if not db.update_subscription(
+        sub_id,
+        owner_id,
+        ignore_keywords="",
+        use_global_ignore=bool(context.user_data.get("use_global_ignore")),
+    ):
         await query.edit_message_text(t("sub_not_found", lang))
     else:
         await query.edit_message_text("✓")
@@ -5171,6 +5253,7 @@ async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["twitch_user_id"] = sub.twitch_user_id
     context.user_data["message_template"] = sub.message_template
     context.user_data["ignore_keywords"] = sub.ignore_keywords
+    context.user_data["use_global_ignore"] = sub.use_global_ignore
     context.user_data["disable_link_preview"] = sub.disable_link_preview
     context.user_data["suppress_repeat_minutes"] = sub.suppress_repeat_minutes
     context.user_data["alert_type"] = _alert_type_from_sub(sub)
@@ -6490,6 +6573,94 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
     )
 
 
+async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    if not await prem.has_premium(context.bot, db, user_id):
+        from premium_handlers import send_premium_screen
+
+        await update.effective_message.reply_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, user_id, lang, db)
+        return ConversationHandler.END
+    current_raw = db.get_global_ignore_keywords(user_id)
+    has_words = bool(current_raw.strip())
+    current = _ignore_keywords_current_label(current_raw, lang)
+    if has_words:
+        current = f"<code>{html.escape(current)}</code>"
+    await update.effective_message.reply_text(
+        t(
+            "ignored_words_prompt",
+            lang,
+            current=current,
+            hint=t(
+                "ignored_words_hint_edit" if has_words else "ignored_words_hint_empty",
+                lang,
+            ),
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=ignored_words_keyboard(lang, has_words=has_words),
+    )
+    return GLOBAL_IGNORE_KEYWORDS
+
+
+async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    text = (update.effective_message.text or "").strip()
+    if text in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return GLOBAL_IGNORE_KEYWORDS
+    keywords = normalize_ignore_keywords(text)
+    db: Database = context.application.bot_data["db"]
+    db.set_global_ignore_keywords(user_id, keywords)
+    await update.effective_message.reply_text(
+        t("ignored_words_cleared" if not keywords else "ignored_words_saved", lang),
+        reply_markup=settings_menu(lang),
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def receive_ignored_words_clear(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.set_global_ignore_keywords(user_id, "")
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        user_id,
+        t("ignored_words_cleared", lang),
+        reply_markup=settings_menu(lang),
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def receive_ignored_words_cancel(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        user_id,
+        t("menu_settings", lang),
+        reply_markup=settings_menu(lang),
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
 async def _refresh_sys_notifications_menu(
     query, context: ContextTypes.DEFAULT_TYPE, lang: str, user_id: int
 ) -> None:
@@ -6613,7 +6784,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
-    if should_ignore_stream(sub.ignore_keywords, game, title):
+    if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
         return
     text = render_template(
         sub.message_template, username, game, title, stream=stream
@@ -6673,7 +6844,7 @@ async def _send_delayed_category_notification(
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
-    if should_ignore_stream(sub.ignore_keywords, game, title):
+    if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
         return
     text = render_template(
         sub.message_template, username, game, title, stream=stream
@@ -6718,7 +6889,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 continue
             if is_on_notify_cooldown(sub):
                 continue
-            if should_ignore_stream(sub.ignore_keywords, game, title):
+            if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
                 continue
             if sub.delay_minutes > 0:
                 context.job_queue.run_once(
@@ -6760,7 +6931,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 continue
             if is_on_notify_cooldown(sub):
                 continue
-            if should_ignore_stream(sub.ignore_keywords, game, title):
+            if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
                 continue
             if sub.delay_minutes > 0:
                 game_id = str(stream.get("game_id") or "")
@@ -7289,6 +7460,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(_btn_filter("watch"), start_what_to_watch),
             MessageHandler(_btn_filter("create_schedule"), start_stream_schedule),
             MessageHandler(_btn_filter("language"), start_language_change),
+            MessageHandler(_btn_filter("ignored_words"), start_ignored_words),
             MessageHandler(_btn_filter("broadcast_new"), admin_broadcast_start),
             CallbackQueryHandler(on_import_mode_sync, pattern=r"^import_mode:sync$"),
             CallbackQueryHandler(on_sync_change_period, pattern=r"^sync:period$"),
@@ -7372,9 +7544,22 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(
+                    receive_ignore_keywords_global_toggle,
+                    pattern=r"^ignore_keywords:global_toggle$",
+                ),
+                CallbackQueryHandler(
                     receive_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_ignore_keywords),
+            ],
+            GLOBAL_IGNORE_KEYWORDS: [
+                CallbackQueryHandler(
+                    receive_ignored_words_clear, pattern=r"^ignored_words:clear$"
+                ),
+                CallbackQueryHandler(
+                    receive_ignored_words_cancel, pattern=r"^ignored_words:cancel$"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_ignored_words),
             ],
             LINK_PREVIEW: [
                 _wiz_cancel,
@@ -7421,6 +7606,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             EDIT_IGNORE_KEYWORDS: [
                 _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_ignore_keywords_global_toggle,
+                    pattern=r"^ignore_keywords:global_toggle$",
+                ),
                 CallbackQueryHandler(
                     receive_edit_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
                 ),
@@ -7668,6 +7857,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("back")
                 | _btn_filter("language")
                 | _btn_filter("sys_notifications")
+                | _btn_filter("ignored_words")
                 | _btn_filter("sync_subs")
                 | _btn_filter("admin")
                 | _btn_filter("broadcast")

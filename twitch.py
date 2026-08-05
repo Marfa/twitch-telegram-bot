@@ -538,6 +538,10 @@ def normalize_ignore_keywords(text: str) -> str:
     return ", ".join(part for part in parts if part)
 
 
+def merge_ignore_keywords(*parts: str) -> str:
+    return normalize_ignore_keywords(", ".join(parts))
+
+
 def should_ignore_stream(ignore_keywords: str, game: str, title: str) -> bool:
     if not ignore_keywords.strip():
         return False

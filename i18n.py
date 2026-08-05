@@ -38,6 +38,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_back": "« Back",
         "btn_wizard_cancel": "Cancel",
         "btn_sys_notifications": "🔔 System alerts",
+        "btn_ignored_words": "🚫 Ignored words",
         "btn_sys_updates": "📬 Bot update alerts",
         "btn_sync_subs": "🔄 Subscription sync",
         "btn_premium": "⭐ Premium",
@@ -432,11 +433,33 @@ _STRINGS: dict[str, dict[str, str]] = {
             "the notification from being sent.\n\n"
             "If multiple words, separate them with commas.\n"
             "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n\n"
-            "Send the list or tap Skip."
+            "Send the list or tap Skip.\n"
+            "Toggle «Use global list» to also apply words from Settings → Ignored words."
         ),
         "ignore_keywords_skip": "Skip ⏭",
+        "ignore_keywords_use_global": "Use global list",
         "ignore_keywords_yes_note": "Ignore keywords: {keywords}",
+        "ignore_keywords_yes_global_note": "Ignore keywords: {keywords} (+ global list)",
+        "ignore_keywords_global_only_note": "Ignore keywords: global list",
         "ignore_keywords_no_note": "Ignore keywords: none",
+        "ignored_words_prompt": (
+            "<b>Ignored words</b>\n\n"
+            "Current: {current}\n\n"
+            "This global list can be applied to alerts via "
+            "«Use global list» when setting ignore keywords.\n\n"
+            "If multiple words, separate them with commas.\n"
+            "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n"
+            "{hint}"
+        ),
+        "ignored_words_hint_empty": "Send the list of words.",
+        "ignored_words_hint_edit": (
+            "Send a new list to replace. «Clear» — remove the list. "
+            "«Cancel» — leave unchanged."
+        ),
+        "ignored_words_clear": "Clear list",
+        "ignored_words_cancel": "Cancel",
+        "ignored_words_saved": "✅ Ignored words saved.",
+        "ignored_words_cleared": "✅ Ignored words cleared.",
         "link_preview_prompt": "Show link preview in notifications?",
         "link_preview_on": "✅ Show preview",
         "link_preview_off": "❌ Hide preview",
@@ -501,6 +524,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_schedule_reminder": "• Stream reminder: {minutes} min before",
         "sub_list_schedule_reminder_none": "• Stream reminder: no",
         "sub_list_ignore_yes": "• Ignore keywords: {keywords}",
+        "sub_list_ignore_yes_global": "• Ignore keywords: {keywords} (+ global)",
+        "sub_list_ignore_global_only": "• Ignore keywords: global list",
         "sub_list_ignore_no": "• Ignore keywords: none",
         "sub_list_image_no": "• Image: none",
         "sub_list_image_before": "• Image: at the beginning",
@@ -810,6 +835,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Current: {current}\n\n"
             "Send keywords separated by commas.\n"
             "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n"
+            "Toggle «Use global list» to also apply Settings → Ignored words.\n"
             "{hint}"
         ),
         "edit_ignore_keywords_hint_skip": (
@@ -967,6 +993,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_back": "« Назад",
         "btn_wizard_cancel": "Отмена",
         "btn_sys_notifications": "🔔 Системные уведомления",
+        "btn_ignored_words": "🚫 Игнорируемые слова",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "btn_sync_subs": "🔄 Синхронизация подписок",
         "btn_premium": "⭐ Премиум",
@@ -1363,11 +1390,37 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Если несколько слов, укажите их через запятую.\n"
             "Поддерживается regexp (без учёта регистра), например "
             "<code>just.?chatting|irl</code>.\n\n"
-            "Отправьте список слов или нажмите «Пропустить»."
+            "Отправьте список слов или нажмите «Пропустить».\n"
+            "Включите «Использовать глобальный список», чтобы также применить слова "
+            "из Настройки → Игнорируемые слова."
         ),
         "ignore_keywords_skip": "Пропустить ⏭",
+        "ignore_keywords_use_global": "Использовать глобальный список",
         "ignore_keywords_yes_note": "Игнорировать ключевые слова: {keywords}",
+        "ignore_keywords_yes_global_note": (
+            "Игнорировать ключевые слова: {keywords} (+ глобальный список)"
+        ),
+        "ignore_keywords_global_only_note": "Игнорировать ключевые слова: глобальный список",
         "ignore_keywords_no_note": "Игнорировать ключевые слова: нет",
+        "ignored_words_prompt": (
+            "<b>Игнорируемые слова</b>\n\n"
+            "Сейчас: {current}\n\n"
+            "Этот глобальный список можно применить к оповещениям через "
+            "«Использовать глобальный список» при настройке игнорируемых ключевых слов.\n\n"
+            "Если несколько слов, укажите их через запятую.\n"
+            "Поддерживается regexp (без учёта регистра), например "
+            "<code>just.?chatting|irl</code>.\n"
+            "{hint}"
+        ),
+        "ignored_words_hint_empty": "Отправьте список слов.",
+        "ignored_words_hint_edit": (
+            "Отправьте новый список, чтобы заменить. «Очистить» — удалить список. "
+            "«Отмена» — без изменений."
+        ),
+        "ignored_words_clear": "Очистить список",
+        "ignored_words_cancel": "Отмена",
+        "ignored_words_saved": "✅ Игнорируемые слова сохранены.",
+        "ignored_words_cleared": "✅ Игнорируемые слова очищены.",
         "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
         "link_preview_on": "✅ Показывать превью",
         "link_preview_off": "❌ Скрыть превью",
@@ -1432,6 +1485,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_schedule_reminder": "• Напоминание о стриме: за {minutes} мин.",
         "sub_list_schedule_reminder_none": "• Напоминание о стриме: нет",
         "sub_list_ignore_yes": "• Игнорировать ключевые слова: {keywords}",
+        "sub_list_ignore_yes_global": "• Игнорировать ключевые слова: {keywords} (+ глобальный)",
+        "sub_list_ignore_global_only": "• Игнорировать ключевые слова: глобальный список",
         "sub_list_ignore_no": "• Игнорировать ключевые слова: нет",
         "sub_list_image_no": "• Изображение: нет",
         "sub_list_image_before": "• Изображение: в начале",
@@ -1746,6 +1801,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Отправьте ключевые слова через запятую.\n"
             "Поддерживается regexp (без учёта регистра), например "
             "<code>just.?chatting|irl</code>.\n"
+            "Включите «Использовать глобальный список», чтобы также применить "
+            "Настройки → Игнорируемые слова.\n"
             "{hint}"
         ),
         "edit_ignore_keywords_hint_skip": (
@@ -1953,6 +2010,7 @@ def all_menu_buttons() -> set[str]:
         "stats",
         "back",
         "sys_notifications",
+        "ignored_words",
         "sync_subs",
         "premium",
         "partner",
@@ -2020,9 +2078,10 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(btn("sys_notifications", lang)),
-                KeyboardButton(btn("language", lang)),
+                KeyboardButton(btn("ignored_words", lang)),
             ],
             [
+                KeyboardButton(btn("language", lang)),
                 KeyboardButton(btn("partner", lang)),
             ],
             [
@@ -2375,23 +2434,62 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def ignore_keywords_keyboard(lang: str, *, as_cancel: bool = False) -> InlineKeyboardMarkup:
+def ignore_keywords_keyboard(
+    lang: str,
+    *,
+    as_cancel: bool = False,
+    use_global: bool = False,
+) -> InlineKeyboardMarkup:
+    mark = "✅ " if use_global else "❌ "
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                mark + t("ignore_keywords_use_global", lang),
+                callback_data="ignore_keywords:global_toggle",
+            )
+        ]
+    ]
     if as_cancel:
-        return InlineKeyboardMarkup(
+        rows.append(
             [
-                [
-                    InlineKeyboardButton(
-                        t("ignore_keywords_cancel", lang),
-                        callback_data="ignore_keywords:cancel",
-                    )
-                ]
+                InlineKeyboardButton(
+                    t("ignore_keywords_cancel", lang),
+                    callback_data="ignore_keywords:cancel",
+                )
             ]
         )
-    return InlineKeyboardMarkup(
+    else:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("ignore_keywords_skip", lang),
+                    callback_data="ignore_keywords:skip",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def ignored_words_keyboard(lang: str, *, has_words: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_words:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("ignored_words_clear", lang),
+                    callback_data="ignored_words:clear",
+                )
+            ]
+        )
+    rows.append(
         [
-            [InlineKeyboardButton(t("ignore_keywords_skip", lang), callback_data="ignore_keywords:skip")],
+            InlineKeyboardButton(
+                t("ignored_words_cancel", lang),
+                callback_data="ignored_words:cancel",
+            )
         ]
     )
+    return InlineKeyboardMarkup(rows)
 
 
 def delay_keyboard(lang: str) -> InlineKeyboardMarkup:

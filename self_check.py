@@ -13,6 +13,7 @@ from twitch import (
     filter_streams_for_watch,
     find_placeholder_typos,
     normalize_ignore_keywords,
+    merge_ignore_keywords,
     normalize_watch_tags,
     pick_random_streams,
     preview_stream_title,
@@ -190,6 +191,9 @@ def main() -> None:
 
     assert normalize_ignore_keywords("foo, bar , baz") == "foo, bar, baz"
     assert normalize_ignore_keywords("") == ""
+    assert merge_ignore_keywords("foo", "bar, baz") == "foo, bar, baz"
+    assert merge_ignore_keywords("foo", "") == "foo"
+    assert merge_ignore_keywords("", "") == ""
     assert should_ignore_stream("chatting", "Just Chatting", "Playing games")
     assert should_ignore_stream("foo", "Foo Bar", "Playing games")
     assert should_ignore_stream("stream", "Just Chatting", "My Foo stream")
@@ -749,10 +753,20 @@ def main() -> None:
         assert sub is not None
         assert sub.notify_delete_fail is True
         assert sub.ignore_keywords == ""
+        assert sub.use_global_ignore is False
         assert db.update_subscription(sub_id, 1, ignore_keywords="foo, bar")
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.ignore_keywords == "foo, bar"
+        assert db.update_subscription(sub_id, 1, use_global_ignore=True)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.use_global_ignore is True
+        assert db.get_global_ignore_keywords(1) == ""
+        db.set_global_ignore_keywords(1, "irl, chatting")
+        assert db.get_global_ignore_keywords(1) == "irl, chatting"
+        db.set_global_ignore_keywords(1, "")
+        assert db.get_global_ignore_keywords(1) == ""
         assert sub.image_file_id is None
         assert sub.image_position == ""
         assert db.update_subscription(
