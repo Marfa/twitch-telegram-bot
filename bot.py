@@ -5683,11 +5683,11 @@ async def _send_admin_broadcast(
     for uid in user_ids:
         locale = user_locales[uid]
         body = translations.get(locale, text)
-        type_label = _broadcast_type_label(msg_type, locale)
-        if msg_type in ("bot_update", "availability"):
-            footer = t("broadcast_footer", locale, type=type_label)
-        else:
-            footer = t("broadcast_footer_other", locale, type=type_label)
+        footer = t(
+            "broadcast_footer",
+            locale,
+            type=_broadcast_type_label(msg_type, locale),
+        )
         message = f"{body}\n\n{footer}"
         result = await _send_dm_html(context.bot, db, uid, message)
         if result == "sent":
