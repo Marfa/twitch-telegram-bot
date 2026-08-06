@@ -892,9 +892,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_done": (
             "Broadcast complete.\n"
             "Sent: {sent}\n"
-            "Blocked the bot: {blocked}\n"
             "Failed: {failed}\n"
-            "Total recipients: {total}"
+            "Total recipients: {total}\n"
+            "Blocked the bot: {blocked_users}"
         ),
         "broadcast_started": (
             "Broadcast started. The bot keeps working; stats arrive when it finishes."
@@ -1860,9 +1860,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_done": (
             "Рассылка завершена.\n"
             "Доставлено: {sent}\n"
-            "Заблокировали бота: {blocked}\n"
             "Ошибок: {failed}\n"
-            "Всего получателей: {total}"
+            "Всего получателей: {total}\n"
+            "Заблокировали бота: {blocked_users}"
         ),
         "broadcast_started": (
             "Рассылка запущена. Бот продолжает работать; статистика придёт по завершении."

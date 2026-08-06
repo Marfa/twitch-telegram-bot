@@ -5655,7 +5655,7 @@ async def _send_admin_broadcast(
     text: str,
     *,
     source_lang: str | None = None,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int]:
     db: Database = context.application.bot_data["db"]
     if msg_type == "bot_update":
         user_ids = db.get_bot_update_recipients()
@@ -5677,7 +5677,7 @@ async def _send_admin_broadcast(
         source,
         set(user_locales.values()),
     )
-    sent = failed = blocked = 0
+    sent = failed = 0
     for uid in user_ids:
         locale = user_locales[uid]
         body = translations.get(locale, text)
@@ -5690,12 +5690,10 @@ async def _send_admin_broadcast(
         result = await _send_dm_html(context.bot, db, uid, message)
         if result == "sent":
             sent += 1
-        elif result == "blocked":
-            blocked += 1
         else:
             failed += 1
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
-    return sent, failed, blocked, len(user_ids)
+    return sent, failed, len(user_ids)
 
 
 async def _report_broadcast_done(
@@ -5704,17 +5702,17 @@ async def _report_broadcast_done(
     *,
     sent: int,
     failed: int,
-    blocked: int,
     total: int,
 ) -> None:
     db: Database = context.application.bot_data["db"]
     lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+    blocked_users = db.get_bot_stats().blocked_users
     text = t(
         "broadcast_done",
         lang,
         sent=sent,
         failed=failed,
-        blocked=blocked,
+        blocked_users=blocked_users,
         total=total,
     )
     try:
@@ -5886,7 +5884,7 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not item:
             return
         source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-        sent, failed, blocked, total = await _send_admin_broadcast(
+        sent, failed, total = await _send_admin_broadcast(
             context, item.msg_type, item.text, source_lang=source_lang
         )
         db.mark_scheduled_broadcast_sent(broadcast_id)
@@ -5895,7 +5893,6 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
             item.created_by,
             sent=sent,
             failed=failed,
-            blocked=blocked,
             total=total,
         )
     finally:
@@ -7087,7 +7084,7 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
             continue
         try:
             source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-            sent, failed, blocked, total = await _send_admin_broadcast(
+            sent, failed, total = await _send_admin_broadcast(
                 context, item.msg_type, item.text, source_lang=source_lang
             )
             db.mark_scheduled_broadcast_sent(item.id)
@@ -7096,7 +7093,6 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
                 item.created_by,
                 sent=sent,
                 failed=failed,
-                blocked=blocked,
                 total=total,
             )
         finally:
