@@ -336,6 +336,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_publish_auth": "Authorize the bot to manage your Twitch schedule.",
         "stream_schedule_publish_auth_button": "Authorize on Twitch",
         "stream_schedule_publish_auth_unavailable": "Twitch schedule publishing is not configured (set PUBLIC_BASE_URL).",
+        "stream_schedule_publishing": "Publishing schedule on Twitch…",
         "stream_schedule_publish_ok": "✅ Schedule published on Twitch!",
         "stream_schedule_publish_ok_recurring": (
             "✅ Schedule published on Twitch as weekly recurring segments "
@@ -1295,6 +1296,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_publish_auth": "Авторизуйте бота для управления расписанием на Twitch.",
         "stream_schedule_publish_auth_button": "Авторизоваться на Twitch",
         "stream_schedule_publish_auth_unavailable": "Публикация расписания не настроена (нужен PUBLIC_BASE_URL).",
+        "stream_schedule_publishing": "Публикую расписание на Twitch…",
         "stream_schedule_publish_ok": "✅ Расписание опубликовано на Twitch!",
         "stream_schedule_publish_ok_recurring": (
             "✅ Расписание опубликовано на Twitch как еженедельные слоты "

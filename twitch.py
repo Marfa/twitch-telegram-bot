@@ -4,6 +4,7 @@ import logging
 import random
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
 from typing import Any
 from urllib.parse import urlencode
@@ -15,6 +16,8 @@ from config import TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 FOLLOWS_SCOPE = "user:read:follows"
 SCHEDULE_SCOPE = "channel:manage:schedule"
 SUBSCRIPTIONS_SCOPE = "user:read:subscriptions"
+# Schedule publish may overwrite twitch_sync used by follow import — keep both.
+SCHEDULE_OAUTH_SCOPES = f"{SCHEDULE_SCOPE} {FOLLOWS_SCOPE}"
 
 logger = logging.getLogger(__name__)
 
@@ -148,13 +151,19 @@ class TwitchClient:
         return True
 
     def get_schedule_segments(
-        self, broadcaster_id: str, *, first: int = 20
+        self, broadcaster_id: str, *, first: int = 20, start_time: str | None = None
     ) -> list[dict[str, Any]]:
         """Upcoming schedule segments; empty if no schedule."""
+        params: dict[str, str | int] = {
+            "broadcaster_id": broadcaster_id,
+            "first": max(1, min(25, first)),
+        }
+        if start_time:
+            params["start_time"] = start_time
         resp = self._session.get(
             "https://api.twitch.tv/helix/schedule",
             headers=self._headers(),
-            params={"broadcaster_id": broadcaster_id, "first": max(1, min(25, first))},
+            params=params,
             timeout=15,
         )
         if resp.status_code == 404:
@@ -163,6 +172,136 @@ class TwitchClient:
         data = resp.json().get("data") or {}
         segments = data.get("segments") or []
         return [s for s in segments if isinstance(s, dict)]
+
+    def delete_schedule_segment(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        segment_id: str,
+    ) -> None:
+        """Delete a schedule segment (entire series if recurring). Ignores 404."""
+        resp = self._session.delete(
+            "https://api.twitch.tv/helix/schedule/segment",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+            },
+            params={"broadcaster_id": broadcaster_id, "id": segment_id},
+            timeout=15,
+        )
+        if resp.status_code in (204, 404):
+            return
+        if not resp.ok:
+            detail = resp.text
+            try:
+                err = resp.json()
+                detail = err.get("message") or err.get("error") or detail
+            except Exception:
+                pass
+            raise requests.HTTPError(
+                f"{resp.status_code} Client Error: {detail} for url: {resp.url}",
+                response=resp,
+            )
+
+    @staticmethod
+    def _parse_schedule_time(value: str) -> datetime:
+        raw = (value or "").strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    @classmethod
+    def overlapping_schedule_segment_ids(
+        cls,
+        segments: list[dict[str, Any]],
+        *,
+        start_time: str,
+        duration: int,
+    ) -> list[str]:
+        """Segment ids whose time window overlaps [start, start+duration).
+
+        Recurring series also match by weekday + time-of-day (Twitch overlap rule).
+        """
+        start = cls._parse_schedule_time(start_time)
+        end = start + timedelta(minutes=max(1, int(duration)))
+        new_tod0 = start.hour * 60 + start.minute
+        new_tod1 = new_tod0 + max(1, int(duration))
+        out: list[str] = []
+        seen: set[str] = set()
+        for seg in segments:
+            sid = str(seg.get("id") or "")
+            if not sid or sid in seen:
+                continue
+            ss = seg.get("start_time")
+            if not ss:
+                continue
+            s0 = cls._parse_schedule_time(str(ss))
+            ee = seg.get("end_time")
+            e0 = (
+                cls._parse_schedule_time(str(ee))
+                if ee
+                else s0 + timedelta(minutes=max(1, int(duration)))
+            )
+            absolute = start < e0 and s0 < end
+            recurring_tod = False
+            if seg.get("is_recurring") and s0.weekday() == start.weekday():
+                tod0 = s0.hour * 60 + s0.minute
+                tod1 = tod0 + max(1, int((e0 - s0).total_seconds() // 60) or duration)
+                recurring_tod = new_tod0 < tod1 and tod0 < new_tod1
+            if absolute or recurring_tod:
+                seen.add(sid)
+                out.append(sid)
+        return out
+
+    def delete_overlapping_schedule_segments(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        *,
+        start_time: str,
+        duration: int = 120,
+    ) -> int:
+        """Delete existing segments that would overlap a new one. Returns deleted count."""
+        day_start = self._parse_schedule_time(start_time).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        existing = self.get_schedule_segments(
+            broadcaster_id,
+            first=25,
+            start_time=day_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+        ids = self.overlapping_schedule_segment_ids(
+            existing, start_time=start_time, duration=duration
+        )
+        for sid in ids:
+            try:
+                self.delete_schedule_segment(user_access_token, broadcaster_id, sid)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete overlapping schedule segment %s: %s", sid, exc
+                )
+        return len(ids)
+
+    def validate_user_token(self, user_access_token: str) -> dict[str, Any]:
+        """Validate a user access token; returns Twitch payload (scopes, user_id, …)."""
+        resp = self._session.get(
+            "https://id.twitch.tv/oauth2/validate",
+            headers={"Authorization": f"OAuth {user_access_token}"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def token_has_scope(self, user_access_token: str, scope: str) -> bool:
+        try:
+            info = self.validate_user_token(user_access_token)
+        except Exception:
+            return False
+        scopes = info.get("scopes") or []
+        return scope in scopes
 
     def build_authorize_url(
         self,
@@ -284,8 +423,7 @@ class TwitchClient:
         return resp.json().get("data") or []
 
     @staticmethod
-    def is_one_off_schedule_forbidden(exc: BaseException) -> bool:
-        """True when Twitch rejects non-recurring segments (non Partner/Affiliate)."""
+    def _schedule_error_detail(exc: BaseException) -> str:
         resp = getattr(exc, "response", None)
         detail = ""
         if resp is not None:
@@ -293,9 +431,17 @@ class TwitchClient:
                 detail = (resp.json() or {}).get("message") or ""
             except Exception:
                 detail = resp.text or ""
-        if not detail:
-            detail = str(exc)
-        return "single segment creation not authorized" in detail.lower()
+        return (detail or str(exc)).lower()
+
+    @classmethod
+    def is_one_off_schedule_forbidden(cls, exc: BaseException) -> bool:
+        """True when Twitch rejects non-recurring segments (non Partner/Affiliate)."""
+        return "single segment creation not authorized" in cls._schedule_error_detail(exc)
+
+    @classmethod
+    def is_overlapping_schedule(cls, exc: BaseException) -> bool:
+        """True when Twitch rejects a segment that overlaps an existing one."""
+        return "overlapping segment" in cls._schedule_error_detail(exc)
 
     def create_schedule_segment(
         self,
@@ -356,11 +502,13 @@ class TwitchClient:
         title: str = "",
         category_id: str = "",
         prefer_recurring: bool = False,
+        replace_overlap: bool = True,
     ) -> tuple[dict[str, Any], bool]:
         """Create one-off segment; on Partner/Affiliate restriction retry as recurring.
 
         Returns (response_json, used_recurring). If prefer_recurring is True, skips
         the one-off attempt (sticky after first fallback in a batch).
+        On overlap, deletes conflicting segments and retries once when replace_overlap.
         """
         kwargs = dict(
             user_access_token=user_access_token,
@@ -371,14 +519,29 @@ class TwitchClient:
             title=title,
             category_id=category_id,
         )
+
+        def _create(recurring: bool) -> dict[str, Any]:
+            try:
+                return self.create_schedule_segment(**kwargs, is_recurring=recurring)
+            except Exception as exc:
+                if not replace_overlap or not self.is_overlapping_schedule(exc):
+                    raise
+                self.delete_overlapping_schedule_segments(
+                    user_access_token,
+                    broadcaster_id,
+                    start_time=start_time,
+                    duration=duration,
+                )
+                return self.create_schedule_segment(**kwargs, is_recurring=recurring)
+
         if prefer_recurring:
-            return self.create_schedule_segment(**kwargs, is_recurring=True), True
+            return _create(True), True
         try:
-            return self.create_schedule_segment(**kwargs, is_recurring=False), False
+            return _create(False), False
         except Exception as exc:
             if not self.is_one_off_schedule_forbidden(exc):
                 raise
-            return self.create_schedule_segment(**kwargs, is_recurring=True), True
+            return _create(True), True
 
     def _igdb_headers(self) -> dict[str, str]:
         return {

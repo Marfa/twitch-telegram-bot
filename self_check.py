@@ -126,11 +126,36 @@ def main() -> None:
         Exception("403 Client Error: single segment creation not authorized for url: x")
     )
     assert not TwitchClient.is_one_off_schedule_forbidden(Exception("rate limit exceeded"))
+    assert TwitchClient.is_overlapping_schedule(
+        Exception("400 Client Error: Segment cannot create overlapping segment for url: x")
+    )
+    overlap_ids = TwitchClient.overlapping_schedule_segment_ids(
+        [
+            {
+                "id": "seg-a",
+                "start_time": "2026-08-10T12:30:00Z",
+                "end_time": "2026-08-10T14:30:00Z",
+            },
+            {
+                "id": "seg-b",
+                "start_time": "2026-08-11T12:30:00Z",
+                "end_time": "2026-08-11T14:30:00Z",
+            },
+        ],
+        start_time="2026-08-10T12:30:00Z",
+        duration=120,
+    )
+    assert overlap_ids == ["seg-a"]
+    from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE
+
+    assert SCHEDULE_SCOPE in SCHEDULE_OAUTH_SCOPES
     from health import _html_page
     from i18n import t as tr
 
     assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "en")
     assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "ru")
+    assert tr("stream_schedule_publishing", "ru")
+    assert tr("stream_schedule_publishing", "en")
     html_ru = _html_page(
         tr("oauth_web_done_title", "ru"),
         tr("oauth_web_done_body", "ru"),

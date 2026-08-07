@@ -3352,7 +3352,7 @@ async def stream_schedule_publish_callback(
 ) -> int:
     from config import twitch_oauth_redirect_uri
     from health import create_oauth_state
-    from twitch import SCHEDULE_SCOPE, TwitchClient
+    from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE, TwitchClient
 
     query = update.callback_query
     await query.answer()
@@ -3374,6 +3374,44 @@ async def stream_schedule_publish_callback(
     ]
     context.user_data.clear()
 
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    sync = db.get_twitch_sync(user_id)
+    if sync and sync.refresh_token:
+        try:
+            token_data = await asyncio.to_thread(
+                twitch.refresh_user_token, sync.refresh_token
+            )
+            access = token_data.get("access_token") or ""
+            refresh = token_data.get("refresh_token") or sync.refresh_token
+            if access and await asyncio.to_thread(
+                twitch.token_has_scope, access, SCHEDULE_SCOPE
+            ):
+                if refresh != sync.refresh_token:
+                    db.update_twitch_sync_tokens(
+                        user_id,
+                        refresh,
+                        last_sync_at=sync.last_sync_at
+                        or datetime.now(timezone.utc).isoformat(),
+                        next_sync_at=sync.next_sync_at,
+                    )
+                await query.edit_message_text(t("stream_schedule_publishing", lang))
+                await _complete_schedule_publish(
+                    context.application,
+                    user_id,
+                    None,
+                    {
+                        "access_token": access,
+                        "refresh_token": "",
+                        "twitch_user_id": sync.twitch_user_id,
+                    },
+                )
+                return ConversationHandler.END
+        except Exception:
+            logger.exception(
+                "Saved Twitch token unusable for schedule publish (user=%s)", user_id
+            )
+
     redirect_uri = twitch_oauth_redirect_uri()
     if not redirect_uri:
         await query.edit_message_text(t("stream_schedule_publish_auth_unavailable", lang))
@@ -3382,10 +3420,9 @@ async def stream_schedule_publish_callback(
         )
         return ConversationHandler.END
 
-    twitch: TwitchClient = context.application.bot_data["twitch"]
     state = create_oauth_state(user_id, lang, purpose="schedule")
     url = twitch.build_authorize_url(
-        redirect_uri=redirect_uri, state=state, scopes=SCHEDULE_SCOPE
+        redirect_uri=redirect_uri, state=state, scopes=SCHEDULE_OAUTH_SCOPES
     )
     await query.edit_message_text(
         t("stream_schedule_publish_auth", lang),
@@ -3503,13 +3540,24 @@ async def schedule_save_token_callback(
         await query.edit_message_reply_markup(None)
         return
     db: Database = context.application.bot_data["db"]
-    db.upsert_twitch_sync(
-        owner_id=user_id,
-        twitch_user_id=pending["twitch_user_id"],
-        refresh_token=pending["refresh_token"],
-        period_days=0,
-        next_sync_at="9999-12-31T00:00:00+00:00",
-    )
+    existing = db.get_twitch_sync(user_id)
+    if existing and existing.period_days > 0:
+        db.upsert_twitch_sync(
+            owner_id=user_id,
+            twitch_user_id=pending["twitch_user_id"],
+            refresh_token=pending["refresh_token"],
+            period_days=existing.period_days,
+            next_sync_at=existing.next_sync_at,
+            last_sync_at=existing.last_sync_at,
+        )
+    else:
+        db.upsert_twitch_sync(
+            owner_id=user_id,
+            twitch_user_id=pending["twitch_user_id"],
+            refresh_token=pending["refresh_token"],
+            period_days=0,
+            next_sync_at="9999-12-31T00:00:00+00:00",
+        )
     await query.edit_message_text(
         query.message.text + "\n\n" + t("stream_schedule_token_saved", lang)
     )
