@@ -108,9 +108,15 @@ def main() -> None:
     assert pop_oauth_state(state) is None
     state2 = create_oauth_state(42, "en", purpose="schedule")
     assert pop_oauth_state(state2) == (42, "en", "schedule")
+    assert TwitchClient.is_one_off_schedule_forbidden(
+        Exception("403 Client Error: single segment creation not authorized for url: x")
+    )
+    assert not TwitchClient.is_one_off_schedule_forbidden(Exception("rate limit exceeded"))
     from health import _html_page
     from i18n import t as tr
 
+    assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "en")
+    assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "ru")
     html_ru = _html_page(
         tr("oauth_web_done_title", "ru"),
         tr("oauth_web_done_body", "ru"),

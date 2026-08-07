@@ -337,6 +337,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_publish_auth_button": "Authorize on Twitch",
         "stream_schedule_publish_auth_unavailable": "Twitch schedule publishing is not configured (set PUBLIC_BASE_URL).",
         "stream_schedule_publish_ok": "✅ Schedule published on Twitch!",
+        "stream_schedule_publish_ok_recurring": (
+            "✅ Schedule published on Twitch as weekly recurring segments "
+            "(one-off slots are only available for Partner/Affiliate)."
+        ),
         "stream_schedule_publish_fail": "❌ Failed to publish schedule: {error}",
         "stream_schedule_publish_partial": "⚠️ Published {ok}/{total} segments. Errors: {errors}",
         "stream_schedule_save_token": "💾 Save authorization",
@@ -1296,6 +1300,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_publish_auth_button": "Авторизоваться на Twitch",
         "stream_schedule_publish_auth_unavailable": "Публикация расписания не настроена (нужен PUBLIC_BASE_URL).",
         "stream_schedule_publish_ok": "✅ Расписание опубликовано на Twitch!",
+        "stream_schedule_publish_ok_recurring": (
+            "✅ Расписание опубликовано на Twitch как еженедельные слоты "
+            "(разовые сегменты доступны только Partner/Affiliate)."
+        ),
         "stream_schedule_publish_fail": "❌ Не удалось опубликовать расписание: {error}",
         "stream_schedule_publish_partial": "⚠️ Опубликовано {ok}/{total} сегментов. Ошибки: {errors}",
         "stream_schedule_save_token": "💾 Сохранить авторизацию",

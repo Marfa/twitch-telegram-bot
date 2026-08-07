@@ -283,6 +283,20 @@ class TwitchClient:
         resp.raise_for_status()
         return resp.json().get("data") or []
 
+    @staticmethod
+    def is_one_off_schedule_forbidden(exc: BaseException) -> bool:
+        """True when Twitch rejects non-recurring segments (non Partner/Affiliate)."""
+        resp = getattr(exc, "response", None)
+        detail = ""
+        if resp is not None:
+            try:
+                detail = (resp.json() or {}).get("message") or ""
+            except Exception:
+                detail = resp.text or ""
+        if not detail:
+            detail = str(exc)
+        return "single segment creation not authorized" in detail.lower()
+
     def create_schedule_segment(
         self,
         user_access_token: str,
@@ -330,6 +344,41 @@ class TwitchClient:
                 response=resp,
             )
         return resp.json()
+
+    def create_schedule_segment_with_fallback(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        *,
+        start_time: str,
+        timezone: str,
+        duration: int = 120,
+        title: str = "",
+        category_id: str = "",
+        prefer_recurring: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
+        """Create one-off segment; on Partner/Affiliate restriction retry as recurring.
+
+        Returns (response_json, used_recurring). If prefer_recurring is True, skips
+        the one-off attempt (sticky after first fallback in a batch).
+        """
+        kwargs = dict(
+            user_access_token=user_access_token,
+            broadcaster_id=broadcaster_id,
+            start_time=start_time,
+            timezone=timezone,
+            duration=duration,
+            title=title,
+            category_id=category_id,
+        )
+        if prefer_recurring:
+            return self.create_schedule_segment(**kwargs, is_recurring=True), True
+        try:
+            return self.create_schedule_segment(**kwargs, is_recurring=False), False
+        except Exception as exc:
+            if not self.is_one_off_schedule_forbidden(exc):
+                raise
+            return self.create_schedule_segment(**kwargs, is_recurring=True), True
 
     def _igdb_headers(self) -> dict[str, str]:
         return {

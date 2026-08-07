@@ -3390,6 +3390,8 @@ async def _complete_schedule_publish(
 
     ok_count = 0
     errors: list[str] = []
+    prefer_recurring = False
+    used_recurring_fallback = False
     for entry in entries:
         hour, minute = (int(x) for x in entry["time"].split(":", 1))
         y, m, d = (int(x) for x in entry["date"].split("-", 2))
@@ -3405,21 +3407,31 @@ async def _complete_schedule_publish(
             except Exception:
                 pass
         try:
-            twitch.create_schedule_segment(
+            # Partner/Affiliate → one-off; else Twitch 403 → weekly recurring fallback.
+            _, recurring = twitch.create_schedule_segment_with_fallback(
                 access,
                 twitch_user_id,
                 start_time=start_iso,
                 timezone=SCHEDULE_TZ_NAME,
                 title=game_text or "",
                 category_id=category_id,
+                prefer_recurring=prefer_recurring,
             )
+            if recurring:
+                prefer_recurring = True
+                used_recurring_fallback = True
             ok_count += 1
         except Exception as exc:
             errors.append(f"{entry['date']}: {exc}")
 
     total = len(entries)
     if ok_count == total:
-        text = t("stream_schedule_publish_ok", lang)
+        key = (
+            "stream_schedule_publish_ok_recurring"
+            if used_recurring_fallback
+            else "stream_schedule_publish_ok"
+        )
+        text = t(key, lang)
     elif ok_count > 0:
         text = t("stream_schedule_publish_partial", lang, ok=ok_count, total=total, errors="; ".join(errors))
     else:
