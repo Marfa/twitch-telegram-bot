@@ -471,9 +471,12 @@ def render_template(
     game: str = "",
     name: str = "",
     stream: dict[str, Any] | None = None,
+    extra: dict[str, str] | None = None,
 ) -> str:
     """Fill template placeholders from channel + optional Helix stream payload."""
     values = _template_values(username, game, name, stream)
+    if extra:
+        values.update(extra)
     out = template
     # Longer keys first so {game_id} is not partially eaten by {game}.
     for key in sorted(values, key=len, reverse=True):
@@ -500,6 +503,7 @@ def _template_values(
         "game_id": "—",
         "id": "—",
         "type": "—",
+        "minutes": "—",
     }
     if not stream:
         return values
@@ -549,7 +553,17 @@ _TEMPLATE_PLACEHOLDERS = (
     "game_id",
     "id",
     "type",
+    "minutes",
 )
+# Telegram may linkify these even without a scheme; used to decide link-preview UI.
+_TEMPLATE_LINK_RE = re.compile(
+    r"(https?://|www\.|t\.me/|telegram\.me/|twitch\.tv/)", re.IGNORECASE
+)
+
+
+def template_has_link(template: str) -> bool:
+    """True if the template text is likely to produce a Telegram link preview."""
+    return bool(_TEMPLATE_LINK_RE.search(template or ""))
 _KNOWN_PLACEHOLDER_TOKENS = frozenset(f"{{{p}}}" for p in _TEMPLATE_PLACEHOLDERS)
 # Brace-ish tokens: {game}, {game), (game}, [name}, {User_Name}, …
 _PLACEHOLDER_CANDIDATE_RE = re.compile(

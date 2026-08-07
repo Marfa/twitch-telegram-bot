@@ -119,6 +119,7 @@ from twitch import (
     preview_stream_title,
     render_template,
     should_ignore_stream,
+    template_has_link,
     twitch_status_fingerprint,
 )
 from translate import build_translations
@@ -703,9 +704,9 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def _continue_after_delay(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    """After delay step: skip repeat mute for stream-end / category-change alerts."""
+    """After delay step: skip repeat mute for upcoming / stream-end / category-change."""
     context.user_data.setdefault("suppress_repeat_minutes", 0)
-    if context.user_data.get("alert_type") in ("end", "category"):
+    if context.user_data.get("alert_type") in ("upcoming", "end", "category"):
         return await _go_after_repeat(update, context, lang)
     return await _prompt_repeat_step(update, context, lang)
 
@@ -983,7 +984,9 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == LINK_PREVIEW:
         return await _go_ignore_keywords_prompt(update, context, lang)
     if state == DELAY_SEND:
-        if context.user_data.get("image_file_id"):
+        if context.user_data.get("image_file_id") or not template_has_link(
+            str(context.user_data.get("message_template") or "")
+        ):
             return await _go_ignore_keywords_prompt(update, context, lang)
         return await _go_link_preview_prompt(update, context, lang)
     if state == DELAY_MINUTES:
@@ -999,7 +1002,12 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return await _go_repeat_prompt(update, context, lang)
     if state == SCHEDULE_REMINDER_MINUTES:
         if context.user_data.get("alert_type") == "upcoming":
-            return await _go_repeat_prompt(update, context, lang)
+            # Upcoming skips delay/repeat; back to preview or ignore.
+            if context.user_data.get("image_file_id") or not template_has_link(
+                str(context.user_data.get("message_template") or "")
+            ):
+                return await _go_ignore_keywords_prompt(update, context, lang)
+            return await _go_link_preview_prompt(update, context, lang)
         return await _go_schedule_reminder_ask(update, context, lang)
     if state == DEST_TYPE:
         if context.user_data.get("lucky_quick"):
@@ -1170,22 +1178,30 @@ def _format_sub_line(
         settings.append(t("sub_list_ignore_global_only", lang))
     else:
         settings.append(t("sub_list_ignore_no", lang))
-    settings.append(
-        t("sub_list_preview_off", lang)
-        if sub.disable_link_preview or sub.image_file_id
-        else t("sub_list_preview_on", lang)
-    )
-    settings.append(
-        t("sub_list_delay", lang, minutes=sub.delay_minutes)
-        if sub.delay_minutes > 0
-        else t("sub_list_delay_none", lang)
-    )
-    if not sub.notify_on_category_change:
+    if sub.image_file_id or template_has_link(sub.message_template or ""):
         settings.append(
-            t("sub_list_repeat_mute", lang, minutes=sub.suppress_repeat_minutes)
-            if sub.suppress_repeat_minutes > 0
-            else t("sub_list_repeat_allow", lang)
+            t("sub_list_preview_off", lang)
+            if sub.disable_link_preview or sub.image_file_id
+            else t("sub_list_preview_on", lang)
         )
+    is_upcoming = (
+        sub.schedule_reminder_minutes > 0
+        and not sub.notify_on_live
+        and not sub.notify_on_end
+        and not sub.notify_on_category_change
+    )
+    if not is_upcoming:
+        settings.append(
+            t("sub_list_delay", lang, minutes=sub.delay_minutes)
+            if sub.delay_minutes > 0
+            else t("sub_list_delay_none", lang)
+        )
+        if not sub.notify_on_category_change and not sub.notify_on_end:
+            settings.append(
+                t("sub_list_repeat_mute", lang, minutes=sub.suppress_repeat_minutes)
+                if sub.suppress_repeat_minutes > 0
+                else t("sub_list_repeat_allow", lang)
+            )
     if sub.schedule_reminder_configured:
         settings.append(
             t("sub_list_schedule_reminder", lang, minutes=sub.schedule_reminder_minutes)
@@ -1353,7 +1369,7 @@ async def _send_notification(
     db: Database,
     sub: Subscription,
     text: str,
-) -> None:
+) -> bool:
     if sub.delete_previous and sub.dest_type != "dm":
         to_delete: list[tuple[int, int]] = []
         seen_msg: set[int] = set()
@@ -1415,8 +1431,10 @@ async def _send_notification(
             db.set_last_message_id(sub.id, msg.message_id)
         if sub.suppress_repeat_minutes > 0:
             db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
+        return True
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
+        return False
 
 
 async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> bool:
@@ -2082,12 +2100,30 @@ async def _prompt_edit_template(
     )
 
 
+async def _go_after_link_preview_step(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """After preview choice (or skip): upcoming → reminder minutes; else → delay."""
+    context.user_data.setdefault("delay_minutes", 0)
+    context.user_data.setdefault("suppress_repeat_minutes", 0)
+    if context.user_data.get("alert_type") == "upcoming":
+        context.user_data["notify_on_live"] = False
+        context.user_data["notify_on_end"] = False
+        return await _go_schedule_reminder_minutes(update, context, lang)
+    return await _go_delay_prompt(update, context, lang)
+
+
 async def _go_after_ignore_keywords(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     if context.user_data.get("image_file_id"):
         context.user_data["disable_link_preview"] = True
-        return await _go_delay_prompt(update, context, lang)
+        return await _go_after_link_preview_step(update, context, lang)
+    template = str(context.user_data.get("message_template") or "")
+    if not template_has_link(template):
+        # No URL in template → nothing to preview; skip the ask.
+        context.user_data["disable_link_preview"] = True
+        return await _go_after_link_preview_step(update, context, lang)
     return await _go_link_preview_prompt(update, context, lang)
 
 
@@ -2148,7 +2184,7 @@ async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = _user_lang(context, query.from_user.id)
     context.user_data["disable_link_preview"] = query.data.endswith(":1")
     await query.edit_message_text("✓")
-    return await _go_delay_prompt(update, context, lang)
+    return await _go_after_link_preview_step(update, context, lang)
 
 
 async def receive_delay_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2763,15 +2799,19 @@ def _has_sibling_publication_subs(
 
 
 def _edit_options_for_sub(sub: Subscription, lang: str) -> InlineKeyboardMarkup:
+    alert_type = _alert_type_from_sub(sub)
     return edit_options_keyboard(
         sub.id,
         lang,
         dest_type=sub.dest_type,
         delete_previous=sub.delete_previous,
         has_image=bool(sub.image_file_id),
+        show_link_preview=not bool(sub.image_file_id)
+        and template_has_link(sub.message_template or ""),
         schedule_reminder_configured=sub.schedule_reminder_configured,
         notify_on_category_change=sub.notify_on_category_change,
         notify_on_end=sub.notify_on_end,
+        is_upcoming=alert_type == "upcoming",
     )
 
 
@@ -7019,27 +7059,24 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     continue
                 username = sub.twitch_username
                 title = str(segment.get("title") or "—")
-                lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-                text = t(
-                    "schedule_reminder_alert",
-                    lang,
-                    username=username,
-                    minutes=max(1, minutes_left),
-                    title=title,
+                category = segment.get("category") or {}
+                game = (
+                    str(category.get("name") or "")
+                    if isinstance(category, dict)
+                    else ""
                 )
-                try:
-                    send_kwargs: dict = {
-                        "chat_id": sub.chat_id,
-                        "text": text,
-                        "disable_web_page_preview": True,
-                    }
-                    if sub.thread_id:
-                        send_kwargs["message_thread_id"] = sub.thread_id
-                    await context.bot.send_message(**send_kwargs)
-                except (BadRequest, Forbidden) as exc:
-                    logger.warning(
-                        "Schedule reminder failed for sub %s: %s", sub.id, exc
-                    )
+                template = (sub.message_template or "").strip()
+                if not template:
+                    continue
+                text = render_template(
+                    template,
+                    username,
+                    game,
+                    title,
+                    extra={"minutes": str(max(1, minutes_left))},
+                )
+                ok = await _send_notification(context.bot, db, sub, text)
+                if not ok:
                     continue
                 db.set_last_schedule_reminder_segment(sub.id, seg_id)
                 break

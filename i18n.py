@@ -377,6 +377,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<li><code>{username}</code> — channel login</li>"
             "<li><code>{game}</code> — stream category name</li>"
             "<li><code>{name}</code> — stream title</li>"
+            "<li><code>{minutes}</code> — minutes until scheduled start (upcoming alerts)</li>"
             "<li><code>{started_at}</code> — stream start time (UTC)</li>"
             "<li><code>{viewer_count}</code> — viewers at poll time</li>"
             "<li><code>{thumbnail_url}</code> — preview image URL</li>"
@@ -492,11 +493,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "schedule_reminder_yes_note": "Stream reminder: {minutes} min before",
         "schedule_reminder_no_note": "Stream reminder: no",
-        "schedule_reminder_alert": (
-            "⏰ {username} is scheduled to go live in {minutes} min.\n"
-            "{title}\n"
-            "https://twitch.tv/{username}"
-        ),
         "schedule_live_add_prompt": (
             "Upcoming stream reminders are configured.\n"
             "Do you want to set up go-live notifications too?"
@@ -1340,6 +1336,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<li><code>{username}</code> — логин канала</li>"
             "<li><code>{game}</code> — название категории</li>"
             "<li><code>{name}</code> — название стрима</li>"
+            "<li><code>{minutes}</code> — минут до старта по расписанию (предстоящий стрим)</li>"
             "<li><code>{started_at}</code> — время старта (UTC)</li>"
             "<li><code>{viewer_count}</code> — зрители на момент запроса</li>"
             "<li><code>{thumbnail_url}</code> — URL превью кадра</li>"
@@ -1460,11 +1457,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "schedule_reminder_yes_note": "Напоминание о стриме: за {minutes} мин.",
         "schedule_reminder_no_note": "Напоминание о стриме: нет",
-        "schedule_reminder_alert": (
-            "⏰ Через {minutes} мин. стрим {username}\n"
-            "{title}\n"
-            "https://twitch.tv/{username}"
-        ),
         "schedule_live_add_prompt": (
             "Оповещение о предстоящих стримах настроено.\n"
             "Хотите настроить оповещение о начале стримов?"
@@ -2974,14 +2966,16 @@ def edit_options_keyboard(
     dest_type: str = "dm",
     delete_previous: bool = False,
     has_image: bool = False,
+    show_link_preview: bool = True,
     schedule_reminder_configured: bool = False,
     notify_on_category_change: bool = False,
     notify_on_end: bool = False,
+    is_upcoming: bool = False,
 ) -> InlineKeyboardMarkup:
     # Same order as create wizard: template → image → ignore → preview → delay
     # → repeat → schedule reminder → dest → delete.
     # Schedule reminder only if configured at creation (unchanged policy).
-    # Repeat is skipped for category-change / stream-end (same as create).
+    # Delay/repeat skipped for upcoming; repeat also skipped for category/end.
     image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
     rows = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
@@ -2999,17 +2993,18 @@ def edit_options_keyboard(
     rows.append(
         [InlineKeyboardButton(t("edit_ignore_keywords", lang), callback_data=f"edit_f:{sub_id}:ignore_keywords")]
     )
-    if not has_image:
+    if show_link_preview:
         rows.append(
             [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")]
         )
-    rows.append(
-        [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")]
-    )
-    if not notify_on_category_change and not notify_on_end:
+    if not is_upcoming:
         rows.append(
-            [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")]
+            [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")]
         )
+        if not notify_on_category_change and not notify_on_end:
+            rows.append(
+                [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")]
+            )
     if schedule_reminder_configured:
         rows.append(
             [

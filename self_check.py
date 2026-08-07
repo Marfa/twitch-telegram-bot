@@ -95,6 +95,20 @@ def main() -> None:
     assert "480x270" in thumb
     assert "{game}" not in render_template("{game_id}", "u", "G", "N", stream={"game_id": "1"})
     assert render_template("{game_id}", "u", "G", "N", stream={"game_id": "1"}) == "1"
+    assert (
+        render_template(
+            "in {minutes} min: {name}",
+            "u",
+            name="Soon",
+            extra={"minutes": "15"},
+        )
+        == "in 15 min: Soon"
+    )
+    from twitch import template_has_link
+
+    assert template_has_link("https://twitch.tv/{username}")
+    assert template_has_link("see twitch.tv/foo")
+    assert not template_has_link("Скоро стрим. Не забудь сделать анон")
     auth_url = t.build_authorize_url(
         redirect_uri="https://example.com/oauth/twitch/callback",
         state="abc",
@@ -307,7 +321,6 @@ def main() -> None:
         assert tr("edit_image_keep", loc)
         assert tr("schedule_reminder_prompt", loc)
         assert tr("schedule_reminder_minutes_prompt", loc)
-        assert tr("schedule_reminder_alert", loc, username="x", minutes=5, title="t")
         assert tr("schedule_live_add_prompt", loc)
         assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
         assert tr("alert_type_prompt", loc)
