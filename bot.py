@@ -4684,6 +4684,46 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+_EDIT_ALERT_TYPE_ORDER = ("live", "category", "upcoming", "end")
+
+
+def _edit_present_types(subs: list[Subscription]) -> list[str]:
+    present = {_alert_type_from_sub(s) for s in subs}
+    return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind in present]
+
+
+def _edit_type_keyboard(lang: str, types: list[str]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t(f"alert_type_{kind}", lang),
+                    callback_data=f"edit_type:{kind}",
+                )
+            ]
+            for kind in types
+        ]
+    )
+
+
+def _edit_pick_keyboard(
+    db: Database, owner_id: int, subs: list[Subscription]
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    _inline_btn_label(
+                        f"✏️ #{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
+                    ),
+                    callback_data=f"edit:{s.id}",
+                )
+            ]
+            for s in subs
+        ]
+    )
+
+
 async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
     user_id = update.effective_user.id
@@ -4697,22 +4737,36 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                _inline_btn_label(f"✏️ #{i} {s.twitch_username}"),
-                callback_data=f"edit:{s.id}",
-            )
-        ]
-        for i, s in enumerate(subs, 1)
-    ]
-    await update.effective_message.reply_text(
-        t("edit_pick", lang),
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    types = _edit_present_types(subs)
+    if len(types) == 1:
+        text = t("edit_pick", lang)
+        markup = _edit_pick_keyboard(db, user_id, subs)
+    else:
+        text = t("edit_type_pick", lang)
+        markup = _edit_type_keyboard(lang, types)
+    await update.effective_message.reply_text(text, reply_markup=markup)
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=subscriptions_menu(lang),
+    )
+
+
+async def on_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    kind = query.data.split(":", 1)[1]
+    if kind not in _EDIT_ALERT_TYPE_ORDER:
+        return
+    db: Database = context.application.bot_data["db"]
+    filtered = [s for s in _subs_for_owner(db, user_id) if _alert_type_from_sub(s) == kind]
+    if not filtered:
+        await query.edit_message_text(t("no_subs_short", lang))
+        return
+    await query.edit_message_text(
+        t("edit_pick", lang),
+        reply_markup=_edit_pick_keyboard(db, user_id, filtered),
     )
 
 
@@ -7625,6 +7679,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
     app.add_handler(CallbackQueryHandler(on_watch_again, pattern=r"^watch:again$"), group=0)
     app.add_handler(CallbackQueryHandler(schedule_save_token_callback, pattern=r"^sched_save_token:"), group=0)
+    app.add_handler(CallbackQueryHandler(on_edit_type, pattern=r"^edit_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(

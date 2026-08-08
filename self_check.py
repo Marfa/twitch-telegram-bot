@@ -23,6 +23,7 @@ from twitch import (
 )
 from translate import build_translations, translate_text
 from bot import (
+    _edit_present_types,
     _format_twitch_status_message,
     _is_link_preview_disabled,
     _message_link,
@@ -372,6 +373,7 @@ def main() -> None:
         assert tr("alert_type_category", loc)
         assert tr("alert_type_upcoming", loc)
         assert tr("alert_type_end", loc)
+        assert tr("edit_type_pick", loc)
         assert tr("alert_type_no_schedule", loc)
         assert tr("alert_note_live", loc, twitch_username="x")
         assert tr("alert_note_category", loc, twitch_username="x")
@@ -1045,6 +1047,25 @@ def main() -> None:
     assert "All Systems Operational" in msg_ok
     assert tr("broadcast_started", "ru")
     assert "status.twitch.com" in tr("sys_notifications_menu", "ru")
+
+    def _fake_sub(**kwargs):
+        base = dict(
+            notify_on_category_change=False,
+            notify_on_end=False,
+            schedule_reminder_minutes=0,
+            notify_on_live=True,
+        )
+        base.update(kwargs)
+        return type("Sub", (), base)()
+
+    assert _edit_present_types([_fake_sub()]) == ["live"]
+    assert _edit_present_types(
+        [
+            _fake_sub(notify_on_end=True, notify_on_live=False),
+            _fake_sub(notify_on_category_change=True, notify_on_live=False),
+            _fake_sub(),
+        ]
+    ) == ["live", "category", "end"]
 
     print("ok")
 
