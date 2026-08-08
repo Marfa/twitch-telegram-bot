@@ -1,18 +1,23 @@
-"""Premium entitlement: permanent, Stars, Twitch sub, or free-chat membership."""
+"""Premium entitlement: full plan, trial, per-feature Stars, Twitch, free-chat."""
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from config import (
     FREE_CHAT_ID,
     PREMIUM_FREE_ACTIVE_LIMIT,
     PREMIUM_STARS_AMOUNT,
+    PREMIUM_STARS_FEATURE,
+    PREMIUM_STARS_LIFETIME,
+    PREMIUM_STARS_YEAR,
     PREMIUM_SUBSCRIPTION_PERIOD,
+    PREMIUM_TRIAL_DAYS,
     PREMIUM_TWITCH_LOGIN,
+    PREMIUM_YEAR_SECONDS,
 )
 
 if TYPE_CHECKING:
@@ -25,6 +30,28 @@ logger = logging.getLogger(__name__)
 
 PREMIUM_INVOICE_PREFIX = "premium:"
 
+FEATURE_IDS: tuple[str, ...] = (
+    "extra_alerts",
+    "alert_types",
+    "twitch_sync",
+    "ignore_keywords",
+    "delay",
+    "repeat",
+    "delete_prev",
+    "schedule_publish",
+)
+
+_FEATURE_LABEL_KEYS = {
+    "extra_alerts": "premium_feat_extra_alerts",
+    "alert_types": "premium_feat_alert_types",
+    "twitch_sync": "premium_feat_twitch_sync",
+    "ignore_keywords": "premium_feat_ignore_keywords",
+    "delay": "premium_feat_delay",
+    "repeat": "premium_feat_repeat",
+    "delete_prev": "premium_feat_delete_prev",
+    "schedule_publish": "premium_feat_schedule_publish",
+}
+
 
 @dataclass(frozen=True)
 class PremiumStatus:
@@ -34,27 +61,78 @@ class PremiumStatus:
     stars_canceled: bool
     twitch_active: bool
     twitch_user_id: str
+    trial_until: int = 0
+    trial_used: bool = False
+    features: dict[str, int] = field(default_factory=dict)
 
     @property
     def stars_active(self) -> bool:
         return self.stars_until > int(time.time())
 
     @property
+    def trial_active(self) -> bool:
+        return self.trial_until > int(time.time())
+
+    @property
     def is_premium(self) -> bool:
-        return self.permanent or self.stars_active or self.twitch_active
+        """Full Premium (all features), not à la carte alone."""
+        return (
+            self.permanent
+            or self.stars_active
+            or self.twitch_active
+            or self.trial_active
+        )
+
+    def feature_until(self, feature_id: str) -> int:
+        return int(self.features.get(feature_id) or 0)
+
+    def feature_active(self, feature_id: str) -> bool:
+        return self.feature_until(feature_id) > int(time.time())
 
 
-def invoice_payload(user_id: int) -> str:
+def feature_label_key(feature_id: str) -> str:
+    return _FEATURE_LABEL_KEYS.get(feature_id, feature_id)
+
+
+def invoice_payload(user_id: int, kind: str = "month", features: list[str] | None = None) -> str:
+    if kind == "feat":
+        ids = ",".join(f for f in (features or []) if f in FEATURE_IDS)
+        return f"{PREMIUM_INVOICE_PREFIX}feat:{user_id}:{ids}"
+    if kind in ("month", "year", "life"):
+        return f"{PREMIUM_INVOICE_PREFIX}{kind}:{user_id}"
+    # legacy: premium:{uid}
     return f"{PREMIUM_INVOICE_PREFIX}{user_id}"
 
 
-def parse_invoice_payload(payload: str) -> int | None:
+@dataclass(frozen=True)
+class ParsedInvoice:
+    user_id: int
+    kind: str  # month | year | life | feat | legacy
+    features: tuple[str, ...] = ()
+
+
+def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
     if not payload.startswith(PREMIUM_INVOICE_PREFIX):
         return None
     raw = payload[len(PREMIUM_INVOICE_PREFIX) :]
-    if not raw.isdigit():
+    if raw.isdigit():
+        return ParsedInvoice(user_id=int(raw), kind="legacy")
+    parts = raw.split(":", 2)
+    if len(parts) < 2:
         return None
-    return int(raw)
+    kind, uid_s = parts[0], parts[1]
+    if not uid_s.isdigit():
+        return None
+    uid = int(uid_s)
+    if kind in ("month", "year", "life"):
+        return ParsedInvoice(user_id=uid, kind=kind)
+    if kind == "feat":
+        feat_raw = parts[2] if len(parts) > 2 else ""
+        feats = tuple(f for f in feat_raw.split(",") if f in FEATURE_IDS)
+        if not feats:
+            return None
+        return ParsedInvoice(user_id=uid, kind="feat", features=feats)
+    return None
 
 
 def get_status(db: Database, user_id: int) -> PremiumStatus:
@@ -62,7 +140,8 @@ def get_status(db: Database, user_id: int) -> PremiumStatus:
 
 
 def is_premium(db: Database, user_id: int) -> bool:
-    """DB-backed premium only (permanent / Stars / Twitch). Prefer has_premium in handlers."""
+    """DB-backed full Premium (permanent / Stars / Twitch / trial). Prefer has_premium."""
+    ensure_trial_expired(db, user_id)
     return get_status(db, user_id).is_premium
 
 
@@ -87,9 +166,30 @@ async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
     }
 
 
-async def has_premium(bot: Bot, db: Database, user_id: int) -> bool:
+def has_feature_sync(db: Database, user_id: int, feature_id: str) -> bool:
+    """DB-only feature check (no free-chat / demo). Call ensure_trial_expired first."""
+    st = get_status(db, user_id)
+    if st.is_premium:
+        return True
+    return st.feature_active(feature_id)
+
+
+async def has_feature(bot: Bot, db: Database, user_id: int, feature_id: str) -> bool:
     from demo_mode import is_active
 
+    ensure_trial_expired(db, user_id)
+    if is_active(user_id):
+        return False
+    if has_feature_sync(db, user_id, feature_id):
+        return True
+    return await is_free_chat_member(bot, user_id)
+
+
+async def has_premium(bot: Bot, db: Database, user_id: int) -> bool:
+    """Full Premium (all features). Demo always False."""
+    from demo_mode import is_active
+
+    ensure_trial_expired(db, user_id)
     if is_active(user_id):
         return False
     if is_premium(db, user_id):
@@ -105,8 +205,28 @@ def stars_price() -> int:
     return PREMIUM_STARS_AMOUNT
 
 
+def stars_year_price() -> int:
+    return PREMIUM_STARS_YEAR
+
+
+def stars_lifetime_price() -> int:
+    return PREMIUM_STARS_LIFETIME
+
+
+def stars_feature_price() -> int:
+    return PREMIUM_STARS_FEATURE
+
+
 def stars_period() -> int:
     return PREMIUM_SUBSCRIPTION_PERIOD
+
+
+def year_seconds() -> int:
+    return PREMIUM_YEAR_SECONDS
+
+
+def trial_days() -> int:
+    return PREMIUM_TRIAL_DAYS
 
 
 def twitch_channel_login() -> str:
@@ -116,8 +236,9 @@ def twitch_channel_login() -> str:
 def can_enable_more(db: Database, user_id: int) -> bool:
     from demo_mode import is_active
 
+    ensure_trial_expired(db, user_id)
     demo = is_active(user_id)
-    if not demo and is_premium(db, user_id):
+    if not demo and has_feature_sync(db, user_id, "extra_alerts"):
         return True
     return db.count_enabled_subscriptions(user_id, demo=demo) < PREMIUM_FREE_ACTIVE_LIMIT
 
@@ -125,10 +246,37 @@ def can_enable_more(db: Database, user_id: int) -> bool:
 async def can_enable_more_async(bot: Bot, db: Database, user_id: int) -> bool:
     from demo_mode import is_active
 
-    if await has_premium(bot, db, user_id):
+    if await has_feature(bot, db, user_id, "extra_alerts"):
         return True
     demo = is_active(user_id)
     return db.count_enabled_subscriptions(user_id, demo=demo) < PREMIUM_FREE_ACTIVE_LIMIT
+
+
+def ensure_trial_expired(db: Database, user_id: int) -> bool:
+    """If trial ended, pause subs and clear trial_until. Returns True if just expired."""
+    st = get_status(db, user_id)
+    if st.trial_until <= 0:
+        return False
+    if st.trial_until > int(time.time()):
+        return False
+    # Expired: pause and clear until (keep trial_used).
+    db.expire_premium_trial(user_id)
+    return True
+
+
+def start_trial(db: Database, user_id: int) -> tuple[bool, str]:
+    """Returns (ok, reason_code). reason: started | used | active | has_premium."""
+    ensure_trial_expired(db, user_id)
+    st = get_status(db, user_id)
+    if st.trial_active:
+        return False, "active"
+    if st.trial_used:
+        return False, "used"
+    if st.permanent or st.stars_active or st.twitch_active:
+        return False, "has_premium"
+    until = int(time.time()) + trial_days() * 86400
+    db.set_premium_trial(user_id, until_unix=until, used=True)
+    return True, "started"
 
 
 async def resolve_marfapr_user(twitch: TwitchClient) -> dict[str, Any] | None:
@@ -154,6 +302,42 @@ def apply_stars_payment(
         invitee_id=user_id,
         charge_id=charge_id,
         stars_paid=stars_paid if stars_paid is not None else stars_price(),
+    )
+
+
+def apply_lifetime_payment(
+    db: Database,
+    user_id: int,
+    *,
+    charge_id: str,
+    stars_paid: int | None = None,
+) -> None:
+    db.set_premium_permanent(user_id, True)
+    credit_referral_commission(
+        db,
+        invitee_id=user_id,
+        charge_id=charge_id,
+        stars_paid=stars_paid if stars_paid is not None else stars_lifetime_price(),
+    )
+
+
+def apply_features_payment(
+    db: Database,
+    user_id: int,
+    *,
+    feature_ids: list[str] | tuple[str, ...],
+    charge_id: str,
+    until_unix: int,
+    stars_paid: int | None = None,
+) -> None:
+    db.extend_premium_features(user_id, list(feature_ids), until_unix=until_unix)
+    credit_referral_commission(
+        db,
+        invitee_id=user_id,
+        charge_id=charge_id,
+        stars_paid=stars_paid
+        if stars_paid is not None
+        else stars_feature_price() * max(1, len(feature_ids)),
     )
 
 
@@ -224,3 +408,13 @@ def refresh_twitch_premium(
     except Exception:
         logger.exception("Twitch premium refresh failed for %s", user_id)
         return status.twitch_active
+
+
+def is_live_only_alert(sub: Any) -> bool:
+    """True if alert is live-start only (free-tier type)."""
+    return bool(
+        getattr(sub, "notify_on_live", True)
+        and not getattr(sub, "notify_on_end", False)
+        and not getattr(sub, "notify_on_category_change", False)
+        and not getattr(sub, "schedule_reminder_configured", False)
+    )

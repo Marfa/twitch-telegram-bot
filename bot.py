@@ -607,7 +607,7 @@ async def _prompt_repeat_step(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.has_premium(context.bot, db, user_id):
+    if not await prem.has_feature(context.bot, db, user_id, "repeat"):
         return await _show_premium_gate(
             update, context, feature="repeat", first_step=False
         )
@@ -837,7 +837,7 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, update.effective_user.id):
+    if not await prem.has_feature(context.bot, db, update.effective_user.id, "ignore_keywords"):
         return await _show_premium_gate(
             update, context, feature="ignore_keywords", first_step=False
         )
@@ -869,7 +869,7 @@ async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_
 
 async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, update.effective_user.id):
+    if not await prem.has_feature(context.bot, db, update.effective_user.id, "delay"):
         return await _show_premium_gate(
             update, context, feature="delay", first_step=False
         )
@@ -1570,8 +1570,8 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if kind not in ("live", "category", "upcoming", "end"):
         return ALERT_TYPE
     db: Database = context.application.bot_data["db"]
-    if kind != "live" and not await prem.has_premium(
-        context.bot, db, query.from_user.id
+    if kind != "live" and not await prem.has_feature(
+        context.bot, db, query.from_user.id, "alert_types"
     ):
         context.user_data["alert_type"] = kind
         return await _show_premium_gate(
@@ -2374,7 +2374,7 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, query.from_user.id):
+    if not await prem.has_feature(context.bot, db, query.from_user.id, "delay"):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -2405,7 +2405,7 @@ async def start_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, query.from_user.id):
+    if not await prem.has_feature(context.bot, db, query.from_user.id, "repeat"):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -2752,7 +2752,7 @@ async def _prompt_delete_old(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, update.effective_user.id):
+    if not await prem.has_feature(context.bot, db, update.effective_user.id, "delete_prev"):
         return await _show_premium_gate(
             update, context, feature="delete_old", first_step=False
         )
@@ -2833,7 +2833,7 @@ async def _prompt_delete_fail_notify(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.has_premium(context.bot, db, user_id):
+    if not await prem.has_feature(context.bot, db, user_id, "delete_prev"):
         return await _show_premium_gate(
             update, context, feature="delete_fail", first_step=False
         )
@@ -3362,7 +3362,7 @@ async def stream_schedule_publish_callback(
         return ConversationHandler.END
 
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, user_id):
+    if not await prem.has_feature(context.bot, db, user_id, "schedule_publish"):
         from premium_handlers import send_premium_screen
 
         context.user_data.clear()
@@ -4964,7 +4964,7 @@ async def on_import_mode_sync(update: Update, context: ContextTypes.DEFAULT_TYPE
     owner_id = query.from_user.id
     lang = _user_lang(context, owner_id)
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, owner_id):
+    if not await prem.has_feature(context.bot, db, owner_id, "twitch_sync"):
         return await _show_premium_gate(
             update, context, feature="sync", first_step=True
         )
@@ -5071,7 +5071,7 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    if not await prem.has_premium(context.bot, db, user_id):
+    if not await prem.has_feature(context.bot, db, user_id, "twitch_sync"):
         from premium_handlers import send_premium_screen
 
         await update.effective_message.reply_text(
@@ -5340,7 +5340,7 @@ async def start_edit_ignore_keywords(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_premium(context.bot, db, query.from_user.id):
+    if not await prem.has_feature(context.bot, db, query.from_user.id, "ignore_keywords"):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -5540,16 +5540,16 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             reply_markup=_edit_options_for_sub(sub, lang),
         )
         return
-    if field in ("delete_old", "delete_fail", "delete_other", "repeat") and not await prem.has_premium(
-        context.bot, db, query.from_user.id
-    ):
-        from premium_handlers import send_premium_screen
+    if field in ("delete_old", "delete_fail", "delete_other", "repeat"):
+        feat = "repeat" if field == "repeat" else "delete_prev"
+        if not await prem.has_feature(context.bot, db, query.from_user.id, feat):
+            from premium_handlers import send_premium_screen
 
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(context.bot, query.from_user.id, lang, db)
-        return
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(context.bot, query.from_user.id, lang, db)
+            return
     if field == "delete_old" and sub.notify_on_category_change:
         menu_key = "edit_delete_old_menu_category"
     else:
@@ -5731,6 +5731,13 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ):
         await query.edit_message_text(t("sub_not_found", lang))
         return
+    if not sub.enabled and getattr(sub, "trial_paused", False):
+        if not await prem.has_premium(context.bot, db, query.from_user.id):
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(t("premium_trial_paused_enable", lang))
+            await send_premium_screen(context.bot, query.from_user.id, lang, db)
+            return
     if not sub.enabled and not await prem.can_enable_more_async(context.bot, db, query.from_user.id):
         from premium_handlers import send_premium_screen
 
@@ -6812,7 +6819,7 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    if not await prem.has_premium(context.bot, db, user_id):
+    if not await prem.has_feature(context.bot, db, user_id, "ignore_keywords"):
         from premium_handlers import send_premium_screen
 
         await update.effective_message.reply_text(
@@ -7662,7 +7669,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(
-        CallbackQueryHandler(on_premium_callback_router, pattern=r"^premium:(pay|cancel|marfapr)$"),
+        CallbackQueryHandler(
+            on_premium_callback_router,
+            pattern=r"^premium:(pay|month|year|life|cancel|marfapr|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+)$",
+        ),
         group=0,
     )
     app.add_handler(

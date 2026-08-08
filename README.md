@@ -32,7 +32,7 @@ English: [README.en.md](README.en.md)
 | Импорт из Twitch | OAuth → разово или синхронизация; только новые фолловы, ручные подписки не трогает |
 | Расписание стримов | В главном меню: мастер текста на неделю; публикация на Twitch — **Premium** (длительность слота, полная очистка старых слотов) |
 | Системные оповещения | Вкл/выкл рассылок об обновлениях, доступности и прочих; падения Twitch (status.twitch.com) |
-| Премиум | Stars-подписка или саб на Twitch-канал (`PREMIUM_TWITCH_LOGIN`) — больше активных алертов, sync, все типы оповещений, синк расписания на Twitch |
+| Премиум | Триал 7 дней; Stars месяц/год/lifetime; оплата отдельных функций; саб Twitch (`PREMIUM_TWITCH_LOGIN`) |
 | Партнёрка | Реферальная ссылка, 10% от Stars Premium приглашённых, заявки на вывод (вручную) |
 | Админка | Рассылка в фоне (без подвисания) с типом в подписи, DeepL, статистика, обработка выводов, **Демо режим** |
 | Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
@@ -248,7 +248,11 @@ python main.py
 | `DATABASE_PATH` | SQLite: локально `data/bot.db`, в Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Лимит подписок на пользователя (по умолчанию 25) |
 | `PREMIUM_FREE_ACTIVE_LIMIT` | Сколько активных алертов без Premium (по умолчанию 5) |
-| `PREMIUM_STARS_AMOUNT` | Цена Stars-подписки (по умолчанию 100) |
+| `PREMIUM_STARS_AMOUNT` | Месячная Stars-подписка (по умолчанию 100) |
+| `PREMIUM_STARS_YEAR` | Год Stars разово (по умолчанию 1000) |
+| `PREMIUM_STARS_LIFETIME` | Пожизненный Premium, Stars (по умолчанию 2000) |
+| `PREMIUM_STARS_FEATURE` | Цена одной функции в месяц, Stars (по умолчанию 20) |
+| `PREMIUM_TRIAL_DAYS` | Длительность триала (по умолчанию 7) |
 | `PREMIUM_SUBSCRIPTION_PERIOD` | Период Stars-подписки, сек (по умолчанию 2592000 ≈ 30 дней) |
 | `PREMIUM_TWITCH_LOGIN` | Twitch-логин для бесплатного Premium за саб (по умолчанию `marfapr`) |
 | `REFERRAL_COMMISSION_PERCENT` | Комиссия партнёра с Stars Premium, % (по умолчанию 10) |

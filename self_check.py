@@ -936,15 +936,29 @@ def main() -> None:
     assert build_translations("hello", "en", {"en", "ru"})["en"] == "hello"
 
     import premium as prem
-    from premium import apply_stars_payment, invoice_payload, parse_invoice_payload
+    from premium import (
+        apply_features_payment,
+        apply_lifetime_payment,
+        apply_stars_payment,
+        invoice_payload,
+        parse_invoice_payload,
+        start_trial,
+    )
 
-    assert parse_invoice_payload(invoice_payload(7)) == 7
+    parsed = parse_invoice_payload(invoice_payload(7, "month"))
+    assert parsed is not None and parsed.user_id == 7 and parsed.kind == "month"
+    assert parse_invoice_payload("premium:7").kind == "legacy"
     assert parse_invoice_payload("other") is None
+    feat_p = parse_invoice_payload(invoice_payload(3, "feat", ["delay", "repeat"]))
+    assert feat_p is not None and feat_p.features == ("delay", "repeat")
     from config import FREE_CHAT_ID
 
     assert FREE_CHAT_ID == -1002155969539
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
     assert tr("btn_premium", "en")
+    assert "Пробный" in tr("btn_premium_trial", "ru") or "триал" in tr(
+        "btn_premium_trial", "ru"
+    ).lower() or "Пробный" in tr("btn_premium_trial", "ru")
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "premium.db")
         db.upsert_user(1)
@@ -953,11 +967,73 @@ def main() -> None:
         assert prem.is_premium(db, 1)
         assert db.count_enabled_subscriptions(1) == 0
         assert db.count_stars_payers_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
-        # Status helper: free-chat maps to free-premium wording without naming the chat
+        # Status helper: free-chat maps to permanent wording without naming the chat
         from premium_handlers import _status_text
 
-        assert "бесплатный премиум" in _status_text(db, 2, "ru", free_chat=True)
+        assert "пожизненный премиум" in _status_text(db, 2, "ru", free_chat=True)
         assert "бесплатный план" in _status_text(db, 2, "ru", free_chat=False)
+        assert "бесплатный план" in _status_text(
+            db, 1, "ru", force_free=True
+        )
+        from premium_handlers import _premium_markup
+
+        assert _premium_markup(db, 2, "ru", free_chat=False, force_free=False) is not None
+        assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
+        assert _premium_markup(db, 1, "ru", free_chat=False, force_free=True) is not None
+        import demo_mode as dm
+
+        dm.activate(1)
+        assert "бесплатный план" in _status_text(db, 1, "ru", force_free=True)
+        dm.deactivate(1)
+
+    with tempfile.TemporaryDirectory() as d:
+        db = SqliteDatabase(Path(d) / "trial.db")
+        db.upsert_user(50)
+        sid = db.add_subscription(
+            50,
+            "x",
+            "1",
+            "hi",
+            "dm",
+            50,
+            None,
+            enabled=True,
+            notify_on_live=True,
+        )
+        ok, reason = start_trial(db, 50)
+        assert ok and reason == "started"
+        assert prem.is_premium(db, 50)
+        ok2, reason2 = start_trial(db, 50)
+        assert not ok2 and reason2 == "active"
+        # Force expire
+        db.set_premium_trial(50, until_unix=1, used=True)
+        assert prem.ensure_trial_expired(db, 50) is True
+        sub = db.get_subscription(sid, 50)
+        assert sub is not None
+        assert sub.enabled is False
+        assert sub.trial_paused is True
+        assert prem.is_live_only_alert(sub)
+        ok3, reason3 = start_trial(db, 50)
+        assert not ok3 and reason3 == "used"
+        db.upsert_user(51)
+        apply_lifetime_payment(db, 51, charge_id="life1", stars_paid=2000)
+        assert prem.get_status(db, 51).permanent
+        db.upsert_user(52)
+        apply_features_payment(
+            db,
+            52,
+            feature_ids=["delay", "repeat"],
+            charge_id="feat1",
+            until_unix=10**12,
+            stars_paid=40,
+        )
+        st52 = prem.get_status(db, 52)
+        assert st52.feature_active("delay")
+        assert st52.feature_active("repeat")
+        assert not st52.feature_active("twitch_sync")
+        assert not st52.is_premium
+        assert prem.has_feature_sync(db, 52, "delay")
+        assert not prem.has_feature_sync(db, 52, "twitch_sync")
 
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "ref.db")

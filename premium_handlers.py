@@ -18,6 +18,8 @@ from i18n import (
     DEFAULT_LOCALE,
     btn,
     main_menu,
+    premium_actions_keyboard,
+    premium_features_keyboard,
     t,
 )
 from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
@@ -25,18 +27,30 @@ from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
 logger = logging.getLogger(__name__)
 
 
+def _fmt_until(unix: int) -> str:
+    return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def _status_text(
-    db: Database, user_id: int, lang: str, *, free_chat: bool = False
+    db: Database,
+    user_id: int,
+    lang: str,
+    *,
+    free_chat: bool = False,
+    force_free: bool = False,
 ) -> str:
+    if force_free:
+        return t("premium_status_none", lang)
+    prem.ensure_trial_expired(db, user_id)
     st = prem.get_status(db, user_id)
     channel = prem.twitch_channel_login()
     if st.permanent:
         return t("premium_status_permanent", lang)
     parts: list[str] = []
+    if st.trial_active:
+        parts.append(t("premium_status_trial", lang, until=_fmt_until(st.trial_until)))
     if st.stars_active:
-        until = datetime.fromtimestamp(st.stars_until, tz=timezone.utc).strftime(
-            "%Y-%m-%d %H:%M UTC"
-        )
+        until = _fmt_until(st.stars_until)
         key = (
             "premium_status_stars_canceled"
             if st.stars_canceled
@@ -47,13 +61,35 @@ def _status_text(
         parts.append(t("premium_status_twitch", lang, channel=channel))
     if parts:
         return "\n".join(parts)
+    active_feats = [
+        (fid, until)
+        for fid, until in st.features.items()
+        if until > int(time.time())
+    ]
+    if active_feats:
+        lines = []
+        for fid, until in sorted(active_feats, key=lambda x: x[0]):
+            name = t(
+                prem.feature_label_key(fid),
+                lang,
+                free_limit=prem.free_active_limit(),
+            )
+            lines.append(
+                t("premium_feat_line", lang, name=name, until=_fmt_until(until))
+            )
+        return t("premium_status_features", lang, features="\n".join(lines))
     if free_chat:
         return t("premium_status_permanent", lang)
     return t("premium_status_none", lang)
 
 
 def premium_screen_text(
-    db: Database, user_id: int, lang: str, *, free_chat: bool = False
+    db: Database,
+    user_id: int,
+    lang: str,
+    *,
+    free_chat: bool = False,
+    force_free: bool = False,
 ) -> str:
     return t(
         "premium_title",
@@ -61,23 +97,64 @@ def premium_screen_text(
         free_limit=prem.free_active_limit(),
         stars=prem.stars_price(),
         channel=prem.twitch_channel_login(),
-        status=_status_text(db, user_id, lang, free_chat=free_chat),
+        status=_status_text(
+            db, user_id, lang, free_chat=free_chat, force_free=force_free
+        ),
+    )
+
+
+def _premium_markup(
+    db: Database, user_id: int, lang: str, *, free_chat: bool, force_free: bool
+) -> InlineKeyboardMarkup | None:
+    """Action buttons for free / partial UX; cancel when Stars auto-renew is on."""
+    if force_free:
+        return premium_actions_keyboard(lang, show_cancel=False, show_trial=True)
+    st = prem.get_status(db, user_id)
+    if st.permanent or free_chat:
+        return None
+    if st.twitch_active and not st.stars_active and not st.trial_active:
+        # Twitch full premium — still allow cancel if somehow has stars charge
+        return None
+    show_cancel = (
+        st.stars_active and bool(st.stars_charge_id) and not st.stars_canceled
+    )
+    show_trial = not st.trial_used and not st.is_premium
+    # Partial feature buyers / free / trial / stars still see buy options
+    if st.is_premium and not show_cancel and not any(
+        until > int(time.time()) for until in st.features.values()
+    ):
+        # Full active (trial or stars without cancel button needed) — keep buy
+        # options hidden only when permanent/twitch already handled.
+        if st.trial_active or st.stars_active:
+            return premium_actions_keyboard(
+                lang, show_cancel=show_cancel, show_trial=False
+            )
+    return premium_actions_keyboard(
+        lang, show_cancel=show_cancel, show_trial=show_trial
     )
 
 
 async def send_premium_screen(
     bot, user_id: int, lang: str, db: Database, *, edit_message=None
 ) -> None:
-    free_chat = await prem.is_free_chat_member(bot, user_id)
-    text = premium_screen_text(db, user_id, lang, free_chat=free_chat)
+    # Demo: show free-plan screen even if admin has permanent / free-chat Premium.
+    force_free = demo_mode.is_active(user_id)
+    free_chat = False if force_free else await prem.is_free_chat_member(bot, user_id)
+    text = premium_screen_text(
+        db, user_id, lang, free_chat=free_chat, force_free=force_free
+    )
+    markup = _premium_markup(
+        db, user_id, lang, free_chat=free_chat, force_free=force_free
+    )
     if edit_message is not None:
         await edit_message.edit_text(
-            text, reply_markup=None, disable_web_page_preview=True
+            text, reply_markup=markup, disable_web_page_preview=True
         )
         return
     await bot.send_message(
         user_id,
         text,
+        reply_markup=markup,
         disable_web_page_preview=True,
     )
 
@@ -91,40 +168,192 @@ async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await send_premium_screen(context.bot, user_id, lang, db)
 
 
+async def _send_invoice_link(
+    query,
+    *,
+    title: str,
+    description: str,
+    payload: str,
+    stars: int,
+    lang: str,
+    subscription_period: int | None = None,
+) -> None:
+    prices = [LabeledPrice(title, stars)]
+    kwargs: dict = {
+        "title": title,
+        "description": description,
+        "payload": payload,
+        "provider_token": "",
+        "currency": "XTR",
+        "prices": prices,
+    }
+    if subscription_period is not None:
+        kwargs["subscription_period"] = subscription_period
+    try:
+        link = await query.get_bot().create_invoice_link(**kwargs)
+    except Exception:
+        logger.exception("create_invoice_link failed payload=%s", payload)
+        await query.edit_message_text(t("import_failed", lang))
+        return
+    await query.edit_message_text(
+        t("premium_pay_link", lang),
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(btn("premium_pay", lang), url=link)]]
+        ),
+    )
+
+
 async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _user_lang
 
     query = update.callback_query
-    await query.answer()
+    data = query.data or ""
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
-    action = query.data.split(":", 1)[1]
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
 
-    if action == "pay":
-        prices = [LabeledPrice(t("premium_pay_title", lang), prem.stars_price())]
-        try:
-            link = await context.bot.create_invoice_link(
-                title=t("premium_pay_title", lang),
-                description=t(
-                    "premium_pay_description", lang, stars=prem.stars_price()
-                ),
-                payload=prem.invoice_payload(user_id),
-                provider_token="",
-                currency="XTR",
-                prices=prices,
-                subscription_period=prem.stars_period(),
-            )
-        except Exception:
-            logger.exception("create_invoice_link failed for %s", user_id)
-            await query.edit_message_text(t("import_failed", lang))
-            return
+    # Feature multi-select toggles
+    if data.startswith("premium:feat_toggle:"):
+        await query.answer()
+        fid = data.split(":", 2)[2]
+        selected: set[str] = set(context.user_data.get("premium_feat_sel") or [])
+        if fid in selected:
+            selected.discard(fid)
+        else:
+            if fid in prem.FEATURE_IDS:
+                selected.add(fid)
+        context.user_data["premium_feat_sel"] = sorted(selected)
         await query.edit_message_text(
-            t("premium_pay_link", lang),
+            t("premium_feat_pick", lang, price=prem.stars_feature_price()),
+            reply_markup=premium_features_keyboard(lang, selected),
+        )
+        return
+
+    if data == "premium:feat_back":
+        await query.answer()
+        context.user_data.pop("premium_feat_sel", None)
+        await send_premium_screen(context.bot, user_id, lang, db, edit_message=query.message)
+        return
+
+    if data == "premium:feat_pay":
+        await query.answer()
+        selected = [
+            f
+            for f in (context.user_data.get("premium_feat_sel") or [])
+            if f in prem.FEATURE_IDS
+        ]
+        if not selected:
+            await query.answer(t("import_failed", lang), show_alert=True)
+            return
+        total = prem.stars_feature_price() * len(selected)
+        await _send_invoice_link(
+            query,
+            title=t("premium_pay_feat_title", lang),
+            description=t("premium_pay_feat_description", lang, stars=total),
+            payload=prem.invoice_payload(user_id, "feat", selected),
+            stars=total,
+            lang=lang,
+            subscription_period=prem.stars_period(),
+        )
+        return
+
+    if data == "premium:features":
+        await query.answer()
+        context.user_data["premium_feat_sel"] = []
+        await query.edit_message_text(
+            t("premium_feat_pick", lang, price=prem.stars_feature_price()),
+            reply_markup=premium_features_keyboard(lang, set()),
+        )
+        return
+
+    await query.answer()
+    action = data.split(":", 1)[1] if ":" in data else ""
+
+    if action == "trial":
+        await query.edit_message_text(
+            t("premium_trial_confirm", lang, days=prem.trial_days()),
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton(btn("premium_pay", lang), url=link)]]
+                [
+                    [
+                        InlineKeyboardButton(
+                            btn("premium_trial_confirm", lang),
+                            callback_data="premium:trial_confirm",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            btn("premium_feat_back", lang),
+                            callback_data="premium:feat_back",
+                        )
+                    ],
+                ]
             ),
+        )
+        return
+
+    if action == "trial_confirm":
+        ok, reason = prem.start_trial(db, user_id)
+        st = prem.get_status(db, user_id)
+        if ok:
+            await query.edit_message_text(
+                t(
+                    "premium_trial_started",
+                    lang,
+                    until=_fmt_until(st.trial_until),
+                )
+            )
+            return
+        if reason == "active":
+            await query.answer(
+                t("premium_trial_active", lang, until=_fmt_until(st.trial_until)),
+                show_alert=True,
+            )
+            return
+        await query.answer(t("premium_trial_used", lang), show_alert=True)
+        return
+
+    if action in ("pay", "month"):
+        await _send_invoice_link(
+            query,
+            title=t("premium_pay_title", lang),
+            description=t(
+                "premium_pay_description", lang, stars=prem.stars_price()
+            ),
+            payload=prem.invoice_payload(user_id, "month"),
+            stars=prem.stars_price(),
+            lang=lang,
+            subscription_period=prem.stars_period(),
+        )
+        return
+
+    if action == "year":
+        await _send_invoice_link(
+            query,
+            title=t("premium_pay_year_title", lang),
+            description=t(
+                "premium_pay_year_description", lang, stars=prem.stars_year_price()
+            ),
+            payload=prem.invoice_payload(user_id, "year"),
+            stars=prem.stars_year_price(),
+            lang=lang,
+            subscription_period=None,
+        )
+        return
+
+    if action == "life":
+        await _send_invoice_link(
+            query,
+            title=t("premium_pay_life_title", lang),
+            description=t(
+                "premium_pay_life_description",
+                lang,
+                stars=prem.stars_lifetime_price(),
+            ),
+            payload=prem.invoice_payload(user_id, "life"),
+            stars=prem.stars_lifetime_price(),
+            lang=lang,
+            subscription_period=None,
         )
         return
 
@@ -266,21 +495,54 @@ async def successful_premium_payment(
     if not msg or not msg.successful_payment:
         return
     payment = msg.successful_payment
-    user_id = prem.parse_invoice_payload(payment.invoice_payload)
-    if user_id is None:
+    parsed = prem.parse_invoice_payload(payment.invoice_payload)
+    if parsed is None:
         return
     lang = _user_lang(context, update.effective_user.id)
-    until = int(getattr(payment, "subscription_expiration_date", None) or 0)
-    if until <= 0:
-        until = int(time.time()) + prem.stars_period()
     db: Database = context.application.bot_data["db"]
-    prem.apply_stars_payment(
-        db,
-        user_id,
-        charge_id=payment.telegram_payment_charge_id,
-        until_unix=until,
-        stars_paid=int(payment.total_amount or prem.stars_price()),
-    )
+    charge_id = payment.telegram_payment_charge_id
+    stars_paid = int(payment.total_amount or 0)
+    now = int(time.time())
+    until_sub = int(getattr(payment, "subscription_expiration_date", None) or 0)
+
+    if parsed.kind in ("month", "legacy"):
+        until = until_sub if until_sub > 0 else now + prem.stars_period()
+        prem.apply_stars_payment(
+            db,
+            parsed.user_id,
+            charge_id=charge_id,
+            until_unix=until,
+            stars_paid=stars_paid or prem.stars_price(),
+        )
+    elif parsed.kind == "year":
+        until = now + prem.year_seconds()
+        prem.apply_stars_payment(
+            db,
+            parsed.user_id,
+            charge_id=charge_id,
+            until_unix=until,
+            stars_paid=stars_paid or prem.stars_year_price(),
+        )
+        # One-shot year: no Telegram auto-renew to cancel.
+        db.set_premium_stars_canceled(parsed.user_id, True)
+    elif parsed.kind == "life":
+        prem.apply_lifetime_payment(
+            db,
+            parsed.user_id,
+            charge_id=charge_id,
+            stars_paid=stars_paid or prem.stars_lifetime_price(),
+        )
+    elif parsed.kind == "feat":
+        until = until_sub if until_sub > 0 else now + prem.stars_period()
+        prem.apply_features_payment(
+            db,
+            parsed.user_id,
+            feature_ids=parsed.features,
+            charge_id=charge_id,
+            until_unix=until,
+            stars_paid=stars_paid
+            or prem.stars_feature_price() * max(1, len(parsed.features)),
+        )
     await msg.reply_text(t("premium_pay_done", lang))
 
 

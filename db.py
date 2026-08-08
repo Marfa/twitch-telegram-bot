@@ -330,6 +330,7 @@ class Subscription:
     from_twitch_sync: bool
     delete_other_alerts: bool
     is_demo: bool
+    trial_paused: bool
 
 
 @dataclass
@@ -445,6 +446,7 @@ def _row_to_sub(row: Any) -> Subscription:
         if "delete_other_alerts" in keys
         else False,
         is_demo=bool(row["is_demo"]) if "is_demo" in keys else False,
+        trial_paused=bool(row["trial_paused"]) if "trial_paused" in keys else False,
     )
 
 
@@ -647,6 +649,18 @@ class Database(Protocol):
     ) -> None: ...
 
     def set_premium_stars_canceled(self, user_id: int, canceled: bool) -> None: ...
+
+    def set_premium_permanent(self, user_id: int, permanent: bool) -> None: ...
+
+    def set_premium_trial(
+        self, user_id: int, *, until_unix: int, used: bool = True
+    ) -> None: ...
+
+    def expire_premium_trial(self, user_id: int) -> int: ...
+
+    def extend_premium_features(
+        self, user_id: int, feature_ids: list[str], *, until_unix: int
+    ) -> None: ...
 
     def set_premium_twitch(
         self,
@@ -867,6 +881,10 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0"
             )
+        if "trial_paused" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN trial_paused INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -923,6 +941,9 @@ class SqliteDatabase:
             ("premium_twitch_checked_at", "TEXT"),
             ("premium_stars_paid_at", "TEXT"),
             ("referred_by", "INTEGER"),
+            ("premium_trial_until", "INTEGER NOT NULL DEFAULT 0"),
+            ("premium_trial_used", "INTEGER NOT NULL DEFAULT 0"),
+            ("premium_features", "TEXT NOT NULL DEFAULT ''"),
         ):
             if col not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
@@ -1766,13 +1787,25 @@ class SqliteDatabase:
             row = conn.execute(
                 """
                 SELECT premium_permanent, premium_stars_until, premium_stars_charge_id,
-                       premium_stars_canceled, premium_twitch_active, premium_twitch_user_id
+                       premium_stars_canceled, premium_twitch_active, premium_twitch_user_id,
+                       COALESCE(premium_trial_until, 0) AS premium_trial_until,
+                       COALESCE(premium_trial_used, 0) AS premium_trial_used,
+                       COALESCE(premium_features, '') AS premium_features
                 FROM users WHERE user_id = ?
                 """,
                 (user_id,),
             ).fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
+        features: dict[str, int] = {}
+        raw = row["premium_features"] or ""
+        if raw:
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    features = {str(k): int(v) for k, v in data.items()}
+            except (json.JSONDecodeError, TypeError, ValueError):
+                features = {}
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -1780,6 +1813,9 @@ class SqliteDatabase:
             stars_canceled=bool(row["premium_stars_canceled"]),
             twitch_active=bool(row["premium_twitch_active"]),
             twitch_user_id=row["premium_twitch_user_id"] or "",
+            trial_until=int(row["premium_trial_until"] or 0),
+            trial_used=bool(row["premium_trial_used"]),
+            features=features,
         )
 
     def set_premium_stars(
@@ -1817,6 +1853,73 @@ class SqliteDatabase:
                     premium_stars_canceled = excluded.premium_stars_canceled
                 """,
                 (user_id, int(bool(canceled))),
+            )
+
+    def set_premium_permanent(self, user_id: int, permanent: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_permanent)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_permanent = excluded.premium_permanent
+                """,
+                (user_id, int(bool(permanent))),
+            )
+
+    def set_premium_trial(
+        self, user_id: int, *, until_unix: int, used: bool = True
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_trial_until, premium_trial_used)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_trial_until = excluded.premium_trial_until,
+                    premium_trial_used = excluded.premium_trial_used
+                """,
+                (user_id, int(until_unix), int(bool(used))),
+            )
+
+    def expire_premium_trial(self, user_id: int) -> int:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET premium_trial_until = 0
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            )
+            cur = conn.execute(
+                """
+                UPDATE subscriptions
+                SET enabled = 0, trial_paused = 1
+                WHERE owner_id = ? AND enabled = 1 AND COALESCE(is_demo, 0) = 0
+                """,
+                (user_id,),
+            )
+            return int(cur.rowcount)
+
+    def extend_premium_features(
+        self, user_id: int, feature_ids: list[str], *, until_unix: int
+    ) -> None:
+        st = self.get_premium_status(user_id)
+        features = dict(st.features)
+        until = int(until_unix)
+        for fid in feature_ids:
+            features[fid] = max(int(features.get(fid) or 0), until)
+        raw = json.dumps(features, ensure_ascii=False)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_features, premium_stars_paid_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_features = excluded.premium_features,
+                    premium_stars_paid_at = datetime('now')
+                """,
+                (user_id, raw),
             )
 
     def set_premium_twitch(
@@ -2493,6 +2596,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS trial_paused BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -2572,6 +2681,9 @@ class PostgresDatabase:
                 "premium_twitch_checked_at TIMESTAMPTZ",
                 "premium_stars_paid_at TIMESTAMPTZ",
                 "referred_by BIGINT",
+                "premium_trial_until BIGINT NOT NULL DEFAULT 0",
+                "premium_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
+                "premium_features TEXT NOT NULL DEFAULT ''",
             ):
                 cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
             if not had_premium:
@@ -3502,7 +3614,10 @@ class PostgresDatabase:
             cur.execute(
                 """
                 SELECT premium_permanent, premium_stars_until, premium_stars_charge_id,
-                       premium_stars_canceled, premium_twitch_active, premium_twitch_user_id
+                       premium_stars_canceled, premium_twitch_active, premium_twitch_user_id,
+                       COALESCE(premium_trial_until, 0) AS premium_trial_until,
+                       COALESCE(premium_trial_used, FALSE) AS premium_trial_used,
+                       COALESCE(premium_features, '') AS premium_features
                 FROM users WHERE user_id = %s
                 """,
                 (user_id,),
@@ -3510,6 +3625,15 @@ class PostgresDatabase:
             row = cur.fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
+        features: dict[str, int] = {}
+        raw = row["premium_features"] or ""
+        if raw:
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    features = {str(k): int(v) for k, v in data.items()}
+            except (json.JSONDecodeError, TypeError, ValueError):
+                features = {}
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -3517,6 +3641,9 @@ class PostgresDatabase:
             stars_canceled=bool(row["premium_stars_canceled"]),
             twitch_active=bool(row["premium_twitch_active"]),
             twitch_user_id=row["premium_twitch_user_id"] or "",
+            trial_until=int(row["premium_trial_until"] or 0),
+            trial_used=bool(row["premium_trial_used"]),
+            features=features,
         )
 
     def set_premium_stars(
@@ -3556,6 +3683,77 @@ class PostgresDatabase:
                     premium_stars_canceled = EXCLUDED.premium_stars_canceled
                 """,
                 (user_id, bool(canceled)),
+            )
+
+    def set_premium_permanent(self, user_id: int, permanent: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_permanent)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_permanent = EXCLUDED.premium_permanent
+                """,
+                (user_id, bool(permanent)),
+            )
+
+    def set_premium_trial(
+        self, user_id: int, *, until_unix: int, used: bool = True
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_trial_until, premium_trial_used)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_trial_until = EXCLUDED.premium_trial_until,
+                    premium_trial_used = EXCLUDED.premium_trial_used
+                """,
+                (user_id, int(until_unix), bool(used)),
+            )
+
+    def expire_premium_trial(self, user_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users SET premium_trial_until = 0
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            cur.execute(
+                """
+                UPDATE subscriptions
+                SET enabled = FALSE, trial_paused = TRUE
+                WHERE owner_id = %s AND enabled = TRUE AND COALESCE(is_demo, FALSE) = FALSE
+                """,
+                (user_id,),
+            )
+            return int(cur.rowcount)
+
+    def extend_premium_features(
+        self, user_id: int, feature_ids: list[str], *, until_unix: int
+    ) -> None:
+        st = self.get_premium_status(user_id)
+        features = dict(st.features)
+        until = int(until_unix)
+        for fid in feature_ids:
+            features[fid] = max(int(features.get(fid) or 0), until)
+        raw = json.dumps(features, ensure_ascii=False)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_features, premium_stars_paid_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_features = EXCLUDED.premium_features,
+                    premium_stars_paid_at = NOW()
+                """,
+                (user_id, raw),
             )
 
     def set_premium_twitch(

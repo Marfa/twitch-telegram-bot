@@ -43,6 +43,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sync_subs": "🔄 Subscription sync",
         "btn_premium": "⭐ Premium",
         "btn_premium_pay": "Pay with Stars",
+        "btn_premium_trial": "Trial period",
+        "btn_premium_trial_confirm": "Activate 7-day trial",
+        "btn_premium_month": "Monthly — {stars} Stars",
+        "btn_premium_year": "Yearly — {stars} Stars",
+        "btn_premium_features": "Pay only for features you need",
+        "btn_premium_lifetime": "Lifetime — {stars} Stars",
+        "btn_premium_feat_pay": "Pay {stars} Stars / month",
+        "btn_premium_feat_back": "Back",
         "btn_premium_marfapr": "Create marfapr alert",
         "btn_premium_cancel_stars": "Cancel Stars subscription",
         "btn_premium_get": "Get Premium",
@@ -201,32 +209,66 @@ _STRINGS: dict[str, dict[str, str]] = {
             "⭐ Premium\n\n"
             "Benefits:\n"
             "• More than {free_limit} active alerts (inactive unlimited)\n"
-            "• Twitch follow sync\n"
-            "• All alert types (free: live start only)\n"
-            "• Ignore keywords\n"
+            "• Alert types beyond live start (category / upcoming / stream end)\n"
+            "• Twitch follow auto-sync\n"
+            "• Ignore keywords (per alert + global list)\n"
             "• Delayed send\n"
-            "• Repeat notifications\n"
-            "• Delete previous messages\n"
-            "• Notify on delete failures\n\n"
-            "How to get Premium:\n"
-            "• {stars} Telegram Stars / month, or\n"
+            "• Repeat notification mute\n"
+            "• Delete previous bot messages (+ delete-fail notify)\n"
+            "• Publish schedule to Twitch\n\n"
+            "How to get:\n"
+            "• Pay for a subscription (buttons below), or\n"
             "• Active Twitch subscription to https://www.twitch.tv/{channel}\n\n"
             "{status}"
         ),
-        "premium_status_permanent": "Status: free premium.",
+        "premium_status_permanent": "Status: lifetime Premium.",
+        "premium_status_trial": "Status: trial until {until}.",
         "premium_status_stars": "Status: Stars active until {until}.",
         "premium_status_stars_canceled": (
             "Status: Stars active until {until} (auto-renew canceled)."
         ),
         "premium_status_twitch": "Status: Twitch sub to {channel} verified.",
+        "premium_status_features": "Status: unlocked features:\n{features}",
         "premium_status_none": "Status: free plan.",
+        "premium_feat_extra_alerts": "More than {free_limit} active alerts",
+        "premium_feat_alert_types": "Alert types beyond live start",
+        "premium_feat_twitch_sync": "Twitch follow auto-sync",
+        "premium_feat_ignore_keywords": "Ignore keywords",
+        "premium_feat_delay": "Delayed send",
+        "premium_feat_repeat": "Repeat notification mute",
+        "premium_feat_delete_prev": "Delete previous messages",
+        "premium_feat_schedule_publish": "Publish schedule to Twitch",
+        "premium_feat_line": "• {name} until {until}",
+        "premium_feat_pick": (
+            "Select features ({price} Stars / month each).\n"
+            "Only selected features unlock."
+        ),
         "premium_gate": "⭐ This step requires Premium.\nGet Premium or {action}.",
         "premium_gate_action_skip": "skip this step",
         "premium_gate_action_cancel": "cancel",
         "premium_pay_title": "Bot Premium",
         "premium_pay_description": "Monthly Premium ({stars} Stars)",
+        "premium_pay_year_title": "Bot Premium — 1 year",
+        "premium_pay_year_description": "Yearly Premium ({stars} Stars)",
+        "premium_pay_life_title": "Bot Premium — lifetime",
+        "premium_pay_life_description": "Lifetime Premium ({stars} Stars)",
+        "premium_pay_feat_title": "Bot Premium — features",
+        "premium_pay_feat_description": "Selected features ({stars} Stars / month)",
         "premium_pay_done": "Premium activated. Thank you!",
         "premium_pay_link": "Open the invoice to pay with Stars:",
+        "premium_trial_confirm": (
+            "Activate a free {days}-day trial?\n\n"
+            "Everything stays after the trial, but alerts are paused. "
+            "You can delete live-start alerts; enabling anything needs Premium again.\n"
+            "One trial per account."
+        ),
+        "premium_trial_started": "Trial activated until {until}.",
+        "premium_trial_used": "Trial already used on this account.",
+        "premium_trial_active": "Trial is already active until {until}.",
+        "premium_trial_expired": (
+            "Trial ended. Your alerts are paused. "
+            "Live-start alerts can be deleted; enabling needs Premium."
+        ),
         "premium_cancel_done": (
             "Stars auto-renew canceled. Premium stays until the end of the paid period."
         ),
@@ -253,6 +295,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_created_disabled": (
             "Alert created as paused: free plan allows {limit} active alerts. "
             "Enable it after upgrading or pausing another."
+        ),
+        "premium_trial_paused_enable": (
+            "This alert was paused after the trial. Get Premium to enable it again."
         ),
         "menu_admin": "Admin panel:",
         "demo_on": (
@@ -1009,6 +1054,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sync_subs": "🔄 Синхронизация подписок",
         "btn_premium": "⭐ Премиум",
         "btn_premium_pay": "Оплатить подписку",
+        "btn_premium_trial": "Пробный период",
+        "btn_premium_trial_confirm": "Активировать триал на 7 дней",
+        "btn_premium_month": "Подписка на месяц — {stars} ⭐",
+        "btn_premium_year": "Подписка на год — {stars} ⭐",
+        "btn_premium_features": "Оплатить только нужные функции",
+        "btn_premium_lifetime": "Пожизненная — {stars} ⭐",
+        "btn_premium_feat_pay": "Оплатить {stars} ⭐ / мес",
+        "btn_premium_feat_back": "Назад",
         "btn_premium_marfapr": "Создать подписку на marfapr",
         "btn_premium_cancel_stars": "Отменить подписку Stars",
         "btn_premium_get": "Оформить премиум",
@@ -1166,33 +1219,67 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_title": (
             "⭐ Премиум\n\n"
             "Возможности:\n"
-            "• Активных подписок больше {free_limit} (неактивные без лимита)\n"
-            "• Синхронизация подписок с Twitch\n"
-            "• Все типы оповещений (без премиума — только о начале стрима)\n"
-            "• Игнорировать ключевые слова\n"
+            "• Активных оповещений больше {free_limit} (неактивные без лимита)\n"
+            "• Типы кроме старта стрима (категория / скоро / конец)\n"
+            "• Автосинхронизация фолловов с Twitch\n"
+            "• Игнор ключевых слов (на алерт + глобальный список)\n"
             "• Отложенная отправка\n"
-            "• Повторные уведомления\n"
-            "• Удалять старые сообщения\n"
-            "• Сообщать о проблемах удаления\n\n"
+            "• Заглушка повторных уведомлений\n"
+            "• Удаление предыдущих сообщений бота (+ уведомление об ошибках)\n"
+            "• Публикация расписания на Twitch\n\n"
             "Как получить:\n"
-            "• {stars} Telegram Stars в месяц, или\n"
+            "• Оплата подписки (кнопки ниже), или\n"
             "• Активная подписка Twitch на https://www.twitch.tv/{channel}\n\n"
             "{status}"
         ),
-        "premium_status_permanent": "Статус: бесплатный премиум.",
+        "premium_status_permanent": "Статус: пожизненный премиум.",
+        "premium_status_trial": "Статус: триал до {until}.",
         "premium_status_stars": "Статус: Stars активны до {until}.",
         "premium_status_stars_canceled": (
             "Статус: Stars активны до {until} (автопродление отключено)."
         ),
         "premium_status_twitch": "Статус: подписка Twitch на {channel} подтверждена.",
+        "premium_status_features": "Статус: разблокированные функции:\n{features}",
         "premium_status_none": "Статус: бесплатный план.",
+        "premium_feat_extra_alerts": "Активных оповещений больше {free_limit}",
+        "premium_feat_alert_types": "Типы кроме старта стрима",
+        "premium_feat_twitch_sync": "Автосинк фолловов Twitch",
+        "premium_feat_ignore_keywords": "Игнор ключевых слов",
+        "premium_feat_delay": "Отложенная отправка",
+        "premium_feat_repeat": "Заглушка повторов",
+        "premium_feat_delete_prev": "Удаление предыдущих сообщений",
+        "premium_feat_schedule_publish": "Публикация расписания на Twitch",
+        "premium_feat_line": "• {name} до {until}",
+        "premium_feat_pick": (
+            "Выберите функции ({price} ⭐ / месяц каждая).\n"
+            "Разблокируются только выбранные."
+        ),
         "premium_gate": "⭐ Этот шаг доступен в премиуме.\nОформите премиум или {action}.",
         "premium_gate_action_skip": "пропустите шаг",
         "premium_gate_action_cancel": "отмените",
         "premium_pay_title": "Премиум бота",
         "premium_pay_description": "Премиум на месяц ({stars} Stars)",
+        "premium_pay_year_title": "Премиум бота — 1 год",
+        "premium_pay_year_description": "Премиум на год ({stars} Stars)",
+        "premium_pay_life_title": "Премиум бота — навсегда",
+        "premium_pay_life_description": "Пожизненный премиум ({stars} Stars)",
+        "premium_pay_feat_title": "Премиум бота — функции",
+        "premium_pay_feat_description": "Выбранные функции ({stars} Stars / месяц)",
         "premium_pay_done": "Премиум активирован. Спасибо!",
         "premium_pay_link": "Откройте счёт для оплаты Stars:",
+        "premium_trial_confirm": (
+            "Активировать бесплатный триал на {days} дней?\n\n"
+            "После окончания всё останется, но оповещения встанут на паузу. "
+            "Оповещения о начале стрима можно удалить; включить без премиума нельзя.\n"
+            "Один триал на аккаунт."
+        ),
+        "premium_trial_started": "Триал активирован до {until}.",
+        "premium_trial_used": "Триал на этом аккаунте уже использован.",
+        "premium_trial_active": "Триал уже активен до {until}.",
+        "premium_trial_expired": (
+            "Триал закончился. Оповещения на паузе. "
+            "Оповещения о начале стрима можно удалить; для включения нужен премиум."
+        ),
         "premium_cancel_done": (
             "Автопродление Stars отключено. Премиум действует до конца оплаченного периода."
         ),
@@ -1219,6 +1306,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_created_disabled": (
             "Оповещение создано на паузе: на бесплатном плане лимит {limit} активных. "
             "Включите после апгрейда или паузы другого."
+        ),
+        "premium_trial_paused_enable": (
+            "Оповещение на паузе после триала. Оформите премиум, чтобы включить."
         ),
         "menu_admin": "Админка:",
         "demo_on": (
@@ -2136,15 +2226,57 @@ def partner_menu(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
-def premium_actions_keyboard(lang: str, *, show_cancel: bool) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(btn("premium_pay", lang), callback_data="premium:pay")],
+def premium_actions_keyboard(
+    lang: str,
+    *,
+    show_cancel: bool,
+    show_trial: bool = True,
+) -> InlineKeyboardMarkup:
+    from premium import stars_feature_price, stars_lifetime_price, stars_price, stars_year_price
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if show_trial:
+        rows.append(
+            [InlineKeyboardButton(btn("premium_trial", lang), callback_data="premium:trial")]
+        )
+    rows.append(
         [
             InlineKeyboardButton(
                 btn("premium_marfapr", lang), callback_data="premium:marfapr"
             )
-        ],
-    ]
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("btn_premium_month", lang, stars=stars_price()),
+                callback_data="premium:month",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("btn_premium_year", lang, stars=stars_year_price()),
+                callback_data="premium:year",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("premium_features", lang), callback_data="premium:features"
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("btn_premium_lifetime", lang, stars=stars_lifetime_price()),
+                callback_data="premium:life",
+            )
+        ]
+    )
     if show_cancel:
         rows.append(
             [
@@ -2153,6 +2285,49 @@ def premium_actions_keyboard(lang: str, *, show_cancel: bool) -> InlineKeyboardM
                 )
             ]
         )
+    return InlineKeyboardMarkup(rows)
+
+
+def premium_features_keyboard(
+    lang: str, selected: set[str]
+) -> InlineKeyboardMarkup:
+    from config import PREMIUM_FREE_ACTIVE_LIMIT
+    from premium import FEATURE_IDS, feature_label_key, stars_feature_price
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for fid in FEATURE_IDS:
+        mark = "✅" if fid in selected else "⬜️"
+        label = t(
+            feature_label_key(fid),
+            lang,
+            free_limit=PREMIUM_FREE_ACTIVE_LIMIT,
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{mark} {label}",
+                    callback_data=f"premium:feat_toggle:{fid}",
+                )
+            ]
+        )
+    n = len(selected)
+    total = n * stars_feature_price()
+    if n > 0:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_feat_pay", lang, stars=total),
+                    callback_data="premium:feat_pay",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("premium_feat_back", lang), callback_data="premium:feat_back"
+            )
+        ]
+    )
     return InlineKeyboardMarkup(rows)
 
 
