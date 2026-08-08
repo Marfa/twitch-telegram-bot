@@ -85,6 +85,7 @@ from i18n import (
     settings_menu,
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
+    stream_schedule_duration_keyboard,
     stream_schedule_publish_keyboard,
     format_stream_schedule_prompt_date,
     format_stream_schedule_result,
@@ -186,6 +187,7 @@ _TWITCH_COMPONENT_KEYS = {
     STREAM_SCHEDULE_GAME,
     STREAM_SCHEDULE_TIME,
     STREAM_SCHEDULE_PUBLISH,
+    STREAM_SCHEDULE_DURATION,
     SYNC_DAYS,
     PREMIUM_GATE,
     WATCH_PICK,
@@ -198,7 +200,7 @@ _TWITCH_COMPONENT_KEYS = {
     WATCH_SAVE,
     DELETE_SIBLING_ALERTS,
     GLOBAL_IGNORE_KEYWORDS,
-) = range(49)
+) = range(50)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -206,6 +208,7 @@ _SYNC_PERIOD_MAX = 365
 _WATCH_MAX_CATS = 5
 _WATCH_SUGGEST_N = 5
 _WATCH_MAX_TAGS = 10
+_SCHEDULE_DEFAULT_DURATION_MIN = 120
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
 _WATCH_VIEWERS_RE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+))?\s*$")
@@ -3250,12 +3253,6 @@ async def _finish_subscription(
 async def start_stream_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    if not _is_admin(user_id):
-        await update.effective_message.reply_text(
-            t("menu_main", lang),
-            reply_markup=_menu(lang, user_id),
-        )
-        return ConversationHandler.END
     context.user_data.clear()
     await update.effective_message.reply_text(
         t("stream_schedule_intro", lang),
@@ -3343,17 +3340,13 @@ async def stream_schedule_finish_callback(
     return await _finish_stream_schedule(update, context, lang)
 
 
-def _pending_schedule_publishes(application: Application) -> dict[int, list[dict]]:
+def _pending_schedule_publishes(application: Application) -> dict[int, dict]:
     return application.bot_data.setdefault("pending_schedule_publishes", {})
 
 
 async def stream_schedule_publish_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    from config import twitch_oauth_redirect_uri
-    from health import create_oauth_state
-    from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE, TwitchClient
-
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -3368,12 +3361,70 @@ async def stream_schedule_publish_callback(
         )
         return ConversationHandler.END
 
-    _pending_schedule_publishes(context.application)[user_id] = [
-        {"date": e["date"].isoformat(), "time": e["time"], "game": e["game"]}
-        for e in entries
-    ]
-    context.user_data.clear()
+    db: Database = context.application.bot_data["db"]
+    if not await prem.has_premium(context.bot, db, user_id):
+        from premium_handlers import send_premium_screen
 
+        context.user_data.clear()
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, user_id, lang, db)
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        t("stream_schedule_duration_prompt", lang),
+        reply_markup=stream_schedule_duration_keyboard(lang),
+    )
+    return STREAM_SCHEDULE_DURATION
+
+
+async def stream_schedule_duration_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    raw = (query.data or "").rsplit(":", 1)[-1]
+    try:
+        hours = int(raw)
+    except ValueError:
+        hours = 0
+    duration_min = (
+        _SCHEDULE_DEFAULT_DURATION_MIN if hours <= 0 else max(1, hours) * 60
+    )
+    entries = context.user_data.get("stream_schedule_entries", [])
+    if not entries:
+        context.user_data.clear()
+        await query.edit_message_text(t("stream_schedule_publish_fail", lang, error="no data"))
+        await context.bot.send_message(
+            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        )
+        return ConversationHandler.END
+
+    _pending_schedule_publishes(context.application)[user_id] = {
+        "entries": [
+            {"date": e["date"].isoformat(), "time": e["time"], "game": e["game"]}
+            for e in entries
+        ],
+        "duration": duration_min,
+    }
+    context.user_data.clear()
+    return await _start_schedule_publish_auth(update, context, user_id, lang)
+
+
+async def _start_schedule_publish_auth(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    lang: str,
+) -> int:
+    from config import twitch_oauth_redirect_uri
+    from health import create_oauth_state
+    from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE, TwitchClient
+
+    query = update.callback_query
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     sync = db.get_twitch_sync(user_id)
@@ -3395,7 +3446,8 @@ async def stream_schedule_publish_callback(
                         or datetime.now(timezone.utc).isoformat(),
                         next_sync_at=sync.next_sync_at,
                     )
-                await query.edit_message_text(t("stream_schedule_publishing", lang))
+                if query:
+                    await query.edit_message_text(t("stream_schedule_publishing", lang))
                 await _complete_schedule_publish(
                     context.application,
                     user_id,
@@ -3414,7 +3466,11 @@ async def stream_schedule_publish_callback(
 
     redirect_uri = twitch_oauth_redirect_uri()
     if not redirect_uri:
-        await query.edit_message_text(t("stream_schedule_publish_auth_unavailable", lang))
+        text = t("stream_schedule_publish_auth_unavailable", lang)
+        if query:
+            await query.edit_message_text(text)
+        else:
+            await context.bot.send_message(user_id, text)
         await context.bot.send_message(
             user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
@@ -3424,12 +3480,14 @@ async def stream_schedule_publish_callback(
     url = twitch.build_authorize_url(
         redirect_uri=redirect_uri, state=state, scopes=SCHEDULE_OAUTH_SCOPES
     )
-    await query.edit_message_text(
-        t("stream_schedule_publish_auth", lang),
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(t("stream_schedule_publish_auth_button", lang), url=url)]]
-        ),
+    auth_text = t("stream_schedule_publish_auth", lang)
+    markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton(t("stream_schedule_publish_auth_button", lang), url=url)]]
     )
+    if query:
+        await query.edit_message_text(auth_text, reply_markup=markup)
+    else:
+        await context.bot.send_message(user_id, auth_text, reply_markup=markup)
     return ConversationHandler.END
 
 
@@ -3451,7 +3509,15 @@ async def _complete_schedule_publish(
         )
         return
 
-    entries = _pending_schedule_publishes(application).pop(owner_id, None)
+    pending = _pending_schedule_publishes(application).pop(owner_id, None)
+    if isinstance(pending, list):
+        # Legacy in-memory shape from older deploys
+        entries, duration_min = pending, _SCHEDULE_DEFAULT_DURATION_MIN
+    elif isinstance(pending, dict):
+        entries = pending.get("entries") or []
+        duration_min = int(pending.get("duration") or _SCHEDULE_DEFAULT_DURATION_MIN)
+    else:
+        entries, duration_min = [], _SCHEDULE_DEFAULT_DURATION_MIN
     if not entries or not token_info:
         await application.bot.send_message(
             owner_id,
@@ -3464,6 +3530,17 @@ async def _complete_schedule_publish(
     twitch_user_id = token_info.get("twitch_user_id", "")
     refresh = token_info.get("refresh_token", "")
     twitch: TwitchClient = application.bot_data["twitch"]
+
+    try:
+        await asyncio.to_thread(
+            twitch.clear_channel_schedule, access, twitch_user_id
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to clear Twitch schedule before publish (user=%s): %s",
+            owner_id,
+            exc,
+        )
 
     ok_count = 0
     errors: list[str] = []
@@ -3490,6 +3567,7 @@ async def _complete_schedule_publish(
                 twitch_user_id,
                 start_time=start_iso,
                 timezone=SCHEDULE_TZ_NAME,
+                duration=duration_min,
                 title=game_text or "",
                 category_id=category_id,
                 prefer_recurring=prefer_recurring,
@@ -7814,6 +7892,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 CallbackQueryHandler(
                     stream_schedule_publish_callback, pattern=r"^stream_sched:publish:"
+                ),
+            ],
+            STREAM_SCHEDULE_DURATION: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    stream_schedule_duration_callback,
+                    pattern=r"^stream_sched:duration:",
                 ),
             ],
             SYNC_DAYS: [

@@ -333,6 +333,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_publish_prompt": "Publish schedule on Twitch?",
         "stream_schedule_publish_yes": "✅ Publish on Twitch",
         "stream_schedule_publish_no": "❌ No",
+        "stream_schedule_duration_prompt": (
+            "How long is a typical stream (hours)?\n"
+            "Existing Twitch schedule slots will be cleared before sync."
+        ),
+        "stream_schedule_duration_hour": "{hours} h",
+        "stream_schedule_duration_unsure": "Not sure",
         "stream_schedule_publish_auth": "Authorize the bot to manage your Twitch schedule.",
         "stream_schedule_publish_auth_button": "Authorize on Twitch",
         "stream_schedule_publish_auth_unavailable": "Twitch schedule publishing is not configured (set PUBLIC_BASE_URL).",
@@ -1293,6 +1299,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_publish_prompt": "Опубликовать расписание на Twitch?",
         "stream_schedule_publish_yes": "✅ Опубликовать на Twitch",
         "stream_schedule_publish_no": "❌ Нет",
+        "stream_schedule_duration_prompt": (
+            "Сколько обычно длится стрим (в часах)?\n"
+            "Перед синхронизацией все текущие слоты на Twitch будут удалены."
+        ),
+        "stream_schedule_duration_hour": "{hours} ч",
+        "stream_schedule_duration_unsure": "Не уверен",
         "stream_schedule_publish_auth": "Авторизуйте бота для управления расписанием на Twitch.",
         "stream_schedule_publish_auth_button": "Авторизоваться на Twitch",
         "stream_schedule_publish_auth_unavailable": "Публикация расписания не настроена (нужен PUBLIC_BASE_URL).",
@@ -2047,10 +2059,13 @@ def main_menu(
         ],
         [
             KeyboardButton(btn("manage", lang)),
-            KeyboardButton(btn("watch", lang)),
+            KeyboardButton(btn("create_schedule", lang)),
         ],
         [
+            KeyboardButton(btn("watch", lang)),
             KeyboardButton(btn("settings", lang)),
+        ],
+        [
             KeyboardButton(btn("feedback", lang)),
         ],
     ]
@@ -2190,7 +2205,6 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(btn("admin_withdrawals", lang)),
-                KeyboardButton(btn("create_schedule", lang)),
             ],
             [KeyboardButton(btn("demo", lang))],
             [KeyboardButton(btn("back", lang))],
@@ -2738,6 +2752,27 @@ def stream_schedule_publish_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("stream_schedule_publish_yes", lang), callback_data="stream_sched:publish:1")],
             [InlineKeyboardButton(t("stream_schedule_publish_no", lang), callback_data="stream_sched:publish:0")],
+        ]
+    )
+
+
+def stream_schedule_duration_keyboard(lang: str) -> InlineKeyboardMarkup:
+    hour_row = [
+        InlineKeyboardButton(
+            t("stream_schedule_duration_hour", lang, hours=h),
+            callback_data=f"stream_sched:duration:{h}",
+        )
+        for h in (1, 2, 3, 4)
+    ]
+    return InlineKeyboardMarkup(
+        [
+            hour_row,
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_duration_unsure", lang),
+                    callback_data="stream_sched:duration:0",
+                )
+            ],
         ]
     )
 

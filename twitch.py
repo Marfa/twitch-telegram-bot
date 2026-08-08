@@ -285,6 +285,49 @@ class TwitchClient:
                 )
         return len(ids)
 
+    def clear_channel_schedule(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        *,
+        max_rounds: int = 50,
+    ) -> int:
+        """Delete all upcoming schedule segments. Returns successful delete calls.
+
+        Refetches after each round because deleting a recurring segment removes the
+        whole series (subsequent occurrence ids 404).
+        """
+        deleted = 0
+        for _ in range(max(1, max_rounds)):
+            segments = self.get_schedule_segments(broadcaster_id, first=25)
+            if not segments:
+                break
+            ids: list[str] = []
+            seen: set[str] = set()
+            for seg in segments:
+                sid = str(seg.get("id") or "")
+                if not sid or sid in seen:
+                    continue
+                seen.add(sid)
+                ids.append(sid)
+            if not ids:
+                break
+            progress = False
+            for sid in ids:
+                try:
+                    self.delete_schedule_segment(
+                        user_access_token, broadcaster_id, sid
+                    )
+                    deleted += 1
+                    progress = True
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to delete schedule segment %s: %s", sid, exc
+                    )
+            if not progress:
+                break
+        return deleted
+
     def validate_user_token(self, user_access_token: str) -> dict[str, Any]:
         """Validate a user access token; returns Twitch payload (scopes, user_id, …)."""
         resp = self._session.get(

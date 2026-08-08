@@ -156,6 +156,25 @@ def main() -> None:
     assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "ru")
     assert tr("stream_schedule_publishing", "ru")
     assert tr("stream_schedule_publishing", "en")
+    assert tr("stream_schedule_duration_prompt", "ru")
+    assert tr("stream_schedule_duration_unsure", "en")
+    from i18n import main_menu, admin_menu, stream_schedule_duration_keyboard
+
+    for loc in ("en", "ru"):
+        main_btns = [b.text for row in main_menu(loc).keyboard for b in row]
+        assert btn("create_schedule", loc) in main_btns
+        assert btn("watch", loc) in main_btns
+        assert main_btns.index(btn("create_schedule", loc)) < main_btns.index(
+            btn("watch", loc)
+        )
+        admin_btns = [b.text for row in admin_menu(loc).keyboard for b in row]
+        assert btn("create_schedule", loc) not in admin_btns
+        dur_kb = stream_schedule_duration_keyboard(loc)
+        assert any(
+            (btn.callback_data or "").startswith("stream_sched:duration:")
+            for row in dur_kb.inline_keyboard
+            for btn in row
+        )
     html_ru = _html_page(
         tr("oauth_web_done_title", "ru"),
         tr("oauth_web_done_body", "ru"),

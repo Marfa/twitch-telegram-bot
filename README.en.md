@@ -30,9 +30,9 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
-| Stream schedule | **📅 Create schedule** wizard — weekly text for publication |
+| Stream schedule | Main menu wizard for weekly text; publish to Twitch is **Premium** (slot duration, full clear of old slots) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | Stars subscription or Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) — more active alerts, sync, all alert types |
+| Premium | Stars subscription or Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) — more active alerts, sync, all alert types, Twitch schedule publish |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer, DeepL, statistics, withdrawal handling, **Demo mode** |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
@@ -143,7 +143,7 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 
 ### Stream schedule
 
-**📅 Create schedule** — wizard for publication text for the upcoming week (nearest Monday through Sunday):
+**📅 Create schedule** on the main menu (everyone) — wizard for publication text for the upcoming week (nearest Monday through Sunday):
 
 1. Description and format example
 2. Confirm “Create the schedule?”
@@ -160,6 +160,13 @@ Result — ready-to-post text, for example:
 
 Dates and month names follow the user’s language.
 
+Optionally **publish to Twitch** (**Premium**):
+
+1. Slot duration: 1–4 h or “Not sure” (default 2 h)
+2. OAuth / saved token with `channel:manage:schedule`
+3. All existing channel schedule segments are deleted before creating new ones
+4. Segments are one-off (Partner/Affiliate) or weekly recurring (fallback)
+
 ### Menu and commands
 
 | Button / command | Action |
@@ -173,8 +180,8 @@ Dates and month names follow the user’s language.
 | ➕ New subscription | Alert type → wizard |
 | ⬇️ Import from Twitch | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete |
+| 📅 Create schedule | Weekly text; Twitch sync — Premium |
 | 🎲 What to watch? | Pick filter / new search / delete filters |
-| 📅 Create schedule | Weekly stream schedule text |
 | ⚙️ Settings | Premium, sync, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
