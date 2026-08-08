@@ -159,7 +159,7 @@ async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
     if status == ChatMemberStatus.RESTRICTED:
         return bool(getattr(member, "is_member", True))
     return status in {
-        ChatMemberStatus.CREATOR,
+        ChatMemberStatus.OWNER,
         ChatMemberStatus.ADMINISTRATOR,
         ChatMemberStatus.MEMBER,
         ChatMemberStatus.RESTRICTED,

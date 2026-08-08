@@ -139,7 +139,15 @@ async def send_premium_screen(
 ) -> None:
     # Demo: show free-plan screen even if admin has permanent / free-chat Premium.
     force_free = demo_mode.is_active(user_id)
-    free_chat = False if force_free else await prem.is_free_chat_member(bot, user_id)
+    prem.ensure_trial_expired(db, user_id)
+    st = prem.get_status(db, user_id)
+    if force_free:
+        free_chat = False
+    elif st.permanent or st.stars_active or st.twitch_active or st.trial_active:
+        # Full Premium already in DB — skip getChatMember.
+        free_chat = False
+    else:
+        free_chat = await prem.is_free_chat_member(bot, user_id)
     text = premium_screen_text(
         db, user_id, lang, free_chat=free_chat, force_free=force_free
     )

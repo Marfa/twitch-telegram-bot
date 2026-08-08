@@ -954,6 +954,10 @@ def main() -> None:
     from config import FREE_CHAT_ID
 
     assert FREE_CHAT_ID == -1002155969539
+    from telegram.constants import ChatMemberStatus
+
+    assert hasattr(ChatMemberStatus, "OWNER")
+    assert not hasattr(ChatMemberStatus, "CREATOR")
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
     assert tr("btn_premium", "en")
     assert "Пробный" in tr("btn_premium_trial", "ru") or "триал" in tr(

@@ -5851,22 +5851,31 @@ async def _send_dm_html(
     db: Database,
     uid: int,
     message: str,
+    *,
+    reply_markup=None,
 ) -> str:
     """Send one DM. Returns 'sent', 'blocked', or 'failed'."""
+    kwargs: dict = {}
+    if reply_markup is not None:
+        kwargs["reply_markup"] = reply_markup
     try:
         try:
-            await bot.send_message(uid, message, parse_mode=ParseMode.HTML)
+            await bot.send_message(
+                uid, message, parse_mode=ParseMode.HTML, **kwargs
+            )
         except BadRequest:
             # Plain legacy text or translation broke tags — send without parse_mode.
-            await bot.send_message(uid, message)
+            await bot.send_message(uid, message, **kwargs)
         return "sent"
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
         try:
             try:
-                await bot.send_message(uid, message, parse_mode=ParseMode.HTML)
+                await bot.send_message(
+                    uid, message, parse_mode=ParseMode.HTML, **kwargs
+                )
             except BadRequest:
-                await bot.send_message(uid, message)
+                await bot.send_message(uid, message, **kwargs)
             return "sent"
         except Forbidden as retry_exc:
             if "blocked" in str(retry_exc).lower():
@@ -5916,6 +5925,8 @@ async def _send_admin_broadcast(
         source,
         set(user_locales.values()),
     )
+    # Bot-update broadcasts also push the current main ReplyKeyboard.
+    attach_menu = msg_type == "bot_update"
     sent = failed = 0
     for uid in user_ids:
         locale = user_locales[uid]
@@ -5926,7 +5937,10 @@ async def _send_admin_broadcast(
             type=_broadcast_type_label(msg_type, locale),
         )
         message = f"{body}\n\n{footer}"
-        result = await _send_dm_html(context.bot, db, uid, message)
+        markup = _menu(locale, uid) if attach_menu else None
+        result = await _send_dm_html(
+            context.bot, db, uid, message, reply_markup=markup
+        )
         if result == "sent":
             sent += 1
         else:

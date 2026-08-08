@@ -34,7 +34,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
 | Premium | 7-day trial; Stars month/year/lifetime; pay per feature; Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
-| Admin | Background broadcast with type footer, DeepL, statistics, withdrawal handling, **Demo mode** |
+| Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
