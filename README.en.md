@@ -28,11 +28,12 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check before send) |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
+| Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | Main menu wizard for weekly text; publish to Twitch is **Premium** (slot duration, full clear of old slots) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | 7-day trial; Stars month/year/lifetime; pay per feature; Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
+| Premium | 7-day trial; Stars month/year/lifetime; pay per feature (incl. 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
@@ -182,6 +183,7 @@ Optionally **publish to Twitch** (**Premium**):
 | 📋 Manage subscriptions | List, edit, delete |
 | 📅 Create schedule | Weekly text; Twitch sync — Premium |
 | 🎲 What to watch? | Pick filter / new search / delete filters |
+| 📜 Alert history | DM: 7 days free / 60 days Premium |
 | ⚙️ Settings | Premium, sync, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |

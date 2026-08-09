@@ -6581,15 +6581,37 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    items = db.list_alert_history(user_id, limit=20)
+    deep = await prem.has_feature(context.bot, db, user_id, "alert_history")
+    days = (
+        prem.ALERT_HISTORY_PREMIUM_DAYS if deep else prem.ALERT_HISTORY_FREE_DAYS
+    )
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    items = db.list_alert_history(user_id, since=since)
+    more_kb = (
+        None
+        if deep
+        else InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        btn("alert_history_more", lang),
+                        callback_data="alert_history:more",
+                    )
+                ]
+            ]
+        )
+    )
     if not items:
         await update.effective_message.reply_text(
             t("alert_history_empty", lang),
-            reply_markup=_menu(lang, user_id),
+            reply_markup=more_kb,
         )
         return
 
-    lines: list[str] = [t("alert_history_title", lang, n=len(items)), ""]
+    lines: list[str] = [
+        t("alert_history_title", lang, days=days, n=len(items)),
+        "",
+    ]
     last_day: date | None = None
     for item in items:
         local = _parse_alert_sent_at(item.sent_at).astimezone(SCHEDULE_TZ)
@@ -6613,10 +6635,23 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 type=_alert_history_type_label(item.alert_type, lang),
             )
         )
-    await update.effective_message.reply_text(
-        "\n".join(lines),
-        reply_markup=_menu(lang, user_id),
-    )
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990].rstrip() + "\n…"
+    await update.effective_message.reply_text(text, reply_markup=more_kb)
+
+
+async def on_alert_history_more(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    from premium_handlers import send_premium_screen
+
+    await send_premium_screen(context.bot, user_id, lang, db)
 
 
 async def open_partner_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7696,6 +7731,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_alert_history_more, pattern=r"^alert_history:more$"),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("settings"), open_settings_menu),
         group=0,
     )
@@ -8197,7 +8236,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_sel:|delete_go$|delete_clear$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
-                r"import_mode:|sync:|premium:|ref_wd:|watch:)"
+                r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
             ),
         ),
         group=-1,

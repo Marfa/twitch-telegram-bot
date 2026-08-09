@@ -48,6 +48,7 @@ from db import (
 )
 from i18n import SUPPORTED_LOCALES, btn, t as tr
 from health import create_oauth_state, pop_oauth_state
+from premium import FEATURE_IDS
 from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
 
@@ -1079,7 +1080,7 @@ def main() -> None:
         assert paid is not None and paid.status == "paid"
         assert db.resolve_referral_withdrawal(wid, "rejected") is None
         assert db.list_pending_referral_withdrawals() == []
-        # Alert history: newest first, prune keeps last 100.
+        # Alert history: newest first, 60-day storage window.
         assert db.list_alert_history(10) == []
         for i in range(3):
             db.add_alert_history(
@@ -1088,11 +1089,18 @@ def main() -> None:
                 twitch_username=f"user{i}",
                 alert_type="live" if i % 2 == 0 else "end",
             )
-        hist = db.list_alert_history(10, limit=20)
+        hist = db.list_alert_history(10)
         assert len(hist) == 3
         assert hist[0].twitch_username == "user2"
         assert hist[0].alert_type == "live"
         assert hist[-1].twitch_username == "user0"
+        recent = db.list_alert_history(
+            10, since=datetime.now(timezone.utc) - timedelta(days=7)
+        )
+        assert len(recent) == 3
+        assert "alert_history" in FEATURE_IDS
+        assert tr("premium_feat_alert_history", "ru")
+        assert tr("btn_alert_history_more", "ru") == "Показать больше"
         # Reject restores available balance.
         apply_stars_payment(
             db, 20, charge_id="pay3", until_unix=10**12, stars_paid=1000

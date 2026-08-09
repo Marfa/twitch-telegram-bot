@@ -162,7 +162,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_allow": "allowed",
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
-        "alert_history_title": "Alert history (last {n}):",
+        "alert_history_title": "Alert history — last {days} days ({n}):",
         "alert_history_empty": "No alerts yet.",
         "alert_history_day": "{date}",
         "alert_history_line": "• {time} — {username} — {type}",
@@ -170,6 +170,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "alert_history_type_end": "Stream ended",
         "alert_history_type_category": "Category change",
         "alert_history_type_schedule": "Schedule reminder",
+        "btn_alert_history_more": "Show more",
         "menu_partner": "Partner program:",
         "partner_intro": (
             "Invite friends with your link. You get {percent}% of every Stars Premium "
@@ -224,7 +225,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Delayed send\n"
             "• Repeat notification mute\n"
             "• Delete previous bot messages (+ delete-fail notify)\n"
-            "• Publish schedule to Twitch\n\n"
+            "• Publish schedule to Twitch\n"
+            "• Alert history for 60 days (7 days on free)\n\n"
             "How to get:\n"
             "• Pay for a subscription (buttons below), or\n"
             "• Active Twitch subscription to https://www.twitch.tv/{channel}\n\n"
@@ -247,6 +249,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_repeat": "Repeat notification mute",
         "premium_feat_delete_prev": "Delete previous messages",
         "premium_feat_schedule_publish": "Publish schedule to Twitch",
+        "premium_feat_alert_history": "Alert history for 60 days",
         "premium_feat_line": "• {name} until {until}",
         "premium_feat_pick": (
             "Select features ({price} Stars / month each).\n"
@@ -1182,7 +1185,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_allow": "разрешены",
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
-        "alert_history_title": "История оповещений (последние {n}):",
+        "alert_history_title": "История оповещений — за {days} дн. ({n}):",
         "alert_history_empty": "Оповещений пока нет.",
         "alert_history_day": "{date}",
         "alert_history_line": "• {time} — {username} — {type}",
@@ -1190,6 +1193,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "alert_history_type_end": "Эфир окончен",
         "alert_history_type_category": "Смена категории",
         "alert_history_type_schedule": "Напоминание о стриме",
+        "btn_alert_history_more": "Показать больше",
         "menu_partner": "Партнёрская программа:",
         "partner_intro": (
             "Приглашайте друзей по своей ссылке. Вы получаете {percent}% от каждой "
@@ -1244,7 +1248,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Отложенная отправка\n"
             "• Заглушка повторных уведомлений\n"
             "• Удаление предыдущих сообщений бота (+ уведомление об ошибках)\n"
-            "• Публикация расписания на Twitch\n\n"
+            "• Публикация расписания на Twitch\n"
+            "• История оповещений за 60 дней (на бесплатном — 7 дней)\n\n"
             "Как получить:\n"
             "• Оплата подписки (кнопки ниже), или\n"
             "• Активная подписка Twitch на https://www.twitch.tv/{channel}\n\n"
@@ -1267,6 +1272,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_repeat": "Заглушка повторов",
         "premium_feat_delete_prev": "Удаление предыдущих сообщений",
         "premium_feat_schedule_publish": "Публикация расписания на Twitch",
+        "premium_feat_alert_history": "История оповещений за 60 дней",
         "premium_feat_line": "• {name} до {until}",
         "premium_feat_pick": (
             "Выберите функции ({price} ⭐ / месяц каждая).\n"

@@ -7,7 +7,7 @@ import secrets
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -612,7 +612,11 @@ class Database(Protocol):
     ) -> None: ...
 
     def list_alert_history(
-        self, owner_id: int, *, limit: int = 20
+        self,
+        owner_id: int,
+        *,
+        since: datetime | None = None,
+        limit: int = 500,
     ) -> list[AlertHistoryEntry]: ...
 
     def resolve_referral_withdrawal(
@@ -1567,6 +1571,11 @@ class SqliteDatabase:
         twitch_username: str,
         alert_type: str,
     ) -> None:
+        from premium import ALERT_HISTORY_PREMIUM_DAYS
+
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=ALERT_HISTORY_PREMIUM_DAYS)
+        ).strftime("%Y-%m-%d %H:%M:%S")
         with self._conn() as conn:
             conn.execute(
                 """
@@ -1581,37 +1590,47 @@ class SqliteDatabase:
                     (alert_type or "").strip() or "live",
                 ),
             )
-            # Keep a bounded log per owner (read path uses last 20).
             conn.execute(
                 """
                 DELETE FROM alert_history
-                WHERE owner_id = ?
-                  AND id NOT IN (
-                    SELECT id FROM (
-                      SELECT id FROM alert_history
-                      WHERE owner_id = ?
-                      ORDER BY id DESC
-                      LIMIT 100
-                    )
-                  )
+                WHERE owner_id = ? AND sent_at < ?
                 """,
-                (owner_id, owner_id),
+                (owner_id, cutoff),
             )
 
     def list_alert_history(
-        self, owner_id: int, *, limit: int = 20
+        self,
+        owner_id: int,
+        *,
+        since: datetime | None = None,
+        limit: int = 500,
     ) -> list[AlertHistoryEntry]:
         with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
-                FROM alert_history
-                WHERE owner_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (owner_id, int(limit)),
-            ).fetchall()
+            if since is not None:
+                if since.tzinfo is None:
+                    since = since.replace(tzinfo=timezone.utc)
+                since_s = since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                rows = conn.execute(
+                    """
+                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    FROM alert_history
+                    WHERE owner_id = ? AND sent_at >= ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (owner_id, since_s, int(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    FROM alert_history
+                    WHERE owner_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (owner_id, int(limit)),
+                ).fetchall()
         return [_row_to_alert_history(r) for r in rows]
 
     def resolve_referral_withdrawal(
@@ -3444,6 +3463,9 @@ class PostgresDatabase:
         twitch_username: str,
         alert_type: str,
     ) -> None:
+        from premium import ALERT_HISTORY_PREMIUM_DAYS
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=ALERT_HISTORY_PREMIUM_DAYS)
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -3462,34 +3484,44 @@ class PostgresDatabase:
             cur.execute(
                 """
                 DELETE FROM alert_history
-                WHERE owner_id = %s
-                  AND id NOT IN (
-                    SELECT id FROM (
-                      SELECT id FROM alert_history
-                      WHERE owner_id = %s
-                      ORDER BY id DESC
-                      LIMIT 100
-                    ) keep_rows
-                  )
+                WHERE owner_id = %s AND sent_at < %s
                 """,
-                (owner_id, owner_id),
+                (owner_id, cutoff),
             )
 
     def list_alert_history(
-        self, owner_id: int, *, limit: int = 20
+        self,
+        owner_id: int,
+        *,
+        since: datetime | None = None,
+        limit: int = 500,
     ) -> list[AlertHistoryEntry]:
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute(
-                """
-                SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
-                FROM alert_history
-                WHERE owner_id = %s
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (owner_id, int(limit)),
-            )
+            if since is not None:
+                if since.tzinfo is None:
+                    since = since.replace(tzinfo=timezone.utc)
+                cur.execute(
+                    """
+                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    FROM alert_history
+                    WHERE owner_id = %s AND sent_at >= %s
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (owner_id, since.astimezone(timezone.utc), int(limit)),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    FROM alert_history
+                    WHERE owner_id = %s
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (owner_id, int(limit)),
+                )
             rows = cur.fetchall()
         return [_row_to_alert_history(r) for r in rows]
 

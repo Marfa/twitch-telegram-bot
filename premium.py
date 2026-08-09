@@ -39,7 +39,12 @@ FEATURE_IDS: tuple[str, ...] = (
     "repeat",
     "delete_prev",
     "schedule_publish",
+    "alert_history",
 )
+
+# DM alert history retention shown to the user (storage keeps the premium window).
+ALERT_HISTORY_FREE_DAYS = 7
+ALERT_HISTORY_PREMIUM_DAYS = 60
 
 _FEATURE_LABEL_KEYS = {
     "extra_alerts": "premium_feat_extra_alerts",
@@ -50,6 +55,7 @@ _FEATURE_LABEL_KEYS = {
     "repeat": "premium_feat_repeat",
     "delete_prev": "premium_feat_delete_prev",
     "schedule_publish": "premium_feat_schedule_publish",
+    "alert_history": "premium_feat_alert_history",
 }
 
 
