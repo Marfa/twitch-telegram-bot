@@ -6606,6 +6606,7 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.effective_message.reply_text(
             t("alert_history_empty", lang),
             reply_markup=more_kb,
+            disable_web_page_preview=True,
         )
         return
 
@@ -6652,7 +6653,11 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     for i, chunk in enumerate(chunks):
         kb = more_kb if i == len(chunks) - 1 else None
-        await update.effective_message.reply_text(chunk, reply_markup=kb)
+        await update.effective_message.reply_text(
+            chunk,
+            reply_markup=kb,
+            disable_web_page_preview=True,
+        )
 
 
 async def on_alert_history_more(
