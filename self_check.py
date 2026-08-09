@@ -165,8 +165,12 @@ def main() -> None:
         main_btns = [b.text for row in main_menu(loc).keyboard for b in row]
         assert btn("create_schedule", loc) in main_btns
         assert btn("watch", loc) in main_btns
+        assert btn("alert_history", loc) in main_btns
         assert main_btns.index(btn("create_schedule", loc)) < main_btns.index(
             btn("watch", loc)
+        )
+        assert main_btns.index(btn("alert_history", loc)) < main_btns.index(
+            btn("settings", loc)
         )
         admin_btns = [b.text for row in admin_menu(loc).keyboard for b in row]
         assert btn("create_schedule", loc) not in admin_btns
@@ -1075,6 +1079,20 @@ def main() -> None:
         assert paid is not None and paid.status == "paid"
         assert db.resolve_referral_withdrawal(wid, "rejected") is None
         assert db.list_pending_referral_withdrawals() == []
+        # Alert history: newest first, prune keeps last 100.
+        assert db.list_alert_history(10) == []
+        for i in range(3):
+            db.add_alert_history(
+                10,
+                subscription_id=i + 1,
+                twitch_username=f"user{i}",
+                alert_type="live" if i % 2 == 0 else "end",
+            )
+        hist = db.list_alert_history(10, limit=20)
+        assert len(hist) == 3
+        assert hist[0].twitch_username == "user2"
+        assert hist[0].alert_type == "live"
+        assert hist[-1].twitch_username == "user0"
         # Reject restores available balance.
         apply_stars_payment(
             db, 20, charge_id="pay3", until_unix=10**12, stars_paid=1000

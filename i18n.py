@@ -26,6 +26,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_delete": "🗑 Delete subscription",
         "btn_feedback": "🐛 Report a problem",
         "btn_create_schedule": "📅 Create schedule",
+        "btn_alert_history": "📜 Alert history",
         "btn_settings": "⚙️ Settings",
         "btn_language": "🌐 Language",
         "btn_admin": "⚙️ Admin",
@@ -161,6 +162,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_allow": "allowed",
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
+        "alert_history_title": "Alert history (last {n}):",
+        "alert_history_empty": "No alerts yet.",
+        "alert_history_day": "{date}",
+        "alert_history_line": "• {time} — {username} — {type}",
+        "alert_history_type_live": "Went live",
+        "alert_history_type_end": "Stream ended",
+        "alert_history_type_category": "Category change",
+        "alert_history_type_schedule": "Schedule reminder",
         "menu_partner": "Partner program:",
         "partner_intro": (
             "Invite friends with your link. You get {percent}% of every Stars Premium "
@@ -1037,6 +1046,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_delete": "🗑 Удалить подписку",
         "btn_feedback": "🐛 Сообщить о проблеме",
         "btn_create_schedule": "📅 Создать расписание",
+        "btn_alert_history": "📜 История оповещений",
         "btn_settings": "⚙️ Настройки",
         "btn_language": "🌐 Выбор языка",
         "btn_admin": "⚙️ Админка",
@@ -1172,6 +1182,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_allow": "разрешены",
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
+        "alert_history_title": "История оповещений (последние {n}):",
+        "alert_history_empty": "Оповещений пока нет.",
+        "alert_history_day": "{date}",
+        "alert_history_line": "• {time} — {username} — {type}",
+        "alert_history_type_live": "В эфире",
+        "alert_history_type_end": "Эфир окончен",
+        "alert_history_type_category": "Смена категории",
+        "alert_history_type_schedule": "Напоминание о стриме",
         "menu_partner": "Партнёрская программа:",
         "partner_intro": (
             "Приглашайте друзей по своей ссылке. Вы получаете {percent}% от каждой "
@@ -2112,6 +2130,7 @@ def all_menu_buttons() -> set[str]:
         "delete",
         "feedback",
         "create_schedule",
+        "alert_history",
         "settings",
         "language",
         "admin",
@@ -2155,6 +2174,9 @@ def main_menu(
         ],
         [
             KeyboardButton(btn("watch", lang)),
+            KeyboardButton(btn("alert_history", lang)),
+        ],
+        [
             KeyboardButton(btn("settings", lang)),
         ],
         [

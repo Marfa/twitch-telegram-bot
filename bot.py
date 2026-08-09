@@ -1372,6 +1372,8 @@ async def _send_notification(
     db: Database,
     sub: Subscription,
     text: str,
+    *,
+    alert_type: str = "live",
 ) -> bool:
     if sub.delete_previous and sub.dest_type != "dm":
         to_delete: list[tuple[int, int]] = []
@@ -1434,6 +1436,15 @@ async def _send_notification(
             db.set_last_message_id(sub.id, msg.message_id)
         if sub.suppress_repeat_minutes > 0:
             db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
+        try:
+            db.add_alert_history(
+                sub.owner_id,
+                subscription_id=sub.id,
+                twitch_username=sub.twitch_username,
+                alert_type=alert_type,
+            )
+        except Exception:
+            logger.exception("Failed to record alert history for sub %s", sub.id)
         return True
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
@@ -6537,6 +6548,75 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+def _alert_history_type_label(alert_type: str, lang: str) -> str:
+    key = {
+        "live": "alert_history_type_live",
+        "end": "alert_history_type_end",
+        "category": "alert_history_type_category",
+        "schedule": "alert_history_type_schedule",
+    }.get(alert_type)
+    return t(key, lang) if key else alert_type
+
+
+def _parse_alert_sent_at(sent_at: str) -> datetime:
+    raw = (sent_at or "").strip()
+    if not raw:
+        return datetime.now(timezone.utc)
+    # SQLite datetime('now') is UTC without timezone marker.
+    if "T" not in raw and " " in raw:
+        raw = raw.replace(" ", "T", 1)
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    items = db.list_alert_history(user_id, limit=20)
+    if not items:
+        await update.effective_message.reply_text(
+            t("alert_history_empty", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return
+
+    lines: list[str] = [t("alert_history_title", lang, n=len(items)), ""]
+    last_day: date | None = None
+    for item in items:
+        local = _parse_alert_sent_at(item.sent_at).astimezone(SCHEDULE_TZ)
+        if last_day != local.date():
+            if last_day is not None:
+                lines.append("")
+            lines.append(
+                t(
+                    "alert_history_day",
+                    lang,
+                    date=format_stream_schedule_prompt_date(local.date(), lang),
+                )
+            )
+            last_day = local.date()
+        lines.append(
+            t(
+                "alert_history_line",
+                lang,
+                time=local.strftime("%H:%M"),
+                username=item.twitch_username,
+                type=_alert_history_type_label(item.alert_type, lang),
+            )
+        )
+    await update.effective_message.reply_text(
+        "\n".join(lines),
+        reply_markup=_menu(lang, user_id),
+    )
+
+
 async def open_partner_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import REFERRAL_COMMISSION_PERCENT, REFERRAL_WITHDRAW_MIN_STARS
 
@@ -7057,7 +7137,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     text = render_template(
         sub.message_template, username, game, title, stream=stream
     )
-    await _send_notification(context.bot, db, sub, text)
+    await _send_notification(context.bot, db, sub, text, alert_type="live")
 
 
 async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7081,7 +7161,7 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
     if is_on_notify_cooldown(sub):
         return
     text = render_template(sub.message_template, sub.twitch_username, "—", "—")
-    await _send_notification(context.bot, db, sub, text)
+    await _send_notification(context.bot, db, sub, text, alert_type="end")
 
 
 async def _send_delayed_category_notification(
@@ -7117,7 +7197,7 @@ async def _send_delayed_category_notification(
     text = render_template(
         sub.message_template, username, game, title, stream=stream
     )
-    await _send_notification(context.bot, db, sub, text)
+    await _send_notification(context.bot, db, sub, text, alert_type="category")
 
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7170,7 +7250,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             text = render_template(
                 sub.message_template, username, game, title, stream=stream
             )
-            await _send_notification(context.bot, db, sub, text)
+            await _send_notification(context.bot, db, sub, text, alert_type="live")
 
     for uid in went_offline:
         for sub in db.get_enabled_by_twitch_user_id(uid):
@@ -7187,7 +7267,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
                 continue
             text = render_template(sub.message_template, sub.twitch_username, "—", "—")
-            await _send_notification(context.bot, db, sub, text)
+            await _send_notification(context.bot, db, sub, text, alert_type="end")
 
     for uid in category_changed:
         stream = live_streams[uid]
@@ -7213,7 +7293,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             text = render_template(
                 sub.message_template, username, game, title, stream=stream
             )
-            await _send_notification(context.bot, db, sub, text)
+            await _send_notification(
+                context.bot, db, sub, text, alert_type="category"
+            )
 
 
 def _parse_segment_start(segment: dict) -> datetime | None:
@@ -7276,7 +7358,9 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     title,
                     extra={"minutes": str(max(1, minutes_left))},
                 )
-                ok = await _send_notification(context.bot, db, sub, text)
+                ok = await _send_notification(
+                    context.bot, db, sub, text, alert_type="schedule"
+                )
                 if not ok:
                     continue
                 db.set_last_schedule_reminder_segment(sub.id, seg_id)
@@ -7603,6 +7687,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_sb_delete, pattern=r"^sb_delete:\d+$"), group=0)
     app.add_handler(
         ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(_btn_filter("alert_history"), show_alert_history),
         group=0,
     )
     app.add_handler(
@@ -8121,6 +8209,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("list")
                 | _btn_filter("edit")
                 | _btn_filter("delete")
+                | _btn_filter("alert_history")
                 | _btn_filter("settings")
                 | _btn_filter("premium")
                 | _btn_filter("partner")

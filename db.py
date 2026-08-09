@@ -175,6 +175,16 @@ class ReferralWithdrawal:
 
 
 @dataclass
+class AlertHistoryEntry:
+    id: int
+    owner_id: int
+    subscription_id: int | None
+    twitch_username: str
+    alert_type: str
+    sent_at: str
+
+
+@dataclass
 class WatchPrefs:
     categories: list[dict[str, str]] = field(default_factory=list)
     min_viewers: int = 0
@@ -386,6 +396,21 @@ def _row_to_referral_withdrawal(row: Any) -> ReferralWithdrawal:
     )
 
 
+def _row_to_alert_history(row: Any) -> AlertHistoryEntry:
+    sent = row["sent_at"]
+    if sent is not None and not isinstance(sent, str):
+        sent = sent.isoformat()
+    sub_id = row["subscription_id"]
+    return AlertHistoryEntry(
+        id=int(row["id"]),
+        owner_id=int(row["owner_id"]),
+        subscription_id=int(sub_id) if sub_id is not None else None,
+        twitch_username=str(row["twitch_username"] or ""),
+        alert_type=str(row["alert_type"] or ""),
+        sent_at=str(sent or ""),
+    )
+
+
 def _row_to_sub(row: Any) -> Subscription:
     keys = set(row.keys())
     image_file_id = None
@@ -576,6 +601,19 @@ class Database(Protocol):
     ) -> list[ReferralWithdrawal]: ...
 
     def list_pending_referral_withdrawals(self) -> list[ReferralWithdrawal]: ...
+
+    def add_alert_history(
+        self,
+        owner_id: int,
+        *,
+        subscription_id: int | None,
+        twitch_username: str,
+        alert_type: str,
+    ) -> None: ...
+
+    def list_alert_history(
+        self, owner_id: int, *, limit: int = 20
+    ) -> list[AlertHistoryEntry]: ...
 
     def resolve_referral_withdrawal(
         self, withdrawal_id: int, status: str
@@ -1018,6 +1056,24 @@ class SqliteDatabase:
                 next_sync_at TEXT NOT NULL,
                 last_sync_at TEXT
             )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                subscription_id INTEGER,
+                twitch_username TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                sent_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
+            ON alert_history(owner_id, sent_at DESC)
             """
         )
         _seed_lucky_templates_sqlite(conn)
@@ -1502,6 +1558,61 @@ class SqliteDatabase:
                 """
             ).fetchall()
         return [_row_to_referral_withdrawal(r) for r in rows]
+
+    def add_alert_history(
+        self,
+        owner_id: int,
+        *,
+        subscription_id: int | None,
+        twitch_username: str,
+        alert_type: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_history (
+                    owner_id, subscription_id, twitch_username, alert_type
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    owner_id,
+                    subscription_id,
+                    (twitch_username or "").strip() or "—",
+                    (alert_type or "").strip() or "live",
+                ),
+            )
+            # Keep a bounded log per owner (read path uses last 20).
+            conn.execute(
+                """
+                DELETE FROM alert_history
+                WHERE owner_id = ?
+                  AND id NOT IN (
+                    SELECT id FROM (
+                      SELECT id FROM alert_history
+                      WHERE owner_id = ?
+                      ORDER BY id DESC
+                      LIMIT 100
+                    )
+                  )
+                """,
+                (owner_id, owner_id),
+            )
+
+    def list_alert_history(
+        self, owner_id: int, *, limit: int = 20
+    ) -> list[AlertHistoryEntry]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                FROM alert_history
+                WHERE owner_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (owner_id, int(limit)),
+            ).fetchall()
+        return [_row_to_alert_history(r) for r in rows]
 
     def resolve_referral_withdrawal(
         self, withdrawal_id: int, status: str
@@ -2771,6 +2882,24 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alert_history (
+                    id SERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL,
+                    subscription_id BIGINT,
+                    twitch_username TEXT NOT NULL,
+                    alert_type TEXT NOT NULL,
+                    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
+                ON alert_history(owner_id, sent_at DESC)
+                """
+            )
             _seed_lucky_templates_pg(cur)
 
     def add_subscription(
@@ -3306,6 +3435,63 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return [_row_to_referral_withdrawal(r) for r in rows]
+
+    def add_alert_history(
+        self,
+        owner_id: int,
+        *,
+        subscription_id: int | None,
+        twitch_username: str,
+        alert_type: str,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO alert_history (
+                    owner_id, subscription_id, twitch_username, alert_type
+                ) VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    owner_id,
+                    subscription_id,
+                    (twitch_username or "").strip() or "—",
+                    (alert_type or "").strip() or "live",
+                ),
+            )
+            cur.execute(
+                """
+                DELETE FROM alert_history
+                WHERE owner_id = %s
+                  AND id NOT IN (
+                    SELECT id FROM (
+                      SELECT id FROM alert_history
+                      WHERE owner_id = %s
+                      ORDER BY id DESC
+                      LIMIT 100
+                    ) keep_rows
+                  )
+                """,
+                (owner_id, owner_id),
+            )
+
+    def list_alert_history(
+        self, owner_id: int, *, limit: int = 20
+    ) -> list[AlertHistoryEntry]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                FROM alert_history
+                WHERE owner_id = %s
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (owner_id, int(limit)),
+            )
+            rows = cur.fetchall()
+        return [_row_to_alert_history(r) for r in rows]
 
     def resolve_referral_withdrawal(
         self, withdrawal_id: int, status: str
