@@ -12,6 +12,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    mem_limit: 512m
+    cpus: "0.50"
     restart: unless-stopped
 
   bot:
@@ -27,6 +29,8 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    mem_limit: 512m
+    cpus: "0.75"
     restart: unless-stopped
 
 volumes:

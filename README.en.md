@@ -244,7 +244,8 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `TWITCH_CLIENT_ID` | Twitch Client ID |
 | `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
 | `ADMIN_USER_IDS` | Admin Telegram user IDs (comma-separated) |
-| `CHECK_INTERVAL` | Twitch poll interval, seconds (default 60) |
+| `CHECK_INTERVAL` | Twitch live poll interval, seconds (default 60) |
+| `SCHEDULE_CHECK_INTERVAL` | Twitch schedule reminder poll, seconds (default 180) |
 | `POSTGRES_PASSWORD` | Postgres password on VPS (`compose.vps.yml`) |
 | `DATABASE_URL` | PostgreSQL. If unset — SQLite (`compose.vps.yml` sets it) |
 | `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |

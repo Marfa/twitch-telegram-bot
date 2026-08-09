@@ -31,6 +31,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
+# Schedule reminders need one Helix call per channel; poll slower than live checks.
+SCHEDULE_CHECK_INTERVAL = int(os.getenv("SCHEDULE_CHECK_INTERVAL", "180"))
 MAX_SUBSCRIPTIONS_PER_OWNER = int(os.getenv("MAX_SUBSCRIPTIONS_PER_OWNER", "25"))
 PREMIUM_FREE_ACTIVE_LIMIT = int(os.getenv("PREMIUM_FREE_ACTIVE_LIMIT", "5"))
 PREMIUM_STARS_AMOUNT = int(os.getenv("PREMIUM_STARS_AMOUNT", "100"))

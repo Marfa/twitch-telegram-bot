@@ -244,7 +244,8 @@ python main.py
 | `TWITCH_CLIENT_ID` | Twitch Client ID |
 | `TWITCH_CLIENT_SECRET` | Twitch Client Secret |
 | `ADMIN_USER_IDS` | Telegram user ID админов (через запятую) |
-| `CHECK_INTERVAL` | Опрос Twitch, сек (по умолчанию 60) |
+| `CHECK_INTERVAL` | Опрос Twitch live, сек (по умолчанию 60) |
+| `SCHEDULE_CHECK_INTERVAL` | Опрос Twitch schedule reminders, сек (по умолчанию 180) |
 | `POSTGRES_PASSWORD` | Пароль Postgres на VPS (`compose.vps.yml`) |
 | `DATABASE_URL` | PostgreSQL. Если не задан — SQLite (`compose.vps.yml` задаёт сам) |
 | `DATABASE_PATH` | SQLite: локально `data/bot.db`, в Docker `/data/bot.db` |

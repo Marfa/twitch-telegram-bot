@@ -5,6 +5,7 @@ import logging
 import random
 import secrets
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -567,6 +568,8 @@ class Database(Protocol):
     def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool: ...
 
     def get_user_locale(self, user_id: int) -> str | None: ...
+
+    def get_user_locales(self, user_ids: list[int]) -> dict[int, str | None]: ...
 
     def set_user_locale(self, user_id: int, locale: str) -> None: ...
 
@@ -1322,6 +1325,22 @@ class SqliteDatabase:
             return None
         return str(row["locale"])
 
+    def get_user_locales(self, user_ids: list[int]) -> dict[int, str | None]:
+        if not user_ids:
+            return {}
+        unique = list(dict.fromkeys(int(uid) for uid in user_ids))
+        out: dict[int, str | None] = {uid: None for uid in unique}
+        placeholders = ",".join("?" for _ in unique)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT user_id, locale FROM users WHERE user_id IN ({placeholders})",
+                unique,
+            ).fetchall()
+        for row in rows:
+            loc = row["locale"]
+            out[int(row["user_id"])] = str(loc) if loc else None
+        return out
+
     def set_user_locale(self, user_id: int, locale: str) -> None:
         with self._conn() as conn:
             conn.execute(
@@ -1709,26 +1728,38 @@ class SqliteDatabase:
             ).fetchall()
         return [int(r["user_id"]) for r in rows]
 
+    def _update_recipients(self, pref_column: str) -> list[int]:
+        # Missing users row → opt-in defaults (receive=1, blocked=0).
+        if pref_column not in (
+            "receive_bot_updates",
+            "receive_availability_updates",
+            "receive_other_updates",
+        ):
+            raise ValueError(f"invalid recipient pref: {pref_column}")
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT ids.uid AS user_id
+                FROM (
+                    SELECT user_id AS uid FROM users
+                    UNION
+                    SELECT owner_id AS uid FROM subscriptions
+                ) AS ids
+                LEFT JOIN users u ON u.user_id = ids.uid
+                WHERE COALESCE(u.bot_blocked, 0) = 0
+                  AND COALESCE(u.{pref_column}, 1) = 1
+                """
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]
+
     def get_bot_update_recipients(self) -> list[int]:
-        return [
-            uid
-            for uid in self.get_notify_user_ids()
-            if self.get_receive_bot_updates(uid) and not self.is_bot_blocked(uid)
-        ]
+        return self._update_recipients("receive_bot_updates")
 
     def get_availability_recipients(self) -> list[int]:
-        return [
-            uid
-            for uid in self.get_notify_user_ids()
-            if self.get_receive_availability_updates(uid) and not self.is_bot_blocked(uid)
-        ]
+        return self._update_recipients("receive_availability_updates")
 
     def get_other_recipients(self) -> list[int]:
-        return [
-            uid
-            for uid in self.get_notify_user_ids()
-            if self.get_receive_other_updates(uid) and not self.is_bot_blocked(uid)
-        ]
+        return self._update_recipients("receive_other_updates")
 
     def get_receive_bot_updates(self, user_id: int) -> bool:
         with self._conn() as conn:
@@ -2574,13 +2605,35 @@ class PostgresDatabase:
 
         self._psycopg = psycopg
         self._dsn = _normalize_pg_url(database_url)
+        self._lock = threading.Lock()
+        self._pooled: Any | None = None
         self._init_schema()
         logger.info("Database: PostgreSQL (DATABASE_URL)")
 
+    def _ensure_pooled(self) -> Any:
+        conn = self._pooled
+        if conn is not None and not conn.closed:
+            return conn
+        self._pooled = self._psycopg.connect(self._dsn, connect_timeout=30)
+        return self._pooled
+
     @contextmanager
     def _conn(self) -> Iterator[Any]:
-        with self._psycopg.connect(self._dsn, connect_timeout=30) as conn:
-            yield conn
+        # Reuse one connection under a lock — avoids TCP handshake per query on VPS.
+        with self._lock:
+            conn = self._ensure_pooled()
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                try:
+                    if not conn.closed:
+                        conn.rollback()
+                except Exception:
+                    self._pooled = None
+                if getattr(conn, "closed", False):
+                    self._pooled = None
+                raise
 
     def _cursor(self, conn: Any) -> Any:
         from psycopg.rows import dict_row  # noqa: PLC0415
@@ -3192,6 +3245,23 @@ class PostgresDatabase:
             return None
         return str(row["locale"])
 
+    def get_user_locales(self, user_ids: list[int]) -> dict[int, str | None]:
+        if not user_ids:
+            return {}
+        unique = list(dict.fromkeys(int(uid) for uid in user_ids))
+        out: dict[int, str | None] = {uid: None for uid in unique}
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT user_id, locale FROM users WHERE user_id = ANY(%s)",
+                (unique,),
+            )
+            rows = cur.fetchall()
+        for row in rows:
+            loc = row["locale"]
+            out[int(row["user_id"])] = str(loc) if loc else None
+        return out
+
     def set_user_locale(self, user_id: int, locale: str) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -3614,26 +3684,40 @@ class PostgresDatabase:
             rows = cur.fetchall()
         return [int(r["user_id"]) for r in rows]
 
+    def _update_recipients(self, pref_column: str) -> list[int]:
+        # Missing users row → opt-in defaults (receive=true, blocked=false).
+        if pref_column not in (
+            "receive_bot_updates",
+            "receive_availability_updates",
+            "receive_other_updates",
+        ):
+            raise ValueError(f"invalid recipient pref: {pref_column}")
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                f"""
+                SELECT DISTINCT ids.uid AS user_id
+                FROM (
+                    SELECT user_id AS uid FROM users
+                    UNION
+                    SELECT owner_id AS uid FROM subscriptions
+                ) AS ids
+                LEFT JOIN users u ON u.user_id = ids.uid
+                WHERE COALESCE(u.bot_blocked, FALSE) = FALSE
+                  AND COALESCE(u.{pref_column}, TRUE) = TRUE
+                """
+            )
+            rows = cur.fetchall()
+        return [int(r["user_id"]) for r in rows]
+
     def get_bot_update_recipients(self) -> list[int]:
-        return [
-            uid
-            for uid in self.get_notify_user_ids()
-            if self.get_receive_bot_updates(uid) and not self.is_bot_blocked(uid)
-        ]
+        return self._update_recipients("receive_bot_updates")
 
     def get_availability_recipients(self) -> list[int]:
-        return [
-            uid
-            for uid in self.get_notify_user_ids()
-            if self.get_receive_availability_updates(uid) and not self.is_bot_blocked(uid)
-        ]
+        return self._update_recipients("receive_availability_updates")
 
     def get_other_recipients(self) -> list[int]:
-        return [
-            uid
-            for uid in self.get_notify_user_ids()
-            if self.get_receive_other_updates(uid) and not self.is_bot_blocked(uid)
-        ]
+        return self._update_recipients("receive_other_updates")
 
     def get_receive_bot_updates(self, user_id: int) -> bool:
         with self._conn() as conn:

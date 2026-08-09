@@ -4,7 +4,7 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 
-from config import parse_admin_user_ids
+from config import SCHEDULE_CHECK_INTERVAL, parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
 from twitch import (
     FOLLOWS_SCOPE,
@@ -34,6 +34,7 @@ from bot import (
     live_transitions,
     category_change_events,
     migrate_import_sync_subscriptions,
+    needs_live_game_recheck,
 )
 from db import (
     SqliteDatabase,
@@ -233,6 +234,12 @@ def main() -> None:
     assert live_transitions(state, ["1"], {"1": {}}, primed=True) == (["1"], [])
     assert live_transitions(state, ["1"], {}, primed=True) == ([], ["1"])
     assert state["1"] is False
+
+    assert needs_live_game_recheck("", 0) is True
+    assert needs_live_game_recheck("   ", 0) is True
+    assert needs_live_game_recheck("Just Chatting", 0) is False
+    assert needs_live_game_recheck("", 5) is False
+    assert SCHEDULE_CHECK_INTERVAL >= 60
 
     games: dict[str, str] = {}
     streams = {"1": {"game_id": "111"}}
@@ -481,6 +488,8 @@ def main() -> None:
         assert db.get_user_locale(1) is None
         db.set_user_locale(1, "en")
         assert db.get_user_locale(1) == "en"
+        assert db.get_user_locales([1, 2]) == {1: "en", 2: None}
+        assert db.get_user_locales([]) == {}
         prefs = WatchPrefs(
             categories=[{"id": "509658", "name": "Just Chatting"}],
             min_viewers=50,

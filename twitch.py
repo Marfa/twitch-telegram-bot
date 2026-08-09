@@ -102,17 +102,24 @@ class TwitchClient:
         return users[0] if users else None
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Helix allows at most 100 user_id params per /streams request."""
         if not user_ids:
             return {}
-        params: list[tuple[str, str]] = [("user_id", uid) for uid in user_ids]
-        resp = self._session.get(
-            "https://api.twitch.tv/helix/streams",
-            headers=self._headers(),
-            params=params,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return {s["user_id"]: s for s in resp.json().get("data", [])}
+        out: dict[str, dict[str, Any]] = {}
+        chunk_size = 100
+        for i in range(0, len(user_ids), chunk_size):
+            chunk = user_ids[i : i + chunk_size]
+            params: list[tuple[str, str]] = [("user_id", uid) for uid in chunk]
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/streams",
+                headers=self._headers(),
+                params=params,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            for stream in resp.json().get("data", []):
+                out[stream["user_id"]] = stream
+        return out
 
     def get_streams_by_game(
         self,

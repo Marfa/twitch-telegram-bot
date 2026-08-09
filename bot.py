@@ -1432,26 +1432,43 @@ async def _send_notification(
             image_position=sub.image_position,
             disable_link_preview=bool(sub.disable_link_preview) or bool(sub.image_file_id),
         )
-        if msg and sub.delete_previous and sub.dest_type != "dm":
-            db.set_last_message_id(sub.id, msg.message_id)
-        if sub.suppress_repeat_minutes > 0:
-            db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
-        # History is for the user's DM inbox only — skip channel/group destinations.
-        if sub.dest_type == "dm":
-            try:
-                db.add_alert_history(
-                    sub.owner_id,
-                    subscription_id=sub.id,
-                    twitch_username=sub.twitch_username,
-                    alert_type=alert_type,
-                    message_text=text,
-                )
-            except Exception:
-                logger.exception("Failed to record alert history for sub %s", sub.id)
-        return True
+    except RetryAfter as exc:
+        await asyncio.sleep(float(exc.retry_after) + 0.5)
+        try:
+            msg = await _deliver_alert_content(
+                bot,
+                chat_id=sub.chat_id,
+                text=text,
+                thread_id=sub.thread_id,
+                image_file_id=sub.image_file_id,
+                image_position=sub.image_position,
+                disable_link_preview=bool(sub.disable_link_preview)
+                or bool(sub.image_file_id),
+            )
+        except (BadRequest, Forbidden, RetryAfter) as retry_exc:
+            logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
+            return False
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
         return False
+
+    if msg and sub.delete_previous and sub.dest_type != "dm":
+        db.set_last_message_id(sub.id, msg.message_id)
+    if sub.suppress_repeat_minutes > 0:
+        db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
+    # History is for the user's DM inbox only — skip channel/group destinations.
+    if sub.dest_type == "dm":
+        try:
+            db.add_alert_history(
+                sub.owner_id,
+                subscription_id=sub.id,
+                twitch_username=sub.twitch_username,
+                alert_type=alert_type,
+                message_text=text,
+            )
+        except Exception:
+            logger.exception("Failed to record alert history for sub %s", sub.id)
+    return True
 
 
 async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> bool:
@@ -5930,8 +5947,9 @@ async def _send_admin_broadcast(
             uid for uid in db.get_notify_user_ids() if not db.is_bot_blocked(uid)
         ]
     source = source_lang or DEFAULT_LOCALE
+    locale_rows = db.get_user_locales(user_ids)
     user_locales = {
-        uid: db.get_user_locale(uid) or DEFAULT_LOCALE for uid in user_ids
+        uid: locale_rows.get(uid) or DEFAULT_LOCALE for uid in user_ids
     }
     translations = await asyncio.to_thread(
         build_translations,
@@ -7150,7 +7168,9 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
-    sub_id = context.job.data["sub_id"]
+    job_data = context.job.data or {}
+    sub_id = job_data["sub_id"]
+    silent_offline = bool(job_data.get("silent_offline"))
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     sub = db.get_subscription_by_id(sub_id)
@@ -7167,6 +7187,8 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
 
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
     if sub.twitch_user_id not in live_streams:
+        if silent_offline:
+            return
         preview = render_template(
             sub.message_template,
             sub.twitch_username,
@@ -7303,6 +7325,15 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     name=f"delay_{sub.id}",
                 )
                 continue
+            # Helix often returns empty game_name for a few seconds after go-live.
+            if needs_live_game_recheck(game, sub.delay_minutes):
+                context.job_queue.run_once(
+                    _send_delayed_notification,
+                    when=LIVE_GAME_RECHECK_SECONDS,
+                    data={"sub_id": sub.id, "silent_offline": True},
+                    name=f"live_game_{sub.id}",
+                )
+                continue
             text = render_template(
                 sub.message_template, username, game, title, stream=stream
             )
@@ -7421,6 +7452,15 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     continue
                 db.set_last_schedule_reminder_segment(sub.id, seg_id)
                 break
+
+
+# Helix can omit category right after go-live; wait once, then send with whatever we get.
+LIVE_GAME_RECHECK_SECONDS = 20
+
+
+def needs_live_game_recheck(game: str, delay_minutes: int) -> bool:
+    """True when live alert should wait briefly for Helix to fill game_name."""
+    return int(delay_minutes or 0) <= 0 and not (game or "").strip()
 
 
 def live_transitions(
@@ -7567,8 +7607,9 @@ async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         locale: _format_twitch_status_message(locale, summary)
         for locale in SUPPORTED_LOCALES
     }
+    locale_rows = db.get_user_locales(user_ids)
     for uid in user_ids:
-        locale = db.get_user_locale(uid) or DEFAULT_LOCALE
+        locale = locale_rows.get(uid) or DEFAULT_LOCALE
         message = messages.get(locale) or messages[DEFAULT_LOCALE]
         await _send_dm_html(context.bot, db, uid, message)
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
@@ -8308,11 +8349,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
 
-    from config import CHECK_INTERVAL
+    from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
     from premium_handlers import refresh_premium_twitch_job
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
-    app.job_queue.run_repeating(check_schedule_reminders, interval=60, first=25)
+    app.job_queue.run_repeating(
+        check_schedule_reminders, interval=SCHEDULE_CHECK_INTERVAL, first=25
+    )
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
     app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
