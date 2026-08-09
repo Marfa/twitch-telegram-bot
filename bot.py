@@ -1436,15 +1436,17 @@ async def _send_notification(
             db.set_last_message_id(sub.id, msg.message_id)
         if sub.suppress_repeat_minutes > 0:
             db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
-        try:
-            db.add_alert_history(
-                sub.owner_id,
-                subscription_id=sub.id,
-                twitch_username=sub.twitch_username,
-                alert_type=alert_type,
-            )
-        except Exception:
-            logger.exception("Failed to record alert history for sub %s", sub.id)
+        # History is for the user's DM inbox only — skip channel/group destinations.
+        if sub.dest_type == "dm":
+            try:
+                db.add_alert_history(
+                    sub.owner_id,
+                    subscription_id=sub.id,
+                    twitch_username=sub.twitch_username,
+                    alert_type=alert_type,
+                )
+            except Exception:
+                logger.exception("Failed to record alert history for sub %s", sub.id)
         return True
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
