@@ -1088,11 +1088,13 @@ def main() -> None:
                 subscription_id=i + 1,
                 twitch_username=f"user{i}",
                 alert_type="live" if i % 2 == 0 else "end",
+                message_text=f"Hello {i}",
             )
         hist = db.list_alert_history(10)
         assert len(hist) == 3
         assert hist[0].twitch_username == "user2"
         assert hist[0].alert_type == "live"
+        assert hist[0].message_text == "Hello 2"
         assert hist[-1].twitch_username == "user0"
         recent = db.list_alert_history(
             10, since=datetime.now(timezone.utc) - timedelta(days=7)

@@ -181,6 +181,7 @@ class AlertHistoryEntry:
     subscription_id: int | None
     twitch_username: str
     alert_type: str
+    message_text: str
     sent_at: str
 
 
@@ -401,12 +402,17 @@ def _row_to_alert_history(row: Any) -> AlertHistoryEntry:
     if sent is not None and not isinstance(sent, str):
         sent = sent.isoformat()
     sub_id = row["subscription_id"]
+    keys = set(row.keys())
+    message_text = ""
+    if "message_text" in keys and row["message_text"] is not None:
+        message_text = str(row["message_text"])
     return AlertHistoryEntry(
         id=int(row["id"]),
         owner_id=int(row["owner_id"]),
         subscription_id=int(sub_id) if sub_id is not None else None,
         twitch_username=str(row["twitch_username"] or ""),
         alert_type=str(row["alert_type"] or ""),
+        message_text=message_text,
         sent_at=str(sent or ""),
     )
 
@@ -609,6 +615,7 @@ class Database(Protocol):
         subscription_id: int | None,
         twitch_username: str,
         alert_type: str,
+        message_text: str = "",
     ) -> None: ...
 
     def list_alert_history(
@@ -1070,10 +1077,16 @@ class SqliteDatabase:
                 subscription_id INTEGER,
                 twitch_username TEXT NOT NULL,
                 alert_type TEXT NOT NULL,
+                message_text TEXT NOT NULL DEFAULT '',
                 sent_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
         )
+        ah_cols = {row[1] for row in conn.execute("PRAGMA table_info(alert_history)")}
+        if "message_text" not in ah_cols:
+            conn.execute(
+                "ALTER TABLE alert_history ADD COLUMN message_text TEXT NOT NULL DEFAULT ''"
+            )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
@@ -1570,24 +1583,29 @@ class SqliteDatabase:
         subscription_id: int | None,
         twitch_username: str,
         alert_type: str,
+        message_text: str = "",
     ) -> None:
         from premium import ALERT_HISTORY_PREMIUM_DAYS
 
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=ALERT_HISTORY_PREMIUM_DAYS)
         ).strftime("%Y-%m-%d %H:%M:%S")
+        body = (message_text or "").strip()
+        if len(body) > 4096:
+            body = body[:4096]
         with self._conn() as conn:
             conn.execute(
                 """
                 INSERT INTO alert_history (
-                    owner_id, subscription_id, twitch_username, alert_type
-                ) VALUES (?, ?, ?, ?)
+                    owner_id, subscription_id, twitch_username, alert_type, message_text
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
                     subscription_id,
                     (twitch_username or "").strip() or "—",
                     (alert_type or "").strip() or "live",
+                    body,
                 ),
             )
             conn.execute(
@@ -1612,7 +1630,8 @@ class SqliteDatabase:
                 since_s = since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 rows = conn.execute(
                     """
-                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    SELECT id, owner_id, subscription_id, twitch_username,
+                           alert_type, message_text, sent_at
                     FROM alert_history
                     WHERE owner_id = ? AND sent_at >= ?
                     ORDER BY id DESC
@@ -1623,7 +1642,8 @@ class SqliteDatabase:
             else:
                 rows = conn.execute(
                     """
-                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    SELECT id, owner_id, subscription_id, twitch_username,
+                           alert_type, message_text, sent_at
                     FROM alert_history
                     WHERE owner_id = ?
                     ORDER BY id DESC
@@ -2909,8 +2929,15 @@ class PostgresDatabase:
                     subscription_id BIGINT,
                     twitch_username TEXT NOT NULL,
                     alert_type TEXT NOT NULL,
+                    message_text TEXT NOT NULL DEFAULT '',
                     sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE alert_history
+                ADD COLUMN IF NOT EXISTS message_text TEXT NOT NULL DEFAULT ''
                 """
             )
             cur.execute(
@@ -3462,23 +3489,28 @@ class PostgresDatabase:
         subscription_id: int | None,
         twitch_username: str,
         alert_type: str,
+        message_text: str = "",
     ) -> None:
         from premium import ALERT_HISTORY_PREMIUM_DAYS
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=ALERT_HISTORY_PREMIUM_DAYS)
+        body = (message_text or "").strip()
+        if len(body) > 4096:
+            body = body[:4096]
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
                 """
                 INSERT INTO alert_history (
-                    owner_id, subscription_id, twitch_username, alert_type
-                ) VALUES (%s, %s, %s, %s)
+                    owner_id, subscription_id, twitch_username, alert_type, message_text
+                ) VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
                     owner_id,
                     subscription_id,
                     (twitch_username or "").strip() or "—",
                     (alert_type or "").strip() or "live",
+                    body,
                 ),
             )
             cur.execute(
@@ -3503,7 +3535,8 @@ class PostgresDatabase:
                     since = since.replace(tzinfo=timezone.utc)
                 cur.execute(
                     """
-                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    SELECT id, owner_id, subscription_id, twitch_username,
+                           alert_type, message_text, sent_at
                     FROM alert_history
                     WHERE owner_id = %s AND sent_at >= %s
                     ORDER BY id DESC
@@ -3514,7 +3547,8 @@ class PostgresDatabase:
             else:
                 cur.execute(
                     """
-                    SELECT id, owner_id, subscription_id, twitch_username, alert_type, sent_at
+                    SELECT id, owner_id, subscription_id, twitch_username,
+                           alert_type, message_text, sent_at
                     FROM alert_history
                     WHERE owner_id = %s
                     ORDER BY id DESC

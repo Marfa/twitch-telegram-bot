@@ -1444,6 +1444,7 @@ async def _send_notification(
                     subscription_id=sub.id,
                     twitch_username=sub.twitch_username,
                     alert_type=alert_type,
+                    message_text=text,
                 )
             except Exception:
                 logger.exception("Failed to record alert history for sub %s", sub.id)
@@ -6608,17 +6609,14 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    lines: list[str] = [
-        t("alert_history_title", lang, days=days, n=len(items)),
-        "",
-    ]
+    title = t("alert_history_title", lang, days=days, n=len(items))
+    blocks: list[str] = []
     last_day: date | None = None
     for item in items:
         local = _parse_alert_sent_at(item.sent_at).astimezone(SCHEDULE_TZ)
+        parts: list[str] = []
         if last_day != local.date():
-            if last_day is not None:
-                lines.append("")
-            lines.append(
+            parts.append(
                 t(
                     "alert_history_day",
                     lang,
@@ -6626,19 +6624,35 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
             )
             last_day = local.date()
-        lines.append(
+        parts.append(
             t(
                 "alert_history_line",
                 lang,
                 time=local.strftime("%H:%M"),
                 username=item.twitch_username,
-                type=_alert_history_type_label(item.alert_type, lang),
             )
         )
-    text = "\n".join(lines)
-    if len(text) > 4000:
-        text = text[:3990].rstrip() + "\n…"
-    await update.effective_message.reply_text(text, reply_markup=more_kb)
+        body = (item.message_text or "").strip()
+        if not body:
+            body = _alert_history_type_label(item.alert_type, lang)
+        parts.append(t("alert_history_body", lang, text=body))
+        blocks.append("\n".join(parts))
+
+    chunks: list[str] = []
+    buf = title
+    for block in blocks:
+        candidate = f"{buf}\n\n{block}" if buf else block
+        if buf and len(candidate) > 4000:
+            chunks.append(buf if len(buf) <= 4000 else buf[:3990].rstrip() + "\n…")
+            buf = block if len(block) <= 4000 else block[:3990].rstrip() + "\n…"
+        else:
+            buf = candidate if len(candidate) <= 4000 else candidate[:3990].rstrip() + "\n…"
+    if buf:
+        chunks.append(buf)
+
+    for i, chunk in enumerate(chunks):
+        kb = more_kb if i == len(chunks) - 1 else None
+        await update.effective_message.reply_text(chunk, reply_markup=kb)
 
 
 async def on_alert_history_more(
