@@ -609,14 +609,11 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
 
 
 async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = True) -> None:
-    """Refresh Cancel/Back reply keyboard; delete the carrier message if possible."""
+    """Refresh Cancel/Back reply keyboard; carrier message is deleted immediately."""
     try:
         msg = await bot.send_message(
             chat_id, "·", reply_markup=_wizard(lang, back=back)
         )
-    except BadRequest:
-        return
-    try:
         await bot.delete_message(chat_id, msg.message_id)
     except BadRequest:
         pass
@@ -633,29 +630,18 @@ async def _send_prompt_with_wizard_inline(
     parse_mode: str | None = ParseMode.HTML,
     disable_web_page_preview: bool = False,
 ) -> None:
-    """Show ReplyKeyboard (Назад/Отмена) and attach InlineKeyboard to the same prompt."""
+    """Send prompt with inline actions (incl. Back/Cancel). No extra carrier message."""
+    _ = (lang, back)
     kwargs: dict = {
         "chat_id": chat_id,
         "text": text,
-        "reply_markup": _wizard(lang, back=back),
+        "reply_markup": inline_markup,
     }
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
     if disable_web_page_preview:
         kwargs["disable_web_page_preview"] = True
-    msg = await bot.send_message(**kwargs)
-    try:
-        await bot.edit_message_reply_markup(
-            chat_id=chat_id,
-            message_id=msg.message_id,
-            reply_markup=inline_markup,
-        )
-    except BadRequest:
-        logger.warning(
-            "edit_message_reply_markup failed for chat %s; sending inline separately",
-            chat_id,
-        )
-        await bot.send_message(chat_id, "·", reply_markup=inline_markup)
+    await bot.send_message(**kwargs)
 
 
 def _render_sub_template(
@@ -866,7 +852,13 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         chat_id,
         text,
         lang,
-        inline_markup=template_strip_keyboard(lang, enabled=strip_on, show_lucky=True),
+        inline_markup=template_strip_keyboard(
+            lang,
+            enabled=strip_on,
+            show_lucky=True,
+            show_back=True,
+            show_cancel=True,
+        ),
         back=True,
         disable_web_page_preview=True,
     )
@@ -1866,6 +1858,8 @@ async def receive_template_typo_confirm(
                 lang,
                 enabled=bool(context.user_data.get("strip_name_mentions")),
                 show_lucky=True,
+                show_back=True,
+                show_cancel=True,
             ),
             back=True,
             disable_web_page_preview=True,
@@ -1940,6 +1934,8 @@ async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 lang,
                 enabled=bool(context.user_data.get("strip_name_mentions")),
                 show_lucky=True,
+                show_back=True,
+                show_cancel=True,
             ),
             back=True,
             parse_mode=None,
@@ -2206,7 +2202,9 @@ async def _prompt_edit_template(
     kb = (
         reply_markup
         if reply_markup is not None
-        else template_strip_keyboard(lang, enabled=strip_on)
+        else template_strip_keyboard(
+            lang, enabled=strip_on, show_cancel=True
+        )
     )
     await _send_prompt_with_wizard_inline(
         bot,
@@ -2231,6 +2229,10 @@ async def receive_strip_name_toggle(
 ) -> int:
     query = update.callback_query
     await query.answer()
+    if query.data.endswith(":cancel"):
+        return await cancel(update, context)
+    if query.data.endswith(":back"):
+        return await wizard_back(update, context)
     lang = _user_lang(context, query.from_user.id)
     enabled = not bool(context.user_data.get("strip_name_mentions"))
     context.user_data["strip_name_mentions"] = enabled
@@ -2246,6 +2248,8 @@ async def receive_strip_name_toggle(
                 lang,
                 enabled=enabled,
                 show_lucky=not editing,
+                show_back=not editing,
+                show_cancel=True,
             )
         )
     except BadRequest:
@@ -8121,7 +8125,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             TEMPLATE: [
                 _wiz_cancel,
                 _wiz_back,
-                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:toggle$"),
+                CallbackQueryHandler(
+                    receive_strip_name_toggle, pattern=r"^strip_name:(toggle|back|cancel)$"
+                ),
                 CallbackQueryHandler(lucky_generate, pattern=r"^lucky:go$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template),
             ],
@@ -8217,7 +8223,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             EDIT_TEMPLATE: [
                 _wiz_cancel,
-                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:toggle$"),
+                CallbackQueryHandler(
+                    receive_strip_name_toggle, pattern=r"^strip_name:(toggle|back|cancel)$"
+                ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template),
             ],
             EDIT_IGNORE_KEYWORDS: [

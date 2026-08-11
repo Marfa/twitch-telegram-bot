@@ -845,7 +845,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "enable_all_none": "Nothing to enable — all subscriptions are already on.",
         "toggle_off": "⏸ Off",
         "toggle_on": "✅ On",
-        "strip_name_label": "Clean title",
+        "strip_name_label": "Clean",
         "sub_not_found": "Subscription not found.",
         "sub_enabled": "Subscription #{sub_id} enabled.",
         "sub_disabled": "Subscription #{sub_id} disabled.",
@@ -1990,7 +1990,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "enable_all_none": "Нечего включать — все подписки уже активны.",
         "toggle_off": "⏸ Выкл",
         "toggle_on": "✅ Вкл",
-        "strip_name_label": "Очистка названия",
+        "strip_name_label": "Очистка",
         "sub_not_found": "Подписка не найдена.",
         "sub_enabled": "Подписка #{sub_id} включена.",
         "sub_disabled": "Подписка #{sub_id} выключена.",
@@ -3152,6 +3152,8 @@ def template_strip_keyboard(
     *,
     enabled: bool = False,
     show_lucky: bool = False,
+    show_back: bool = False,
+    show_cancel: bool = False,
 ) -> InlineKeyboardMarkup:
     mark = "✅ " if enabled else "❌ "
     rows: list[list[InlineKeyboardButton]] = [
@@ -3166,6 +3168,19 @@ def template_strip_keyboard(
         rows.append(
             [InlineKeyboardButton(t("lucky_btn", lang), callback_data="lucky:go")]
         )
+    nav: list[InlineKeyboardButton] = []
+    if show_back:
+        nav.append(
+            InlineKeyboardButton(btn("wizard_back", lang), callback_data="strip_name:back")
+        )
+    if show_cancel:
+        nav.append(
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang), callback_data="strip_name:cancel"
+            )
+        )
+    if nav:
+        rows.append(nav)
     return InlineKeyboardMarkup(rows)
 
 
