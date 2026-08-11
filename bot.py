@@ -602,6 +602,17 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
     return wizard_menu(lang, back=back)
 
 
+async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = True) -> None:
+    """Refresh Cancel/Back reply keyboard without leaving a visible second prompt."""
+    try:
+        msg = await bot.send_message(
+            chat_id, "\u2060", reply_markup=_wizard(lang, back=back)
+        )
+        await bot.delete_message(chat_id, msg.message_id)
+    except BadRequest:
+        pass
+
+
 def _render_sub_template(
     sub: Subscription,
     username: str,
@@ -814,25 +825,17 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
             chat_id,
             text,
             parse_mode=ParseMode.HTML,
-            reply_markup=_wizard(lang),
-            disable_web_page_preview=True,
-        )
-        await context.bot.send_message(
-            chat_id,
-            t("lucky_hint", lang),
             reply_markup=strip_kb,
+            disable_web_page_preview=True,
         )
     else:
         await target.reply_text(
             text,
             parse_mode=ParseMode.HTML,
-            reply_markup=_wizard(lang),
+            reply_markup=strip_kb,
             disable_web_page_preview=True,
         )
-        await target.reply_text(
-            t("lucky_hint", lang),
-            reply_markup=strip_kb,
-        )
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, TEMPLATE)
     return TEMPLATE
 
@@ -1811,10 +1814,9 @@ async def receive_template_typo_confirm(
                 lang=lang,
                 sub=sub,
                 sub_num=sub_num,
-                reply_markup=_wizard(lang, back=False),
             )
             return EDIT_TEMPLATE
-        msg = await context.bot.send_message(
+        await context.bot.send_message(
             query.from_user.id,
             t(
                 "template_typo_resend",
@@ -1822,21 +1824,14 @@ async def receive_template_typo_confirm(
                 placeholders_link=placeholders_link_html(lang),
             ),
             parse_mode=ParseMode.HTML,
-            reply_markup=_wizard(lang, back=True),
+            reply_markup=template_strip_keyboard(
+                lang,
+                enabled=bool(context.user_data.get("strip_name_mentions")),
+                show_lucky=True,
+            ),
             disable_web_page_preview=True,
         )
-        try:
-            await context.bot.edit_message_reply_markup(
-                chat_id=query.from_user.id,
-                message_id=msg.message_id,
-                reply_markup=template_strip_keyboard(
-                    lang,
-                    enabled=bool(context.user_data.get("strip_name_mentions")),
-                    show_lucky=True,
-                ),
-            )
-        except BadRequest:
-            pass
+        await _pulse_wizard_keyboard(context.bot, query.from_user.id, lang, back=True)
         _set_wizard_back(context, TEMPLATE)
         return TEMPLATE
 
@@ -1907,6 +1902,7 @@ async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 show_lucky=True,
             ),
         )
+        await _pulse_wizard_keyboard(context.bot, query.from_user.id, lang, back=True)
         _set_wizard_back(context, TEMPLATE)
         return TEMPLATE
 
@@ -2166,7 +2162,12 @@ async def _prompt_edit_template(
         if strip_name_mentions is not None
         else bool(sub.strip_name_mentions)
     )
-    msg = await bot.send_message(
+    kb = (
+        reply_markup
+        if reply_markup is not None
+        else template_strip_keyboard(lang, enabled=strip_on)
+    )
+    await bot.send_message(
         user_id,
         t(
             "edit_template_prompt",
@@ -2177,17 +2178,10 @@ async def _prompt_edit_template(
             preview=html.escape(preview),
         ),
         parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup if reply_markup is not None else _wizard(lang, back=False),
+        reply_markup=kb,
         disable_web_page_preview=True,
     )
-    try:
-        await bot.edit_message_reply_markup(
-            chat_id=user_id,
-            message_id=msg.message_id,
-            reply_markup=template_strip_keyboard(lang, enabled=strip_on),
-        )
-    except BadRequest:
-        pass
+    await _pulse_wizard_keyboard(bot, user_id, lang, back=False)
 
 
 async def receive_strip_name_toggle(
@@ -2204,11 +2198,12 @@ async def receive_strip_name_toggle(
         owner_id = query.from_user.id
         sub_id = int(context.user_data["edit_sub_id"])
         db.update_subscription(sub_id, owner_id, strip_name_mentions=enabled)
-    show_lucky = not editing
     try:
         await query.edit_message_reply_markup(
             reply_markup=template_strip_keyboard(
-                lang, enabled=enabled, show_lucky=show_lucky
+                lang,
+                enabled=enabled,
+                show_lucky=not editing,
             )
         )
     except BadRequest:

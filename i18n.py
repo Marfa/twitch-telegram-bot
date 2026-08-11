@@ -3151,16 +3151,10 @@ def template_strip_keyboard(
     enabled: bool = False,
     show_lucky: bool = False,
 ) -> InlineKeyboardMarkup:
-    on_label = t("toggle_on", lang)
-    off_label = t("toggle_off", lang)
-    if enabled:
-        on_label = f"• {on_label}"
-    else:
-        off_label = f"• {off_label}"
     rows: list[list[InlineKeyboardButton]] = [
         [
-            InlineKeyboardButton(on_label, callback_data="strip_name:1"),
-            InlineKeyboardButton(off_label, callback_data="strip_name:0"),
+            InlineKeyboardButton(t("toggle_on", lang), callback_data="strip_name:1"),
+            InlineKeyboardButton(t("toggle_off", lang), callback_data="strip_name:0"),
         ],
     ]
     if show_lucky:
