@@ -513,7 +513,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "If multiple words, separate them with commas.\n"
             "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n\n"
             "Send the list or tap Skip.\n"
-            "Toggle «Use global list» to also apply words from Settings → Ignored words."
+            "Tap «Use global list» to apply Settings → Ignored words and continue."
         ),
         "ignore_keywords_skip": "Skip ⏭",
         "ignore_keywords_use_global": "Use global list",
@@ -530,9 +530,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n"
             "{hint}"
         ),
-        "ignored_words_hint_empty": "Send the list of words.",
+        "ignored_words_hint_empty": "Send words to add to the list.",
         "ignored_words_hint_edit": (
-            "Send a new list to replace. «Clear» — remove the list. "
+            "Send words to add (they are appended). «Clear» — remove the list. "
             "«Cancel» — leave unchanged."
         ),
         "ignored_words_clear": "Clear list",
@@ -910,7 +910,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Current: {current}\n\n"
             "Send keywords separated by commas.\n"
             "Regexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\n"
-            "Toggle «Use global list» to also apply Settings → Ignored words.\n"
+            "Tap «Use global list» to apply Settings → Ignored words and finish.\n"
             "{hint}"
         ),
         "edit_ignore_keywords_hint_skip": (
@@ -1647,8 +1647,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Поддерживается regexp (без учёта регистра), например "
             "<code>just.?chatting|irl</code>.\n\n"
             "Отправьте список слов или нажмите «Пропустить».\n"
-            "Включите «Использовать глобальный список», чтобы также применить слова "
-            "из Настройки → Игнорируемые слова."
+            "Нажмите «Использовать глобальный список», чтобы применить "
+            "Настройки → Игнорируемые слова и перейти дальше."
         ),
         "ignore_keywords_skip": "Пропустить ⏭",
         "ignore_keywords_use_global": "Использовать глобальный список",
@@ -1668,10 +1668,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<code>just.?chatting|irl</code>.\n"
             "{hint}"
         ),
-        "ignored_words_hint_empty": "Отправьте список слов.",
+        "ignored_words_hint_empty": "Отправьте слова, чтобы добавить в список.",
         "ignored_words_hint_edit": (
-            "Отправьте новый список, чтобы заменить. «Очистить» — удалить список. "
-            "«Отмена» — без изменений."
+            "Отправьте слова, чтобы добавить (они допишутся к списку). "
+            "«Очистить» — удалить список. «Отмена» — без изменений."
         ),
         "ignored_words_clear": "Очистить список",
         "ignored_words_cancel": "Отмена",
@@ -2053,8 +2053,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Отправьте ключевые слова через запятую.\n"
             "Поддерживается regexp (без учёта регистра), например "
             "<code>just.?chatting|irl</code>.\n"
-            "Включите «Использовать глобальный список», чтобы также применить "
-            "Настройки → Игнорируемые слова.\n"
+            "Нажмите «Использовать глобальный список», чтобы применить "
+            "Настройки → Игнорируемые слова и завершить.\n"
             "{hint}"
         ),
         "edit_ignore_keywords_hint_skip": (

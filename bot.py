@@ -2191,25 +2191,38 @@ async def receive_ignore_keywords_global_toggle(
     lang = _user_lang(context, query.from_user.id)
     new_val = not bool(context.user_data.get("use_global_ignore"))
     context.user_data["use_global_ignore"] = new_val
-    if context.user_data.get("wizard_edit") and context.user_data.get("edit_sub_id"):
+    editing = bool(
+        context.user_data.get("wizard_edit") and context.user_data.get("edit_sub_id")
+    )
+    if not new_val:
+        await query.edit_message_reply_markup(
+            reply_markup=ignore_keywords_keyboard(
+                lang,
+                as_cancel=bool(context.user_data.get("ignore_keywords_as_cancel")),
+                use_global=False,
+            )
+        )
+        return EDIT_IGNORE_KEYWORDS if editing else IGNORE_KEYWORDS
+
+    await query.edit_message_text("✓")
+    if editing:
         db: Database = context.application.bot_data["db"]
-        db.update_subscription(
-            int(context.user_data["edit_sub_id"]),
-            query.from_user.id,
-            use_global_ignore=new_val,
-        )
-    await query.edit_message_reply_markup(
-        reply_markup=ignore_keywords_keyboard(
-            lang,
-            as_cancel=bool(context.user_data.get("ignore_keywords_as_cancel")),
-            use_global=new_val,
-        )
-    )
-    return (
-        EDIT_IGNORE_KEYWORDS
-        if context.user_data.get("wizard_edit")
-        else IGNORE_KEYWORDS
-    )
+        owner_id = query.from_user.id
+        sub_id = int(context.user_data["edit_sub_id"])
+        sub_num = _owner_sub_number(db, owner_id, sub_id)
+        if not db.update_subscription(sub_id, owner_id, use_global_ignore=True):
+            await context.bot.send_message(owner_id, t("sub_not_found", lang))
+        else:
+            await context.bot.send_message(
+                owner_id,
+                t("edit_updated", lang, sub_id=sub_num),
+                reply_markup=_menu(lang, owner_id),
+            )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    context.user_data.setdefault("ignore_keywords", "")
+    return await _go_after_ignore_keywords(update, context, lang)
 
 
 async def receive_link_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -7023,11 +7036,15 @@ async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TY
     if text in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return GLOBAL_IGNORE_KEYWORDS
-    keywords = normalize_ignore_keywords(text)
+    added = normalize_ignore_keywords(text)
+    if not added:
+        await update.effective_message.reply_text(t("ignored_words_hint_empty", lang))
+        return GLOBAL_IGNORE_KEYWORDS
     db: Database = context.application.bot_data["db"]
+    keywords = merge_ignore_keywords(db.get_global_ignore_keywords(user_id), added)
     db.set_global_ignore_keywords(user_id, keywords)
     await update.effective_message.reply_text(
-        t("ignored_words_cleared" if not keywords else "ignored_words_saved", lang),
+        t("ignored_words_saved", lang),
         reply_markup=settings_menu(lang),
     )
     context.user_data.clear()
