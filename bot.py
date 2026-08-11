@@ -535,6 +535,9 @@ async def _prompt_stream_schedule_game(
         )
     else:
         await update.effective_message.reply_text(message, reply_markup=keyboard)
+    await _pulse_wizard_keyboard(
+        context.bot, update.effective_user.id, lang, back=False
+    )
     return STREAM_SCHEDULE_GAME
 
 
@@ -549,6 +552,9 @@ async def _prompt_stream_schedule_time(
     await update.effective_message.reply_text(
         t("stream_schedule_time_prompt", lang),
         reply_markup=keyboard,
+    )
+    await _pulse_wizard_keyboard(
+        context.bot, update.effective_user.id, lang, back=False
     )
     return STREAM_SCHEDULE_TIME
 
@@ -603,14 +609,53 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
 
 
 async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = True) -> None:
-    """Refresh Cancel/Back reply keyboard without leaving a visible second prompt."""
+    """Refresh Cancel/Back reply keyboard; delete the carrier message if possible."""
     try:
         msg = await bot.send_message(
-            chat_id, "\u2060", reply_markup=_wizard(lang, back=back)
+            chat_id, "·", reply_markup=_wizard(lang, back=back)
         )
+    except BadRequest:
+        return
+    try:
         await bot.delete_message(chat_id, msg.message_id)
     except BadRequest:
         pass
+
+
+async def _send_prompt_with_wizard_inline(
+    bot,
+    chat_id: int,
+    text: str,
+    lang: str,
+    *,
+    inline_markup: InlineKeyboardMarkup,
+    back: bool = True,
+    parse_mode: str | None = ParseMode.HTML,
+    disable_web_page_preview: bool = False,
+) -> None:
+    """Show ReplyKeyboard (Назад/Отмена) and attach InlineKeyboard to the same prompt."""
+    kwargs: dict = {
+        "chat_id": chat_id,
+        "text": text,
+        "reply_markup": _wizard(lang, back=back),
+    }
+    if parse_mode is not None:
+        kwargs["parse_mode"] = parse_mode
+    if disable_web_page_preview:
+        kwargs["disable_web_page_preview"] = True
+    msg = await bot.send_message(**kwargs)
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=msg.message_id,
+            reply_markup=inline_markup,
+        )
+    except BadRequest:
+        logger.warning(
+            "edit_message_reply_markup failed for chat %s; sending inline separately",
+            chat_id,
+        )
+        await bot.send_message(chat_id, "·", reply_markup=inline_markup)
 
 
 def _render_sub_template(
@@ -807,9 +852,6 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data.get("twitch_display_name")
         or context.user_data.get("twitch_username", "")
     )
-    target = update.effective_message
-    if update.callback_query and not target:
-        target = update.callback_query.message
     chat_id = update.effective_user.id
     context.user_data.setdefault("strip_name_mentions", False)
     strip_on = bool(context.user_data.get("strip_name_mentions"))
@@ -819,23 +861,15 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         display_name=html.escape(display),
         placeholders_link=placeholders_link_html(lang),
     )
-    strip_kb = template_strip_keyboard(lang, enabled=strip_on, show_lucky=True)
-    if update.callback_query:
-        await context.bot.send_message(
-            chat_id,
-            text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=strip_kb,
-            disable_web_page_preview=True,
-        )
-    else:
-        await target.reply_text(
-            text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=strip_kb,
-            disable_web_page_preview=True,
-        )
-    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
+    await _send_prompt_with_wizard_inline(
+        context.bot,
+        chat_id,
+        text,
+        lang,
+        inline_markup=template_strip_keyboard(lang, enabled=strip_on, show_lucky=True),
+        back=True,
+        disable_web_page_preview=True,
+    )
     _set_wizard_back(context, TEMPLATE)
     return TEMPLATE
 
@@ -878,6 +912,9 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
             lang,
             use_global=bool(context.user_data.get("use_global_ignore")),
         ),
+    )
+    await _pulse_wizard_keyboard(
+        context.bot, update.effective_user.id, lang, back=True
     )
     _set_wizard_back(context, IGNORE_KEYWORDS)
     return IGNORE_KEYWORDS
@@ -1816,22 +1853,23 @@ async def receive_template_typo_confirm(
                 sub_num=sub_num,
             )
             return EDIT_TEMPLATE
-        await context.bot.send_message(
+        await _send_prompt_with_wizard_inline(
+            context.bot,
             query.from_user.id,
             t(
                 "template_typo_resend",
                 lang,
                 placeholders_link=placeholders_link_html(lang),
             ),
-            parse_mode=ParseMode.HTML,
-            reply_markup=template_strip_keyboard(
+            lang,
+            inline_markup=template_strip_keyboard(
                 lang,
                 enabled=bool(context.user_data.get("strip_name_mentions")),
                 show_lucky=True,
             ),
+            back=True,
             disable_web_page_preview=True,
         )
-        await _pulse_wizard_keyboard(context.bot, query.from_user.id, lang, back=True)
         _set_wizard_back(context, TEMPLATE)
         return TEMPLATE
 
@@ -1893,16 +1931,19 @@ async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except Exception:
         logger.exception("Lucky template generation failed")
-        await context.bot.send_message(
+        await _send_prompt_with_wizard_inline(
+            context.bot,
             query.from_user.id,
             t("lucky_failed", lang),
-            reply_markup=template_strip_keyboard(
+            lang,
+            inline_markup=template_strip_keyboard(
                 lang,
                 enabled=bool(context.user_data.get("strip_name_mentions")),
                 show_lucky=True,
             ),
+            back=True,
+            parse_mode=None,
         )
-        await _pulse_wizard_keyboard(context.bot, query.from_user.id, lang, back=True)
         _set_wizard_back(context, TEMPLATE)
         return TEMPLATE
 
@@ -2167,7 +2208,8 @@ async def _prompt_edit_template(
         if reply_markup is not None
         else template_strip_keyboard(lang, enabled=strip_on)
     )
-    await bot.send_message(
+    await _send_prompt_with_wizard_inline(
+        bot,
         user_id,
         t(
             "edit_template_prompt",
@@ -2177,11 +2219,11 @@ async def _prompt_edit_template(
             current=html.escape(sub.message_template or ""),
             preview=html.escape(preview),
         ),
-        parse_mode=ParseMode.HTML,
-        reply_markup=kb,
+        lang,
+        inline_markup=kb,
+        back=False,
         disable_web_page_preview=True,
     )
-    await _pulse_wizard_keyboard(bot, user_id, lang, back=False)
 
 
 async def receive_strip_name_toggle(
@@ -5508,6 +5550,7 @@ async def start_edit_ignore_keywords(
             use_global=bool(sub.use_global_ignore),
         ),
     )
+    await _pulse_wizard_keyboard(context.bot, query.from_user.id, lang, back=False)
     return EDIT_IGNORE_KEYWORDS
 
 
@@ -7108,6 +7151,7 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode=ParseMode.HTML,
         reply_markup=ignored_words_keyboard(lang, has_words=has_words),
     )
+    await _pulse_wizard_keyboard(context.bot, user_id, lang, back=False)
     return GLOBAL_IGNORE_KEYWORDS
 
 
@@ -7115,6 +7159,13 @@ async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     text = (update.effective_message.text or "").strip()
+    if text in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(
+            t("menu_settings", lang),
+            reply_markup=settings_menu(lang),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
     if text in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return GLOBAL_IGNORE_KEYWORDS
