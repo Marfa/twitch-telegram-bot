@@ -234,6 +234,53 @@ def _placeholders_page(lang: str) -> bytes:
     ).encode("utf-8")
 
 
+def _fmt_rub(amount: int) -> str:
+    return f"{amount:,}".replace(",", "\u00a0")
+
+
+def _oferta_page() -> bytes:
+    """Public offer for paid Premium (Russian legal text; always ru)."""
+    from config import (
+        PREMIUM_FREE_ACTIVE_LIMIT,
+        PREMIUM_STARS_AMOUNT,
+        PREMIUM_STARS_FEATURE,
+        PREMIUM_STARS_LIFETIME,
+        PREMIUM_STARS_YEAR,
+        PREMIUM_TRIAL_DAYS,
+        PREMIUM_TWITCH_LOGIN,
+    )
+    from i18n import t
+
+    # Orientative Stars→RUB for offer disclosure; Telegram sets the rate when buying Stars.
+    rub_per_star = 2
+    title = html.escape(t("oferta_page_title", "ru"))
+    intro = html.escape(t("oferta_page_intro", "ru"))
+    body = t(
+        "oferta_page_body",
+        "ru",
+        free_limit=PREMIUM_FREE_ACTIVE_LIMIT,
+        trial_days=PREMIUM_TRIAL_DAYS,
+        channel=html.escape(PREMIUM_TWITCH_LOGIN),
+        month_stars=PREMIUM_STARS_AMOUNT,
+        month_rub=_fmt_rub(PREMIUM_STARS_AMOUNT * rub_per_star),
+        year_stars=PREMIUM_STARS_YEAR,
+        year_rub=_fmt_rub(PREMIUM_STARS_YEAR * rub_per_star),
+        life_stars=PREMIUM_STARS_LIFETIME,
+        life_rub=_fmt_rub(PREMIUM_STARS_LIFETIME * rub_per_star),
+        feat_stars=PREMIUM_STARS_FEATURE,
+        feat_rub=_fmt_rub(PREMIUM_STARS_FEATURE * rub_per_star),
+        rub_per_star=rub_per_star,
+    )
+    return (
+        "<!DOCTYPE html><html lang='ru'><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "</head><body style='font-family:sans-serif;max-width:40rem;"
+        "margin:2rem auto;padding:0 1rem;line-height:1.5'>"
+        f"<h1>{title}</h1><p>{intro}</p>{body}</body></html>"
+    ).encode("utf-8")
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     timeout = 60  # half-open clients must not hold a worker forever
 
@@ -258,6 +305,14 @@ class _HealthHandler(BaseHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             lang = (query.get("lang") or ["en"])[0]
             body = _placeholders_page(lang)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/oferta":
+            body = _oferta_page()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

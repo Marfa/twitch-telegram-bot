@@ -21,6 +21,7 @@ from i18n import (
     premium_actions_keyboard,
     premium_features_keyboard,
     t,
+    with_premium_oferta,
 )
 from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
 
@@ -151,8 +152,11 @@ async def send_premium_screen(
     text = premium_screen_text(
         db, user_id, lang, free_chat=free_chat, force_free=force_free
     )
-    markup = _premium_markup(
-        db, user_id, lang, free_chat=free_chat, force_free=force_free
+    markup = with_premium_oferta(
+        lang,
+        _premium_markup(
+            db, user_id, lang, free_chat=free_chat, force_free=force_free
+        ),
     )
     if edit_message is not None:
         await edit_message.edit_text(

@@ -56,6 +56,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_cancel_stars": "Cancel Stars subscription",
         "btn_premium_get": "Get Premium",
         "btn_premium_skip": "Skip",
+        "btn_premium_oferta": "Offer",
         "btn_partner": "🤝 Partner program",
         "btn_partner_stats": "📈 My stats",
         "btn_partner_link": "🔗 Get link",
@@ -453,6 +454,14 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<li><code>{id}</code> — stream ID</li>"
             "<li><code>{type}</code> — usually live</li>"
             "</ul>"
+        ),
+        "oferta_page_title": "Public offer for paid bot features",
+        "oferta_page_intro": (
+            "This legal document is published in Russian. "
+            "Open /oferta in the bot with Russian language selected."
+        ),
+        "oferta_page_body": (
+            "<p>The full offer text is available in Russian only.</p>"
         ),
         "channel_dup_prompt": (
             "An alert for this streamer is already set up. "
@@ -1080,6 +1089,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_cancel_stars": "Отменить подписку Stars",
         "btn_premium_get": "Оформить премиум",
         "btn_premium_skip": "Пропустить",
+        "btn_premium_oferta": "Оферта",
         "btn_partner": "🤝 Партнёрка",
         "btn_partner_stats": "📈 Моя статистика",
         "btn_partner_link": "🔗 Получить ссылку",
@@ -1478,6 +1488,113 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<li><code>{id}</code> — ID стрима</li>"
             "<li><code>{type}</code> — обычно live</li>"
             "</ul>"
+        ),
+        "oferta_page_title": "Публичная оферта на платные функции бота",
+        "oferta_page_intro": (
+            "Настоящий документ является официальным предложением "
+            "(публичной офертой) заключить договор на условиях ниже."
+        ),
+        "oferta_page_body": (
+            "<h2>1. Исполнитель</h2>"
+            "<p>Индивидуальный предприниматель Докучаев Константин Георгиевич<br>"
+            "ИНН 760403963548<br>"
+            "ОГРНИП 318762700036170<br>"
+            "Сайт: "
+            "<a href=\"https://blog.themarfa.name/\">blog.themarfa.name</a><br>"
+            "E-mail: "
+            "<a href=\"mailto:biz@themarfa.name\">biz@themarfa.name</a><br>"
+            "Телефон: +7-915-968-1682</p>"
+            "<h2>2. Предмет оферты</h2>"
+            "<p>Исполнитель предоставляет Пользователю доступ к платным "
+            "(премиум) функциям Telegram-бота для оповещений о стримах Twitch "
+            "(далее — Бот) на условиях настоящей оферты.</p>"
+            "<h2>3. Платные функции</h2>"
+            "<p>В состав премиум-доступа входят, в частности:</p>"
+            "<ul>"
+            "<li>более {free_limit} активных оповещений "
+            "(неактивные — без лимита);</li>"
+            "<li>типы оповещений кроме старта стрима "
+            "(категория / скоро / конец);</li>"
+            "<li>автосинхронизация фолловов с Twitch;</li>"
+            "<li>игнор ключевых слов (на алерт и глобальный список);</li>"
+            "<li>отложенная отправка;</li>"
+            "<li>заглушка повторных уведомлений;</li>"
+            "<li>удаление предыдущих сообщений бота;</li>"
+            "<li>публикация расписания на Twitch;</li>"
+            "<li>история оповещений за 60 дней "
+            "(на бесплатном плане — 7 дней).</li>"
+            "</ul>"
+            "<p>Состав функций может уточняться в интерфейсе Бота. "
+            "Бесплатный пробный период — {trial_days} дней "
+            "(один раз на аккаунт Telegram), если он доступен.</p>"
+            "<p>Премиум также может предоставляться без оплаты Stars "
+            "при активной подписке Twitch на канал "
+            "<a href=\"https://www.twitch.tv/{channel}\">{channel}</a> "
+            "либо на иных условиях, указанных в Боте "
+            "(например, участие в указанном чате).</p>"
+            "<h2>4. Цены</h2>"
+            "<p>Оплата производится через платёжную систему Telegram "
+            "в валюте Telegram Stars (XTR). Ниже указаны цены услуг "
+            "и ориентировочный эквивалент в рублях "
+            "из расчёта {rub_per_star}&nbsp;₽ за 1 Star "
+            "(фактическая стоимость покупки Stars для Пользователя "
+            "определяется Telegram и платёжными системами "
+            "на момент покупки Stars и может отличаться).</p>"
+            "<ul>"
+            "<li>Подписка на месяц (с автопродлением): "
+            "{month_stars} Stars — {month_rub}&nbsp;₽;</li>"
+            "<li>Подписка на год (разовый платёж): "
+            "{year_stars} Stars — {year_rub}&nbsp;₽;</li>"
+            "<li>Пожизненный доступ: "
+            "{life_stars} Stars — {life_rub}&nbsp;₽;</li>"
+            "<li>Одна выбранная функция на месяц: "
+            "{feat_stars} Stars — {feat_rub}&nbsp;₽ "
+            "(можно оплатить несколько функций; сумма кратна числу выбранных).</li>"
+            "</ul>"
+            "<p>Актуальные цены в Stars также отображаются на кнопках оплаты "
+            "в разделе «Настройки → Премиум» Бота.</p>"
+            "<h2>5. Акцепт оферты и оплата</h2>"
+            "<p>Акцептом оферты является оплата выбранного тарифа "
+            "через интерфейс Бота (счёт Telegram Stars) либо иное "
+            "предусмотренное Ботом действие, явно подтверждающее "
+            "получение платного доступа. Договор считается заключённым "
+            "с момента успешной оплаты (или подтверждения иного основания "
+            "доступа) и действует в течение оплаченного периода "
+            "либо бессрочно для пожизненного тарифа.</p>"
+            "<h2>6. Порядок оказания услуг</h2>"
+            "<p>Доступ к платным функциям активируется автоматически "
+            "после успешной оплаты. При отмене автопродления подписки "
+            "доступ сохраняется до конца уже оплаченного периода.</p>"
+            "<h2>7. Возврат средств</h2>"
+            "<p>Услуга считается оказанной с момента предоставления доступа "
+            "к платным функциям. Возврат Stars регулируется правилами "
+            "Telegram и применимым законодательством. По вопросам, "
+            "связанным с оплатой через Бота, обращайтесь "
+            "на biz@themarfa.name.</p>"
+            "<h2>8. Ответственность</h2>"
+            "<p>Исполнитель не гарантирует бесперебойную работу сторонних "
+            "сервисов (Telegram, Twitch и др.). Исполнитель не несёт "
+            "ответственности за сбои, вызванные действиями Пользователя, "
+            "третьих лиц или непреодолимой силой. Совокупная "
+            "ответственность Исполнителя ограничена стоимостью "
+            "оплаченного Пользователем тарифа за последний период оплаты.</p>"
+            "<h2>9. Персональные данные</h2>"
+            "<p>Для оказания услуг обрабатываются идентификаторы "
+            "и данные, необходимые для работы Бота в Telegram/Twitch "
+            "(в объёме, требуемом функциональностью). Обработка ведётся "
+            "в целях исполнения договора и поддержки сервиса.</p>"
+            "<h2>10. Заключительные положения</h2>"
+            "<p>К настоящей оферте применяется право Российской Федерации. "
+            "Споры подлежат рассмотрению в соответствии с "
+            "законодательством РФ по месту регистрации Исполнителя, "
+            "если иное не предусмотрено императивными нормами. "
+            "Исполнитель вправе изменять условия оферты; новая редакция "
+            "публикуется по адресу этой страницы и применяется "
+            "к последующим оплатам.</p>"
+            "<p>Реквизиты и контакты Исполнителя также опубликованы на "
+            "<a href=\"https://blog.themarfa.name/sotrudnichiestvo/"
+            "#%D1%8E%D1%80%D0%B8%D0%B4%D0%B8%D1%87%D0%B5%D1%81%D0%BA%D0%BE%D0%B5-"
+            "%D0%BB%D0%B8%D1%86%D0%BE\">странице сотрудничества</a>.</p>"
         ),
         "channel_dup_prompt": (
             "Уже есть настроенное оповещение для этого стримера. "
@@ -2099,6 +2216,31 @@ def placeholders_link_html(lang: str) -> str:
         return html.escape(t("placeholders_link_unavailable", lang))
     label = html.escape(t("placeholders_link_label", lang))
     return f'<a href="{html.escape(url)}">{label}</a>'
+
+
+def oferta_url() -> str:
+    from config import PUBLIC_BASE_URL
+
+    if not PUBLIC_BASE_URL:
+        return ""
+    return f"{PUBLIC_BASE_URL}/oferta"
+
+
+def with_premium_oferta(
+    lang: str, markup: InlineKeyboardMarkup | None
+) -> InlineKeyboardMarkup | None:
+    """Append RU-only «Оферта» URL button at the end of the Premium keyboard."""
+    if lang != "ru":
+        return markup
+    url = oferta_url()
+    if not url:
+        return markup
+    row = [InlineKeyboardButton(btn("premium_oferta", lang), url=url)]
+    if markup is None:
+        return InlineKeyboardMarkup([row])
+    rows = [list(r) for r in markup.inline_keyboard]
+    rows.append(row)
+    return InlineKeyboardMarkup(rows)
 
 
 def channel_dup_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
