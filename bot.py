@@ -2190,7 +2190,7 @@ async def receive_strip_name_toggle(
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
-    enabled = query.data.endswith(":1")
+    enabled = not bool(context.user_data.get("strip_name_mentions"))
     context.user_data["strip_name_mentions"] = enabled
     editing = bool(context.user_data.get("edit_sub_id"))
     if editing:
@@ -8070,7 +8070,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             TEMPLATE: [
                 _wiz_cancel,
                 _wiz_back,
-                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:[01]$"),
+                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:toggle$"),
                 CallbackQueryHandler(lucky_generate, pattern=r"^lucky:go$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template),
             ],
@@ -8166,7 +8166,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             EDIT_TEMPLATE: [
                 _wiz_cancel,
-                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:[01]$"),
+                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:toggle$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template),
             ],
             EDIT_IGNORE_KEYWORDS: [

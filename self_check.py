@@ -465,7 +465,7 @@ def main() -> None:
         assert "{username}" in found or "{{username}}" not in found
         assert "Изображение можно добавить" in found or loc != "ru"
         assert "You can add an image" in found or loc != "en"
-        assert "Вкл / Выкл" in found or "On / Off" in found
+        assert "Очистка названия" in found or "Clean title" in found
         edit_tpl = tr(
             "edit_template_prompt",
             loc,
@@ -479,7 +479,7 @@ def main() -> None:
         assert "marfapr live" in edit_tpl
         assert "Current format" in edit_tpl or "Текущий формат" in edit_tpl
         assert "How it will look" in edit_tpl or "Как будет выглядеть" in edit_tpl
-        assert "Вкл / Выкл" in edit_tpl or "On / Off" in edit_tpl
+        assert "Очистка названия" in edit_tpl or "Clean title" in edit_tpl
         feedback = tr("feedback", loc, github="https://example.com", user_id=42)
         assert "42" in feedback
         assert "<code>42</code>" in feedback

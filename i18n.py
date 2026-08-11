@@ -429,7 +429,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<code>{{username}} is live!\n"
             "{{name}}\n"
             "Category: {{game}}</code>\n\n"
-            "On / Off buttons — strip streamer mentions and commands from the stream title.\n\n"
+            "«Clean title» — strips streamer mentions and commands from the stream title.\n\n"
             "You can add an image on the next step"
         ),
         "placeholders_link_label": "Full list",
@@ -845,6 +845,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "enable_all_none": "Nothing to enable — all subscriptions are already on.",
         "toggle_off": "⏸ Off",
         "toggle_on": "✅ On",
+        "strip_name_label": "Clean title",
         "sub_not_found": "Subscription not found.",
         "sub_enabled": "Subscription #{sub_id} enabled.",
         "sub_disabled": "Subscription #{sub_id} disabled.",
@@ -905,7 +906,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{game}}</code> — stream category\n"
             "• <code>{{name}}</code> — stream title\n\n"
             "{placeholders_link}\n\n"
-            "On / Off buttons — strip streamer mentions and commands from the stream title."
+            "«Clean title» — strips streamer mentions and commands from the stream title."
         ),
         "edit_ignore_keywords_prompt": (
             "Subscription #{sub_id}\n"
@@ -1465,7 +1466,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<code>{{username}} в эфире!\n"
             "{{name}}\n"
             "Категория: {{game}}</code>\n\n"
-            "Кнопки «Вкл / Выкл» — очистка названия стрима от упоминания стримеров и команд.\n\n"
+            "«Очистка названия» — убирает из названия стрима упоминания стримеров и команды.\n\n"
             "Изображение можно добавить на следующем шаге"
         ),
         "placeholders_link_label": "Полный список",
@@ -1989,6 +1990,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "enable_all_none": "Нечего включать — все подписки уже активны.",
         "toggle_off": "⏸ Выкл",
         "toggle_on": "✅ Вкл",
+        "strip_name_label": "Очистка названия",
         "sub_not_found": "Подписка не найдена.",
         "sub_enabled": "Подписка #{sub_id} включена.",
         "sub_disabled": "Подписка #{sub_id} выключена.",
@@ -2049,7 +2051,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{game}}</code> — категория стрима\n"
             "• <code>{{name}}</code> — название стрима\n\n"
             "{placeholders_link}\n\n"
-            "Кнопки «Вкл / Выкл» — очистка названия стрима от упоминания стримеров и команд."
+            "«Очистка названия» — убирает из названия стрима упоминания стримеров и команды."
         ),
         "edit_ignore_keywords_prompt": (
             "Подписка #{sub_id}\n"
@@ -3151,10 +3153,13 @@ def template_strip_keyboard(
     enabled: bool = False,
     show_lucky: bool = False,
 ) -> InlineKeyboardMarkup:
+    mark = "✅ " if enabled else "❌ "
     rows: list[list[InlineKeyboardButton]] = [
         [
-            InlineKeyboardButton(t("toggle_on", lang), callback_data="strip_name:1"),
-            InlineKeyboardButton(t("toggle_off", lang), callback_data="strip_name:0"),
+            InlineKeyboardButton(
+                mark + t("strip_name_label", lang),
+                callback_data="strip_name:toggle",
+            )
         ],
     ]
     if show_lucky:
