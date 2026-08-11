@@ -21,7 +21,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
 | Destinations | DM, channel, group or community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
-| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en) |
+| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **On / Off** strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
 | 🎲 What to watch? | Saved filters to pick, new search, multi-select delete like subscriptions; categories → tags → viewers → language → mature |
 | Image | Optional alert image — caption above or below; link preview then off |
@@ -95,7 +95,7 @@ For **upcoming stream**, after the channel and schedule check — template and s
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
-**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`).
+**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **On / Off** buttons in the template editor (create and edit) strip streamer mentions and commands from the stream title `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default; tapping does not close the editor.
 
 **🎲 I'm feeling lucky** builds a template with placeholders. Chain: **Groq** (if keyed) → on failure **Hugging Face** → if both are down, a random template from the local DB pool (up to 100 recent successful generations per language). The Example block fills in a random [IGDB](https://api-docs.igdb.com/) game (same Twitch API credentials) and a stream title derived from it. After preview: continue, try again, or full wizard.
 
@@ -210,7 +210,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit subscription** — same order as creation: template, image, ignore keywords, link preview (hidden when an image is set), delay, repeats (not for category change or stream end), schedule reminders (if enabled at creation), destination, delete old messages. For **category change** with delete enabled — a separate «delete other alerts too» option.
+**Edit subscription** — same order as creation: template (**On / Off** to strip `{name}`), image, ignore keywords, link preview (hidden when an image is set), delay, repeats (not for category change or stream end), schedule reminders (if enabled at creation), destination, delete old messages. For **category change** with delete enabled — a separate «delete other alerts too» option.
 
 Notification template example:
 
