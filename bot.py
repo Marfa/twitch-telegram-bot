@@ -71,7 +71,6 @@ from i18n import (
     language_keyboard,
     link_preview_keyboard,
     lucky_preview_keyboard,
-    lucky_start_keyboard,
     main_menu,
     placeholders_link_html,
     partner_menu,
@@ -94,6 +93,7 @@ from i18n import (
     withdrawal_actions_keyboard,
     sys_notifications_keyboard,
     t,
+    template_strip_keyboard,
     template_typo_keyboard,
     watch_cats_nav_keyboard,
     watch_cats_pick_keyboard,
@@ -602,6 +602,28 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
     return wizard_menu(lang, back=back)
 
 
+def _render_sub_template(
+    sub: Subscription,
+    username: str,
+    game: str = "",
+    name: str = "",
+    *,
+    twitch: TwitchClient | None = None,
+    stream: dict | None = None,
+    extra: dict[str, str] | None = None,
+) -> str:
+    return render_template(
+        sub.message_template,
+        username,
+        game,
+        name,
+        stream=stream,
+        extra=extra,
+        strip_name_mentions=bool(sub.strip_name_mentions),
+        twitch=twitch,
+    )
+
+
 async def _prompt_repeat_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, *, edit: bool = False
 ) -> int:
@@ -778,12 +800,15 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.callback_query and not target:
         target = update.callback_query.message
     chat_id = update.effective_user.id
+    context.user_data.setdefault("strip_name_mentions", False)
+    strip_on = bool(context.user_data.get("strip_name_mentions"))
     text = t(
         "channel_found",
         lang,
         display_name=html.escape(display),
         placeholders_link=placeholders_link_html(lang),
     )
+    strip_kb = template_strip_keyboard(lang, enabled=strip_on, show_lucky=True)
     if update.callback_query:
         await context.bot.send_message(
             chat_id,
@@ -795,7 +820,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         await context.bot.send_message(
             chat_id,
             t("lucky_hint", lang),
-            reply_markup=lucky_start_keyboard(lang),
+            reply_markup=strip_kb,
         )
     else:
         await target.reply_text(
@@ -806,7 +831,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await target.reply_text(
             t("lucky_hint", lang),
-            reply_markup=lucky_start_keyboard(lang),
+            reply_markup=strip_kb,
         )
     _set_wizard_back(context, TEMPLATE)
     return TEMPLATE
@@ -1789,7 +1814,7 @@ async def receive_template_typo_confirm(
                 reply_markup=_wizard(lang, back=False),
             )
             return EDIT_TEMPLATE
-        await context.bot.send_message(
+        msg = await context.bot.send_message(
             query.from_user.id,
             t(
                 "template_typo_resend",
@@ -1800,6 +1825,18 @@ async def receive_template_typo_confirm(
             reply_markup=_wizard(lang, back=True),
             disable_web_page_preview=True,
         )
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=query.from_user.id,
+                message_id=msg.message_id,
+                reply_markup=template_strip_keyboard(
+                    lang,
+                    enabled=bool(context.user_data.get("strip_name_mentions")),
+                    show_lucky=True,
+                ),
+            )
+        except BadRequest:
+            pass
         _set_wizard_back(context, TEMPLATE)
         return TEMPLATE
 
@@ -1864,7 +1901,11 @@ async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await context.bot.send_message(
             query.from_user.id,
             t("lucky_failed", lang),
-            reply_markup=lucky_start_keyboard(lang),
+            reply_markup=template_strip_keyboard(
+                lang,
+                enabled=bool(context.user_data.get("strip_name_mentions")),
+                show_lucky=True,
+            ),
         )
         _set_wizard_back(context, TEMPLATE)
         return TEMPLATE
@@ -2086,12 +2127,13 @@ async def _save_edit_template(
         preview_disabled = _is_link_preview_disabled(update.effective_message)
     if preview_disabled is None:
         preview_disabled = False
-    if not db.update_subscription(
-        sub_id,
-        owner_id,
-        message_template=template,
-        disable_link_preview=bool(preview_disabled),
-    ):
+    fields: dict[str, object] = {
+        "message_template": template,
+        "disable_link_preview": bool(preview_disabled),
+    }
+    if "strip_name_mentions" in context.user_data:
+        fields["strip_name_mentions"] = bool(context.user_data.get("strip_name_mentions"))
+    if not db.update_subscription(sub_id, owner_id, **fields):
         await context.bot.send_message(owner_id, t("sub_not_found", lang))
     else:
         await context.bot.send_message(
@@ -2111,6 +2153,7 @@ async def _prompt_edit_template(
     sub: Subscription,
     sub_num: int,
     reply_markup=None,
+    strip_name_mentions: bool | None = None,
 ) -> None:
     preview = render_template(
         sub.message_template,
@@ -2118,7 +2161,12 @@ async def _prompt_edit_template(
         "Just Chatting",
         t("preview_stream", lang),
     )
-    await bot.send_message(
+    strip_on = (
+        bool(strip_name_mentions)
+        if strip_name_mentions is not None
+        else bool(sub.strip_name_mentions)
+    )
+    msg = await bot.send_message(
         user_id,
         t(
             "edit_template_prompt",
@@ -2132,6 +2180,40 @@ async def _prompt_edit_template(
         reply_markup=reply_markup if reply_markup is not None else _wizard(lang, back=False),
         disable_web_page_preview=True,
     )
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=user_id,
+            message_id=msg.message_id,
+            reply_markup=template_strip_keyboard(lang, enabled=strip_on),
+        )
+    except BadRequest:
+        pass
+
+
+async def receive_strip_name_toggle(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    enabled = query.data.endswith(":1")
+    context.user_data["strip_name_mentions"] = enabled
+    editing = bool(context.user_data.get("edit_sub_id"))
+    if editing:
+        db: Database = context.application.bot_data["db"]
+        owner_id = query.from_user.id
+        sub_id = int(context.user_data["edit_sub_id"])
+        db.update_subscription(sub_id, owner_id, strip_name_mentions=enabled)
+    show_lucky = not editing
+    try:
+        await query.edit_message_reply_markup(
+            reply_markup=template_strip_keyboard(
+                lang, enabled=enabled, show_lucky=show_lucky
+            )
+        )
+    except BadRequest:
+        pass
+    return EDIT_TEMPLATE if editing else TEMPLATE
 
 
 async def _go_after_link_preview_step(
@@ -2348,6 +2430,7 @@ _LIVE_ADDON_CLEAR_KEYS = (
     "ignore_keywords",
     "use_global_ignore",
     "disable_link_preview",
+    "strip_name_mentions",
     "delay_minutes",
     "suppress_repeat_minutes",
     "dest_type",
@@ -3012,6 +3095,7 @@ async def _finish_subscription(
                 notify_delete_fail=notify_delete_fail,
                 disable_link_preview=bool(data.get("disable_link_preview", False))
                 or bool(data.get("image_file_id")),
+                strip_name_mentions=bool(data.get("strip_name_mentions")),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
@@ -3075,6 +3159,7 @@ async def _finish_subscription(
                 notify_delete_fail=notify_delete_fail,
                 disable_link_preview=bool(data.get("disable_link_preview", False))
                 or bool(data.get("image_file_id")),
+                strip_name_mentions=bool(data.get("strip_name_mentions")),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=(
                     0
@@ -5365,6 +5450,7 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
+    context.user_data["strip_name_mentions"] = bool(sub.strip_name_mentions)
     await query.edit_message_text("✓")
     await _prompt_edit_template(
         bot=context.bot,
@@ -5372,6 +5458,7 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
         lang=lang,
         sub=sub,
         sub_num=sub_num,
+        strip_name_mentions=bool(sub.strip_name_mentions),
     )
     return EDIT_TEMPLATE
 
@@ -7229,8 +7316,8 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     title = stream.get("title", "")
     if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
         return
-    text = render_template(
-        sub.message_template, username, game, title, stream=stream
+    text = _render_sub_template(
+        sub, username, game, title, twitch=twitch, stream=stream
     )
     await _send_notification(context.bot, db, sub, text, alert_type="live")
 
@@ -7255,7 +7342,7 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
         return
     if is_on_notify_cooldown(sub):
         return
-    text = render_template(sub.message_template, sub.twitch_username, "—", "—")
+    text = _render_sub_template(sub, sub.twitch_username, "—", "—", twitch=twitch)
     await _send_notification(context.bot, db, sub, text, alert_type="end")
 
 
@@ -7289,8 +7376,8 @@ async def _send_delayed_category_notification(
     title = stream.get("title", "")
     if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
         return
-    text = render_template(
-        sub.message_template, username, game, title, stream=stream
+    text = _render_sub_template(
+        sub, username, game, title, twitch=twitch, stream=stream
     )
     await _send_notification(context.bot, db, sub, text, alert_type="category")
 
@@ -7351,8 +7438,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     name=f"live_game_{sub.id}",
                 )
                 continue
-            text = render_template(
-                sub.message_template, username, game, title, stream=stream
+            text = _render_sub_template(
+                sub, username, game, title, twitch=twitch, stream=stream
             )
             await _send_notification(context.bot, db, sub, text, alert_type="live")
 
@@ -7370,7 +7457,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     name=f"delay_end_{sub.id}",
                 )
                 continue
-            text = render_template(sub.message_template, sub.twitch_username, "—", "—")
+            text = _render_sub_template(
+                sub, sub.twitch_username, "—", "—", twitch=twitch
+            )
             await _send_notification(context.bot, db, sub, text, alert_type="end")
 
     for uid in category_changed:
@@ -7394,8 +7483,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     name=f"delay_cat_{sub.id}_{game_id}",
                 )
                 continue
-            text = render_template(
-                sub.message_template, username, game, title, stream=stream
+            text = _render_sub_template(
+                sub, username, game, title, twitch=twitch, stream=stream
             )
             await _send_notification(
                 context.bot, db, sub, text, alert_type="category"
@@ -7455,11 +7544,12 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 template = (sub.message_template or "").strip()
                 if not template:
                     continue
-                text = render_template(
-                    template,
+                text = _render_sub_template(
+                    sub,
                     username,
                     game,
                     title,
+                    twitch=twitch,
                     extra={"minutes": str(max(1, minutes_left))},
                 )
                 ok = await _send_notification(
@@ -7985,6 +8075,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             TEMPLATE: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:[01]$"),
                 CallbackQueryHandler(lucky_generate, pattern=r"^lucky:go$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template),
             ],
@@ -8080,6 +8171,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             EDIT_TEMPLATE: [
                 _wiz_cancel,
+                CallbackQueryHandler(receive_strip_name_toggle, pattern=r"^strip_name:[01]$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_template),
             ],
             EDIT_IGNORE_KEYWORDS: [

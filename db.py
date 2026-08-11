@@ -325,6 +325,7 @@ class Subscription:
     delete_previous: bool
     notify_delete_fail: bool
     disable_link_preview: bool
+    strip_name_mentions: bool
     delay_minutes: int
     suppress_repeat_minutes: int
     schedule_reminder_minutes: int
@@ -439,6 +440,9 @@ def _row_to_sub(row: Any) -> Subscription:
         delete_previous=bool(row["delete_previous"]),
         notify_delete_fail=bool(row["notify_delete_fail"]),
         disable_link_preview=bool(row["disable_link_preview"]),
+        strip_name_mentions=bool(row["strip_name_mentions"])
+        if "strip_name_mentions" in keys
+        else False,
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
         schedule_reminder_minutes=int(row["schedule_reminder_minutes"] or 0)
@@ -526,6 +530,7 @@ class Database(Protocol):
         delete_previous: bool = False,
         notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
+        strip_name_mentions: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -937,6 +942,11 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN trial_paused INTEGER NOT NULL DEFAULT 0"
             )
+        if "strip_name_mentions" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN strip_name_mentions "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -1110,6 +1120,7 @@ class SqliteDatabase:
         delete_previous: bool = False,
         notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
+        strip_name_mentions: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -1133,12 +1144,13 @@ class SqliteDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
+                    strip_name_mentions,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1151,6 +1163,7 @@ class SqliteDatabase:
                     int(delete_previous),
                     int(notify_delete_fail),
                     int(disable_link_preview),
+                    int(bool(strip_name_mentions)),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -1260,6 +1273,7 @@ class SqliteDatabase:
             "delete_previous",
             "notify_delete_fail",
             "disable_link_preview",
+            "strip_name_mentions",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -1283,6 +1297,7 @@ class SqliteDatabase:
                 "delete_previous",
                 "notify_delete_fail",
                 "disable_link_preview",
+                "strip_name_mentions",
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",
@@ -2805,6 +2820,13 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS strip_name_mentions
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -3013,6 +3035,7 @@ class PostgresDatabase:
         delete_previous: bool = False,
         notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
+        strip_name_mentions: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -3037,12 +3060,13 @@ class PostgresDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
+                    strip_name_mentions,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -3056,6 +3080,7 @@ class PostgresDatabase:
                     delete_previous,
                     notify_delete_fail,
                     disable_link_preview,
+                    bool(strip_name_mentions),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -3178,6 +3203,7 @@ class PostgresDatabase:
             "delete_previous",
             "notify_delete_fail",
             "disable_link_preview",
+            "strip_name_mentions",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -3201,6 +3227,7 @@ class PostgresDatabase:
                 "delete_previous",
                 "notify_delete_fail",
                 "disable_link_preview",
+                "strip_name_mentions",
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",

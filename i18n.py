@@ -429,6 +429,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<code>{{username}} is live!\n"
             "{{name}}\n"
             "Category: {{game}}</code>\n\n"
+            "On / Off buttons — strip streamer mentions and commands from the stream title.\n\n"
             "You can add an image on the next step"
         ),
         "placeholders_link_label": "Full list",
@@ -903,7 +904,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{username}}</code> — channel name\n"
             "• <code>{{game}}</code> — stream category\n"
             "• <code>{{name}}</code> — stream title\n\n"
-            "{placeholders_link}"
+            "{placeholders_link}\n\n"
+            "On / Off buttons — strip streamer mentions and commands from the stream title."
         ),
         "edit_ignore_keywords_prompt": (
             "Subscription #{sub_id}\n"
@@ -1463,6 +1465,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<code>{{username}} в эфире!\n"
             "{{name}}\n"
             "Категория: {{game}}</code>\n\n"
+            "Кнопки «Вкл / Выкл» — очистка названия стрима от упоминания стримеров и команд.\n\n"
             "Изображение можно добавить на следующем шаге"
         ),
         "placeholders_link_label": "Полный список",
@@ -2045,7 +2048,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• <code>{{username}}</code> — имя канала\n"
             "• <code>{{game}}</code> — категория стрима\n"
             "• <code>{{name}}</code> — название стрима\n\n"
-            "{placeholders_link}"
+            "{placeholders_link}\n\n"
+            "Кнопки «Вкл / Выкл» — очистка названия стрима от упоминания стримеров и команд."
         ),
         "edit_ignore_keywords_prompt": (
             "Подписка #{sub_id}\n"
@@ -3139,6 +3143,31 @@ def lucky_start_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(t("lucky_btn", lang), callback_data="lucky:go")]]
     )
+
+
+def template_strip_keyboard(
+    lang: str,
+    *,
+    enabled: bool = False,
+    show_lucky: bool = False,
+) -> InlineKeyboardMarkup:
+    on_label = t("toggle_on", lang)
+    off_label = t("toggle_off", lang)
+    if enabled:
+        on_label = f"• {on_label}"
+    else:
+        off_label = f"• {off_label}"
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(on_label, callback_data="strip_name:1"),
+            InlineKeyboardButton(off_label, callback_data="strip_name:0"),
+        ],
+    ]
+    if show_lucky:
+        rows.append(
+            [InlineKeyboardButton(t("lucky_btn", lang), callback_data="lucky:go")]
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def lucky_preview_keyboard(lang: str) -> InlineKeyboardMarkup:

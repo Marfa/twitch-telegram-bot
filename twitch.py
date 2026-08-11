@@ -678,6 +678,41 @@ def preview_stream_title(locale: str, game: str) -> str:
     )
 
 
+_STREAM_NAME_MENTION_RE = re.compile(r"@([A-Za-z0-9_]{1,25})")
+_STREAM_NAME_COMMAND_RE = re.compile(r"!\w+", re.UNICODE)
+
+
+def strip_name_mentions_and_commands(
+    title: str,
+    twitch: "TwitchClient | None" = None,
+) -> str:
+    """Remove Twitch !commands and @logins that resolve to real Helix users."""
+    if not title:
+        return title
+    out = _STREAM_NAME_COMMAND_RE.sub("", title)
+    mentions = _STREAM_NAME_MENTION_RE.findall(out)
+    if not mentions or twitch is None:
+        return _tidy_stream_title(out)
+    exists: dict[str, bool] = {}
+    for login in {m.lower() for m in mentions}:
+        try:
+            exists[login] = bool(twitch.get_user(login))
+        except Exception:
+            exists[login] = False
+
+    def _keep_or_drop(match: re.Match[str]) -> str:
+        return "" if exists.get(match.group(1).lower()) else match.group(0)
+
+    out = _STREAM_NAME_MENTION_RE.sub(_keep_or_drop, out)
+    return _tidy_stream_title(out)
+
+
+def _tidy_stream_title(text: str) -> str:
+    text = re.sub(r"[^\S\n]{2,}", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    return text.strip()
+
+
 def render_template(
     template: str,
     username: str,
@@ -685,8 +720,13 @@ def render_template(
     name: str = "",
     stream: dict[str, Any] | None = None,
     extra: dict[str, str] | None = None,
+    *,
+    strip_name_mentions: bool = False,
+    twitch: "TwitchClient | None" = None,
 ) -> str:
     """Fill template placeholders from channel + optional Helix stream payload."""
+    if strip_name_mentions and "{name}" in template:
+        name = strip_name_mentions_and_commands(name, twitch)
     values = _template_values(username, game, name, stream)
     if extra:
         values.update(extra)

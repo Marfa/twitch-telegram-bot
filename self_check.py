@@ -72,6 +72,39 @@ def main() -> None:
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+
+    class _FakeTwitch:
+        def get_user(self, login: str):
+            return {"login": login} if login.lower() == "shroud" else None
+
+    from twitch import strip_name_mentions_and_commands
+
+    cleaned = strip_name_mentions_and_commands(
+        "hi @shroud !drop @notarealuser123xx", _FakeTwitch()
+    )
+    assert "@shroud" not in cleaned
+    assert "!drop" not in cleaned
+    assert "@notarealuser123xx" in cleaned
+    assert (
+        render_template(
+            "{name}",
+            CHANNEL,
+            name="play with @shroud !points",
+            strip_name_mentions=True,
+            twitch=_FakeTwitch(),
+        )
+        == "play with"
+    )
+    assert (
+        render_template(
+            "{name}",
+            CHANNEL,
+            name="play with @shroud !points",
+            strip_name_mentions=False,
+            twitch=_FakeTwitch(),
+        )
+        == "play with @shroud !points"
+    )
     rich = render_template(
         "{username} {viewer_count} {tags} {is_mature} {game_id}",
         "x",
@@ -432,6 +465,7 @@ def main() -> None:
         assert "{username}" in found or "{{username}}" not in found
         assert "Изображение можно добавить" in found or loc != "ru"
         assert "You can add an image" in found or loc != "en"
+        assert "Вкл / Выкл" in found or "On / Off" in found
         edit_tpl = tr(
             "edit_template_prompt",
             loc,
@@ -445,6 +479,7 @@ def main() -> None:
         assert "marfapr live" in edit_tpl
         assert "Current format" in edit_tpl or "Текущий формат" in edit_tpl
         assert "How it will look" in edit_tpl or "Как будет выглядеть" in edit_tpl
+        assert "Вкл / Выкл" in edit_tpl or "On / Off" in edit_tpl
         feedback = tr("feedback", loc, github="https://example.com", user_id=42)
         assert "42" in feedback
         assert "<code>42</code>" in feedback
