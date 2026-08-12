@@ -1,5 +1,6 @@
 import logging
 
+from analytics import init_analytics, shutdown_analytics
 from bot import build_application
 from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN, validate
 from db import open_database
@@ -16,6 +17,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 def main() -> None:
     start_health_server()
     validate()
+    init_analytics()
     log = logging.getLogger(__name__)
     if DATABASE_URL:
         log.info("Using PostgreSQL (DATABASE_URL)")
@@ -25,15 +27,18 @@ def main() -> None:
     twitch = TwitchClient()
     app = build_application(TELEGRAM_BOT_TOKEN, db, twitch)
     mark_ready()
-    app.run_polling(
-        allowed_updates=[
-            "message",
-            "callback_query",
-            "my_chat_member",
-            "pre_checkout_query",
-        ],
-        drop_pending_updates=True,
-    )
+    try:
+        app.run_polling(
+            allowed_updates=[
+                "message",
+                "callback_query",
+                "my_chat_member",
+                "pre_checkout_query",
+            ],
+            drop_pending_updates=True,
+        )
+    finally:
+        shutdown_analytics()
 
 
 if __name__ == "__main__":

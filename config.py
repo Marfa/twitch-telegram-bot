@@ -87,6 +87,11 @@ GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "llama-3.1-8b-instant").strip() o
     "llama-3.1-8b-instant"
 )
 BOT_VERSION = (os.getenv("BOT_VERSION") or "dev").strip() or "dev"
+POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", "").strip()
+# US default; EU projects: https://eu.i.posthog.com
+POSTHOG_HOST = (
+    os.getenv("POSTHOG_HOST", "").strip() or "https://us.i.posthog.com"
+).rstrip("/")
 
 
 def validate() -> None:

@@ -56,6 +56,13 @@ from telegram import LinkPreviewOptions, Message
 
 def main() -> None:
     os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK")
+    import analytics as analytics_mod
+
+    assert analytics_mod.distinct_id(1) == analytics_mod.distinct_id(1)
+    assert analytics_mod.distinct_id(1) != analytics_mod.distinct_id(2)
+    analytics_mod.capture(1, "self_check_noop")
+    analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
+
     CHANNEL = "marfapr"
     t = TwitchClient()
     assert t.parse_username(CHANNEL) == CHANNEL

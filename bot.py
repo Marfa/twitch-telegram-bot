@@ -30,6 +30,7 @@ from telegram.ext import (
 
 import premium as prem
 import demo_mode
+import analytics
 from db import (
     BotStats,
     Database,
@@ -1580,6 +1581,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db.upsert_user(user_id)
     _apply_referral_start_arg(db, user_id, context.args)
     lang = db.get_user_locale(user_id)
+    analytics.capture(
+        user_id,
+        "bot_started",
+        {
+            "has_locale": bool(lang),
+            "has_start_arg": bool(context.args),
+        },
+    )
     if not lang:
         context.user_data["after_lang"] = "welcome"
         return await _prompt_language(update)
@@ -1607,6 +1616,11 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         lang = DEFAULT_LOCALE
     db: Database = context.application.bot_data["db"]
     db.set_user_locale(query.from_user.id, lang)
+    analytics.capture(
+        query.from_user.id,
+        "locale_set",
+        {"locale": lang, "$set": {"locale": lang}},
+    )
     await query.edit_message_text(t("lang_set", lang))
     after = context.user_data.pop("after_lang", "welcome")
     if after == "help":
@@ -3239,6 +3253,20 @@ async def _finish_subscription(
 
     db.upsert_user(owner_id)
 
+    analytics.capture(
+        owner_id,
+        "subscription_updated" if edit_sub_id else "subscription_created",
+        {
+            "dest_type": dest_type,
+            "notify_on_live": notify_on_live,
+            "notify_on_end": notify_on_end,
+            "notify_on_category_change": notify_on_category_change,
+            "has_schedule_reminder": int(data.get("schedule_reminder_minutes", 0)) > 0,
+            "is_demo": demo_mode.is_active(owner_id),
+            "live_addon": bool(live_addon),
+        },
+    )
+
     schedule_only_pending = (
         not edit_sub_id
         and not notify_on_live
@@ -4203,6 +4231,11 @@ async def start_what_to_watch(
     lang = _user_lang(context, user_id)
     filters = db.get_watch_filters(user_id)
     context.user_data.clear()
+    analytics.capture(
+        user_id,
+        "watch_opened",
+        {"has_saved_filters": bool(filters)},
+    )
     if filters:
         return await _go_watch_pick_prompt(update, context, lang)
     return await _start_watch_wizard(update, context, lang)
@@ -4623,6 +4656,7 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
+    analytics.capture(user_id, "feedback_opened")
     await update.effective_message.reply_text(
         t("feedback", lang, github=GITHUB_ISSUES_URL, user_id=user_id),
         reply_markup=_menu(lang, user_id),
@@ -4772,6 +4806,7 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
     twitch: TwitchClient = context.application.bot_data["twitch"]
     state = create_oauth_state(user_id, lang)
     url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
+    analytics.capture(user_id, "twitch_import_started")
     await update.effective_message.reply_text(
         t("import_oauth_prompt", lang),
         reply_markup=InlineKeyboardMarkup(
@@ -4959,6 +4994,11 @@ async def _deliver_import_result(
             t("import_empty", lang),
             reply_markup=_menu(lang, owner_id),
         )
+        analytics.capture(
+            owner_id,
+            "twitch_import_completed",
+            {"imported": 0, "skipped": 0, "limited": 0, "removed": 0, "empty": True},
+        )
         return
     limit_note = ""
     if limited:
@@ -4980,6 +5020,17 @@ async def _deliver_import_result(
         removed_note=removed_note,
     )
     markup = _import_result_keyboard(lang, new_subs) if new_subs else None
+    analytics.capture(
+        owner_id,
+        "twitch_import_completed",
+        {
+            "imported": imported,
+            "skipped": skipped,
+            "limited": limited,
+            "removed": removed,
+            "empty": False,
+        },
+    )
     await application.bot.send_message(
         owner_id,
         header,
@@ -5088,6 +5139,11 @@ async def complete_twitch_import(
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
         key = "import_denied" if error == "access_denied" else "import_failed"
+        analytics.capture(
+            owner_id,
+            "twitch_import_failed",
+            {"error": error},
+        )
         await application.bot.send_message(
             owner_id,
             t(key, lang),
@@ -5095,6 +5151,11 @@ async def complete_twitch_import(
         )
         return
     if followed is None:
+        analytics.capture(
+            owner_id,
+            "twitch_import_failed",
+            {"error": "no_follows"},
+        )
         await application.bot.send_message(
             owner_id,
             t("import_failed", lang),
@@ -6128,7 +6189,6 @@ async def _report_broadcast_done(
     admin_id: int,
     *,
     sent: int,
-    failed: int,
     total: int,
 ) -> None:
     db: Database = context.application.bot_data["db"]
@@ -6138,9 +6198,13 @@ async def _report_broadcast_done(
         "broadcast_done",
         lang,
         sent=sent,
-        failed=failed,
         blocked_users=blocked_users,
         total=total,
+    )
+    analytics.capture(
+        admin_id,
+        "broadcast_completed",
+        {"sent": sent, "total": total, "blocked_users": blocked_users},
     )
     try:
         await context.bot.send_message(admin_id, text)
@@ -6157,8 +6221,10 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     status = result.new_chat_member.status
     if status == ChatMemberStatus.KICKED:
         db.set_bot_blocked(user_id, True)
+        analytics.capture(user_id, "bot_blocked")
     elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
         db.set_bot_blocked(user_id, False)
+        analytics.capture(user_id, "bot_unblocked")
 
 
 async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -6311,7 +6377,7 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not item:
             return
         source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-        sent, failed, total = await _send_admin_broadcast(
+        sent, _failed, total = await _send_admin_broadcast(
             context, item.msg_type, item.text, source_lang=source_lang
         )
         db.mark_scheduled_broadcast_sent(broadcast_id)
@@ -6319,7 +6385,6 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
             context,
             item.created_by,
             sent=sent,
-            failed=failed,
             total=total,
         )
     finally:
@@ -7671,7 +7736,7 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
             continue
         try:
             source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-            sent, failed, total = await _send_admin_broadcast(
+            sent, _failed, total = await _send_admin_broadcast(
                 context, item.msg_type, item.text, source_lang=source_lang
             )
             db.mark_scheduled_broadcast_sent(item.id)
@@ -7679,7 +7744,6 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
                 context,
                 item.created_by,
                 sent=sent,
-                failed=failed,
                 total=total,
             )
         finally:
@@ -7833,6 +7897,14 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.warning(t("conflict_polling", DEFAULT_LOCALE))
         return
     logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
+    user_id = None
+    if isinstance(update, Update) and update.effective_user is not None:
+        user_id = update.effective_user.id
+    analytics.capture_exception(
+        err if isinstance(err, BaseException) else None,
+        user_id=user_id,
+        properties={"handler": "telegram_error_handler"},
+    )
 
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:

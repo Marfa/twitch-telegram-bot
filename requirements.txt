@@ -3,3 +3,4 @@ requests==2.34.2
 urllib3==2.7.0
 psycopg[binary]==3.2.9
 cryptography==50.0.0
+posthog==6.9.3

@@ -11,6 +11,7 @@ from telegram.ext import Application, ContextTypes
 
 import premium as prem
 import demo_mode
+import analytics
 from config import twitch_oauth_redirect_uri
 from db import Database
 from health import create_oauth_state
@@ -555,6 +556,15 @@ async def successful_premium_payment(
             stars_paid=stars_paid
             or prem.stars_feature_price() * max(1, len(parsed.features)),
         )
+    analytics.capture(
+        parsed.user_id,
+        "premium_purchased",
+        {
+            "kind": parsed.kind,
+            "stars": stars_paid,
+            "features": list(parsed.features) if parsed.kind == "feat" else [],
+        },
+    )
     await msg.reply_text(t("premium_pay_done", lang))
 
 
