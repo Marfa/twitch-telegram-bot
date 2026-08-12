@@ -69,6 +69,8 @@ def capture(
     user_id: int | None,
     event: str,
     properties: dict[str, Any] | None = None,
+    *,
+    timestamp: Any | None = None,
 ) -> None:
     if not _enabled or _client is None:
         return
@@ -83,6 +85,8 @@ def capture(
             kwargs["distinct_id"] = distinct_id(user_id)
         else:
             kwargs["distinct_id"] = "bot_system"
+        if timestamp is not None:
+            kwargs["timestamp"] = timestamp
         _client.capture(event, **kwargs)
     except Exception:
         logger.exception("PostHog capture failed event=%s", event)
@@ -110,6 +114,32 @@ def capture_exception(
         logger.exception("PostHog capture_exception failed")
 
 
+def capture_bot_stats(stats: Any, *, timestamp: Any | None = None) -> None:
+    """Snapshot admin BotStats fields as daily_bot_stats (distinct_id=bot_system)."""
+    capture(
+        None,
+        "daily_bot_stats",
+        {
+            "users": int(stats.users),
+            "notify_users": int(stats.notify_users),
+            "unique_owners": int(stats.unique_owners),
+            "subscriptions_total": int(stats.subscriptions_total),
+            "subscriptions_enabled": int(stats.subscriptions_enabled),
+            "subscriptions_disabled": int(stats.subscriptions_disabled),
+            "unique_twitch_channels": int(stats.unique_twitch_channels),
+            "premium_paid": int(stats.premium_paid),
+            "blocked_users": int(stats.blocked_users),
+            "sys_updates": int(stats.sys_updates),
+            "sys_availability": int(stats.sys_availability),
+            "sys_other": int(stats.sys_other),
+            "locale_en": int(stats.locale_en),
+            "locale_ru": int(stats.locale_ru),
+            "locale_unset": int(stats.locale_unset),
+        },
+        timestamp=timestamp,
+    )
+
+
 def _self_check() -> None:
     assert distinct_id(1) == distinct_id(1)
     assert distinct_id(1) != distinct_id(2)
@@ -118,6 +148,25 @@ def _self_check() -> None:
     # No client → no crash
     capture(1, "self_check_noop")
     capture_exception(RuntimeError("self_check"), user_id=1)
+
+    class _Stats:
+        users = 1
+        notify_users = 1
+        unique_owners = 1
+        subscriptions_total = 2
+        subscriptions_enabled = 1
+        subscriptions_disabled = 1
+        unique_twitch_channels = 1
+        premium_paid = 0
+        blocked_users = 0
+        sys_updates = 1
+        sys_availability = 1
+        sys_other = 1
+        locale_en = 0
+        locale_ru = 1
+        locale_unset = 0
+
+    capture_bot_stats(_Stats())
     print("analytics ok")
 
 

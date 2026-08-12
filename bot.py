@@ -7848,6 +7848,19 @@ def _seconds_until_next_weekly_report() -> float:
     return (target - now).total_seconds()
 
 
+def _seconds_until_next_daily_stats() -> float:
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=3, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+async def daily_bot_stats_snapshot(context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    analytics.capture_bot_stats(db.get_bot_stats())
+
+
 async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import ADMIN_USER_IDS
 
@@ -8599,5 +8612,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         weekly_new_users_report,
         interval=7 * 24 * 3600,
         first=_seconds_until_next_weekly_report(),
+    )
+    app.job_queue.run_repeating(
+        daily_bot_stats_snapshot,
+        interval=24 * 3600,
+        first=_seconds_until_next_daily_stats(),
     )
     return app

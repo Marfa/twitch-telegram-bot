@@ -36,6 +36,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Premium | 7-day trial; Stars month/year/lifetime; pay per feature (incl. 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
+| Analytics | [PostHog](https://posthog.com): usage events, Error tracking, daily `daily_bot_stats` snapshot (03:00 UTC) |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -192,7 +193,7 @@ Optionally **publish to Twitch** (**Premium**):
 | ⚙️ Admin | Broadcast, stats, withdrawals, demo mode (`ADMIN_USER_IDS` only) |
 | ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, or “Other”, scheduled send; footer with type and how to disable in Settings |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
-| ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium |
+| ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium; same snapshot sent daily to PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Demo mode | Start from Admin: free-user menu without Premium, demo subscriptions; **Admin is hidden**, «Demo mode» stays on the main menu — press again to exit and wipe all demo data |
 | 🐛 Report a problem | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
 
@@ -268,14 +269,31 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `GROQ_TEXT_MODEL` | Groq model (default `llama-3.1-8b-instant`) |
 | `HF_TOKEN` | Hugging Face — fallback LLM (alias: `HUGGING_FACE_API`) |
 | `HF_TEXT_MODEL` | HF model (default `Qwen/Qwen2.5-7B-Instruct`) |
+| `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |
+| `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 
 Without Groq/HF keys, **I'm feeling lucky** still works from the local template pool in the DB.
+
+### PostHog
+
+Optional. Use the **Project API key** (`phc_…`) from Project settings → Project variables (not Personal `phx_` or Project secret `phs_`).
+
+| What | Where in PostHog |
+|---|---|
+| `/start`, alerts, import, premium, blocks | Activity / Product analytics → Trends |
+| Unhandled exceptions | Error tracking |
+| Admin stats snapshot | `daily_bot_stats` event daily at 03:00 UTC |
+
+`daily_bot_stats` properties: `users`, `notify_users`, `unique_owners`, `subscriptions_*`, `unique_twitch_channels`, `premium_paid`, `blocked_users`, `sys_*`, `locale_*`.
+
+One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (on VPS inside the bot container).
 
 ## Architecture
 
 | Module | Role |
 |---|---|
 | `bot.py` | Wizard, menu, notifications, What to watch?, admin broadcast, Twitch Status, partner program, schedule |
+| `analytics.py` | PostHog: usage events, errors, daily `daily_bot_stats` |
 | `i18n.py` | Strings and keyboards (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |

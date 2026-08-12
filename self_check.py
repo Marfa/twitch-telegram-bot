@@ -63,6 +63,30 @@ def main() -> None:
     analytics_mod.capture(1, "self_check_noop")
     analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
 
+    class _Stats:
+        users = 1
+        notify_users = 1
+        unique_owners = 1
+        subscriptions_total = 2
+        subscriptions_enabled = 1
+        subscriptions_disabled = 1
+        unique_twitch_channels = 1
+        premium_paid = 0
+        blocked_users = 0
+        sys_updates = 1
+        sys_availability = 1
+        sys_other = 1
+        locale_en = 0
+        locale_ru = 1
+        locale_unset = 0
+
+    analytics_mod.capture_bot_stats(_Stats())
+
+    from bot import _seconds_until_next_daily_stats
+
+    delay = _seconds_until_next_daily_stats()
+    assert 0 < delay <= 24 * 3600
+
     CHANNEL = "marfapr"
     t = TwitchClient()
     assert t.parse_username(CHANNEL) == CHANNEL

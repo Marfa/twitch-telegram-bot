@@ -36,6 +36,7 @@ English: [README.en.md](README.en.md)
 | Премиум | Триал 7 дней; Stars месяц/год/lifetime; оплата отдельных функций (в т.ч. история за 60 дней); саб Twitch (`PREMIUM_TWITCH_LOGIN`) |
 | Партнёрка | Реферальная ссылка, 10% от Stars Premium приглашённых, заявки на вывод (вручную) |
 | Админка | Рассылка в фоне (без подвисания) с типом в подписи; тип «обновление бота» ещё обновляет главное меню; DeepL, статистика, выводы, **Демо режим** |
+| Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, ежедневный снимок `daily_bot_stats` (03:00 UTC) |
 | Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -192,7 +193,7 @@ python main.py
 | ⚙️ Админка | Рассылка, статистика, выводы, демо режим (только `ADMIN_USER_IDS`) |
 | ↳ 📣 Рассылка | «Обновления бота», «Доступность бота» или «Прочие», отложенная отправка; в конце текста — тип и подсказка отключить в настройках |
 | ↳ 💸 Выводы | Заявки партнёров: ✅ выплачено / ❌ отклонить (баланс возвращается) |
-| ↳ 📊 Статистика | Пользователи, подписки, языки, платный Premium |
+| ↳ 📊 Статистика | Пользователи, подписки, языки, платный Premium; тот же снимок раз в сутки уходит в PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Демо режим | Вкл. из админки: меню как у free без Premium, демо-подписки; **Админка скрыта**, кнопка «Демо режим» остаётся в главном меню — повторное нажатие выходит и сбрасывает всё демо |
 | 🐛 Сообщить о проблеме | @immarfa или [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
 
@@ -268,14 +269,31 @@ python main.py
 | `GROQ_TEXT_MODEL` | Модель Groq (по умолчанию `llama-3.1-8b-instant`) |
 | `HF_TOKEN` | Hugging Face — запасной LLM (алиас: `HUGGING_FACE_API`) |
 | `HF_TEXT_MODEL` | Модель HF (по умолчанию `Qwen/Qwen2.5-7B-Instruct`) |
+| `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Без ключа аналитика выключена |
+| `POSTHOG_HOST` | Ingestion host (по умолчанию `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 
 Без ключей Groq/HF кнопка **Мне повезёт** всё равно работает — из локального пула шаблонов в БД.
+
+### PostHog
+
+Опционально. Ключ — **Project API key** (`phc_…`) из Project settings → Project variables (не Personal `phx_` и не Project secret `phs_`).
+
+| Что | Где в PostHog |
+|---|---|
+| `/start`, алерты, импорт, premium, блоки | Activity / Product analytics → Trends |
+| Необработанные исключения | Error tracking |
+| Снимок админ-статистики | событие `daily_bot_stats` каждый день в 03:00 UTC |
+
+Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subscriptions_*`, `unique_twitch_channels`, `premium_paid`, `blocked_users`, `sys_*`, `locale_*`.
+
+Разовый снимок / приближённый backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (на VPS в контейнере bot).
 
 ## Архитектура
 
 | Модуль | Назначение |
 |---|---|
 | `bot.py` | Wizard, меню, уведомления, «Что посмотреть?», админ-рассылка, Twitch Status, партнёрка, расписание |
+| `analytics.py` | PostHog: usage-события, ошибки, ежедневный `daily_bot_stats` |
 | `i18n.py` | Тексты и клавиатуры (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), реферальные начисления |
 | `demo_mode.py` | Флаг админского демо-режима (free UX + сброс демо-подписок) |
