@@ -1062,6 +1062,34 @@ def main() -> None:
 
     assert hasattr(ChatMemberStatus, "OWNER")
     assert not hasattr(ChatMemberStatus, "CREATOR")
+    assert hasattr(ChatMemberStatus, "BANNED")
+    assert not hasattr(ChatMemberStatus, "KICKED")
+    # Bot API 7.0 removed Message.forward_from_chat; a personal forward must
+    # return no chat instead of raising AttributeError in the wizard.
+    from telegram import Chat, MessageOriginChannel, MessageOriginUser, User
+
+    from bot import _extract_forward_chat
+
+    _now = datetime.now(timezone.utc)
+    _pm = Chat(id=7, type="private")
+    _fwd_user = Message(
+        message_id=1,
+        date=_now,
+        chat=_pm,
+        forward_origin=MessageOriginUser(
+            date=_now, sender_user=User(id=5, first_name="A", is_bot=False)
+        ),
+    )
+    assert _extract_forward_chat(_fwd_user) == (None, None)
+    _fwd_channel = Message(
+        message_id=2,
+        date=_now,
+        chat=_pm,
+        forward_origin=MessageOriginChannel(
+            date=_now, chat=Chat(id=-100123, type="channel"), message_id=9
+        ),
+    )
+    assert _extract_forward_chat(_fwd_channel) == (-100123, None)
     # PTB 21.8+: subscription_expiration_date is datetime (same formula as premium_handlers)
     stars_exp = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
     until_sub = int(stars_exp.timestamp()) if stars_exp is not None else 0
