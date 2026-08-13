@@ -15,7 +15,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
-from telegram.error import BadRequest, Conflict, Forbidden, RetryAfter
+from telegram.error import BadRequest, Conflict, Forbidden, NetworkError, RetryAfter
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -6219,7 +6219,7 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     db: Database = context.application.bot_data["db"]
     user_id = result.from_user.id
     status = result.new_chat_member.status
-    if status == ChatMemberStatus.KICKED:
+    if status == ChatMemberStatus.BANNED:
         db.set_bot_blocked(user_id, True)
         analytics.capture(user_id, "bot_blocked")
     elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
@@ -7908,6 +7908,9 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     err = context.error
     if isinstance(err, Conflict):
         logger.warning(t("conflict_polling", DEFAULT_LOCALE))
+        return
+    if isinstance(err, NetworkError) and not isinstance(err, BadRequest):
+        logger.warning(t("network_transient", DEFAULT_LOCALE, err=err))
         return
     logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
     user_id = None

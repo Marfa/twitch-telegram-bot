@@ -954,6 +954,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "conflict_polling": (
             "Polling conflict — two bot instances may be running. Keep only one."
         ),
+        "network_transient": "Transient Telegram network error (will retry): {err}",
         "unhandled_error": "Unhandled error: {err}",
         "broadcast_prompt": (
             "Choose notification type:"
@@ -2100,6 +2101,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "conflict_polling": (
             "Конфликт polling — возможно, запущено два экземпляра бота. Оставьте один."
         ),
+        "network_transient": "Временная сетевая ошибка Telegram (будет повтор): {err}",
         "unhandled_error": "Необработанная ошибка: {err}",
         "broadcast_prompt": "Выберите тип оповещения:",
         "broadcast_type_bot_update": "📬 Оповещения об обновлении бота",

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterShellExecution": [
+      {
+        "command": ".cursor/hooks/after-git-commit-cleanup.sh",
+        "matcher": "git\\s+commit"
+      }
+    ]
+  }
+}

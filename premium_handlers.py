@@ -516,7 +516,9 @@ async def successful_premium_payment(
     charge_id = payment.telegram_payment_charge_id
     stars_paid = int(payment.total_amount or 0)
     now = int(time.time())
-    until_sub = int(getattr(payment, "subscription_expiration_date", None) or 0)
+    # PTB 21.8+: subscription_expiration_date is datetime, not unix int
+    exp = payment.subscription_expiration_date
+    until_sub = int(exp.timestamp()) if exp is not None else 0
 
     if parsed.kind in ("month", "legacy"):
         until = until_sub if until_sub > 0 else now + prem.stars_period()
