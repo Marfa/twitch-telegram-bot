@@ -1185,11 +1185,13 @@ def _help_text(lang: str) -> str:
         "help",
         lang,
         btn_new=btn("new", lang),
-        btn_watch=btn("watch", lang),
         btn_import_twitch=btn("import_twitch", lang),
         btn_manage=btn("manage", lang),
-        btn_feedback=btn("feedback", lang),
+        btn_create_schedule=btn("create_schedule", lang),
+        btn_watch=btn("watch", lang),
+        btn_alert_history=btn("alert_history", lang),
         btn_settings=btn("settings", lang),
+        btn_feedback=btn("feedback", lang),
     )
 
 
@@ -8005,6 +8007,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("stats"), admin_show_stats),
         group=0,
     )
+    app.add_handler(CommandHandler("stats", admin_show_stats), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("broadcast"), open_broadcast_menu),
         group=0,

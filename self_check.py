@@ -25,6 +25,7 @@ from translate import build_translations, translate_text
 from bot import (
     _edit_present_types,
     _format_twitch_status_message,
+    _help_text,
     _is_link_preview_disabled,
     _message_link,
     _parse_sb_edit_f_id,
@@ -418,6 +419,12 @@ def main() -> None:
     assert _is_link_preview_disabled(no_preview)
 
     for loc in SUPPORTED_LOCALES:
+        help_txt = _help_text(loc)
+        assert "/schedule" in help_txt
+        assert "/settings" in help_txt
+        assert "/stats" not in help_txt
+        assert btn("create_schedule", loc) in help_txt
+        assert btn("alert_history", loc) in help_txt
         assert btn("new", loc)
         assert btn("watch", loc)
         assert btn("settings", loc)

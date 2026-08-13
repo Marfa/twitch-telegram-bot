@@ -741,18 +741,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "help": (
             "Available commands:\n"
-            "/start — open the main menu / set up a subscription\n"
+            "/start — open the main menu\n"
             "/help — show this help\n"
             "/cancel — cancel the current wizard\n"
+            "/schedule — create a weekly stream schedule\n"
             "/feedback — report a problem\n"
             "/settings — open settings\n\n"
             "Menu:\n"
             "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
-            "• {btn_watch} — random live streams by your categories and filters\n"
             "• {btn_import_twitch} — authorize and import followed channels\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
-            "• {btn_feedback}\n"
-            "• {btn_settings}"
+            "• {btn_create_schedule} — weekly schedule text; publish to Twitch\n"
+            "• {btn_watch} — random live streams by your categories and filters\n"
+            "• {btn_alert_history} — sent alerts history\n"
+            "• {btn_settings} — premium, sync, system alerts, language, partner program\n"
+            "• {btn_feedback}"
         ),
         "no_subs": (
             "No subscriptions yet.\n\n"
@@ -1886,18 +1889,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "help": (
             "Доступные команды:\n"
-            "/start — главное меню / настройка подписки\n"
+            "/start — главное меню\n"
             "/help — эта справка\n"
             "/cancel — отменить текущий мастер\n"
+            "/schedule — создать расписание стримов\n"
             "/feedback — сообщить о проблеме\n"
             "/settings — настройки\n\n"
             "Меню:\n"
             "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
-            "• {btn_watch} — случайные live-стримы по категориям и фильтрам\n"
             "• {btn_import_twitch} — авторизация и импорт фолловов\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
-            "• {btn_feedback}\n"
-            "• {btn_settings}"
+            "• {btn_create_schedule} — текст расписания на неделю; публикация на Twitch\n"
+            "• {btn_watch} — случайные live-стримы по категориям и фильтрам\n"
+            "• {btn_alert_history} — история отправленных оповещений\n"
+            "• {btn_settings} — премиум, sync, системные уведомления, язык, партнёрка\n"
+            "• {btn_feedback}"
         ),
         "no_subs": (
             "Подписок пока нет.\n\n"
