@@ -219,6 +219,10 @@ def _stars_override(user_id: int | None) -> int | None:
     return _STARS_BY_USER.get(int(user_id))
 
 
+def has_custom_stars_price(user_id: int) -> bool:
+    return _stars_override(user_id) is not None
+
+
 def stars_price(user_id: int | None = None) -> int:
     o = _stars_override(user_id)
     return o if o is not None else PREMIUM_STARS_AMOUNT

@@ -114,15 +114,17 @@ def _premium_markup(
             lang, show_cancel=False, show_trial=True, user_id=user_id
         )
     st = prem.get_status(db, user_id)
-    if st.permanent or free_chat:
+    # Custom 1⭐ (etc.) testers still need pay buttons even with free-chat Premium.
+    if (st.permanent or free_chat) and not prem.has_custom_stars_price(user_id):
         return None
     if st.twitch_active and not st.stars_active and not st.trial_active:
         # Twitch full premium — still allow cancel if somehow has stars charge
-        return None
+        if not prem.has_custom_stars_price(user_id):
+            return None
     show_cancel = (
         st.stars_active and bool(st.stars_charge_id) and not st.stars_canceled
     )
-    show_trial = not st.trial_used and not st.is_premium
+    show_trial = not st.trial_used and not st.is_premium and not free_chat
     # Partial feature buyers / free / trial / stars still see buy options
     if st.is_premium and not show_cancel and not any(
         until > int(time.time()) for until in st.features.values()
