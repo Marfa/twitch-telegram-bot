@@ -1062,6 +1062,19 @@ def main() -> None:
 
     assert hasattr(ChatMemberStatus, "OWNER")
     assert not hasattr(ChatMemberStatus, "CREATOR")
+    # PTB 21.8+: subscription_expiration_date is datetime (same formula as premium_handlers)
+    stars_exp = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+    until_sub = int(stars_exp.timestamp()) if stars_exp is not None else 0
+    assert until_sub == int(stars_exp.timestamp())
+    none_exp = None
+    assert (int(none_exp.timestamp()) if none_exp is not None else 0) == 0
+    try:
+        int(stars_exp)
+        raise AssertionError("int(datetime) must raise TypeError")
+    except TypeError:
+        pass
+    assert prem.stars_price(249097744) == 1
+    assert prem.stars_price() == prem.stars_price(1)
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
     assert tr("btn_premium", "en")
     assert tr("btn_premium_oferta", "ru") == "Оферта"

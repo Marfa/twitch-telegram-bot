@@ -2415,6 +2415,7 @@ def premium_actions_keyboard(
     *,
     show_cancel: bool,
     show_trial: bool = True,
+    user_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     from premium import stars_feature_price, stars_lifetime_price, stars_price, stars_year_price
 
@@ -2433,7 +2434,7 @@ def premium_actions_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
-                t("btn_premium_month", lang, stars=stars_price()),
+                t("btn_premium_month", lang, stars=stars_price(user_id)),
                 callback_data="premium:month",
             )
         ]

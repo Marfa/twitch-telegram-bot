@@ -97,7 +97,7 @@ def premium_screen_text(
         "premium_title",
         lang,
         free_limit=prem.free_active_limit(),
-        stars=prem.stars_price(),
+        stars=prem.stars_price(user_id),
         channel=prem.twitch_channel_login(),
         status=_status_text(
             db, user_id, lang, free_chat=free_chat, force_free=force_free
@@ -110,7 +110,9 @@ def _premium_markup(
 ) -> InlineKeyboardMarkup | None:
     """Action buttons for free / partial UX; cancel when Stars auto-renew is on."""
     if force_free:
-        return premium_actions_keyboard(lang, show_cancel=False, show_trial=True)
+        return premium_actions_keyboard(
+            lang, show_cancel=False, show_trial=True, user_id=user_id
+        )
     st = prem.get_status(db, user_id)
     if st.permanent or free_chat:
         return None
@@ -129,10 +131,10 @@ def _premium_markup(
         # options hidden only when permanent/twitch already handled.
         if st.trial_active or st.stars_active:
             return premium_actions_keyboard(
-                lang, show_cancel=show_cancel, show_trial=False
+                lang, show_cancel=show_cancel, show_trial=False, user_id=user_id
             )
     return premium_actions_keyboard(
-        lang, show_cancel=show_cancel, show_trial=show_trial
+        lang, show_cancel=show_cancel, show_trial=show_trial, user_id=user_id
     )
 
 
@@ -327,14 +329,15 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if action in ("pay", "month"):
+        month_stars = prem.stars_price(user_id)
         await _send_invoice_link(
             query,
             title=t("premium_pay_title", lang),
             description=t(
-                "premium_pay_description", lang, stars=prem.stars_price()
+                "premium_pay_description", lang, stars=month_stars
             ),
             payload=prem.invoice_payload(user_id, "month"),
-            stars=prem.stars_price(),
+            stars=month_stars,
             lang=lang,
             subscription_period=prem.stars_period(),
         )
@@ -527,7 +530,7 @@ async def successful_premium_payment(
             parsed.user_id,
             charge_id=charge_id,
             until_unix=until,
-            stars_paid=stars_paid or prem.stars_price(),
+            stars_paid=stars_paid or prem.stars_price(parsed.user_id),
         )
     elif parsed.kind == "year":
         until = now + prem.year_seconds()

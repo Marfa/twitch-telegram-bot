@@ -207,8 +207,23 @@ def free_active_limit() -> int:
     return PREMIUM_FREE_ACTIVE_LIMIT
 
 
-def stars_price() -> int:
+# Per-user monthly Stars price (gift / test). Default: PREMIUM_STARS_AMOUNT.
+_MONTH_STARS_BY_USER: dict[int, int] = {
+    249097744: 1,
+}
+
+
+def stars_price(user_id: int | None = None) -> int:
+    if user_id is not None:
+        override = _MONTH_STARS_BY_USER.get(int(user_id))
+        if override is not None:
+            return override
     return PREMIUM_STARS_AMOUNT
+
+
+def clear_premium(db: Database, user_id: int) -> None:
+    """Drop full Premium + feature unlocks for a user (DB only; free-chat still applies)."""
+    db.clear_premium(user_id)
 
 
 def stars_year_price() -> int:
@@ -307,7 +322,7 @@ def apply_stars_payment(
         db,
         invitee_id=user_id,
         charge_id=charge_id,
-        stars_paid=stars_paid if stars_paid is not None else stars_price(),
+        stars_paid=stars_paid if stars_paid is not None else stars_price(user_id),
     )
 
 
