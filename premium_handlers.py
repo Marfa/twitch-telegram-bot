@@ -30,6 +30,22 @@ from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
 logger = logging.getLogger(__name__)
 
 
+async def _edit_user_star_subscription(
+    bot, *, user_id: int, telegram_payment_charge_id: str, is_canceled: bool
+) -> bool:
+    """PTB ≤22 typo: editUserStartSubscription → 404. Call the real Bot API method."""
+    return bool(
+        await bot._post(
+            "editUserStarSubscription",
+            {
+                "user_id": user_id,
+                "telegram_payment_charge_id": telegram_payment_charge_id,
+                "is_canceled": is_canceled,
+            },
+        )
+    )
+
+
 def _fmt_until(unix: int) -> str:
     return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -334,7 +350,8 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         charge_id = st.feature_charge_id(fid)
         if charge_id:
             try:
-                await context.bot.edit_user_star_subscription(
+                await _edit_user_star_subscription(
+                    context.bot,
                     user_id=user_id,
                     telegram_payment_charge_id=charge_id,
                     is_canceled=True,
@@ -499,7 +516,8 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(t("premium_cancel_none", lang))
             return
         try:
-            await context.bot.edit_user_star_subscription(
+            await _edit_user_star_subscription(
+                context.bot,
                 user_id=user_id,
                 telegram_payment_charge_id=st.stars_charge_id,
                 is_canceled=True,
