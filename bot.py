@@ -2832,8 +2832,8 @@ def _extract_forward_chat(message) -> tuple[int | None, int | None]:
         return origin.chat.id, None
     if isinstance(origin, MessageOriginChat):
         return origin.sender_chat.id, message.message_thread_id or None
-    if message.forward_from_chat:
-        return message.forward_from_chat.id, message.message_thread_id or None
+    # A personal forward (MessageOriginUser / MessageOriginHiddenUser) has no
+    # usable destination chat.
     return None, None
 
 
@@ -2868,7 +2868,7 @@ async def _parse_dest_input(
     if text and re.fullmatch(r"-?\d+", text):
         return int(text), None, None
 
-    if message.forward_origin or message.forward_from_chat:
+    if message.forward_origin:
         return None, None, t("fwd_from_dm", lang)
 
     hint_key = "dest_hint_group" if dest_type == "group" else "dest_hint_channel"
