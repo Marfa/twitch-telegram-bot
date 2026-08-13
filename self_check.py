@@ -83,6 +83,23 @@ def main() -> None:
 
     analytics_mod.capture_bot_stats(_Stats())
 
+    filt = analytics_mod._WarningPlusRedactFilter()
+    import logging as _logging
+
+    info_rec = _logging.LogRecord("t", _logging.INFO, __file__, 1, "ok", (), None)
+    assert filt.filter(info_rec) is False
+    warn_rec = _logging.LogRecord(
+        "t",
+        _logging.WARNING,
+        __file__,
+        1,
+        "token=supersecrettokenvalue",
+        (),
+        None,
+    )
+    assert filt.filter(warn_rec) is True
+    assert "[redacted]" in warn_rec.getMessage()
+
     from bot import _seconds_until_next_daily_stats
 
     delay = _seconds_until_next_daily_stats()
