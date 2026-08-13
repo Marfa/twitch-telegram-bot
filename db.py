@@ -709,6 +709,8 @@ class Database(Protocol):
 
     def set_premium_permanent(self, user_id: int, permanent: bool) -> None: ...
 
+    def clear_premium(self, user_id: int) -> None: ...
+
     def set_premium_trial(
         self, user_id: int, *, until_unix: int, used: bool = True
     ) -> None: ...
@@ -2061,6 +2063,26 @@ class SqliteDatabase:
                     premium_permanent = excluded.premium_permanent
                 """,
                 (user_id, int(bool(permanent))),
+            )
+
+    def clear_premium(self, user_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET
+                    premium_permanent = 0,
+                    premium_stars_charge_id = '',
+                    premium_stars_until = 0,
+                    premium_stars_canceled = 1,
+                    premium_trial_until = 0,
+                    premium_features = '',
+                    premium_twitch_active = 0,
+                    premium_twitch_user_id = '',
+                    premium_twitch_refresh = '',
+                    premium_twitch_checked_at = NULL
+                WHERE user_id = ?
+                """,
+                (user_id,),
             )
 
     def set_premium_trial(
@@ -4059,6 +4081,27 @@ class PostgresDatabase:
                     premium_permanent = EXCLUDED.premium_permanent
                 """,
                 (user_id, bool(permanent)),
+            )
+
+    def clear_premium(self, user_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users SET
+                    premium_permanent = FALSE,
+                    premium_stars_charge_id = '',
+                    premium_stars_until = 0,
+                    premium_stars_canceled = TRUE,
+                    premium_trial_until = 0,
+                    premium_features = '',
+                    premium_twitch_active = FALSE,
+                    premium_twitch_user_id = '',
+                    premium_twitch_refresh = '',
+                    premium_twitch_checked_at = NULL
+                WHERE user_id = %s
+                """,
+                (user_id,),
             )
 
     def set_premium_trial(

@@ -1090,6 +1090,43 @@ def main() -> None:
         ),
     )
     assert _extract_forward_chat(_fwd_channel) == (-100123, None)
+    # PTB 21.8+: subscription_expiration_date is datetime (same formula as premium_handlers)
+    stars_exp = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+    until_sub = int(stars_exp.timestamp()) if stars_exp is not None else 0
+    assert until_sub == int(stars_exp.timestamp())
+    none_exp = None
+    assert (int(none_exp.timestamp()) if none_exp is not None else 0) == 0
+    try:
+        int(stars_exp)
+        raise AssertionError("int(datetime) must raise TypeError")
+    except TypeError:
+        pass
+    assert prem.stars_price(249097744) == 1
+    assert prem.stars_year_price(249097744) == 1
+    assert prem.stars_lifetime_price(249097744) == 1
+    assert prem.stars_feature_price(249097744) == 1
+    assert prem.has_custom_stars_price(249097744)
+    assert not prem.has_custom_stars_price(1)
+    assert prem.stars_price() == prem.stars_price(1)
+    assert prem.stars_feature_price() == prem.stars_feature_price(1)
+    from premium_handlers import _premium_markup
+
+    with tempfile.TemporaryDirectory() as d:
+        db = SqliteDatabase(Path(d) / "pay_btns.db")
+        db.upsert_user(249097744)
+        kb = _premium_markup(
+            db, 249097744, "ru", free_chat=True, force_free=False
+        )
+        assert kb is not None
+        callbacks = {
+            b.callback_data
+            for row in kb.inline_keyboard
+            for b in row
+            if b.callback_data
+        }
+        assert "premium:month" in callbacks
+        db.upsert_user(2)
+        assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
     assert tr("btn_premium", "en")
     assert tr("btn_premium_oferta", "ru") == "Оферта"
