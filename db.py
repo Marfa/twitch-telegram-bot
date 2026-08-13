@@ -718,8 +718,15 @@ class Database(Protocol):
     def expire_premium_trial(self, user_id: int) -> int: ...
 
     def extend_premium_features(
-        self, user_id: int, feature_ids: list[str], *, until_unix: int
+        self,
+        user_id: int,
+        feature_ids: list[str],
+        *,
+        until_unix: int,
+        charge_id: str = "",
     ) -> None: ...
+
+    def clear_premium_feature(self, user_id: int, feature_id: str) -> None: ...
 
     def set_premium_twitch(
         self,
@@ -1979,7 +1986,7 @@ class SqliteDatabase:
         return int(cur.rowcount)
 
     def get_premium_status(self, user_id: int):
-        from premium import PremiumStatus
+        from premium import PremiumStatus, parse_premium_features_blob
 
         with self._conn() as conn:
             row = conn.execute(
@@ -1995,15 +2002,7 @@ class SqliteDatabase:
             ).fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
-        features: dict[str, int] = {}
-        raw = row["premium_features"] or ""
-        if raw:
-            try:
-                data = json.loads(raw)
-                if isinstance(data, dict):
-                    features = {str(k): int(v) for k, v in data.items()}
-            except (json.JSONDecodeError, TypeError, ValueError):
-                features = {}
+        features, charges = parse_premium_features_blob(row["premium_features"] or "")
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -2014,6 +2013,7 @@ class SqliteDatabase:
             trial_until=int(row["premium_trial_until"] or 0),
             trial_used=bool(row["premium_trial_used"]),
             features=features,
+            feature_charges=charges,
         )
 
     def set_premium_stars(
@@ -2120,14 +2120,24 @@ class SqliteDatabase:
             return int(cur.rowcount)
 
     def extend_premium_features(
-        self, user_id: int, feature_ids: list[str], *, until_unix: int
+        self,
+        user_id: int,
+        feature_ids: list[str],
+        *,
+        until_unix: int,
+        charge_id: str = "",
     ) -> None:
+        from premium import dump_premium_features_blob
+
         st = self.get_premium_status(user_id)
         features = dict(st.features)
+        charges = dict(st.feature_charges)
         until = int(until_unix)
         for fid in feature_ids:
             features[fid] = max(int(features.get(fid) or 0), until)
-        raw = json.dumps(features, ensure_ascii=False)
+            if charge_id:
+                charges[fid] = charge_id
+        raw = dump_premium_features_blob(features, charges)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -2136,6 +2146,26 @@ class SqliteDatabase:
                 ON CONFLICT(user_id) DO UPDATE SET
                     premium_features = excluded.premium_features,
                     premium_stars_paid_at = datetime('now')
+                """,
+                (user_id, raw),
+            )
+
+    def clear_premium_feature(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        features.pop(feature_id, None)
+        charges.pop(feature_id, None)
+        raw = dump_premium_features_blob(features, charges)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_features = excluded.premium_features
                 """,
                 (user_id, raw),
             )
@@ -3992,7 +4022,7 @@ class PostgresDatabase:
             return int(cur.rowcount)
 
     def get_premium_status(self, user_id: int):
-        from premium import PremiumStatus
+        from premium import PremiumStatus, parse_premium_features_blob
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4010,15 +4040,7 @@ class PostgresDatabase:
             row = cur.fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
-        features: dict[str, int] = {}
-        raw = row["premium_features"] or ""
-        if raw:
-            try:
-                data = json.loads(raw)
-                if isinstance(data, dict):
-                    features = {str(k): int(v) for k, v in data.items()}
-            except (json.JSONDecodeError, TypeError, ValueError):
-                features = {}
+        features, charges = parse_premium_features_blob(row["premium_features"] or "")
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -4029,6 +4051,7 @@ class PostgresDatabase:
             trial_until=int(row["premium_trial_until"] or 0),
             trial_used=bool(row["premium_trial_used"]),
             features=features,
+            feature_charges=charges,
         )
 
     def set_premium_stars(
@@ -4141,14 +4164,24 @@ class PostgresDatabase:
             return int(cur.rowcount)
 
     def extend_premium_features(
-        self, user_id: int, feature_ids: list[str], *, until_unix: int
+        self,
+        user_id: int,
+        feature_ids: list[str],
+        *,
+        until_unix: int,
+        charge_id: str = "",
     ) -> None:
+        from premium import dump_premium_features_blob
+
         st = self.get_premium_status(user_id)
         features = dict(st.features)
+        charges = dict(st.feature_charges)
         until = int(until_unix)
         for fid in feature_ids:
             features[fid] = max(int(features.get(fid) or 0), until)
-        raw = json.dumps(features, ensure_ascii=False)
+            if charge_id:
+                charges[fid] = charge_id
+        raw = dump_premium_features_blob(features, charges)
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -4158,6 +4191,27 @@ class PostgresDatabase:
                 ON CONFLICT (user_id) DO UPDATE SET
                     premium_features = EXCLUDED.premium_features,
                     premium_stars_paid_at = NOW()
+                """,
+                (user_id, raw),
+            )
+
+    def clear_premium_feature(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        features.pop(feature_id, None)
+        charges.pop(feature_id, None)
+        raw = dump_premium_features_blob(features, charges)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_features = EXCLUDED.premium_features
                 """,
                 (user_id, raw),
             )

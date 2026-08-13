@@ -21,6 +21,7 @@ from i18n import (
     main_menu,
     premium_actions_keyboard,
     premium_features_keyboard,
+    premium_owned_keyboard,
     t,
     with_premium_oferta,
 )
@@ -111,32 +112,88 @@ def _premium_markup(
     """Action buttons for free / partial UX; cancel when Stars auto-renew is on."""
     if force_free:
         return premium_actions_keyboard(
-            lang, show_cancel=False, show_trial=True, user_id=user_id
+            lang,
+            show_trial=True,
+            show_plans=True,
+            show_features=True,
+            show_owned=False,
+            user_id=user_id,
         )
     st = prem.get_status(db, user_id)
     # Custom 1⭐ (etc.) testers still need pay buttons even with free-chat Premium.
     if (st.permanent or free_chat) and not prem.has_custom_stars_price(user_id):
         return None
-    if st.twitch_active and not st.stars_active and not st.trial_active:
-        # Twitch full premium — still allow cancel if somehow has stars charge
-        if not prem.has_custom_stars_price(user_id):
-            return None
-    show_cancel = (
-        st.stars_active and bool(st.stars_charge_id) and not st.stars_canceled
-    )
-    show_trial = not st.trial_used and not st.is_premium and not free_chat
-    # Partial feature buyers / free / trial / stars still see buy options
-    if st.is_premium and not show_cancel and not any(
-        until > int(time.time()) for until in st.features.values()
+    if (
+        st.twitch_active
+        and not st.stars_active
+        and not st.trial_active
+        and not st.has_active_features
+        and not prem.has_custom_stars_price(user_id)
     ):
-        # Full active (trial or stars without cancel button needed) — keep buy
-        # options hidden only when permanent/twitch already handled.
-        if st.trial_active or st.stars_active:
-            return premium_actions_keyboard(
-                lang, show_cancel=show_cancel, show_trial=False, user_id=user_id
-            )
+        return None
+    full = st.has_full_plan
+    show_owned = bool(
+        st.has_active_features
+        or (st.stars_active and st.stars_charge_id and not st.stars_canceled)
+    )
+    # Full plan → no purchases. À la carte → more features only (not month/year/life).
+    show_plans = not full and not st.has_active_features
+    show_features = not full
+    show_trial = (
+        not st.trial_used and not full and not st.has_active_features and not free_chat
+    )
     return premium_actions_keyboard(
-        lang, show_cancel=show_cancel, show_trial=show_trial, user_id=user_id
+        lang,
+        show_trial=show_trial,
+        show_plans=show_plans,
+        show_features=show_features,
+        show_owned=show_owned,
+        user_id=user_id,
+    )
+
+
+def _owned_features(st: prem.PremiumStatus) -> list[str]:
+    now = int(time.time())
+    return sorted(fid for fid, until in st.features.items() if int(until) > now)
+
+
+async def _show_owned_subscriptions(
+    query, db: Database, user_id: int, lang: str
+) -> None:
+    st = prem.get_status(db, user_id)
+    lines: list[str] = []
+    stars_cancelable = bool(
+        st.stars_active and st.stars_charge_id and not st.stars_canceled
+    )
+    if st.stars_active:
+        lines.append(t("premium_owned_stars", lang, until=_fmt_until(st.stars_until)))
+    feat_ids = _owned_features(st)
+    for fid in feat_ids:
+        name = t(
+            prem.feature_label_key(fid),
+            lang,
+            free_limit=prem.free_active_limit(),
+        )
+        lines.append(
+            t(
+                "premium_owned_feat",
+                lang,
+                name=name,
+                until=_fmt_until(st.feature_until(fid)),
+            )
+        )
+    text = (
+        t("premium_owned_title", lang, items="\n".join(lines))
+        if lines
+        else t("premium_owned_empty", lang)
+    )
+    await query.edit_message_text(
+        text,
+        reply_markup=premium_owned_keyboard(
+            lang,
+            stars_cancelable=stars_cancelable,
+            feature_ids=feat_ids,
+        ),
     )
 
 
@@ -233,7 +290,15 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Feature multi-select toggles
     if data.startswith("premium:feat_toggle:"):
         await query.answer()
+        st = prem.get_status(db, user_id)
+        if st.has_full_plan:
+            await query.answer(t("premium_plans_blocked", lang), show_alert=True)
+            return
         fid = data.split(":", 2)[2]
+        owned = set(_owned_features(st))
+        if fid in owned:
+            await query.answer(t("premium_feat_owned", lang), show_alert=True)
+            return
         selected: set[str] = set(context.user_data.get("premium_feat_sel") or [])
         if fid in selected:
             selected.discard(fid)
@@ -243,7 +308,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["premium_feat_sel"] = sorted(selected)
         await query.edit_message_text(
             t("premium_feat_pick", lang, price=prem.stars_feature_price(user_id)),
-            reply_markup=premium_features_keyboard(lang, selected, user_id=user_id),
+            reply_markup=premium_features_keyboard(
+                lang, selected, user_id=user_id, owned=owned
+            ),
         )
         return
 
@@ -253,12 +320,49 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await send_premium_screen(context.bot, user_id, lang, db, edit_message=query.message)
         return
 
+    if data == "premium:owned":
+        await query.answer()
+        await _show_owned_subscriptions(query, db, user_id, lang)
+        return
+
+    if data.startswith("premium:cancel_feat:"):
+        await query.answer()
+        fid = data.split(":", 2)[2]
+        st = prem.get_status(db, user_id)
+        if not st.feature_active(fid):
+            await query.answer(t("premium_cancel_none", lang), show_alert=True)
+            return
+        charge_id = st.feature_charge_id(fid)
+        if charge_id:
+            try:
+                await context.bot.edit_user_star_subscription(
+                    user_id=user_id,
+                    telegram_payment_charge_id=charge_id,
+                    is_canceled=True,
+                )
+            except Exception:
+                logger.exception(
+                    "edit_user_star_subscription feature failed user=%s feat=%s",
+                    user_id,
+                    fid,
+                )
+                await query.answer(t("import_failed", lang), show_alert=True)
+                return
+        db.clear_premium_feature(user_id, fid)
+        await query.edit_message_text(t("premium_cancel_done", lang))
+        return
+
     if data == "premium:feat_pay":
         await query.answer()
+        st = prem.get_status(db, user_id)
+        if st.has_full_plan:
+            await query.answer(t("premium_plans_blocked", lang), show_alert=True)
+            return
+        owned = set(_owned_features(st))
         selected = [
             f
             for f in (context.user_data.get("premium_feat_sel") or [])
-            if f in prem.FEATURE_IDS
+            if f in prem.FEATURE_IDS and f not in owned
         ]
         if not selected:
             await query.answer(t("import_failed", lang), show_alert=True)
@@ -277,15 +381,28 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if data == "premium:features":
         await query.answer()
+        st = prem.get_status(db, user_id)
+        if st.has_full_plan:
+            await query.answer(t("premium_plans_blocked", lang), show_alert=True)
+            return
         context.user_data["premium_feat_sel"] = []
+        owned = set(_owned_features(st))
         await query.edit_message_text(
             t("premium_feat_pick", lang, price=prem.stars_feature_price(user_id)),
-            reply_markup=premium_features_keyboard(lang, set(), user_id=user_id),
+            reply_markup=premium_features_keyboard(
+                lang, set(), user_id=user_id, owned=owned
+            ),
         )
         return
 
     await query.answer()
     action = data.split(":", 1)[1] if ":" in data else ""
+
+    if action in ("month", "year", "life", "pay", "trial", "trial_confirm"):
+        st = prem.get_status(db, user_id)
+        if st.has_full_plan or st.has_active_features:
+            await query.answer(t("premium_plans_blocked", lang), show_alert=True)
+            return
 
     if action == "trial":
         await query.edit_message_text(

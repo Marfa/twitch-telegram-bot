@@ -1048,6 +1048,7 @@ def main() -> None:
         parse_invoice_payload,
         start_trial,
     )
+    from i18n import premium_features_keyboard
 
     parsed = parse_invoice_payload(invoice_payload(7, "month"))
     assert parsed is not None and parsed.user_id == 7 and parsed.kind == "month"
@@ -1125,6 +1126,40 @@ def main() -> None:
             if b.callback_data
         }
         assert "premium:month" in callbacks
+        apply_features_payment(
+            db,
+            249097744,
+            feature_ids=["alert_types"],
+            charge_id="stx_test",
+            until_unix=10**12,
+            stars_paid=1,
+        )
+        assert prem.is_premium(db, 249097744)
+        assert not prem.get_status(db, 249097744).has_full_plan
+        kb2 = _premium_markup(
+            db, 249097744, "ru", free_chat=True, force_free=False
+        )
+        assert kb2 is not None
+        cb2 = {
+            b.callback_data
+            for row in kb2.inline_keyboard
+            for b in row
+            if b.callback_data
+        }
+        assert "premium:month" not in cb2
+        assert "premium:features" in cb2
+        assert "premium:owned" in cb2
+        assert "alert_types" not in {
+            (b.callback_data or "").split(":")[-1]
+            for row in premium_features_keyboard(
+                "ru",
+                set(),
+                user_id=249097744,
+                owned={"alert_types"},
+            ).inline_keyboard
+            for b in row
+            if (b.callback_data or "").startswith("premium:feat_toggle:")
+        }
         db.upsert_user(2)
         assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
@@ -1243,9 +1278,14 @@ def main() -> None:
         assert st52.feature_active("delay")
         assert st52.feature_active("repeat")
         assert not st52.feature_active("twitch_sync")
-        assert not st52.is_premium
+        assert st52.is_premium
+        assert not st52.has_full_plan
+        assert st52.feature_charge_id("delay") == "feat1"
         assert prem.has_feature_sync(db, 52, "delay")
         assert not prem.has_feature_sync(db, 52, "twitch_sync")
+        db.clear_premium_feature(52, "delay")
+        assert not prem.get_status(db, 52).feature_active("delay")
+        assert prem.get_status(db, 52).feature_active("repeat")
 
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "ref.db")

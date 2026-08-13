@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -70,6 +71,7 @@ class PremiumStatus:
     trial_until: int = 0
     trial_used: bool = False
     features: dict[str, int] = field(default_factory=dict)
+    feature_charges: dict[str, str] = field(default_factory=dict)
 
     @property
     def stars_active(self) -> bool:
@@ -80,8 +82,8 @@ class PremiumStatus:
         return self.trial_until > int(time.time())
 
     @property
-    def is_premium(self) -> bool:
-        """Full Premium (all features), not à la carte alone."""
+    def has_full_plan(self) -> bool:
+        """Month/year/life/trial/Twitch — unlocks every feature."""
         return (
             self.permanent
             or self.stars_active
@@ -89,11 +91,72 @@ class PremiumStatus:
             or self.trial_active
         )
 
+    @property
+    def has_active_features(self) -> bool:
+        now = int(time.time())
+        return any(int(u) > now for u in self.features.values())
+
+    @property
+    def is_premium(self) -> bool:
+        """Full plan or any paid à la carte feature."""
+        return self.has_full_plan or self.has_active_features
+
     def feature_until(self, feature_id: str) -> int:
         return int(self.features.get(feature_id) or 0)
 
     def feature_active(self, feature_id: str) -> bool:
         return self.feature_until(feature_id) > int(time.time())
+
+    def feature_charge_id(self, feature_id: str) -> str:
+        return self.feature_charges.get(feature_id) or ""
+
+
+def parse_premium_features_blob(
+    raw: str | dict | None,
+) -> tuple[dict[str, int], dict[str, str]]:
+    """Support legacy `{fid: until}` and `{fid: {until, charge_id}}`."""
+    features: dict[str, int] = {}
+    charges: dict[str, str] = {}
+    if not raw:
+        return features, charges
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return features, charges
+    if not isinstance(data, dict):
+        return features, charges
+    for key, val in data.items():
+        fid = str(key)
+        if isinstance(val, dict):
+            try:
+                features[fid] = int(val.get("until") or 0)
+            except (TypeError, ValueError):
+                features[fid] = 0
+            cid = str(val.get("charge_id") or "")
+            if cid:
+                charges[fid] = cid
+        else:
+            try:
+                features[fid] = int(val)
+            except (TypeError, ValueError):
+                features[fid] = 0
+    return features, charges
+
+
+def dump_premium_features_blob(
+    features: dict[str, int], charges: dict[str, str] | None = None
+) -> str:
+    charges = charges or {}
+    out: dict[str, Any] = {}
+    for fid, until in features.items():
+        cid = charges.get(fid) or ""
+        if cid:
+            out[fid] = {"until": int(until), "charge_id": cid}
+        else:
+            out[fid] = int(until)
+    return json.dumps(out, ensure_ascii=False)
 
 
 def feature_label_key(feature_id: str) -> str:
@@ -175,7 +238,7 @@ async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
 def has_feature_sync(db: Database, user_id: int, feature_id: str) -> bool:
     """DB-only feature check (no free-chat / demo). Call ensure_trial_expired first."""
     st = get_status(db, user_id)
-    if st.is_premium:
+    if st.has_full_plan:
         return True
     return st.feature_active(feature_id)
 
@@ -361,7 +424,12 @@ def apply_features_payment(
     until_unix: int,
     stars_paid: int | None = None,
 ) -> None:
-    db.extend_premium_features(user_id, list(feature_ids), until_unix=until_unix)
+    db.extend_premium_features(
+        user_id,
+        list(feature_ids),
+        until_unix=until_unix,
+        charge_id=charge_id,
+    )
     credit_referral_commission(
         db,
         invitee_id=user_id,

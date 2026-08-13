@@ -54,6 +54,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_feat_back": "Back",
         "btn_premium_marfapr": "Create marfapr alert",
         "btn_premium_cancel_stars": "Cancel Stars subscription",
+        "btn_premium_owned": "Purchased subscriptions",
+        "btn_premium_cancel_feat": "Cancel",
         "btn_premium_get": "Get Premium",
         "btn_premium_skip": "Skip",
         "btn_premium_oferta": "Offer",
@@ -287,6 +289,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Stars auto-renew canceled. Premium stays until the end of the paid period."
         ),
         "premium_cancel_none": "No active Stars subscription to cancel.",
+        "premium_owned_title": "Purchased subscriptions:\n{items}",
+        "premium_owned_empty": "No purchased subscriptions.",
+        "premium_owned_stars": "• Monthly Stars until {until}",
+        "premium_owned_feat": "• {name} until {until}",
+        "premium_feat_owned": "Already purchased",
+        "premium_plans_blocked": "A Premium plan is already active.",
         "premium_marfapr_need_sub": (
             "No active Twitch subscription to {channel} found.\n"
             "Subscribe at https://www.twitch.tv/{channel} and try again."
@@ -1093,6 +1101,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_feat_back": "Назад",
         "btn_premium_marfapr": "Создать подписку на marfapr",
         "btn_premium_cancel_stars": "Отменить подписку Stars",
+        "btn_premium_owned": "Купленные подписки",
+        "btn_premium_cancel_feat": "Отменить",
         "btn_premium_get": "Оформить премиум",
         "btn_premium_skip": "Пропустить",
         "btn_premium_oferta": "Оферта",
@@ -1326,6 +1336,12 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Автопродление Stars отключено. Премиум действует до конца оплаченного периода."
         ),
         "premium_cancel_none": "Нет активной подписки Stars для отмены.",
+        "premium_owned_title": "Купленные подписки:\n{items}",
+        "premium_owned_empty": "Нет купленных подписок.",
+        "premium_owned_stars": "• Stars на месяц до {until}",
+        "premium_owned_feat": "• {name} до {until}",
+        "premium_feat_owned": "Уже куплено",
+        "premium_plans_blocked": "Премиум-план уже активен.",
         "premium_marfapr_need_sub": (
             "Активная подписка Twitch на {channel} не найдена.\n"
             "Оформите её на https://www.twitch.tv/{channel} и попробуйте снова."
@@ -2413,8 +2429,10 @@ def partner_menu(lang: str) -> ReplyKeyboardMarkup:
 def premium_actions_keyboard(
     lang: str,
     *,
-    show_cancel: bool,
     show_trial: bool = True,
+    show_plans: bool = True,
+    show_features: bool = True,
+    show_owned: bool = False,
     user_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     from premium import stars_feature_price, stars_lifetime_price, stars_price, stars_year_price
@@ -2431,42 +2449,44 @@ def premium_actions_keyboard(
             )
         ]
     )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("btn_premium_month", lang, stars=stars_price(user_id)),
-                callback_data="premium:month",
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("btn_premium_year", lang, stars=stars_year_price(user_id)),
-                callback_data="premium:year",
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                btn("premium_features", lang), callback_data="premium:features"
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("btn_premium_lifetime", lang, stars=stars_lifetime_price(user_id)),
-                callback_data="premium:life",
-            )
-        ]
-    )
-    if show_cancel:
+    if show_plans:
         rows.append(
             [
                 InlineKeyboardButton(
-                    btn("premium_cancel_stars", lang), callback_data="premium:cancel"
+                    t("btn_premium_month", lang, stars=stars_price(user_id)),
+                    callback_data="premium:month",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_year", lang, stars=stars_year_price(user_id)),
+                    callback_data="premium:year",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_lifetime", lang, stars=stars_lifetime_price(user_id)),
+                    callback_data="premium:life",
+                )
+            ]
+        )
+    if show_features:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_features", lang), callback_data="premium:features"
+                )
+            ]
+        )
+    if show_owned:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_owned", lang), callback_data="premium:owned"
                 )
             ]
         )
@@ -2474,13 +2494,20 @@ def premium_actions_keyboard(
 
 
 def premium_features_keyboard(
-    lang: str, selected: set[str], *, user_id: int | None = None
+    lang: str,
+    selected: set[str],
+    *,
+    user_id: int | None = None,
+    owned: set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from config import PREMIUM_FREE_ACTIVE_LIMIT
     from premium import FEATURE_IDS, feature_label_key, stars_feature_price
 
+    owned = owned or set()
     rows: list[list[InlineKeyboardButton]] = []
     for fid in FEATURE_IDS:
+        if fid in owned:
+            continue
         mark = "✅" if fid in selected else "⬜️"
         label = t(
             feature_label_key(fid),
@@ -2503,6 +2530,49 @@ def premium_features_keyboard(
                 InlineKeyboardButton(
                     t("btn_premium_feat_pay", lang, stars=total),
                     callback_data="premium:feat_pay",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("premium_feat_back", lang), callback_data="premium:feat_back"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def premium_owned_keyboard(
+    lang: str,
+    *,
+    stars_cancelable: bool,
+    feature_ids: list[str],
+) -> InlineKeyboardMarkup:
+    from config import PREMIUM_FREE_ACTIVE_LIMIT
+    from premium import feature_label_key
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if stars_cancelable:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_cancel_stars", lang),
+                    callback_data="premium:cancel",
+                )
+            ]
+        )
+    for fid in feature_ids:
+        name = t(
+            feature_label_key(fid),
+            lang,
+            free_limit=PREMIUM_FREE_ACTIVE_LIMIT,
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{btn('premium_cancel_feat', lang)} — {name}",
+                    callback_data=f"premium:cancel_feat:{fid}",
                 )
             ]
         )
