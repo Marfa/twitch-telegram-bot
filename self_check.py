@@ -1160,7 +1160,66 @@ def main() -> None:
     assert "Типы кроме старта стрима" in _premium_gate_text(
         "ru", "alert_type", "отмените"
     )
-    from premium_handlers import _premium_markup
+    assert "функция Premium" in _premium_gate_text(
+        "ru", "delay", "пропустите шаг"
+    )
+    # Chat fixes: callback wiring, PTB Stars typo, cancel copy, deploy polling, Other audience.
+    import inspect
+    from pathlib import Path as _Path
+
+    from telegram import Bot
+
+    import main as main_mod
+    from bot import _dump_broadcast_recipient_ids
+    from i18n import admin_other_audience_keyboard, premium_owned_keyboard
+    from premium_handlers import _edit_user_star_subscription, _premium_markup
+
+    bot_src = _Path(__file__).resolve().parent.joinpath("bot.py").read_text(
+        encoding="utf-8"
+    )
+    assert "cancel_feat:.+" in bot_src
+    assert "owned|" in bot_src
+    assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
+    assert "mark_ready()" in bot_src
+    ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
+    assert "editUserStartSubscription" in ptb_edit  # upstream typo still present
+    our_edit = inspect.getsource(_edit_user_star_subscription)
+    assert '"editUserStarSubscription"' in our_edit
+    assert '"editUserStartSubscription"' not in our_edit
+    ph_src = _Path(__file__).resolve().parent.joinpath(
+        "premium_handlers.py"
+    ).read_text(encoding="utf-8")
+    cancel_block = ph_src.split('if action == "cancel":', 1)[1].split(
+        'if action == "marfapr":', 1
+    )[0]
+    assert 't("import_failed"' not in cancel_block
+    assert "premium_cancel_feat_done" in ph_src
+    assert tr("premium_cancel_feat_done", "ru")
+    assert tr("premium_cancel_failed", "ru")
+    assert tr("premium_pay_failed", "ru")
+    assert "Twitch" not in tr("premium_cancel_feat_done", "ru")
+    assert "Twitch" not in tr("premium_pay_failed", "ru")
+    aud_cb = {
+        b.callback_data
+        for row in admin_other_audience_keyboard("ru").inline_keyboard
+        for b in row
+        if b.callback_data
+    }
+    assert aud_cb == {"admin_audience:ids", "admin_audience:all"}
+    assert tr("broadcast_audience_ids", "ru") == "Указать ID"
+    assert tr("broadcast_audience_all", "ru") == "Разослать всем"
+    owned_kb = premium_owned_keyboard(
+        "ru", stars_cancelable=True, feature_ids=["alert_types"]
+    )
+    owned_cb = {
+        b.callback_data
+        for row in owned_kb.inline_keyboard
+        for b in row
+        if b.callback_data
+    }
+    assert "premium:cancel" in owned_cb
+    assert "premium:cancel_feat:alert_types" in owned_cb
+    assert _dump_broadcast_recipient_ids([9, 9, 8, "x"]) == "9,8"
 
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "pay_btns.db")
@@ -1188,6 +1247,19 @@ def main() -> None:
         assert not prem.get_status(db, 249097744).has_full_plan
         assert db.get_bot_stats().premium_paid == 1
         assert not prem.has_feature_sync(db, 249097744, "extra_alerts")
+        assert prem.can_enable_more(db, 249097744) is True
+        # Local feature cancel (API may fail): entitlement must drop.
+        db.clear_premium_feature(249097744, "alert_types")
+        assert not prem.get_status(db, 249097744).feature_active("alert_types")
+        assert db.get_bot_stats().premium_paid == 0
+        apply_features_payment(
+            db,
+            249097744,
+            feature_ids=["alert_types"],
+            charge_id="stx_test2",
+            until_unix=10**12,
+            stars_paid=1,
+        )
         assert prem.can_enable_more(db, 249097744) is True
         db2 = SqliteDatabase(Path(d) / "perm_not_paid.db")
         db2.upsert_user(1)
