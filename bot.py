@@ -47,6 +47,7 @@ from i18n import (
     SUPPORTED_LOCALES,
     admin_menu,
     admin_type_keyboard,
+    admin_other_audience_keyboard,
     admin_wizard_menu,
     alert_type_keyboard,
     all_btn_texts,
@@ -201,7 +202,9 @@ _TWITCH_COMPONENT_KEYS = {
     WATCH_SAVE,
     DELETE_SIBLING_ALERTS,
     GLOBAL_IGNORE_KEYWORDS,
-) = range(50)
+    ADMIN_MSG_AUDIENCE,
+    ADMIN_MSG_IDS,
+) = range(52)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -1141,7 +1144,28 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         _set_wizard_back(context, DELETE_OLD)
         return DELETE_OLD
     if state == ADMIN_MSG_TEXT:
+        if context.user_data.get("admin_msg_type") == "other":
+            await update.effective_message.reply_text(
+                t("broadcast_audience_prompt", lang),
+                reply_markup=admin_other_audience_keyboard(lang),
+            )
+            _set_wizard_back(context, ADMIN_MSG_AUDIENCE)
+            return ADMIN_MSG_AUDIENCE
         user_id = update.effective_user.id
+        await update.effective_message.reply_text(
+            t("broadcast_prompt", lang),
+            reply_markup=admin_type_keyboard(lang),
+        )
+        _set_wizard_back(context, ADMIN_MSG_TYPE)
+        return ADMIN_MSG_TYPE
+    if state == ADMIN_MSG_IDS:
+        await update.effective_message.reply_text(
+            t("broadcast_audience_prompt", lang),
+            reply_markup=admin_other_audience_keyboard(lang),
+        )
+        _set_wizard_back(context, ADMIN_MSG_AUDIENCE)
+        return ADMIN_MSG_AUDIENCE
+    if state == ADMIN_MSG_AUDIENCE:
         await update.effective_message.reply_text(
             t("broadcast_prompt", lang),
             reply_markup=admin_type_keyboard(lang),
@@ -6035,9 +6059,99 @@ async def admin_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lang = _user_lang(context, query.from_user.id)
     msg_type = query.data.split(":", 1)[1]
     context.user_data["admin_msg_type"] = msg_type
+    context.user_data.pop("admin_recipient_ids", None)
     await query.edit_message_text("✓")
+    if msg_type == "other":
+        await context.bot.send_message(
+            query.from_user.id,
+            t("broadcast_audience_prompt", lang),
+            reply_markup=admin_other_audience_keyboard(lang),
+        )
+        _set_wizard_back(context, ADMIN_MSG_AUDIENCE)
+        return ADMIN_MSG_AUDIENCE
     await context.bot.send_message(
         query.from_user.id,
+        t("broadcast_text_prompt", lang),
+        reply_markup=admin_wizard_menu(lang),
+    )
+    _set_wizard_back(context, ADMIN_MSG_TEXT)
+    return ADMIN_MSG_TEXT
+
+
+async def admin_audience_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        return ConversationHandler.END
+    lang = _user_lang(context, query.from_user.id)
+    action = query.data.split(":", 1)[1]
+    await query.edit_message_text("✓")
+    if action == "ids":
+        context.user_data.pop("admin_recipient_ids", None)
+        await context.bot.send_message(
+            query.from_user.id,
+            t("broadcast_ids_prompt", lang),
+            reply_markup=admin_wizard_menu(lang),
+        )
+        _set_wizard_back(context, ADMIN_MSG_IDS)
+        return ADMIN_MSG_IDS
+    context.user_data.pop("admin_recipient_ids", None)
+    await context.bot.send_message(
+        query.from_user.id,
+        t("broadcast_text_prompt", lang),
+        reply_markup=admin_wizard_menu(lang),
+    )
+    _set_wizard_back(context, ADMIN_MSG_TEXT)
+    return ADMIN_MSG_TEXT
+
+
+def _parse_broadcast_recipient_ids(raw: str) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for part in (raw or "").replace(";", ",").split(","):
+        token = part.strip()
+        if not token or not token.isdigit():
+            continue
+        uid = int(token)
+        if uid <= 0 or uid in seen:
+            continue
+        seen.add(uid)
+        ids.append(uid)
+    return ids
+
+
+def _dump_broadcast_recipient_ids(ids: object) -> str:
+    if not isinstance(ids, (list, tuple)):
+        return ""
+    out: list[str] = []
+    seen: set[int] = set()
+    for item in ids:
+        try:
+            uid = int(item)
+        except (TypeError, ValueError):
+            continue
+        if uid <= 0 or uid in seen:
+            continue
+        seen.add(uid)
+        out.append(str(uid))
+    return ",".join(out)
+
+
+async def admin_receive_ids(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        return ConversationHandler.END
+    lang = _user_lang(context, user_id)
+    plain = (update.effective_message.text or "").strip()
+    if plain in all_menu_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return ADMIN_MSG_IDS
+    ids = _parse_broadcast_recipient_ids(plain)
+    if not ids:
+        await update.effective_message.reply_text(t("broadcast_ids_invalid", lang))
+        return ADMIN_MSG_IDS
+    context.user_data["admin_recipient_ids"] = ids
+    await update.effective_message.reply_text(
         t("broadcast_text_prompt", lang),
         reply_markup=admin_wizard_menu(lang),
     )
@@ -6161,9 +6275,12 @@ async def _send_admin_broadcast(
     text: str,
     *,
     source_lang: str | None = None,
+    recipient_ids: list[int] | None = None,
 ) -> tuple[int, int, int]:
     db: Database = context.application.bot_data["db"]
-    if msg_type == "bot_update":
+    if recipient_ids is not None:
+        user_ids = [uid for uid in recipient_ids if not db.is_bot_blocked(uid)]
+    elif msg_type == "bot_update":
         user_ids = db.get_bot_update_recipients()
     elif msg_type == "availability":
         user_ids = db.get_availability_recipients()
@@ -6320,11 +6437,16 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
 
     msg_type = context.user_data.get("admin_msg_type", "bot_update")
     text = context.user_data.get("admin_msg_text", "")
+    recipient_ids_raw = _dump_broadcast_recipient_ids(
+        context.user_data.get("admin_recipient_ids")
+    )
     if data == "sched:now":
         # Offload to job queue so the conversation handler returns immediately
         # and the bot keeps processing other updates while the mass send runs.
         scheduled_at = datetime.now(timezone.utc).isoformat()
-        broadcast_id = db.add_scheduled_broadcast(msg_type, text, scheduled_at, user_id)
+        broadcast_id = db.add_scheduled_broadcast(
+            msg_type, text, scheduled_at, user_id, recipient_ids=recipient_ids_raw
+        )
         context.user_data.clear()
         try:
             await query.edit_message_text(t("broadcast_started", lang))
@@ -6349,7 +6471,9 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
         minute = int(schedule["minute"])
         db.set_saved_schedule(user_id, hour, minute)
         scheduled_at = _schedule_to_utc_iso(schedule)
-        broadcast_id = db.add_scheduled_broadcast(msg_type, text, scheduled_at, user_id)
+        broadcast_id = db.add_scheduled_broadcast(
+            msg_type, text, scheduled_at, user_id, recipient_ids=recipient_ids_raw
+        )
         when = (
             datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
             - datetime.now(timezone.utc)
@@ -6401,8 +6525,13 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not item:
             return
         source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+        recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
         sent, _failed, total = await _send_admin_broadcast(
-            context, item.msg_type, item.text, source_lang=source_lang
+            context,
+            item.msg_type,
+            item.text,
+            source_lang=source_lang,
+            recipient_ids=recipients or None,
         )
         db.mark_scheduled_broadcast_sent(broadcast_id)
         await _report_broadcast_done(
@@ -7760,8 +7889,13 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
             continue
         try:
             source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+            recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
             sent, _failed, total = await _send_admin_broadcast(
-                context, item.msg_type, item.text, source_lang=source_lang
+                context,
+                item.msg_type,
+                item.text,
+                source_lang=source_lang,
+                recipient_ids=recipients or None,
             )
             db.mark_scheduled_broadcast_sent(item.id)
             await _report_broadcast_done(
@@ -8411,6 +8545,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ADMIN_MSG_TYPE: [
                 _wiz_cancel,
                 CallbackQueryHandler(admin_select_type, pattern=r"^admin_type:"),
+            ],
+            ADMIN_MSG_AUDIENCE: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(admin_audience_callback, pattern=r"^admin_audience:"),
+            ],
+            ADMIN_MSG_IDS: [
+                _wiz_cancel,
+                _wiz_back,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_ids),
             ],
             ADMIN_MSG_TEXT: [
                 _wiz_cancel,

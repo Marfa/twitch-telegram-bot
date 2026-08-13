@@ -28,6 +28,7 @@ from bot import (
     _help_text,
     _is_link_preview_disabled,
     _message_link,
+    _parse_broadcast_recipient_ids,
     _parse_sb_edit_f_id,
     _parse_segment_start,
     _parse_watch_viewers,
@@ -1010,6 +1011,14 @@ def main() -> None:
         item = db.get_scheduled_broadcast(bid)
         assert item is not None
         assert item.text == "hello"
+        assert item.recipient_ids == ""
+        bid_ids = db.add_scheduled_broadcast(
+            "other", "hi", "2099-01-01T00:00:00+00:00", 1, recipient_ids="11,22"
+        )
+        item_ids = db.get_scheduled_broadcast(bid_ids)
+        assert item_ids is not None and item_ids.recipient_ids == "11,22"
+        assert _parse_broadcast_recipient_ids("11, 22, x, 22") == [11, 22]
+        assert db.delete_scheduled_broadcast(bid_ids)
         assert db.update_scheduled_broadcast(bid, text="updated")
         item = db.get_scheduled_broadcast(bid)
         assert item is not None

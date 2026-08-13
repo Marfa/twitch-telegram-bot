@@ -984,6 +984,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_bot_update": "📬 Bot update notifications",
         "broadcast_type_availability": "📡 Bot availability alerts",
         "broadcast_type_other": "📢 Other",
+        "broadcast_audience_prompt": "Who should receive this message?",
+        "broadcast_audience_all": "Send to everyone",
+        "broadcast_audience_ids": "Specify IDs",
+        "broadcast_ids_prompt": (
+            "Send recipient Telegram IDs separated by commas.\n"
+            "Example: 123456789, 987654321\n"
+            "/cancel — cancel."
+        ),
+        "broadcast_ids_invalid": "No valid IDs found. Send numbers separated by commas.",
         "broadcast_text_prompt": (
             "Send the message text (bold/italic and line breaks are kept).\n"
             "It will be auto-translated to each recipient's language.\n"
@@ -2152,6 +2161,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_bot_update": "📬 Оповещения об обновлении бота",
         "broadcast_type_availability": "📡 Оповещения о доступности бота",
         "broadcast_type_other": "📢 Прочие",
+        "broadcast_audience_prompt": "Кому отправить сообщение?",
+        "broadcast_audience_all": "Разослать всем",
+        "broadcast_audience_ids": "Указать ID",
+        "broadcast_ids_prompt": (
+            "Отправьте Telegram ID получателей через запятую.\n"
+            "Пример: 123456789, 987654321\n"
+            "/cancel — отмена."
+        ),
+        "broadcast_ids_invalid": "Не найдено валидных ID. Отправьте числа через запятую.",
         "broadcast_text_prompt": (
             "Отправьте текст сообщения (жирный/курсив и переносы сохраняются).\n"
             "Оно будет автоматически переведено на язык каждого получателя.\n"
@@ -3100,6 +3118,25 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     t("broadcast_type_other", lang),
                     callback_data="admin_type:other",
+                )
+            ],
+        ]
+    )
+
+
+def admin_other_audience_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("broadcast_audience_ids", lang),
+                    callback_data="admin_audience:ids",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("broadcast_audience_all", lang),
+                    callback_data="admin_audience:all",
                 )
             ],
         ]
