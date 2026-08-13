@@ -1136,6 +1136,20 @@ def main() -> None:
         )
         assert prem.is_premium(db, 249097744)
         assert not prem.get_status(db, 249097744).has_full_plan
+        assert db.get_bot_stats().premium_paid == 1
+        assert not prem.has_feature_sync(db, 249097744, "extra_alerts")
+        assert prem.can_enable_more(db, 249097744) is True
+        for i in range(5):
+            db.add_subscription(
+                owner_id=249097744,
+                twitch_username=f"lim{i}",
+                twitch_user_id=str(9000 + i),
+                message_template="x",
+                dest_type="dm",
+                chat_id=249097744,
+                thread_id=None,
+            )
+        assert prem.can_enable_more(db, 249097744) is False
         kb2 = _premium_markup(
             db, 249097744, "ru", free_chat=True, force_free=False
         )

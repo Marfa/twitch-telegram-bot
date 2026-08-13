@@ -1661,8 +1661,9 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
         )
         return ConversationHandler.END
     if not await prem.can_enable_more_async(context.bot, db, user_id):
-        # Still allow creating paused alerts; warn via gate only when enabling.
-        pass
+        return await _show_premium_gate(
+            update, context, feature="active_limit", first_step=True
+        )
     return await _go_alert_type_prompt(update, context, lang)
 
 
@@ -8122,7 +8123,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_premium_callback_router,
-            pattern=r"^premium:(pay|month|year|life|cancel|marfapr|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+)$",
+            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+)$",
         ),
         group=0,
     )

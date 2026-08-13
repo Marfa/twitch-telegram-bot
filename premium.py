@@ -261,7 +261,7 @@ async def has_premium(bot: Bot, db: Database, user_id: int) -> bool:
     ensure_trial_expired(db, user_id)
     if is_active(user_id):
         return False
-    if is_premium(db, user_id):
+    if get_status(db, user_id).has_full_plan:
         return True
     return await is_free_chat_member(bot, user_id)
 
