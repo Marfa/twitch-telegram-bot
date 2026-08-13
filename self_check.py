@@ -1074,7 +1074,11 @@ def main() -> None:
     except TypeError:
         pass
     assert prem.stars_price(249097744) == 1
+    assert prem.stars_year_price(249097744) == 1
+    assert prem.stars_lifetime_price(249097744) == 1
+    assert prem.stars_feature_price(249097744) == 1
     assert prem.stars_price() == prem.stars_price(1)
+    assert prem.stars_feature_price() == prem.stars_feature_price(1)
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
     assert tr("btn_premium", "en")
     assert tr("btn_premium_oferta", "ru") == "Оферта"

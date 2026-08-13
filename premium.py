@@ -207,18 +207,21 @@ def free_active_limit() -> int:
     return PREMIUM_FREE_ACTIVE_LIMIT
 
 
-# Per-user monthly Stars price (gift / test). Default: PREMIUM_STARS_AMOUNT.
-_MONTH_STARS_BY_USER: dict[int, int] = {
+# Per-user Stars price override (gift / test). Applies to month/year/life/feature.
+_STARS_BY_USER: dict[int, int] = {
     249097744: 1,
 }
 
 
+def _stars_override(user_id: int | None) -> int | None:
+    if user_id is None:
+        return None
+    return _STARS_BY_USER.get(int(user_id))
+
+
 def stars_price(user_id: int | None = None) -> int:
-    if user_id is not None:
-        override = _MONTH_STARS_BY_USER.get(int(user_id))
-        if override is not None:
-            return override
-    return PREMIUM_STARS_AMOUNT
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_AMOUNT
 
 
 def clear_premium(db: Database, user_id: int) -> None:
@@ -226,16 +229,19 @@ def clear_premium(db: Database, user_id: int) -> None:
     db.clear_premium(user_id)
 
 
-def stars_year_price() -> int:
-    return PREMIUM_STARS_YEAR
+def stars_year_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_YEAR
 
 
-def stars_lifetime_price() -> int:
-    return PREMIUM_STARS_LIFETIME
+def stars_lifetime_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_LIFETIME
 
 
-def stars_feature_price() -> int:
-    return PREMIUM_STARS_FEATURE
+def stars_feature_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_FEATURE
 
 
 def stars_period() -> int:
@@ -338,7 +344,7 @@ def apply_lifetime_payment(
         db,
         invitee_id=user_id,
         charge_id=charge_id,
-        stars_paid=stars_paid if stars_paid is not None else stars_lifetime_price(),
+        stars_paid=stars_paid if stars_paid is not None else stars_lifetime_price(user_id),
     )
 
 
@@ -358,7 +364,7 @@ def apply_features_payment(
         charge_id=charge_id,
         stars_paid=stars_paid
         if stars_paid is not None
-        else stars_feature_price() * max(1, len(feature_ids)),
+        else stars_feature_price(user_id) * max(1, len(feature_ids)),
     )
 
 

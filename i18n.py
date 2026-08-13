@@ -2442,7 +2442,7 @@ def premium_actions_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
-                t("btn_premium_year", lang, stars=stars_year_price()),
+                t("btn_premium_year", lang, stars=stars_year_price(user_id)),
                 callback_data="premium:year",
             )
         ]
@@ -2457,7 +2457,7 @@ def premium_actions_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
-                t("btn_premium_lifetime", lang, stars=stars_lifetime_price()),
+                t("btn_premium_lifetime", lang, stars=stars_lifetime_price(user_id)),
                 callback_data="premium:life",
             )
         ]
@@ -2474,7 +2474,7 @@ def premium_actions_keyboard(
 
 
 def premium_features_keyboard(
-    lang: str, selected: set[str]
+    lang: str, selected: set[str], *, user_id: int | None = None
 ) -> InlineKeyboardMarkup:
     from config import PREMIUM_FREE_ACTIVE_LIMIT
     from premium import FEATURE_IDS, feature_label_key, stars_feature_price
@@ -2496,7 +2496,7 @@ def premium_features_keyboard(
             ]
         )
     n = len(selected)
-    total = n * stars_feature_price()
+    total = n * stars_feature_price(user_id)
     if n > 0:
         rows.append(
             [
