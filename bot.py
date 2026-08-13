@@ -7945,13 +7945,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         user_id=user_id,
         properties={"handler": "telegram_error_handler"},
     )
-    # Unanswered callbacks spin forever after handler crashes / mid-deploy.
+    # Best-effort: stop spinner if the handler crashed before answering.
     if isinstance(update, Update) and update.callback_query is not None:
         try:
-            await update.callback_query.answer(
-                t("callback_stale", _user_lang(context, user_id or 0)),
-                show_alert=True,
-            )
+            await update.callback_query.answer()
         except Exception:
             pass
 
@@ -8657,31 +8654,4 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         interval=24 * 3600,
         first=_seconds_until_next_daily_stats(),
     )
-
-    async def ensure_callback_answered(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        """If no handler answered the callback, stop the spinner and nudge the user."""
-        query = update.callback_query
-        if query is None:
-            return
-        try:
-            await query.answer()
-        except BadRequest:
-            return
-        except Exception:
-            logger.exception("ensure_callback_answered answer failed")
-            return
-        user_id = query.from_user.id if query.from_user else 0
-        lang = _user_lang(context, user_id)
-        try:
-            await context.bot.send_message(
-                user_id,
-                t("callback_stale", lang),
-                reply_markup=_menu(lang, user_id),
-            )
-        except Exception:
-            logger.exception("ensure_callback_answered notify failed")
-
-    app.add_handler(CallbackQueryHandler(ensure_callback_answered), group=99)
     return app
