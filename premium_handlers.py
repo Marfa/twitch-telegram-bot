@@ -326,7 +326,6 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if data.startswith("premium:cancel_feat:"):
-        await query.answer()
         fid = data.split(":", 2)[2]
         st = prem.get_status(db, user_id)
         if not st.feature_active(fid):
@@ -341,15 +340,15 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                     is_canceled=True,
                 )
             except Exception:
+                # Charge may be invalid/already canceled; still drop local entitlement.
                 logger.exception(
                     "edit_user_star_subscription feature failed user=%s feat=%s",
                     user_id,
                     fid,
                 )
-                await query.answer(t("import_failed", lang), show_alert=True)
-                return
         db.clear_premium_feature(user_id, fid)
-        await query.edit_message_text(t("premium_cancel_done", lang))
+        await query.answer()
+        await query.edit_message_text(t("premium_cancel_feat_done", lang))
         return
 
     if data == "premium:feat_pay":
@@ -497,7 +496,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if action == "cancel":
         st = prem.get_status(db, user_id)
         if not st.stars_charge_id or not st.stars_active:
-            await query.answer(t("premium_cancel_none", lang), show_alert=True)
+            await query.edit_message_text(t("premium_cancel_none", lang))
             return
         try:
             await context.bot.edit_user_star_subscription(
@@ -505,10 +504,12 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 telegram_payment_charge_id=st.stars_charge_id,
                 is_canceled=True,
             )
-        except Exception:
+        except Exception as e:
             logger.exception("edit_user_star_subscription failed for %s", user_id)
-            await query.answer(t("import_failed", lang), show_alert=True)
-            return
+            err = str(e).lower()
+            if "already canceled" not in err:
+                await query.edit_message_text(t("import_failed", lang))
+                return
         db.set_premium_stars_canceled(user_id, True)
         await query.edit_message_text(t("premium_cancel_done", lang))
         return

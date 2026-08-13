@@ -705,13 +705,34 @@ async def _show_premium_gate(
         "premium_gate_action_cancel" if first_step else "premium_gate_action_skip",
         lang,
     )
-    text = t("premium_gate", lang, action=action)
+    text = _premium_gate_text(lang, feature, action)
     markup = premium_gate_keyboard(lang, first_step=first_step)
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=markup)
     else:
         await update.effective_message.reply_text(text, reply_markup=markup)
     return PREMIUM_GATE
+
+
+_GATE_FEATURE_LABEL = {
+    "alert_type": "premium_feat_alert_types",
+    "sync": "premium_feat_twitch_sync",
+    "ignore_keywords": "premium_feat_ignore_keywords",
+    "delay": "premium_feat_delay",
+    "repeat": "premium_feat_repeat",
+    "delete_old": "premium_feat_delete_prev",
+    "delete_fail": "premium_feat_delete_prev",
+}
+
+
+def _premium_gate_text(lang: str, feature: str, action: str) -> str:
+    if feature == "active_limit":
+        return t("premium_active_limit", lang, limit=prem.free_active_limit())
+    label_key = _GATE_FEATURE_LABEL.get(feature)
+    if label_key:
+        reason = t(label_key, lang, free_limit=prem.free_active_limit())
+        return t("premium_gate_feature", lang, feature=reason, action=action)
+    return t("premium_gate", lang, action=action)
 
 
 async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -7924,12 +7945,21 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         user_id=user_id,
         properties={"handler": "telegram_error_handler"},
     )
+    # Unanswered callbacks spin forever after handler crashes / mid-deploy.
+    if isinstance(update, Update) and update.callback_query is not None:
+        try:
+            await update.callback_query.answer(
+                t("callback_stale", _user_lang(context, user_id or 0)),
+                show_alert=True,
+            )
+        except Exception:
+            pass
 
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
     async def post_init(application: Application) -> None:
         from config import twitch_oauth_redirect_uri
-        from health import register_oauth_bridge
+        from health import mark_ready, register_oauth_bridge
 
         await _restore_broadcast_jobs(application)
         redirect_uri = twitch_oauth_redirect_uri()
@@ -7952,6 +7982,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 redirect_uri=redirect_uri,
                 on_complete=on_oauth_complete,
             )
+        # Ready only after Application init — avoid deploy cutting over before polling.
+        mark_ready()
 
     app = (
         Application.builder()
@@ -8625,4 +8657,31 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         interval=24 * 3600,
         first=_seconds_until_next_daily_stats(),
     )
+
+    async def ensure_callback_answered(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """If no handler answered the callback, stop the spinner and nudge the user."""
+        query = update.callback_query
+        if query is None:
+            return
+        try:
+            await query.answer()
+        except BadRequest:
+            return
+        except Exception:
+            logger.exception("ensure_callback_answered answer failed")
+            return
+        user_id = query.from_user.id if query.from_user else 0
+        lang = _user_lang(context, user_id)
+        try:
+            await context.bot.send_message(
+                user_id,
+                t("callback_stale", lang),
+                reply_markup=_menu(lang, user_id),
+            )
+        except Exception:
+            logger.exception("ensure_callback_answered notify failed")
+
+    app.add_handler(CallbackQueryHandler(ensure_callback_answered), group=99)
     return app

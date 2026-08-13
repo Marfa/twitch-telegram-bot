@@ -2509,7 +2509,6 @@ class SqliteDatabase:
                     COALESCE(premium_stars_until, 0)
                       > CAST(strftime('%s', 'now') AS INTEGER)
                     OR COALESCE(premium_twitch_active, 0) = 1
-                    OR COALESCE(premium_permanent, 0) = 1
                     OR (
                       COALESCE(premium_features, '') NOT IN ('', '{}')
                     )
@@ -4606,7 +4605,6 @@ class PostgresDatabase:
                     COALESCE(premium_stars_until, 0)
                       > EXTRACT(EPOCH FROM NOW())::BIGINT
                     OR COALESCE(premium_twitch_active, FALSE) = TRUE
-                    OR COALESCE(premium_permanent, FALSE) = TRUE
                     OR (
                       COALESCE(premium_features, '') NOT IN ('', '{}')
                     )

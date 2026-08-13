@@ -260,6 +260,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Only selected features unlock."
         ),
         "premium_gate": "⭐ This step requires Premium.\nGet Premium or {action}.",
+        "premium_gate_feature": (
+            "⭐ {feature} requires Premium.\nGet Premium or {action}."
+        ),
         "premium_gate_action_skip": "skip this step",
         "premium_gate_action_cancel": "cancel",
         "premium_pay_title": "Bot Premium",
@@ -287,6 +290,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "premium_cancel_done": (
             "Stars auto-renew canceled. Premium stays until the end of the paid period."
+        ),
+        "premium_cancel_feat_done": (
+            "Feature removed. Stars auto-renew stopped when Telegram allowed it."
         ),
         "premium_cancel_none": "No active Stars subscription to cancel.",
         "premium_owned_title": "Purchased subscriptions:\n{items}",
@@ -734,6 +740,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "preview_stream": "Test stream",
         "cancelled": "Cancelled.",
+        "callback_stale": "Bot was updating. Tap again or open the menu.",
         "feedback": (
             "Feedback:\n"
             "• Telegram: @immarfa\n"
@@ -1307,6 +1314,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Разблокируются только выбранные."
         ),
         "premium_gate": "⭐ Этот шаг доступен в премиуме.\nОформите премиум или {action}.",
+        "premium_gate_feature": (
+            "⭐ {feature} — функция Premium.\nОформите премиум или {action}."
+        ),
         "premium_gate_action_skip": "пропустите шаг",
         "premium_gate_action_cancel": "отмените",
         "premium_pay_title": "Премиум бота",
@@ -1334,6 +1344,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "premium_cancel_done": (
             "Автопродление Stars отключено. Премиум действует до конца оплаченного периода."
+        ),
+        "premium_cancel_feat_done": (
+            "Функция снята. Автопродление Stars остановлено, если Telegram это разрешил."
         ),
         "premium_cancel_none": "Нет активной подписки Stars для отмены.",
         "premium_owned_title": "Купленные подписки:\n{items}",
@@ -1890,6 +1903,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "preview_stream": "Тестовый стрим",
         "cancelled": "Отменено.",
+        "callback_stale": "Бот обновлялся. Нажмите ещё раз или откройте меню.",
         "feedback": (
             "Обратная связь:\n"
             "• Telegram: @immarfa\n"

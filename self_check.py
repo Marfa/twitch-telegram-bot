@@ -31,6 +31,7 @@ from bot import (
     _parse_sb_edit_f_id,
     _parse_segment_start,
     _parse_watch_viewers,
+    _premium_gate_text,
     import_followed_as_subscriptions,
     live_transitions,
     category_change_events,
@@ -1067,9 +1068,18 @@ def main() -> None:
     assert not hasattr(ChatMemberStatus, "KICKED")
     # Bot API 7.0 removed Message.forward_from_chat; a personal forward must
     # return no chat instead of raising AttributeError in the wizard.
-    from telegram import Chat, MessageOriginChannel, MessageOriginUser, User
+    import asyncio
 
-    from bot import _extract_forward_chat
+    from telegram import (
+        Chat,
+        MessageOriginChannel,
+        MessageOriginChat,
+        MessageOriginHiddenUser,
+        MessageOriginUser,
+        User,
+    )
+
+    from bot import _extract_forward_chat, _parse_dest_input
 
     _now = datetime.now(timezone.utc)
     _pm = Chat(id=7, type="private")
@@ -1081,9 +1091,21 @@ def main() -> None:
             date=_now, sender_user=User(id=5, first_name="A", is_bot=False)
         ),
     )
+    try:
+        _ = _fwd_user.forward_from_chat
+        raise AssertionError("Message.forward_from_chat must be removed")
+    except AttributeError:
+        pass
     assert _extract_forward_chat(_fwd_user) == (None, None)
-    _fwd_channel = Message(
+    _fwd_hidden = Message(
         message_id=2,
+        date=_now,
+        chat=_pm,
+        forward_origin=MessageOriginHiddenUser(date=_now, sender_user_name="anon"),
+    )
+    assert _extract_forward_chat(_fwd_hidden) == (None, None)
+    _fwd_channel = Message(
+        message_id=3,
         date=_now,
         chat=_pm,
         forward_origin=MessageOriginChannel(
@@ -1091,6 +1113,21 @@ def main() -> None:
         ),
     )
     assert _extract_forward_chat(_fwd_channel) == (-100123, None)
+    _fwd_group = Message(
+        message_id=4,
+        date=_now,
+        chat=_pm,
+        message_thread_id=30,
+        forward_origin=MessageOriginChat(
+            date=_now, sender_chat=Chat(id=-100999, type="supergroup")
+        ),
+    )
+    assert _extract_forward_chat(_fwd_group) == (-100999, 30)
+    # Same path as the wizard DEST_CHAT step: DM forward → hint, no crash.
+    _cid, _tid, _err = asyncio.run(_parse_dest_input(None, _fwd_user, "group", "ru"))
+    assert _cid is None and _tid is None and _err == tr("fwd_from_dm", "ru")
+    _cid, _tid, _err = asyncio.run(_parse_dest_input(None, _fwd_channel, "channel", "ru"))
+    assert (_cid, _tid, _err) == (-100123, None, None)
     # PTB 21.8+: subscription_expiration_date is datetime (same formula as premium_handlers)
     stars_exp = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
     until_sub = int(stars_exp.timestamp()) if stars_exp is not None else 0
@@ -1110,6 +1147,10 @@ def main() -> None:
     assert not prem.has_custom_stars_price(1)
     assert prem.stars_price() == prem.stars_price(1)
     assert prem.stars_feature_price() == prem.stars_feature_price(1)
+    assert "5" in _premium_gate_text("ru", "active_limit", "отмените")
+    assert "Типы кроме старта стрима" in _premium_gate_text(
+        "ru", "alert_type", "отмените"
+    )
     from premium_handlers import _premium_markup
 
     with tempfile.TemporaryDirectory() as d:
@@ -1139,6 +1180,10 @@ def main() -> None:
         assert db.get_bot_stats().premium_paid == 1
         assert not prem.has_feature_sync(db, 249097744, "extra_alerts")
         assert prem.can_enable_more(db, 249097744) is True
+        db2 = SqliteDatabase(Path(d) / "perm_not_paid.db")
+        db2.upsert_user(1)
+        db2.set_premium_permanent(1, True)
+        assert db2.get_bot_stats().premium_paid == 0
         for i in range(5):
             db.add_subscription(
                 owner_id=249097744,
