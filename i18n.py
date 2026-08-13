@@ -295,6 +295,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Feature removed. Stars auto-renew stopped when Telegram allowed it."
         ),
         "premium_cancel_none": "No active Stars subscription to cancel.",
+        "premium_cancel_failed": (
+            "Could not cancel Stars auto-renew via Telegram. Try again later or cancel in Telegram Settings → Stars."
+        ),
+        "premium_pay_failed": "Could not create the Stars invoice. Try again later.",
         "premium_owned_title": "Purchased subscriptions:\n{items}",
         "premium_owned_empty": "No purchased subscriptions.",
         "premium_owned_stars": "• Monthly Stars until {until}",
@@ -1349,6 +1353,11 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Функция снята. Автопродление Stars остановлено, если Telegram это разрешил."
         ),
         "premium_cancel_none": "Нет активной подписки Stars для отмены.",
+        "premium_cancel_failed": (
+            "Не удалось отменить автопродление Stars через Telegram. "
+            "Попробуйте позже или отмените в настройках Telegram → Stars."
+        ),
+        "premium_pay_failed": "Не удалось создать счёт Stars. Попробуйте позже.",
         "premium_owned_title": "Купленные подписки:\n{items}",
         "premium_owned_empty": "Нет купленных подписок.",
         "premium_owned_stars": "• Stars на месяц до {until}",

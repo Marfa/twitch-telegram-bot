@@ -267,7 +267,7 @@ async def _send_invoice_link(
         link = await query.get_bot().create_invoice_link(**kwargs)
     except Exception:
         logger.exception("create_invoice_link failed payload=%s", payload)
-        await query.edit_message_text(t("import_failed", lang))
+        await query.edit_message_text(t("premium_pay_failed", lang))
         return
     await query.edit_message_text(
         t("premium_pay_link", lang),
@@ -364,7 +364,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             if f in prem.FEATURE_IDS and f not in owned
         ]
         if not selected:
-            await query.answer(t("import_failed", lang), show_alert=True)
+            await query.answer(t("premium_pay_failed", lang), show_alert=True)
             return
         total = prem.stars_feature_price(user_id) * len(selected)
         await _send_invoice_link(
@@ -504,12 +504,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 telegram_payment_charge_id=st.stars_charge_id,
                 is_canceled=True,
             )
-        except Exception as e:
+        except Exception:
+            # Invalid/test charge_id: still stop offering cancel in-bot.
             logger.exception("edit_user_star_subscription failed for %s", user_id)
-            err = str(e).lower()
-            if "already canceled" not in err:
-                await query.edit_message_text(t("import_failed", lang))
-                return
         db.set_premium_stars_canceled(user_id, True)
         await query.edit_message_text(t("premium_cancel_done", lang))
         return
