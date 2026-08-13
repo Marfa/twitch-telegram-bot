@@ -72,6 +72,7 @@ class PremiumStatus:
     trial_used: bool = False
     features: dict[str, int] = field(default_factory=dict)
     feature_charges: dict[str, str] = field(default_factory=dict)
+    feature_canceled: dict[str, bool] = field(default_factory=dict)
 
     @property
     def stars_active(self) -> bool:
@@ -110,23 +111,34 @@ class PremiumStatus:
     def feature_charge_id(self, feature_id: str) -> str:
         return self.feature_charges.get(feature_id) or ""
 
+    def is_feature_canceled(self, feature_id: str) -> bool:
+        return bool(self.feature_canceled.get(feature_id))
+
+    def feature_cancelable(self, feature_id: str) -> bool:
+        return (
+            self.feature_active(feature_id)
+            and not self.is_feature_canceled(feature_id)
+            and bool(self.feature_charge_id(feature_id))
+        )
+
 
 def parse_premium_features_blob(
     raw: str | dict | None,
-) -> tuple[dict[str, int], dict[str, str]]:
-    """Support legacy `{fid: until}` and `{fid: {until, charge_id}}`."""
+) -> tuple[dict[str, int], dict[str, str], dict[str, bool]]:
+    """Support `{fid: until}` and `{fid: {until, charge_id, canceled}}`."""
     features: dict[str, int] = {}
     charges: dict[str, str] = {}
+    canceled: dict[str, bool] = {}
     if not raw:
-        return features, charges
+        return features, charges, canceled
     data = raw
     if isinstance(raw, str):
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, TypeError, ValueError):
-            return features, charges
+            return features, charges, canceled
     if not isinstance(data, dict):
-        return features, charges
+        return features, charges, canceled
     for key, val in data.items():
         fid = str(key)
         if isinstance(val, dict):
@@ -137,23 +149,34 @@ def parse_premium_features_blob(
             cid = str(val.get("charge_id") or "")
             if cid:
                 charges[fid] = cid
+            if val.get("canceled"):
+                canceled[fid] = True
         else:
             try:
                 features[fid] = int(val)
             except (TypeError, ValueError):
                 features[fid] = 0
-    return features, charges
+    return features, charges, canceled
 
 
 def dump_premium_features_blob(
-    features: dict[str, int], charges: dict[str, str] | None = None
+    features: dict[str, int],
+    charges: dict[str, str] | None = None,
+    canceled: dict[str, bool] | None = None,
 ) -> str:
     charges = charges or {}
+    canceled = canceled or {}
     out: dict[str, Any] = {}
     for fid, until in features.items():
         cid = charges.get(fid) or ""
-        if cid:
-            out[fid] = {"until": int(until), "charge_id": cid}
+        is_canceled = bool(canceled.get(fid))
+        if cid or is_canceled:
+            entry: dict[str, Any] = {"until": int(until)}
+            if cid:
+                entry["charge_id"] = cid
+            if is_canceled:
+                entry["canceled"] = True
+            out[fid] = entry
         else:
             out[fid] = int(until)
     return json.dumps(out, ensure_ascii=False)

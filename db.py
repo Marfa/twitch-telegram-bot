@@ -747,6 +747,8 @@ class Database(Protocol):
 
     def clear_premium_feature(self, user_id: int, feature_id: str) -> None: ...
 
+    def set_premium_feature_canceled(self, user_id: int, feature_id: str) -> None: ...
+
     def set_premium_twitch(
         self,
         user_id: int,
@@ -2034,7 +2036,9 @@ class SqliteDatabase:
             ).fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
-        features, charges = parse_premium_features_blob(row["premium_features"] or "")
+        features, charges, canceled = parse_premium_features_blob(
+            row["premium_features"] or ""
+        )
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -2046,6 +2050,7 @@ class SqliteDatabase:
             trial_used=bool(row["premium_trial_used"]),
             features=features,
             feature_charges=charges,
+            feature_canceled=canceled,
         )
 
     def set_premium_stars(
@@ -2164,12 +2169,14 @@ class SqliteDatabase:
         st = self.get_premium_status(user_id)
         features = dict(st.features)
         charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
         until = int(until_unix)
         for fid in feature_ids:
             features[fid] = max(int(features.get(fid) or 0), until)
             if charge_id:
                 charges[fid] = charge_id
-        raw = dump_premium_features_blob(features, charges)
+            canceled.pop(fid, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -2188,9 +2195,33 @@ class SqliteDatabase:
         st = self.get_premium_status(user_id)
         features = dict(st.features)
         charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
         features.pop(feature_id, None)
         charges.pop(feature_id, None)
-        raw = dump_premium_features_blob(features, charges)
+        canceled.pop(feature_id, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_features = excluded.premium_features
+                """,
+                (user_id, raw),
+            )
+
+    def set_premium_feature_canceled(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        if not st.feature_active(feature_id):
+            return
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
+        canceled[feature_id] = True
+        raw = dump_premium_features_blob(features, charges, canceled)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -4066,7 +4097,9 @@ class PostgresDatabase:
             row = cur.fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
-        features, charges = parse_premium_features_blob(row["premium_features"] or "")
+        features, charges, canceled = parse_premium_features_blob(
+            row["premium_features"] or ""
+        )
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -4078,6 +4111,7 @@ class PostgresDatabase:
             trial_used=bool(row["premium_trial_used"]),
             features=features,
             feature_charges=charges,
+            feature_canceled=canceled,
         )
 
     def set_premium_stars(
@@ -4202,12 +4236,14 @@ class PostgresDatabase:
         st = self.get_premium_status(user_id)
         features = dict(st.features)
         charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
         until = int(until_unix)
         for fid in feature_ids:
             features[fid] = max(int(features.get(fid) or 0), until)
             if charge_id:
                 charges[fid] = charge_id
-        raw = dump_premium_features_blob(features, charges)
+            canceled.pop(fid, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -4227,9 +4263,34 @@ class PostgresDatabase:
         st = self.get_premium_status(user_id)
         features = dict(st.features)
         charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
         features.pop(feature_id, None)
         charges.pop(feature_id, None)
-        raw = dump_premium_features_blob(features, charges)
+        canceled.pop(feature_id, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_features = EXCLUDED.premium_features
+                """,
+                (user_id, raw),
+            )
+
+    def set_premium_feature_canceled(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        if not st.feature_active(feature_id):
+            return
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
+        canceled[feature_id] = True
+        raw = dump_premium_features_blob(features, charges, canceled)
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(

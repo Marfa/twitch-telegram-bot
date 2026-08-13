@@ -93,8 +93,13 @@ def _status_text(
                 lang,
                 free_limit=prem.free_active_limit(),
             )
+            key = (
+                "premium_feat_line_canceled"
+                if st.is_feature_canceled(fid)
+                else "premium_feat_line"
+            )
             lines.append(
-                t("premium_feat_line", lang, name=name, until=_fmt_until(until))
+                t(key, lang, name=name, until=_fmt_until(until))
             )
         return t("premium_status_features", lang, features="\n".join(lines))
     if free_chat:
@@ -150,7 +155,7 @@ def _premium_markup(
     full = st.has_full_plan
     show_owned = bool(
         st.has_active_features
-        or (st.stars_active and st.stars_charge_id and not st.stars_canceled)
+        or (st.stars_active and st.stars_charge_id)
     )
     # Full plan → no purchases. À la carte → more features only (not month/year/life).
     show_plans = not full and not st.has_active_features
@@ -182,17 +187,28 @@ async def _show_owned_subscriptions(
         st.stars_active and st.stars_charge_id and not st.stars_canceled
     )
     if st.stars_active:
-        lines.append(t("premium_owned_stars", lang, until=_fmt_until(st.stars_until)))
+        key = (
+            "premium_owned_stars_canceled"
+            if st.stars_canceled
+            else "premium_owned_stars"
+        )
+        lines.append(t(key, lang, until=_fmt_until(st.stars_until)))
     feat_ids = _owned_features(st)
+    cancelable_feats = [fid for fid in feat_ids if st.feature_cancelable(fid)]
     for fid in feat_ids:
         name = t(
             prem.feature_label_key(fid),
             lang,
             free_limit=prem.free_active_limit(),
         )
+        key = (
+            "premium_owned_feat_canceled"
+            if st.is_feature_canceled(fid)
+            else "premium_owned_feat"
+        )
         lines.append(
             t(
-                "premium_owned_feat",
+                key,
                 lang,
                 name=name,
                 until=_fmt_until(st.feature_until(fid)),
@@ -208,7 +224,7 @@ async def _show_owned_subscriptions(
         reply_markup=premium_owned_keyboard(
             lang,
             stars_cancelable=stars_cancelable,
-            feature_ids=feat_ids,
+            feature_ids=cancelable_feats,
         ),
     )
 
@@ -347,6 +363,16 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not st.feature_active(fid):
             await query.answer(t("premium_cancel_none", lang), show_alert=True)
             return
+        if st.is_feature_canceled(fid):
+            await query.answer(
+                t(
+                    "premium_cancel_feat_done",
+                    lang,
+                    until=_fmt_until(st.feature_until(fid)),
+                ),
+                show_alert=True,
+            )
+            return
         charge_id = st.feature_charge_id(fid)
         if charge_id:
             try:
@@ -357,15 +383,18 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                     is_canceled=True,
                 )
             except Exception:
-                # Charge may be invalid/already canceled; still drop local entitlement.
+                # Charge may be invalid/already canceled; still mark local cancel.
                 logger.exception(
                     "edit_user_star_subscription feature failed user=%s feat=%s",
                     user_id,
                     fid,
                 )
-        db.clear_premium_feature(user_id, fid)
+        db.set_premium_feature_canceled(user_id, fid)
+        until = _fmt_until(st.feature_until(fid))
         await query.answer()
-        await query.edit_message_text(t("premium_cancel_feat_done", lang))
+        await query.edit_message_text(
+            t("premium_cancel_feat_done", lang, until=until)
+        )
         return
 
     if data == "premium:feat_pay":
@@ -526,7 +555,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Invalid/test charge_id: still stop offering cancel in-bot.
             logger.exception("edit_user_star_subscription failed for %s", user_id)
         db.set_premium_stars_canceled(user_id, True)
-        await query.edit_message_text(t("premium_cancel_done", lang))
+        await query.edit_message_text(
+            t("premium_cancel_done", lang, until=_fmt_until(st.stars_until))
+        )
         return
 
     if action == "marfapr":

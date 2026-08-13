@@ -53,7 +53,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_feat_pay": "Pay {stars} Stars / month",
         "btn_premium_feat_back": "Back",
         "btn_premium_marfapr": "Create marfapr alert",
-        "btn_premium_cancel_stars": "Cancel Stars subscription",
+        "btn_premium_cancel_stars": "Cancel subscription",
         "btn_premium_owned": "Purchased subscriptions",
         "btn_premium_cancel_feat": "Cancel",
         "btn_premium_get": "Get Premium",
@@ -238,9 +238,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "premium_status_permanent": "Status: lifetime Premium.",
         "premium_status_trial": "Status: trial until {until}.",
-        "premium_status_stars": "Status: Stars active until {until}.",
+        "premium_status_stars": "Status: monthly subscription until {until}.",
         "premium_status_stars_canceled": (
-            "Status: Stars active until {until} (auto-renew canceled)."
+            "Status: monthly subscription until {until} (auto-renew off)."
         ),
         "premium_status_twitch": "Status: Twitch sub to {channel} verified.",
         "premium_status_features": "Status: unlocked features:\n{features}",
@@ -255,6 +255,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_schedule_publish": "Publish schedule to Twitch",
         "premium_feat_alert_history": "Alert history for 60 days",
         "premium_feat_line": "• {name} until {until}",
+        "premium_feat_line_canceled": "• {name} until {until} (auto-renew off)",
         "premium_feat_pick": (
             "Select features ({price} Stars / month each).\n"
             "Only selected features unlock."
@@ -289,20 +290,24 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Live-start alerts can be deleted; enabling needs Premium."
         ),
         "premium_cancel_done": (
-            "Stars auto-renew canceled. Premium stays until the end of the paid period."
+            "Subscription auto-renew canceled. Premium stays until the end of the paid period {until}."
         ),
         "premium_cancel_feat_done": (
-            "Feature removed. Stars auto-renew stopped when Telegram allowed it."
+            "Subscription auto-renew canceled. Premium stays until the end of the paid period {until}."
         ),
-        "premium_cancel_none": "No active Stars subscription to cancel.",
+        "premium_cancel_none": "No active subscription to cancel.",
         "premium_cancel_failed": (
-            "Could not cancel Stars auto-renew via Telegram. Try again later or cancel in Telegram Settings → Stars."
+            "Could not cancel auto-renew via Telegram. Try again later or cancel in Telegram Settings → Stars."
         ),
         "premium_pay_failed": "Could not create the Stars invoice. Try again later.",
         "premium_owned_title": "Purchased subscriptions:\n{items}",
         "premium_owned_empty": "No purchased subscriptions.",
-        "premium_owned_stars": "• Monthly Stars until {until}",
+        "premium_owned_stars": "• Monthly subscription until {until}",
+        "premium_owned_stars_canceled": (
+            "• Monthly subscription until {until} (auto-renew off)"
+        ),
         "premium_owned_feat": "• {name} until {until}",
+        "premium_owned_feat_canceled": "• {name} until {until} (auto-renew off)",
         "premium_feat_owned": "Already purchased",
         "premium_plans_blocked": "A Premium plan is already active.",
         "premium_marfapr_need_sub": (
@@ -1120,7 +1125,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_feat_pay": "Оплатить {stars} ⭐ / мес",
         "btn_premium_feat_back": "Назад",
         "btn_premium_marfapr": "Создать подписку на marfapr",
-        "btn_premium_cancel_stars": "Отменить подписку Stars",
+        "btn_premium_cancel_stars": "Отменить подписку",
         "btn_premium_owned": "Купленные подписки",
         "btn_premium_cancel_feat": "Отменить",
         "btn_premium_get": "Оформить премиум",
@@ -1305,9 +1310,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "premium_status_permanent": "Статус: пожизненный премиум.",
         "premium_status_trial": "Статус: триал до {until}.",
-        "premium_status_stars": "Статус: Stars активны до {until}.",
+        "premium_status_stars": "Статус: подписка на месяц до {until}.",
         "premium_status_stars_canceled": (
-            "Статус: Stars активны до {until} (автопродление отключено)."
+            "Статус: подписка на месяц до {until} (автопродление выкл.)."
         ),
         "premium_status_twitch": "Статус: подписка Twitch на {channel} подтверждена.",
         "premium_status_features": "Статус: разблокированные функции:\n{features}",
@@ -1322,6 +1327,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_schedule_publish": "Публикация расписания на Twitch",
         "premium_feat_alert_history": "История оповещений за 60 дней",
         "premium_feat_line": "• {name} до {until}",
+        "premium_feat_line_canceled": "• {name} до {until} (автопродление выкл.)",
         "premium_feat_pick": (
             "Выберите функции ({price} ⭐ / месяц каждая).\n"
             "Разблокируются только выбранные."
@@ -1356,21 +1362,27 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Оповещения о начале стрима можно удалить; для включения нужен премиум."
         ),
         "premium_cancel_done": (
-            "Автопродление Stars отключено. Премиум действует до конца оплаченного периода."
+            "Автопродление подписки отключено. Премиум действует до конца оплаченного периода {until}."
         ),
         "premium_cancel_feat_done": (
-            "Функция снята. Автопродление Stars остановлено, если Telegram это разрешил."
+            "Автопродление подписки отключено. Премиум действует до конца оплаченного периода {until}."
         ),
-        "premium_cancel_none": "Нет активной подписки Stars для отмены.",
+        "premium_cancel_none": "Нет активной подписки для отмены.",
         "premium_cancel_failed": (
-            "Не удалось отменить автопродление Stars через Telegram. "
+            "Не удалось отменить автопродление через Telegram. "
             "Попробуйте позже или отмените в настройках Telegram → Stars."
         ),
         "premium_pay_failed": "Не удалось создать счёт Stars. Попробуйте позже.",
         "premium_owned_title": "Купленные подписки:\n{items}",
         "premium_owned_empty": "Нет купленных подписок.",
-        "premium_owned_stars": "• Stars на месяц до {until}",
+        "premium_owned_stars": "• Подписка на месяц до {until}",
+        "premium_owned_stars_canceled": (
+            "• Подписка на месяц до {until} (автопродление выкл.)"
+        ),
         "premium_owned_feat": "• {name} до {until}",
+        "premium_owned_feat_canceled": (
+            "• {name} до {until} (автопродление выкл.)"
+        ),
         "premium_feat_owned": "Уже куплено",
         "premium_plans_blocked": "Премиум-план уже активен.",
         "premium_marfapr_need_sub": (

@@ -1194,11 +1194,28 @@ def main() -> None:
     )[0]
     assert 't("import_failed"' not in cancel_block
     assert "premium_cancel_feat_done" in ph_src
-    assert tr("premium_cancel_feat_done", "ru")
+    assert "set_premium_feature_canceled" in ph_src
+    assert "clear_premium_feature" not in ph_src.split(
+        'if data.startswith("premium:cancel_feat:")', 1
+    )[1].split("if data == \"premium:feat_pay\":", 1)[0]
+    assert "{until}" in tr("premium_cancel_feat_done", "ru")
+    assert "{until}" in tr("premium_cancel_feat_done", "en")
+    assert "{until}" in tr("premium_cancel_done", "ru")
+    assert "{until}" in tr("premium_cancel_done", "en")
     assert tr("premium_cancel_failed", "ru")
     assert tr("premium_pay_failed", "ru")
     assert "Twitch" not in tr("premium_cancel_feat_done", "ru")
     assert "Twitch" not in tr("premium_pay_failed", "ru")
+    assert "снята" not in tr("premium_cancel_feat_done", "ru").lower()
+    assert "Автопродление подписки отключено" in tr("premium_cancel_done", "ru")
+    assert "Автопродление подписки отключено" in tr("premium_cancel_feat_done", "ru")
+    assert tr("premium_owned_feat_canceled", "ru")
+    assert "автопродление выкл" in tr("premium_feat_line_canceled", "ru")
+    assert "Stars" not in tr("premium_status_stars", "ru")
+    assert "Stars" not in tr("premium_status_stars_canceled", "ru")
+    assert "Stars" not in tr("premium_owned_stars", "ru")
+    assert "Stars" not in tr("premium_owned_stars_canceled", "ru")
+    assert "Stars" not in btn("premium_cancel_stars", "ru")
     aud_cb = {
         b.callback_data
         for row in admin_other_audience_keyboard("ru").inline_keyboard
@@ -1248,7 +1265,26 @@ def main() -> None:
         assert db.get_bot_stats().premium_paid == 1
         assert not prem.has_feature_sync(db, 249097744, "extra_alerts")
         assert prem.can_enable_more(db, 249097744) is True
-        # Local feature cancel (API may fail): entitlement must drop.
+        # Cancel renew: keep access until expiry; block repurchase.
+        db.set_premium_feature_canceled(249097744, "alert_types")
+        st_c = prem.get_status(db, 249097744)
+        assert st_c.feature_active("alert_types")
+        assert st_c.is_feature_canceled("alert_types")
+        assert not st_c.feature_cancelable("alert_types")
+        assert db.get_bot_stats().premium_paid == 1
+        kb_c = _premium_markup(
+            db, 249097744, "ru", free_chat=False, force_free=False
+        )
+        assert kb_c is not None
+        cb_c = {
+            b.callback_data
+            for row in kb_c.inline_keyboard
+            for b in row
+            if b.callback_data
+        }
+        assert "premium:month" not in cb_c
+        assert "premium:features" in cb_c
+        assert "premium:owned" in cb_c
         db.clear_premium_feature(249097744, "alert_types")
         assert not prem.get_status(db, 249097744).feature_active("alert_types")
         assert db.get_bot_stats().premium_paid == 0
