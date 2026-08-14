@@ -246,6 +246,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_status_twitch": "Status: Twitch sub to {channel} verified.",
         "premium_status_features": "Status: unlocked features:\n{features}",
         "premium_status_none": "Status: free plan.",
+        "premium_buy_after_current": (
+            "<b>Purchase of new plans will be available after the current "
+            "subscription ends.</b>"
+        ),
         "premium_feat_extra_alerts": "More than {free_limit} active alerts",
         "premium_feat_alert_types": "Alert types beyond live start",
         "premium_feat_twitch_sync": "Twitch follow auto-sync",
@@ -1319,6 +1323,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_status_twitch": "Статус: подписка Twitch на {channel} подтверждена.",
         "premium_status_features": "Статус: разблокированные функции:\n{features}",
         "premium_status_none": "Статус: бесплатный план.",
+        "premium_buy_after_current": (
+            "<b>Покупка новых тарифов будет доступна после окончания "
+            "действующей подписки.</b>"
+        ),
         "premium_feat_extra_alerts": "Активных оповещений больше {free_limit}",
         "premium_feat_alert_types": "Типы кроме старта стрима",
         "premium_feat_twitch_sync": "Автосинк фолловов Twitch",

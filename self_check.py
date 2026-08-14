@@ -1397,7 +1397,14 @@ def main() -> None:
         db = SqliteDatabase(Path(d) / "premium.db")
         db.upsert_user(1)
         assert not prem.is_premium(db, 1)
-        apply_stars_payment(db, 1, charge_id="chg", until_unix=10**12)
+        apply_stars_payment(
+            db,
+            1,
+            charge_id="chg",
+            until_unix=int(
+                (datetime.now(timezone.utc) + timedelta(days=40)).timestamp()
+            ),
+        )
         assert prem.is_premium(db, 1)
         assert db.count_enabled_subscriptions(1) == 0
         assert db.count_stars_payers_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
@@ -1405,10 +1412,21 @@ def main() -> None:
         from premium_handlers import _status_text
 
         assert "пожизненный премиум" in _status_text(db, 2, "ru", free_chat=True)
+        assert "Покупка новых тарифов" in _status_text(db, 2, "ru", free_chat=True)
         assert "бесплатный план" in _status_text(db, 2, "ru", free_chat=False)
+        assert "Покупка новых тарифов" not in _status_text(db, 2, "ru", free_chat=False)
         assert "бесплатный план" in _status_text(
             db, 1, "ru", force_free=True
         )
+        # Active Stars with auto-renew → no buy-after note.
+        assert "Покупка новых тарифов" not in _status_text(db, 1, "ru")
+        db.set_premium_stars_canceled(1, True)
+        canceled_status = _status_text(db, 1, "ru")
+        assert "автопродление выкл" in canceled_status
+        assert "Покупка новых тарифов" in canceled_status
+        assert "<b>" in tr("premium_buy_after_current", "ru")
+        assert "<b>" in tr("premium_buy_after_current", "en")
+        db.set_premium_stars_canceled(1, False)
         from premium_handlers import _premium_markup
 
         assert _premium_markup(db, 2, "ru", free_chat=False, force_free=False) is not None

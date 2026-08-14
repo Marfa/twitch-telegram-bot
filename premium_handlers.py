@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Update
+from telegram.constants import ParseMode
 from telegram.ext import Application, ContextTypes
 
 import premium as prem
@@ -34,6 +35,21 @@ def _fmt_until(unix: int) -> str:
     return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _has_premium_without_autorenew(
+    st: prem.PremiumStatus, *, free_chat: bool = False
+) -> bool:
+    """True if any active entitlement is not on Stars auto-renew."""
+    if st.permanent or st.trial_active or st.twitch_active or free_chat:
+        return True
+    if st.stars_active and st.stars_canceled:
+        return True
+    now = int(time.time())
+    for fid, until in st.features.items():
+        if int(until) > now and st.is_feature_canceled(fid):
+            return True
+    return False
+
+
 def _status_text(
     db: Database,
     user_id: int,
@@ -48,47 +64,53 @@ def _status_text(
     st = prem.get_status(db, user_id)
     channel = prem.twitch_channel_login()
     if st.permanent:
-        return t("premium_status_permanent", lang)
-    parts: list[str] = []
-    if st.trial_active:
-        parts.append(t("premium_status_trial", lang, until=_fmt_until(st.trial_until)))
-    if st.stars_active:
-        until = _fmt_until(st.stars_until)
-        key = (
-            "premium_status_stars_canceled"
-            if st.stars_canceled
-            else "premium_status_stars"
-        )
-        parts.append(t(key, lang, until=until))
-    if st.twitch_active:
-        parts.append(t("premium_status_twitch", lang, channel=channel))
-    if parts:
-        return "\n".join(parts)
-    active_feats = [
-        (fid, until)
-        for fid, until in st.features.items()
-        if until > int(time.time())
-    ]
-    if active_feats:
-        lines = []
-        for fid, until in sorted(active_feats, key=lambda x: x[0]):
-            name = t(
-                prem.feature_label_key(fid),
-                lang,
-                free_limit=prem.free_active_limit(),
-            )
+        body = t("premium_status_permanent", lang)
+    else:
+        parts: list[str] = []
+        if st.trial_active:
+            parts.append(t("premium_status_trial", lang, until=_fmt_until(st.trial_until)))
+        if st.stars_active:
+            until = _fmt_until(st.stars_until)
             key = (
-                "premium_feat_line_canceled"
-                if st.is_feature_canceled(fid)
-                else "premium_feat_line"
+                "premium_status_stars_canceled"
+                if st.stars_canceled
+                else "premium_status_stars"
             )
-            lines.append(
-                t(key, lang, name=name, until=_fmt_until(until))
-            )
-        return t("premium_status_features", lang, features="\n".join(lines))
-    if free_chat:
-        return t("premium_status_permanent", lang)
-    return t("premium_status_none", lang)
+            parts.append(t(key, lang, until=until))
+        if st.twitch_active:
+            parts.append(t("premium_status_twitch", lang, channel=channel))
+        if parts:
+            body = "\n".join(parts)
+        else:
+            active_feats = [
+                (fid, until)
+                for fid, until in st.features.items()
+                if until > int(time.time())
+            ]
+            if active_feats:
+                lines = []
+                for fid, until in sorted(active_feats, key=lambda x: x[0]):
+                    name = t(
+                        prem.feature_label_key(fid),
+                        lang,
+                        free_limit=prem.free_active_limit(),
+                    )
+                    key = (
+                        "premium_feat_line_canceled"
+                        if st.is_feature_canceled(fid)
+                        else "premium_feat_line"
+                    )
+                    lines.append(
+                        t(key, lang, name=name, until=_fmt_until(until))
+                    )
+                body = t("premium_status_features", lang, features="\n".join(lines))
+            elif free_chat:
+                body = t("premium_status_permanent", lang)
+            else:
+                body = t("premium_status_none", lang)
+    if _has_premium_without_autorenew(st, free_chat=free_chat):
+        return body + "\n" + t("premium_buy_after_current", lang)
+    return body
 
 
 def premium_screen_text(
@@ -238,13 +260,17 @@ async def send_premium_screen(
     )
     if edit_message is not None:
         await edit_message.edit_text(
-            text, reply_markup=markup, disable_web_page_preview=True
+            text,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
         return
     await bot.send_message(
         user_id,
         text,
         reply_markup=markup,
+        parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
 
