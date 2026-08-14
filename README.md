@@ -36,7 +36,7 @@ English: [README.en.md](README.en.md)
 | Премиум | Триал 7 дней; Stars месяц/год/lifetime; оплата отдельных функций (в т.ч. история за 60 дней); саб Twitch (`PREMIUM_TWITCH_LOGIN`) |
 | Партнёрка | Реферальная ссылка, 10% от Stars Premium приглашённых, заявки на вывод (вручную) |
 | Админка | Рассылка в фоне (без подвисания) с типом в подписи; тип «обновление бота» ещё обновляет главное меню; DeepL, статистика, выводы, **Демо режим** |
-| Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, ежедневный снимок `daily_bot_stats` (03:00 UTC) |
+| Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, Logs (WARNING+), ежедневный `daily_bot_stats` (03:00 UTC) |
 | Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -282,6 +282,7 @@ python main.py
 |---|---|
 | `/start`, алерты, импорт, premium, блоки | Activity / Product analytics → Trends |
 | Необработанные исключения | Error tracking |
+| `logger.warning` / `logger.error` / `exception` | Logs (`service.name=twitch-telegram-bot`, без INFO) |
 | Снимок админ-статистики | событие `daily_bot_stats` каждый день в 03:00 UTC |
 
 Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subscriptions_*`, `unique_twitch_channels`, `premium_paid`, `blocked_users`, `sys_*`, `locale_*`.
@@ -293,7 +294,7 @@ Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subs
 | Модуль | Назначение |
 |---|---|
 | `bot.py` | Wizard, меню, уведомления, «Что посмотреть?», админ-рассылка, Twitch Status, партнёрка, расписание |
-| `analytics.py` | PostHog: usage-события, ошибки, ежедневный `daily_bot_stats` |
+| `analytics.py` | PostHog: usage-события, ошибки, Logs WARNING+, ежедневный `daily_bot_stats` |
 | `i18n.py` | Тексты и клавиатуры (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), реферальные начисления |
 | `demo_mode.py` | Флаг админского демо-режима (free UX + сброс демо-подписок) |

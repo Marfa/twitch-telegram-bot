@@ -36,7 +36,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Premium | 7-day trial; Stars month/year/lifetime; pay per feature (incl. 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
-| Analytics | [PostHog](https://posthog.com): usage events, Error tracking, daily `daily_bot_stats` snapshot (03:00 UTC) |
+| Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -282,6 +282,7 @@ Optional. Use the **Project API key** (`phc_…`) from Project settings → Proj
 |---|---|
 | `/start`, alerts, import, premium, blocks | Activity / Product analytics → Trends |
 | Unhandled exceptions | Error tracking |
+| `logger.warning` / `logger.error` / `exception` | Logs (`service.name=twitch-telegram-bot`, no INFO) |
 | Admin stats snapshot | `daily_bot_stats` event daily at 03:00 UTC |
 
 `daily_bot_stats` properties: `users`, `notify_users`, `unique_owners`, `subscriptions_*`, `unique_twitch_channels`, `premium_paid`, `blocked_users`, `sys_*`, `locale_*`.
@@ -293,7 +294,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | Module | Role |
 |---|---|
 | `bot.py` | Wizard, menu, notifications, What to watch?, admin broadcast, Twitch Status, partner program, schedule |
-| `analytics.py` | PostHog: usage events, errors, daily `daily_bot_stats` |
+| `analytics.py` | PostHog: usage events, errors, WARNING+ Logs, daily `daily_bot_stats` |
 | `i18n.py` | Strings and keyboards (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |

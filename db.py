@@ -353,6 +353,7 @@ class ScheduledBroadcast:
     text: str
     scheduled_at: str
     created_by: int
+    recipient_ids: str = ""
 
 
 @dataclass
@@ -363,6 +364,24 @@ class TwitchSync:
     period_days: int
     next_sync_at: str
     last_sync_at: str | None
+
+
+def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
+    scheduled_at = row["scheduled_at"]
+    if scheduled_at is not None and not isinstance(scheduled_at, str):
+        scheduled_at = scheduled_at.isoformat()
+    try:
+        recipient_ids = str(row["recipient_ids"] or "")
+    except (KeyError, IndexError, TypeError):
+        recipient_ids = ""
+    return ScheduledBroadcast(
+        id=int(row["id"]),
+        msg_type=str(row["msg_type"]),
+        text=str(row["text"]),
+        scheduled_at=str(scheduled_at),
+        created_by=int(row["created_by"]),
+        recipient_ids=recipient_ids,
+    )
 
 
 def _row_to_twitch_sync(row: Any) -> TwitchSync:
@@ -709,6 +728,8 @@ class Database(Protocol):
 
     def set_premium_permanent(self, user_id: int, permanent: bool) -> None: ...
 
+    def clear_premium(self, user_id: int) -> None: ...
+
     def set_premium_trial(
         self, user_id: int, *, until_unix: int, used: bool = True
     ) -> None: ...
@@ -716,8 +737,17 @@ class Database(Protocol):
     def expire_premium_trial(self, user_id: int) -> int: ...
 
     def extend_premium_features(
-        self, user_id: int, feature_ids: list[str], *, until_unix: int
+        self,
+        user_id: int,
+        feature_ids: list[str],
+        *,
+        until_unix: int,
+        charge_id: str = "",
     ) -> None: ...
+
+    def clear_premium_feature(self, user_id: int, feature_id: str) -> None: ...
+
+    def set_premium_feature_canceled(self, user_id: int, feature_id: str) -> None: ...
 
     def set_premium_twitch(
         self,
@@ -735,7 +765,12 @@ class Database(Protocol):
     def list_premium_twitch_user_ids(self) -> list[int]: ...
 
     def add_scheduled_broadcast(
-        self, msg_type: str, text: str, scheduled_at: str, created_by: int
+        self,
+        msg_type: str,
+        text: str,
+        scheduled_at: str,
+        created_by: int,
+        recipient_ids: str = "",
     ) -> int: ...
 
     def get_pending_scheduled_broadcasts(self) -> list[ScheduledBroadcast]: ...
@@ -1060,6 +1095,14 @@ class SqliteDatabase:
         )
         # Sent broadcasts are deleted on send; purge any leftover marked-sent rows.
         conn.execute("DELETE FROM scheduled_broadcasts WHERE sent_at IS NOT NULL")
+        sb_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(scheduled_broadcasts)")
+        }
+        if "recipient_ids" not in sb_cols:
+            conn.execute(
+                "ALTER TABLE scheduled_broadcasts "
+                "ADD COLUMN recipient_ids TEXT NOT NULL DEFAULT ''"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS lucky_templates (
@@ -1977,7 +2020,7 @@ class SqliteDatabase:
         return int(cur.rowcount)
 
     def get_premium_status(self, user_id: int):
-        from premium import PremiumStatus
+        from premium import PremiumStatus, parse_premium_features_blob
 
         with self._conn() as conn:
             row = conn.execute(
@@ -1993,15 +2036,9 @@ class SqliteDatabase:
             ).fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
-        features: dict[str, int] = {}
-        raw = row["premium_features"] or ""
-        if raw:
-            try:
-                data = json.loads(raw)
-                if isinstance(data, dict):
-                    features = {str(k): int(v) for k, v in data.items()}
-            except (json.JSONDecodeError, TypeError, ValueError):
-                features = {}
+        features, charges, canceled = parse_premium_features_blob(
+            row["premium_features"] or ""
+        )
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -2012,6 +2049,8 @@ class SqliteDatabase:
             trial_until=int(row["premium_trial_until"] or 0),
             trial_used=bool(row["premium_trial_used"]),
             features=features,
+            feature_charges=charges,
+            feature_canceled=canceled,
         )
 
     def set_premium_stars(
@@ -2063,6 +2102,26 @@ class SqliteDatabase:
                 (user_id, int(bool(permanent))),
             )
 
+    def clear_premium(self, user_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET
+                    premium_permanent = 0,
+                    premium_stars_charge_id = '',
+                    premium_stars_until = 0,
+                    premium_stars_canceled = 1,
+                    premium_trial_until = 0,
+                    premium_features = '',
+                    premium_twitch_active = 0,
+                    premium_twitch_user_id = '',
+                    premium_twitch_refresh = '',
+                    premium_twitch_checked_at = NULL
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            )
+
     def set_premium_trial(
         self, user_id: int, *, until_unix: int, used: bool = True
     ) -> None:
@@ -2098,14 +2157,26 @@ class SqliteDatabase:
             return int(cur.rowcount)
 
     def extend_premium_features(
-        self, user_id: int, feature_ids: list[str], *, until_unix: int
+        self,
+        user_id: int,
+        feature_ids: list[str],
+        *,
+        until_unix: int,
+        charge_id: str = "",
     ) -> None:
+        from premium import dump_premium_features_blob
+
         st = self.get_premium_status(user_id)
         features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
         until = int(until_unix)
         for fid in feature_ids:
             features[fid] = max(int(features.get(fid) or 0), until)
-        raw = json.dumps(features, ensure_ascii=False)
+            if charge_id:
+                charges[fid] = charge_id
+            canceled.pop(fid, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -2114,6 +2185,50 @@ class SqliteDatabase:
                 ON CONFLICT(user_id) DO UPDATE SET
                     premium_features = excluded.premium_features,
                     premium_stars_paid_at = datetime('now')
+                """,
+                (user_id, raw),
+            )
+
+    def clear_premium_feature(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
+        features.pop(feature_id, None)
+        charges.pop(feature_id, None)
+        canceled.pop(feature_id, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_features = excluded.premium_features
+                """,
+                (user_id, raw),
+            )
+
+    def set_premium_feature_canceled(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        if not st.feature_active(feature_id):
+            return
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
+        canceled[feature_id] = True
+        raw = dump_premium_features_blob(features, charges, canceled)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_features = excluded.premium_features
                 """,
                 (user_id, raw),
             )
@@ -2199,15 +2314,21 @@ class SqliteDatabase:
         return [int(r["user_id"]) for r in rows]
 
     def add_scheduled_broadcast(
-        self, msg_type: str, text: str, scheduled_at: str, created_by: int
+        self,
+        msg_type: str,
+        text: str,
+        scheduled_at: str,
+        created_by: int,
+        recipient_ids: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO scheduled_broadcasts (msg_type, text, scheduled_at, created_by)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO scheduled_broadcasts
+                    (msg_type, text, scheduled_at, created_by, recipient_ids)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (msg_type, text, scheduled_at, created_by),
+                (msg_type, text, scheduled_at, created_by, recipient_ids or ""),
             )
             return int(cur.lastrowid)
 
@@ -2215,51 +2336,36 @@ class SqliteDatabase:
         with self._conn() as conn:
             rows = conn.execute(
                 """
-                SELECT id, msg_type, text, scheduled_at, created_by
+                SELECT id, msg_type, text, scheduled_at, created_by,
+                       COALESCE(recipient_ids, '') AS recipient_ids
                 FROM scheduled_broadcasts
                 WHERE sent_at IS NULL
                 ORDER BY scheduled_at
                 """
             ).fetchall()
-        return [
-            ScheduledBroadcast(
-                id=int(r["id"]),
-                msg_type=r["msg_type"],
-                text=r["text"],
-                scheduled_at=r["scheduled_at"],
-                created_by=int(r["created_by"]),
-            )
-            for r in rows
-        ]
+        return [_scheduled_broadcast_from_row(r) for r in rows]
 
     def get_pending_scheduled_broadcasts(self) -> list[ScheduledBroadcast]:
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as conn:
             rows = conn.execute(
                 """
-                SELECT id, msg_type, text, scheduled_at, created_by
+                SELECT id, msg_type, text, scheduled_at, created_by,
+                       COALESCE(recipient_ids, '') AS recipient_ids
                 FROM scheduled_broadcasts
                 WHERE sent_at IS NULL AND scheduled_at <= ?
                 ORDER BY scheduled_at
                 """,
                 (now,),
             ).fetchall()
-        return [
-            ScheduledBroadcast(
-                id=int(r["id"]),
-                msg_type=r["msg_type"],
-                text=r["text"],
-                scheduled_at=r["scheduled_at"],
-                created_by=int(r["created_by"]),
-            )
-            for r in rows
-        ]
+        return [_scheduled_broadcast_from_row(r) for r in rows]
 
     def get_scheduled_broadcast(self, broadcast_id: int) -> ScheduledBroadcast | None:
         with self._conn() as conn:
             row = conn.execute(
                 """
-                SELECT id, msg_type, text, scheduled_at, created_by
+                SELECT id, msg_type, text, scheduled_at, created_by,
+                       COALESCE(recipient_ids, '') AS recipient_ids
                 FROM scheduled_broadcasts
                 WHERE id = ? AND sent_at IS NULL
                 """,
@@ -2267,13 +2373,7 @@ class SqliteDatabase:
             ).fetchone()
         if not row:
             return None
-        return ScheduledBroadcast(
-            id=int(row["id"]),
-            msg_type=row["msg_type"],
-            text=row["text"],
-            scheduled_at=row["scheduled_at"],
-            created_by=int(row["created_by"]),
-        )
+        return _scheduled_broadcast_from_row(row)
 
     def update_scheduled_broadcast(self, broadcast_id: int, **fields: object) -> bool:
         allowed = {"text", "scheduled_at"}
@@ -2457,6 +2557,9 @@ class SqliteDatabase:
                     COALESCE(premium_stars_until, 0)
                       > CAST(strftime('%s', 'now') AS INTEGER)
                     OR COALESCE(premium_twitch_active, 0) = 1
+                    OR (
+                      COALESCE(premium_features, '') NOT IN ('', '{}')
+                    )
                   )
                 """
             ).fetchone()["c"]
@@ -2974,6 +3077,12 @@ class PostgresDatabase:
                 """
             )
             cur.execute("DELETE FROM scheduled_broadcasts WHERE sent_at IS NOT NULL")
+            cur.execute(
+                """
+                ALTER TABLE scheduled_broadcasts
+                ADD COLUMN IF NOT EXISTS recipient_ids TEXT NOT NULL DEFAULT ''
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS lucky_templates (
@@ -3970,7 +4079,7 @@ class PostgresDatabase:
             return int(cur.rowcount)
 
     def get_premium_status(self, user_id: int):
-        from premium import PremiumStatus
+        from premium import PremiumStatus, parse_premium_features_blob
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -3988,15 +4097,9 @@ class PostgresDatabase:
             row = cur.fetchone()
         if not row:
             return PremiumStatus(False, 0, "", False, False, "")
-        features: dict[str, int] = {}
-        raw = row["premium_features"] or ""
-        if raw:
-            try:
-                data = json.loads(raw)
-                if isinstance(data, dict):
-                    features = {str(k): int(v) for k, v in data.items()}
-            except (json.JSONDecodeError, TypeError, ValueError):
-                features = {}
+        features, charges, canceled = parse_premium_features_blob(
+            row["premium_features"] or ""
+        )
         return PremiumStatus(
             permanent=bool(row["premium_permanent"]),
             stars_until=int(row["premium_stars_until"] or 0),
@@ -4007,6 +4110,8 @@ class PostgresDatabase:
             trial_until=int(row["premium_trial_until"] or 0),
             trial_used=bool(row["premium_trial_used"]),
             features=features,
+            feature_charges=charges,
+            feature_canceled=canceled,
         )
 
     def set_premium_stars(
@@ -4061,6 +4166,27 @@ class PostgresDatabase:
                 (user_id, bool(permanent)),
             )
 
+    def clear_premium(self, user_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users SET
+                    premium_permanent = FALSE,
+                    premium_stars_charge_id = '',
+                    premium_stars_until = 0,
+                    premium_stars_canceled = TRUE,
+                    premium_trial_until = 0,
+                    premium_features = '',
+                    premium_twitch_active = FALSE,
+                    premium_twitch_user_id = '',
+                    premium_twitch_refresh = '',
+                    premium_twitch_checked_at = NULL
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+
     def set_premium_trial(
         self, user_id: int, *, until_unix: int, used: bool = True
     ) -> None:
@@ -4098,14 +4224,26 @@ class PostgresDatabase:
             return int(cur.rowcount)
 
     def extend_premium_features(
-        self, user_id: int, feature_ids: list[str], *, until_unix: int
+        self,
+        user_id: int,
+        feature_ids: list[str],
+        *,
+        until_unix: int,
+        charge_id: str = "",
     ) -> None:
+        from premium import dump_premium_features_blob
+
         st = self.get_premium_status(user_id)
         features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
         until = int(until_unix)
         for fid in feature_ids:
             features[fid] = max(int(features.get(fid) or 0), until)
-        raw = json.dumps(features, ensure_ascii=False)
+            if charge_id:
+                charges[fid] = charge_id
+            canceled.pop(fid, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -4115,6 +4253,52 @@ class PostgresDatabase:
                 ON CONFLICT (user_id) DO UPDATE SET
                     premium_features = EXCLUDED.premium_features,
                     premium_stars_paid_at = NOW()
+                """,
+                (user_id, raw),
+            )
+
+    def clear_premium_feature(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
+        features.pop(feature_id, None)
+        charges.pop(feature_id, None)
+        canceled.pop(feature_id, None)
+        raw = dump_premium_features_blob(features, charges, canceled)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_features = EXCLUDED.premium_features
+                """,
+                (user_id, raw),
+            )
+
+    def set_premium_feature_canceled(self, user_id: int, feature_id: str) -> None:
+        from premium import dump_premium_features_blob
+
+        st = self.get_premium_status(user_id)
+        if not st.feature_active(feature_id):
+            return
+        features = dict(st.features)
+        charges = dict(st.feature_charges)
+        canceled = dict(st.feature_canceled)
+        canceled[feature_id] = True
+        raw = dump_premium_features_blob(features, charges, canceled)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_features)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_features = EXCLUDED.premium_features
                 """,
                 (user_id, raw),
             )
@@ -4207,17 +4391,23 @@ class PostgresDatabase:
         return [int(r["user_id"]) for r in rows]
 
     def add_scheduled_broadcast(
-        self, msg_type: str, text: str, scheduled_at: str, created_by: int
+        self,
+        msg_type: str,
+        text: str,
+        scheduled_at: str,
+        created_by: int,
+        recipient_ids: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
                 """
-                INSERT INTO scheduled_broadcasts (msg_type, text, scheduled_at, created_by)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO scheduled_broadcasts
+                    (msg_type, text, scheduled_at, created_by, recipient_ids)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (msg_type, text, scheduled_at, created_by),
+                (msg_type, text, scheduled_at, created_by, recipient_ids or ""),
             )
             row = cur.fetchone()
             return int(row["id"])
@@ -4227,23 +4417,15 @@ class PostgresDatabase:
             cur = self._cursor(conn)
             cur.execute(
                 """
-                SELECT id, msg_type, text, scheduled_at, created_by
+                SELECT id, msg_type, text, scheduled_at, created_by,
+                       COALESCE(recipient_ids, '') AS recipient_ids
                 FROM scheduled_broadcasts
                 WHERE sent_at IS NULL
                 ORDER BY scheduled_at
                 """
             )
             rows = cur.fetchall()
-        return [
-            ScheduledBroadcast(
-                id=int(r["id"]),
-                msg_type=r["msg_type"],
-                text=r["text"],
-                scheduled_at=str(r["scheduled_at"]),
-                created_by=int(r["created_by"]),
-            )
-            for r in rows
-        ]
+        return [_scheduled_broadcast_from_row(r) for r in rows]
 
     def get_pending_scheduled_broadcasts(self) -> list[ScheduledBroadcast]:
         now = datetime.now(timezone.utc)
@@ -4251,7 +4433,8 @@ class PostgresDatabase:
             cur = self._cursor(conn)
             cur.execute(
                 """
-                SELECT id, msg_type, text, scheduled_at, created_by
+                SELECT id, msg_type, text, scheduled_at, created_by,
+                       COALESCE(recipient_ids, '') AS recipient_ids
                 FROM scheduled_broadcasts
                 WHERE sent_at IS NULL AND scheduled_at <= %s
                 ORDER BY scheduled_at
@@ -4259,23 +4442,15 @@ class PostgresDatabase:
                 (now,),
             )
             rows = cur.fetchall()
-        return [
-            ScheduledBroadcast(
-                id=int(r["id"]),
-                msg_type=r["msg_type"],
-                text=r["text"],
-                scheduled_at=str(r["scheduled_at"]),
-                created_by=int(r["created_by"]),
-            )
-            for r in rows
-        ]
+        return [_scheduled_broadcast_from_row(r) for r in rows]
 
     def get_scheduled_broadcast(self, broadcast_id: int) -> ScheduledBroadcast | None:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
                 """
-                SELECT id, msg_type, text, scheduled_at, created_by
+                SELECT id, msg_type, text, scheduled_at, created_by,
+                       COALESCE(recipient_ids, '') AS recipient_ids
                 FROM scheduled_broadcasts
                 WHERE id = %s AND sent_at IS NULL
                 """,
@@ -4284,13 +4459,7 @@ class PostgresDatabase:
             row = cur.fetchone()
         if not row:
             return None
-        return ScheduledBroadcast(
-            id=int(row["id"]),
-            msg_type=row["msg_type"],
-            text=row["text"],
-            scheduled_at=str(row["scheduled_at"]),
-            created_by=int(row["created_by"]),
-        )
+        return _scheduled_broadcast_from_row(row)
 
     def update_scheduled_broadcast(self, broadcast_id: int, **fields: object) -> bool:
         allowed = {"text", "scheduled_at"}
@@ -4505,6 +4674,9 @@ class PostgresDatabase:
                     COALESCE(premium_stars_until, 0)
                       > EXTRACT(EPOCH FROM NOW())::BIGINT
                     OR COALESCE(premium_twitch_active, FALSE) = TRUE
+                    OR (
+                      COALESCE(premium_features, '') NOT IN ('', '{}')
+                    )
                   )
                 """
             )

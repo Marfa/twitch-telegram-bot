@@ -32,6 +32,7 @@ services:
     mem_limit: 512m
     cpus: "0.75"
     restart: unless-stopped
+    stop_grace_period: 25s
 
 volumes:
   bot-data:

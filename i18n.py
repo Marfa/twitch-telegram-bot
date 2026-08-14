@@ -53,7 +53,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_feat_pay": "Pay {stars} Stars / month",
         "btn_premium_feat_back": "Back",
         "btn_premium_marfapr": "Create marfapr alert",
-        "btn_premium_cancel_stars": "Cancel Stars subscription",
+        "btn_premium_cancel_stars": "Cancel subscription",
+        "btn_premium_owned": "Purchased subscriptions",
+        "btn_premium_cancel_feat": "Cancel",
         "btn_premium_get": "Get Premium",
         "btn_premium_skip": "Skip",
         "btn_premium_oferta": "Offer",
@@ -236,9 +238,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "premium_status_permanent": "Status: lifetime Premium.",
         "premium_status_trial": "Status: trial until {until}.",
-        "premium_status_stars": "Status: Stars active until {until}.",
+        "premium_status_stars": "Status: monthly subscription until {until}.",
         "premium_status_stars_canceled": (
-            "Status: Stars active until {until} (auto-renew canceled)."
+            "Status: monthly subscription until {until} (auto-renew off)."
         ),
         "premium_status_twitch": "Status: Twitch sub to {channel} verified.",
         "premium_status_features": "Status: unlocked features:\n{features}",
@@ -253,11 +255,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_schedule_publish": "Publish schedule to Twitch",
         "premium_feat_alert_history": "Alert history for 60 days",
         "premium_feat_line": "• {name} until {until}",
+        "premium_feat_line_canceled": "• {name} until {until} (auto-renew off)",
         "premium_feat_pick": (
             "Select features ({price} Stars / month each).\n"
             "Only selected features unlock."
         ),
         "premium_gate": "⭐ This step requires Premium.\nGet Premium or {action}.",
+        "premium_gate_feature": (
+            "⭐ {feature} requires Premium.\nGet Premium or {action}."
+        ),
         "premium_gate_action_skip": "skip this step",
         "premium_gate_action_cancel": "cancel",
         "premium_pay_title": "Bot Premium",
@@ -284,9 +290,26 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Live-start alerts can be deleted; enabling needs Premium."
         ),
         "premium_cancel_done": (
-            "Stars auto-renew canceled. Premium stays until the end of the paid period."
+            "Subscription auto-renew canceled. Premium stays until the end of the paid period {until}."
         ),
-        "premium_cancel_none": "No active Stars subscription to cancel.",
+        "premium_cancel_feat_done": (
+            "Subscription auto-renew canceled. Premium stays until the end of the paid period {until}."
+        ),
+        "premium_cancel_none": "No active subscription to cancel.",
+        "premium_cancel_failed": (
+            "Could not cancel auto-renew via Telegram. Try again later or cancel in Telegram Settings → Stars."
+        ),
+        "premium_pay_failed": "Could not create the Stars invoice. Try again later.",
+        "premium_owned_title": "Purchased subscriptions:\n{items}",
+        "premium_owned_empty": "No purchased subscriptions.",
+        "premium_owned_stars": "• Monthly subscription until {until}",
+        "premium_owned_stars_canceled": (
+            "• Monthly subscription until {until} (auto-renew off)"
+        ),
+        "premium_owned_feat": "• {name} until {until}",
+        "premium_owned_feat_canceled": "• {name} until {until} (auto-renew off)",
+        "premium_feat_owned": "Already purchased",
+        "premium_plans_blocked": "A Premium plan is already active.",
         "premium_marfapr_need_sub": (
             "No active Twitch subscription to {channel} found.\n"
             "Subscribe at https://www.twitch.tv/{channel} and try again."
@@ -726,6 +749,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "preview_stream": "Test stream",
         "cancelled": "Cancelled.",
+        "callback_stale": "Bot was updating. Tap again or open the menu.",
         "feedback": (
             "Feedback:\n"
             "• Telegram: @immarfa\n"
@@ -741,18 +765,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "help": (
             "Available commands:\n"
-            "/start — open the main menu / set up a subscription\n"
+            "/start — open the main menu\n"
             "/help — show this help\n"
             "/cancel — cancel the current wizard\n"
+            "/schedule — create a weekly stream schedule\n"
             "/feedback — report a problem\n"
             "/settings — open settings\n\n"
             "Menu:\n"
             "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
-            "• {btn_watch} — random live streams by your categories and filters\n"
             "• {btn_import_twitch} — authorize and import followed channels\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
-            "• {btn_feedback}\n"
-            "• {btn_settings}"
+            "• {btn_create_schedule} — weekly schedule text; publish to Twitch\n"
+            "• {btn_watch} — random live streams by your categories and filters\n"
+            "• {btn_alert_history} — sent alerts history\n"
+            "• {btn_settings} — premium, sync, system alerts, language, partner program\n"
+            "• {btn_feedback}"
         ),
         "no_subs": (
             "No subscriptions yet.\n\n"
@@ -962,6 +989,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_bot_update": "📬 Bot update notifications",
         "broadcast_type_availability": "📡 Bot availability alerts",
         "broadcast_type_other": "📢 Other",
+        "broadcast_audience_prompt": "Who should receive this message?",
+        "broadcast_audience_all": "Send to everyone",
+        "broadcast_audience_ids": "Specify IDs",
+        "broadcast_ids_prompt": (
+            "Send recipient Telegram IDs separated by commas.\n"
+            "Example: 123456789, 987654321\n"
+            "/cancel — cancel."
+        ),
+        "broadcast_ids_invalid": "No valid IDs found. Send numbers separated by commas.",
         "broadcast_text_prompt": (
             "Send the message text (bold/italic and line breaks are kept).\n"
             "It will be auto-translated to each recipient's language.\n"
@@ -1089,7 +1125,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_feat_pay": "Оплатить {stars} ⭐ / мес",
         "btn_premium_feat_back": "Назад",
         "btn_premium_marfapr": "Создать подписку на marfapr",
-        "btn_premium_cancel_stars": "Отменить подписку Stars",
+        "btn_premium_cancel_stars": "Отменить подписку",
+        "btn_premium_owned": "Купленные подписки",
+        "btn_premium_cancel_feat": "Отменить",
         "btn_premium_get": "Оформить премиум",
         "btn_premium_skip": "Пропустить",
         "btn_premium_oferta": "Оферта",
@@ -1272,9 +1310,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "premium_status_permanent": "Статус: пожизненный премиум.",
         "premium_status_trial": "Статус: триал до {until}.",
-        "premium_status_stars": "Статус: Stars активны до {until}.",
+        "premium_status_stars": "Статус: подписка на месяц до {until}.",
         "premium_status_stars_canceled": (
-            "Статус: Stars активны до {until} (автопродление отключено)."
+            "Статус: подписка на месяц до {until} (автопродление выкл.)."
         ),
         "premium_status_twitch": "Статус: подписка Twitch на {channel} подтверждена.",
         "premium_status_features": "Статус: разблокированные функции:\n{features}",
@@ -1289,11 +1327,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_schedule_publish": "Публикация расписания на Twitch",
         "premium_feat_alert_history": "История оповещений за 60 дней",
         "premium_feat_line": "• {name} до {until}",
+        "premium_feat_line_canceled": "• {name} до {until} (автопродление выкл.)",
         "premium_feat_pick": (
             "Выберите функции ({price} ⭐ / месяц каждая).\n"
             "Разблокируются только выбранные."
         ),
         "premium_gate": "⭐ Этот шаг доступен в премиуме.\nОформите премиум или {action}.",
+        "premium_gate_feature": (
+            "⭐ {feature} — функция Premium.\nОформите премиум или {action}."
+        ),
         "premium_gate_action_skip": "пропустите шаг",
         "premium_gate_action_cancel": "отмените",
         "premium_pay_title": "Премиум бота",
@@ -1320,9 +1362,29 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Оповещения о начале стрима можно удалить; для включения нужен премиум."
         ),
         "premium_cancel_done": (
-            "Автопродление Stars отключено. Премиум действует до конца оплаченного периода."
+            "Автопродление подписки отключено. Премиум действует до конца оплаченного периода {until}."
         ),
-        "premium_cancel_none": "Нет активной подписки Stars для отмены.",
+        "premium_cancel_feat_done": (
+            "Автопродление подписки отключено. Премиум действует до конца оплаченного периода {until}."
+        ),
+        "premium_cancel_none": "Нет активной подписки для отмены.",
+        "premium_cancel_failed": (
+            "Не удалось отменить автопродление через Telegram. "
+            "Попробуйте позже или отмените в настройках Telegram → Stars."
+        ),
+        "premium_pay_failed": "Не удалось создать счёт Stars. Попробуйте позже.",
+        "premium_owned_title": "Купленные подписки:\n{items}",
+        "premium_owned_empty": "Нет купленных подписок.",
+        "premium_owned_stars": "• Подписка на месяц до {until}",
+        "premium_owned_stars_canceled": (
+            "• Подписка на месяц до {until} (автопродление выкл.)"
+        ),
+        "premium_owned_feat": "• {name} до {until}",
+        "premium_owned_feat_canceled": (
+            "• {name} до {until} (автопродление выкл.)"
+        ),
+        "premium_feat_owned": "Уже куплено",
+        "premium_plans_blocked": "Премиум-план уже активен.",
         "premium_marfapr_need_sub": (
             "Активная подписка Twitch на {channel} не найдена.\n"
             "Оформите её на https://www.twitch.tv/{channel} и попробуйте снова."
@@ -1871,6 +1933,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "preview_stream": "Тестовый стрим",
         "cancelled": "Отменено.",
+        "callback_stale": "Бот обновлялся. Нажмите ещё раз или откройте меню.",
         "feedback": (
             "Обратная связь:\n"
             "• Telegram: @immarfa\n"
@@ -1886,18 +1949,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "help": (
             "Доступные команды:\n"
-            "/start — главное меню / настройка подписки\n"
+            "/start — главное меню\n"
             "/help — эта справка\n"
             "/cancel — отменить текущий мастер\n"
+            "/schedule — создать расписание стримов\n"
             "/feedback — сообщить о проблеме\n"
             "/settings — настройки\n\n"
             "Меню:\n"
             "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
-            "• {btn_watch} — случайные live-стримы по категориям и фильтрам\n"
             "• {btn_import_twitch} — авторизация и импорт фолловов\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
-            "• {btn_feedback}\n"
-            "• {btn_settings}"
+            "• {btn_create_schedule} — текст расписания на неделю; публикация на Twitch\n"
+            "• {btn_watch} — случайные live-стримы по категориям и фильтрам\n"
+            "• {btn_alert_history} — история отправленных оповещений\n"
+            "• {btn_settings} — премиум, sync, системные уведомления, язык, партнёрка\n"
+            "• {btn_feedback}"
         ),
         "no_subs": (
             "Подписок пока нет.\n\n"
@@ -2107,6 +2173,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "broadcast_type_bot_update": "📬 Оповещения об обновлении бота",
         "broadcast_type_availability": "📡 Оповещения о доступности бота",
         "broadcast_type_other": "📢 Прочие",
+        "broadcast_audience_prompt": "Кому отправить сообщение?",
+        "broadcast_audience_all": "Разослать всем",
+        "broadcast_audience_ids": "Указать ID",
+        "broadcast_ids_prompt": (
+            "Отправьте Telegram ID получателей через запятую.\n"
+            "Пример: 123456789, 987654321\n"
+            "/cancel — отмена."
+        ),
+        "broadcast_ids_invalid": "Не найдено валидных ID. Отправьте числа через запятую.",
         "broadcast_text_prompt": (
             "Отправьте текст сообщения (жирный/курсив и переносы сохраняются).\n"
             "Оно будет автоматически переведено на язык каждого получателя.\n"
@@ -2407,8 +2482,11 @@ def partner_menu(lang: str) -> ReplyKeyboardMarkup:
 def premium_actions_keyboard(
     lang: str,
     *,
-    show_cancel: bool,
     show_trial: bool = True,
+    show_plans: bool = True,
+    show_features: bool = True,
+    show_owned: bool = False,
+    user_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     from premium import stars_feature_price, stars_lifetime_price, stars_price, stars_year_price
 
@@ -2424,42 +2502,44 @@ def premium_actions_keyboard(
             )
         ]
     )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("btn_premium_month", lang, stars=stars_price()),
-                callback_data="premium:month",
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("btn_premium_year", lang, stars=stars_year_price()),
-                callback_data="premium:year",
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                btn("premium_features", lang), callback_data="premium:features"
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("btn_premium_lifetime", lang, stars=stars_lifetime_price()),
-                callback_data="premium:life",
-            )
-        ]
-    )
-    if show_cancel:
+    if show_plans:
         rows.append(
             [
                 InlineKeyboardButton(
-                    btn("premium_cancel_stars", lang), callback_data="premium:cancel"
+                    t("btn_premium_month", lang, stars=stars_price(user_id)),
+                    callback_data="premium:month",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_year", lang, stars=stars_year_price(user_id)),
+                    callback_data="premium:year",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_lifetime", lang, stars=stars_lifetime_price(user_id)),
+                    callback_data="premium:life",
+                )
+            ]
+        )
+    if show_features:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_features", lang), callback_data="premium:features"
+                )
+            ]
+        )
+    if show_owned:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_owned", lang), callback_data="premium:owned"
                 )
             ]
         )
@@ -2467,13 +2547,20 @@ def premium_actions_keyboard(
 
 
 def premium_features_keyboard(
-    lang: str, selected: set[str]
+    lang: str,
+    selected: set[str],
+    *,
+    user_id: int | None = None,
+    owned: set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from config import PREMIUM_FREE_ACTIVE_LIMIT
     from premium import FEATURE_IDS, feature_label_key, stars_feature_price
 
+    owned = owned or set()
     rows: list[list[InlineKeyboardButton]] = []
     for fid in FEATURE_IDS:
+        if fid in owned:
+            continue
         mark = "✅" if fid in selected else "⬜️"
         label = t(
             feature_label_key(fid),
@@ -2489,13 +2576,56 @@ def premium_features_keyboard(
             ]
         )
     n = len(selected)
-    total = n * stars_feature_price()
+    total = n * stars_feature_price(user_id)
     if n > 0:
         rows.append(
             [
                 InlineKeyboardButton(
                     t("btn_premium_feat_pay", lang, stars=total),
                     callback_data="premium:feat_pay",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("premium_feat_back", lang), callback_data="premium:feat_back"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def premium_owned_keyboard(
+    lang: str,
+    *,
+    stars_cancelable: bool,
+    feature_ids: list[str],
+) -> InlineKeyboardMarkup:
+    from config import PREMIUM_FREE_ACTIVE_LIMIT
+    from premium import feature_label_key
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if stars_cancelable:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_cancel_stars", lang),
+                    callback_data="premium:cancel",
+                )
+            ]
+        )
+    for fid in feature_ids:
+        name = t(
+            feature_label_key(fid),
+            lang,
+            free_limit=PREMIUM_FREE_ACTIVE_LIMIT,
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{btn('premium_cancel_feat', lang)} — {name}",
+                    callback_data=f"premium:cancel_feat:{fid}",
                 )
             ]
         )
@@ -3000,6 +3130,25 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     t("broadcast_type_other", lang),
                     callback_data="admin_type:other",
+                )
+            ],
+        ]
+    )
+
+
+def admin_other_audience_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("broadcast_audience_ids", lang),
+                    callback_data="admin_audience:ids",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("broadcast_audience_all", lang),
+                    callback_data="admin_audience:all",
                 )
             ],
         ]

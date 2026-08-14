@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -70,6 +71,8 @@ class PremiumStatus:
     trial_until: int = 0
     trial_used: bool = False
     features: dict[str, int] = field(default_factory=dict)
+    feature_charges: dict[str, str] = field(default_factory=dict)
+    feature_canceled: dict[str, bool] = field(default_factory=dict)
 
     @property
     def stars_active(self) -> bool:
@@ -80,8 +83,8 @@ class PremiumStatus:
         return self.trial_until > int(time.time())
 
     @property
-    def is_premium(self) -> bool:
-        """Full Premium (all features), not à la carte alone."""
+    def has_full_plan(self) -> bool:
+        """Month/year/life/trial/Twitch — unlocks every feature."""
         return (
             self.permanent
             or self.stars_active
@@ -89,11 +92,94 @@ class PremiumStatus:
             or self.trial_active
         )
 
+    @property
+    def has_active_features(self) -> bool:
+        now = int(time.time())
+        return any(int(u) > now for u in self.features.values())
+
+    @property
+    def is_premium(self) -> bool:
+        """Full plan or any paid à la carte feature."""
+        return self.has_full_plan or self.has_active_features
+
     def feature_until(self, feature_id: str) -> int:
         return int(self.features.get(feature_id) or 0)
 
     def feature_active(self, feature_id: str) -> bool:
         return self.feature_until(feature_id) > int(time.time())
+
+    def feature_charge_id(self, feature_id: str) -> str:
+        return self.feature_charges.get(feature_id) or ""
+
+    def is_feature_canceled(self, feature_id: str) -> bool:
+        return bool(self.feature_canceled.get(feature_id))
+
+    def feature_cancelable(self, feature_id: str) -> bool:
+        return (
+            self.feature_active(feature_id)
+            and not self.is_feature_canceled(feature_id)
+            and bool(self.feature_charge_id(feature_id))
+        )
+
+
+def parse_premium_features_blob(
+    raw: str | dict | None,
+) -> tuple[dict[str, int], dict[str, str], dict[str, bool]]:
+    """Support `{fid: until}` and `{fid: {until, charge_id, canceled}}`."""
+    features: dict[str, int] = {}
+    charges: dict[str, str] = {}
+    canceled: dict[str, bool] = {}
+    if not raw:
+        return features, charges, canceled
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return features, charges, canceled
+    if not isinstance(data, dict):
+        return features, charges, canceled
+    for key, val in data.items():
+        fid = str(key)
+        if isinstance(val, dict):
+            try:
+                features[fid] = int(val.get("until") or 0)
+            except (TypeError, ValueError):
+                features[fid] = 0
+            cid = str(val.get("charge_id") or "")
+            if cid:
+                charges[fid] = cid
+            if val.get("canceled"):
+                canceled[fid] = True
+        else:
+            try:
+                features[fid] = int(val)
+            except (TypeError, ValueError):
+                features[fid] = 0
+    return features, charges, canceled
+
+
+def dump_premium_features_blob(
+    features: dict[str, int],
+    charges: dict[str, str] | None = None,
+    canceled: dict[str, bool] | None = None,
+) -> str:
+    charges = charges or {}
+    canceled = canceled or {}
+    out: dict[str, Any] = {}
+    for fid, until in features.items():
+        cid = charges.get(fid) or ""
+        is_canceled = bool(canceled.get(fid))
+        if cid or is_canceled:
+            entry: dict[str, Any] = {"until": int(until)}
+            if cid:
+                entry["charge_id"] = cid
+            if is_canceled:
+                entry["canceled"] = True
+            out[fid] = entry
+        else:
+            out[fid] = int(until)
+    return json.dumps(out, ensure_ascii=False)
 
 
 def feature_label_key(feature_id: str) -> str:
@@ -175,7 +261,7 @@ async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
 def has_feature_sync(db: Database, user_id: int, feature_id: str) -> bool:
     """DB-only feature check (no free-chat / demo). Call ensure_trial_expired first."""
     st = get_status(db, user_id)
-    if st.is_premium:
+    if st.has_full_plan:
         return True
     return st.feature_active(feature_id)
 
@@ -198,7 +284,7 @@ async def has_premium(bot: Bot, db: Database, user_id: int) -> bool:
     ensure_trial_expired(db, user_id)
     if is_active(user_id):
         return False
-    if is_premium(db, user_id):
+    if get_status(db, user_id).has_full_plan:
         return True
     return await is_free_chat_member(bot, user_id)
 
@@ -207,20 +293,45 @@ def free_active_limit() -> int:
     return PREMIUM_FREE_ACTIVE_LIMIT
 
 
-def stars_price() -> int:
-    return PREMIUM_STARS_AMOUNT
+# Per-user Stars price override (gift / test). Applies to month/year/life/feature.
+_STARS_BY_USER: dict[int, int] = {
+    249097744: 1,
+}
 
 
-def stars_year_price() -> int:
-    return PREMIUM_STARS_YEAR
+def _stars_override(user_id: int | None) -> int | None:
+    if user_id is None:
+        return None
+    return _STARS_BY_USER.get(int(user_id))
 
 
-def stars_lifetime_price() -> int:
-    return PREMIUM_STARS_LIFETIME
+def has_custom_stars_price(user_id: int) -> bool:
+    return _stars_override(user_id) is not None
 
 
-def stars_feature_price() -> int:
-    return PREMIUM_STARS_FEATURE
+def stars_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_AMOUNT
+
+
+def clear_premium(db: Database, user_id: int) -> None:
+    """Drop full Premium + feature unlocks for a user (DB only; free-chat still applies)."""
+    db.clear_premium(user_id)
+
+
+def stars_year_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_YEAR
+
+
+def stars_lifetime_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_LIFETIME
+
+
+def stars_feature_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_STARS_FEATURE
 
 
 def stars_period() -> int:
@@ -307,7 +418,7 @@ def apply_stars_payment(
         db,
         invitee_id=user_id,
         charge_id=charge_id,
-        stars_paid=stars_paid if stars_paid is not None else stars_price(),
+        stars_paid=stars_paid if stars_paid is not None else stars_price(user_id),
     )
 
 
@@ -323,7 +434,7 @@ def apply_lifetime_payment(
         db,
         invitee_id=user_id,
         charge_id=charge_id,
-        stars_paid=stars_paid if stars_paid is not None else stars_lifetime_price(),
+        stars_paid=stars_paid if stars_paid is not None else stars_lifetime_price(user_id),
     )
 
 
@@ -336,14 +447,19 @@ def apply_features_payment(
     until_unix: int,
     stars_paid: int | None = None,
 ) -> None:
-    db.extend_premium_features(user_id, list(feature_ids), until_unix=until_unix)
+    db.extend_premium_features(
+        user_id,
+        list(feature_ids),
+        until_unix=until_unix,
+        charge_id=charge_id,
+    )
     credit_referral_commission(
         db,
         invitee_id=user_id,
         charge_id=charge_id,
         stars_paid=stars_paid
         if stars_paid is not None
-        else stars_feature_price() * max(1, len(feature_ids)),
+        else stars_feature_price(user_id) * max(1, len(feature_ids)),
     )
 
 

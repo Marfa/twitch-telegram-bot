@@ -1,6 +1,9 @@
-python-telegram-bot[job-queue]==21.10
+python-telegram-bot[job-queue]==22.8
 requests==2.34.2
 urllib3==2.7.0
-psycopg[binary]==3.2.9
+psycopg[binary]==3.3.4
 cryptography==50.0.0
-posthog==6.9.3
+posthog==7.38.4
+opentelemetry-api==1.41.1
+opentelemetry-sdk==1.41.1
+opentelemetry-exporter-otlp==1.41.1

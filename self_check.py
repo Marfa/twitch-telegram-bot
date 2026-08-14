@@ -25,11 +25,14 @@ from translate import build_translations, translate_text
 from bot import (
     _edit_present_types,
     _format_twitch_status_message,
+    _help_text,
     _is_link_preview_disabled,
     _message_link,
+    _parse_broadcast_recipient_ids,
     _parse_sb_edit_f_id,
     _parse_segment_start,
     _parse_watch_viewers,
+    _premium_gate_text,
     import_followed_as_subscriptions,
     live_transitions,
     category_change_events,
@@ -81,6 +84,23 @@ def main() -> None:
         locale_unset = 0
 
     analytics_mod.capture_bot_stats(_Stats())
+
+    filt = analytics_mod._WarningPlusRedactFilter()
+    import logging as _logging
+
+    info_rec = _logging.LogRecord("t", _logging.INFO, __file__, 1, "ok", (), None)
+    assert filt.filter(info_rec) is False
+    warn_rec = _logging.LogRecord(
+        "t",
+        _logging.WARNING,
+        __file__,
+        1,
+        "token=supersecrettokenvalue",
+        (),
+        None,
+    )
+    assert filt.filter(warn_rec) is True
+    assert "[redacted]" in warn_rec.getMessage()
 
     from bot import _seconds_until_next_daily_stats
 
@@ -418,6 +438,12 @@ def main() -> None:
     assert _is_link_preview_disabled(no_preview)
 
     for loc in SUPPORTED_LOCALES:
+        help_txt = _help_text(loc)
+        assert "/schedule" in help_txt
+        assert "/settings" in help_txt
+        assert "/stats" not in help_txt
+        assert btn("create_schedule", loc) in help_txt
+        assert btn("alert_history", loc) in help_txt
         assert btn("new", loc)
         assert btn("watch", loc)
         assert btn("settings", loc)
@@ -985,6 +1011,14 @@ def main() -> None:
         item = db.get_scheduled_broadcast(bid)
         assert item is not None
         assert item.text == "hello"
+        assert item.recipient_ids == ""
+        bid_ids = db.add_scheduled_broadcast(
+            "other", "hi", "2099-01-01T00:00:00+00:00", 1, recipient_ids="11,22"
+        )
+        item_ids = db.get_scheduled_broadcast(bid_ids)
+        assert item_ids is not None and item_ids.recipient_ids == "11,22"
+        assert _parse_broadcast_recipient_ids("11, 22, x, 22") == [11, 22]
+        assert db.delete_scheduled_broadcast(bid_ids)
         assert db.update_scheduled_broadcast(bid, text="updated")
         item = db.get_scheduled_broadcast(bid)
         assert item is not None
@@ -1024,6 +1058,7 @@ def main() -> None:
         parse_invoice_payload,
         start_trial,
     )
+    from i18n import premium_features_keyboard
 
     parsed = parse_invoice_payload(invoice_payload(7, "month"))
     assert parsed is not None and parsed.user_id == 7 and parsed.kind == "month"
@@ -1038,6 +1073,271 @@ def main() -> None:
 
     assert hasattr(ChatMemberStatus, "OWNER")
     assert not hasattr(ChatMemberStatus, "CREATOR")
+    assert hasattr(ChatMemberStatus, "BANNED")
+    assert not hasattr(ChatMemberStatus, "KICKED")
+    # Bot API 7.0 removed Message.forward_from_chat; a personal forward must
+    # return no chat instead of raising AttributeError in the wizard.
+    import asyncio
+
+    from telegram import (
+        Chat,
+        MessageOriginChannel,
+        MessageOriginChat,
+        MessageOriginHiddenUser,
+        MessageOriginUser,
+        User,
+    )
+
+    from bot import _extract_forward_chat, _parse_dest_input
+
+    _now = datetime.now(timezone.utc)
+    _pm = Chat(id=7, type="private")
+    _fwd_user = Message(
+        message_id=1,
+        date=_now,
+        chat=_pm,
+        forward_origin=MessageOriginUser(
+            date=_now, sender_user=User(id=5, first_name="A", is_bot=False)
+        ),
+    )
+    try:
+        _ = _fwd_user.forward_from_chat
+        raise AssertionError("Message.forward_from_chat must be removed")
+    except AttributeError:
+        pass
+    assert _extract_forward_chat(_fwd_user) == (None, None)
+    _fwd_hidden = Message(
+        message_id=2,
+        date=_now,
+        chat=_pm,
+        forward_origin=MessageOriginHiddenUser(date=_now, sender_user_name="anon"),
+    )
+    assert _extract_forward_chat(_fwd_hidden) == (None, None)
+    _fwd_channel = Message(
+        message_id=3,
+        date=_now,
+        chat=_pm,
+        forward_origin=MessageOriginChannel(
+            date=_now, chat=Chat(id=-100123, type="channel"), message_id=9
+        ),
+    )
+    assert _extract_forward_chat(_fwd_channel) == (-100123, None)
+    _fwd_group = Message(
+        message_id=4,
+        date=_now,
+        chat=_pm,
+        message_thread_id=30,
+        forward_origin=MessageOriginChat(
+            date=_now, sender_chat=Chat(id=-100999, type="supergroup")
+        ),
+    )
+    assert _extract_forward_chat(_fwd_group) == (-100999, 30)
+    # Same path as the wizard DEST_CHAT step: DM forward → hint, no crash.
+    _cid, _tid, _err = asyncio.run(_parse_dest_input(None, _fwd_user, "group", "ru"))
+    assert _cid is None and _tid is None and _err == tr("fwd_from_dm", "ru")
+    _cid, _tid, _err = asyncio.run(_parse_dest_input(None, _fwd_channel, "channel", "ru"))
+    assert (_cid, _tid, _err) == (-100123, None, None)
+    # PTB 21.8+: subscription_expiration_date is datetime (same formula as premium_handlers)
+    stars_exp = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+    until_sub = int(stars_exp.timestamp()) if stars_exp is not None else 0
+    assert until_sub == int(stars_exp.timestamp())
+    none_exp = None
+    assert (int(none_exp.timestamp()) if none_exp is not None else 0) == 0
+    try:
+        int(stars_exp)
+        raise AssertionError("int(datetime) must raise TypeError")
+    except TypeError:
+        pass
+    assert prem.stars_price(249097744) == 1
+    assert prem.stars_year_price(249097744) == 1
+    assert prem.stars_lifetime_price(249097744) == 1
+    assert prem.stars_feature_price(249097744) == 1
+    assert prem.has_custom_stars_price(249097744)
+    assert not prem.has_custom_stars_price(1)
+    assert prem.stars_price() == prem.stars_price(1)
+    assert prem.stars_feature_price() == prem.stars_feature_price(1)
+    assert "5" in _premium_gate_text("ru", "active_limit", "отмените")
+    assert "Типы кроме старта стрима" in _premium_gate_text(
+        "ru", "alert_type", "отмените"
+    )
+    assert "функция Premium" in _premium_gate_text(
+        "ru", "delay", "пропустите шаг"
+    )
+    # Chat fixes: callback wiring, PTB Stars typo, cancel copy, deploy polling, Other audience.
+    import inspect
+    from pathlib import Path as _Path
+
+    from telegram import Bot
+
+    import main as main_mod
+    from bot import _dump_broadcast_recipient_ids
+    from i18n import admin_other_audience_keyboard, premium_owned_keyboard
+    from premium_handlers import _edit_user_star_subscription, _premium_markup
+
+    bot_src = _Path(__file__).resolve().parent.joinpath("bot.py").read_text(
+        encoding="utf-8"
+    )
+    assert "cancel_feat:.+" in bot_src
+    assert "owned|" in bot_src
+    assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
+    assert "mark_ready()" in bot_src
+    ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
+    assert "editUserStartSubscription" in ptb_edit  # upstream typo still present
+    our_edit = inspect.getsource(_edit_user_star_subscription)
+    assert '"editUserStarSubscription"' in our_edit
+    assert '"editUserStartSubscription"' not in our_edit
+    ph_src = _Path(__file__).resolve().parent.joinpath(
+        "premium_handlers.py"
+    ).read_text(encoding="utf-8")
+    cancel_block = ph_src.split('if action == "cancel":', 1)[1].split(
+        'if action == "marfapr":', 1
+    )[0]
+    assert 't("import_failed"' not in cancel_block
+    assert "premium_cancel_feat_done" in ph_src
+    assert "set_premium_feature_canceled" in ph_src
+    assert "clear_premium_feature" not in ph_src.split(
+        'if data.startswith("premium:cancel_feat:")', 1
+    )[1].split("if data == \"premium:feat_pay\":", 1)[0]
+    assert "{until}" in tr("premium_cancel_feat_done", "ru")
+    assert "{until}" in tr("premium_cancel_feat_done", "en")
+    assert "{until}" in tr("premium_cancel_done", "ru")
+    assert "{until}" in tr("premium_cancel_done", "en")
+    assert tr("premium_cancel_failed", "ru")
+    assert tr("premium_pay_failed", "ru")
+    assert "Twitch" not in tr("premium_cancel_feat_done", "ru")
+    assert "Twitch" not in tr("premium_pay_failed", "ru")
+    assert "снята" not in tr("premium_cancel_feat_done", "ru").lower()
+    assert "Автопродление подписки отключено" in tr("premium_cancel_done", "ru")
+    assert "Автопродление подписки отключено" in tr("premium_cancel_feat_done", "ru")
+    assert tr("premium_owned_feat_canceled", "ru")
+    assert "автопродление выкл" in tr("premium_feat_line_canceled", "ru")
+    assert "Stars" not in tr("premium_status_stars", "ru")
+    assert "Stars" not in tr("premium_status_stars_canceled", "ru")
+    assert "Stars" not in tr("premium_owned_stars", "ru")
+    assert "Stars" not in tr("premium_owned_stars_canceled", "ru")
+    assert "Stars" not in btn("premium_cancel_stars", "ru")
+    aud_cb = {
+        b.callback_data
+        for row in admin_other_audience_keyboard("ru").inline_keyboard
+        for b in row
+        if b.callback_data
+    }
+    assert aud_cb == {"admin_audience:ids", "admin_audience:all"}
+    assert tr("broadcast_audience_ids", "ru") == "Указать ID"
+    assert tr("broadcast_audience_all", "ru") == "Разослать всем"
+    owned_kb = premium_owned_keyboard(
+        "ru", stars_cancelable=True, feature_ids=["alert_types"]
+    )
+    owned_cb = {
+        b.callback_data
+        for row in owned_kb.inline_keyboard
+        for b in row
+        if b.callback_data
+    }
+    assert "premium:cancel" in owned_cb
+    assert "premium:cancel_feat:alert_types" in owned_cb
+    assert _dump_broadcast_recipient_ids([9, 9, 8, "x"]) == "9,8"
+
+    with tempfile.TemporaryDirectory() as d:
+        db = SqliteDatabase(Path(d) / "pay_btns.db")
+        db.upsert_user(249097744)
+        kb = _premium_markup(
+            db, 249097744, "ru", free_chat=True, force_free=False
+        )
+        assert kb is not None
+        callbacks = {
+            b.callback_data
+            for row in kb.inline_keyboard
+            for b in row
+            if b.callback_data
+        }
+        assert "premium:month" in callbacks
+        apply_features_payment(
+            db,
+            249097744,
+            feature_ids=["alert_types"],
+            charge_id="stx_test",
+            until_unix=10**12,
+            stars_paid=1,
+        )
+        assert prem.is_premium(db, 249097744)
+        assert not prem.get_status(db, 249097744).has_full_plan
+        assert db.get_bot_stats().premium_paid == 1
+        assert not prem.has_feature_sync(db, 249097744, "extra_alerts")
+        assert prem.can_enable_more(db, 249097744) is True
+        # Cancel renew: keep access until expiry; block repurchase.
+        db.set_premium_feature_canceled(249097744, "alert_types")
+        st_c = prem.get_status(db, 249097744)
+        assert st_c.feature_active("alert_types")
+        assert st_c.is_feature_canceled("alert_types")
+        assert not st_c.feature_cancelable("alert_types")
+        assert db.get_bot_stats().premium_paid == 1
+        kb_c = _premium_markup(
+            db, 249097744, "ru", free_chat=False, force_free=False
+        )
+        assert kb_c is not None
+        cb_c = {
+            b.callback_data
+            for row in kb_c.inline_keyboard
+            for b in row
+            if b.callback_data
+        }
+        assert "premium:month" not in cb_c
+        assert "premium:features" in cb_c
+        assert "premium:owned" in cb_c
+        db.clear_premium_feature(249097744, "alert_types")
+        assert not prem.get_status(db, 249097744).feature_active("alert_types")
+        assert db.get_bot_stats().premium_paid == 0
+        apply_features_payment(
+            db,
+            249097744,
+            feature_ids=["alert_types"],
+            charge_id="stx_test2",
+            until_unix=10**12,
+            stars_paid=1,
+        )
+        assert prem.can_enable_more(db, 249097744) is True
+        db2 = SqliteDatabase(Path(d) / "perm_not_paid.db")
+        db2.upsert_user(1)
+        db2.set_premium_permanent(1, True)
+        assert db2.get_bot_stats().premium_paid == 0
+        for i in range(5):
+            db.add_subscription(
+                owner_id=249097744,
+                twitch_username=f"lim{i}",
+                twitch_user_id=str(9000 + i),
+                message_template="x",
+                dest_type="dm",
+                chat_id=249097744,
+                thread_id=None,
+            )
+        assert prem.can_enable_more(db, 249097744) is False
+        kb2 = _premium_markup(
+            db, 249097744, "ru", free_chat=True, force_free=False
+        )
+        assert kb2 is not None
+        cb2 = {
+            b.callback_data
+            for row in kb2.inline_keyboard
+            for b in row
+            if b.callback_data
+        }
+        assert "premium:month" not in cb2
+        assert "premium:features" in cb2
+        assert "premium:owned" in cb2
+        assert "alert_types" not in {
+            (b.callback_data or "").split(":")[-1]
+            for row in premium_features_keyboard(
+                "ru",
+                set(),
+                user_id=249097744,
+                owned={"alert_types"},
+            ).inline_keyboard
+            for b in row
+            if (b.callback_data or "").startswith("premium:feat_toggle:")
+        }
+        db.upsert_user(2)
+        assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
     assert tr("btn_premium", "en")
     assert tr("btn_premium_oferta", "ru") == "Оферта"
@@ -1154,9 +1454,14 @@ def main() -> None:
         assert st52.feature_active("delay")
         assert st52.feature_active("repeat")
         assert not st52.feature_active("twitch_sync")
-        assert not st52.is_premium
+        assert st52.is_premium
+        assert not st52.has_full_plan
+        assert st52.feature_charge_id("delay") == "feat1"
         assert prem.has_feature_sync(db, 52, "delay")
         assert not prem.has_feature_sync(db, 52, "twitch_sync")
+        db.clear_premium_feature(52, "delay")
+        assert not prem.get_status(db, 52).feature_active("delay")
+        assert prem.get_status(db, 52).feature_active("repeat")
 
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "ref.db")

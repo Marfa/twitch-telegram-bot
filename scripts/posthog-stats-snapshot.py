@@ -124,6 +124,7 @@ def _backfill_postgres(db) -> int:
                      WHERE COALESCE(u.premium_stars_until, 0)
                            > EXTRACT(EPOCH FROM NOW())::bigint
                         OR COALESCE(u.premium_twitch_active, FALSE) = TRUE
+                        OR COALESCE(u.premium_features, '') NOT IN ('', '{}')
                   ) AS premium_paid,
                   (SELECT COUNT(*) FROM users
                      WHERE bot_blocked = TRUE
