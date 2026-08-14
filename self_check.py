@@ -556,6 +556,8 @@ def main() -> None:
     assert "Test stream" not in _normalize_template("hi\nTest stream")
 
     from hf_text import _local_template, generate_alert_template
+    from config import GROQ_TEXT_MODEL
+    assert GROQ_TEXT_MODEL == "openai/gpt-oss-20b" or os.getenv("GROQ_TEXT_MODEL", "").strip()
     local_ru = _local_template("ru")
     assert "{username}" in local_ru and "{game}" in local_ru and "{name}" in local_ru
     # With no cloud tokens, generation must still return a template via fallback.

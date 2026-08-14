@@ -83,8 +83,8 @@ GROQ_API_KEY = (
     or os.getenv("GROQ_API", "").strip()
     or os.getenv("GROK_API", "").strip()
 )
-GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "llama-3.1-8b-instant").strip() or (
-    "llama-3.1-8b-instant"
+GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "openai/gpt-oss-20b").strip() or (
+    "openai/gpt-oss-20b"
 )
 BOT_VERSION = (os.getenv("BOT_VERSION") or "dev").strip() or "dev"
 POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", "").strip()

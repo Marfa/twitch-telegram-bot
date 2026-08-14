@@ -120,19 +120,23 @@ def _chat_completion(
     model: str,
     locale: str,
     channel: str,
+    extra: dict | None = None,
 ) -> str:
+    payload = {
+        "model": model,
+        "messages": _prompt_messages(locale=locale, channel=channel),
+        "max_tokens": 200,
+        "temperature": 0.8,
+    }
+    if extra:
+        payload.update(extra)
     response = requests.post(
         url,
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
-        json={
-            "model": model,
-            "messages": _prompt_messages(locale=locale, channel=channel),
-            "max_tokens": 200,
-            "temperature": 0.8,
-        },
+        json=payload,
         timeout=90,
     )
     if response.status_code >= 400:
@@ -160,14 +164,20 @@ def _groq_generate(*, locale: str, channel: str = "") -> str:
     model = (
         os.getenv("GROQ_TEXT_MODEL", "").strip()
         or GROQ_TEXT_MODEL
-        or "llama-3.1-8b-instant"
+        or "openai/gpt-oss-20b"
     )
+    extra = {"max_tokens": 1024}
+    # ponytail: gpt-oss spends completion tokens on reasoning first; 200 often
+    # returns empty content (finish_reason=length). Upgrade: raise budget further.
+    if "gpt-oss" in model:
+        extra["reasoning_effort"] = "low"
     return _chat_completion(
         url=_GROQ_CHAT_URL,
         token=token,
         model=model,
         locale=locale,
         channel=channel,
+        extra=extra,
     )
 
 

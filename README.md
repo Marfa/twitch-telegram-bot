@@ -266,7 +266,7 @@ python main.py
 | `PORT` | Порт health/OAuth (по умолчанию 8080) |
 | `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя |
 | `GROQ_API_KEY` | Groq — основной LLM для **Мне повезёт** (алиасы: `GROQ_API`, `GROK_API`) |
-| `GROQ_TEXT_MODEL` | Модель Groq (по умолчанию `llama-3.1-8b-instant`) |
+| `GROQ_TEXT_MODEL` | Модель Groq (по умолчанию `openai/gpt-oss-20b`) |
 | `HF_TOKEN` | Hugging Face — запасной LLM (алиас: `HUGGING_FACE_API`) |
 | `HF_TEXT_MODEL` | Модель HF (по умолчанию `Qwen/Qwen2.5-7B-Instruct`) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Без ключа аналитика выключена |

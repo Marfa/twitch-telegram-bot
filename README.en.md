@@ -266,7 +266,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
 | `GROQ_API_KEY` | Groq — primary LLM for **I'm feeling lucky** (aliases: `GROQ_API`, `GROK_API`) |
-| `GROQ_TEXT_MODEL` | Groq model (default `llama-3.1-8b-instant`) |
+| `GROQ_TEXT_MODEL` | Groq model (default `openai/gpt-oss-20b`) |
 | `HF_TOKEN` | Hugging Face — fallback LLM (alias: `HUGGING_FACE_API`) |
 | `HF_TEXT_MODEL` | HF model (default `Qwen/Qwen2.5-7B-Instruct`) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |
