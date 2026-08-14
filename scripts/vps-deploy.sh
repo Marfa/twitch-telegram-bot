@@ -24,6 +24,11 @@ git reset --hard "origin/$BRANCH"
 cp -a /tmp/twitch-telegram-bot.env.bak .env
 rm -f /tmp/twitch-telegram-bot.env.bak
 
+# Dump 17 and restore into 18 before compose up (no-op once db is already 18).
+if [[ -f scripts/pg-upgrade-to-18.sh ]]; then
+  bash scripts/pg-upgrade-to-18.sh
+fi
+
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 
 # Nightly Postgres dump (7 newest files under /var/backups/twitch-telegram-bot)
