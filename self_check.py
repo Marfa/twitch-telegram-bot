@@ -523,6 +523,8 @@ def main() -> None:
         assert "Изображение можно добавить" in found or loc != "ru"
         assert "You can add an image" in found or loc != "en"
         assert "Очистка названия" in found or "Clean title" in found
+        assert "x в эфире с игрой Just Chatting. Тестовый стрим" in found or loc != "ru"
+        assert "x is live with Just Chatting. Test stream" in found or loc != "en"
         edit_tpl = tr(
             "edit_template_prompt",
             loc,
