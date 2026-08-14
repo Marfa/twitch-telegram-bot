@@ -1390,28 +1390,6 @@ def _split_telegram_text(text: str, *, limit: int = 4096) -> list[str]:
     return chunks
 
 
-async def _resolve_thread_display_name(bot, chat_id: int, thread_id: int) -> str:
-    try:
-        # PTB 21.x has no getForumTopic wrapper; call the Bot API directly.
-        result = await bot._post(
-            "getForumTopic",
-            {"chat_id": chat_id, "message_thread_id": thread_id},
-        )
-        if isinstance(result, dict):
-            name = result.get("name")
-            if name:
-                return str(name)
-    except (BadRequest, Forbidden) as exc:
-        logger.debug(
-            "Cannot resolve topic name for %s/%s: %s", chat_id, thread_id, exc
-        )
-    except Exception:
-        logger.exception(
-            "Unexpected error resolving topic name for %s/%s", chat_id, thread_id
-        )
-    return str(thread_id)
-
-
 def _message_link(chat_id: int, message_id: int, thread_id: int | None = None) -> str:
     s = str(chat_id)
     if s.startswith("-100"):
@@ -4871,18 +4849,12 @@ async def _format_subs_overview_lines(
     for i, sub in enumerate(subs, 1):
         try:
             chat_display = await _resolve_chat_display_name(bot, sub)
-            thread_display = None
-            if sub.thread_id:
-                thread_display = await _resolve_thread_display_name(
-                    bot, sub.chat_id, sub.thread_id
-                )
             lines.append(
                 _format_sub_line(
                     sub,
                     lang,
                     i,
                     chat_display=chat_display,
-                    thread_display=thread_display,
                 )
             )
         except Exception:

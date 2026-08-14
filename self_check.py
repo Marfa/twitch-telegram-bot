@@ -1183,6 +1183,8 @@ def main() -> None:
     )
     assert "cancel_feat:.+" in bot_src
     assert "owned|" in bot_src
+    # Bot API has no getForumTopic; 404 is mapped to PTB InvalidToken.
+    assert "getForumTopic" not in bot_src
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
