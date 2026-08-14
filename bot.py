@@ -5627,44 +5627,30 @@ async def start_edit_ignore_keywords(
     context.user_data["wizard_edit"] = True
     context.user_data["use_global_ignore"] = bool(sub.use_global_ignore)
     has_keywords = bool(sub.ignore_keywords.strip())
-    context.user_data["ignore_keywords_as_cancel"] = has_keywords
+    context.user_data["ignore_keywords_as_cancel"] = True
     current = _ignore_keywords_current_label(sub.ignore_keywords, lang)
     if has_keywords:
         current = f"<code>{html.escape(current)}</code>"
-    hint = t(
-        "edit_ignore_keywords_hint_cancel" if has_keywords else "edit_ignore_keywords_hint_skip",
-        lang,
-    )
+    hint = t("edit_ignore_keywords_hint_cancel", lang)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text("✓")
-    # ReplyKeyboard first, then swap to inline on the same message so Cancel stays
-    # at the bottom (pulse+delete drops the reply keyboard on many clients).
-    prompt = t(
-        "edit_ignore_keywords_prompt",
-        lang,
-        sub_id=sub_num,
-        current=current,
-        hint=hint,
-    )
-    inline = ignore_keywords_keyboard(
-        lang,
-        as_cancel=has_keywords,
-        use_global=bool(sub.use_global_ignore),
-    )
-    msg = await context.bot.send_message(
+    # Inline only: Cancel under the prompt (always). No reply keyboard / no junk carrier.
+    await context.bot.send_message(
         query.from_user.id,
-        prompt,
+        t(
+            "edit_ignore_keywords_prompt",
+            lang,
+            sub_id=sub_num,
+            current=current,
+            hint=hint,
+        ),
         parse_mode=ParseMode.HTML,
-        reply_markup=_wizard(lang, back=False),
+        reply_markup=ignore_keywords_keyboard(
+            lang,
+            as_cancel=True,
+            use_global=bool(sub.use_global_ignore),
+        ),
     )
-    try:
-        await context.bot.edit_message_reply_markup(
-            chat_id=query.from_user.id,
-            message_id=msg.message_id,
-            reply_markup=inline,
-        )
-    except BadRequest:
-        await context.bot.send_message(query.from_user.id, "·", reply_markup=inline)
     return EDIT_IGNORE_KEYWORDS
 
 
