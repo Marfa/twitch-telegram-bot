@@ -1172,7 +1172,7 @@ def main() -> None:
     import main as main_mod
     from bot import _dump_broadcast_recipient_ids
     from i18n import admin_other_audience_keyboard, premium_owned_keyboard
-    from premium_handlers import _edit_user_star_subscription, _premium_markup
+    from premium_handlers import _premium_markup
 
     bot_src = _Path(__file__).resolve().parent.joinpath("bot.py").read_text(
         encoding="utf-8"
@@ -1182,13 +1182,13 @@ def main() -> None:
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
-    assert "editUserStartSubscription" in ptb_edit  # upstream typo still present
-    our_edit = inspect.getsource(_edit_user_star_subscription)
-    assert '"editUserStarSubscription"' in our_edit
-    assert '"editUserStartSubscription"' not in our_edit
+    assert "editUserStarSubscription" in ptb_edit
+    assert "editUserStartSubscription" not in ptb_edit
     ph_src = _Path(__file__).resolve().parent.joinpath(
         "premium_handlers.py"
     ).read_text(encoding="utf-8")
+    assert "edit_user_star_subscription(" in ph_src
+    assert "editUserStartSubscription" not in ph_src
     cancel_block = ph_src.split('if action == "cancel":', 1)[1].split(
         'if action == "marfapr":', 1
     )[0]
