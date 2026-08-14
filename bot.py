@@ -32,6 +32,7 @@ import premium as prem
 import demo_mode
 import analytics
 from db import (
+    AlertHistoryEntry,
     BotStats,
     Database,
     Subscription,
@@ -1457,6 +1458,9 @@ async def _send_notification(
     text: str,
     *,
     alert_type: str = "live",
+    stream: dict | None = None,
+    stream_id: str = "",
+    vod_offset_seconds: int | None = None,
 ) -> bool:
     if sub.delete_previous and sub.dest_type != "dm":
         to_delete: list[tuple[int, int]] = []
@@ -1548,6 +1552,20 @@ async def _send_notification(
                 twitch_username=sub.twitch_username,
                 alert_type=alert_type,
                 message_text=text,
+                twitch_user_id=sub.twitch_user_id,
+                stream_id=(
+                    (stream_id or "").strip()
+                    or (str(stream.get("id") or "") if stream else "")
+                ),
+                vod_offset_seconds=(
+                    vod_offset_seconds
+                    if vod_offset_seconds is not None
+                    else (
+                        _vod_offset_seconds(stream)
+                        if alert_type == "category"
+                        else None
+                    )
+                ),
             )
         except Exception:
             logger.exception("Failed to record alert history for sub %s", sub.id)
@@ -6911,6 +6929,133 @@ def _alert_history_type_label(alert_type: str, lang: str) -> str:
     return t(key, lang) if key else alert_type
 
 
+def _alert_history_stream_url(username: str) -> str:
+    login = (username or "").strip().lstrip("@")
+    return f"https://twitch.tv/{login}"
+
+
+def _format_vod_timestamp(seconds: int) -> str:
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return "".join(parts)
+
+
+def _twitch_vod_url(vod_id: str, offset_seconds: int | None = None) -> str:
+    url = f"https://www.twitch.tv/videos/{vod_id}"
+    if offset_seconds and int(offset_seconds) > 0:
+        url += f"?t={_format_vod_timestamp(int(offset_seconds))}"
+    return url
+
+
+def _vod_offset_seconds(stream: dict | None) -> int:
+    if not stream:
+        return 0
+    raw = str(stream.get("started_at") or "").strip()
+    if not raw:
+        return 0
+    if "T" not in raw and " " in raw:
+        raw = raw.replace(" ", "T", 1)
+    try:
+        started = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return max(0, int((datetime.now(timezone.utc) - started.astimezone(timezone.utc)).total_seconds()))
+
+
+def _vod_id_from_videos(videos: list[dict], stream_id: str) -> str:
+    sid = str(stream_id or "").strip()
+    if not sid:
+        return ""
+    for video in videos:
+        if str(video.get("stream_id") or "") == sid:
+            return str(video.get("id") or "")
+    return ""
+
+
+def _alert_history_item_url(item: AlertHistoryEntry) -> str:
+    vod_id = (item.vod_id or "").strip()
+    if vod_id:
+        offset = item.vod_offset_seconds if item.alert_type == "category" else None
+        return _twitch_vod_url(vod_id, offset)
+    login = (item.twitch_username or "").strip().lstrip("@")
+    if login and login != "—":
+        return _alert_history_stream_url(login)
+    return ""
+
+
+def _format_alert_history_block(
+    *,
+    time_str: str,
+    username: str,
+    body: str,
+    lang: str,
+    stream_url: str | None = None,
+) -> str:
+    parts = [
+        t(
+            "alert_history_line",
+            lang,
+            time=time_str,
+            username=html.escape(username),
+        )
+    ]
+    parts.append(t("alert_history_body", lang, text=html.escape(body)))
+    login = (username or "").strip().lstrip("@")
+    url = stream_url
+    if url is None:
+        url = _alert_history_stream_url(login) if login and login != "—" else ""
+    if url:
+        label = html.escape(t("alert_history_go_stream", lang))
+        parts.append(f'<a href="{html.escape(url, quote=True)}">{label}</a>')
+    return "\n".join(parts)
+
+
+async def _fill_alert_history_vods(
+    twitch: TwitchClient, db: Database, items: list[AlertHistoryEntry]
+) -> None:
+    missing = [
+        item
+        for item in items
+        if not (item.vod_id or "").strip()
+        and (item.stream_id or "").strip()
+        and (item.twitch_user_id or "").strip()
+    ]
+    if not missing:
+        return
+    user_ids = list(dict.fromkeys(item.twitch_user_id for item in missing))
+
+    async def _fetch(uid: str) -> tuple[str, list[dict]]:
+        try:
+            videos = await asyncio.to_thread(twitch.get_videos_by_user, uid)
+        except Exception:
+            logger.exception("VOD lookup failed for %s", uid)
+            return uid, []
+        return uid, videos
+
+    fetched = await asyncio.gather(*[_fetch(uid) for uid in user_ids])
+    videos_by_user = dict(fetched)
+    for item in missing:
+        vid = _vod_id_from_videos(
+            videos_by_user.get(item.twitch_user_id) or [], item.stream_id
+        )
+        if not vid:
+            continue
+        item.vod_id = vid
+        try:
+            db.set_alert_history_vod_id(item.id, vid)
+        except Exception:
+            logger.exception("Failed to cache VOD id for history %s", item.id)
+
+
 def _parse_alert_sent_at(sent_at: str) -> datetime:
     raw = (sent_at or "").strip()
     if not raw:
@@ -6938,6 +7083,9 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     since = datetime.now(timezone.utc) - timedelta(days=days)
     items = db.list_alert_history(user_id, since=since)
+    twitch = context.application.bot_data.get("twitch")
+    if twitch is not None and items:
+        await _fill_alert_history_vods(twitch, db, items)
     more_kb = (
         None
         if deep
@@ -6975,18 +7123,18 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
             )
             last_day = local.date()
-        parts.append(
-            t(
-                "alert_history_line",
-                lang,
-                time=local.strftime("%H:%M"),
-                username=item.twitch_username,
-            )
-        )
         body = (item.message_text or "").strip()
         if not body:
             body = _alert_history_type_label(item.alert_type, lang)
-        parts.append(t("alert_history_body", lang, text=body))
+        parts.append(
+            _format_alert_history_block(
+                time_str=local.strftime("%H:%M"),
+                username=item.twitch_username,
+                body=body,
+                lang=lang,
+                stream_url=_alert_history_item_url(item),
+            )
+        )
         blocks.append("\n".join(parts))
 
     chunks: list[str] = []
@@ -7006,6 +7154,7 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.effective_message.reply_text(
             chunk,
             reply_markup=kb,
+            parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
 
@@ -7559,7 +7708,15 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     text = _render_sub_template(
         sub, username, game, title, twitch=twitch, stream=stream
     )
-    await _send_notification(context.bot, db, sub, text, alert_type="live")
+    await _send_notification(
+        context.bot,
+        db,
+        sub,
+        text,
+        alert_type="live",
+        stream=stream,
+        stream_id=str(job_data.get("stream_id") or ""),
+    )
 
 
 async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7583,7 +7740,14 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
     if is_on_notify_cooldown(sub):
         return
     text = _render_sub_template(sub, sub.twitch_username, "—", "—", twitch=twitch)
-    await _send_notification(context.bot, db, sub, text, alert_type="end")
+    await _send_notification(
+        context.bot,
+        db,
+        sub,
+        text,
+        alert_type="end",
+        stream_id=str((context.job.data or {}).get("stream_id") or ""),
+    )
 
 
 async def _send_delayed_category_notification(
@@ -7619,7 +7783,17 @@ async def _send_delayed_category_notification(
     text = _render_sub_template(
         sub, username, game, title, twitch=twitch, stream=stream
     )
-    await _send_notification(context.bot, db, sub, text, alert_type="category")
+    job_data = context.job.data or {}
+    await _send_notification(
+        context.bot,
+        db,
+        sub,
+        text,
+        alert_type="category",
+        stream=stream,
+        stream_id=str(job_data.get("stream_id") or ""),
+        vod_offset_seconds=job_data.get("vod_offset_seconds"),
+    )
 
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7627,6 +7801,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     twitch: TwitchClient = context.application.bot_data["twitch"]
     last_live: dict[str, bool] = context.application.bot_data.setdefault("last_live", {})
     last_games: dict[str, str] = context.application.bot_data.setdefault("last_games", {})
+    last_stream_ids: dict[str, str] = context.application.bot_data.setdefault(
+        "last_stream_ids", {}
+    )
     # After restart memory is empty; first successful poll only seeds state so
     # already-live streams are not treated as fresh starts.
     primed = bool(context.application.bot_data.get("last_live_primed"))
@@ -7647,6 +7824,11 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     category_changed = category_change_events(
         last_games, user_ids, live_streams, primed=primed
     )
+    offline_stream_ids = {uid: last_stream_ids.get(uid, "") for uid in went_offline}
+    for uid, stream in live_streams.items():
+        sid = str(stream.get("id") or "")
+        if sid:
+            last_stream_ids[uid] = sid
     context.application.bot_data["last_live_primed"] = True
 
     for uid in went_live:
@@ -7654,6 +7836,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         username = stream.get("user_login", stream.get("user_name", ""))
         game = stream.get("game_name", "")
         title = stream.get("title", "")
+        stream_id = str(stream.get("id") or "")
         for sub in db.get_enabled_by_twitch_user_id(uid):
             if not sub.notify_on_live:
                 continue
@@ -7665,7 +7848,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context.job_queue.run_once(
                     _send_delayed_notification,
                     when=sub.delay_minutes * 60,
-                    data={"sub_id": sub.id},
+                    data={"sub_id": sub.id, "stream_id": stream_id},
                     name=f"delay_{sub.id}",
                 )
                 continue
@@ -7674,16 +7857,23 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context.job_queue.run_once(
                     _send_delayed_notification,
                     when=LIVE_GAME_RECHECK_SECONDS,
-                    data={"sub_id": sub.id, "silent_offline": True},
+                    data={
+                        "sub_id": sub.id,
+                        "silent_offline": True,
+                        "stream_id": stream_id,
+                    },
                     name=f"live_game_{sub.id}",
                 )
                 continue
             text = _render_sub_template(
                 sub, username, game, title, twitch=twitch, stream=stream
             )
-            await _send_notification(context.bot, db, sub, text, alert_type="live")
+            await _send_notification(
+                context.bot, db, sub, text, alert_type="live", stream=stream
+            )
 
     for uid in went_offline:
+        stream_id = offline_stream_ids.get(uid, "")
         for sub in db.get_enabled_by_twitch_user_id(uid):
             if not sub.notify_on_end:
                 continue
@@ -7693,20 +7883,29 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context.job_queue.run_once(
                     _send_delayed_end_notification,
                     when=sub.delay_minutes * 60,
-                    data={"sub_id": sub.id},
+                    data={"sub_id": sub.id, "stream_id": stream_id},
                     name=f"delay_end_{sub.id}",
                 )
                 continue
             text = _render_sub_template(
                 sub, sub.twitch_username, "—", "—", twitch=twitch
             )
-            await _send_notification(context.bot, db, sub, text, alert_type="end")
+            await _send_notification(
+                context.bot,
+                db,
+                sub,
+                text,
+                alert_type="end",
+                stream_id=stream_id,
+            )
 
     for uid in category_changed:
         stream = live_streams[uid]
         username = stream.get("user_login", stream.get("user_name", ""))
         game = stream.get("game_name", "")
         title = stream.get("title", "")
+        stream_id = str(stream.get("id") or "")
+        cat_offset = _vod_offset_seconds(stream)
         for sub in db.get_enabled_by_twitch_user_id(uid):
             if not sub.notify_on_category_change:
                 continue
@@ -7719,7 +7918,11 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context.job_queue.run_once(
                     _send_delayed_category_notification,
                     when=sub.delay_minutes * 60,
-                    data={"sub_id": sub.id},
+                    data={
+                        "sub_id": sub.id,
+                        "stream_id": stream_id,
+                        "vod_offset_seconds": cat_offset,
+                    },
                     name=f"delay_cat_{sub.id}_{game_id}",
                 )
                 continue
@@ -7727,7 +7930,13 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 sub, username, game, title, twitch=twitch, stream=stream
             )
             await _send_notification(
-                context.bot, db, sub, text, alert_type="category"
+                context.bot,
+                db,
+                sub,
+                text,
+                alert_type="category",
+                stream=stream,
+                vod_offset_seconds=cat_offset,
             )
 
 

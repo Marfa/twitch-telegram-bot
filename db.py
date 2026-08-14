@@ -184,6 +184,10 @@ class AlertHistoryEntry:
     alert_type: str
     message_text: str
     sent_at: str
+    twitch_user_id: str = ""
+    stream_id: str = ""
+    vod_id: str = ""
+    vod_offset_seconds: int | None = None
 
 
 @dataclass
@@ -427,6 +431,9 @@ def _row_to_alert_history(row: Any) -> AlertHistoryEntry:
     message_text = ""
     if "message_text" in keys and row["message_text"] is not None:
         message_text = str(row["message_text"])
+    offset = None
+    if "vod_offset_seconds" in keys and row["vod_offset_seconds"] is not None:
+        offset = int(row["vod_offset_seconds"])
     return AlertHistoryEntry(
         id=int(row["id"]),
         owner_id=int(row["owner_id"]),
@@ -435,6 +442,10 @@ def _row_to_alert_history(row: Any) -> AlertHistoryEntry:
         alert_type=str(row["alert_type"] or ""),
         message_text=message_text,
         sent_at=str(sent or ""),
+        twitch_user_id=str(row["twitch_user_id"] or "") if "twitch_user_id" in keys else "",
+        stream_id=str(row["stream_id"] or "") if "stream_id" in keys else "",
+        vod_id=str(row["vod_id"] or "") if "vod_id" in keys else "",
+        vod_offset_seconds=offset,
     )
 
 
@@ -643,7 +654,13 @@ class Database(Protocol):
         twitch_username: str,
         alert_type: str,
         message_text: str = "",
+        twitch_user_id: str = "",
+        stream_id: str = "",
+        vod_id: str = "",
+        vod_offset_seconds: int | None = None,
     ) -> None: ...
+
+    def set_alert_history_vod_id(self, history_id: int, vod_id: str) -> None: ...
 
     def list_alert_history(
         self,
@@ -1134,6 +1151,10 @@ class SqliteDatabase:
                 twitch_username TEXT NOT NULL,
                 alert_type TEXT NOT NULL,
                 message_text TEXT NOT NULL DEFAULT '',
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                stream_id TEXT NOT NULL DEFAULT '',
+                vod_id TEXT NOT NULL DEFAULT '',
+                vod_offset_seconds INTEGER,
                 sent_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
@@ -1143,6 +1164,20 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE alert_history ADD COLUMN message_text TEXT NOT NULL DEFAULT ''"
             )
+        if "twitch_user_id" not in ah_cols:
+            conn.execute(
+                "ALTER TABLE alert_history ADD COLUMN twitch_user_id TEXT NOT NULL DEFAULT ''"
+            )
+        if "stream_id" not in ah_cols:
+            conn.execute(
+                "ALTER TABLE alert_history ADD COLUMN stream_id TEXT NOT NULL DEFAULT ''"
+            )
+        if "vod_id" not in ah_cols:
+            conn.execute(
+                "ALTER TABLE alert_history ADD COLUMN vod_id TEXT NOT NULL DEFAULT ''"
+            )
+        if "vod_offset_seconds" not in ah_cols:
+            conn.execute("ALTER TABLE alert_history ADD COLUMN vod_offset_seconds INTEGER")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
@@ -1661,6 +1696,10 @@ class SqliteDatabase:
         twitch_username: str,
         alert_type: str,
         message_text: str = "",
+        twitch_user_id: str = "",
+        stream_id: str = "",
+        vod_id: str = "",
+        vod_offset_seconds: int | None = None,
     ) -> None:
         from premium import ALERT_HISTORY_PREMIUM_DAYS
 
@@ -1674,8 +1713,9 @@ class SqliteDatabase:
             conn.execute(
                 """
                 INSERT INTO alert_history (
-                    owner_id, subscription_id, twitch_username, alert_type, message_text
-                ) VALUES (?, ?, ?, ?, ?)
+                    owner_id, subscription_id, twitch_username, alert_type, message_text,
+                    twitch_user_id, stream_id, vod_id, vod_offset_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1683,6 +1723,10 @@ class SqliteDatabase:
                     (twitch_username or "").strip() or "—",
                     (alert_type or "").strip() or "live",
                     body,
+                    (twitch_user_id or "").strip(),
+                    (stream_id or "").strip(),
+                    (vod_id or "").strip(),
+                    vod_offset_seconds,
                 ),
             )
             conn.execute(
@@ -1691,6 +1735,16 @@ class SqliteDatabase:
                 WHERE owner_id = ? AND sent_at < ?
                 """,
                 (owner_id, cutoff),
+            )
+
+    def set_alert_history_vod_id(self, history_id: int, vod_id: str) -> None:
+        vid = (vod_id or "").strip()
+        if not vid:
+            return
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE alert_history SET vod_id = ? WHERE id = ?",
+                (vid, int(history_id)),
             )
 
     def list_alert_history(
@@ -1708,7 +1762,8 @@ class SqliteDatabase:
                 rows = conn.execute(
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
-                           alert_type, message_text, sent_at
+                           alert_type, message_text, sent_at,
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
                     FROM alert_history
                     WHERE owner_id = ? AND sent_at >= ?
                     ORDER BY id DESC
@@ -1720,7 +1775,8 @@ class SqliteDatabase:
                 rows = conn.execute(
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
-                           alert_type, message_text, sent_at
+                           alert_type, message_text, sent_at,
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
                     FROM alert_history
                     WHERE owner_id = ?
                     ORDER BY id DESC
@@ -3114,6 +3170,10 @@ class PostgresDatabase:
                     twitch_username TEXT NOT NULL,
                     alert_type TEXT NOT NULL,
                     message_text TEXT NOT NULL DEFAULT '',
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    stream_id TEXT NOT NULL DEFAULT '',
+                    vod_id TEXT NOT NULL DEFAULT '',
+                    vod_offset_seconds INTEGER,
                     sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
@@ -3122,6 +3182,30 @@ class PostgresDatabase:
                 """
                 ALTER TABLE alert_history
                 ADD COLUMN IF NOT EXISTS message_text TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE alert_history
+                ADD COLUMN IF NOT EXISTS twitch_user_id TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE alert_history
+                ADD COLUMN IF NOT EXISTS stream_id TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE alert_history
+                ADD COLUMN IF NOT EXISTS vod_id TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE alert_history
+                ADD COLUMN IF NOT EXISTS vod_offset_seconds INTEGER
                 """
             )
             cur.execute(
@@ -3696,6 +3780,10 @@ class PostgresDatabase:
         twitch_username: str,
         alert_type: str,
         message_text: str = "",
+        twitch_user_id: str = "",
+        stream_id: str = "",
+        vod_id: str = "",
+        vod_offset_seconds: int | None = None,
     ) -> None:
         from premium import ALERT_HISTORY_PREMIUM_DAYS
 
@@ -3708,8 +3796,9 @@ class PostgresDatabase:
             cur.execute(
                 """
                 INSERT INTO alert_history (
-                    owner_id, subscription_id, twitch_username, alert_type, message_text
-                ) VALUES (%s, %s, %s, %s, %s)
+                    owner_id, subscription_id, twitch_username, alert_type, message_text,
+                    twitch_user_id, stream_id, vod_id, vod_offset_seconds
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     owner_id,
@@ -3717,6 +3806,10 @@ class PostgresDatabase:
                     (twitch_username or "").strip() or "—",
                     (alert_type or "").strip() or "live",
                     body,
+                    (twitch_user_id or "").strip(),
+                    (stream_id or "").strip(),
+                    (vod_id or "").strip(),
+                    vod_offset_seconds,
                 ),
             )
             cur.execute(
@@ -3725,6 +3818,17 @@ class PostgresDatabase:
                 WHERE owner_id = %s AND sent_at < %s
                 """,
                 (owner_id, cutoff),
+            )
+
+    def set_alert_history_vod_id(self, history_id: int, vod_id: str) -> None:
+        vid = (vod_id or "").strip()
+        if not vid:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE alert_history SET vod_id = %s WHERE id = %s",
+                (vid, int(history_id)),
             )
 
     def list_alert_history(
@@ -3742,7 +3846,8 @@ class PostgresDatabase:
                 cur.execute(
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
-                           alert_type, message_text, sent_at
+                           alert_type, message_text, sent_at,
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
                     FROM alert_history
                     WHERE owner_id = %s AND sent_at >= %s
                     ORDER BY id DESC
@@ -3754,7 +3859,8 @@ class PostgresDatabase:
                 cur.execute(
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
-                           alert_type, message_text, sent_at
+                           alert_type, message_text, sent_at,
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
                     FROM alert_history
                     WHERE owner_id = %s
                     ORDER BY id DESC

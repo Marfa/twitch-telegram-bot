@@ -23,8 +23,11 @@ from twitch import (
 )
 from translate import build_translations, translate_text
 from bot import (
+    _alert_history_item_url,
     _edit_present_types,
+    _format_alert_history_block,
     _format_twitch_status_message,
+    _format_vod_timestamp,
     _help_text,
     _is_link_preview_disabled,
     _message_link,
@@ -33,6 +36,8 @@ from bot import (
     _parse_segment_start,
     _parse_watch_viewers,
     _premium_gate_text,
+    _twitch_vod_url,
+    _vod_id_from_videos,
     import_followed_as_subscriptions,
     live_transitions,
     category_change_events,
@@ -40,6 +45,7 @@ from bot import (
     needs_live_game_recheck,
 )
 from db import (
+    AlertHistoryEntry,
     SqliteDatabase,
     WATCH_MAX_FILTERS,
     WatchPrefs,
@@ -1528,6 +1534,71 @@ def main() -> None:
         assert "alert_history" in FEATURE_IDS
         assert tr("premium_feat_alert_history", "ru")
         assert tr("btn_alert_history_more", "ru") == "Показать больше"
+        assert tr("alert_history_go_stream", "ru") == "Перейти к стриму"
+        assert "<b>📅 " in tr("alert_history_day", "ru", date="пятница, 14 августа")
+        assert _format_vod_timestamp(45) == "45s"
+        assert _format_vod_timestamp(125) == "2m5s"
+        assert _format_vod_timestamp(3723) == "1h2m3s"
+        assert _twitch_vod_url("99") == "https://www.twitch.tv/videos/99"
+        assert _twitch_vod_url("99", 125) == "https://www.twitch.tv/videos/99?t=2m5s"
+        assert _vod_id_from_videos([{"id": "v1", "stream_id": "s1"}], "s1") == "v1"
+        assert _vod_id_from_videos([{"id": "v1", "stream_id": "s1"}], "no") == ""
+        cat_item = AlertHistoryEntry(
+            id=1,
+            owner_id=1,
+            subscription_id=1,
+            twitch_username="frank_sg",
+            alert_type="category",
+            message_text="",
+            sent_at="",
+            vod_id="99",
+            vod_offset_seconds=125,
+        )
+        assert _alert_history_item_url(cat_item) == "https://www.twitch.tv/videos/99?t=2m5s"
+        live_item = AlertHistoryEntry(
+            id=1,
+            owner_id=1,
+            subscription_id=1,
+            twitch_username="frank_sg",
+            alert_type="live",
+            message_text="",
+            sent_at="",
+            vod_id="99",
+            vod_offset_seconds=125,
+        )
+        assert _alert_history_item_url(live_item) == "https://www.twitch.tv/videos/99"
+        hist_block = _format_alert_history_block(
+            time_str="17:00",
+            username="frank_sg",
+            body="Hello <b>x</b>",
+            lang="ru",
+        )
+        assert "• 17:00 — <b>frank_sg</b>" in hist_block
+        assert "Hello &lt;b&gt;x&lt;/b&gt;" in hist_block
+        assert '<a href="https://twitch.tv/frank_sg">Перейти к стриму</a>' in hist_block
+        assert "videos/99?t=2m5s" in _format_alert_history_block(
+            time_str="17:00",
+            username="frank_sg",
+            body="Hi",
+            lang="ru",
+            stream_url="https://www.twitch.tv/videos/99?t=2m5s",
+        )
+        db.add_alert_history(
+            10,
+            subscription_id=9,
+            twitch_username="frank_sg",
+            alert_type="category",
+            message_text="cat",
+            twitch_user_id="uid1",
+            stream_id="sid1",
+            vod_offset_seconds=125,
+        )
+        vod_row = db.list_alert_history(10)[0]
+        assert vod_row.stream_id == "sid1"
+        assert vod_row.twitch_user_id == "uid1"
+        assert vod_row.vod_offset_seconds == 125
+        db.set_alert_history_vod_id(vod_row.id, "99")
+        assert db.list_alert_history(10)[0].vod_id == "99"
         # Reject restores available balance.
         apply_stars_payment(
             db, 20, charge_id="pay3", until_unix=10**12, stars_paid=1000

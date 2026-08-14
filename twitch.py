@@ -121,6 +121,30 @@ class TwitchClient:
                 out[stream["user_id"]] = stream
         return out
 
+    def get_videos_by_user(
+        self,
+        user_id: str,
+        *,
+        video_type: str = "archive",
+        first: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Helix VODs/highlights/uploads for a broadcaster. Max first=100."""
+        uid = (user_id or "").strip()
+        if not uid:
+            return []
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/videos",
+            headers=self._headers(),
+            params={
+                "user_id": uid,
+                "type": video_type,
+                "first": max(1, min(100, int(first))),
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return list(resp.json().get("data") or [])
+
     def get_streams_by_game(
         self,
         game_id: str,
