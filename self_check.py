@@ -1201,6 +1201,11 @@ def main() -> None:
     assert "_wizard(" not in edit_ignore_chunk
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
+    assert "async def orphan_wizard_callback" in bot_src
+    orphan_tail = bot_src.split("async def orphan_wizard_callback", 1)[1]
+    assert "strip_name:" in orphan_tail
+    assert "callback_stale" in orphan_tail
+    assert "group=2" in orphan_tail
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
     assert "editUserStarSubscription" in ptb_edit
     assert "editUserStartSubscription" not in ptb_edit
