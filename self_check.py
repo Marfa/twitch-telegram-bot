@@ -24,6 +24,8 @@ from twitch import (
 from translate import build_translations, translate_text
 from bot import (
     _alert_history_item_url,
+    _alert_history_nav_keyboard,
+    _build_alert_history_chunks,
     _edit_present_types,
     _format_alert_history_block,
     _format_twitch_status_message,
@@ -482,6 +484,8 @@ def main() -> None:
         assert tr("alert_type_upcoming", loc)
         assert tr("alert_type_end", loc)
         assert tr("edit_type_pick", loc)
+        assert tr("list_type_pick", loc)
+        assert tr("delete_type_pick", loc)
         assert tr("alert_type_no_schedule", loc)
         assert tr("alert_note_live", loc, twitch_username="x")
         assert tr("alert_note_category", loc, twitch_username="x")
@@ -1609,6 +1613,38 @@ def main() -> None:
             lang="ru",
             stream_url="https://www.twitch.tv/videos/99?t=2m5s",
         )
+        nav_mid = _alert_history_nav_keyboard("ru", 0, 3, show_more=True)
+        assert nav_mid is not None
+        mid_data = [b.callback_data for row in nav_mid.inline_keyboard for b in row]
+        assert "alert_history:page:1" in mid_data
+        assert "alert_history:more" not in mid_data
+        nav_last = _alert_history_nav_keyboard("ru", 2, 3, show_more=True)
+        last_data = [b.callback_data for row in nav_last.inline_keyboard for b in row]
+        assert "alert_history:more" in last_data
+        assert "alert_history:page:1" in last_data
+        nav_free_one = _alert_history_nav_keyboard("ru", 0, 1, show_more=True)
+        assert nav_free_one is not None
+        assert any(
+            b.callback_data == "alert_history:more"
+            for row in nav_free_one.inline_keyboard
+            for b in row
+        )
+        assert _alert_history_nav_keyboard("ru", 0, 1, show_more=False) is None
+        fat_items = [
+            AlertHistoryEntry(
+                id=i,
+                owner_id=10,
+                subscription_id=1,
+                twitch_username=f"u{i}",
+                alert_type="live",
+                message_text=("x" * 800),
+                sent_at=datetime.now(timezone.utc).isoformat(),
+            )
+            for i in range(12)
+        ]
+        pages = _build_alert_history_chunks(fat_items, "ru", 7)
+        assert len(pages) > 1
+        assert all(len(p) <= 4100 for p in pages)
         db.add_alert_history(
             10,
             subscription_id=9,

@@ -4860,25 +4860,85 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _format_subs_overview_lines(
-    bot, db: Database, owner_id: int, lang: str
+    bot,
+    db: Database,
+    owner_id: int,
+    lang: str,
+    *,
+    subs: list[Subscription] | None = None,
 ) -> tuple[list[str], list[Subscription]]:
-    subs = _subs_for_owner(db, owner_id)
+    if subs is None:
+        subs = _subs_for_owner(db, owner_id)
     lines: list[str] = []
-    for i, sub in enumerate(subs, 1):
+    for sub in subs:
+        sub_num = _owner_sub_number(db, owner_id, sub.id)
         try:
             chat_display = await _resolve_chat_display_name(bot, sub)
             lines.append(
                 _format_sub_line(
                     sub,
                     lang,
-                    i,
+                    sub_num,
                     chat_display=chat_display,
                 )
             )
         except Exception:
             logger.exception("Failed to format subscription %s for list", sub.id)
-            lines.append(f"{'✅' if sub.enabled else '⏸'} #{i} — {sub.twitch_username}")
+            lines.append(
+                f"{'✅' if sub.enabled else '⏸'} #{sub_num} — {sub.twitch_username}"
+            )
     return lines, subs
+
+
+def _subs_toggle_keyboard(
+    db: Database, owner_id: int, lang: str, subs: list[Subscription]
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    _inline_btn_label(
+                        f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
+                        f"#{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
+                    ),
+                    callback_data=f"toggle:{s.id}",
+                )
+            ]
+            for s in subs
+        ]
+    )
+
+
+async def _deliver_subs_list(
+    *,
+    bot,
+    db: Database,
+    owner_id: int,
+    lang: str,
+    subs: list[Subscription],
+    reply_message,
+    query=None,
+) -> None:
+    lines, _ = await _format_subs_overview_lines(
+        bot, db, owner_id, lang, subs=subs
+    )
+    keyboard = _subs_toggle_keyboard(db, owner_id, lang, subs)
+    text = t("subs_list", lang) + "\n".join(lines)
+    chunks = _split_telegram_text(text)
+    for index, chunk in enumerate(chunks):
+        markup = keyboard if index == len(chunks) - 1 else None
+        try:
+            if query is not None and index == 0:
+                await query.edit_message_text(chunk, reply_markup=markup)
+            else:
+                await reply_message.reply_text(chunk, reply_markup=markup)
+        except BadRequest:
+            logger.exception("Failed to send subscriptions list chunk to %s", owner_id)
+            if markup is not None:
+                await reply_message.reply_text(
+                    t("subs_list", lang).strip() or "—",
+                    reply_markup=markup,
+                )
 
 
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4886,7 +4946,7 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    lines, subs = await _format_subs_overview_lines(context.bot, db, user_id, lang)
+    subs = _subs_for_owner(db, user_id)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs", lang),
@@ -4894,36 +4954,50 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    _inline_btn_label(
-                        f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
-                        f"#{i} {s.twitch_username}"
-                    ),
-                    callback_data=f"toggle:{s.id}",
-                )
-            ]
-            for i, s in enumerate(subs, 1)
-        ]
-    )
-    text = t("subs_list", lang) + "\n".join(lines)
-    chunks = _split_telegram_text(text)
-    for index, chunk in enumerate(chunks):
-        markup = keyboard if index == len(chunks) - 1 else None
-        try:
-            await update.effective_message.reply_text(chunk, reply_markup=markup)
-        except BadRequest:
-            logger.exception("Failed to send subscriptions list chunk to %s", user_id)
-            if markup is not None:
-                await update.effective_message.reply_text(
-                    t("subs_list", lang).strip() or "—",
-                    reply_markup=markup,
-                )
+    types = _edit_present_types(subs)
+    if len(types) > 1:
+        await update.effective_message.reply_text(
+            t("list_type_pick", lang),
+            reply_markup=_alert_type_pick_keyboard(lang, types, "list_type"),
+        )
+    else:
+        await _deliver_subs_list(
+            bot=context.bot,
+            db=db,
+            owner_id=user_id,
+            lang=lang,
+            subs=subs,
+            reply_message=update.effective_message,
+        )
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=subscriptions_menu(lang),
+    )
+
+
+async def on_list_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    kind = query.data.split(":", 1)[1]
+    if kind not in _EDIT_ALERT_TYPE_ORDER:
+        return
+    db: Database = context.application.bot_data["db"]
+    filtered = [
+        s for s in _subs_for_owner(db, user_id) if _alert_type_from_sub(s) == kind
+    ]
+    if not filtered:
+        await query.edit_message_text(t("no_subs_short", lang))
+        return
+    await _deliver_subs_list(
+        bot=context.bot,
+        db=db,
+        owner_id=user_id,
+        lang=lang,
+        subs=filtered,
+        reply_message=query.message,
+        query=query,
     )
 
 
@@ -4935,18 +5009,24 @@ def _edit_present_types(subs: list[Subscription]) -> list[str]:
     return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind in present]
 
 
-def _edit_type_keyboard(lang: str, types: list[str]) -> InlineKeyboardMarkup:
+def _alert_type_pick_keyboard(
+    lang: str, types: list[str], prefix: str
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     t(f"alert_type_{kind}", lang),
-                    callback_data=f"edit_type:{kind}",
+                    callback_data=f"{prefix}:{kind}",
                 )
             ]
             for kind in types
         ]
     )
+
+
+def _edit_type_keyboard(lang: str, types: list[str]) -> InlineKeyboardMarkup:
+    return _alert_type_pick_keyboard(lang, types, "edit_type")
 
 
 def _edit_pick_keyboard(
@@ -5895,26 +5975,71 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
     context.user_data["delete_selected"] = set()
-    await update.effective_message.reply_text(
-        t("delete_pick", lang),
-        reply_markup=_delete_pick_keyboard(lang, subs, set()),
-    )
+    types = _edit_present_types(subs)
+    if len(types) > 1:
+        await update.effective_message.reply_text(
+            t("delete_type_pick", lang),
+            reply_markup=_alert_type_pick_keyboard(lang, types, "delete_type"),
+        )
+    else:
+        await update.effective_message.reply_text(
+            t("delete_pick", lang),
+            reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, set()),
+        )
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=subscriptions_menu(lang),
     )
 
 
+async def on_delete_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    kind = query.data.split(":", 1)[1]
+    if kind not in _EDIT_ALERT_TYPE_ORDER:
+        return
+    db: Database = context.application.bot_data["db"]
+    filtered = [
+        s for s in _subs_for_owner(db, user_id) if _alert_type_from_sub(s) == kind
+    ]
+    if not filtered:
+        await query.edit_message_text(t("no_subs_short", lang))
+        return
+    context.user_data["delete_selected"] = set()
+    context.user_data["delete_type"] = kind
+    await query.edit_message_text(
+        t("delete_pick", lang),
+        reply_markup=_delete_pick_keyboard(db, user_id, lang, filtered, set()),
+    )
+
+
+def _delete_subs_for_owner(
+    db: Database, owner_id: int, context: ContextTypes.DEFAULT_TYPE
+) -> list[Subscription]:
+    subs = _subs_for_owner(db, owner_id)
+    kind = context.user_data.get("delete_type")
+    if kind in _EDIT_ALERT_TYPE_ORDER:
+        return [s for s in subs if _alert_type_from_sub(s) == kind]
+    return subs
+
+
 def _delete_pick_keyboard(
-    lang: str, subs: list[Subscription], selected: set[int]
+    db: Database,
+    owner_id: int,
+    lang: str,
+    subs: list[Subscription],
+    selected: set[int],
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for i, s in enumerate(subs, 1):
+    for s in subs:
         mark = "✅ " if s.id in selected else ""
+        num = _owner_sub_number(db, owner_id, s.id)
         rows.append(
             [
                 InlineKeyboardButton(
-                    f"{mark}🗑 #{i} {s.twitch_username}",
+                    f"{mark}🗑 #{num} {s.twitch_username}",
                     callback_data=f"delete_sel:{s.id}",
                 )
             ]
@@ -5946,9 +6071,9 @@ async def on_delete_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         selected.add(sub_id)
     db: Database = context.application.bot_data["db"]
-    subs = _subs_for_owner(db, user_id)
+    subs = _delete_subs_for_owner(db, user_id, context)
     await query.edit_message_reply_markup(
-        reply_markup=_delete_pick_keyboard(lang, subs, selected)
+        reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, selected)
     )
 
 
@@ -5959,9 +6084,9 @@ async def on_delete_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     lang = _user_lang(context, user_id)
     context.user_data["delete_selected"] = set()
     db: Database = context.application.bot_data["db"]
-    subs = _subs_for_owner(db, user_id)
+    subs = _delete_subs_for_owner(db, user_id, context)
     await query.edit_message_reply_markup(
-        reply_markup=_delete_pick_keyboard(lang, subs, set())
+        reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, set())
     )
 
 
@@ -5983,6 +6108,7 @@ async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if db.delete_subscription(sub_id, user_id):
             deleted += 1
     context.user_data["delete_selected"] = set()
+    context.user_data.pop("delete_type", None)
     await query.edit_message_text(t("subs_deleted", lang, count=deleted))
 
 
@@ -7069,42 +7195,11 @@ def _parse_alert_sent_at(sent_at: str) -> datetime:
     return dt
 
 
-async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
-    deep = await prem.has_feature(context.bot, db, user_id, "alert_history")
-    days = (
-        prem.ALERT_HISTORY_PREMIUM_DAYS if deep else prem.ALERT_HISTORY_FREE_DAYS
-    )
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-    items = db.list_alert_history(user_id, since=since)
-    twitch = context.application.bot_data.get("twitch")
-    if twitch is not None and items:
-        await _fill_alert_history_vods(twitch, db, items)
-    more_kb = (
-        None
-        if deep
-        else InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        btn("alert_history_more", lang),
-                        callback_data="alert_history:more",
-                    )
-                ]
-            ]
-        )
-    )
-    if not items:
-        await update.effective_message.reply_text(
-            t("alert_history_empty", lang),
-            reply_markup=more_kb,
-            disable_web_page_preview=True,
-        )
-        return
-
+def _build_alert_history_chunks(
+    items: list,
+    lang: str,
+    days: int,
+) -> list[str]:
     title = t("alert_history_title", lang, days=days, n=len(items))
     blocks: list[str] = []
     last_day: date | None = None
@@ -7145,15 +7240,147 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
             buf = candidate if len(candidate) <= 4000 else candidate[:3990].rstrip() + "\n…"
     if buf:
         chunks.append(buf)
+    return chunks
 
-    for i, chunk in enumerate(chunks):
-        kb = more_kb if i == len(chunks) - 1 else None
+
+def _alert_history_nav_keyboard(
+    lang: str, page: int, total: int, *, show_more: bool
+) -> InlineKeyboardMarkup | None:
+    rows: list[list[InlineKeyboardButton]] = []
+    if total > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton(
+                    "‹",
+                    callback_data=f"alert_history:page:{page - 1}",
+                )
+            )
+        nav.append(
+            InlineKeyboardButton(
+                f"{page + 1}/{total}",
+                callback_data="alert_history:noop",
+            )
+        )
+        if page < total - 1:
+            nav.append(
+                InlineKeyboardButton(
+                    "›",
+                    callback_data=f"alert_history:page:{page + 1}",
+                )
+            )
+        rows.append(nav)
+    if show_more and page >= total - 1:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("alert_history_more", lang),
+                    callback_data="alert_history:more",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    deep = await prem.has_feature(context.bot, db, user_id, "alert_history")
+    days = (
+        prem.ALERT_HISTORY_PREMIUM_DAYS if deep else prem.ALERT_HISTORY_FREE_DAYS
+    )
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    items = db.list_alert_history(user_id, since=since)
+    twitch = context.application.bot_data.get("twitch")
+    if twitch is not None and items:
+        await _fill_alert_history_vods(twitch, db, items)
+
+    if not items:
+        more_kb = (
+            None
+            if deep
+            else InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            btn("alert_history_more", lang),
+                            callback_data="alert_history:more",
+                        )
+                    ]
+                ]
+            )
+        )
         await update.effective_message.reply_text(
-            chunk,
+            t("alert_history_empty", lang),
+            reply_markup=more_kb,
+            disable_web_page_preview=True,
+        )
+        return
+
+    chunks = _build_alert_history_chunks(items, lang, days)
+    context.user_data["alert_history_pages"] = chunks
+    context.user_data["alert_history_deep"] = deep
+    kb = _alert_history_nav_keyboard(
+        lang, 0, len(chunks), show_more=not deep
+    )
+    await update.effective_message.reply_text(
+        chunks[0],
+        reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+async def on_alert_history_page(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    try:
+        page = int(query.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError, IndexError):
+        return
+    pages = context.user_data.get("alert_history_pages")
+    deep = bool(context.user_data.get("alert_history_deep"))
+    if not isinstance(pages, list) or not pages:
+        db: Database = context.application.bot_data["db"]
+        deep = await prem.has_feature(context.bot, db, user_id, "alert_history")
+        days = (
+            prem.ALERT_HISTORY_PREMIUM_DAYS if deep else prem.ALERT_HISTORY_FREE_DAYS
+        )
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        items = db.list_alert_history(user_id, since=since)
+        if not items:
+            await query.edit_message_text(t("alert_history_empty", lang))
+            return
+        pages = _build_alert_history_chunks(items, lang, days)
+        context.user_data["alert_history_pages"] = pages
+        context.user_data["alert_history_deep"] = deep
+    page = max(0, min(page, len(pages) - 1))
+    kb = _alert_history_nav_keyboard(
+        lang, page, len(pages), show_more=not deep
+    )
+    try:
+        await query.edit_message_text(
+            pages[page],
             reply_markup=kb,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
+    except BadRequest as exc:
+        # Same text/markup (e.g. double tap) — ignore "message is not modified".
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+async def on_alert_history_noop(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    await update.callback_query.answer()
 
 
 async def on_alert_history_more(
@@ -8381,6 +8608,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(
+            on_alert_history_page, pattern=r"^alert_history:page:\d+$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_alert_history_noop, pattern=r"^alert_history:noop$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_alert_history_more, pattern=r"^alert_history:more$"),
         group=0,
     )
@@ -8480,8 +8717,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_delete_type, pattern=r"^delete_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_watch_again, pattern=r"^watch:again$"), group=0)
     app.add_handler(CallbackQueryHandler(schedule_save_token_callback, pattern=r"^sched_save_token:"), group=0)
+    app.add_handler(CallbackQueryHandler(on_list_type, pattern=r"^list_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_type, pattern=r"^edit_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
@@ -8899,7 +9138,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             wake_stuck_on_menu_callback,
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
-                r"delete_sel:|delete_go$|delete_clear$|"
+                r"delete_sel:|delete_go$|delete_clear$|delete_type:|list_type:|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
                 r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
