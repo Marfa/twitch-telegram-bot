@@ -8976,41 +8976,4 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         interval=24 * 3600,
         first=_seconds_until_next_daily_stats(),
     )
-
-    async def orphan_wizard_callback(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        """After restart, mid-wizard inline buttons have no conversation state."""
-        query = update.callback_query
-        if query is None:
-            return
-        user_id = query.from_user.id if query.from_user else 0
-        lang = _user_lang(context, user_id)
-        context.user_data.clear()
-        try:
-            await query.answer(t("callback_stale", lang), show_alert=True)
-        except Exception:
-            return
-        try:
-            await context.bot.send_message(
-                user_id,
-                t("menu_main", lang),
-                reply_markup=_menu(lang, user_id),
-            )
-        except Exception:
-            logger.exception("orphan_wizard_callback notify failed")
-
-    # group=2: only runs if ConversationHandler (group=1) did not handle the update.
-    app.add_handler(
-        CallbackQueryHandler(
-            orphan_wizard_callback,
-            pattern=(
-                r"^(strip_name:|ignore_keywords:|link_preview:|delay_send:|repeat:|"
-                r"image_ask:|image_pos:|delete_old:|delete_sibling:|delete_fail:|"
-                r"template_typo:|lucky:|dest:|sched_live:|alert_type:|"
-                r"premium_gate:|dup:|sched_remind:)"
-            ),
-        ),
-        group=2,
-    )
     return app
