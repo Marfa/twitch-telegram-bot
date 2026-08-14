@@ -1,12 +1,12 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: bot
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: bot
     volumes:
-      - pg-data:/var/lib/postgresql/data
+      - pg-data-18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bot -d bot"]
       interval: 5s
@@ -36,4 +36,4 @@ services:
 
 volumes:
   bot-data:
-  pg-data:
+  pg-data-18:
