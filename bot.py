@@ -5637,23 +5637,34 @@ async def start_edit_ignore_keywords(
     )
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text("✓")
-    await context.bot.send_message(
-        query.from_user.id,
-        t(
-            "edit_ignore_keywords_prompt",
-            lang,
-            sub_id=sub_num,
-            current=current,
-            hint=hint,
-        ),
-        parse_mode=ParseMode.HTML,
-        reply_markup=ignore_keywords_keyboard(
-            lang,
-            as_cancel=has_keywords,
-            use_global=bool(sub.use_global_ignore),
-        ),
+    # ReplyKeyboard first, then swap to inline on the same message so Cancel stays
+    # at the bottom (pulse+delete drops the reply keyboard on many clients).
+    prompt = t(
+        "edit_ignore_keywords_prompt",
+        lang,
+        sub_id=sub_num,
+        current=current,
+        hint=hint,
     )
-    await _pulse_wizard_keyboard(context.bot, query.from_user.id, lang, back=False)
+    inline = ignore_keywords_keyboard(
+        lang,
+        as_cancel=has_keywords,
+        use_global=bool(sub.use_global_ignore),
+    )
+    msg = await context.bot.send_message(
+        query.from_user.id,
+        prompt,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_wizard(lang, back=False),
+    )
+    try:
+        await context.bot.edit_message_reply_markup(
+            chat_id=query.from_user.id,
+            message_id=msg.message_id,
+            reply_markup=inline,
+        )
+    except BadRequest:
+        await context.bot.send_message(query.from_user.id, "·", reply_markup=inline)
     return EDIT_IGNORE_KEYWORDS
 
 

@@ -1191,6 +1191,13 @@ def main() -> None:
     assert "owned|" in bot_src
     # Bot API has no getForumTopic; 404 is mapped to PTB InvalidToken.
     assert "getForumTopic" not in bot_src
+    # Edit ignore-keywords: ReplyKeyboard then swap to inline (pulse+delete drops Cancel).
+    edit_ignore_chunk = bot_src.split("async def start_edit_ignore_keywords", 1)[1].split(
+        "async def receive_edit_ignore_keywords", 1
+    )[0]
+    assert "_wizard(lang, back=False)" in edit_ignore_chunk
+    assert "edit_message_reply_markup" in edit_ignore_chunk
+    assert "_pulse_wizard_keyboard" not in edit_ignore_chunk
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
