@@ -319,6 +319,24 @@ async def _send_invoice_link(
     )
 
 
+def _demo_force_free(user_id: int) -> bool:
+    """Demo shows free Premium UI; purchase checks must match that screen."""
+    return demo_mode.is_active(user_id)
+
+
+def _blocks_plan_purchase(db: Database, user_id: int) -> bool:
+    if _demo_force_free(user_id):
+        return False
+    st = prem.get_status(db, user_id)
+    return st.has_full_plan or st.has_active_features
+
+
+def _blocks_feature_purchase(db: Database, user_id: int) -> bool:
+    if _demo_force_free(user_id):
+        return False
+    return prem.get_status(db, user_id).has_full_plan
+
+
 async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _user_lang
 
@@ -331,16 +349,16 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Feature multi-select toggles
     if data.startswith("premium:feat_toggle:"):
-        await query.answer()
-        st = prem.get_status(db, user_id)
-        if st.has_full_plan:
+        if _blocks_feature_purchase(db, user_id):
             await query.answer(t("premium_plans_blocked", lang), show_alert=True)
             return
+        st = prem.get_status(db, user_id)
         fid = data.split(":", 2)[2]
         owned = set(_owned_features(st))
-        if fid in owned:
+        if fid in owned and not _demo_force_free(user_id):
             await query.answer(t("premium_feat_owned", lang), show_alert=True)
             return
+        await query.answer()
         selected: set[str] = set(context.user_data.get("premium_feat_sel") or [])
         if fid in selected:
             selected.discard(fid)
@@ -351,7 +369,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(
             t("premium_feat_pick", lang, price=prem.stars_feature_price(user_id)),
             reply_markup=premium_features_keyboard(
-                lang, selected, user_id=user_id, owned=owned
+                lang, selected, user_id=user_id, owned=owned if not _demo_force_free(user_id) else set()
             ),
         )
         return
@@ -407,12 +425,11 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if data == "premium:feat_pay":
-        await query.answer()
-        st = prem.get_status(db, user_id)
-        if st.has_full_plan:
+        if _blocks_feature_purchase(db, user_id):
             await query.answer(t("premium_plans_blocked", lang), show_alert=True)
             return
-        owned = set(_owned_features(st))
+        st = prem.get_status(db, user_id)
+        owned = set() if _demo_force_free(user_id) else set(_owned_features(st))
         selected = [
             f
             for f in (context.user_data.get("premium_feat_sel") or [])
@@ -421,6 +438,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not selected:
             await query.answer(t("premium_pay_failed", lang), show_alert=True)
             return
+        await query.answer()
         total = prem.stars_feature_price(user_id) * len(selected)
         await _send_invoice_link(
             query,
@@ -434,13 +452,13 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if data == "premium:features":
-        await query.answer()
-        st = prem.get_status(db, user_id)
-        if st.has_full_plan:
+        if _blocks_feature_purchase(db, user_id):
             await query.answer(t("premium_plans_blocked", lang), show_alert=True)
             return
+        await query.answer()
+        st = prem.get_status(db, user_id)
         context.user_data["premium_feat_sel"] = []
-        owned = set(_owned_features(st))
+        owned = set() if _demo_force_free(user_id) else set(_owned_features(st))
         await query.edit_message_text(
             t("premium_feat_pick", lang, price=prem.stars_feature_price(user_id)),
             reply_markup=premium_features_keyboard(
@@ -449,14 +467,36 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    await query.answer()
     action = data.split(":", 1)[1] if ":" in data else ""
 
     if action in ("month", "year", "life", "pay", "trial", "trial_confirm"):
-        st = prem.get_status(db, user_id)
-        if st.has_full_plan or st.has_active_features:
+        if _blocks_plan_purchase(db, user_id):
             await query.answer(t("premium_plans_blocked", lang), show_alert=True)
             return
+
+    if action == "trial_confirm":
+        ok, reason = prem.start_trial(db, user_id)
+        st = prem.get_status(db, user_id)
+        if ok:
+            await query.answer()
+            await query.edit_message_text(
+                t(
+                    "premium_trial_started",
+                    lang,
+                    until=_fmt_until(st.trial_until),
+                )
+            )
+            return
+        if reason == "active":
+            await query.answer(
+                t("premium_trial_active", lang, until=_fmt_until(st.trial_until)),
+                show_alert=True,
+            )
+            return
+        await query.answer(t("premium_trial_used", lang), show_alert=True)
+        return
+
+    await query.answer()
 
     if action == "trial":
         await query.edit_message_text(
@@ -478,27 +518,6 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 ]
             ),
         )
-        return
-
-    if action == "trial_confirm":
-        ok, reason = prem.start_trial(db, user_id)
-        st = prem.get_status(db, user_id)
-        if ok:
-            await query.edit_message_text(
-                t(
-                    "premium_trial_started",
-                    lang,
-                    until=_fmt_until(st.trial_until),
-                )
-            )
-            return
-        if reason == "active":
-            await query.answer(
-                t("premium_trial_active", lang, until=_fmt_until(st.trial_until)),
-                show_alert=True,
-            )
-            return
-        await query.answer(t("premium_trial_used", lang), show_alert=True)
         return
 
     if action in ("pay", "month"):

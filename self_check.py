@@ -1459,9 +1459,27 @@ def main() -> None:
             assert len(prem_only.inline_keyboard) == 1
             assert prem_only.inline_keyboard[0][0].url == "https://example.com/oferta"
         import demo_mode as dm
+        from premium_handlers import (
+            _blocks_feature_purchase,
+            _blocks_plan_purchase,
+            _demo_force_free,
+        )
 
+        # Stars/full plan blocks real purchases; demo force-free must not.
+        assert _demo_force_free(1) is False
+        assert _blocks_plan_purchase(db, 1) is True
+        assert _blocks_feature_purchase(db, 1) is True
         dm.activate(1)
+        assert _demo_force_free(1) is True
+        assert _blocks_plan_purchase(db, 1) is False
+        assert _blocks_feature_purchase(db, 1) is False
         assert "бесплатный план" in _status_text(db, 1, "ru", force_free=True)
+        dm.deactivate(1)
+        assert _blocks_plan_purchase(db, 1) is True
+        # Free user (no plan) can purchase.
+        db.upsert_user(55)
+        assert _blocks_plan_purchase(db, 55) is False
+        assert _blocks_feature_purchase(db, 55) is False
         dm.deactivate(1)
 
     with tempfile.TemporaryDirectory() as d:
