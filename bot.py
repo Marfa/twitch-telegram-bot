@@ -4287,13 +4287,11 @@ async def _go_watch_categories_prompt(
 async def _go_watch_tags_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_tags_prompt", lang),
         reply_markup=watch_tags_keyboard(lang),
         parse_mode=ParseMode.HTML,
     )
-    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_TAGS)
     return WATCH_TAGS
 
@@ -4301,13 +4299,11 @@ async def _go_watch_tags_prompt(
 async def _go_watch_viewers_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_viewers_prompt", lang),
         reply_markup=watch_viewers_keyboard(lang),
         parse_mode=ParseMode.HTML,
     )
-    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_VIEWERS)
     return WATCH_VIEWERS
 
@@ -4316,12 +4312,10 @@ async def _go_watch_language_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     context.user_data.pop("watch_lang_await_other", None)
-    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_lang_prompt", lang),
         reply_markup=watch_lang_keyboard(lang),
     )
-    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_LANGUAGE)
     return WATCH_LANGUAGE
 
@@ -4329,12 +4323,10 @@ async def _go_watch_language_prompt(
 async def _go_watch_mature_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_mature_prompt", lang),
         reply_markup=watch_mature_keyboard(lang),
     )
-    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_MATURE)
     return WATCH_MATURE
 
@@ -4343,7 +4335,6 @@ async def _go_watch_save_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     prefs = _watch_prefs_from_user_data(context)
-    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t(
             "watch_save_prompt",
@@ -4354,7 +4345,6 @@ async def _go_watch_save_prompt(
         reply_markup=watch_save_keyboard(lang),
         parse_mode=ParseMode.HTML,
     )
-    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_SAVE)
     return WATCH_SAVE
 
@@ -4753,6 +4743,14 @@ async def receive_watch_language_text(
     context.user_data["watch_language"] = code
     context.user_data.pop("watch_lang_await_other", None)
     return await _go_watch_mature_prompt(update, context, lang)
+
+
+async def receive_watch_nav_back(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    return await wizard_back(update, context)
 
 
 async def receive_watch_tags_text(
@@ -9287,6 +9285,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             WATCH_TAGS: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
                 CallbackQueryHandler(
                     receive_watch_tags_callback, pattern=r"^watch_tags:"
                 ),
@@ -9295,6 +9295,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             WATCH_VIEWERS: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
                 CallbackQueryHandler(
                     receive_watch_viewers_callback, pattern=r"^watch_viewers:"
                 ),
@@ -9303,6 +9305,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             WATCH_LANGUAGE: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
                 CallbackQueryHandler(
                     receive_watch_language_callback, pattern=r"^watch_lang:"
                 ),
@@ -9311,6 +9315,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             WATCH_MATURE: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
                 CallbackQueryHandler(
                     receive_watch_mature_callback, pattern=r"^watch_mature:"
                 ),
@@ -9318,6 +9324,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             WATCH_SAVE: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
                 CallbackQueryHandler(
                     receive_watch_save_callback, pattern=r"^watch_save:"
                 ),
