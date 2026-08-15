@@ -301,6 +301,35 @@ def dump_watch_prefs(prefs: WatchPrefs) -> str:
     )
 
 
+def dump_category_watch_prefs(prefs: WatchPrefs) -> str:
+    """Stable JSON for category-watch subscriptions (no random filter id)."""
+    return json.dumps(
+        {
+            "categories": prefs.categories,
+            "min_viewers": prefs.min_viewers,
+            "max_viewers": prefs.max_viewers,
+            "language": prefs.language,
+            "tags": list(prefs.tags),
+            "exclude_mature": prefs.exclude_mature,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def parse_category_watch_prefs(raw: str | None) -> WatchPrefs | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _parse_watch_prefs_dict(data)
+
+
 def dump_watch_filters(filters: list[WatchFilter]) -> str:
     payload = {
         "filters": [
@@ -345,9 +374,17 @@ class Subscription:
     last_message_id: int | None
     last_schedule_reminder_segment_id: str | None
     from_twitch_sync: bool
+    from_watch_suggest: bool
+    category_watch_prefs: str
+    category_watch_live_ids: str
+    category_watch_primed: bool
     delete_other_alerts: bool
     is_demo: bool
     trial_paused: bool
+
+
+def is_category_watch_sub(sub: Subscription) -> bool:
+    return bool((sub.category_watch_prefs or "").strip())
 
 
 @dataclass
@@ -508,6 +545,18 @@ def _row_to_sub(row: Any) -> Subscription:
         from_twitch_sync=bool(row["from_twitch_sync"])
         if "from_twitch_sync" in keys
         else False,
+        from_watch_suggest=bool(row["from_watch_suggest"])
+        if "from_watch_suggest" in keys
+        else False,
+        category_watch_prefs=str(row["category_watch_prefs"] or "")
+        if "category_watch_prefs" in keys
+        else "",
+        category_watch_live_ids=str(row["category_watch_live_ids"] or "")
+        if "category_watch_live_ids" in keys
+        else "",
+        category_watch_primed=bool(row["category_watch_primed"])
+        if "category_watch_primed" in keys
+        else False,
         delete_other_alerts=bool(row["delete_other_alerts"])
         if "delete_other_alerts" in keys
         else False,
@@ -571,6 +620,8 @@ class Database(Protocol):
         image_position: str = "",
         enabled: bool = True,
         from_twitch_sync: bool = False,
+        from_watch_suggest: bool = False,
+        category_watch_prefs: str = "",
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
@@ -609,6 +660,12 @@ class Database(Protocol):
     def set_user_locale(self, user_id: int, locale: str) -> None: ...
 
     def get_unique_twitch_user_ids(self) -> list[str]: ...
+
+    def get_enabled_category_watch_subscriptions(self) -> list[Subscription]: ...
+
+    def set_category_watch_live_state(
+        self, sub_id: int, live_ids: list[str], *, primed: bool
+    ) -> None: ...
 
     def get_enabled_by_twitch_user_id(self, twitch_user_id: str) -> list[Subscription]: ...
 
@@ -953,6 +1010,22 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN from_twitch_sync INTEGER NOT NULL DEFAULT 0"
             )
+        if "from_watch_suggest" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN from_watch_suggest INTEGER NOT NULL DEFAULT 0"
+            )
+        if "category_watch_prefs" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN category_watch_prefs TEXT NOT NULL DEFAULT ''"
+            )
+        if "category_watch_live_ids" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN category_watch_live_ids TEXT NOT NULL DEFAULT ''"
+            )
+        if "category_watch_primed" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN category_watch_primed INTEGER NOT NULL DEFAULT 0"
+            )
         if "schedule_reminder_minutes" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN schedule_reminder_minutes "
@@ -1216,6 +1289,8 @@ class SqliteDatabase:
         image_position: str = "",
         enabled: bool = True,
         from_twitch_sync: bool = False,
+        from_watch_suggest: bool = False,
+        category_watch_prefs: str = "",
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
@@ -1233,9 +1308,10 @@ class SqliteDatabase:
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
+                    from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1259,6 +1335,8 @@ class SqliteDatabase:
                     (image_position or "") if image_file_id else "",
                     int(enabled),
                     int(from_twitch_sync),
+                    int(bool(from_watch_suggest)),
+                    str(category_watch_prefs or ""),
                     int(bool(notify_on_live)),
                     int(bool(notify_on_end)),
                     int(bool(notify_on_category_change)),
@@ -1455,7 +1533,10 @@ class SqliteDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = 1 AND (
+                WHERE enabled = 1
+                  AND COALESCE(category_watch_prefs, '') = ''
+                  AND twitch_user_id NOT LIKE 'cw:%'
+                  AND (
                     notify_on_live = 1
                     OR notify_on_end = 1
                     OR notify_on_category_change = 1
@@ -1463,6 +1544,33 @@ class SqliteDatabase:
                 """
             ).fetchall()
         return [r["twitch_user_id"] for r in rows]
+
+    def get_enabled_category_watch_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE enabled = 1
+                  AND notify_on_live = 1
+                  AND COALESCE(category_watch_prefs, '') != ''
+                ORDER BY id
+                """
+            ).fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def set_category_watch_live_state(
+        self, sub_id: int, live_ids: list[str], *, primed: bool
+    ) -> None:
+        payload = json.dumps(list(live_ids), ensure_ascii=False)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET category_watch_live_ids = ?, category_watch_primed = ?
+                WHERE id = ?
+                """,
+                (payload, int(bool(primed)), sub_id),
+            )
 
     def get_unique_schedule_reminder_twitch_ids(self) -> list[str]:
         with self._conn() as conn:
@@ -2962,6 +3070,30 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS from_watch_suggest BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS category_watch_prefs TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS category_watch_live_ids TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS category_watch_primed BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS schedule_reminder_minutes INTEGER NOT NULL DEFAULT 0
                 """
             )
@@ -3287,6 +3419,8 @@ class PostgresDatabase:
         image_position: str = "",
         enabled: bool = True,
         from_twitch_sync: bool = False,
+        from_watch_suggest: bool = False,
+        category_watch_prefs: str = "",
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
@@ -3305,9 +3439,10 @@ class PostgresDatabase:
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
+                    from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -3332,6 +3467,8 @@ class PostgresDatabase:
                     (image_position or "") if image_file_id else "",
                     enabled,
                     from_twitch_sync,
+                    bool(from_watch_suggest),
+                    str(category_watch_prefs or ""),
                     bool(notify_on_live),
                     bool(notify_on_end),
                     bool(notify_on_category_change),
@@ -3548,7 +3685,10 @@ class PostgresDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = TRUE AND (
+                WHERE enabled = TRUE
+                  AND COALESCE(category_watch_prefs, '') = ''
+                  AND twitch_user_id NOT LIKE 'cw:%'
+                  AND (
                     notify_on_live = TRUE
                     OR notify_on_end = TRUE
                     OR notify_on_category_change = TRUE
@@ -3557,6 +3697,36 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return [r["twitch_user_id"] for r in rows]
+
+    def get_enabled_category_watch_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE enabled = TRUE
+                  AND notify_on_live = TRUE
+                  AND COALESCE(category_watch_prefs, '') != ''
+                ORDER BY id
+                """
+            )
+            rows = cur.fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def set_category_watch_live_state(
+        self, sub_id: int, live_ids: list[str], *, primed: bool
+    ) -> None:
+        payload = json.dumps(list(live_ids), ensure_ascii=False)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE subscriptions
+                SET category_watch_live_ids = %s, category_watch_primed = %s
+                WHERE id = %s
+                """,
+                (payload, bool(primed), sub_id),
+            )
 
     def get_unique_schedule_reminder_twitch_ids(self) -> list[str]:
         with self._conn() as conn:

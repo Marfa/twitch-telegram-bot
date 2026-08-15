@@ -147,9 +147,37 @@ _STRINGS: dict[str, dict[str, str]] = {
             "No live streams match your filters right now.\n"
             "Try again later or change preferences."
         ),
+        "watch_suggest_vod_header": (
+            "No one is live right now. Recent VODs for your filters:"
+        ),
+        "watch_suggest_vod_item": (
+            "{n}. <b>{display}</b> (@{login})\n"
+            "{title}\n"
+            "🎮 {game} · ⏱ {duration}\n"
+            "{url}"
+        ),
         "watch_suggest_error": "Could not fetch streams from Twitch. Try again later.",
         "watch_again": "Suggest again",
         "watch_change": "Filters / new search",
+        "watch_create_alerts": "Watch new streams by this filter?",
+        "watch_create_alerts_ok": (
+            "Category alert created: <b>{name}</b>\n\n"
+            "{summary}{paused_note}\n\n"
+            "I'll notify you when new streams matching the filter go live."
+        ),
+        "watch_create_alerts_none": (
+            "No filter to watch. Run «What to watch?» again first."
+        ),
+        "watch_create_alerts_dup": (
+            "You already have a stream-start alert for this filter."
+        ),
+        "watch_create_alerts_paused_note": (
+            "\n\nAlert created paused (free active limit: {free_limit})."
+        ),
+        "edit_watch_locked": (
+            "This alert watches streams by category/filter and uses default settings.\n"
+            "It cannot be edited — only deleted (Manage subscriptions → Delete)."
+        ),
         "watch_prefs_summary": (
             "Filters: {cats}\n"
             "Viewers: {viewers}\n"
@@ -1251,9 +1279,37 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Сейчас нет стримов по вашим фильтрам.\n"
             "Попробуйте позже или измените настройки."
         ),
+        "watch_suggest_vod_header": (
+            "Сейчас никто не в эфире. Недавние VOD по вашим фильтрам:"
+        ),
+        "watch_suggest_vod_item": (
+            "{n}. <b>{display}</b> (@{login})\n"
+            "{title}\n"
+            "🎮 {game} · ⏱ {duration}\n"
+            "{url}"
+        ),
         "watch_suggest_error": "Не удалось получить стримы с Twitch. Попробуйте позже.",
         "watch_again": "Ещё варианты",
         "watch_change": "Фильтры / новый поиск",
+        "watch_create_alerts": "Ловить новые стримы по фильтру?",
+        "watch_create_alerts_ok": (
+            "Оповещение по категории создано: <b>{name}</b>\n\n"
+            "{summary}{paused_note}\n\n"
+            "Буду писать, когда появятся новые стримы по этому фильтру."
+        ),
+        "watch_create_alerts_none": (
+            "Нет фильтра для отслеживания. Сначала снова откройте «Что посмотреть?»."
+        ),
+        "watch_create_alerts_dup": (
+            "Оповещение о начале стрима с таким фильтром уже есть."
+        ),
+        "watch_create_alerts_paused_note": (
+            "\n\nОповещение создано на паузе (лимит активных без Premium: {free_limit})."
+        ),
+        "edit_watch_locked": (
+            "Это оповещение ловит стримы по категории/фильтру с настройками по умолчанию.\n"
+            "Редактировать нельзя — только удалить (Управление подписками → Удалить)."
+        ),
         "watch_prefs_summary": (
             "Фильтры: {cats}\n"
             "Зрители: {viewers}\n"
@@ -2479,8 +2535,6 @@ def main_menu(
         ],
         [
             KeyboardButton(btn("settings", lang)),
-        ],
-        [
             KeyboardButton(btn("feedback", lang)),
         ],
     ]
@@ -2524,8 +2578,6 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(btn("partner", lang)),
-            ],
-            [
                 KeyboardButton(btn("back", lang)),
             ],
         ],
@@ -2980,13 +3032,26 @@ def watch_delete_pick_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def watch_suggest_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(t("watch_again", lang), callback_data="watch:again")],
-            [InlineKeyboardButton(t("watch_change", lang), callback_data="watch:change")],
-        ]
+def watch_suggest_keyboard(
+    lang: str, *, offer_create_alerts: bool = False
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if offer_create_alerts:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("watch_create_alerts", lang),
+                    callback_data="watch:create_alerts",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(t("watch_again", lang), callback_data="watch:again")]
     )
+    rows.append(
+        [InlineKeyboardButton(t("watch_change", lang), callback_data="watch:change")]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def dest_keyboard(lang: str) -> InlineKeyboardMarkup:

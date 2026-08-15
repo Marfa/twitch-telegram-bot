@@ -30,6 +30,7 @@ from bot import (
     _format_alert_history_block,
     _format_twitch_status_message,
     _format_vod_timestamp,
+    _format_watch_vod_suggestions,
     _help_text,
     _is_link_preview_disabled,
     _message_link,
@@ -40,6 +41,7 @@ from bot import (
     _premium_gate_text,
     _twitch_vod_url,
     _vod_id_from_videos,
+    _watch_channel_refs,
     import_followed_as_subscriptions,
     live_transitions,
     category_change_events,
@@ -51,10 +53,14 @@ from db import (
     SqliteDatabase,
     WATCH_MAX_FILTERS,
     WatchPrefs,
+    dump_category_watch_prefs,
     dump_watch_filters,
     dump_watch_prefs,
+    is_category_watch_sub,
+    parse_category_watch_prefs,
     parse_watch_filters,
     parse_watch_prefs,
+    watch_filter_auto_name,
     _normalize_pg_url,
     open_database,
 )
@@ -280,10 +286,11 @@ def main() -> None:
     assert tr("stream_schedule_publishing", "en")
     assert tr("stream_schedule_duration_prompt", "ru")
     assert tr("stream_schedule_duration_unsure", "en")
-    from i18n import main_menu, admin_menu, stream_schedule_duration_keyboard
+    from i18n import main_menu, admin_menu, settings_menu, stream_schedule_duration_keyboard, watch_suggest_keyboard
 
     for loc in ("en", "ru"):
-        main_btns = [b.text for row in main_menu(loc).keyboard for b in row]
+        main_kb = main_menu(loc).keyboard
+        main_btns = [b.text for row in main_kb for b in row]
         assert btn("create_schedule", loc) in main_btns
         assert btn("watch", loc) in main_btns
         assert btn("alert_history", loc) in main_btns
@@ -292,6 +299,36 @@ def main() -> None:
         )
         assert main_btns.index(btn("alert_history", loc)) < main_btns.index(
             btn("settings", loc)
+        )
+        settings_feedback_row = next(
+            row
+            for row in main_kb
+            if btn("settings", loc) in [b.text for b in row]
+        )
+        assert [b.text for b in settings_feedback_row] == [
+            btn("settings", loc),
+            btn("feedback", loc),
+        ]
+        settings_kb = settings_menu(loc).keyboard
+        partner_back_row = next(
+            row
+            for row in settings_kb
+            if btn("partner", loc) in [b.text for b in row]
+        )
+        assert [b.text for b in partner_back_row] == [
+            btn("partner", loc),
+            btn("back", loc),
+        ]
+        suggest_kb = watch_suggest_keyboard(loc, offer_create_alerts=True)
+        cbs = [
+            (btn.callback_data or "")
+            for row in suggest_kb.inline_keyboard
+            for btn in row
+        ]
+        assert "watch:create_alerts" in cbs
+        assert "watch:again" in cbs
+        assert watch_suggest_keyboard(loc).inline_keyboard[0][0].callback_data == (
+            "watch:again"
         )
         admin_btns = [b.text for row in admin_menu(loc).keyboard for b in row]
         assert btn("create_schedule", loc) not in admin_btns
@@ -425,6 +462,17 @@ def main() -> None:
     picked = pick_random_streams(streams, 2)
     assert len(picked) == 2
     assert len({s["user_id"] for s in picked}) == 2
+    assert _watch_channel_refs(
+        [
+            {"user_id": "1", "user_login": "Alice"},
+            {"user_id": "1", "user_login": "alice"},
+            {"user_id": "2", "user_login": "bob"},
+            {"user_id": "", "user_login": "x"},
+        ]
+    ) == [
+        {"user_id": "1", "user_login": "alice"},
+        {"user_id": "2", "user_login": "bob"},
+    ]
     prefs = WatchPrefs(
         categories=[{"id": "1", "name": "Just Chatting"}],
         min_viewers=10,
@@ -492,6 +540,21 @@ def main() -> None:
         assert tr("watch_delete_pick", loc)
         assert tr("watch_save_prompt", loc, summary="x", max=5)
         assert tr("watch_suggest_header", loc)
+        assert tr("watch_suggest_vod_header", loc)
+        assert tr(
+            "watch_suggest_vod_item",
+            loc,
+            n=1,
+            display="A",
+            login="a",
+            title="t",
+            game="g",
+            duration="1h",
+            url="https://twitch.tv/videos/1",
+        )
+        assert tr("watch_create_alerts", loc)
+        assert tr("watch_create_alerts_dup", loc)
+        assert tr("edit_watch_locked", loc)
         assert tr("import_mode_prompt", loc)
         assert tr("sync_menu_off", loc)
         assert tr("lucky_btn", loc)
@@ -884,6 +947,38 @@ def main() -> None:
         assert db.get_unique_schedule_reminder_twitch_ids() == [sub.twitch_user_id]
         assert sub.notify_on_live is True
         assert sub.notify_on_end is False
+        assert getattr(sub, "from_watch_suggest", False) is False
+        cw_prefs = WatchPrefs(
+            categories=[{"id": "509658", "name": "Just Chatting"}],
+            min_viewers=0,
+            max_viewers=None,
+            language=None,
+            tags=[],
+            exclude_mature=True,
+        )
+        cw_raw = dump_category_watch_prefs(cw_prefs)
+        assert parse_category_watch_prefs(cw_raw) == cw_prefs
+        watch_sid = db.add_subscription(
+            owner_id=1,
+            twitch_username=watch_filter_auto_name(cw_prefs),
+            twitch_user_id="cw:1:abcd",
+            message_template="hi",
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            from_watch_suggest=True,
+            category_watch_prefs=cw_raw,
+            notify_on_live=True,
+        )
+        watch_sub = db.get_subscription(watch_sid, 1)
+        assert watch_sub is not None
+        assert watch_sub.from_watch_suggest is True
+        assert is_category_watch_sub(watch_sub)
+        assert "cw:1:abcd" not in db.get_unique_twitch_user_ids()
+        assert any(s.id == watch_sid for s in db.get_enabled_category_watch_subscriptions())
+        db.set_category_watch_live_state(watch_sid, ["9"], primed=True)
+        assert db.get_subscription(watch_sid, 1).category_watch_primed is True
+        assert db.delete_subscription(watch_sid, 1)
         assert db.update_subscription(sub_id, 1, notify_on_live=False)
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
@@ -1711,6 +1806,57 @@ def main() -> None:
         assert _twitch_vod_url("99", 125) == "https://www.twitch.tv/videos/99?t=2m5s"
         assert _vod_id_from_videos([{"id": "v1", "stream_id": "s1"}], "s1") == "v1"
         assert _vod_id_from_videos([{"id": "v1", "stream_id": "s1"}], "no") == ""
+        vod_text = _format_watch_vod_suggestions(
+            [
+                {
+                    "id": "99",
+                    "user_login": "alice",
+                    "user_name": "Alice",
+                    "title": "Hi",
+                    "game_name": "Just Chatting",
+                    "duration": "1h2m3s",
+                    "url": "https://www.twitch.tv/videos/99",
+                }
+            ],
+            WatchPrefs(
+                categories=[{"id": "1", "name": "Just Chatting"}],
+                min_viewers=0,
+                max_viewers=None,
+                language=None,
+                tags=[],
+                exclude_mature=False,
+            ),
+            "en",
+        )
+        assert "No one is live" in vod_text
+        assert "https://www.twitch.tv/videos/99" in vod_text
+        assert "twitch.tv/alice" not in vod_text
+        assert "1h2m3s" in vod_text
+        # Without video id — skip item (never fall back to channel URL).
+        no_id = _format_watch_vod_suggestions(
+            [
+                {
+                    "id": "",
+                    "user_login": "alice",
+                    "user_name": "Alice",
+                    "title": "Hi",
+                    "game_name": "Just Chatting",
+                    "duration": "1h",
+                    "url": "https://www.twitch.tv/alice",
+                }
+            ],
+            WatchPrefs(
+                categories=[{"id": "1", "name": "Just Chatting"}],
+                min_viewers=0,
+                max_viewers=None,
+                language=None,
+                tags=[],
+                exclude_mature=False,
+            ),
+            "en",
+        )
+        assert "alice" not in no_id
+        assert "twitch.tv/alice" not in no_id
         cat_item = AlertHistoryEntry(
             id=1,
             owner_id=1,

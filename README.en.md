@@ -23,7 +23,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **Clean title** (checkbox) strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
-| 🎲 What to watch? | Saved filters to pick, new search, multi-select delete like subscriptions; categories → tags → viewers → language → mature |
+| 🎲 What to watch? | Saved filters; live → else VOD; button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); wizard step in **advanced mode** |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; wizard step in **advanced mode** |
@@ -115,7 +115,7 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 
 ### What to watch?
 
-**🎲 What to watch?** — random live streams matching your filters (available to everyone, no Premium).
+**🎲 What to watch?** — random live streams matching your filters (available to everyone, no Premium). If none are live — recent VODs for the same categories.
 
 If you have saved filters, the bot offers:
 
@@ -134,7 +134,15 @@ New search wizard:
 5. Exclude mature or allow
 6. Save filter for later (up to 5) or just this once
 
-After suggestions: **Suggest again** / **Filters / new search**.
+After suggestions (or an empty result):
+
+| Button | Action |
+|---|---|
+| **Watch new streams by this filter?** | Stream-start alert for the current filter (Helix by category); defaults only, delete-only |
+| **Suggest again** | Another random set |
+| **Filters / new search** | Pick again / wizard |
+
+The bot polls live streams by `game_id` and notifies when a **new** matching stream appears.
 
 ### Import from Twitch
 

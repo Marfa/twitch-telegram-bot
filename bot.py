@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import re
+import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from telegram import (
@@ -39,7 +41,11 @@ from db import (
     TwitchSync,
     WATCH_MAX_FILTERS,
     WatchPrefs,
+    dump_category_watch_prefs,
+    is_category_watch_sub,
     is_on_notify_cooldown,
+    parse_category_watch_prefs,
+    watch_filter_auto_name,
 )
 from i18n import (
     DEFAULT_LOCALE,
@@ -213,6 +219,7 @@ _SYNC_PERIOD_MIN = 1
 _SYNC_PERIOD_MAX = 365
 _WATCH_MAX_CATS = 5
 _WATCH_SUGGEST_N = 5
+_WATCH_CATEGORY_NOTIFY_CAP = 5
 _WATCH_MAX_TAGS = 10
 _SCHEDULE_DEFAULT_DURATION_MIN = 120
 
@@ -4108,6 +4115,45 @@ def _format_watch_suggestions(
     return "\n".join(lines).rstrip()
 
 
+def _format_watch_vod_suggestions(
+    videos: list[dict], prefs: WatchPrefs, lang: str
+) -> str:
+    lines = [
+        t("watch_suggest_vod_header", lang),
+        "",
+        _watch_prefs_summary(prefs, lang),
+        "",
+    ]
+    n = 0
+    for v in videos:
+        vid = str(v.get("id") or "").strip().lstrip("v")
+        if not vid:
+            continue
+        n += 1
+        login = html.escape(str(v.get("user_login") or ""))
+        display = html.escape(str(v.get("user_name") or login))
+        title = html.escape(str(v.get("title") or "—"))
+        game = html.escape(str(v.get("game_name") or "—"))
+        duration = html.escape(str(v.get("duration") or "—"))
+        # Always /videos/{id} — never the channel page.
+        url = html.escape(_twitch_vod_url(vid))
+        lines.append(
+            t(
+                "watch_suggest_vod_item",
+                lang,
+                n=n,
+                display=display,
+                login=login,
+                title=title,
+                game=game,
+                duration=duration,
+                url=url,
+            )
+        )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 async def _fetch_watch_suggestions(
     twitch: TwitchClient, prefs: WatchPrefs
 ) -> list[dict]:
@@ -4134,6 +4180,48 @@ async def _fetch_watch_suggestions(
     return pick_random_streams(filtered, _WATCH_SUGGEST_N)
 
 
+async def _fetch_watch_vod_suggestions(
+    twitch: TwitchClient, prefs: WatchPrefs
+) -> list[dict]:
+    """Fallback when no live streams: recent archives by category (+ language)."""
+    pooled: list[dict] = []
+    for cat in prefs.categories:
+        try:
+            batch = await asyncio.to_thread(
+                twitch.get_videos_by_game,
+                cat["id"],
+                language=prefs.language,
+                first=100,
+            )
+        except Exception:
+            logger.exception("watch VOD fetch failed for game_id=%s", cat.get("id"))
+            continue
+        game_name = str(cat.get("name") or "—")
+        for item in batch:
+            vid = str(item.get("id") or "").strip().lstrip("v")
+            if not vid:
+                continue
+            row = dict(item)
+            row["id"] = vid
+            row["game_name"] = game_name
+            pooled.append(row)
+    # Viewers/tags/mature do not map cleanly to Helix videos — category + language only.
+    return pick_random_streams(pooled, _WATCH_SUGGEST_N)
+
+
+def _watch_channel_refs(items: list[dict]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in items:
+        uid = str(item.get("user_id") or "").strip()
+        login = str(item.get("user_login") or "").strip().lower()
+        if not uid or not login or uid in seen:
+            continue
+        seen.add(uid)
+        out.append({"user_id": uid, "user_login": login})
+    return out
+
+
 async def _send_watch_suggestions(
     *,
     bot,
@@ -4151,7 +4239,7 @@ async def _send_watch_suggestions(
     except Exception:
         logger.exception("watch suggestions failed")
         text = t("watch_suggest_error", lang)
-        markup = watch_suggest_keyboard(lang)
+        markup = watch_suggest_keyboard(lang, offer_create_alerts=True)
         if edit_message is not None:
             try:
                 await edit_message.edit_text(text, reply_markup=markup)
@@ -4164,15 +4252,23 @@ async def _send_watch_suggestions(
         await bot.send_message(chat_id, text, reply_markup=markup)
         return
 
-    if not streams:
-        text = (
-            t("watch_suggest_empty", lang)
-            + "\n\n"
-            + _watch_prefs_summary(prefs, lang)
-        )
-    else:
+    if streams:
         text = _format_watch_suggestions(streams, prefs, lang)
-    markup = watch_suggest_keyboard(lang)
+    else:
+        try:
+            vods = await _fetch_watch_vod_suggestions(twitch, prefs)
+        except Exception:
+            logger.exception("watch VOD suggestions failed")
+            vods = []
+        if vods:
+            text = _format_watch_vod_suggestions(vods, prefs, lang)
+        else:
+            text = (
+                t("watch_suggest_empty", lang)
+                + "\n\n"
+                + _watch_prefs_summary(prefs, lang)
+            )
+    markup = watch_suggest_keyboard(lang, offer_create_alerts=True)
     if edit_message is not None:
         try:
             await edit_message.edit_text(
@@ -4420,6 +4516,76 @@ async def on_watch_again(
         prefs=prefs,
         edit_message=query.message,
     )
+
+
+async def on_watch_create_alerts(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    prefs = _resolve_watch_prefs(context, user_id)
+    if not prefs or not prefs.categories:
+        await query.edit_message_text(t("watch_create_alerts_none", lang))
+        return
+
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    db: Database = context.application.bot_data["db"]
+    prefs_json = dump_category_watch_prefs(prefs)
+    existing_subs = _subs_for_owner(db, user_id)
+    for sub in existing_subs:
+        if (sub.category_watch_prefs or "").strip() == prefs_json:
+            await query.edit_message_text(t("watch_create_alerts_dup", lang))
+            return
+    if len(existing_subs) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await query.edit_message_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
+        )
+        return
+
+    enabled = await prem.can_enable_more_async(context.bot, db, user_id)
+    label = watch_filter_auto_name(prefs)
+    db.add_subscription(
+        owner_id=user_id,
+        twitch_username=label,
+        twitch_user_id=f"cw:{user_id}:{secrets.token_hex(4)}",
+        message_template=t("import_default_template", lang),
+        dest_type="dm",
+        chat_id=user_id,
+        thread_id=None,
+        disable_link_preview=True,
+        enabled=enabled,
+        notify_on_live=True,
+        notify_on_end=False,
+        notify_on_category_change=False,
+        from_watch_suggest=True,
+        category_watch_prefs=prefs_json,
+        is_demo=demo_mode.is_active(user_id),
+    )
+    db.upsert_user(user_id)
+    paused_note = ""
+    if not enabled:
+        paused_note = t(
+            "watch_create_alerts_paused_note",
+            lang,
+            paused=1,
+            free_limit=prem.free_active_limit(),
+        )
+    text = t(
+        "watch_create_alerts_ok",
+        lang,
+        name=html.escape(label),
+        summary=_watch_prefs_summary(prefs, lang),
+        paused_note=paused_note,
+    )
+    analytics.capture(
+        user_id,
+        "watch_create_category_alert",
+        {"categories": len(prefs.categories), "enabled": enabled},
+    )
+    await query.edit_message_text(text, parse_mode=ParseMode.HTML)
 
 
 async def receive_watch_pick_callback(
@@ -5765,6 +5931,9 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub or not _sub_in_current_mode(sub, query.from_user.id):
         await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if sub.from_watch_suggest or is_category_watch_sub(sub):
+        await query.edit_message_text(t("edit_watch_locked", lang))
         return
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
@@ -8198,135 +8367,230 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     primed = bool(context.application.bot_data.get("last_live_primed"))
 
     user_ids = db.get_unique_twitch_user_ids()
-    if not user_ids:
+    category_watch_subs = db.get_enabled_category_watch_subscriptions()
+    if not user_ids and not category_watch_subs:
         return
 
+    live_streams: dict[str, dict] = {}
+    if user_ids:
+        try:
+            live_streams = await asyncio.to_thread(twitch.get_live_streams, user_ids)
+        except Exception:
+            logger.exception("Twitch poll failed")
+            live_streams = {}
+        else:
+            went_live, went_offline = live_transitions(
+                last_live, user_ids, live_streams, primed=primed
+            )
+            category_changed = category_change_events(
+                last_games, user_ids, live_streams, primed=primed
+            )
+            offline_stream_ids = {
+                uid: last_stream_ids.get(uid, "") for uid in went_offline
+            }
+            for uid, stream in live_streams.items():
+                sid = str(stream.get("id") or "")
+                if sid:
+                    last_stream_ids[uid] = sid
+            context.application.bot_data["last_live_primed"] = True
+
+            for uid in went_live:
+                stream = live_streams[uid]
+                username = stream.get("user_login", stream.get("user_name", ""))
+                game = stream.get("game_name", "")
+                title = stream.get("title", "")
+                stream_id = str(stream.get("id") or "")
+                for sub in db.get_enabled_by_twitch_user_id(uid):
+                    if is_category_watch_sub(sub):
+                        continue
+                    if not sub.notify_on_live:
+                        continue
+                    if is_on_notify_cooldown(sub):
+                        continue
+                    if should_ignore_stream(
+                        _effective_ignore_keywords(sub, db), game, title
+                    ):
+                        continue
+                    if sub.delay_minutes > 0:
+                        context.job_queue.run_once(
+                            _send_delayed_notification,
+                            when=sub.delay_minutes * 60,
+                            data={"sub_id": sub.id, "stream_id": stream_id},
+                            name=f"delay_{sub.id}",
+                        )
+                        continue
+                    # Helix often returns empty game_name for a few seconds after go-live.
+                    if needs_live_game_recheck(game, sub.delay_minutes):
+                        context.job_queue.run_once(
+                            _send_delayed_notification,
+                            when=LIVE_GAME_RECHECK_SECONDS,
+                            data={
+                                "sub_id": sub.id,
+                                "silent_offline": True,
+                                "stream_id": stream_id,
+                            },
+                            name=f"live_game_{sub.id}",
+                        )
+                        continue
+                    text = _render_sub_template(
+                        sub, username, game, title, twitch=twitch, stream=stream
+                    )
+                    await _send_notification(
+                        context.bot, db, sub, text, alert_type="live", stream=stream
+                    )
+
+            for uid in went_offline:
+                stream_id = offline_stream_ids.get(uid, "")
+                for sub in db.get_enabled_by_twitch_user_id(uid):
+                    if is_category_watch_sub(sub):
+                        continue
+                    if not sub.notify_on_end:
+                        continue
+                    if is_on_notify_cooldown(sub):
+                        continue
+                    if sub.delay_minutes > 0:
+                        context.job_queue.run_once(
+                            _send_delayed_end_notification,
+                            when=sub.delay_minutes * 60,
+                            data={"sub_id": sub.id, "stream_id": stream_id},
+                            name=f"delay_end_{sub.id}",
+                        )
+                        continue
+                    text = _render_sub_template(
+                        sub, sub.twitch_username, "—", "—", twitch=twitch
+                    )
+                    await _send_notification(
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="end",
+                        stream_id=stream_id,
+                    )
+
+            for uid in category_changed:
+                stream = live_streams[uid]
+                username = stream.get("user_login", stream.get("user_name", ""))
+                game = stream.get("game_name", "")
+                title = stream.get("title", "")
+                stream_id = str(stream.get("id") or "")
+                for sub in db.get_enabled_by_twitch_user_id(uid):
+                    if is_category_watch_sub(sub):
+                        continue
+                    if not sub.notify_on_category_change:
+                        continue
+                    if is_on_notify_cooldown(sub):
+                        continue
+                    if should_ignore_stream(
+                        _effective_ignore_keywords(sub, db), game, title
+                    ):
+                        continue
+                    if sub.delay_minutes > 0:
+                        game_id = str(stream.get("game_id") or "")
+                        context.job_queue.run_once(
+                            _send_delayed_category_notification,
+                            when=sub.delay_minutes * 60,
+                            data={
+                                "sub_id": sub.id,
+                                "stream_id": stream_id,
+                                "vod_offset_seconds": _vod_offset_seconds(stream),
+                            },
+                            name=f"delay_cat_{sub.id}_{game_id}",
+                        )
+                        continue
+                    text = _render_sub_template(
+                        sub, username, game, title, twitch=twitch, stream=stream
+                    )
+                    await _send_notification(
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="category",
+                        stream=stream,
+                        stream_id=stream_id,
+                        vod_offset_seconds=_vod_offset_seconds(stream),
+                    )
+
+    if category_watch_subs:
+        await _check_category_watch_alerts(context, category_watch_subs)
+
+
+def _parse_category_watch_live_ids(raw: str | None) -> set[str]:
+    text = (raw or "").strip()
+    if not text:
+        return set()
     try:
-        live_streams = await asyncio.to_thread(twitch.get_live_streams, user_ids)
-    except Exception:
-        logger.exception("Twitch poll failed")
-        return
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {str(x).strip() for x in data if str(x).strip()}
 
-    went_live, went_offline = live_transitions(
-        last_live, user_ids, live_streams, primed=primed
-    )
-    category_changed = category_change_events(
-        last_games, user_ids, live_streams, primed=primed
-    )
-    offline_stream_ids = {uid: last_stream_ids.get(uid, "") for uid in went_offline}
-    for uid, stream in live_streams.items():
-        sid = str(stream.get("id") or "")
-        if sid:
-            last_stream_ids[uid] = sid
-    context.application.bot_data["last_live_primed"] = True
 
-    for uid in went_live:
-        stream = live_streams[uid]
-        username = stream.get("user_login", stream.get("user_name", ""))
-        game = stream.get("game_name", "")
-        title = stream.get("title", "")
-        stream_id = str(stream.get("id") or "")
-        for sub in db.get_enabled_by_twitch_user_id(uid):
-            if not sub.notify_on_live:
-                continue
-            if is_on_notify_cooldown(sub):
-                continue
-            if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
-                continue
-            if sub.delay_minutes > 0:
-                context.job_queue.run_once(
-                    _send_delayed_notification,
-                    when=sub.delay_minutes * 60,
-                    data={"sub_id": sub.id, "stream_id": stream_id},
-                    name=f"delay_{sub.id}",
+async def _check_category_watch_alerts(
+    context: ContextTypes.DEFAULT_TYPE, subs: list[Subscription]
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    for sub in subs:
+        prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+        if not prefs or not prefs.categories:
+            continue
+        pooled: list[dict] = []
+        for cat in prefs.categories:
+            try:
+                batch = await asyncio.to_thread(
+                    twitch.get_streams_by_game,
+                    cat["id"],
+                    language=prefs.language,
+                    first=100,
+                )
+            except Exception:
+                logger.exception(
+                    "category watch fetch failed sub=%s game_id=%s",
+                    sub.id,
+                    cat.get("id"),
                 )
                 continue
-            # Helix often returns empty game_name for a few seconds after go-live.
-            if needs_live_game_recheck(game, sub.delay_minutes):
-                context.job_queue.run_once(
-                    _send_delayed_notification,
-                    when=LIVE_GAME_RECHECK_SECONDS,
-                    data={
-                        "sub_id": sub.id,
-                        "silent_offline": True,
-                        "stream_id": stream_id,
-                    },
-                    name=f"live_game_{sub.id}",
-                )
-                continue
+            pooled.extend(batch)
+        filtered = filter_streams_for_watch(
+            pooled,
+            min_viewers=prefs.min_viewers,
+            max_viewers=prefs.max_viewers,
+            exclude_mature=prefs.exclude_mature,
+            tags=prefs.tags,
+        )
+        by_uid: dict[str, dict] = {}
+        for stream in filtered:
+            uid = str(stream.get("user_id") or "").strip()
+            if uid and uid not in by_uid:
+                by_uid[uid] = stream
+        current_uids = set(by_uid)
+        prev_uids = _parse_category_watch_live_ids(sub.category_watch_live_ids)
+        if not sub.category_watch_primed:
+            db.set_category_watch_live_state(
+                sub.id, sorted(current_uids), primed=True
+            )
+            continue
+        new_uids = sorted(current_uids - prev_uids)
+        notified = 0
+        for uid in new_uids:
+            if notified >= _WATCH_CATEGORY_NOTIFY_CAP:
+                break
+            stream = by_uid[uid]
+            username = stream.get("user_login", stream.get("user_name", ""))
+            game = stream.get("game_name", "")
+            title = stream.get("title", "")
             text = _render_sub_template(
                 sub, username, game, title, twitch=twitch, stream=stream
             )
             await _send_notification(
                 context.bot, db, sub, text, alert_type="live", stream=stream
             )
-
-    for uid in went_offline:
-        stream_id = offline_stream_ids.get(uid, "")
-        for sub in db.get_enabled_by_twitch_user_id(uid):
-            if not sub.notify_on_end:
-                continue
-            if is_on_notify_cooldown(sub):
-                continue
-            if sub.delay_minutes > 0:
-                context.job_queue.run_once(
-                    _send_delayed_end_notification,
-                    when=sub.delay_minutes * 60,
-                    data={"sub_id": sub.id, "stream_id": stream_id},
-                    name=f"delay_end_{sub.id}",
-                )
-                continue
-            text = _render_sub_template(
-                sub, sub.twitch_username, "—", "—", twitch=twitch
-            )
-            await _send_notification(
-                context.bot,
-                db,
-                sub,
-                text,
-                alert_type="end",
-                stream_id=stream_id,
-            )
-
-    for uid in category_changed:
-        stream = live_streams[uid]
-        username = stream.get("user_login", stream.get("user_name", ""))
-        game = stream.get("game_name", "")
-        title = stream.get("title", "")
-        stream_id = str(stream.get("id") or "")
-        cat_offset = _vod_offset_seconds(stream)
-        for sub in db.get_enabled_by_twitch_user_id(uid):
-            if not sub.notify_on_category_change:
-                continue
-            if is_on_notify_cooldown(sub):
-                continue
-            if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
-                continue
-            if sub.delay_minutes > 0:
-                game_id = str(stream.get("game_id") or "")
-                context.job_queue.run_once(
-                    _send_delayed_category_notification,
-                    when=sub.delay_minutes * 60,
-                    data={
-                        "sub_id": sub.id,
-                        "stream_id": stream_id,
-                        "vod_offset_seconds": cat_offset,
-                    },
-                    name=f"delay_cat_{sub.id}_{game_id}",
-                )
-                continue
-            text = _render_sub_template(
-                sub, username, game, title, twitch=twitch, stream=stream
-            )
-            await _send_notification(
-                context.bot,
-                db,
-                sub,
-                text,
-                alert_type="category",
-                stream=stream,
-                vod_offset_seconds=cat_offset,
-            )
+            notified += 1
+        db.set_category_watch_live_state(sub.id, sorted(current_uids), primed=True)
 
 
 def _parse_segment_start(segment: dict) -> datetime | None:
@@ -8953,6 +9217,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_type, pattern=r"^delete_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_watch_again, pattern=r"^watch:again$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_watch_create_alerts, pattern=r"^watch:create_alerts$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(schedule_save_token_callback, pattern=r"^sched_save_token:"), group=0)
     app.add_handler(CallbackQueryHandler(on_list_type, pattern=r"^list_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_type, pattern=r"^edit_type:\w+$"), group=0)

@@ -145,6 +145,37 @@ class TwitchClient:
         resp.raise_for_status()
         return list(resp.json().get("data") or [])
 
+    def get_videos_by_game(
+        self,
+        game_id: str,
+        *,
+        language: str | None = None,
+        video_type: str = "archive",
+        period: str = "month",
+        first: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Helix VODs for a category. Cap ~500 total when paging; one page here."""
+        gid = (game_id or "").strip()
+        if not gid:
+            return []
+        params: dict[str, str | int] = {
+            "game_id": gid,
+            "type": video_type,
+            "period": period,
+            "sort": "time",
+            "first": max(1, min(100, int(first))),
+        }
+        if language:
+            params["language"] = language.lower()
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/videos",
+            headers=self._headers(),
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return list(resp.json().get("data") or [])
+
     def get_streams_by_game(
         self,
         game_id: str,
