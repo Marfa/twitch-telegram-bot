@@ -4287,15 +4287,13 @@ async def _go_watch_categories_prompt(
 async def _go_watch_tags_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_tags_prompt", lang),
-        reply_markup=_wizard(lang),
+        reply_markup=watch_tags_keyboard(lang),
         parse_mode=ParseMode.HTML,
     )
-    await update.effective_message.reply_text(
-        t("watch_choose", lang),
-        reply_markup=watch_tags_keyboard(lang),
-    )
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_TAGS)
     return WATCH_TAGS
 
@@ -4303,15 +4301,13 @@ async def _go_watch_tags_prompt(
 async def _go_watch_viewers_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_viewers_prompt", lang),
-        reply_markup=_wizard(lang),
+        reply_markup=watch_viewers_keyboard(lang),
         parse_mode=ParseMode.HTML,
     )
-    await update.effective_message.reply_text(
-        t("watch_choose", lang),
-        reply_markup=watch_viewers_keyboard(lang),
-    )
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_VIEWERS)
     return WATCH_VIEWERS
 
@@ -4320,14 +4316,12 @@ async def _go_watch_language_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     context.user_data.pop("watch_lang_await_other", None)
+    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_lang_prompt", lang),
-        reply_markup=_wizard(lang),
-    )
-    await update.effective_message.reply_text(
-        t("watch_choose", lang),
         reply_markup=watch_lang_keyboard(lang),
     )
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_LANGUAGE)
     return WATCH_LANGUAGE
 
@@ -4335,14 +4329,12 @@ async def _go_watch_language_prompt(
 async def _go_watch_mature_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t("watch_mature_prompt", lang),
-        reply_markup=_wizard(lang),
-    )
-    await update.effective_message.reply_text(
-        t("watch_choose", lang),
         reply_markup=watch_mature_keyboard(lang),
     )
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_MATURE)
     return WATCH_MATURE
 
@@ -4351,6 +4343,7 @@ async def _go_watch_save_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     prefs = _watch_prefs_from_user_data(context)
+    chat_id = update.effective_chat.id
     await update.effective_message.reply_text(
         t(
             "watch_save_prompt",
@@ -4358,13 +4351,10 @@ async def _go_watch_save_prompt(
             max=WATCH_MAX_FILTERS,
             summary=_watch_prefs_summary(prefs, lang),
         ),
-        reply_markup=_wizard(lang),
+        reply_markup=watch_save_keyboard(lang),
         parse_mode=ParseMode.HTML,
     )
-    await update.effective_message.reply_text(
-        t("watch_choose", lang),
-        reply_markup=watch_save_keyboard(lang),
-    )
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=True)
     _set_wizard_back(context, WATCH_SAVE)
     return WATCH_SAVE
 

@@ -92,7 +92,6 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Or tap Skip."
         ),
         "watch_tags_skip": "Skip",
-        "watch_choose": "Choose:",
         "watch_tags_bad": "Send tags separated by commas, or tap Skip.",
         "watch_viewers_prompt": (
             "What to watch — step 3/5\n\n"
@@ -1197,7 +1196,6 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Или нажмите Пропустить."
         ),
         "watch_tags_skip": "Пропустить",
-        "watch_choose": "Выберите:",
         "watch_tags_bad": "Отправьте теги через запятую или нажмите Пропустить.",
         "watch_viewers_prompt": (
             "Что посмотреть — шаг 3/5\n\n"
