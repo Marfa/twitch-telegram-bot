@@ -25,15 +25,16 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
 | 🎲 What to watch? | Saved filters to pick, new search, multi-select delete like subscriptions; categories → tags → viewers → language → mature |
 | Image | Optional alert image — caption above or below; link preview then off |
-| Delayed send | N minutes after go-live, category change, or going offline (Helix re-check before send) |
-| Repeat suppression | For stream start: skip repeats for X minutes after the first alert |
+| Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); wizard step in **advanced mode** |
+| Repeat suppression | For stream start: skip repeats for X minutes after the first alert; wizard step in **advanced mode** |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
+| Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | Main menu wizard for weekly text; publish to Twitch is **Premium** (slot duration, full clear of old slots) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | 7-day trial; Stars month/year/lifetime; pay per feature (incl. 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
+| Premium | 7-day trial; Stars month/year/lifetime; à la carte (incl. advanced mode, 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
@@ -84,13 +85,15 @@ Then the wizard (for stream start / category change / stream end):
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
 3. Image (add / skip; if added — position: start or end of caption)
-4. Ignore keywords (optional)
+4. Ignore keywords — **advanced mode** only
 5. Link preview (skipped when an image is set)
-6. Delay send (yes/no, minutes) — after go-live, category change, or after offline; Helix is re-checked before send
-7. Allow repeat notifications (**stream start** only; yes/no; if no — mute minutes)
+6. Delay send (yes/no, minutes) — **advanced mode** only; after go-live / category change / offline; Helix re-checked before send
+7. Allow repeat notifications — **advanced mode** and **stream start** only
 8. Destination: DM / channel / group or community
 9. For channel or group — add the bot and confirm the chat
-10. Delete previous bot message on each new alert? (yes/no; for category change defaults to its own alerts only; if other subs for the same streamer share the destination — asks whether to delete those too)
+10. Delete previous bot message? — **advanced mode** only (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
+
+With advanced mode off, steps 4 / 6 / 7 / 10 are skipped; the first wizard step notes simplified mode. Toggle: **⚙️ Settings → 🎛 Advanced mode** (Premium).
 
 For **upcoming stream**, after the channel and schedule check — template and settings, then reminder minutes and destination (no “do you want reminders?” ask).
 
@@ -185,8 +188,9 @@ Optionally **publish to Twitch** (**Premium**):
 | 📅 Create schedule | Weekly text; Twitch sync — Premium |
 | 🎲 What to watch? | Pick filter / new search / delete filters |
 | 📜 Alert history | DM: 7 days free / 60 days Premium |
-| ⚙️ Settings | Premium, sync, system alerts, language, partner program |
+| ⚙️ Settings | Premium, sync, ignored words, advanced mode, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
+| ↳ 🎛 Advanced mode | Ignore / delay / repeats / delete in the wizard; Premium; off by default |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
 | ↳ 🌐 Language | Russian / English |
@@ -211,7 +215,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit subscription** — same order as creation: template (**Clean title** checkbox), image, ignore keywords, link preview (hidden when an image is set), delay, repeats (not for category change or stream end), schedule reminders (if enabled at creation), destination, delete old messages. For **category change** with delete enabled — a separate «delete other alerts too» option.
+**Edit subscription** — same order as creation: template (**Clean title** checkbox), image, ignore / delay / repeats / delete (edit-menu items only in **advanced mode**), link preview (hidden when an image is set), schedule reminders (if enabled at creation), destination. For **category change** with delete enabled — a separate «delete other alerts too» option.
 
 Notification template example:
 

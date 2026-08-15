@@ -677,7 +677,7 @@ async def _prompt_repeat_step(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not prem.is_advanced_mode_enabled(db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id):
         context.user_data["suppress_repeat_minutes"] = 0
         return await _go_after_repeat(update, context, lang)
     if not await prem.has_feature(context.bot, db, user_id, "repeat"):
@@ -853,7 +853,7 @@ async def _go_alert_type_prompt(
     chat_id = update.effective_user.id
     db: Database = context.application.bot_data["db"]
     text = t("alert_type_prompt", lang)
-    if not prem.is_advanced_mode_enabled(db, chat_id):
+    if not await prem.advanced_mode_on(context.bot, db, chat_id):
         text = f"{text}\n\n{t('wizard_simple_mode_note', lang)}"
     markup = alert_type_keyboard(lang)
     parse_mode = ParseMode.HTML if "<b>" in text else None
@@ -928,7 +928,7 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
 async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not prem.is_advanced_mode_enabled(db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id):
         context.user_data["ignore_keywords"] = ""
         context.user_data["use_global_ignore"] = False
         return await _go_after_ignore_keywords(update, context, lang)
@@ -938,16 +938,16 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
         )
     context.user_data.setdefault("use_global_ignore", False)
     context.user_data["ignore_keywords_as_cancel"] = False
+    # Inline Back/Cancel (like template step). Reply pulse+delete is unreliable here.
     await update.effective_message.reply_text(
         t("ignore_keywords_prompt", lang),
         parse_mode=ParseMode.HTML,
         reply_markup=ignore_keywords_keyboard(
             lang,
             use_global=bool(context.user_data.get("use_global_ignore")),
+            show_back=True,
+            show_cancel=True,
         ),
-    )
-    await _pulse_wizard_keyboard(
-        context.bot, update.effective_user.id, lang, back=True
     )
     _set_wizard_back(context, IGNORE_KEYWORDS)
     return IGNORE_KEYWORDS
@@ -968,7 +968,7 @@ async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_
 async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not prem.is_advanced_mode_enabled(db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id):
         context.user_data["delay_minutes"] = 0
         return await _continue_after_delay(update, context, lang)
     if not await prem.has_feature(context.bot, db, user_id, "delay"):
@@ -1865,15 +1865,15 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(t("sub_not_found", lang))
             return ConversationHandler.END
         sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+        show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
                 sub_id=sub_num,
                 username=sub.twitch_username,
-                db=db,
-                owner_id=query.from_user.id,
+                show_advanced=show_adv,
             ),
-            reply_markup=_edit_options_for_sub(sub, lang, db),
+            reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
             parse_mode=ParseMode.HTML,
         )
         await context.bot.send_message(
@@ -2404,12 +2404,24 @@ async def _go_after_ignore_keywords(
 async def receive_ignore_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     text = (update.effective_message.text or "").strip()
+    if text in all_wizard_nav_buttons():
+        if text in all_btn_texts("wizard_cancel"):
+            return await cancel(update, context)
+        return await wizard_back(update, context)
     if text in all_menu_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return IGNORE_KEYWORDS
 
     context.user_data["ignore_keywords"] = normalize_ignore_keywords(text)
     return await _go_after_ignore_keywords(update, context, lang)
+
+
+async def receive_ignore_keywords_back(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    return await wizard_back(update, context)
 
 
 async def receive_ignore_keywords_skip(
@@ -2435,11 +2447,14 @@ async def receive_ignore_keywords_global_toggle(
         context.user_data.get("wizard_edit") and context.user_data.get("edit_sub_id")
     )
     if not new_val:
+        as_cancel = bool(context.user_data.get("ignore_keywords_as_cancel"))
         await query.edit_message_reply_markup(
             reply_markup=ignore_keywords_keyboard(
                 lang,
-                as_cancel=bool(context.user_data.get("ignore_keywords_as_cancel")),
+                as_cancel=as_cancel,
                 use_global=False,
+                show_back=not editing and not as_cancel,
+                show_cancel=not as_cancel,
             )
         )
         return EDIT_IGNORE_KEYWORDS if editing else IGNORE_KEYWORDS
@@ -3031,7 +3046,7 @@ async def _prompt_delete_old(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not prem.is_advanced_mode_enabled(db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id):
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
@@ -3090,7 +3105,7 @@ def _has_sibling_publication_subs(
 
 
 def _edit_options_for_sub(
-    sub: Subscription, lang: str, db: Database
+    sub: Subscription, lang: str, *, show_advanced: bool
 ) -> InlineKeyboardMarkup:
     alert_type = _alert_type_from_sub(sub)
     return edit_options_keyboard(
@@ -3105,18 +3120,24 @@ def _edit_options_for_sub(
         notify_on_category_change=sub.notify_on_category_change,
         notify_on_end=sub.notify_on_end,
         is_upcoming=alert_type == "upcoming",
-        show_advanced=prem.is_advanced_mode_enabled(db, sub.owner_id),
+        show_advanced=show_advanced,
     )
 
 
-def _edit_menu_text(lang: str, *, sub_id: int, username: str, db: Database, owner_id: int) -> str:
+def _edit_menu_text(
+    lang: str,
+    *,
+    sub_id: int,
+    username: str,
+    show_advanced: bool,
+) -> str:
     text = t(
         "edit_menu",
         lang,
         sub_id=sub_id,
         username=html.escape(username),
     )
-    if not prem.is_advanced_mode_enabled(db, owner_id):
+    if not show_advanced:
         text = f"{text}\n\n{t('wizard_simple_mode_note', lang)}"
     return text
 
@@ -5758,15 +5779,15 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.edit_message_text(t("sub_not_found", lang))
         return
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
     await query.edit_message_text(
         _edit_menu_text(
             lang,
             sub_id=sub_num,
             username=sub.twitch_username,
-            db=db,
-            owner_id=query.from_user.id,
+            show_advanced=show_adv,
         ),
-        reply_markup=_edit_options_for_sub(sub, lang, db),
+        reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
         parse_mode=ParseMode.HTML,
     )
 
@@ -5980,30 +6001,30 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(t("sub_not_found", lang))
         return
     if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
+        show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
                 sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
                 username=sub.twitch_username,
-                db=db,
-                owner_id=query.from_user.id,
+                show_advanced=show_adv,
             ),
-            reply_markup=_edit_options_for_sub(sub, lang, db),
+            reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
             parse_mode=ParseMode.HTML,
         )
         return
     if field == "delete_other" and (
         not sub.notify_on_category_change or not sub.delete_previous
     ):
+        show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
                 sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
                 username=sub.twitch_username,
-                db=db,
-                owner_id=query.from_user.id,
+                show_advanced=show_adv,
             ),
-            reply_markup=_edit_options_for_sub(sub, lang, db),
+            reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
             parse_mode=ParseMode.HTML,
         )
         return
@@ -7810,7 +7831,7 @@ async def open_advanced_mode_menu(update: Update, context: ContextTypes.DEFAULT_
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    enabled = prem.is_advanced_mode_enabled(db, user_id)
+    enabled = await prem.advanced_mode_on(context.bot, db, user_id)
     await update.effective_message.reply_text(
         t("advanced_mode_screen", lang),
         reply_markup=advanced_mode_keyboard(lang, enabled=enabled),
@@ -7823,7 +7844,7 @@ async def on_advanced_mode_toggle(update: Update, context: ContextTypes.DEFAULT_
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    currently_on = prem.is_advanced_mode_enabled(db, user_id)
+    currently_on = await prem.advanced_mode_on(context.bot, db, user_id)
     if not currently_on:
         if not await prem.has_feature(context.bot, db, user_id, "advanced_mode"):
             from premium_handlers import send_premium_screen
@@ -9006,6 +9027,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     receive_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
                 ),
+                CallbackQueryHandler(
+                    receive_ignore_keywords_back, pattern=r"^ignore_keywords:back$"
+                ),
+                CallbackQueryHandler(cancel, pattern=r"^ignore_keywords:cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_ignore_keywords),
             ],
             GLOBAL_IGNORE_KEYWORDS: [

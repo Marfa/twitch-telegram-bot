@@ -3003,6 +3003,8 @@ def ignore_keywords_keyboard(
     *,
     as_cancel: bool = False,
     use_global: bool = False,
+    show_back: bool = False,
+    show_cancel: bool = False,
 ) -> InlineKeyboardMarkup:
     mark = "✅ " if use_global else "❌ "
     rows: list[list[InlineKeyboardButton]] = [
@@ -3031,6 +3033,21 @@ def ignore_keywords_keyboard(
                 )
             ]
         )
+    nav: list[InlineKeyboardButton] = []
+    if show_back:
+        nav.append(
+            InlineKeyboardButton(
+                btn("wizard_back", lang), callback_data="ignore_keywords:back"
+            )
+        )
+    if show_cancel:
+        nav.append(
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang), callback_data="ignore_keywords:cancel"
+            )
+        )
+    if nav:
+        rows.append(nav)
     return InlineKeyboardMarkup(rows)
 
 

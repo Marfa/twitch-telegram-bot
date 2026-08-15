@@ -285,12 +285,72 @@ def has_feature_sync(db: Database, user_id: int, feature_id: str) -> bool:
     return st.feature_active(feature_id)
 
 
-def is_advanced_mode_enabled(db: Database, user_id: int) -> bool:
-    """Wizard shows ignore/delay/repeat/delete steps when True."""
+def is_advanced_mode_enabled(
+    db: Database, user_id: int, *, entitled: bool | None = None
+) -> bool:
+    """Wizard shows ignore/delay/repeat/delete steps when True.
+
+    Default off. Demo always off. Non‑Premium always off.
+    Explicit setting wins when entitled; if unset, auto-on only for entitled
+    users who already configured advanced options on an alert.
+    """
+    from demo_mode import is_active
+
+    if is_active(user_id):
+        return False
+    if entitled is None:
+        entitled = has_feature_sync(db, user_id, "advanced_mode")
+    if not entitled:
+        return False
     setting = db.get_advanced_mode_setting(user_id)
     if setting is not None:
         return setting
     return db.owner_has_advanced_subscription_options(user_id)
+
+
+async def advanced_mode_on(bot: Bot, db: Database, user_id: int) -> bool:
+    """Like is_advanced_mode_enabled, but includes free-chat Premium via has_feature."""
+    from demo_mode import is_active
+
+    if is_active(user_id):
+        return False
+    entitled = await has_feature(bot, db, user_id, "advanced_mode")
+    return is_advanced_mode_enabled(db, user_id, entitled=entitled)
+
+
+def migrate_advanced_mode_defaults(
+    db: Database, *, dry_run: bool = False
+) -> tuple[int, int, int]:
+    """Materialize users.advanced_mode from product defaults.
+
+    ON only when DB-entitled for advanced_mode (full plan / feature / legacy
+    à la carte) and at least one alert already uses ignore / delay / repeat /
+    delete. Everyone else → OFF. Overwrites previous setting.
+
+    Returns (examined, set_on, set_off).
+    """
+    examined = set_on = set_off = 0
+    for user_id in sorted(set(db.get_notify_user_ids())):
+        examined += 1
+        ensure_trial_expired(db, user_id)
+        desired = has_feature_sync(
+            db, user_id, "advanced_mode"
+        ) and db.owner_has_advanced_subscription_options(user_id)
+        current = db.get_advanced_mode_setting(user_id)
+        if current is not None and current is desired:
+            continue
+        if dry_run:
+            if desired:
+                set_on += 1
+            else:
+                set_off += 1
+            continue
+        db.set_advanced_mode_setting(user_id, desired)
+        if desired:
+            set_on += 1
+        else:
+            set_off += 1
+    return examined, set_on, set_off
 
 
 async def has_feature(bot: Bot, db: Database, user_id: int, feature_id: str) -> bool:

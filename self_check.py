@@ -1207,6 +1207,15 @@ def main() -> None:
     assert "_pulse_wizard_keyboard" not in edit_ignore_chunk
     assert "edit_message_reply_markup" not in edit_ignore_chunk
     assert "_wizard(" not in edit_ignore_chunk
+    # Create ignore-keywords: inline Back/Cancel (no reply pulse).
+    create_ignore_chunk = bot_src.split("async def _go_ignore_keywords_prompt", 1)[1].split(
+        "async def _go_link_preview_prompt", 1
+    )[0]
+    assert "show_back=True" in create_ignore_chunk
+    assert "show_cancel=True" in create_ignore_chunk
+    assert "_pulse_wizard_keyboard" not in create_ignore_chunk
+    assert 'ignore_keywords:back"' in bot_src or "ignore_keywords:back$" in bot_src
+    assert "receive_ignore_keywords_back" in bot_src
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
@@ -1579,10 +1588,12 @@ def main() -> None:
         db.upsert_user(77)
         assert db.get_advanced_mode_setting(77) is None
         assert not prem.is_advanced_mode_enabled(db, 77)
+        # Explicit on without Premium entitlement → still off.
         db.set_advanced_mode_setting(77, True)
-        assert prem.is_advanced_mode_enabled(db, 77) is True
-        db.set_advanced_mode_setting(77, False)
         assert prem.is_advanced_mode_enabled(db, 77) is False
+        assert prem.is_advanced_mode_enabled(db, 77, entitled=True) is True
+        db.set_advanced_mode_setting(77, False)
+        assert prem.is_advanced_mode_enabled(db, 77, entitled=True) is False
         # Legacy à la carte unlocks still count as advanced_mode entitlement.
         import time as _time
 
@@ -1600,7 +1611,8 @@ def main() -> None:
         )
         assert prem.has_feature_sync(db, 89, "delay")
         assert db.get_advanced_mode_setting(89) is True
-        # Auto-on when an alert already uses advanced options.
+        assert prem.is_advanced_mode_enabled(db, 89) is True
+        # Auto-on only when entitled + alert already uses advanced options.
         db.upsert_user(90)
         sid90 = db.add_subscription(
             owner_id=90,
@@ -1613,9 +1625,37 @@ def main() -> None:
             delay_minutes=5,
         )
         assert sid90
-        assert prem.is_advanced_mode_enabled(db, 90) is True
+        assert prem.is_advanced_mode_enabled(db, 90) is False  # not premium
+        db.set_premium_permanent(90, True)
+        assert prem.is_advanced_mode_enabled(db, 90) is True  # auto-on
         db.set_advanced_mode_setting(90, False)
         assert prem.is_advanced_mode_enabled(db, 90) is False
+        # Demo mode forces off even if setting/premium would enable it.
+        import demo_mode as _dm
+
+        _dm.activate(89)
+        assert prem.is_advanced_mode_enabled(db, 89) is False
+        _dm.deactivate(89)
+        assert prem.is_advanced_mode_enabled(db, 89) is True
+        # migrate_advanced_mode_defaults: ON only if entitled + alert options.
+        db.upsert_user(91)
+        db.set_premium_permanent(91, True)
+        sid91 = db.add_subscription(
+            owner_id=91,
+            twitch_username="y",
+            twitch_user_id="91",
+            message_template="hi",
+            dest_type="dm",
+            chat_id=91,
+            thread_id=None,
+            delay_minutes=3,
+        )
+        assert sid91
+        examined, on_n, off_n = prem.migrate_advanced_mode_defaults(db)
+        assert examined >= 1
+        assert db.get_advanced_mode_setting(91) is True
+        assert db.get_advanced_mode_setting(77) is False  # not entitled
+        assert on_n >= 1 and off_n >= 1
         assert tr("btn_alert_history_more", "ru") == "Показать больше"
         assert tr("alert_history_go_stream", "ru") == "Перейти к стриму"
         assert "<b>📅 " in tr("alert_history_day", "ru", date="пятница, 14 августа")
