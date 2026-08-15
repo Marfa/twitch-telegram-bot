@@ -1,0 +1,30 @@
+---
+description: Удаление артефактов сборки после git commit
+alwaysApply: true
+---
+
+# Очистка артефактов после commit
+
+## После каждого commit
+
+Запусти:
+
+```bash
+./scripts/cleanup-artifacts.sh
+```
+
+Скрипт удаляет **только** артефакты сборки **старше 7 дней** (не трогает `.venv/`, `data/`, `*.db`):
+
+- `__pycache__/`, `*.pyc`, `*.pyo`
+- `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`
+- `build/`, `dist/`, `*.egg-info`
+- `.DS_Store`
+
+## Локальный post-commit hook
+
+Уже должен быть установлен. Если нет:
+
+```bash
+cp scripts/post-commit-cleanup.sh .git/hooks/post-commit
+chmod +x .git/hooks/post-commit
+```

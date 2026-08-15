@@ -1,0 +1,33 @@
+---
+description: Secure coding — secrets, parameterized SQL, least privilege, dependency hygiene
+globs: "**/*.{py,sh,yml,yaml}"
+alwaysApply: true
+---
+
+# DevSecOps + AppSec
+
+Source: [awesome-cursorrules security-devsecops-ssdls-appsec.mdc](https://github.com/PatrickJS/awesome-cursorrules/blob/main/rules/security-devsecops-ssdls-appsec.mdc)
+
+## General
+
+- Never hardcode secrets, tokens, or API keys — use env / vaults
+- Do not commit `.env`, private keys, or unknown tokens
+- Never log secrets, session tokens, or OAuth codes
+- Validate and sanitize user input; escape output in HTML/JS/SQL contexts
+- Avoid `eval` / unsafe dynamic execution
+
+## Database
+
+- Parameterized queries only — no SQL string concatenation
+- Least privilege for DB users
+
+## Dependencies
+
+- Only packages from verified sources
+- Do not add dependencies without explicit approval and a quick security glance
+- Prefer pinning versions in `requirements.txt`
+
+## AuthZ
+
+- Enforce least privilege for admin / premium / chat-manage checks already in the bot
+- Do not weaken existing permission gates for convenience

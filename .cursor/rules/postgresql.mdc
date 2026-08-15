@@ -1,0 +1,32 @@
+---
+description: PostgreSQL / SQL safety — parameterized queries, TIMESTAMPTZ, careful migrations
+globs: "**/*.py,**/compose*.yml,**/*.sql"
+alwaysApply: false
+---
+
+# PostgreSQL / database
+
+Source: [awesome-cursorrules postgresql.mdc](https://github.com/PatrickJS/awesome-cursorrules/blob/main/rules/postgresql.mdc) — this bot uses SQLite by default and Postgres when `DATABASE_URL` is set (`db.py` + `psycopg`).
+
+## Queries
+
+- Parameterized always — never string interpolation into SQL
+- Prefer explicit columns over `SELECT *` on large tables
+- LIMIT on potentially large result sets
+
+## Schema
+
+- Prefer TIMESTAMPTZ semantics for timestamps when adding Postgres-facing columns
+- NOT NULL by default; nullable only when intentional
+- Explicit ON DELETE for FKs when introducing relations
+
+## Dual backend
+
+- Changes in `db.py` must work for both SQLite and Postgres paths unless the task is VPS-only
+- Normalize `postgres://` → `postgresql://` as existing code does
+- Do not truncate or drop user data from app code
+
+## Forbidden
+
+- No plaintext secrets in the DB
+- No `TRUNCATE` / destructive one-off SQL in handlers

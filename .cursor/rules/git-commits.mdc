@@ -1,0 +1,27 @@
+---
+description: Commit message style for this repo (imperative summary; conventional optional)
+alwaysApply: false
+---
+
+# Git commits
+
+Inspired by [awesome-cursorrules git-conventional-commit-messages.mdc](https://github.com/PatrickJS/awesome-cursorrules/blob/main/rules/git-conventional-commit-messages.mdc), adapted to this repo's history.
+
+## Message style
+
+- Match recent commits: short imperative English summary (e.g. `Add …`, `Fix …`, `Use …`)
+- Conventional types (`feat:`, `fix:`, `docs:`, …) are optional, not required
+- Focus on why when it is not obvious from the diff
+- Only commit when the user explicitly asks
+
+## After commit
+
+Run `./scripts/cleanup-artifacts.sh` (also via `.git/hooks/post-commit`).
+
+## README on GitHub commits
+
+When the user asks to commit and README is part of the change, keep:
+
+1. Код подготовлен с помощью Cursor
+2. Донат https://www.donationalerts.com/r/themarfa
+3. Крипто-донат https://nowpayments.io/donation/themarfa

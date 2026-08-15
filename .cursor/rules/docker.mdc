@@ -1,0 +1,29 @@
+---
+description: Docker production rules — pinned bases, non-root, no secrets in image
+globs: "Dockerfile,Dockerfile.*,compose*.yml,compose*.yaml,.dockerignore"
+alwaysApply: false
+---
+
+# Docker
+
+Source: [awesome-cursorrules docker.mdc](https://github.com/PatrickJS/awesome-cursorrules/blob/main/rules/docker.mdc) — aligned with this project's `Dockerfile` / compose.
+
+## Dockerfile
+
+- Pin base images (this repo: `python:3.13-slim`); avoid `:latest` in production
+- Layer cache: copy `requirements.txt` → `pip install` → copy source
+- `USER` non-root before `CMD` (this repo: `appuser` uid 10001)
+- `HEALTHCHECK` on services that expose HTTP
+- `COPY --chown=appuser:appuser` for app files
+
+## Security
+
+- Never run as root in production
+- No secrets in Dockerfile, build args, or image layers
+- Keep `.env` out of the image (`.dockerignore`)
+
+## Compose / runtime
+
+- Named volumes for persistence (`/data`, Postgres data)
+- Logs to stdout/stderr only
+- Reference services by compose service name
