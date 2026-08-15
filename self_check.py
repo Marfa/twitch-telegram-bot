@@ -1078,8 +1078,12 @@ def main() -> None:
     assert parsed is not None and parsed.user_id == 7 and parsed.kind == "month"
     assert parse_invoice_payload("premium:7").kind == "legacy"
     assert parse_invoice_payload("other") is None
-    feat_p = parse_invoice_payload(invoice_payload(3, "feat", ["delay", "repeat"]))
-    assert feat_p is not None and feat_p.features == ("delay", "repeat")
+    feat_p = parse_invoice_payload(
+        invoice_payload(3, "feat", ["advanced_mode", "alert_history"])
+    )
+    assert feat_p is not None and feat_p.features == ("advanced_mode", "alert_history")
+    # Legacy feature ids are stripped from new invoices → invalid empty feat payload.
+    assert parse_invoice_payload(invoice_payload(3, "feat", ["delay", "repeat"])) is None
     from config import FREE_CHAT_ID
 
     assert FREE_CHAT_ID == -1002155969539
@@ -1562,7 +1566,56 @@ def main() -> None:
         )
         assert len(recent) == 3
         assert "alert_history" in FEATURE_IDS
+        assert "advanced_mode" in FEATURE_IDS
+        assert "ignore_keywords" not in FEATURE_IDS
+        assert "delay" not in FEATURE_IDS
+        assert "repeat" not in FEATURE_IDS
+        assert "delete_prev" not in FEATURE_IDS
+        assert tr("premium_feat_advanced_mode", "ru") == "Продвинутый режим"
         assert tr("premium_feat_alert_history", "ru")
+        assert "упрощённом режиме" in tr("wizard_simple_mode_note", "ru")
+        assert tr("btn_advanced_mode", "ru")
+        assert "стоп-слова" in tr("advanced_mode_screen", "ru")
+        db.upsert_user(77)
+        assert db.get_advanced_mode_setting(77) is None
+        assert not prem.is_advanced_mode_enabled(db, 77)
+        db.set_advanced_mode_setting(77, True)
+        assert prem.is_advanced_mode_enabled(db, 77) is True
+        db.set_advanced_mode_setting(77, False)
+        assert prem.is_advanced_mode_enabled(db, 77) is False
+        # Legacy à la carte unlocks still count as advanced_mode entitlement.
+        import time as _time
+
+        until = int(_time.time()) + 3600
+        db.extend_premium_features(88, ["delay"], until_unix=until, charge_id="c1")
+        assert prem.has_feature_sync(db, 88, "advanced_mode")
+        assert prem.has_feature_sync(db, 88, "ignore_keywords")
+        apply_features_payment(
+            db,
+            89,
+            feature_ids=["advanced_mode"],
+            charge_id="c2",
+            until_unix=until,
+            stars_paid=20,
+        )
+        assert prem.has_feature_sync(db, 89, "delay")
+        assert db.get_advanced_mode_setting(89) is True
+        # Auto-on when an alert already uses advanced options.
+        db.upsert_user(90)
+        sid90 = db.add_subscription(
+            owner_id=90,
+            twitch_username="x",
+            twitch_user_id="90",
+            message_template="hi",
+            dest_type="dm",
+            chat_id=90,
+            thread_id=None,
+            delay_minutes=5,
+        )
+        assert sid90
+        assert prem.is_advanced_mode_enabled(db, 90) is True
+        db.set_advanced_mode_setting(90, False)
+        assert prem.is_advanced_mode_enabled(db, 90) is False
         assert tr("btn_alert_history_more", "ru") == "Показать больше"
         assert tr("alert_history_go_stream", "ru") == "Перейти к стриму"
         assert "<b>📅 " in tr("alert_history_day", "ru", date="пятница, 14 августа")

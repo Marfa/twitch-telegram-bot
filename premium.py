@@ -35,12 +35,26 @@ FEATURE_IDS: tuple[str, ...] = (
     "extra_alerts",
     "alert_types",
     "twitch_sync",
+    "advanced_mode",
+    "schedule_publish",
+    "alert_history",
+)
+
+# Wizard steps bundled into advanced_mode (legacy à la carte ids still honored).
+ADVANCED_MODE_FEATURE_IDS: frozenset[str] = frozenset(
+    {
+        "advanced_mode",
+        "ignore_keywords",
+        "delay",
+        "repeat",
+        "delete_prev",
+    }
+)
+_LEGACY_ADVANCED_FEATURE_IDS: tuple[str, ...] = (
     "ignore_keywords",
     "delay",
     "repeat",
     "delete_prev",
-    "schedule_publish",
-    "alert_history",
 )
 
 # DM alert history retention shown to the user (storage keeps the premium window).
@@ -51,6 +65,7 @@ _FEATURE_LABEL_KEYS = {
     "extra_alerts": "premium_feat_extra_alerts",
     "alert_types": "premium_feat_alert_types",
     "twitch_sync": "premium_feat_twitch_sync",
+    "advanced_mode": "premium_feat_advanced_mode",
     "ignore_keywords": "premium_feat_ignore_keywords",
     "delay": "premium_feat_delay",
     "repeat": "premium_feat_repeat",
@@ -263,7 +278,19 @@ def has_feature_sync(db: Database, user_id: int, feature_id: str) -> bool:
     st = get_status(db, user_id)
     if st.has_full_plan:
         return True
+    if feature_id in ADVANCED_MODE_FEATURE_IDS:
+        if st.feature_active("advanced_mode"):
+            return True
+        return any(st.feature_active(fid) for fid in _LEGACY_ADVANCED_FEATURE_IDS)
     return st.feature_active(feature_id)
+
+
+def is_advanced_mode_enabled(db: Database, user_id: int) -> bool:
+    """Wizard shows ignore/delay/repeat/delete steps when True."""
+    setting = db.get_advanced_mode_setting(user_id)
+    if setting is not None:
+        return setting
+    return db.owner_has_advanced_subscription_options(user_id)
 
 
 async def has_feature(bot: Bot, db: Database, user_id: int, feature_id: str) -> bool:
@@ -447,19 +474,22 @@ def apply_features_payment(
     until_unix: int,
     stars_paid: int | None = None,
 ) -> None:
+    ids = list(feature_ids)
     db.extend_premium_features(
         user_id,
-        list(feature_ids),
+        ids,
         until_unix=until_unix,
         charge_id=charge_id,
     )
+    if "advanced_mode" in ids:
+        db.set_advanced_mode_setting(user_id, True)
     credit_referral_commission(
         db,
         invitee_id=user_id,
         charge_id=charge_id,
         stars_paid=stars_paid
         if stars_paid is not None
-        else stars_feature_price(user_id) * max(1, len(feature_ids)),
+        else stars_feature_price(user_id) * max(1, len(ids)),
     )
 
 

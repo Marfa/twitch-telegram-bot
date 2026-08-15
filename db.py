@@ -706,6 +706,12 @@ class Database(Protocol):
 
     def set_global_ignore_keywords(self, user_id: int, keywords: str) -> None: ...
 
+    def get_advanced_mode_setting(self, user_id: int) -> bool | None: ...
+
+    def set_advanced_mode_setting(self, user_id: int, enabled: bool) -> None: ...
+
+    def owner_has_advanced_subscription_options(self, owner_id: int) -> bool: ...
+
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]: ...
 
     def set_saved_schedule(self, user_id: int, hour: int, minute: int) -> None: ...
@@ -1058,6 +1064,7 @@ class SqliteDatabase:
             ("premium_trial_until", "INTEGER NOT NULL DEFAULT 0"),
             ("premium_trial_used", "INTEGER NOT NULL DEFAULT 0"),
             ("premium_features", "TEXT NOT NULL DEFAULT ''"),
+            ("advanced_mode", "INTEGER"),
         ):
             if col not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
@@ -1978,6 +1985,46 @@ class SqliteDatabase:
                 """,
                 (user_id, str(keywords or "")),
             )
+
+    def get_advanced_mode_setting(self, user_id: int) -> bool | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT advanced_mode FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None or row["advanced_mode"] is None:
+            return None
+        return bool(row["advanced_mode"])
+
+    def set_advanced_mode_setting(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, advanced_mode) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    advanced_mode = excluded.advanced_mode
+                """,
+                (user_id, 1 if enabled else 0),
+            )
+
+    def owner_has_advanced_subscription_options(self, owner_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 AS ok FROM subscriptions
+                WHERE owner_id = ?
+                  AND (
+                    TRIM(COALESCE(ignore_keywords, '')) != ''
+                    OR COALESCE(use_global_ignore, 0) != 0
+                    OR COALESCE(delay_minutes, 0) > 0
+                    OR COALESCE(suppress_repeat_minutes, 0) > 0
+                    OR COALESCE(delete_previous, 0) != 0
+                  )
+                LIMIT 1
+                """,
+                (owner_id,),
+            ).fetchone()
+        return row is not None
 
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]:
         with self._conn() as conn:
@@ -3068,6 +3115,7 @@ class PostgresDatabase:
                 "premium_trial_until BIGINT NOT NULL DEFAULT 0",
                 "premium_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
                 "premium_features TEXT NOT NULL DEFAULT ''",
+                "advanced_mode INTEGER",
             ):
                 cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
             if not had_premium:
@@ -4079,6 +4127,51 @@ class PostgresDatabase:
                 """,
                 (user_id, str(keywords or "")),
             )
+
+    def get_advanced_mode_setting(self, user_id: int) -> bool | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT advanced_mode FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if row is None or row["advanced_mode"] is None:
+            return None
+        return bool(row["advanced_mode"])
+
+    def set_advanced_mode_setting(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, advanced_mode) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    advanced_mode = EXCLUDED.advanced_mode
+                """,
+                (user_id, 1 if enabled else 0),
+            )
+
+    def owner_has_advanced_subscription_options(self, owner_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 AS ok FROM subscriptions
+                WHERE owner_id = %s
+                  AND (
+                    TRIM(COALESCE(ignore_keywords, '')) != ''
+                    OR COALESCE(use_global_ignore, FALSE)
+                    OR COALESCE(delay_minutes, 0) > 0
+                    OR COALESCE(suppress_repeat_minutes, 0) > 0
+                    OR COALESCE(delete_previous, FALSE)
+                  )
+                LIMIT 1
+                """,
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        return row is not None
 
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]:
         with self._conn() as conn:

@@ -67,6 +67,7 @@ from i18n import (
     edit_options_keyboard,
     ignore_keywords_keyboard,
     ignored_words_keyboard,
+    advanced_mode_keyboard,
     image_ask_keyboard,
     image_edit_keyboard,
     image_position_keyboard,
@@ -676,6 +677,9 @@ async def _prompt_repeat_step(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
+    if not prem.is_advanced_mode_enabled(db, user_id):
+        context.user_data["suppress_repeat_minutes"] = 0
+        return await _go_after_repeat(update, context, lang)
     if not await prem.has_feature(context.bot, db, user_id, "repeat"):
         return await _show_premium_gate(
             update, context, feature="repeat", first_step=False
@@ -789,9 +793,7 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         chat_id = context.user_data.get("pending_chat_id", user_id)
         thread_id = context.user_data.get("pending_thread_id")
         return await _finish_subscription(update, context, user_id, chat_id, thread_id)
-    if feature in ("active_limit", "sync", "alert_type"):
-        return await cancel(update, context)
-    return await _prompt_dest_step(update, context, lang)
+    return await cancel(update, context)
 
 
 async def _continue_after_delay(
@@ -849,12 +851,20 @@ async def _go_alert_type_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     chat_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
     text = t("alert_type_prompt", lang)
+    if not prem.is_advanced_mode_enabled(db, chat_id):
+        text = f"{text}\n\n{t('wizard_simple_mode_note', lang)}"
     markup = alert_type_keyboard(lang)
+    parse_mode = ParseMode.HTML if "<b>" in text else None
     if update.callback_query:
-        await context.bot.send_message(chat_id, text, reply_markup=markup)
+        await context.bot.send_message(
+            chat_id, text, reply_markup=markup, parse_mode=parse_mode
+        )
     else:
-        await update.effective_message.reply_text(text, reply_markup=markup)
+        await update.effective_message.reply_text(
+            text, reply_markup=markup, parse_mode=parse_mode
+        )
     _set_wizard_back(context, ALERT_TYPE)
     return ALERT_TYPE
 
@@ -917,7 +927,12 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, update.effective_user.id, "ignore_keywords"):
+    user_id = update.effective_user.id
+    if not prem.is_advanced_mode_enabled(db, user_id):
+        context.user_data["ignore_keywords"] = ""
+        context.user_data["use_global_ignore"] = False
+        return await _go_after_ignore_keywords(update, context, lang)
+    if not await prem.has_feature(context.bot, db, user_id, "ignore_keywords"):
         return await _show_premium_gate(
             update, context, feature="ignore_keywords", first_step=False
         )
@@ -952,7 +967,11 @@ async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_
 
 async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, update.effective_user.id, "delay"):
+    user_id = update.effective_user.id
+    if not prem.is_advanced_mode_enabled(db, user_id):
+        context.user_data["delay_minutes"] = 0
+        return await _continue_after_delay(update, context, lang)
+    if not await prem.has_feature(context.bot, db, user_id, "delay"):
         return await _show_premium_gate(
             update, context, feature="delay", first_step=False
         )
@@ -1033,10 +1052,43 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     lang = _user_lang(context, update.effective_user.id)
     state = context.user_data.get("wizard_back_state")
     if state == CHANNEL:
-        context.user_data.pop("twitch_username", None)
-        context.user_data.pop("twitch_user_id", None)
-        context.user_data.pop("twitch_display_name", None)
-        context.user_data.pop("channel_input_was_url", None)
+        # Back to alert-type picker: drop channel + everything chosen after it.
+        # Leaving dest_type/template behind could finish a create without twitch_username.
+        for key in (
+            "twitch_username",
+            "twitch_user_id",
+            "twitch_display_name",
+            "channel_input_was_url",
+            "message_template",
+            "pending_template",
+            "pending_template_preview_disabled",
+            "image_file_id",
+            "image_position",
+            "ignore_keywords",
+            "use_global_ignore",
+            "disable_link_preview",
+            "strip_name_mentions",
+            "delay_minutes",
+            "suppress_repeat_minutes",
+            "schedule_reminder_minutes",
+            "schedule_reminder_configured",
+            "schedule_reminder_offered",
+            "after_delay_state",
+            "dest_type",
+            "delete_previous",
+            "notify_delete_fail",
+            "delete_other_alerts",
+            "delete_sibling_asked",
+            "pending_chat_id",
+            "pending_thread_id",
+            "lucky_quick",
+            "alert_type",
+            "notify_on_live",
+            "notify_on_end",
+            "notify_on_category_change",
+            "skip_schedule_check",
+        ):
+            context.user_data.pop(key, None)
         return await _go_alert_type_prompt(update, context, lang)
     if state == TEMPLATE:
         context.user_data.pop("pending_template", None)
@@ -1814,8 +1866,15 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
             return ConversationHandler.END
         sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
         await query.edit_message_text(
-            t("edit_menu", lang, sub_id=sub_num, username=sub.twitch_username),
-            reply_markup=_edit_options_for_sub(sub, lang),
+            _edit_menu_text(
+                lang,
+                sub_id=sub_num,
+                username=sub.twitch_username,
+                db=db,
+                owner_id=query.from_user.id,
+            ),
+            reply_markup=_edit_options_for_sub(sub, lang, db),
+            parse_mode=ParseMode.HTML,
         )
         await context.bot.send_message(
             query.from_user.id,
@@ -2625,31 +2684,6 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return EDIT_DELAY
 
 
-async def start_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    sub_id = int(query.data.split(":")[1])
-    db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, query.from_user.id, "repeat"):
-        from premium_handlers import send_premium_screen
-
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(context.bot, query.from_user.id, lang, db)
-        return ConversationHandler.END
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
-    await query.edit_message_text(
-        t("edit_repeat_menu", lang),
-        reply_markup=edit_bool_keyboard(sub_id, "repeat", lang),
-    )
-    return ConversationHandler.END
-
-
 async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
@@ -2832,6 +2866,24 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["dest_type"] = dest_type
 
     if dest_type == "dm":
+        if not context.user_data.get("edit_sub_id") and not (
+            context.user_data.get("twitch_username")
+            and context.user_data.get("twitch_user_id")
+            and context.user_data.get("message_template")
+        ):
+            logger.warning(
+                "dest:dm without create payload for %s keys=%s",
+                query.from_user.id,
+                sorted(context.user_data.keys()),
+            )
+            await query.edit_message_text(t("save_failed", lang))
+            await context.bot.send_message(
+                query.from_user.id,
+                t("menu_main", lang),
+                reply_markup=_menu(lang, query.from_user.id),
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
         context.user_data["pending_chat_id"] = query.from_user.id
         context.user_data["pending_thread_id"] = None
         context.user_data["delete_previous"] = False
@@ -2978,7 +3030,17 @@ async def _prompt_delete_old(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, update.effective_user.id, "delete_prev"):
+    user_id = update.effective_user.id
+    if not prem.is_advanced_mode_enabled(db, user_id):
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        context.user_data["delete_other_alerts"] = False
+        chat_id = context.user_data.get("pending_chat_id", user_id)
+        thread_id = context.user_data.get("pending_thread_id")
+        return await _finish_subscription(
+            update, context, user_id, chat_id, thread_id
+        )
+    if not await prem.has_feature(context.bot, db, user_id, "delete_prev"):
         return await _show_premium_gate(
             update, context, feature="delete_old", first_step=False
         )
@@ -3027,7 +3089,9 @@ def _has_sibling_publication_subs(
     return False
 
 
-def _edit_options_for_sub(sub: Subscription, lang: str) -> InlineKeyboardMarkup:
+def _edit_options_for_sub(
+    sub: Subscription, lang: str, db: Database
+) -> InlineKeyboardMarkup:
     alert_type = _alert_type_from_sub(sub)
     return edit_options_keyboard(
         sub.id,
@@ -3041,7 +3105,20 @@ def _edit_options_for_sub(sub: Subscription, lang: str) -> InlineKeyboardMarkup:
         notify_on_category_change=sub.notify_on_category_change,
         notify_on_end=sub.notify_on_end,
         is_upcoming=alert_type == "upcoming",
+        show_advanced=prem.is_advanced_mode_enabled(db, sub.owner_id),
     )
+
+
+def _edit_menu_text(lang: str, *, sub_id: int, username: str, db: Database, owner_id: int) -> str:
+    text = t(
+        "edit_menu",
+        lang,
+        sub_id=sub_id,
+        username=html.escape(username),
+    )
+    if not prem.is_advanced_mode_enabled(db, owner_id):
+        text = f"{text}\n\n{t('wizard_simple_mode_note', lang)}"
+    return text
 
 
 def _alert_type_from_sub(sub: Subscription) -> str:
@@ -3149,7 +3226,37 @@ async def _finish_subscription(
     data = dict(context.user_data)
     edit_sub_id = data.get("edit_sub_id")
     live_addon = bool(data.get("live_addon_pass"))
-    dest_type = data["dest_type"]
+    dest_type = data.get("dest_type")
+    if not dest_type:
+        logger.warning(
+            "finish_subscription missing dest_type for %s keys=%s",
+            owner_id,
+            sorted(data.keys()),
+        )
+        await context.bot.send_message(
+            owner_id,
+            t("save_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    if not edit_sub_id and not (
+        data.get("twitch_username")
+        and data.get("twitch_user_id")
+        and data.get("message_template")
+    ):
+        logger.warning(
+            "finish_subscription incomplete create for %s keys=%s",
+            owner_id,
+            sorted(data.keys()),
+        )
+        await context.bot.send_message(
+            owner_id,
+            t("save_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
     delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
     notify_delete_fail = bool(data.get("notify_delete_fail", False)) and delete_previous
     alert_type = str(data.get("alert_type") or "")
@@ -5652,8 +5759,15 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text(
-        t("edit_menu", lang, sub_id=sub_num, username=sub.twitch_username),
-        reply_markup=_edit_options_for_sub(sub, lang),
+        _edit_menu_text(
+            lang,
+            sub_id=sub_num,
+            username=sub.twitch_username,
+            db=db,
+            owner_id=query.from_user.id,
+        ),
+        reply_markup=_edit_options_for_sub(sub, lang, db),
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -5867,26 +5981,30 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
         await query.edit_message_text(
-            t(
-                "edit_menu",
+            _edit_menu_text(
                 lang,
                 sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
                 username=sub.twitch_username,
+                db=db,
+                owner_id=query.from_user.id,
             ),
-            reply_markup=_edit_options_for_sub(sub, lang),
+            reply_markup=_edit_options_for_sub(sub, lang, db),
+            parse_mode=ParseMode.HTML,
         )
         return
     if field == "delete_other" and (
         not sub.notify_on_category_change or not sub.delete_previous
     ):
         await query.edit_message_text(
-            t(
-                "edit_menu",
+            _edit_menu_text(
                 lang,
                 sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
                 username=sub.twitch_username,
+                db=db,
+                owner_id=query.from_user.id,
             ),
-            reply_markup=_edit_options_for_sub(sub, lang),
+            reply_markup=_edit_options_for_sub(sub, lang, db),
+            parse_mode=ParseMode.HTML,
         )
         return
     if field in ("delete_old", "delete_fail", "delete_other", "repeat"):
@@ -7687,6 +7805,44 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
     )
 
 
+async def open_advanced_mode_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    enabled = prem.is_advanced_mode_enabled(db, user_id)
+    await update.effective_message.reply_text(
+        t("advanced_mode_screen", lang),
+        reply_markup=advanced_mode_keyboard(lang, enabled=enabled),
+    )
+
+
+async def on_advanced_mode_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    currently_on = prem.is_advanced_mode_enabled(db, user_id)
+    if not currently_on:
+        if not await prem.has_feature(context.bot, db, user_id, "advanced_mode"):
+            from premium_handlers import send_premium_screen
+
+            await query.answer(t("advanced_mode_premium_only", lang), show_alert=True)
+            await send_premium_screen(context.bot, user_id, lang, db)
+            return
+        await query.answer()
+        db.set_advanced_mode_setting(user_id, True)
+        enabled = True
+    else:
+        await query.answer()
+        db.set_advanced_mode_setting(user_id, False)
+        enabled = False
+    await query.edit_message_reply_markup(
+        reply_markup=advanced_mode_keyboard(lang, enabled=enabled)
+    )
+
+
 async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -8684,6 +8840,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("sys_notifications"), open_sys_notifications_menu),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(_btn_filter("advanced_mode"), open_advanced_mode_menu),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_advanced_mode_toggle, pattern=r"^advanced_mode:toggle$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_sys_updates_toggle, pattern=r"^sys_updates:toggle$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_sys_availability_toggle, pattern=r"^sys_availability:toggle$"),
@@ -8760,7 +8924,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(start_edit_ignore_keywords, pattern=r"^edit_f:\d+:ignore_keywords$"),
             CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
             CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
-            CallbackQueryHandler(start_edit_repeat, pattern=r"^edit_f:\d+:repeat$"),
             CallbackQueryHandler(
                 start_edit_schedule_reminder, pattern=r"^edit_f:\d+:sched_remind$"
             ),
@@ -9141,6 +9304,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_sel:|delete_go$|delete_clear$|delete_type:|list_type:|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
+                r"advanced_mode:|"
                 r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
             ),
         ),
@@ -9172,6 +9336,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("language")
                 | _btn_filter("sys_notifications")
                 | _btn_filter("ignored_words")
+                | _btn_filter("advanced_mode")
                 | _btn_filter("sync_subs")
                 | _btn_filter("admin")
                 | _btn_filter("broadcast")

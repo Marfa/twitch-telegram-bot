@@ -40,6 +40,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_cancel": "Cancel",
         "btn_sys_notifications": "🔔 System alerts",
         "btn_ignored_words": "🚫 Ignored words",
+        "btn_advanced_mode": "🎛 Advanced mode",
         "btn_sys_updates": "📬 Bot update alerts",
         "btn_sync_subs": "🔄 Subscription sync",
         "btn_premium": "⭐ Premium",
@@ -253,6 +254,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_extra_alerts": "More than {free_limit} active alerts",
         "premium_feat_alert_types": "Alert types beyond live start",
         "premium_feat_twitch_sync": "Twitch follow auto-sync",
+        "premium_feat_advanced_mode": "Advanced mode",
         "premium_feat_ignore_keywords": "Ignore keywords",
         "premium_feat_delay": "Delayed send",
         "premium_feat_repeat": "Repeat notification mute",
@@ -568,6 +570,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ignored_words_cancel": "Cancel",
         "ignored_words_saved": "✅ Ignored words saved.",
         "ignored_words_cleared": "✅ Ignored words cleared.",
+        "advanced_mode_screen": (
+            "When advanced mode is on, creating or editing an alert shows extra options:\n"
+            "• Ignore keywords (skip the alert if the title or category matches stop words)\n"
+            "• Delayed send (wait N minutes after stream start before sending)\n"
+            "• Repeat notification mute (no repeats if the stream drops within N minutes)\n"
+            "• Delete previous messages (remove the bot’s last alert in the chat before a new one)"
+        ),
+        "advanced_mode_activate": "Activate mode",
+        "advanced_mode_premium_only": (
+            "Advanced mode is available to Premium users only."
+        ),
+        "wizard_simple_mode_note": (
+            "<b>You are in simplified mode. Open Settings → Advanced mode "
+            "to show all wizard steps.</b>"
+        ),
         "link_preview_prompt": "Show link preview in notifications?",
         "link_preview_on": "✅ Show preview",
         "link_preview_off": "❌ Hide preview",
@@ -1119,6 +1136,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_cancel": "Отмена",
         "btn_sys_notifications": "🔔 Системные уведомления",
         "btn_ignored_words": "🚫 Игнорируемые слова",
+        "btn_advanced_mode": "🎛 Продвинутый режим",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "btn_sync_subs": "🔄 Синхронизация подписок",
         "btn_premium": "⭐ Премиум",
@@ -1332,6 +1350,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_extra_alerts": "Активных оповещений больше {free_limit}",
         "premium_feat_alert_types": "Типы кроме старта стрима",
         "premium_feat_twitch_sync": "Автосинк фолловов Twitch",
+        "premium_feat_advanced_mode": "Продвинутый режим",
         "premium_feat_ignore_keywords": "Игнор ключевых слов",
         "premium_feat_delay": "Отложенная отправка",
         "premium_feat_repeat": "Заглушка повторов",
@@ -1755,6 +1774,26 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ignored_words_cancel": "Отмена",
         "ignored_words_saved": "✅ Игнорируемые слова сохранены.",
         "ignored_words_cleared": "✅ Игнорируемые слова очищены.",
+        "advanced_mode_screen": (
+            "При активации продвинутого режима в создании или редактировании "
+            "сообщения у вас появятся дополнительные опции:\n"
+            "• Игнор ключевых слов (не отправлять оповещение, если в названии "
+            "или категории есть стоп-слова)\n"
+            "• Отложенная отправка (подождать N минут после старта стрима "
+            "перед отправкой)\n"
+            "• Заглушка повторов (не слать повторные оповещения при обрыве "
+            "стрима в течение N минут)\n"
+            "• Удаление предыдущих сообщений (удалять прошлое оповещение бота "
+            "в чате перед новым)"
+        ),
+        "advanced_mode_activate": "Активировать режим",
+        "advanced_mode_premium_only": (
+            "Активация продвинутого режима доступна только Premium-пользователям."
+        ),
+        "wizard_simple_mode_note": (
+            "<b>Вы работаете в упрощённом режиме, перейдите в Настройках "
+            "в продвинутый режим для отображения всех шагов мастера.</b>"
+        ),
         "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
         "link_preview_on": "✅ Показывать превью",
         "link_preview_off": "❌ Скрыть превью",
@@ -2387,6 +2426,7 @@ def all_menu_buttons() -> set[str]:
         "back",
         "sys_notifications",
         "ignored_words",
+        "advanced_mode",
         "sync_subs",
         "premium",
         "partner",
@@ -2460,10 +2500,13 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(btn("ignored_words", lang)),
-                KeyboardButton(btn("sys_notifications", lang)),
+                KeyboardButton(btn("advanced_mode", lang)),
             ],
             [
+                KeyboardButton(btn("sys_notifications", lang)),
                 KeyboardButton(btn("language", lang)),
+            ],
+            [
                 KeyboardButton(btn("partner", lang)),
             ],
             [
@@ -3011,6 +3054,20 @@ def ignored_words_keyboard(lang: str, *, has_words: bool) -> InlineKeyboardMarku
         ]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def advanced_mode_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
+    mark = "✅ " if enabled else "⬜️ "
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    mark + t("advanced_mode_activate", lang),
+                    callback_data="advanced_mode:toggle",
+                )
+            ]
+        ]
+    )
 
 
 def delay_keyboard(lang: str) -> InlineKeyboardMarkup:
@@ -3563,6 +3620,7 @@ def edit_options_keyboard(
     notify_on_category_change: bool = False,
     notify_on_end: bool = False,
     is_upcoming: bool = False,
+    show_advanced: bool = True,
 ) -> InlineKeyboardMarkup:
     # Same order as create wizard: template → image → ignore → preview → delay
     # → repeat → schedule reminder → dest → delete.
@@ -3582,14 +3640,20 @@ def edit_options_keyboard(
                 )
             ]
         )
-    rows.append(
-        [InlineKeyboardButton(t("edit_ignore_keywords", lang), callback_data=f"edit_f:{sub_id}:ignore_keywords")]
-    )
+    if show_advanced:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("edit_ignore_keywords", lang),
+                    callback_data=f"edit_f:{sub_id}:ignore_keywords",
+                )
+            ]
+        )
     if show_link_preview:
         rows.append(
             [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")]
         )
-    if not is_upcoming:
+    if show_advanced and not is_upcoming:
         rows.append(
             [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")]
         )
@@ -3609,7 +3673,7 @@ def edit_options_keyboard(
     rows.append(
         [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")]
     )
-    if dest_type != "dm":
+    if show_advanced and dest_type != "dm":
         rows.append(
             [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")]
         )
