@@ -92,6 +92,8 @@ POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", "").strip()
 POSTHOG_HOST = (
     os.getenv("POSTHOG_HOST", "").strip() or "https://us.i.posthog.com"
 ).rstrip("/")
+# Shared secret for PostHog → bot Issue alerts (Bearer / query). Empty = endpoint off.
+POSTHOG_ISSUE_WEBHOOK_SECRET = os.getenv("POSTHOG_ISSUE_WEBHOOK_SECRET", "").strip()
 
 
 def validate() -> None:

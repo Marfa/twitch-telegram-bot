@@ -59,7 +59,7 @@ from db import (
     open_database,
 )
 from i18n import SUPPORTED_LOCALES, btn, t as tr
-from health import create_oauth_state, pop_oauth_state
+from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
 from premium import FEATURE_IDS
 from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
@@ -217,6 +217,33 @@ def main() -> None:
     assert pop_oauth_state(state) is None
     state2 = create_oauth_state(42, "en", purpose="schedule")
     assert pop_oauth_state(state2) == (42, "en", "schedule")
+
+    created = parse_posthog_issue_payload(
+        {
+            "kind": "$error_tracking_issue_created",
+            "name": "ValueError: boom",
+            "description": "Traceback…",
+            "fingerprint": "abc",
+            "url": "https://us.posthog.com/project/1/error_tracking/x",
+        }
+    )
+    assert created is not None
+    assert created["kind"] == "created"
+    assert created["name"].startswith("ValueError")
+    reopened = parse_posthog_issue_payload(
+        {
+            "event": {
+                "event": "$error_tracking_issue_reopened",
+                "properties": {
+                    "name": "KeyError",
+                    "description": "missing",
+                    "fingerprint": "fp1",
+                },
+            }
+        }
+    )
+    assert reopened is not None and reopened["kind"] == "reopened"
+    assert parse_posthog_issue_payload({"event": {"event": "$pageview"}}) is None
     assert TwitchClient.is_one_off_schedule_forbidden(
         Exception("403 Client Error: single segment creation not authorized for url: x")
     )

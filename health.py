@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import os
 import secrets
@@ -32,6 +33,12 @@ _oauth_loop: asyncio.AbstractEventLoop | None = None
 _oauth_on_complete: OAuthCompleteHandler | None = None
 _oauth_twitch: Any = None
 _oauth_redirect_uri: str = ""
+
+# PostHog error-tracking Issue alerts → Telegram admins
+PosthogIssueHandler = Callable[[dict[str, Any]], Awaitable[None]]
+_posthog_issue_loop: asyncio.AbstractEventLoop | None = None
+_posthog_issue_on_event: PosthogIssueHandler | None = None
+_POSTHOG_BODY_MAX = 256_000
 
 
 def mark_ready() -> None:
@@ -96,6 +103,142 @@ def register_oauth_bridge(
     _oauth_on_complete = on_complete
     _oauth_twitch = twitch
     _oauth_redirect_uri = redirect_uri
+
+
+def register_posthog_issue_bridge(
+    loop: asyncio.AbstractEventLoop,
+    on_event: PosthogIssueHandler,
+) -> None:
+    global _posthog_issue_loop, _posthog_issue_on_event
+    _posthog_issue_loop = loop
+    _posthog_issue_on_event = on_event
+
+
+def parse_posthog_issue_payload(raw: dict[str, Any]) -> dict[str, str] | None:
+    """Normalize HogFunction webhook JSON into name/description/url/kind."""
+    if not isinstance(raw, dict):
+        return None
+    kind = ""
+    name = ""
+    description = ""
+    url = ""
+    fingerprint = ""
+    status = ""
+    # Custom body from our HogFunction inputs.body
+    if any(k in raw for k in ("name", "fingerprint", "kind", "description")) and not isinstance(
+        raw.get("event"), dict
+    ):
+        kind = str(raw.get("kind") or raw.get("event") or "")
+        name = str(raw.get("name") or "").strip()
+        description = str(raw.get("description") or "").strip()
+        url = str(raw.get("url") or "").strip()
+        fingerprint = str(raw.get("fingerprint") or "").strip()
+        status = str(raw.get("status") or "").strip()
+    else:
+        event = raw.get("event")
+        if isinstance(event, dict):
+            kind = str(event.get("event") or "")
+            props = event.get("properties")
+            if not isinstance(props, dict):
+                props = {}
+            name = str(props.get("name") or "").strip()
+            description = str(props.get("description") or "").strip()
+            fingerprint = str(props.get("fingerprint") or "").strip()
+            status = str(props.get("status") or "").strip()
+            url = str(raw.get("url") or props.get("url") or "").strip()
+        else:
+            kind = str(raw.get("kind") or raw.get("event") or "")
+            name = str(raw.get("name") or "").strip()
+            description = str(raw.get("description") or "").strip()
+            url = str(raw.get("url") or "").strip()
+            fingerprint = str(raw.get("fingerprint") or "").strip()
+            status = str(raw.get("status") or "").strip()
+
+    allowed = {
+        "$error_tracking_issue_created",
+        "$error_tracking_issue_reopened",
+        "created",
+        "reopened",
+    }
+    if kind and kind not in allowed:
+        return None
+    if not name and not description and not fingerprint:
+        return None
+    kind_key = (
+        "reopened"
+        if kind in ("$error_tracking_issue_reopened", "reopened")
+        else "created"
+    )
+    return {
+        "kind": kind_key,
+        "name": name or fingerprint or "Issue",
+        "description": description,
+        "url": url,
+        "fingerprint": fingerprint,
+        "status": status,
+    }
+
+
+def _schedule_posthog_issue(payload: dict[str, str]) -> None:
+    if _posthog_issue_loop is None or _posthog_issue_on_event is None:
+        logger.error("PostHog issue webhook with no bridge registered")
+        return
+    fut = asyncio.run_coroutine_threadsafe(
+        _posthog_issue_on_event(payload),
+        _posthog_issue_loop,
+    )
+
+    def _done(f: Any) -> None:
+        try:
+            f.result()
+        except Exception:
+            logger.exception("PostHog issue notify failed")
+
+    fut.add_done_callback(_done)
+
+
+def _posthog_webhook_authorized(handler: BaseHTTPRequestHandler) -> bool:
+    from config import POSTHOG_ISSUE_WEBHOOK_SECRET
+
+    secret = POSTHOG_ISSUE_WEBHOOK_SECRET
+    if not secret:
+        return False
+    auth = handler.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        if secrets.compare_digest(token, secret):
+            return True
+    query = parse_qs(urlparse(handler.path).query)
+    token = (query.get("token") or [""])[0]
+    if token and secrets.compare_digest(token, secret):
+        return True
+    return False
+
+
+def _handle_posthog_issue_post(
+    handler: BaseHTTPRequestHandler,
+) -> tuple[int, bytes]:
+    if not _posthog_webhook_authorized(handler):
+        return 401, b"unauthorized"
+    length_raw = handler.headers.get("Content-Length") or "0"
+    try:
+        length = int(length_raw)
+    except ValueError:
+        return 400, b"bad content-length"
+    if length < 0 or length > _POSTHOG_BODY_MAX:
+        return 413, b"payload too large"
+    try:
+        body = handler.rfile.read(length)
+        raw = json.loads(body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return 400, b"invalid json"
+    if not isinstance(raw, dict):
+        return 400, b"expected object"
+    parsed = parse_posthog_issue_payload(raw)
+    if not parsed:
+        return 204, b""
+    _schedule_posthog_issue(parsed)
+    return 202, b"accepted"
 
 
 def _schedule_oauth_complete(
@@ -333,6 +476,20 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self) -> None:
+        path = self._path_only()
+        if path == "/hooks/posthog-issues":
+            status, body = _handle_posthog_issue_post(self)
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def do_HEAD(self) -> None:
         if not self._health_paths():

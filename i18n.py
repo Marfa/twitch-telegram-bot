@@ -92,6 +92,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Or tap Skip."
         ),
         "watch_tags_skip": "Skip",
+        "watch_choose": "Choose:",
         "watch_tags_bad": "Send tags separated by commas, or tap Skip.",
         "watch_viewers_prompt": (
             "What to watch — step 3/5\n\n"
@@ -708,6 +709,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_fail_yes_note": "Notify on delete failure: yes",
         "delete_fail_no_note": "Notify on delete failure: no",
         "weekly_new_users": "New users: {count}\nPaid users (Stars): {paid}",
+        "posthog_issue_created": "🔴 New Issue",
+        "posthog_issue_reopened": "🔄 Issue reopened",
+        "posthog_issue_body": (
+            "{title}\n\n"
+            "<b>{name}</b>\n"
+            "{description}"
+            "{link}"
+        ),
         "broadcast_footer": "—\n{type}. You can turn these off in Settings.",
         "group_not_found": "Group not found. Add the bot and check the link.",
         "dest_not_found_channel": "Channel not found. Check @username.",
@@ -1188,6 +1197,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Или нажмите Пропустить."
         ),
         "watch_tags_skip": "Пропустить",
+        "watch_choose": "Выберите:",
         "watch_tags_bad": "Отправьте теги через запятую или нажмите Пропустить.",
         "watch_viewers_prompt": (
             "Что посмотреть — шаг 3/5\n\n"
@@ -1918,6 +1928,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_fail_yes_note": "Сообщать о проблемах удаления: да",
         "delete_fail_no_note": "Сообщать о проблемах удаления: нет",
         "weekly_new_users": "Новых пользователей: {count}\nПлатных (Stars): {paid}",
+        "posthog_issue_created": "🔴 Новый Issue",
+        "posthog_issue_reopened": "🔄 Issue снова открыт",
+        "posthog_issue_body": (
+            "{title}\n\n"
+            "<b>{name}</b>\n"
+            "{description}"
+            "{link}"
+        ),
         "broadcast_footer": "—\n{type}. Можно отключить в настройках",
         "group_not_found": "Группа не найдена. Добавьте бота и проверьте ссылку.",
         "dest_not_found_channel": "Канал не найден. Проверьте @username.",

@@ -275,6 +275,7 @@ python main.py
 | `HF_TEXT_MODEL` | Модель HF (по умолчанию `Qwen/Qwen2.5-7B-Instruct`) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Без ключа аналитика выключена |
 | `POSTHOG_HOST` | Ingestion host (по умолчанию `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
+| `POSTHOG_ISSUE_WEBHOOK_SECRET` | Секрет Bearer для `POST /hooks/posthog-issues` (алерты new/reopened Issue → админам) |
 
 Без ключей Groq/HF кнопка **Мне повезёт** всё равно работает — из локального пула шаблонов в БД.
 
@@ -286,6 +287,7 @@ python main.py
 |---|---|
 | `/start`, алерты, импорт, premium, блоки | Activity / Product analytics → Trends |
 | Необработанные исключения | Error tracking |
+| Новый / reopen Issue | Alert → HTTP webhook → Telegram админам (RU через DeepL) |
 | `logger.warning` / `logger.error` / `exception` | Logs (`service.name=twitch-telegram-bot`, без INFO) |
 | Снимок админ-статистики | событие `daily_bot_stats` каждый день в 03:00 UTC |
 
@@ -306,10 +308,10 @@ Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subs
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
 | `translate.py` | DeepL для админ-рассылок |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/health`, `/placeholders`, Twitch OAuth callback |
+| `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue webhook |
 | `db.py` | SQLite или PostgreSQL, пул `lucky_templates`, watch-фильтры, рефералы |
 
-Опрос Twitch Helix ~60 сек, Statuspage ~120 сек, polling Telegram, без публичного webhook.
+Опрос Twitch Helix ~60 сек, Statuspage ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue webhook.
 
 ## Заимствования
 

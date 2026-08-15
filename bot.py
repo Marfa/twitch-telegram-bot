@@ -4293,7 +4293,7 @@ async def _go_watch_tags_prompt(
         parse_mode=ParseMode.HTML,
     )
     await update.effective_message.reply_text(
-        t("watch_tags_skip", lang),
+        t("watch_choose", lang),
         reply_markup=watch_tags_keyboard(lang),
     )
     _set_wizard_back(context, WATCH_TAGS)
@@ -4309,7 +4309,7 @@ async def _go_watch_viewers_prompt(
         parse_mode=ParseMode.HTML,
     )
     await update.effective_message.reply_text(
-        t("watch_viewers_any", lang),
+        t("watch_choose", lang),
         reply_markup=watch_viewers_keyboard(lang),
     )
     _set_wizard_back(context, WATCH_VIEWERS)
@@ -4325,7 +4325,7 @@ async def _go_watch_language_prompt(
         reply_markup=_wizard(lang),
     )
     await update.effective_message.reply_text(
-        t("watch_lang_any", lang),
+        t("watch_choose", lang),
         reply_markup=watch_lang_keyboard(lang),
     )
     _set_wizard_back(context, WATCH_LANGUAGE)
@@ -4340,7 +4340,7 @@ async def _go_watch_mature_prompt(
         reply_markup=_wizard(lang),
     )
     await update.effective_message.reply_text(
-        t("watch_mature_exclude", lang),
+        t("watch_choose", lang),
         reply_markup=watch_mature_keyboard(lang),
     )
     _set_wizard_back(context, WATCH_MATURE)
@@ -4362,7 +4362,7 @@ async def _go_watch_save_prompt(
         parse_mode=ParseMode.HTML,
     )
     await update.effective_message.reply_text(
-        t("watch_save_yes", lang),
+        t("watch_choose", lang),
         reply_markup=watch_save_keyboard(lang),
     )
     _set_wizard_back(context, WATCH_SAVE)
@@ -8623,6 +8623,61 @@ async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.warning("Cannot send weekly report to admin %s: %s", admin_id, exc)
 
 
+async def notify_admins_posthog_issue(
+    application: Application, payload: dict[str, str]
+) -> None:
+    """Telegram DM to ADMIN_USER_IDS for PostHog Issue created/reopened."""
+    from config import ADMIN_USER_IDS
+    from translate import translate_text
+
+    if not ADMIN_USER_IDS:
+        return
+    db: Database = application.bot_data["db"]
+    kind = payload.get("kind") or "created"
+    name = (payload.get("name") or "Issue").strip()
+    description = (payload.get("description") or "").strip()
+    url = (payload.get("url") or "").strip()
+    # Brief Russian summary for admins (DeepL when available).
+    try:
+        name_ru = translate_text(name, target_lang="ru")
+    except Exception:
+        logger.exception("DeepL name translate failed for PostHog issue")
+        name_ru = name
+    desc_ru = ""
+    if description:
+        try:
+            desc_ru = translate_text(description, target_lang="ru")
+        except Exception:
+            logger.exception("DeepL description translate failed for PostHog issue")
+            desc_ru = description
+        if len(desc_ru) > 400:
+            desc_ru = desc_ru[:397] + "…"
+    link_block = f"\n\n{html.escape(url)}" if url else ""
+    desc_block = html.escape(desc_ru) + "\n" if desc_ru else ""
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        title_key = (
+            "posthog_issue_reopened" if kind == "reopened" else "posthog_issue_created"
+        )
+        text = t(
+            "posthog_issue_body",
+            lang,
+            title=t(title_key, lang),
+            name=html.escape(name_ru),
+            description=desc_block,
+            link=link_block,
+        )
+        try:
+            await application.bot.send_message(
+                admin_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning("Cannot send PostHog issue to admin %s: %s", admin_id, exc)
+
+
 async def _restore_broadcast_jobs(app: Application) -> None:
     db: Database = app.bot_data["db"]
     now = datetime.now(timezone.utc)
@@ -8671,13 +8726,13 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
     async def post_init(application: Application) -> None:
-        from config import twitch_oauth_redirect_uri
-        from health import mark_ready, register_oauth_bridge
+        from config import POSTHOG_ISSUE_WEBHOOK_SECRET, twitch_oauth_redirect_uri
+        from health import mark_ready, register_oauth_bridge, register_posthog_issue_bridge
 
         await _restore_broadcast_jobs(application)
+        loop = asyncio.get_running_loop()
         redirect_uri = twitch_oauth_redirect_uri()
         if redirect_uri:
-            loop = asyncio.get_running_loop()
 
             async def on_oauth_complete(
                 owner_id: int,
@@ -8695,6 +8750,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 redirect_uri=redirect_uri,
                 on_complete=on_oauth_complete,
             )
+        if POSTHOG_ISSUE_WEBHOOK_SECRET:
+
+            async def on_posthog_issue(payload: dict[str, str]) -> None:
+                await notify_admins_posthog_issue(application, payload)
+
+            register_posthog_issue_bridge(loop, on_posthog_issue)
         # Ready only after Application init — avoid deploy cutting over before polling.
         mark_ready()
 
