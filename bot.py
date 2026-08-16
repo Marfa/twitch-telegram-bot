@@ -100,6 +100,7 @@ from i18n import (
     format_stream_schedule_result,
     subscriptions_menu,
     sync_settings_keyboard,
+    sync_unfollow_keyboard,
     withdrawal_actions_keyboard,
     sys_notifications_keyboard,
     t,
@@ -361,13 +362,14 @@ def import_followed_as_subscriptions(
     prune_missing: bool = False,
     enabled: bool = False,
     is_demo: bool = False,
-) -> tuple[int, int, int, int, list[Subscription]]:
+) -> tuple[int, int, int, int, list[Subscription], list[dict[str, str]]]:
     """Create DM subscriptions from Helix followed channels.
 
     Import path keeps enabled=False (paused). Periodic sync passes enabled=True.
-    New rows are marked from_twitch_sync=True. When prune_missing=True, sync-origin
-    subs absent from follows are deleted (manual subs never touched).
-    Returns (imported, skipped, limited, removed, new_subs).
+    New rows are marked from_twitch_sync=True. When prune_missing=True, pristine
+    sync-origin subs absent from follows are deleted; edited/manual leftovers are
+    returned in ask_streamers for user confirmation.
+    Returns (imported, skipped, limited, removed, new_subs, ask_streamers).
     """
     existing_subs = [
         s for s in db.get_subscriptions_by_owner(owner_id) if s.is_demo is is_demo
@@ -413,9 +415,13 @@ def import_followed_as_subscriptions(
         count += 1
         imported += 1
     removed = 0
+    ask_streamers: list[dict[str, str]] = []
     if prune_missing:
         removed = db.delete_synced_subscriptions_missing(owner_id, follow_ids)
-    return imported, skipped, limited, removed, new_subs
+        ask_streamers = db.get_unfollowed_manual_alert_streamers(
+            owner_id, follow_ids, is_demo=is_demo
+        )
+    return imported, skipped, limited, removed, new_subs, ask_streamers
 
 
 LEGACY_IMPORT_TEMPLATES = frozenset(
@@ -454,7 +460,9 @@ def migrate_import_sync_subscriptions(
                 if "disable_link_preview" in fields:
                     preview_updated += 1
                 continue
-            if db.update_subscription(sub.id, owner_id, **fields):
+            if db.update_subscription(
+                sub.id, owner_id, mark_sync_edited=False, **fields
+            ):
                 if "message_template" in fields:
                     templates_updated += 1
                 if "disable_link_preview" in fields:
@@ -4180,6 +4188,73 @@ async def _fetch_watch_suggestions(
     return pick_random_streams(filtered, _WATCH_SUGGEST_N)
 
 
+def _bot_lang_to_twitch(lang: str) -> str:
+    loc = (lang or DEFAULT_LOCALE).lower()
+    if loc.startswith("ru"):
+        return "ru"
+    return "en"
+
+
+def _lucky_streams_from_igdb(
+    twitch: TwitchClient, *, prefer_language: str
+) -> tuple[list[dict[str, str]], list[dict]]:
+    """IGDB random → recently released. Bot language first, else any. Live only, 18+ ok."""
+
+    def _pick(
+        game_rows: list, *, language: str | None
+    ) -> tuple[list[dict[str, str]], list[dict]]:
+        cats = twitch.resolve_igdb_games_to_twitch_categories(game_rows)
+        pooled: list[dict] = []
+        for cat in cats:
+            try:
+                pooled.extend(
+                    twitch.get_streams_by_game(
+                        cat["id"], language=language, first=100
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "lucky streams fetch failed for game_id=%s", cat.get("id")
+                )
+        filtered = filter_streams_for_watch(pooled, exclude_mature=False)
+        return cats, pick_random_streams(filtered, _WATCH_SUGGEST_N)
+
+    def _pick_lang_then_any(
+        game_rows: list,
+    ) -> tuple[list[dict[str, str]], list[dict]]:
+        cats, streams = _pick(game_rows, language=prefer_language)
+        if streams:
+            return cats, streams
+        return _pick(game_rows, language=None)
+
+    cats, streams = _pick_lang_then_any(twitch.igdb_random_games(5))
+    if streams:
+        return cats, streams
+    return _pick_lang_then_any(twitch.igdb_recently_released_games(5))
+
+
+async def _fetch_lucky_watch_suggestions(
+    twitch: TwitchClient, *, prefer_language: str
+) -> tuple[list[dict[str, str]], list[dict]]:
+    return await asyncio.to_thread(
+        _lucky_streams_from_igdb, twitch, prefer_language=prefer_language
+    )
+
+
+def _set_watch_lucky_mode(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int, *, enabled: bool
+) -> None:
+    modes = context.application.bot_data.setdefault("watch_lucky_mode", {})
+    if enabled:
+        modes[user_id] = True
+    else:
+        modes.pop(user_id, None)
+
+
+def _watch_lucky_mode(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    return bool((context.application.bot_data.get("watch_lucky_mode") or {}).get(user_id))
+
+
 async def _fetch_watch_vod_suggestions(
     twitch: TwitchClient, prefs: WatchPrefs
 ) -> list[dict]:
@@ -4230,12 +4305,15 @@ async def _send_watch_suggestions(
     context: ContextTypes.DEFAULT_TYPE,
     prefs: WatchPrefs,
     edit_message=None,
+    streams: list[dict] | None = None,
+    allow_vod: bool = True,
 ) -> None:
     lang = _user_lang(context, user_id)
     context.application.bot_data.setdefault("watch_last_prefs", {})[user_id] = prefs
     twitch: TwitchClient = context.application.bot_data["twitch"]
     try:
-        streams = await _fetch_watch_suggestions(twitch, prefs)
+        if streams is None:
+            streams = await _fetch_watch_suggestions(twitch, prefs)
     except Exception:
         logger.exception("watch suggestions failed")
         text = t("watch_suggest_error", lang)
@@ -4254,7 +4332,7 @@ async def _send_watch_suggestions(
 
     if streams:
         text = _format_watch_suggestions(streams, prefs, lang)
-    else:
+    elif allow_vod:
         try:
             vods = await _fetch_watch_vod_suggestions(twitch, prefs)
         except Exception:
@@ -4268,6 +4346,8 @@ async def _send_watch_suggestions(
                 + "\n\n"
                 + _watch_prefs_summary(prefs, lang)
             )
+    else:
+        text = t("watch_lucky_empty", lang)
     markup = watch_suggest_keyboard(lang, offer_create_alerts=True)
     if edit_message is not None:
         try:
@@ -4364,8 +4444,8 @@ async def _go_watch_categories_prompt(
         reply_markup=_wizard(lang, back=False),
         parse_mode=ParseMode.HTML,
     )
-    if cats:
-        await update.effective_message.reply_text(
+    await update.effective_message.reply_text(
+        (
             t(
                 "watch_cats_added",
                 lang,
@@ -4373,9 +4453,12 @@ async def _go_watch_categories_prompt(
                 count=len(cats),
                 max=_WATCH_MAX_CATS,
                 list=", ".join(c["name"] for c in cats),
-            ),
-            reply_markup=watch_cats_nav_keyboard(lang, has_cats=True),
-        )
+            )
+            if cats
+            else t("watch_cats_lucky", lang)
+        ),
+        reply_markup=watch_cats_nav_keyboard(lang, has_cats=bool(cats)),
+    )
     _set_wizard_back(context, WATCH_CATEGORIES)
     return WATCH_CATEGORIES
 
@@ -4454,6 +4537,7 @@ async def _complete_watch_wizard(
     if save:
         db.add_watch_filter(user_id, prefs)
     context.user_data.clear()
+    _set_watch_lucky_mode(context, user_id, enabled=False)
     chat_id = update.effective_chat.id
     if update.callback_query:
         try:
@@ -4479,6 +4563,7 @@ async def start_what_to_watch(
     lang = _user_lang(context, user_id)
     filters = db.get_watch_filters(user_id)
     context.user_data.clear()
+    _set_watch_lucky_mode(context, user_id, enabled=False)
     analytics.capture(
         user_id,
         "watch_opened",
@@ -4503,9 +4588,39 @@ async def on_watch_again(
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    if _watch_lucky_mode(context, user_id):
+        twitch: TwitchClient = context.application.bot_data["twitch"]
+        prefer = _bot_lang_to_twitch(lang)
+        try:
+            cats, streams = await _fetch_lucky_watch_suggestions(
+                twitch, prefer_language=prefer
+            )
+        except Exception:
+            logger.exception("watch lucky again failed")
+            await query.edit_message_text(t("watch_suggest_error", lang))
+            return
+        prefs = WatchPrefs(
+            categories=cats,
+            min_viewers=0,
+            max_viewers=None,
+            language=None,
+            tags=[],
+            exclude_mature=False,
+        )
+        await _send_watch_suggestions(
+            bot=context.bot,
+            chat_id=query.message.chat_id,
+            user_id=user_id,
+            context=context,
+            prefs=prefs,
+            edit_message=query.message,
+            streams=streams,
+            allow_vod=False,
+        )
+        return
     prefs = _resolve_watch_prefs(context, user_id)
     if not prefs:
-        lang = _user_lang(context, user_id)
         await query.edit_message_text(t("watch_cats_need_one", lang))
         return
     await _send_watch_suggestions(
@@ -4621,6 +4736,7 @@ async def receive_watch_pick_callback(
         if not match:
             return await _go_watch_pick_prompt(update, context, lang)
         context.user_data.clear()
+        _set_watch_lucky_mode(context, user_id, enabled=False)
         try:
             await query.edit_message_reply_markup(None)
         except BadRequest:
@@ -4797,6 +4913,60 @@ async def receive_watch_category_callback(
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     data = query.data or ""
+    if data == "watch_cat:lucky":
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        twitch: TwitchClient = context.application.bot_data["twitch"]
+        prefer = _bot_lang_to_twitch(lang)
+        try:
+            cats, streams = await _fetch_lucky_watch_suggestions(
+                twitch, prefer_language=prefer
+            )
+        except Exception:
+            logger.exception("watch lucky failed")
+            await context.bot.send_message(
+                query.message.chat_id, t("watch_suggest_error", lang)
+            )
+            return WATCH_CATEGORIES
+        if not streams:
+            await context.bot.send_message(
+                query.message.chat_id,
+                t("watch_lucky_empty", lang),
+                reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+            )
+            return WATCH_CATEGORIES
+        prefs = WatchPrefs(
+            categories=cats,
+            min_viewers=0,
+            max_viewers=None,
+            language=None,
+            tags=[],
+            exclude_mature=False,
+        )
+        context.user_data["watch_categories"] = list(cats)
+        context.user_data["watch_tags"] = []
+        context.user_data["watch_min_viewers"] = 0
+        context.user_data["watch_max_viewers"] = None
+        context.user_data["watch_language"] = None
+        context.user_data["watch_exclude_mature"] = False
+        analytics.capture(
+            user_id,
+            "watch_lucky",
+            {"categories": len(cats), "streams": len(streams)},
+        )
+        _set_watch_lucky_mode(context, user_id, enabled=True)
+        await _send_watch_suggestions(
+            bot=context.bot,
+            chat_id=query.message.chat_id,
+            user_id=user_id,
+            context=context,
+            prefs=prefs,
+            streams=streams,
+            allow_vod=False,
+        )
+        return ConversationHandler.END
     if data == "watch_cat:done":
         cats = context.user_data.get("watch_categories") or []
         if not cats:
@@ -4809,7 +4979,10 @@ async def receive_watch_category_callback(
         return await _go_watch_tags_prompt(update, context, lang)
     if data == "watch_cat:clear":
         context.user_data["watch_categories"] = []
-        await query.edit_message_text(t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS))
+        await query.edit_message_text(
+            t("watch_cats_lucky", lang),
+            reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+        )
         return WATCH_CATEGORIES
     if data.startswith("watch_cat:pick:"):
         try:
@@ -5385,10 +5558,11 @@ async def _deliver_import_result(
     new_subs: list[Subscription],
     *,
     removed: int = 0,
+    ask_streamers: list[dict[str, str]] | None = None,
 ) -> None:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
-    if imported == 0 and skipped == 0 and limited == 0 and removed == 0:
+    if imported == 0 and skipped == 0 and limited == 0 and removed == 0 and not ask_streamers:
         await application.bot.send_message(
             owner_id,
             t("import_empty", lang),
@@ -5441,6 +5615,73 @@ async def _deliver_import_result(
         owner_id,
         t("menu_main", lang),
         reply_markup=_menu(lang, owner_id),
+    )
+    await _ask_sync_unfollow_if_needed(application, owner_id, lang, ask_streamers or [])
+
+
+_PENDING_SYNC_UNFOLLOW_TTL_SEC = 24 * 3600
+
+
+def _pending_sync_unfollows(application: Application) -> dict[int, dict]:
+    return application.bot_data.setdefault("pending_sync_unfollows", {})
+
+
+async def _ask_sync_unfollow_if_needed(
+    application: Application,
+    owner_id: int,
+    lang: str,
+    ask_streamers: list[dict[str, str]],
+) -> None:
+    if not ask_streamers:
+        return
+    _pending_sync_unfollows(application)[owner_id] = {
+        "streamers": ask_streamers,
+        "expires": datetime.now(timezone.utc).timestamp() + _PENDING_SYNC_UNFOLLOW_TTL_SEC,
+    }
+    names = ", ".join(
+        f"@{html.escape(s.get('user_login') or s.get('user_id') or '?')}"
+        for s in ask_streamers
+    )
+    await application.bot.send_message(
+        owner_id,
+        t("sync_unfollow_ask", lang, list=names),
+        reply_markup=sync_unfollow_keyboard(lang),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def on_sync_unfollow_answer(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    data = query.data or ""
+    pending = _pending_sync_unfollows(context.application).pop(owner_id, None)
+    if not pending or pending.get("expires", 0) < datetime.now(timezone.utc).timestamp():
+        await query.edit_message_text(t("sync_unfollow_expired", lang))
+        return
+    streamers: list[dict[str, str]] = list(pending.get("streamers") or [])
+    names = ", ".join(
+        f"@{html.escape(s.get('user_login') or s.get('user_id') or '?')}"
+        for s in streamers
+    )
+    if data == "sync_unfollow:yes":
+        db: Database = context.application.bot_data["db"]
+        ids = {str(s.get("user_id") or "").strip() for s in streamers}
+        ids.discard("")
+        db.delete_subscriptions_for_twitch_users(
+            owner_id, ids, is_demo=demo_mode.is_active(owner_id)
+        )
+        await query.edit_message_text(
+            t("sync_unfollow_deleted", lang, list=names),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    await query.edit_message_text(
+        t("sync_unfollow_kept", lang, list=names),
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -5502,7 +5743,7 @@ async def _run_followed_import(
     *,
     prune_missing: bool = False,
     enabled: bool = False,
-) -> tuple[int, int, int, int, list[Subscription]]:
+) -> tuple[int, int, int, int, list[Subscription], list[dict[str, str]]]:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
     db: Database = application.bot_data["db"]
@@ -5580,12 +5821,13 @@ async def on_import_mode_once(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(t("import_pending_expired", lang))
         return
     await query.edit_message_text(t("import_mode_once", lang))
-    imported, skipped, limited, removed, new_subs = await _run_followed_import(
+    imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
         context.application, owner_id, pending["followed"]
     )
     await _deliver_import_result(
         context.application, owner_id, lang, imported, skipped, limited, new_subs,
         removed=removed,
+        ask_streamers=ask_streamers,
     )
 
 
@@ -5607,12 +5849,13 @@ async def on_import_mode_sync(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not refresh:
         pending = _pop_pending_import(context.application, owner_id)
         await query.edit_message_text(t("import_sync_no_refresh", lang))
-        imported, skipped, limited, removed, new_subs = await _run_followed_import(
+        imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
             context.application, owner_id, pending["followed"]
         )
         await _deliver_import_result(
             context.application, owner_id, lang, imported, skipped, limited, new_subs,
             removed=removed,
+            ask_streamers=ask_streamers,
         )
         return ConversationHandler.END
     context.user_data["sync_days_mode"] = "import"
@@ -5666,12 +5909,13 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     twitch_user_id = token_info.get("twitch_user_id") or ""
     if not refresh or not twitch_user_id:
         await update.effective_message.reply_text(t("import_sync_no_refresh", lang))
-        imported, skipped, limited, removed, new_subs = await _run_followed_import(
+        imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
             context.application, user_id, pending["followed"]
         )
         await _deliver_import_result(
             context.application, user_id, lang, imported, skipped, limited, new_subs,
             removed=removed,
+            ask_streamers=ask_streamers,
         )
         return ConversationHandler.END
 
@@ -5686,12 +5930,13 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await update.effective_message.reply_text(
         t("import_sync_enabled", lang, days=days),
     )
-    imported, skipped, limited, removed, new_subs = await _run_followed_import(
+    imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
         context.application, user_id, pending["followed"], enabled=True
     )
     await _deliver_import_result(
         context.application, user_id, lang, imported, skipped, limited, new_subs,
         removed=removed,
+        ask_streamers=ask_streamers,
     )
     context.user_data.pop("sync_days_mode", None)
     return ConversationHandler.END
@@ -5762,8 +6007,8 @@ async def _sync_owner_follows(
     row: TwitchSync,
     *,
     advance_schedule: bool = True,
-) -> tuple[int, int, int, int] | None:
-    """Run one follow sync. Returns (imported, skipped, limited, removed) or None on auth failure."""
+) -> tuple[int, int, int, int, list[dict[str, str]]] | None:
+    """Run one follow sync. Returns (imported, skipped, limited, removed, ask) or None on auth failure."""
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
     db: Database = application.bot_data["db"]
@@ -5793,7 +6038,7 @@ async def _sync_owner_follows(
                 logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
         return None
 
-    imported, skipped, limited, removed, _new = import_followed_as_subscriptions(
+    imported, skipped, limited, removed, _new, ask_streamers = import_followed_as_subscriptions(
         db,
         row.owner_id,
         followed,
@@ -5813,7 +6058,7 @@ async def _sync_owner_follows(
         last_sync_at=now.isoformat(),
         next_sync_at=next_at,
     )
-    return imported, skipped, limited, removed
+    return imported, skipped, limited, removed, ask_streamers
 
 
 def _sync_result_notes(
@@ -5846,29 +6091,38 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
         result = await _sync_owner_follows(context.application, row)
         if result is None:
             continue
-        imported, skipped, limited, removed = result
+        imported, skipped, limited, removed, ask_streamers = result
+        lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
         if imported or limited or removed:
-            if not db.get_receive_sync_updates(row.owner_id):
-                continue
-            lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
-            limit_note, removed_note = _sync_result_notes(
-                lang, limited=limited, removed=removed
-            )
-            try:
-                await context.bot.send_message(
-                    row.owner_id,
-                    t(
-                        "sync_job_done",
-                        lang,
-                        imported=imported,
-                        skipped=skipped,
-                        limit_note=limit_note,
-                        removed_note=removed_note,
-                    ),
-                    reply_markup=_menu(lang, row.owner_id),
+            if db.get_receive_sync_updates(row.owner_id):
+                limit_note, removed_note = _sync_result_notes(
+                    lang, limited=limited, removed=removed
                 )
-            except Exception:
-                logger.exception("Cannot notify owner %s about sync result", row.owner_id)
+                try:
+                    await context.bot.send_message(
+                        row.owner_id,
+                        t(
+                            "sync_job_done",
+                            lang,
+                            imported=imported,
+                            skipped=skipped,
+                            limit_note=limit_note,
+                            removed_note=removed_note,
+                        ),
+                        reply_markup=_menu(lang, row.owner_id),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Cannot notify owner %s about sync result", row.owner_id
+                    )
+        try:
+            await _ask_sync_unfollow_if_needed(
+                context.application, row.owner_id, lang, ask_streamers
+            )
+        except Exception:
+            logger.exception(
+                "Cannot ask owner %s about unfollowed alerts", row.owner_id
+            )
 
 
 async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5885,7 +6139,7 @@ async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     result = await _sync_owner_follows(context.application, sync, advance_schedule=True)
     if result is None:
         return
-    imported, skipped, limited, removed = result
+    imported, skipped, limited, removed, ask_streamers = result
     limit_note, removed_note = _sync_result_notes(
         lang, limited=limited, removed=removed
     )
@@ -5904,6 +6158,9 @@ async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         user_id,
         text,
         reply_markup=settings_menu(lang),
+    )
+    await _ask_sync_unfollow_if_needed(
+        context.application, user_id, lang, ask_streamers
     )
 
 
@@ -9168,6 +9425,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_sync_now, pattern=r"^sync:now$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_sync_unfollow_answer, pattern=r"^sync_unfollow:(yes|no)$"),
         group=0,
     )
     app.add_handler(

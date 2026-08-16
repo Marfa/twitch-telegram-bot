@@ -84,6 +84,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_need_one": "Add at least one category.",
         "watch_cats_done": "Done",
         "watch_cats_clear": "Clear list",
+        "watch_cats_lucky": "🎲 I'm feeling lucky",
+        "watch_lucky_empty": (
+            "No live streams for random / recently released games. "
+            "Try again or type a category."
+        ),
         "watch_tags_prompt": (
             "What to watch — step 2/5\n\n"
             "Stream tags (optional).\n"
@@ -917,6 +922,15 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Twitch sync failed (token expired or revoked). "
             "Sync disabled — authorize again via Import."
         ),
+        "sync_unfollow_ask": (
+            "You unfollowed streamer(s): {list}, for whom you still have "
+            "manual alerts. Delete alerts?"
+        ),
+        "sync_unfollow_yes": "Yes",
+        "sync_unfollow_no": "No",
+        "sync_unfollow_deleted": "Deleted alerts for: {list}",
+        "sync_unfollow_kept": "Kept alerts for: {list}",
+        "sync_unfollow_expired": "This prompt expired. Run sync again if needed.",
         "oauth_web_done_title": "Done",
         "oauth_web_done_body": "You can close this tab and return to Telegram.",
         "oauth_web_expired_title": "Session expired",
@@ -1216,6 +1230,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_need_one": "Добавьте хотя бы одну категорию.",
         "watch_cats_done": "Готово",
         "watch_cats_clear": "Очистить список",
+        "watch_cats_lucky": "🎲 Мне повезёт",
+        "watch_lucky_empty": (
+            "Нет лайвов по случайным / недавно вышедшим играм. "
+            "Попробуйте ещё раз или введите категорию."
+        ),
         "watch_tags_prompt": (
             "Что посмотреть — шаг 2/5\n\n"
             "Теги стрима (опционально).\n"
@@ -2166,6 +2185,15 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Синхронизация Twitch не удалась (токен истёк или отозван). "
             "Синхронизация отключена — авторизуйтесь снова через Импорт."
         ),
+        "sync_unfollow_ask": (
+            "Вы отписались от стримера(ов): {list}, для которых у вас созданы "
+            "ручные оповещения. Удалить оповещения?"
+        ),
+        "sync_unfollow_yes": "Да",
+        "sync_unfollow_no": "Нет",
+        "sync_unfollow_deleted": "Удалены оповещения для: {list}",
+        "sync_unfollow_kept": "Оповещения оставлены для: {list}",
+        "sync_unfollow_expired": "Этот запрос устарел. При необходимости запустите синхронизацию снова.",
         "oauth_web_done_title": "Готово",
         "oauth_web_done_body": "Можете закрыть эту вкладку и вернуться в Telegram.",
         "oauth_web_expired_title": "Сессия истекла",
@@ -2872,7 +2900,13 @@ def language_keyboard() -> InlineKeyboardMarkup:
 
 
 def watch_cats_nav_keyboard(lang: str, *, has_cats: bool) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                t("watch_cats_lucky", lang), callback_data="watch_cat:lucky"
+            )
+        ]
+    ]
     if has_cats:
         rows.append(
             [InlineKeyboardButton(t("watch_cats_done", lang), callback_data="watch_cat:done")]
@@ -2881,6 +2915,21 @@ def watch_cats_nav_keyboard(lang: str, *, has_cats: bool) -> InlineKeyboardMarku
             [InlineKeyboardButton(t("watch_cats_clear", lang), callback_data="watch_cat:clear")]
         )
     return InlineKeyboardMarkup(rows)
+
+
+def sync_unfollow_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("sync_unfollow_yes", lang), callback_data="sync_unfollow:yes"
+                ),
+                InlineKeyboardButton(
+                    t("sync_unfollow_no", lang), callback_data="sync_unfollow:no"
+                ),
+            ]
+        ]
+    )
 
 
 def _watch_nav_row(lang: str) -> list[InlineKeyboardButton]:

@@ -462,6 +462,16 @@ def main() -> None:
     picked = pick_random_streams(streams, 2)
     assert len(picked) == 2
     assert len({s["user_id"] for s in picked}) == 2
+    lang_streams = [
+        {"user_id": "a", "language": "ru"},
+        {"user_id": "b", "language": "en"},
+        {"user_id": "c", "language": "ru"},
+        {"user_id": "d", "language": "de"},
+    ]
+    preferred = pick_random_streams(lang_streams, 3, prefer_language="ru")
+    assert len(preferred) == 3
+    assert preferred[0]["language"] == "ru"
+    assert preferred[1]["language"] == "ru"
     assert _watch_channel_refs(
         [
             {"user_id": "1", "user_login": "Alice"},
@@ -534,6 +544,8 @@ def main() -> None:
         assert btn("language", loc)
         assert tr("start_welcome", loc)
         assert tr("watch_cats_prompt", loc, max=5)
+        assert tr("watch_cats_lucky", loc)
+        assert tr("watch_lucky_empty", loc)
         assert tr("watch_tags_prompt", loc)
         assert tr("watch_pick_prompt", loc)
         assert tr("watch_pick_delete_btn", loc)
@@ -557,6 +569,9 @@ def main() -> None:
         assert tr("edit_watch_locked", loc)
         assert tr("import_mode_prompt", loc)
         assert tr("sync_menu_off", loc)
+        assert tr("sync_unfollow_ask", loc, list="@x")
+        assert tr("sync_unfollow_yes", loc)
+        assert tr("sync_unfollow_no", loc)
         assert tr("lucky_btn", loc)
         assert tr("lucky_hint", loc)
         assert tr("image_ask", loc)
@@ -783,7 +798,7 @@ def main() -> None:
         assert "{username}" in paused.message_template
         assert "{game}" in paused.message_template
         assert "https://twitch.tv/{username}" in paused.message_template
-        imported, skipped, limited, removed, new_subs = import_followed_as_subscriptions(
+        imported, skipped, limited, removed, new_subs, ask0 = import_followed_as_subscriptions(
             db,
             1,
             [
@@ -795,6 +810,7 @@ def main() -> None:
             limit=25,
         )
         assert imported == 1 and skipped == 1 and limited == 0 and removed == 0
+        assert ask0 == []
         assert len(new_subs) == 1
         assert new_subs[0].twitch_username == "newbie"
         assert new_subs[0].from_twitch_sync is True
@@ -802,7 +818,7 @@ def main() -> None:
         assert new_subs[0].disable_link_preview is True
         assert paused.from_twitch_sync is False
         # Sync path: new follows are enabled
-        imported_sync, _, _, _, sync_subs = import_followed_as_subscriptions(
+        imported_sync, _, _, _, sync_subs, ask1 = import_followed_as_subscriptions(
             db,
             1,
             [
@@ -814,12 +830,13 @@ def main() -> None:
             enabled=True,
         )
         assert imported_sync == 1 and len(sync_subs) == 1
+        assert ask1 == []
         assert sync_subs[0].twitch_username == "synced"
         assert sync_subs[0].enabled is True
         assert sync_subs[0].from_twitch_sync is True
         assert sync_subs[0].disable_link_preview is True
         # Prune: remove sync-origin "newbie" when follows only keep CHANNEL
-        imported2, skipped2, limited2, removed2, _ = import_followed_as_subscriptions(
+        imported2, skipped2, limited2, removed2, _, ask2 = import_followed_as_subscriptions(
             db,
             1,
             [{"broadcaster_id": "123", "broadcaster_login": CHANNEL}],
@@ -828,9 +845,53 @@ def main() -> None:
             prune_missing=True,
         )
         assert imported2 == 0 and skipped2 == 1 and removed2 == 2  # newbie + synced
+        # Manual paused "other" (999) is not in follows → ask before delete
+        assert any(s["user_id"] == "999" for s in ask2)
         assert db.get_subscription(new_subs[0].id, 1) is None
         assert db.get_subscription(sync_subs[0].id, 1) is None
-        assert db.get_subscription(paused_id, 1) is not None  # manual kept
+        assert db.get_subscription(paused_id, 1) is not None  # manual kept until user confirms
+        deleted_manual = db.delete_subscriptions_for_twitch_users(1, {"999"})
+        assert deleted_manual == 1
+        assert db.get_subscription(paused_id, 1) is None
+        # Edited sync: prune keeps it and asks
+        edited_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="edited",
+            twitch_user_id="666",
+            message_template=tr("import_default_template", "en"),
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            enabled=True,
+            from_twitch_sync=True,
+        )
+        assert db.update_subscription(edited_id, 1, message_template="custom {username}")
+        edited = db.get_subscription(edited_id, 1)
+        assert edited is not None and edited.sync_user_edited is True
+        _, _, _, removed_edit, _, ask_edit = import_followed_as_subscriptions(
+            db,
+            1,
+            [{"broadcaster_id": "123", "broadcaster_login": CHANNEL}],
+            template=tr("import_default_template", "en"),
+            limit=25,
+            prune_missing=True,
+        )
+        assert removed_edit == 0
+        assert any(s["user_id"] == "666" for s in ask_edit)
+        assert db.get_subscription(edited_id, 1) is not None
+        db.delete_subscriptions_for_twitch_users(1, {"666"})
+        assert db.get_subscription(edited_id, 1) is None
+        # Restore a manual paused row for later assertions that expect paused_id
+        paused_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="other",
+            twitch_user_id="999",
+            message_template=tr("import_default_template", "ru"),
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            enabled=False,
+        )
         db.set_user_locale(1, "ru")
         legacy_id = db.add_subscription(
             owner_id=1,

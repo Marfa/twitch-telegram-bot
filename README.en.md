@@ -23,7 +23,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **Clean title** (checkbox) strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
-| 🎲 What to watch? | Saved filters; live → else VOD; button to watch new streams by filter |
+| 🎲 What to watch? | Saved filters; live → else VOD; I'm feeling lucky (live, bot language → any, no VOD); button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); wizard step in **advanced mode** |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; wizard step in **advanced mode** |
@@ -127,7 +127,7 @@ If you have saved filters, the bot offers:
 
 New search wizard:
 
-1. Twitch categories (up to 5)
+1. Twitch categories (up to 5) — or **🎲 I'm feeling lucky** (live only from IGDB games: random → recently released; bot language first, else any; no VOD; 18+ allowed)
 2. Stream tags (optional; stream must include all listed)
 3. Viewer range
 4. Stream language (optional)
@@ -149,7 +149,7 @@ The bot polls live streams by `game_id` and notifies when a **new** matching str
 **⬇️ Import from Twitch** — Twitch OAuth, then choose **one-time import** or **sync**:
 
 - one-time — same as before, token not stored;
-- sync — period in days, refresh token stored encrypted; each run adds new follows (**enabled**) and removes unfollowed imports (manual subscriptions untouched);
+- sync — period in days, refresh token stored encrypted; each run adds new follows (**enabled**) and removes unedited sync imports on unfollow; if an alert was **edited** or is **manual**, the bot asks “Delete alerts?” (Yes / No);
 - on import, alerts are created **paused** (DM to self); Settings → **Subscription sync** (change period / disable).
 
 Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (see `PUBLIC_BASE_URL`).

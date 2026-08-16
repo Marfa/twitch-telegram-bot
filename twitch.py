@@ -30,6 +30,8 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 _IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 _IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
 _IGDB_WHERE = "version_parent = null & name != null"
+# IGDB ExternalGameCategory: Twitch = 14
+_IGDB_EXTERNAL_TWITCH = 14
 _FALLBACK_GAMES = (
     "Elden Ring",
     "Cyberpunk 2077",
@@ -663,7 +665,99 @@ class TwitchClient:
             logger.warning("IGDB random game unavailable (%s)", exc)
             return random.choice(_FALLBACK_GAMES)
 
-    def _random_igdb_game_name(self) -> str:
+    def igdb_random_games(self, n: int = 5) -> list[dict[str, Any]]:
+        """n random main games from IGDB (like igdb.com/random)."""
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for _ in range(max(1, n) * 3):
+            if len(out) >= n:
+                break
+            try:
+                rows = self._igdb_random_game_rows(limit=1)
+            except Exception as exc:
+                logger.warning("IGDB random games failed (%s)", exc)
+                break
+            for row in rows:
+                name = str(row.get("name") or "").strip()
+                key = name.lower()
+                if not name or key in seen:
+                    continue
+                seen.add(key)
+                out.append(row)
+                if len(out) >= n:
+                    break
+        while len(out) < n:
+            name = random.choice(_FALLBACK_GAMES)
+            key = name.lower()
+            if key in seen:
+                break
+            seen.add(key)
+            out.append({"name": name})
+        return out[:n]
+
+    def igdb_recently_released_games(self, n: int = 5) -> list[dict[str, Any]]:
+        """Recently released main games (like igdb.com/games/recently_released)."""
+        headers = self._igdb_headers()
+        body = (
+            f"fields name, external_games.category, external_games.uid;\n"
+            f"where {_IGDB_WHERE} & first_release_date != null;\n"
+            f"sort first_release_date desc;\n"
+            f"limit {max(1, min(25, n))};"
+        )
+        try:
+            resp = self._session.post(
+                _IGDB_GAMES_URL, headers=headers, data=body, timeout=15
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+            if isinstance(rows, list) and rows:
+                return list(rows)[:n]
+        except Exception as exc:
+            logger.warning("IGDB recently released failed (%s)", exc)
+        return self.igdb_random_games(n)
+
+    def resolve_igdb_games_to_twitch_categories(
+        self, games: list[dict[str, Any]]
+    ) -> list[dict[str, str]]:
+        """Map IGDB game rows to Twitch categories {id, name}."""
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for game in games:
+            twitch_id = ""
+            for eg in game.get("external_games") or []:
+                if not isinstance(eg, dict):
+                    continue
+                if int(eg.get("category") or 0) != _IGDB_EXTERNAL_TWITCH:
+                    continue
+                uid = str(eg.get("uid") or "").strip()
+                if uid:
+                    twitch_id = uid
+                    break
+            name = str(game.get("name") or "").strip()
+            if twitch_id:
+                if twitch_id in seen:
+                    continue
+                seen.add(twitch_id)
+                out.append({"id": twitch_id, "name": name or twitch_id})
+                continue
+            if not name:
+                continue
+            try:
+                found = self.search_categories(name, first=1)
+            except Exception:
+                logger.exception("Twitch category search failed for %s", name)
+                continue
+            if not found:
+                continue
+            cid = str(found[0].get("id") or "").strip()
+            cname = str(found[0].get("name") or name).strip()
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            out.append({"id": cid, "name": cname})
+        return out
+
+    def _igdb_random_game_rows(self, *, limit: int = 1) -> list[dict[str, Any]]:
         headers = self._igdb_headers()
         count = 0
         try:
@@ -679,13 +773,14 @@ class TwitchClient:
             logger.warning("IGDB count failed (%s)", exc)
 
         max_offset = max(0, min(count - 1, 200_000)) if count else 20_000
+        lim = max(1, min(10, int(limit)))
         for _ in range(4):
             offset = random.randint(0, max_offset)
             body = (
-                f"fields name;\n"
+                f"fields name, external_games.category, external_games.uid;\n"
                 f"where {_IGDB_WHERE};\n"
                 f"sort id asc;\n"
-                f"limit 1;\n"
+                f"limit {lim};\n"
                 f"offset {offset};"
             )
             resp = self._session.post(
@@ -700,12 +795,18 @@ class TwitchClient:
             resp.raise_for_status()
             rows = resp.json()
             if isinstance(rows, list) and rows:
-                name = str(rows[0].get("name") or "").strip()
-                if name:
-                    return name
+                return list(rows)
             if offset == 0:
                 break
             max_offset = max(0, offset // 2)
+        return []
+
+    def _random_igdb_game_name(self) -> str:
+        rows = self._igdb_random_game_rows(limit=1)
+        if rows:
+            name = str(rows[0].get("name") or "").strip()
+            if name:
+                return name
         return random.choice(_FALLBACK_GAMES)
 
 
@@ -985,15 +1086,34 @@ def normalize_watch_tags(text: str, *, limit: int = 10) -> list[str]:
 
 
 def pick_random_streams(
-    streams: list[dict[str, Any]], n: int = 5
+    streams: list[dict[str, Any]],
+    n: int = 5,
+    *,
+    prefer_language: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Dedupe by user_id, then sample up to n streams."""
+    """Dedupe by user_id, then sample up to n streams (optional language priority)."""
     by_user: dict[str, dict[str, Any]] = {}
     for s in streams:
         uid = str(s.get("user_id") or "")
         if uid and uid not in by_user:
             by_user[uid] = s
     unique = list(by_user.values())
+    prefer = (prefer_language or "").strip().lower()
+    if prefer:
+        preferred = [
+            s
+            for s in unique
+            if str(s.get("language") or "").strip().lower() == prefer
+        ]
+        others = [
+            s
+            for s in unique
+            if str(s.get("language") or "").strip().lower() != prefer
+        ]
+        random.shuffle(preferred)
+        random.shuffle(others)
+        ordered = preferred + others
+        return ordered[:n]
     if len(unique) <= n:
         random.shuffle(unique)
         return unique

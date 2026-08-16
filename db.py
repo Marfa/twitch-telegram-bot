@@ -375,6 +375,7 @@ class Subscription:
     last_schedule_reminder_segment_id: str | None
     from_twitch_sync: bool
     from_watch_suggest: bool
+    sync_user_edited: bool
     category_watch_prefs: str
     category_watch_live_ids: str
     category_watch_primed: bool
@@ -547,6 +548,9 @@ def _row_to_sub(row: Any) -> Subscription:
         else False,
         from_watch_suggest=bool(row["from_watch_suggest"])
         if "from_watch_suggest" in keys
+        else False,
+        sync_user_edited=bool(row["sync_user_edited"])
+        if "sync_user_edited" in keys
         else False,
         category_watch_prefs=str(row["category_watch_prefs"] or "")
         if "category_watch_prefs" in keys
@@ -904,6 +908,22 @@ class Database(Protocol):
         self, owner_id: int, keep_twitch_user_ids: set[str]
     ) -> int: ...
 
+    def get_unfollowed_manual_alert_streamers(
+        self,
+        owner_id: int,
+        keep_twitch_user_ids: set[str],
+        *,
+        is_demo: bool = False,
+    ) -> list[dict[str, str]]: ...
+
+    def delete_subscriptions_for_twitch_users(
+        self,
+        owner_id: int,
+        twitch_user_ids: set[str],
+        *,
+        is_demo: bool = False,
+    ) -> int: ...
+
 
 class SqliteDatabase:
     def __init__(self, path: Path) -> None:
@@ -1013,6 +1033,10 @@ class SqliteDatabase:
         if "from_watch_suggest" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN from_watch_suggest INTEGER NOT NULL DEFAULT 0"
+            )
+        if "sync_user_edited" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN sync_user_edited INTEGER NOT NULL DEFAULT 0"
             )
         if "category_watch_prefs" not in cols:
             conn.execute(
@@ -1428,6 +1452,7 @@ class SqliteDatabase:
         return cur.rowcount > 0
 
     def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool:
+        mark_sync_edited = bool(fields.pop("mark_sync_edited", True))
         allowed = {
             "message_template",
             "dest_type",
@@ -1492,7 +1517,16 @@ class SqliteDatabase:
                 "WHERE id = ? AND owner_id = ?",
                 values,
             )
-        return cur.rowcount > 0
+            updated = cur.rowcount > 0
+            if updated and mark_sync_edited:
+                conn.execute(
+                    """
+                    UPDATE subscriptions SET sync_user_edited = 1
+                    WHERE id = ? AND owner_id = ? AND from_twitch_sync = 1
+                    """,
+                    (sub_id, owner_id),
+                )
+        return updated
 
     def get_user_locale(self, user_id: int) -> str | None:
         with self._conn() as conn:
@@ -2907,11 +2941,13 @@ class SqliteDatabase:
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str]
     ) -> int:
+        """Delete pristine (unedited) sync-origin subs not in keep set."""
         with self._conn() as conn:
             rows = conn.execute(
                 """
                 SELECT id, twitch_user_id FROM subscriptions
                 WHERE owner_id = ? AND from_twitch_sync = 1
+                  AND COALESCE(sync_user_edited, 0) = 0
                 """,
                 (owner_id,),
             ).fetchall()
@@ -2919,6 +2955,66 @@ class SqliteDatabase:
                 int(r["id"])
                 for r in rows
                 if str(r["twitch_user_id"]) not in keep_twitch_user_ids
+            ]
+            for sub_id in to_delete:
+                conn.execute(
+                    "DELETE FROM subscriptions WHERE id = ? AND owner_id = ?",
+                    (sub_id, owner_id),
+                )
+            return len(to_delete)
+
+    def get_unfollowed_manual_alert_streamers(
+        self,
+        owner_id: int,
+        keep_twitch_user_ids: set[str],
+        *,
+        is_demo: bool = False,
+    ) -> list[dict[str, str]]:
+        """Streamers not in follows that still have non-category-watch alerts."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT twitch_user_id, twitch_username FROM subscriptions
+                WHERE owner_id = ? AND is_demo = ?
+                  AND COALESCE(category_watch_prefs, '') = ''
+                  AND twitch_user_id NOT LIKE 'cw:%'
+                """,
+                (owner_id, int(bool(is_demo))),
+            ).fetchall()
+        by_uid: dict[str, str] = {}
+        for r in rows:
+            uid = str(r["twitch_user_id"] or "").strip()
+            if not uid or uid in keep_twitch_user_ids:
+                continue
+            login = str(r["twitch_username"] or "").strip().lower() or uid
+            by_uid.setdefault(uid, login)
+        return [
+            {"user_id": uid, "user_login": login}
+            for uid, login in sorted(by_uid.items(), key=lambda x: x[1])
+        ]
+
+    def delete_subscriptions_for_twitch_users(
+        self,
+        owner_id: int,
+        twitch_user_ids: set[str],
+        *,
+        is_demo: bool = False,
+    ) -> int:
+        ids = {str(u).strip() for u in twitch_user_ids if str(u).strip()}
+        if not ids:
+            return 0
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, twitch_user_id FROM subscriptions
+                WHERE owner_id = ? AND is_demo = ?
+                """,
+                (owner_id, int(bool(is_demo))),
+            ).fetchall()
+            to_delete = [
+                int(r["id"])
+                for r in rows
+                if str(r["twitch_user_id"]) in ids
             ]
             for sub_id in to_delete:
                 conn.execute(
@@ -3071,6 +3167,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS from_watch_suggest BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS sync_user_edited BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             cur.execute(
@@ -3573,6 +3675,7 @@ class PostgresDatabase:
         return deleted
 
     def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool:
+        mark_sync_edited = bool(fields.pop("mark_sync_edited", True))
         allowed = {
             "message_template",
             "dest_type",
@@ -3639,6 +3742,14 @@ class PostgresDatabase:
                 values,
             )
             updated = cur.rowcount > 0
+            if updated and mark_sync_edited:
+                cur.execute(
+                    """
+                    UPDATE subscriptions SET sync_user_edited = TRUE
+                    WHERE id = %s AND owner_id = %s AND from_twitch_sync = TRUE
+                    """,
+                    (sub_id, owner_id),
+                )
         return updated
 
     def get_user_locale(self, user_id: int) -> str | None:
@@ -5199,6 +5310,7 @@ class PostgresDatabase:
                 """
                 SELECT id, twitch_user_id FROM subscriptions
                 WHERE owner_id = %s AND from_twitch_sync = TRUE
+                  AND COALESCE(sync_user_edited, FALSE) = FALSE
                 """,
                 (owner_id,),
             )
@@ -5207,6 +5319,69 @@ class PostgresDatabase:
                 int(r["id"])
                 for r in rows
                 if str(r["twitch_user_id"]) not in keep_twitch_user_ids
+            ]
+            for sub_id in to_delete:
+                cur.execute(
+                    "DELETE FROM subscriptions WHERE id = %s AND owner_id = %s",
+                    (sub_id, owner_id),
+                )
+            return len(to_delete)
+
+    def get_unfollowed_manual_alert_streamers(
+        self,
+        owner_id: int,
+        keep_twitch_user_ids: set[str],
+        *,
+        is_demo: bool = False,
+    ) -> list[dict[str, str]]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT twitch_user_id, twitch_username FROM subscriptions
+                WHERE owner_id = %s AND is_demo = %s
+                  AND COALESCE(category_watch_prefs, '') = ''
+                  AND twitch_user_id NOT LIKE 'cw:%%'
+                """,
+                (owner_id, bool(is_demo)),
+            )
+            rows = cur.fetchall()
+        by_uid: dict[str, str] = {}
+        for r in rows:
+            uid = str(r["twitch_user_id"] or "").strip()
+            if not uid or uid in keep_twitch_user_ids:
+                continue
+            login = str(r["twitch_username"] or "").strip().lower() or uid
+            by_uid.setdefault(uid, login)
+        return [
+            {"user_id": uid, "user_login": login}
+            for uid, login in sorted(by_uid.items(), key=lambda x: x[1])
+        ]
+
+    def delete_subscriptions_for_twitch_users(
+        self,
+        owner_id: int,
+        twitch_user_ids: set[str],
+        *,
+        is_demo: bool = False,
+    ) -> int:
+        ids = {str(u).strip() for u in twitch_user_ids if str(u).strip()}
+        if not ids:
+            return 0
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, twitch_user_id FROM subscriptions
+                WHERE owner_id = %s AND is_demo = %s
+                """,
+                (owner_id, bool(is_demo)),
+            )
+            rows = cur.fetchall()
+            to_delete = [
+                int(r["id"])
+                for r in rows
+                if str(r["twitch_user_id"]) in ids
             ]
             for sub_id in to_delete:
                 cur.execute(
