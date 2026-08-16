@@ -4201,7 +4201,7 @@ def _lucky_streams_from_igdb(
     """Exact order:
     1) IGDB random ×5 → live bot language, else any
     2) IGDB recently released ×5 → live bot language, else any
-    3) If still empty → VOD for the same categories (bot language, else any)
+    3) If still empty → VOD for categories from both batches (bot language, else any)
     18+ allowed for live.
     Returns (categories, live_streams, vods, random_names, recent_names).
     """
@@ -4284,7 +4284,16 @@ def _lucky_streams_from_igdb(
     cats2, streams = _pick_lang_then_any(recent_rows)
     if streams:
         return cats2, streams, [], random_names, recent_names
-    use_cats = cats2 or cats
+    # VOD for all categories from both batches (random first), lang then any.
+    use_cats: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for group in (cats, cats2):
+        for cat in group:
+            cid = str(cat.get("id") or "")
+            if not cid or cid in seen_ids:
+                continue
+            seen_ids.add(cid)
+            use_cats.append(cat)
     if not use_cats:
         return [], [], [], random_names, recent_names
     vods = _vods_for_cats(use_cats, language=prefer_language)
