@@ -23,7 +23,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **Clean title** (checkbox) strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
-| 🎲 What to watch? | Saved filters; live → else VOD; I'm feeling lucky (live, bot language → any, no VOD); button to watch new streams by filter |
+| 🎲 What to watch? | Saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); wizard step in **advanced mode** |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; wizard step in **advanced mode** |
@@ -127,7 +127,7 @@ If you have saved filters, the bot offers:
 
 New search wizard:
 
-1. Twitch categories (up to 5) — or **🎲 I'm feeling lucky** (live only: IGDB random ×5 → bot language / any; then recently released ×5 → bot language / any; no VOD; 18+ allowed)
+1. Twitch categories (up to 5) — or **🎲 I'm feeling lucky** (IGDB random ×5 → live bot language / any; recently released ×5 → live; if empty → VOD for the same games; 18+ allowed)
 2. Stream tags (optional; stream must include all listed)
 3. Viewer range
 4. Stream language (optional)

@@ -4197,11 +4197,13 @@ def _bot_lang_to_twitch(lang: str) -> str:
 
 def _lucky_streams_from_igdb(
     twitch: TwitchClient, *, prefer_language: str
-) -> tuple[list[dict[str, str]], list[dict]]:
+) -> tuple[list[dict[str, str]], list[dict], list[dict]]:
     """Exact order:
-    1) IGDB random ×5 → streams in bot language, else any
-    2) IGDB recently released ×5 → streams in bot language, else any
-    Live only, 18+ allowed.
+    1) IGDB random ×5 → live bot language, else any
+    2) IGDB recently released ×5 → live bot language, else any
+    3) If still empty → VOD for the same categories (bot language, else any)
+    18+ allowed for live.
+    Returns (categories, live_streams, vods).
     """
 
     def _streams_for_cats(
@@ -4222,6 +4224,31 @@ def _lucky_streams_from_igdb(
         filtered = filter_streams_for_watch(pooled, exclude_mature=False)
         return pick_random_streams(filtered, _WATCH_SUGGEST_N)
 
+    def _vods_for_cats(
+        cats: list[dict[str, str]], *, language: str | None
+    ) -> list[dict]:
+        pooled: list[dict] = []
+        for cat in cats:
+            try:
+                batch = twitch.get_videos_by_game(
+                    cat["id"], language=language, first=100
+                )
+            except Exception:
+                logger.exception(
+                    "lucky VOD fetch failed for game_id=%s", cat.get("id")
+                )
+                continue
+            game_name = str(cat.get("name") or "—")
+            for item in batch:
+                vid = str(item.get("id") or "").strip().lstrip("v")
+                if not vid:
+                    continue
+                row = dict(item)
+                row["id"] = vid
+                row["game_name"] = game_name
+                pooled.append(row)
+        return pick_random_streams(pooled, _WATCH_SUGGEST_N)
+
     def _pick_lang_then_any(
         game_rows: list,
     ) -> tuple[list[dict[str, str]], list[dict]]:
@@ -4237,13 +4264,22 @@ def _lucky_streams_from_igdb(
 
     cats, streams = _pick_lang_then_any(twitch.igdb_random_games(5))
     if streams:
-        return cats, streams
-    return _pick_lang_then_any(twitch.igdb_recently_released_games(5))
+        return cats, streams, []
+    cats2, streams = _pick_lang_then_any(twitch.igdb_recently_released_games(5))
+    if streams:
+        return cats2, streams, []
+    use_cats = cats2 or cats
+    if not use_cats:
+        return [], [], []
+    vods = _vods_for_cats(use_cats, language=prefer_language)
+    if not vods:
+        vods = _vods_for_cats(use_cats, language=None)
+    return use_cats, [], vods
 
 
 async def _fetch_lucky_watch_suggestions(
     twitch: TwitchClient, *, prefer_language: str
-) -> tuple[list[dict[str, str]], list[dict]]:
+) -> tuple[list[dict[str, str]], list[dict], list[dict]]:
     return await asyncio.to_thread(
         _lucky_streams_from_igdb, twitch, prefer_language=prefer_language
     )
@@ -4314,13 +4350,14 @@ async def _send_watch_suggestions(
     prefs: WatchPrefs,
     edit_message=None,
     streams: list[dict] | None = None,
+    vods: list[dict] | None = None,
     allow_vod: bool = True,
 ) -> None:
     lang = _user_lang(context, user_id)
     context.application.bot_data.setdefault("watch_last_prefs", {})[user_id] = prefs
     twitch: TwitchClient = context.application.bot_data["twitch"]
     try:
-        if streams is None:
+        if streams is None and vods is None:
             streams = await _fetch_watch_suggestions(twitch, prefs)
     except Exception:
         logger.exception("watch suggestions failed")
@@ -4340,14 +4377,16 @@ async def _send_watch_suggestions(
 
     if streams:
         text = _format_watch_suggestions(streams, prefs, lang)
+    elif vods:
+        text = _format_watch_vod_suggestions(vods, prefs, lang)
     elif allow_vod:
         try:
-            vods = await _fetch_watch_vod_suggestions(twitch, prefs)
+            fetched_vods = await _fetch_watch_vod_suggestions(twitch, prefs)
         except Exception:
             logger.exception("watch VOD suggestions failed")
-            vods = []
-        if vods:
-            text = _format_watch_vod_suggestions(vods, prefs, lang)
+            fetched_vods = []
+        if fetched_vods:
+            text = _format_watch_vod_suggestions(fetched_vods, prefs, lang)
         else:
             text = (
                 t("watch_suggest_empty", lang)
@@ -4601,7 +4640,7 @@ async def on_watch_again(
         twitch: TwitchClient = context.application.bot_data["twitch"]
         prefer = _bot_lang_to_twitch(lang)
         try:
-            cats, streams = await _fetch_lucky_watch_suggestions(
+            cats, streams, vods = await _fetch_lucky_watch_suggestions(
                 twitch, prefer_language=prefer
             )
         except Exception:
@@ -4623,7 +4662,8 @@ async def on_watch_again(
             context=context,
             prefs=prefs,
             edit_message=query.message,
-            streams=streams,
+            streams=streams or None,
+            vods=vods or None,
             allow_vod=False,
         )
         return
@@ -4935,7 +4975,7 @@ async def receive_watch_category_callback(
         twitch: TwitchClient = context.application.bot_data["twitch"]
         prefer = _bot_lang_to_twitch(lang)
         try:
-            cats, streams = await _fetch_lucky_watch_suggestions(
+            cats, streams, vods = await _fetch_lucky_watch_suggestions(
                 twitch, prefer_language=prefer
             )
         except Exception:
@@ -4944,7 +4984,7 @@ async def receive_watch_category_callback(
                 query.message.chat_id, t("watch_suggest_error", lang)
             )
             return WATCH_CATEGORIES
-        if not streams:
+        if not streams and not vods:
             try:
                 await query.edit_message_text(
                     t("watch_lucky_empty", lang),
@@ -4974,7 +5014,11 @@ async def receive_watch_category_callback(
         analytics.capture(
             user_id,
             "watch_lucky",
-            {"categories": len(cats), "streams": len(streams)},
+            {
+                "categories": len(cats),
+                "streams": len(streams),
+                "vods": len(vods),
+            },
         )
         _set_watch_lucky_mode(context, user_id, enabled=True)
         await _send_watch_suggestions(
@@ -4984,7 +5028,8 @@ async def receive_watch_category_callback(
             context=context,
             prefs=prefs,
             edit_message=query.message,
-            streams=streams,
+            streams=streams or None,
+            vods=vods or None,
             allow_vod=False,
         )
         return ConversationHandler.END

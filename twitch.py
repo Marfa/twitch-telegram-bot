@@ -31,9 +31,12 @@ _IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 _IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
 _IGDB_EXTERNAL_GAMES_URL = "https://api.igdb.com/v4/external_games"
 _IGDB_WHERE = "version_parent = null & name != null"
-# Games that exist as Twitch categories (ExternalGameCategory twitch = 14).
-_IGDB_WHERE_TWITCH = f"{_IGDB_WHERE} & external_games.category = 14"
-# IGDB ExternalGameCategory: Twitch = 14
+# Games that exist as Twitch categories (external_game_source / legacy category = 14).
+_IGDB_WHERE_TWITCH = (
+    f"{_IGDB_WHERE} & (external_games.external_game_source = 14 "
+    f"| external_games.category = 14)"
+)
+# IGDB ExternalGameSource / legacy ExternalGameCategory: Twitch = 14
 _IGDB_EXTERNAL_TWITCH = 14
 _FALLBACK_GAMES = (
     "Elden Ring",
@@ -703,7 +706,8 @@ class TwitchClient:
         headers = self._igdb_headers()
         # Fetch a wider window, keep first n that we can use.
         body = (
-            f"fields name, external_games.category, external_games.uid;\n"
+            f"fields name, external_games.external_game_source, "
+            f"external_games.category, external_games.uid, external_games.url;\n"
             f"where {_IGDB_WHERE_TWITCH} & first_release_date != null;\n"
             f"sort first_release_date desc;\n"
             f"limit {max(n, min(50, n * 5))};"
@@ -724,12 +728,31 @@ class TwitchClient:
         """Twitch category id from IGDB game row (expanded or via external_games ids)."""
         eg_list = game.get("external_games") or []
         pending_ids: list[int] = []
+
+        def _is_twitch(row: dict[str, Any]) -> bool:
+            src = row.get("external_game_source")
+            if src is None:
+                src = row.get("category")
+            try:
+                return int(src or 0) == _IGDB_EXTERNAL_TWITCH
+            except (TypeError, ValueError):
+                return False
+
         for eg in eg_list:
             if isinstance(eg, dict):
-                if int(eg.get("category") or 0) != _IGDB_EXTERNAL_TWITCH:
-                    continue
                 uid = str(eg.get("uid") or "").strip()
-                if uid:
+                if _is_twitch(eg) and uid:
+                    return uid
+                # Nested expansion often returns {id, uid} without source/category.
+                eid = eg.get("id")
+                if eid is not None:
+                    try:
+                        pending_ids.append(int(eid))
+                    except (TypeError, ValueError):
+                        pass
+                # Twitch directory URL in expanded payload.
+                url = str(eg.get("url") or "")
+                if uid and "twitch.tv" in url:
                     return uid
             else:
                 try:
@@ -741,8 +764,9 @@ class TwitchClient:
         headers = self._igdb_headers()
         ids = ",".join(str(i) for i in pending_ids[:50])
         body = (
-            f"fields category, uid;\n"
-            f"where id = ({ids}) & category = {_IGDB_EXTERNAL_TWITCH};\n"
+            f"fields external_game_source, category, uid, url;\n"
+            f"where id = ({ids}) & (external_game_source = {_IGDB_EXTERNAL_TWITCH} "
+            f"| category = {_IGDB_EXTERNAL_TWITCH});\n"
             f"limit 50;"
         )
         try:
@@ -753,11 +777,33 @@ class TwitchClient:
             rows = resp.json()
             if isinstance(rows, list):
                 for row in rows:
+                    if not _is_twitch(row) and "twitch.tv" not in str(row.get("url") or ""):
+                        continue
                     uid = str(row.get("uid") or "").strip()
                     if uid:
                         return uid
         except Exception as exc:
             logger.warning("IGDB external_games lookup failed (%s)", exc)
+        # Fallback: fetch without source filter and pick Twitch by url/source.
+        body2 = (
+            f"fields external_game_source, category, uid, url;\n"
+            f"where id = ({ids});\n"
+            f"limit 50;"
+        )
+        try:
+            resp = self._session.post(
+                _IGDB_EXTERNAL_GAMES_URL, headers=headers, data=body2, timeout=15
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+            if isinstance(rows, list):
+                for row in rows:
+                    if _is_twitch(row) or "twitch.tv" in str(row.get("url") or ""):
+                        uid = str(row.get("uid") or "").strip()
+                        if uid:
+                            return uid
+        except Exception as exc:
+            logger.warning("IGDB external_games fallback failed (%s)", exc)
         return ""
 
     def resolve_igdb_games_to_twitch_categories(
@@ -778,14 +824,21 @@ class TwitchClient:
             if not name:
                 continue
             try:
-                found = self.search_categories(name, first=1)
+                found = self.search_categories(name, first=10)
             except Exception:
                 logger.exception("Twitch category search failed for %s", name)
                 continue
             if not found:
                 continue
-            cid = str(found[0].get("id") or "").strip()
-            cname = str(found[0].get("name") or name).strip()
+            want = name.casefold()
+            exact = [
+                c
+                for c in found
+                if str(c.get("name") or "").strip().casefold() == want
+            ]
+            pick = exact[0] if exact else found[0]
+            cid = str(pick.get("id") or "").strip()
+            cname = str(pick.get("name") or name).strip()
             if not cid or cid in seen:
                 continue
             seen.add(cid)
@@ -815,7 +868,8 @@ class TwitchClient:
         for _ in range(4):
             offset = random.randint(0, max_offset)
             body = (
-                f"fields name, external_games.category, external_games.uid;\n"
+                f"fields name, external_games.external_game_source, "
+                f"external_games.category, external_games.uid, external_games.url;\n"
                 f"where {where};\n"
                 f"sort id asc;\n"
                 f"limit {lim};\n"
