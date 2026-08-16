@@ -702,15 +702,17 @@ class TwitchClient:
         return out[:n]
 
     def igdb_recently_released_games(self, n: int = 5) -> list[dict[str, Any]]:
-        """Recently released main games (like igdb.com/games/recently_released)."""
+        """Random sample from recent IGDB releases (like igdb.com/games/recently_released)."""
         headers = self._igdb_headers()
-        # Fetch a wider window, keep first n that we can use.
+        want = max(1, n)
+        # Wider window so each lucky run can pick different titles.
+        window = max(want * 10, 50)
         body = (
             f"fields name, external_games.external_game_source, "
             f"external_games.category, external_games.uid, external_games.url;\n"
             f"where {_IGDB_WHERE_TWITCH} & first_release_date != null;\n"
             f"sort first_release_date desc;\n"
-            f"limit {max(n, min(50, n * 5))};"
+            f"limit {min(100, window)};"
         )
         try:
             resp = self._session.post(
@@ -719,7 +721,10 @@ class TwitchClient:
             resp.raise_for_status()
             rows = resp.json()
             if isinstance(rows, list) and rows:
-                return list(rows)[:n]
+                pool = list(rows)
+                if len(pool) <= want:
+                    return pool
+                return random.sample(pool, want)
         except Exception as exc:
             logger.warning("IGDB recently released failed (%s)", exc)
         return self.igdb_random_games(n)
