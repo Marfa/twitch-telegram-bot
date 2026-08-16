@@ -4439,25 +4439,21 @@ async def _go_watch_categories_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     cats = context.user_data.setdefault("watch_categories", [])
+    if cats:
+        text = t(
+            "watch_cats_added",
+            lang,
+            name=cats[-1]["name"],
+            count=len(cats),
+            max=_WATCH_MAX_CATS,
+            list=", ".join(c["name"] for c in cats),
+        )
+    else:
+        text = t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS)
     await update.effective_message.reply_text(
-        t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS),
-        reply_markup=_wizard(lang, back=False),
-        parse_mode=ParseMode.HTML,
-    )
-    await update.effective_message.reply_text(
-        (
-            t(
-                "watch_cats_added",
-                lang,
-                name=cats[-1]["name"],
-                count=len(cats),
-                max=_WATCH_MAX_CATS,
-                list=", ".join(c["name"] for c in cats),
-            )
-            if cats
-            else t("watch_cats_lucky", lang)
-        ),
+        text,
         reply_markup=watch_cats_nav_keyboard(lang, has_cats=bool(cats)),
+        parse_mode=ParseMode.HTML,
     )
     _set_wizard_back(context, WATCH_CATEGORIES)
     return WATCH_CATEGORIES
@@ -4980,8 +4976,9 @@ async def receive_watch_category_callback(
     if data == "watch_cat:clear":
         context.user_data["watch_categories"] = []
         await query.edit_message_text(
-            t("watch_cats_lucky", lang),
+            t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS),
             reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+            parse_mode=ParseMode.HTML,
         )
         return WATCH_CATEGORIES
     if data.startswith("watch_cat:pick:"):
@@ -9806,6 +9803,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             WATCH_CATEGORIES: [
                 _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
                 CallbackQueryHandler(
                     receive_watch_category_callback, pattern=r"^watch_cat:"
                 ),

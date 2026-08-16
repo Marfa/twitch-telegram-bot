@@ -2914,6 +2914,9 @@ def watch_cats_nav_keyboard(lang: str, *, has_cats: bool) -> InlineKeyboardMarku
         rows.append(
             [InlineKeyboardButton(t("watch_cats_clear", lang), callback_data="watch_cat:clear")]
         )
+    rows.append(
+        [InlineKeyboardButton(btn("wizard_cancel", lang), callback_data="watch_nav:cancel")]
+    )
     return InlineKeyboardMarkup(rows)
 
 
