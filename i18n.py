@@ -90,11 +90,6 @@ _STRINGS: dict[str, dict[str, str]] = {
             "No live streams for random / recently released games. "
             "Try again or type a category."
         ),
-        "watch_lucky_admin_games": (
-            "<i>Admin — games searched:</i>\n"
-            "Random: {random}\n"
-            "Recently released: {recent}"
-        ),
         "watch_tags_prompt": (
             "What to watch — step 2/5\n\n"
             "Stream tags (optional).\n"
@@ -1241,11 +1236,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_lucky_empty": (
             "Нет лайвов по случайным / недавно вышедшим играм. "
             "Попробуйте ещё раз или введите категорию."
-        ),
-        "watch_lucky_admin_games": (
-            "<i>Админ — игры поиска:</i>\n"
-            "Random: {random}\n"
-            "Recently released: {recent}"
         ),
         "watch_tags_prompt": (
             "Что посмотреть — шаг 2/5\n\n"

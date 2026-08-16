@@ -20,8 +20,8 @@ alwaysApply: false
 ## Что сделать
 
 1. Обновить `docs/user-flow-map.ru.md`: тексты, кнопки, переходы, mermaid при необходимости.
-2. Скопировать ту же версию в  
-   `/Users/konstantiedokucaev/Dropbox backup/Inbox/To Hyper/user-flow-map.ru.md`  
+2. Скопировать ту же версию **с заменой файла** в  
+   `/Users/konstantiedokucaev/Obsidian Full/New DB/@inbox/user-flow-map.ru.md`  
    (если путь доступен).
 3. Включить обновление карты в тот же коммит, что и UX-изменения (если пользователь просит коммит).
 
