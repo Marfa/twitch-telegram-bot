@@ -4197,14 +4197,26 @@ def _bot_lang_to_twitch(lang: str) -> str:
 
 def _lucky_streams_from_igdb(
     twitch: TwitchClient, *, prefer_language: str
-) -> tuple[list[dict[str, str]], list[dict], list[dict]]:
+) -> tuple[list[dict[str, str]], list[dict], list[dict], list[str], list[str]]:
     """Exact order:
     1) IGDB random ×5 → live bot language, else any
     2) IGDB recently released ×5 → live bot language, else any
     3) If still empty → VOD for the same categories (bot language, else any)
     18+ allowed for live.
-    Returns (categories, live_streams, vods).
+    Returns (categories, live_streams, vods, random_names, recent_names).
     """
+
+    def _names(rows: list) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            name = str(row.get("name") or "").strip()
+            key = name.casefold()
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            out.append(name)
+        return out
 
     def _streams_for_cats(
         cats: list[dict[str, str]], *, language: str | None
@@ -4262,26 +4274,43 @@ def _lucky_streams_from_igdb(
         streams = _streams_for_cats(cats, language=None)
         return cats, streams
 
-    cats, streams = _pick_lang_then_any(twitch.igdb_random_games(5))
+    random_rows = twitch.igdb_random_games(5)
+    random_names = _names(random_rows)
+    cats, streams = _pick_lang_then_any(random_rows)
     if streams:
-        return cats, streams, []
-    cats2, streams = _pick_lang_then_any(twitch.igdb_recently_released_games(5))
+        return cats, streams, [], random_names, []
+    recent_rows = twitch.igdb_recently_released_games(5)
+    recent_names = _names(recent_rows)
+    cats2, streams = _pick_lang_then_any(recent_rows)
     if streams:
-        return cats2, streams, []
+        return cats2, streams, [], random_names, recent_names
     use_cats = cats2 or cats
     if not use_cats:
-        return [], [], []
+        return [], [], [], random_names, recent_names
     vods = _vods_for_cats(use_cats, language=prefer_language)
     if not vods:
         vods = _vods_for_cats(use_cats, language=None)
-    return use_cats, [], vods
+    return use_cats, [], vods, random_names, recent_names
 
 
 async def _fetch_lucky_watch_suggestions(
     twitch: TwitchClient, *, prefer_language: str
-) -> tuple[list[dict[str, str]], list[dict], list[dict]]:
+) -> tuple[list[dict[str, str]], list[dict], list[dict], list[str], list[str]]:
     return await asyncio.to_thread(
         _lucky_streams_from_igdb, twitch, prefer_language=prefer_language
+    )
+
+
+def _format_lucky_admin_games(
+    lang: str, *, random_names: list[str], recent_names: list[str]
+) -> str:
+    if not random_names and not recent_names:
+        return ""
+    return t(
+        "watch_lucky_admin_games",
+        lang,
+        random=html.escape(", ".join(random_names) or "—"),
+        recent=html.escape(", ".join(recent_names) or "—"),
     )
 
 
@@ -4352,6 +4381,8 @@ async def _send_watch_suggestions(
     streams: list[dict] | None = None,
     vods: list[dict] | None = None,
     allow_vod: bool = True,
+    lucky_random_names: list[str] | None = None,
+    lucky_recent_names: list[str] | None = None,
 ) -> None:
     lang = _user_lang(context, user_id)
     context.application.bot_data.setdefault("watch_last_prefs", {})[user_id] = prefs
@@ -4395,6 +4426,14 @@ async def _send_watch_suggestions(
             )
     else:
         text = t("watch_lucky_empty", lang)
+    if _is_admin(user_id):
+        admin_block = _format_lucky_admin_games(
+            lang,
+            random_names=list(lucky_random_names or []),
+            recent_names=list(lucky_recent_names or []),
+        )
+        if admin_block:
+            text = f"{text}\n\n{admin_block}"
     markup = watch_suggest_keyboard(lang, offer_create_alerts=True)
     if edit_message is not None:
         try:
@@ -4640,8 +4679,10 @@ async def on_watch_again(
         twitch: TwitchClient = context.application.bot_data["twitch"]
         prefer = _bot_lang_to_twitch(lang)
         try:
-            cats, streams, vods = await _fetch_lucky_watch_suggestions(
-                twitch, prefer_language=prefer
+            cats, streams, vods, random_names, recent_names = (
+                await _fetch_lucky_watch_suggestions(
+                    twitch, prefer_language=prefer
+                )
             )
         except Exception:
             logger.exception("watch lucky again failed")
@@ -4665,6 +4706,8 @@ async def on_watch_again(
             streams=streams or None,
             vods=vods or None,
             allow_vod=False,
+            lucky_random_names=random_names,
+            lucky_recent_names=recent_names,
         )
         return
     prefs = _resolve_watch_prefs(context, user_id)
@@ -4975,8 +5018,10 @@ async def receive_watch_category_callback(
         twitch: TwitchClient = context.application.bot_data["twitch"]
         prefer = _bot_lang_to_twitch(lang)
         try:
-            cats, streams, vods = await _fetch_lucky_watch_suggestions(
-                twitch, prefer_language=prefer
+            cats, streams, vods, random_names, recent_names = (
+                await _fetch_lucky_watch_suggestions(
+                    twitch, prefer_language=prefer
+                )
             )
         except Exception:
             logger.exception("watch lucky failed")
@@ -4985,16 +5030,27 @@ async def receive_watch_category_callback(
             )
             return WATCH_CATEGORIES
         if not streams and not vods:
+            empty_text = t("watch_lucky_empty", lang)
+            if _is_admin(user_id):
+                admin_block = _format_lucky_admin_games(
+                    lang,
+                    random_names=random_names,
+                    recent_names=recent_names,
+                )
+                if admin_block:
+                    empty_text = f"{empty_text}\n\n{admin_block}"
             try:
                 await query.edit_message_text(
-                    t("watch_lucky_empty", lang),
+                    empty_text,
                     reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+                    parse_mode=ParseMode.HTML,
                 )
             except BadRequest:
                 await context.bot.send_message(
                     query.message.chat_id,
-                    t("watch_lucky_empty", lang),
+                    empty_text,
                     reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+                    parse_mode=ParseMode.HTML,
                 )
             return WATCH_CATEGORIES
         prefs = WatchPrefs(
@@ -5031,6 +5087,8 @@ async def receive_watch_category_callback(
             streams=streams or None,
             vods=vods or None,
             allow_vod=False,
+            lucky_random_names=random_names,
+            lucky_recent_names=recent_names,
         )
         return ConversationHandler.END
     if data == "watch_cat:done":

@@ -547,6 +547,7 @@ def main() -> None:
         assert tr("watch_cats_lucky", loc)
         assert tr("watch_lucky_searching", loc)
         assert tr("watch_lucky_empty", loc)
+        assert tr("watch_lucky_admin_games", loc, random="A", recent="B")
         assert tr("watch_tags_prompt", loc)
         assert tr("watch_pick_prompt", loc)
         assert tr("watch_pick_delete_btn", loc)
