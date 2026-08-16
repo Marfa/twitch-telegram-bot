@@ -127,7 +127,7 @@ If you have saved filters, the bot offers:
 
 New search wizard:
 
-1. Twitch categories (up to 5) — or **🎲 I'm feeling lucky** (live only from IGDB games: random → recently released; bot language first, else any; no VOD; 18+ allowed)
+1. Twitch categories (up to 5) — or **🎲 I'm feeling lucky** (live only: IGDB random ×5 → bot language / any; then recently released ×5 → bot language / any; no VOD; 18+ allowed)
 2. Stream tags (optional; stream must include all listed)
 3. Viewer range
 4. Stream language (optional)

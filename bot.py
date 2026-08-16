@@ -4198,12 +4198,15 @@ def _bot_lang_to_twitch(lang: str) -> str:
 def _lucky_streams_from_igdb(
     twitch: TwitchClient, *, prefer_language: str
 ) -> tuple[list[dict[str, str]], list[dict]]:
-    """IGDB random → recently released. Bot language first, else any. Live only, 18+ ok."""
+    """Exact order:
+    1) IGDB random ×5 → streams in bot language, else any
+    2) IGDB recently released ×5 → streams in bot language, else any
+    Live only, 18+ allowed.
+    """
 
-    def _pick(
-        game_rows: list, *, language: str | None
-    ) -> tuple[list[dict[str, str]], list[dict]]:
-        cats = twitch.resolve_igdb_games_to_twitch_categories(game_rows)
+    def _streams_for_cats(
+        cats: list[dict[str, str]], *, language: str | None
+    ) -> list[dict]:
         pooled: list[dict] = []
         for cat in cats:
             try:
@@ -4217,15 +4220,20 @@ def _lucky_streams_from_igdb(
                     "lucky streams fetch failed for game_id=%s", cat.get("id")
                 )
         filtered = filter_streams_for_watch(pooled, exclude_mature=False)
-        return cats, pick_random_streams(filtered, _WATCH_SUGGEST_N)
+        return pick_random_streams(filtered, _WATCH_SUGGEST_N)
 
     def _pick_lang_then_any(
         game_rows: list,
     ) -> tuple[list[dict[str, str]], list[dict]]:
-        cats, streams = _pick(game_rows, language=prefer_language)
+        cats = twitch.resolve_igdb_games_to_twitch_categories(game_rows)
+        if not cats:
+            logger.info("lucky: no Twitch categories for %s IGDB games", len(game_rows))
+            return [], []
+        streams = _streams_for_cats(cats, language=prefer_language)
         if streams:
             return cats, streams
-        return _pick(game_rows, language=None)
+        streams = _streams_for_cats(cats, language=None)
+        return cats, streams
 
     cats, streams = _pick_lang_then_any(twitch.igdb_random_games(5))
     if streams:
@@ -4586,6 +4594,10 @@ async def on_watch_again(
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     if _watch_lucky_mode(context, user_id):
+        try:
+            await query.edit_message_text(t("watch_lucky_searching", lang))
+        except BadRequest:
+            pass
         twitch: TwitchClient = context.application.bot_data["twitch"]
         prefer = _bot_lang_to_twitch(lang)
         try:
@@ -4911,9 +4923,15 @@ async def receive_watch_category_callback(
     data = query.data or ""
     if data == "watch_cat:lucky":
         try:
-            await query.edit_message_reply_markup(None)
+            await query.edit_message_text(t("watch_lucky_searching", lang))
         except BadRequest:
-            pass
+            try:
+                await query.edit_message_reply_markup(None)
+            except BadRequest:
+                pass
+            await context.bot.send_message(
+                query.message.chat_id, t("watch_lucky_searching", lang)
+            )
         twitch: TwitchClient = context.application.bot_data["twitch"]
         prefer = _bot_lang_to_twitch(lang)
         try:
@@ -4927,11 +4945,17 @@ async def receive_watch_category_callback(
             )
             return WATCH_CATEGORIES
         if not streams:
-            await context.bot.send_message(
-                query.message.chat_id,
-                t("watch_lucky_empty", lang),
-                reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
-            )
+            try:
+                await query.edit_message_text(
+                    t("watch_lucky_empty", lang),
+                    reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+                )
+            except BadRequest:
+                await context.bot.send_message(
+                    query.message.chat_id,
+                    t("watch_lucky_empty", lang),
+                    reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+                )
             return WATCH_CATEGORIES
         prefs = WatchPrefs(
             categories=cats,
@@ -4959,6 +4983,7 @@ async def receive_watch_category_callback(
             user_id=user_id,
             context=context,
             prefs=prefs,
+            edit_message=query.message,
             streams=streams,
             allow_vod=False,
         )

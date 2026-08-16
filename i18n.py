@@ -85,6 +85,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_done": "Done",
         "watch_cats_clear": "Clear list",
         "watch_cats_lucky": "🎲 I'm feeling lucky",
+        "watch_lucky_searching": "Searching live streams…",
         "watch_lucky_empty": (
             "No live streams for random / recently released games. "
             "Try again or type a category."
@@ -1231,6 +1232,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_done": "Готово",
         "watch_cats_clear": "Очистить список",
         "watch_cats_lucky": "🎲 Мне повезёт",
+        "watch_lucky_searching": "Ищем стримы…",
         "watch_lucky_empty": (
             "Нет лайвов по случайным / недавно вышедшим играм. "
             "Попробуйте ещё раз или введите категорию."

@@ -29,7 +29,10 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 
 _IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 _IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
+_IGDB_EXTERNAL_GAMES_URL = "https://api.igdb.com/v4/external_games"
 _IGDB_WHERE = "version_parent = null & name != null"
+# Games that exist as Twitch categories (ExternalGameCategory twitch = 14).
+_IGDB_WHERE_TWITCH = f"{_IGDB_WHERE} & external_games.category = 14"
 # IGDB ExternalGameCategory: Twitch = 14
 _IGDB_EXTERNAL_TWITCH = 14
 _FALLBACK_GAMES = (
@@ -666,14 +669,14 @@ class TwitchClient:
             return random.choice(_FALLBACK_GAMES)
 
     def igdb_random_games(self, n: int = 5) -> list[dict[str, Any]]:
-        """n random main games from IGDB (like igdb.com/random)."""
+        """n random main games from IGDB (like igdb.com/random), Twitch-mapped."""
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for _ in range(max(1, n) * 3):
+        for _ in range(max(1, n) * 4):
             if len(out) >= n:
                 break
             try:
-                rows = self._igdb_random_game_rows(limit=1)
+                rows = self._igdb_random_game_rows(limit=1, twitch_only=True)
             except Exception as exc:
                 logger.warning("IGDB random games failed (%s)", exc)
                 break
@@ -698,11 +701,12 @@ class TwitchClient:
     def igdb_recently_released_games(self, n: int = 5) -> list[dict[str, Any]]:
         """Recently released main games (like igdb.com/games/recently_released)."""
         headers = self._igdb_headers()
+        # Fetch a wider window, keep first n that we can use.
         body = (
             f"fields name, external_games.category, external_games.uid;\n"
-            f"where {_IGDB_WHERE} & first_release_date != null;\n"
+            f"where {_IGDB_WHERE_TWITCH} & first_release_date != null;\n"
             f"sort first_release_date desc;\n"
-            f"limit {max(1, min(25, n))};"
+            f"limit {max(n, min(50, n * 5))};"
         )
         try:
             resp = self._session.post(
@@ -716,6 +720,46 @@ class TwitchClient:
             logger.warning("IGDB recently released failed (%s)", exc)
         return self.igdb_random_games(n)
 
+    def _igdb_twitch_uid(self, game: dict[str, Any]) -> str:
+        """Twitch category id from IGDB game row (expanded or via external_games ids)."""
+        eg_list = game.get("external_games") or []
+        pending_ids: list[int] = []
+        for eg in eg_list:
+            if isinstance(eg, dict):
+                if int(eg.get("category") or 0) != _IGDB_EXTERNAL_TWITCH:
+                    continue
+                uid = str(eg.get("uid") or "").strip()
+                if uid:
+                    return uid
+            else:
+                try:
+                    pending_ids.append(int(eg))
+                except (TypeError, ValueError):
+                    continue
+        if not pending_ids:
+            return ""
+        headers = self._igdb_headers()
+        ids = ",".join(str(i) for i in pending_ids[:50])
+        body = (
+            f"fields category, uid;\n"
+            f"where id = ({ids}) & category = {_IGDB_EXTERNAL_TWITCH};\n"
+            f"limit 50;"
+        )
+        try:
+            resp = self._session.post(
+                _IGDB_EXTERNAL_GAMES_URL, headers=headers, data=body, timeout=15
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+            if isinstance(rows, list):
+                for row in rows:
+                    uid = str(row.get("uid") or "").strip()
+                    if uid:
+                        return uid
+        except Exception as exc:
+            logger.warning("IGDB external_games lookup failed (%s)", exc)
+        return ""
+
     def resolve_igdb_games_to_twitch_categories(
         self, games: list[dict[str, Any]]
     ) -> list[dict[str, str]]:
@@ -723,17 +767,8 @@ class TwitchClient:
         out: list[dict[str, str]] = []
         seen: set[str] = set()
         for game in games:
-            twitch_id = ""
-            for eg in game.get("external_games") or []:
-                if not isinstance(eg, dict):
-                    continue
-                if int(eg.get("category") or 0) != _IGDB_EXTERNAL_TWITCH:
-                    continue
-                uid = str(eg.get("uid") or "").strip()
-                if uid:
-                    twitch_id = uid
-                    break
             name = str(game.get("name") or "").strip()
+            twitch_id = self._igdb_twitch_uid(game)
             if twitch_id:
                 if twitch_id in seen:
                     continue
@@ -757,14 +792,17 @@ class TwitchClient:
             out.append({"id": cid, "name": cname})
         return out
 
-    def _igdb_random_game_rows(self, *, limit: int = 1) -> list[dict[str, Any]]:
+    def _igdb_random_game_rows(
+        self, *, limit: int = 1, twitch_only: bool = False
+    ) -> list[dict[str, Any]]:
         headers = self._igdb_headers()
+        where = _IGDB_WHERE_TWITCH if twitch_only else _IGDB_WHERE
         count = 0
         try:
             count_resp = self._session.post(
                 _IGDB_COUNT_URL,
                 headers=headers,
-                data=f"where {_IGDB_WHERE};",
+                data=f"where {where};",
                 timeout=15,
             )
             if count_resp.ok:
@@ -778,7 +816,7 @@ class TwitchClient:
             offset = random.randint(0, max_offset)
             body = (
                 f"fields name, external_games.category, external_games.uid;\n"
-                f"where {_IGDB_WHERE};\n"
+                f"where {where};\n"
                 f"sort id asc;\n"
                 f"limit {lim};\n"
                 f"offset {offset};"
