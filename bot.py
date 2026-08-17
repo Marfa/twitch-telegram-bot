@@ -8570,7 +8570,6 @@ def _enable_whisper_eventsub(
     twitch: TwitchClient,
     owner_id: int,
     *,
-    access: str,
     refresh: str,
     twitch_user_id: str,
     twitch_login: str,
@@ -8581,7 +8580,6 @@ def _enable_whisper_eventsub(
     if not callback:
         raise RuntimeError("no_callback")
     sub_id = twitch.create_whisper_eventsub(
-        access,
         user_id=twitch_user_id,
         callback=callback,
         secret=eventsub_secret(),
@@ -8697,7 +8695,6 @@ async def on_whisper_alerts_toggle(
             db,
             twitch,
             user_id,
-            access=access,
             refresh=refresh,
             twitch_user_id=twitch_user_id,
             twitch_login=twitch_login,
@@ -8740,7 +8737,10 @@ async def complete_whisper_oauth(
     refresh = info.get("refresh_token") or ""
     twitch_user_id = info.get("twitch_user_id") or ""
     twitch_login = info.get("twitch_login") or ""
-    if not access or not refresh or not twitch_user_id:
+    if not access or not twitch_user_id:
+        logger.warning(
+            "Whisper OAuth missing token fields for user %s", owner_id
+        )
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
@@ -8752,7 +8752,6 @@ async def complete_whisper_oauth(
             db,
             twitch,
             owner_id,
-            access=access,
             refresh=refresh,
             twitch_user_id=twitch_user_id,
             twitch_login=twitch_login,

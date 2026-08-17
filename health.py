@@ -571,7 +571,11 @@ class _HealthHandler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             return
         if path == "/hooks/eventsub":
-            status, body, content_type = _handle_eventsub_post(self)
+            try:
+                status, body, content_type = _handle_eventsub_post(self)
+            except Exception:
+                logger.exception("EventSub webhook handler failed")
+                status, body, content_type = 500, b"error", "text/plain"
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))

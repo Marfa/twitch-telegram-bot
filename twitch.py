@@ -478,13 +478,16 @@ class TwitchClient:
 
     def create_whisper_eventsub(
         self,
-        user_access_token: str,
         *,
         user_id: str,
         callback: str,
         secret: str,
     ) -> str:
-        """Subscribe to user.whisper.message; returns EventSub id."""
+        """Subscribe to user.whisper.message; returns EventSub id.
+
+        Webhook transport must use an app access token. The user in
+        condition.user_id must already have authorized user:read:whispers.
+        """
         body = {
             "type": "user.whisper.message",
             "version": "1",
@@ -495,13 +498,10 @@ class TwitchClient:
                 "secret": secret,
             },
         }
+        headers = {**self._headers(), "Content-Type": "application/json"}
         resp = self._session.post(
             "https://api.twitch.tv/helix/eventsub/subscriptions",
-            headers={
-                "Client-ID": TWITCH_CLIENT_ID,
-                "Authorization": f"Bearer {user_access_token}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             json=body,
             timeout=20,
         )
@@ -509,6 +509,18 @@ class TwitchClient:
             existing = self.find_whisper_eventsub_id(str(user_id))
             if existing:
                 return existing
+            try:
+                eid = str((resp.json() or {}).get("id") or "")
+            except Exception:
+                eid = ""
+            if eid:
+                return eid
+        if not resp.ok:
+            logger.warning(
+                "Create whisper EventSub failed: %s %s",
+                resp.status_code,
+                (resp.text or "")[:300],
+            )
         resp.raise_for_status()
         rows = resp.json().get("data") or []
         if not rows:

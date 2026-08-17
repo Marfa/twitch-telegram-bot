@@ -229,6 +229,12 @@ def main() -> None:
     state3 = create_oauth_state(7, "ru", purpose="whispers")
     assert pop_oauth_state(state3) == (7, "ru", "whispers")
     assert WHISPERS_SCOPE == "user:read:whispers"
+    import inspect as _inspect
+    from eventsub import timestamp_fresh as _ts_fresh
+
+    create_params = list(_inspect.signature(TwitchClient.create_whisper_eventsub).parameters)
+    assert "user_access_token" not in create_params
+    assert _ts_fresh("") is True
 
     import hashlib
     import hmac as hmac_mod

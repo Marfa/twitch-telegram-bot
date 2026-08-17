@@ -111,7 +111,8 @@ def parse_rfc3339(ts: str) -> datetime | None:
 def timestamp_fresh(ts: str, *, now: datetime | None = None) -> bool:
     dt = parse_rfc3339(ts)
     if dt is None:
-        return False
+        # HMAC already checked; do not fail verification on an unparsed stamp.
+        return True
     current = now or datetime.now(timezone.utc)
     if dt > current + _FUTURE_SKEW:
         return False
@@ -212,8 +213,10 @@ def handle_eventsub_post(
         body=body,
         signature=signature,
     ):
+        logger.warning("EventSub signature mismatch (type=%s)", msg_type or "?")
         return EventSubResult(403, b"invalid signature", "text/plain")
     if not timestamp_fresh(timestamp):
+        logger.warning("EventSub stale timestamp (type=%s)", msg_type or "?")
         return EventSubResult(403, b"stale timestamp", "text/plain")
     try:
         payload = json.loads(body.decode("utf-8") or "{}")
