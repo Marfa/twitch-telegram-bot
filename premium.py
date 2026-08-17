@@ -281,8 +281,13 @@ def has_feature_sync(db: Database, user_id: int, feature_id: str) -> bool:
     if feature_id in ADVANCED_MODE_FEATURE_IDS:
         if st.feature_active("advanced_mode"):
             return True
-        return any(st.feature_active(fid) for fid in _LEGACY_ADVANCED_FEATURE_IDS)
-    return st.feature_active(feature_id)
+        if any(st.feature_active(fid) for fid in _LEGACY_ADVANCED_FEATURE_IDS):
+            return True
+    elif st.feature_active(feature_id):
+        return True
+    import beta as beta_features
+
+    return beta_features.grants_premium_feature(db, user_id, feature_id)
 
 
 def is_advanced_mode_enabled(

@@ -1,0 +1,37 @@
+name: Beta bug report
+description: Report a problem with a beta feature
+title: "[Beta] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing a beta feature! Please fill in the details below.
+        Do not paste bot tokens or OAuth secrets.
+  - type: input
+    id: feature_id
+    attributes:
+      label: Beta feature ID
+      description: Shown in Settings → Beta mode (e.g. schedule_publish_v2)
+      placeholder: my_feature_id
+    validations:
+      required: true
+  - type: input
+    id: user_id
+    attributes:
+      label: Telegram user ID
+      description: Optional — copy from Settings → Report a problem
+      placeholder: "123456789"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: What you did, what you expected, what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: Screenshots, streamer name, alert id, etc.
+      required: false

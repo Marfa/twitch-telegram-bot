@@ -41,6 +41,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sys_notifications": "🔔 System alerts",
         "btn_ignored_words": "🚫 Ignored words",
         "btn_advanced_mode": "🎛 Advanced mode",
+        "btn_beta_mode": "🧪 Beta mode",
         "btn_sys_updates": "📬 Bot update alerts",
         "btn_sync_subs": "🔄 Subscription sync",
         "btn_premium": "⭐ Premium",
@@ -615,6 +616,20 @@ _STRINGS: dict[str, dict[str, str]] = {
         "advanced_mode_premium_only": (
             "Advanced mode is available to Premium users only."
         ),
+        "beta_mode_menu": (
+            "🧪 <b>Beta mode</b>\n\n"
+            "Try new features before public release. Tap Join to enable a feature "
+            "on your account (Premium features are free during beta).\n\n"
+            "{features_block}"
+        ),
+        "beta_mode_empty": "There are no active beta features right now.",
+        "beta_mode_admin_note": "Admins have all beta features enabled automatically.",
+        "beta_mode_join": "Join",
+        "beta_mode_leave": "Leave",
+        "beta_mode_report_bug": "🐛 Report bug",
+        "beta_mode_admin_toggle": "Admins always have beta access.",
+        "beta_mode_opt_in": "✅ Joined beta: {name}",
+        "beta_mode_opt_out": "Left beta: {name}",
         "wizard_simple_mode_note": (
             "<b>You are in simplified mode. Open Settings → Advanced mode "
             "to show all wizard steps.</b>"
@@ -1188,6 +1203,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_sys_notifications": "🔔 Системные уведомления",
         "btn_ignored_words": "🚫 Игнорируемые слова",
         "btn_advanced_mode": "🎛 Продвинутый режим",
+        "btn_beta_mode": "🧪 Бета-режим",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
         "btn_sync_subs": "🔄 Синхронизация подписок",
         "btn_premium": "⭐ Премиум",
@@ -1875,6 +1891,20 @@ _STRINGS: dict[str, dict[str, str]] = {
         "advanced_mode_premium_only": (
             "Активация продвинутого режима доступна только Premium-пользователям."
         ),
+        "beta_mode_menu": (
+            "🧪 <b>Бета-режим</b>\n\n"
+            "Пробуйте новые функции до публичного релиза. Нажмите «Присоединиться», "
+            "чтобы включить функцию (Premium на время бета — бесплатно).\n\n"
+            "{features_block}"
+        ),
+        "beta_mode_empty": "Сейчас нет активных бета-функций.",
+        "beta_mode_admin_note": "Админам все бета-функции включены автоматически.",
+        "beta_mode_join": "Присоединиться",
+        "beta_mode_leave": "Выйти",
+        "beta_mode_report_bug": "🐛 Сообщить об ошибке",
+        "beta_mode_admin_toggle": "У админов бета-доступ всегда включён.",
+        "beta_mode_opt_in": "✅ Вы в бете: {name}",
+        "beta_mode_opt_out": "Вы вышли из беты: {name}",
         "wizard_simple_mode_note": (
             "<b>Вы работаете в упрощённом режиме, перейдите в Настройках "
             "в продвинутый режим для отображения всех шагов мастера.</b>"
@@ -2529,6 +2559,7 @@ def all_menu_buttons() -> set[str]:
         "sys_notifications",
         "ignored_words",
         "advanced_mode",
+        "beta_mode",
         "sync_subs",
         "premium",
         "partner",
@@ -2603,11 +2634,14 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("advanced_mode", lang)),
             ],
             [
+                KeyboardButton(btn("beta_mode", lang)),
                 KeyboardButton(btn("sys_notifications", lang)),
-                KeyboardButton(btn("language", lang)),
             ],
             [
+                KeyboardButton(btn("language", lang)),
                 KeyboardButton(btn("partner", lang)),
+            ],
+            [
                 KeyboardButton(btn("back", lang)),
             ],
         ],
@@ -3232,6 +3266,30 @@ def advanced_mode_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def beta_mode_keyboard(
+    lang: str,
+    features: list[tuple[str, str, bool, str]],
+) -> InlineKeyboardMarkup:
+    """features: (id, title, enrolled, bug_url) per row."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for fid, title, enrolled, bug_url in features:
+        mark = "✅ " if enrolled else "⬜️ "
+        action = t("beta_mode_leave", lang) if enrolled else t("beta_mode_join", lang)
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    mark + action + ": " + title,
+                    callback_data=f"beta:toggle:{fid}",
+                ),
+                InlineKeyboardButton(
+                    t("beta_mode_report_bug", lang),
+                    url=bug_url,
+                ),
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def delay_keyboard(lang: str) -> InlineKeyboardMarkup:

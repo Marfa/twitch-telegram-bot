@@ -1,4 +1,5 @@
 """ponytail: minimal self-check for twitch parsing and templates."""
+import json
 from pathlib import Path
 import os
 import tempfile
@@ -2078,6 +2079,42 @@ def main() -> None:
             _fake_sub(),
         ]
     ) == ["live", "category", "end"]
+
+    import beta as beta_mod
+    from premium import ensure_trial_expired, has_feature_sync
+
+    beta_mod._self_check()
+    with tempfile.TemporaryDirectory() as beta_tmp:
+        manifest = Path(beta_tmp) / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "features": [
+                        {
+                            "id": "sc_premium_beta",
+                            "branch": "feat/sc-premium-beta",
+                            "title_key": "beta_feat_sc",
+                            "description_key": "beta_feat_sc_desc",
+                            "issue_label": "beta/sc-premium-beta",
+                            "stage": "beta",
+                            "premium_feature_id": "schedule_publish",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        beta_mod.load_manifest(manifest)
+        bdb = SqliteDatabase(Path(beta_tmp) / "beta.db")
+        bdb.upsert_user(99)
+        ensure_trial_expired(bdb, 99)
+        assert not has_feature_sync(bdb, 99, "schedule_publish")
+        bdb.set_beta_enrollment(99, "sc_premium_beta", True)
+        assert has_feature_sync(bdb, 99, "schedule_publish")
+        beta_mod.load_manifest(beta_mod.manifest_path())
+
+    assert btn("beta_mode", "ru") == "🧪 Бета-режим"
+    assert btn("beta_mode", "en") == "🧪 Beta mode"
 
     print("ok")
 

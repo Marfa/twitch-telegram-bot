@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    LinkPreviewOptions,
     MessageOriginChannel,
     MessageOriginChat,
     ReplyKeyboardMarkup,
@@ -33,6 +34,7 @@ from telegram.ext import (
 import premium as prem
 import demo_mode
 import analytics
+import beta as beta_features
 from db import (
     AlertHistoryEntry,
     BotStats,
@@ -74,6 +76,7 @@ from i18n import (
     ignore_keywords_keyboard,
     ignored_words_keyboard,
     advanced_mode_keyboard,
+    beta_mode_keyboard,
     image_ask_keyboard,
     image_edit_keyboard,
     image_position_keyboard,
@@ -8356,6 +8359,94 @@ async def on_advanced_mode_toggle(update: Update, context: ContextTypes.DEFAULT_
     )
 
 
+def _beta_mode_features_block(
+    db: Database, user_id: int, lang: str
+) -> tuple[str, list[tuple[str, str, bool, str]]]:
+    features = beta_features.list_features()
+    if not features:
+        return t("beta_mode_empty", lang), []
+    lines: list[str] = []
+    kb_rows: list[tuple[str, str, bool, str]] = []
+    for feat in features:
+        title = t(feat.title_key, lang)
+        desc = t(feat.description_key, lang)
+        enrolled = beta_features.is_enrolled(db, user_id, feat.id)
+        lines.append(f"<b>{html.escape(title)}</b>\n{html.escape(desc)}")
+        kb_rows.append(
+            (
+                feat.id,
+                title,
+                enrolled,
+                beta_features.issue_url(feat, user_id=user_id),
+            )
+        )
+    block = "\n\n".join(lines)
+    if beta_features.is_admin(user_id):
+        block += f"\n\n<i>{html.escape(t('beta_mode_admin_note', lang))}</i>"
+    return block, kb_rows
+
+
+async def open_beta_mode_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    analytics.capture(user_id, "beta_menu_opened")
+    features_block, kb_rows = _beta_mode_features_block(db, user_id, lang)
+    text = t("beta_mode_menu", lang, features_block=features_block)
+    markup = beta_mode_keyboard(lang, kb_rows) if kb_rows else None
+    await update.effective_message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=markup,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
+
+
+async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    data = query.data or ""
+    prefix = "beta:toggle:"
+    if not data.startswith(prefix):
+        await query.answer()
+        return
+    feature_id = data[len(prefix) :].strip()
+    feat = beta_features.get_feature(feature_id)
+    if feat is None or feat.stage not in ("alpha", "beta"):
+        await query.answer()
+        return
+    title = t(feat.title_key, lang)
+    if beta_features.is_admin(user_id):
+        await query.answer(t("beta_mode_admin_toggle", lang), show_alert=True)
+        return
+    enrolled = beta_features.is_enrolled(db, user_id, feature_id)
+    new_state = not enrolled
+    db.set_beta_enrollment(user_id, feature_id, new_state)
+    analytics.capture(
+        user_id,
+        "beta_feature_opt_in" if new_state else "beta_feature_opt_out",
+        {"feature_id": feature_id, "premium_feature_id": feat.premium_feature_id or ""},
+    )
+    toast = t(
+        "beta_mode_opt_in" if new_state else "beta_mode_opt_out",
+        lang,
+        name=title,
+    )
+    await query.answer(toast)
+    features_block, kb_rows = _beta_mode_features_block(db, user_id, lang)
+    text = t("beta_mode_menu", lang, features_block=features_block)
+    await query.edit_message_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=beta_mode_keyboard(lang, kb_rows),
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
+
+
 async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -9312,6 +9403,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
+    beta_features.load_manifest()
     async def post_init(application: Application) -> None:
         from config import POSTHOG_ISSUE_WEBHOOK_SECRET, twitch_oauth_redirect_uri
         from health import mark_ready, register_oauth_bridge, register_posthog_issue_bridge
@@ -9518,7 +9610,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("beta_mode"), open_beta_mode_menu),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_advanced_mode_toggle, pattern=r"^advanced_mode:toggle$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_beta_toggle, pattern=r"^beta:toggle:[\w.-]+$"),
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_sys_updates_toggle, pattern=r"^sys_updates:toggle$"), group=0)

@@ -1,0 +1,56 @@
+---
+description: Beta feature branches — manifest, gating, GitHub labels, lifecycle
+globs: beta/**,beta.py,bot.py,premium.py,i18n.py
+alwaysApply: false
+---
+
+# Beta feature branch workflow
+
+## When adding a new user-facing capability
+
+1. Create branch `feat/<slug>` (one feature per branch / Cursor chat).
+2. Add entry to [`beta/manifest.json`](beta/manifest.json):
+
+```json
+{
+  "id": "<slug>",
+  "branch": "feat/<slug>",
+  "title_key": "beta_feat_<slug>",
+  "description_key": "beta_feat_<slug>_desc",
+  "premium_feature_id": "<FEATURE_IDS id or omit>",
+  "issue_label": "beta/<slug>",
+  "stage": "draft",
+  "created_at": "YYYY-MM-DD"
+}
+```
+
+3. Add `beta_feat_<slug>` and `beta_feat_<slug>_desc` to `i18n.py` (en + ru).
+4. Create GitHub label `beta/<slug>`.
+5. Gate new behavior:
+
+```python
+import beta as beta_features
+
+if beta_features.is_enabled(db, user_id, "<slug>"):
+    ...
+```
+
+6. Set `stage` to `beta` when ready for testers (visible in Settings → Beta mode).
+7. Open PR; when ready for release add label `beta/ready-to-merge`.
+8. Update [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) if UX changes.
+
+## Lifecycle (automated)
+
+Daily workflow [`.github/workflows/beta-lifecycle.yml`](../.github/workflows/beta-lifecycle.yml) merges when:
+
+- `stage` is `beta`
+- open PR from `branch` has label `beta/ready-to-merge`
+- PR age ≥ 7 days
+- no open Issues with `issue_label`
+- CI green
+
+After merge: `stage` → `ga` (beta UI hidden; premium rules apply to everyone — decision A).
+
+## Premium during beta
+
+If `premium_feature_id` is set, enrolled users (and admins) get access via `prem.has_feature()` while `stage` is `alpha` or `beta`.

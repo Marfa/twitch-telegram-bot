@@ -924,6 +924,14 @@ class Database(Protocol):
         is_demo: bool = False,
     ) -> int: ...
 
+    def is_beta_enrolled(self, user_id: int, feature_id: str) -> bool: ...
+
+    def set_beta_enrollment(
+        self, user_id: int, feature_id: str, enrolled: bool
+    ) -> None: ...
+
+    def list_beta_enrollments(self, user_id: int) -> set[str]: ...
+
 
 class SqliteDatabase:
     def __init__(self, path: Path) -> None:
@@ -1286,6 +1294,18 @@ class SqliteDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
             ON alert_history(owner_id, sent_at DESC)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_beta_enrollments (
+                user_id INTEGER NOT NULL,
+                feature_id TEXT NOT NULL,
+                enrolled INTEGER NOT NULL DEFAULT 1,
+                opted_in_at TEXT NOT NULL DEFAULT (datetime('now')),
+                opted_out_at TEXT,
+                PRIMARY KEY (user_id, feature_id)
+            )
             """
         )
         _seed_lucky_templates_sqlite(conn)
@@ -3023,6 +3043,56 @@ class SqliteDatabase:
                 )
             return len(to_delete)
 
+    def is_beta_enrolled(self, user_id: int, feature_id: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT enrolled FROM user_beta_enrollments
+                WHERE user_id = ? AND feature_id = ?
+                """,
+                (user_id, feature_id),
+            ).fetchone()
+        return row is not None and bool(row["enrolled"])
+
+    def set_beta_enrollment(
+        self, user_id: int, feature_id: str, enrolled: bool
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            if enrolled:
+                conn.execute(
+                    """
+                    INSERT INTO user_beta_enrollments
+                        (user_id, feature_id, enrolled, opted_in_at, opted_out_at)
+                    VALUES (?, ?, 1, ?, NULL)
+                    ON CONFLICT(user_id, feature_id) DO UPDATE SET
+                        enrolled = 1,
+                        opted_in_at = excluded.opted_in_at,
+                        opted_out_at = NULL
+                    """,
+                    (user_id, feature_id, now),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE user_beta_enrollments
+                    SET enrolled = 0, opted_out_at = ?
+                    WHERE user_id = ? AND feature_id = ?
+                    """,
+                    (now, user_id, feature_id),
+                )
+
+    def list_beta_enrollments(self, user_id: int) -> set[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT feature_id FROM user_beta_enrollments
+                WHERE user_id = ? AND enrolled = 1
+                """,
+                (user_id,),
+            ).fetchall()
+        return {str(r["feature_id"]) for r in rows}
+
 
 class PostgresDatabase:
     def __init__(self, database_url: str) -> None:
@@ -3494,6 +3564,18 @@ class PostgresDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
                 ON alert_history(owner_id, sent_at DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_beta_enrollments (
+                    user_id BIGINT NOT NULL,
+                    feature_id TEXT NOT NULL,
+                    enrolled BOOLEAN NOT NULL DEFAULT TRUE,
+                    opted_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    opted_out_at TIMESTAMPTZ,
+                    PRIMARY KEY (user_id, feature_id)
+                )
                 """
             )
             _seed_lucky_templates_pg(cur)
@@ -5389,6 +5471,60 @@ class PostgresDatabase:
                     (sub_id, owner_id),
                 )
             return len(to_delete)
+
+    def is_beta_enrolled(self, user_id: int, feature_id: str) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT enrolled FROM user_beta_enrollments
+                WHERE user_id = %s AND feature_id = %s
+                """,
+                (user_id, feature_id),
+            )
+            row = cur.fetchone()
+        return row is not None and bool(row["enrolled"])
+
+    def set_beta_enrollment(
+        self, user_id: int, feature_id: str, enrolled: bool
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if enrolled:
+                cur.execute(
+                    """
+                    INSERT INTO user_beta_enrollments
+                        (user_id, feature_id, enrolled, opted_in_at, opted_out_at)
+                    VALUES (%s, %s, TRUE, NOW(), NULL)
+                    ON CONFLICT (user_id, feature_id) DO UPDATE SET
+                        enrolled = TRUE,
+                        opted_in_at = EXCLUDED.opted_in_at,
+                        opted_out_at = NULL
+                    """,
+                    (user_id, feature_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE user_beta_enrollments
+                    SET enrolled = FALSE, opted_out_at = NOW()
+                    WHERE user_id = %s AND feature_id = %s
+                    """,
+                    (user_id, feature_id),
+                )
+
+    def list_beta_enrollments(self, user_id: int) -> set[str]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT feature_id FROM user_beta_enrollments
+                WHERE user_id = %s AND enrolled = TRUE
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+        return {str(r["feature_id"]) for r in rows}
 
 
 def open_database(path: Path, database_url: str | None = None) -> Database:
