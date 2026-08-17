@@ -150,6 +150,14 @@ def is_enrolled(db: Database, user_id: int, feature_id: str) -> bool:
     return _user_enrolled(db, user_id, feature_id)
 
 
+def enrollment_counts(db: Database, user_id: int) -> tuple[int, int]:
+    """(joined visible betas, total visible betas) for the Settings button."""
+    features = list_features()
+    total = len(features)
+    joined = sum(1 for feat in features if is_enrolled(db, user_id, feat.id))
+    return joined, total
+
+
 def grants_premium_feature(db: Database, user_id: int, premium_feature_id: str) -> bool:
     """Beta bypass for prem.has_feature_sync (alpha/beta stages only)."""
     from demo_mode import is_active
@@ -236,6 +244,7 @@ def _self_check() -> None:
         assert not is_enabled(db, 1, "demo_feat")
         db.set_beta_enrollment(1, "demo_feat", True)
         assert is_enabled(db, 1, "demo_feat")
+        assert enrollment_counts(db, 1) == (1, 1)
         assert grants_premium_feature(db, 1, "alert_history")
         assert not grants_premium_feature(db, 1, "twitch_sync")
         import config

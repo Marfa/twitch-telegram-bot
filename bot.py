@@ -61,7 +61,6 @@ from i18n import (
     admin_wizard_menu,
     alert_type_keyboard,
     all_btn_texts,
-    all_menu_buttons,
     all_wizard_nav_buttons,
     broadcast_menu,
     btn,
@@ -76,6 +75,7 @@ from i18n import (
     edit_options_keyboard,
     ignore_keywords_keyboard,
     ignored_words_keyboard,
+    is_menu_button,
     whisper_alerts_keyboard,
     advanced_mode_keyboard,
     beta_mode_keyboard,
@@ -87,6 +87,7 @@ from i18n import (
     link_preview_keyboard,
     lucky_preview_keyboard,
     main_menu,
+    other_menu,
     placeholders_link_html,
     partner_menu,
     premium_gate_keyboard,
@@ -788,7 +789,7 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await context.bot.send_message(
             user_id,
             t("menu_settings", lang),
-            reply_markup=settings_menu(lang),
+            reply_markup=_settings_kb(lang, db, user_id),
         )
         context.user_data.clear()
         return ConversationHandler.END
@@ -1287,7 +1288,14 @@ def _set_wizard_back(context: ContextTypes.DEFAULT_TYPE, state: int) -> None:
 
 def _btn_filter(key: str) -> filters.Regex:
     texts = "|".join(re.escape(btn(key, loc)) for loc in SUPPORTED_LOCALES)
+    if key == "beta_mode":
+        return filters.Regex(rf"^({texts})( \(\d+/\d+\))?$")
     return filters.Regex(f"^({texts})$")
+
+
+def _settings_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
+    enrolled, total = beta_features.enrollment_counts(db, user_id)
+    return settings_menu(lang, beta_enrolled=enrolled, beta_total=total)
 
 
 def _is_admin(user_id: int) -> bool:
@@ -1312,9 +1320,11 @@ def _help_text(lang: str) -> str:
         btn_new=btn("new", lang),
         btn_import_twitch=btn("import_twitch", lang),
         btn_manage=btn("manage", lang),
+        btn_alert_history=btn("alert_history", lang),
+        btn_other=btn("other", lang),
+        btn_whisper_alerts=btn("whisper_alerts", lang),
         btn_create_schedule=btn("create_schedule", lang),
         btn_watch=btn("watch", lang),
-        btn_alert_history=btn("alert_history", lang),
         btn_settings=btn("settings", lang),
         btn_feedback=btn("feedback", lang),
     )
@@ -1756,7 +1766,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await context.bot.send_message(
             query.from_user.id,
             t("menu_settings", lang),
-            reply_markup=settings_menu(lang),
+            reply_markup=_settings_kb(lang, db, query.from_user.id),
         )
         return ConversationHandler.END
     await context.bot.send_message(
@@ -1822,7 +1832,7 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     text = update.effective_message.text or ""
-    if text in all_menu_buttons():
+    if is_menu_button(text):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return CHANNEL
 
@@ -1917,7 +1927,7 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     template = (update.effective_message.text or "").strip()
-    if template in all_menu_buttons():
+    if is_menu_button(template):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return TEMPLATE
     if not template:
@@ -2435,7 +2445,7 @@ async def receive_ignore_keywords(update: Update, context: ContextTypes.DEFAULT_
         if text in all_btn_texts("wizard_cancel"):
             return await cancel(update, context)
         return await wizard_back(update, context)
-    if text in all_menu_buttons():
+    if is_menu_button(text):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return IGNORE_KEYWORDS
 
@@ -2538,7 +2548,7 @@ async def receive_delay_send(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def receive_delay_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons():
+    if is_menu_button(raw):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return DELAY_MINUTES
     if not raw.isdigit() or int(raw) < 1:
@@ -2569,7 +2579,7 @@ async def receive_repeat_allow(update: Update, context: ContextTypes.DEFAULT_TYP
 async def receive_repeat_mute_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons():
+    if is_menu_button(raw):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return REPEAT_MUTE_MINUTES
     if not raw.isdigit() or int(raw) < 1:
@@ -2607,7 +2617,7 @@ async def receive_schedule_reminder_minutes(
 ) -> int:
     lang = _user_lang(context, update.effective_user.id)
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons():
+    if is_menu_button(raw):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return SCHEDULE_REMINDER_MINUTES
     if not raw.isdigit() or int(raw) < 1:
@@ -2733,7 +2743,7 @@ async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons():
+    if is_menu_button(raw):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_DELAY
     if not raw.isdigit():
@@ -2822,7 +2832,7 @@ async def receive_edit_schedule_reminder(
         return ConversationHandler.END
 
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons():
+    if is_menu_button(raw):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_SCHEDULE_REMINDER
     if not raw.isdigit():
@@ -2855,7 +2865,7 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
     template = (update.effective_message.text or "").strip()
-    if template in all_menu_buttons():
+    if is_menu_button(template):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_TEMPLATE
     if not template:
@@ -2878,7 +2888,7 @@ async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons():
+    if is_menu_button(raw):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_REPEAT
     if not raw.isdigit():
@@ -3685,7 +3695,7 @@ async def stream_schedule_confirm_callback(
 async def stream_schedule_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     text = (update.effective_message.text or "").strip()
-    if text in all_menu_buttons() or text in all_wizard_nav_buttons():
+    if is_menu_button(text) or text in all_wizard_nav_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return STREAM_SCHEDULE_GAME
     if not text:
@@ -3698,7 +3708,7 @@ async def stream_schedule_game(update: Update, context: ContextTypes.DEFAULT_TYP
 async def stream_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     text = (update.effective_message.text or "").strip()
-    if text in all_menu_buttons() or text in all_wizard_nav_buttons():
+    if is_menu_button(text) or text in all_wizard_nav_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return STREAM_SCHEDULE_TIME
     parsed_time = _parse_stream_time(text)
@@ -5965,7 +5975,7 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     raw = (update.effective_message.text or "").strip()
-    if raw in all_menu_buttons() or raw in all_wizard_nav_buttons():
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
         return ConversationHandler.END
     if not raw.isdigit() or not (_SYNC_PERIOD_MIN <= int(raw) <= _SYNC_PERIOD_MAX):
         await update.effective_message.reply_text(t("import_sync_days_invalid", lang))
@@ -5980,12 +5990,12 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if not db.set_twitch_sync_period(user_id, days, next_at):
             await update.effective_message.reply_text(
                 t("sync_menu_off", lang),
-                reply_markup=settings_menu(lang),
+                reply_markup=_settings_kb(lang, db, user_id),
             )
             return ConversationHandler.END
         await update.effective_message.reply_text(
             t("sync_period_updated", lang, days=days),
-            reply_markup=settings_menu(lang),
+            reply_markup=_settings_kb(lang, db, user_id),
         )
         context.user_data.pop("sync_days_mode", None)
         return ConversationHandler.END
@@ -6052,7 +6062,7 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not sync or sync.period_days <= 0:
         await update.effective_message.reply_text(
             t("sync_menu_off", lang),
-            reply_markup=settings_menu(lang),
+            reply_markup=_settings_kb(lang, db, user_id),
         )
         return
     await update.effective_message.reply_text(
@@ -6250,7 +6260,7 @@ async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await context.bot.send_message(
         user_id,
         text,
-        reply_markup=settings_menu(lang),
+        reply_markup=_settings_kb(lang, db, user_id),
     )
     await _ask_sync_unfollow_if_needed(
         context.application, user_id, lang, ask_streamers
@@ -6385,7 +6395,7 @@ async def receive_edit_ignore_keywords(
         return ConversationHandler.END
 
     text = (update.effective_message.text or "").strip()
-    if text in all_menu_buttons():
+    if is_menu_button(text):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_IGNORE_KEYWORDS
 
@@ -6902,7 +6912,7 @@ async def admin_receive_ids(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
     lang = _user_lang(context, user_id)
     plain = (update.effective_message.text or "").strip()
-    if plain in all_menu_buttons():
+    if is_menu_button(plain):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return ADMIN_MSG_IDS
     ids = _parse_broadcast_recipient_ids(plain)
@@ -6925,7 +6935,7 @@ async def admin_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = _user_lang(context, user_id)
     msg = update.effective_message
     plain = (msg.text or "").strip()
-    if plain in all_menu_buttons():
+    if is_menu_button(plain):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return ADMIN_MSG_TEXT
     if not plain:
@@ -7512,7 +7522,7 @@ async def receive_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYP
 
     msg = update.effective_message
     plain = (msg.text or "").strip()
-    if plain in all_menu_buttons() or plain in all_wizard_nav_buttons():
+    if is_menu_button(plain) or plain in all_wizard_nav_buttons():
         context.user_data.clear()
         await update.effective_message.reply_text(
             t("menu_broadcast", lang),
@@ -7684,7 +7694,16 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db.upsert_user(user_id)
     await update.effective_message.reply_text(
         t("menu_settings", lang),
-        reply_markup=settings_menu(lang),
+        reply_markup=_settings_kb(lang, db, user_id),
+    )
+
+
+async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    await update.effective_message.reply_text(
+        t("menu_other", lang),
+        reply_markup=other_menu(lang),
     )
 
 
@@ -8448,7 +8467,7 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         lang,
         name=title,
     )
-    await query.answer(toast)
+    await query.answer()
     features_block, kb_rows = _beta_mode_features_block(db, user_id, lang)
     text = t("beta_mode_menu", lang, features_block=features_block)
     await query.edit_message_text(
@@ -8456,6 +8475,11 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode=ParseMode.HTML,
         reply_markup=beta_mode_keyboard(lang, kb_rows),
         link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
+    await context.bot.send_message(
+        user_id,
+        toast,
+        reply_markup=_settings_kb(lang, db, user_id),
     )
 
 
@@ -8497,27 +8521,27 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
     text = (update.effective_message.text or "").strip()
     if text in all_wizard_nav_buttons():
         await update.effective_message.reply_text(
             t("menu_settings", lang),
-            reply_markup=settings_menu(lang),
+            reply_markup=_settings_kb(lang, db, user_id),
         )
         context.user_data.clear()
         return ConversationHandler.END
-    if text in all_menu_buttons():
+    if is_menu_button(text):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return GLOBAL_IGNORE_KEYWORDS
     added = normalize_ignore_keywords(text)
     if not added:
         await update.effective_message.reply_text(t("ignored_words_hint_empty", lang))
         return GLOBAL_IGNORE_KEYWORDS
-    db: Database = context.application.bot_data["db"]
     keywords = merge_ignore_keywords(db.get_global_ignore_keywords(user_id), added)
     db.set_global_ignore_keywords(user_id, keywords)
     await update.effective_message.reply_text(
         t("ignored_words_saved", lang),
-        reply_markup=settings_menu(lang),
+        reply_markup=_settings_kb(lang, db, user_id),
     )
     context.user_data.clear()
     return ConversationHandler.END
@@ -8536,7 +8560,7 @@ async def receive_ignored_words_clear(
     await context.bot.send_message(
         user_id,
         t("ignored_words_cleared", lang),
-        reply_markup=settings_menu(lang),
+        reply_markup=_settings_kb(lang, db, user_id),
     )
     context.user_data.clear()
     return ConversationHandler.END
@@ -8549,11 +8573,12 @@ async def receive_ignored_words_cancel(
     await query.answer()
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
     await query.edit_message_text("✓")
     await context.bot.send_message(
         user_id,
         t("menu_settings", lang),
-        reply_markup=settings_menu(lang),
+        reply_markup=_settings_kb(lang, db, user_id),
     )
     context.user_data.clear()
     return ConversationHandler.END
@@ -8729,7 +8754,7 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t(key, lang),
-            reply_markup=settings_menu(lang),
+            reply_markup=_settings_kb(lang, db, owner_id),
         )
         return
     info = token_info or {}
@@ -8744,7 +8769,7 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
-            reply_markup=settings_menu(lang),
+            reply_markup=other_menu(lang),
         )
         return
     try:
@@ -8761,14 +8786,14 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
-            reply_markup=settings_menu(lang),
+            reply_markup=other_menu(lang),
         )
         return
     analytics.capture(owner_id, "whisper_alerts_toggled", {"enabled": True})
     await application.bot.send_message(
         owner_id,
         t("whisper_alerts_enabled", lang),
-        reply_markup=whisper_alerts_keyboard(lang, enabled=True),
+        reply_markup=other_menu(lang),
     )
 
 
@@ -9909,6 +9934,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("other"), open_other_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("premium"), open_premium_from_settings),
         group=0,
     )
@@ -10486,6 +10515,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("edit")
                 | _btn_filter("delete")
                 | _btn_filter("alert_history")
+                | _btn_filter("other")
                 | _btn_filter("settings")
                 | _btn_filter("premium")
                 | _btn_filter("partner")

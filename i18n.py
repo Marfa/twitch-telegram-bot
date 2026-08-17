@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from telegram import (
@@ -27,6 +28,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_feedback": "🐛 Report a problem",
         "btn_create_schedule": "📅 Create schedule",
         "btn_alert_history": "📜 Alert history",
+        "btn_other": "📦 Other",
         "btn_settings": "⚙️ Settings",
         "btn_language": "🌐 Language",
         "btn_admin": "⚙️ Admin",
@@ -202,6 +204,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_allow": "allowed",
         "menu_subs": "Manage subscriptions:",
         "menu_settings": "Settings:",
+        "menu_other": "Other:",
         "alert_history_title": "Alert history — last {days} days ({n}):",
         "alert_history_empty": "No alerts yet.",
         "alert_history_day": "<b>📅 {date}</b>",
@@ -625,7 +628,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "whisper_alerts_failed": "Could not enable whisper alerts. Try again.",
         "whisper_alerts_denied": "Twitch authorization was cancelled.",
         "whisper_alerts_revoked": (
-            "Twitch stopped whisper alerts. Open Settings → Whisper alerts to turn them on again."
+            "Twitch stopped whisper alerts. Open Other → Whisper alerts to turn them on again."
         ),
         "whisper_alert_message": (
             "💬 New Twitch whisper\n\n"
@@ -882,9 +885,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• {btn_new} — Twitch channel, message template, optional image, filters, destination\n"
             "• {btn_import_twitch} — authorize and import followed channels\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
-            "• {btn_create_schedule} — weekly schedule text; publish to Twitch\n"
-            "• {btn_watch} — random live streams by your categories and filters\n"
             "• {btn_alert_history} — sent alerts history\n"
+            "• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}\n"
             "• {btn_settings} — premium, sync, system alerts, language, partner program\n"
             "• {btn_feedback}"
         ),
@@ -1218,6 +1220,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_feedback": "🐛 Сообщить о проблеме",
         "btn_create_schedule": "📅 Создать расписание",
         "btn_alert_history": "📜 История оповещений",
+        "btn_other": "📦 Прочее",
         "btn_settings": "⚙️ Настройки",
         "btn_language": "🌐 Выбор языка",
         "btn_admin": "⚙️ Админка",
@@ -1393,6 +1396,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_allow": "разрешены",
         "menu_subs": "Управление подписками:",
         "menu_settings": "Настройки:",
+        "menu_other": "Прочее:",
         "alert_history_title": "История оповещений — за {days} дн. ({n}):",
         "alert_history_empty": "Оповещений пока нет.",
         "alert_history_day": "<b>📅 {date}</b>",
@@ -1924,7 +1928,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "whisper_alerts_failed": "Не удалось включить оповещения об ЛС. Попробуйте ещё раз.",
         "whisper_alerts_denied": "Авторизация Twitch отменена.",
         "whisper_alerts_revoked": (
-            "Twitch отключил оповещения об ЛС. Включите их снова в Настройках → Оповещения об ЛС."
+            "Twitch отключил оповещения об ЛС. Включите их снова в Прочем → Оповещения об ЛС."
         ),
         "whisper_alert_message": (
             "💬 Новое личное сообщение на Twitch\n\n"
@@ -2190,9 +2194,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n"
             "• {btn_import_twitch} — авторизация и импорт фолловов\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
-            "• {btn_create_schedule} — текст расписания на неделю; публикация на Twitch\n"
-            "• {btn_watch} — случайные live-стримы по категориям и фильтрам\n"
             "• {btn_alert_history} — история отправленных оповещений\n"
+            "• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}\n"
             "• {btn_settings} — премиум, sync, системные уведомления, язык, партнёрка\n"
             "• {btn_feedback}"
         ),
@@ -2594,6 +2597,22 @@ def all_btn_texts(key: str) -> set[str]:
     return {btn(key, loc) for loc in SUPPORTED_LOCALES}
 
 
+_BETA_COUNT_SUFFIX = re.compile(r" \(\d+/\d+\)$")
+
+
+def beta_mode_btn(lang: str, enrolled: int, total: int) -> str:
+    return f"{btn('beta_mode', lang)} ({enrolled}/{total})"
+
+
+def is_menu_button(text: str) -> bool:
+    if text in all_menu_buttons():
+        return True
+    stripped = _BETA_COUNT_SUFFIX.sub("", text)
+    return stripped != text and stripped in {
+        btn("beta_mode", loc) for loc in SUPPORTED_LOCALES
+    }
+
+
 def all_menu_buttons() -> set[str]:
     keys = (
         "new",
@@ -2605,6 +2624,7 @@ def all_menu_buttons() -> set[str]:
         "feedback",
         "create_schedule",
         "alert_history",
+        "other",
         "settings",
         "language",
         "admin",
@@ -2647,11 +2667,10 @@ def main_menu(
         ],
         [
             KeyboardButton(btn("manage", lang)),
-            KeyboardButton(btn("create_schedule", lang)),
+            KeyboardButton(btn("alert_history", lang)),
         ],
         [
-            KeyboardButton(btn("watch", lang)),
-            KeyboardButton(btn("alert_history", lang)),
+            KeyboardButton(btn("other", lang)),
         ],
         [
             KeyboardButton(btn("settings", lang)),
@@ -2681,7 +2700,21 @@ def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
-def settings_menu(lang: str) -> ReplyKeyboardMarkup:
+def other_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(btn("whisper_alerts", lang))],
+            [KeyboardButton(btn("create_schedule", lang))],
+            [KeyboardButton(btn("watch", lang))],
+            [KeyboardButton(btn("back", lang))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def settings_menu(
+    lang: str, *, beta_enrolled: int = 0, beta_total: int = 0
+) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [
@@ -2690,13 +2723,10 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(btn("ignored_words", lang)),
-                KeyboardButton(btn("whisper_alerts", lang)),
-            ],
-            [
                 KeyboardButton(btn("advanced_mode", lang)),
-                KeyboardButton(btn("beta_mode", lang)),
             ],
             [
+                KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
                 KeyboardButton(btn("sys_notifications", lang)),
             ],
             [

@@ -385,18 +385,26 @@ def main() -> None:
     assert tr("stream_schedule_publishing", "en")
     assert tr("stream_schedule_duration_prompt", "ru")
     assert tr("stream_schedule_duration_unsure", "en")
-    from i18n import main_menu, admin_menu, settings_menu, stream_schedule_duration_keyboard, watch_suggest_keyboard
+    from i18n import (
+        main_menu,
+        admin_menu,
+        other_menu,
+        settings_menu,
+        stream_schedule_duration_keyboard,
+        watch_suggest_keyboard,
+    )
 
     for loc in ("en", "ru"):
         main_kb = main_menu(loc).keyboard
         main_btns = [b.text for row in main_kb for b in row]
-        assert btn("create_schedule", loc) in main_btns
-        assert btn("watch", loc) in main_btns
+        assert btn("other", loc) in main_btns
         assert btn("alert_history", loc) in main_btns
-        assert main_btns.index(btn("create_schedule", loc)) < main_btns.index(
-            btn("watch", loc)
-        )
+        assert btn("create_schedule", loc) not in main_btns
+        assert btn("watch", loc) not in main_btns
         assert main_btns.index(btn("alert_history", loc)) < main_btns.index(
+            btn("other", loc)
+        )
+        assert main_btns.index(btn("other", loc)) < main_btns.index(
             btn("settings", loc)
         )
         settings_feedback_row = next(
@@ -408,6 +416,13 @@ def main() -> None:
             btn("settings", loc),
             btn("feedback", loc),
         ]
+        other_btns = [b.text for row in other_menu(loc).keyboard for b in row]
+        assert other_btns == [
+            btn("whisper_alerts", loc),
+            btn("create_schedule", loc),
+            btn("watch", loc),
+            btn("back", loc),
+        ]
         settings_kb = settings_menu(loc).keyboard
         ignored_row = next(
             row
@@ -416,7 +431,7 @@ def main() -> None:
         )
         assert [b.text for b in ignored_row] == [
             btn("ignored_words", loc),
-            btn("whisper_alerts", loc),
+            btn("advanced_mode", loc),
         ]
         partner_row = next(
             row
@@ -427,6 +442,16 @@ def main() -> None:
             btn("language", loc),
             btn("partner", loc),
         ]
+        from i18n import beta_mode_btn
+
+        beta_row = next(
+            row
+            for row in settings_kb
+            if any(
+                (b.text or "").startswith(btn("beta_mode", loc)) for b in row
+            )
+        )
+        assert [b.text for b in beta_row][0] == beta_mode_btn(loc, 0, 0)
         suggest_kb = watch_suggest_keyboard(loc, offer_create_alerts=True)
         cbs = [
             (btn.callback_data or "")
@@ -645,6 +670,8 @@ def main() -> None:
         assert "/stats" not in help_txt
         assert btn("create_schedule", loc) in help_txt
         assert btn("alert_history", loc) in help_txt
+        assert btn("other", loc) in help_txt
+        assert btn("whisper_alerts", loc) in help_txt
         assert btn("new", loc)
         assert btn("watch", loc)
         assert btn("settings", loc)
@@ -2270,10 +2297,17 @@ def main() -> None:
         assert not has_feature_sync(bdb, 99, "schedule_publish")
         bdb.set_beta_enrollment(99, "sc_premium_beta", True)
         assert has_feature_sync(bdb, 99, "schedule_publish")
+        assert beta_mod.enrollment_counts(bdb, 99) == (1, 1)
         beta_mod.load_manifest(beta_mod.manifest_path())
 
     assert btn("beta_mode", "ru") == "🧪 Бета-режим"
     assert btn("beta_mode", "en") == "🧪 Beta mode"
+    from i18n import beta_mode_btn, is_menu_button
+
+    assert beta_mode_btn("ru", 0, 0) == "🧪 Бета-режим (0/0)"
+    assert beta_mode_btn("en", 1, 3) == "🧪 Beta mode (1/3)"
+    assert is_menu_button(beta_mode_btn("ru", 2, 5))
+    assert not is_menu_button("not a menu button")
 
     print("ok")
 

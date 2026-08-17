@@ -23,7 +23,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **Clean title** (checkbox) strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
-| 🎲 What to watch? | Saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
+| 🎲 What to watch? | In **📦 Other**: saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); wizard step in **advanced mode** |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; wizard step in **advanced mode** |
@@ -32,7 +32,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
 | Subscriptions | List, edit all fields, enable/disable, delete |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
-| Stream schedule | Main menu wizard for weekly text; publish to Twitch is **Premium** (slot duration, full clear of old slots) |
+| Stream schedule | In **📦 Other**: weekly text wizard; publish to Twitch is **Premium** (slot duration, full clear of old slots) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
 | Premium | 7-day trial; Stars month/year/lifetime; à la carte (incl. advanced mode, 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
@@ -115,7 +115,7 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 
 ### What to watch?
 
-**🎲 What to watch?** — random live streams matching your filters (available to everyone, no Premium). If none are live — recent VODs for the same categories.
+**🎲 What to watch?** (in **📦 Other**) — random live streams matching your filters (available to everyone, no Premium). If none are live — recent VODs for the same categories.
 
 If you have saved filters, the bot offers:
 
@@ -156,7 +156,7 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 
 ### Stream schedule
 
-**📅 Create schedule** on the main menu (everyone) — wizard for publication text for the upcoming week (nearest Monday through Sunday):
+**📅 Create schedule** in **📦 Other** (everyone) — wizard for publication text for the upcoming week (nearest Monday through Sunday):
 
 1. Description and format example
 2. Confirm “Create the schedule?”
@@ -193,12 +193,13 @@ Optionally **publish to Twitch** (**Premium**):
 | ➕ New subscription | Alert type → wizard |
 | ⬇️ Import from Twitch | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete |
-| 📅 Create schedule | Weekly text; Twitch sync — Premium |
-| 🎲 What to watch? | Pick filter / new search / delete filters |
 | 📜 Alert history | DM: 7 days free / 60 days Premium |
-| ⚙️ Settings | Premium, sync, ignored words, whisper alerts, advanced mode, system alerts, language, partner program |
-| ↳ ⭐ Premium | Stars or free via Twitch channel sub |
+| 📦 Other | Whisper alerts, schedule, what to watch |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
+| ↳ 📅 Create schedule | Weekly text; Twitch sync — Premium |
+| ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
+| ⚙️ Settings | Premium, sync, ignored words, advanced mode, system alerts, language, partner program |
+| ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🎛 Advanced mode | Ignore / delay / repeats / delete in the wizard; Premium; off by default |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
