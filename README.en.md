@@ -196,8 +196,9 @@ Optionally **publish to Twitch** (**Premium**):
 | 📅 Create schedule | Weekly text; Twitch sync — Premium |
 | 🎲 What to watch? | Pick filter / new search / delete filters |
 | 📜 Alert history | DM: 7 days free / 60 days Premium |
-| ⚙️ Settings | Premium, sync, ignored words, advanced mode, system alerts, language, partner program |
+| ⚙️ Settings | Premium, sync, ignored words, whisper alerts, advanced mode, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
+| ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 🎛 Advanced mode | Ignore / delay / repeats / delete in the wizard; Premium; off by default |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |

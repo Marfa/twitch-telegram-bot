@@ -408,6 +408,16 @@ class TwitchSync:
     last_sync_at: str | None
 
 
+@dataclass
+class WhisperAlert:
+    owner_id: int
+    enabled: bool
+    twitch_user_id: str
+    twitch_login: str
+    refresh_token: str
+    eventsub_id: str
+
+
 def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
     scheduled_at = row["scheduled_at"]
     if scheduled_at is not None and not isinstance(scheduled_at, str):
@@ -440,6 +450,17 @@ def _row_to_twitch_sync(row: Any) -> TwitchSync:
         period_days=int(row["period_days"]),
         next_sync_at=str(next_at),
         last_sync_at=str(last) if last else None,
+    )
+
+
+def _row_to_whisper_alert(row: Any) -> WhisperAlert:
+    return WhisperAlert(
+        owner_id=int(row["owner_id"]),
+        enabled=bool(row["enabled"]),
+        twitch_user_id=str(row["twitch_user_id"] or ""),
+        twitch_login=str(row["twitch_login"] or ""),
+        refresh_token=str(row["refresh_token"] or ""),
+        eventsub_id=str(row["eventsub_id"] or ""),
     )
 
 
@@ -904,6 +925,33 @@ class Database(Protocol):
 
     def get_due_twitch_syncs(self, now_iso: str) -> list[TwitchSync]: ...
 
+    def get_whisper_alert(self, owner_id: int) -> WhisperAlert | None: ...
+
+    def get_whisper_alerts_by_twitch_user_id(
+        self, twitch_user_id: str
+    ) -> list[WhisperAlert]: ...
+
+    def upsert_whisper_alert(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+        eventsub_id: str = "",
+    ) -> None: ...
+
+    def set_whisper_alert_enabled(
+        self,
+        owner_id: int,
+        enabled: bool,
+        *,
+        eventsub_id: str | None = None,
+    ) -> None: ...
+
+    def disable_whisper_alerts_for_twitch_user(self, twitch_user_id: str) -> list[int]: ...
+
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str]
     ) -> int: ...
@@ -1252,6 +1300,24 @@ class SqliteDatabase:
                 next_sync_at TEXT NOT NULL,
                 last_sync_at TEXT
             )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS whisper_alerts (
+                owner_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                twitch_login TEXT NOT NULL DEFAULT '',
+                refresh_token TEXT NOT NULL DEFAULT '',
+                eventsub_id TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_whisper_alerts_twitch_user
+            ON whisper_alerts(twitch_user_id)
             """
         )
         conn.execute(
@@ -2958,6 +3024,124 @@ class SqliteDatabase:
             out.append(sync)
         return out
 
+    def get_whisper_alert(self, owner_id: int) -> WhisperAlert | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM whisper_alerts WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return None
+        alert = _row_to_whisper_alert(row)
+        alert.refresh_token = decrypt_secret(alert.refresh_token)
+        return alert
+
+    def get_whisper_alerts_by_twitch_user_id(
+        self, twitch_user_id: str
+    ) -> list[WhisperAlert]:
+        from token_crypto import decrypt_secret
+
+        if not twitch_user_id:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM whisper_alerts
+                WHERE twitch_user_id = ? AND enabled = 1
+                ORDER BY owner_id
+                """,
+                (twitch_user_id,),
+            ).fetchall()
+        out: list[WhisperAlert] = []
+        for row in rows:
+            alert = _row_to_whisper_alert(row)
+            alert.refresh_token = decrypt_secret(alert.refresh_token)
+            out.append(alert)
+        return out
+
+    def upsert_whisper_alert(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+        eventsub_id: str = "",
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO whisper_alerts (
+                    owner_id, enabled, twitch_user_id, twitch_login,
+                    refresh_token, eventsub_id
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    twitch_user_id = excluded.twitch_user_id,
+                    twitch_login = excluded.twitch_login,
+                    refresh_token = excluded.refresh_token,
+                    eventsub_id = excluded.eventsub_id
+                """,
+                (
+                    owner_id,
+                    1 if enabled else 0,
+                    twitch_user_id,
+                    twitch_login,
+                    enc,
+                    eventsub_id,
+                ),
+            )
+
+    def set_whisper_alert_enabled(
+        self,
+        owner_id: int,
+        enabled: bool,
+        *,
+        eventsub_id: str | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            if eventsub_id is None:
+                conn.execute(
+                    "UPDATE whisper_alerts SET enabled = ? WHERE owner_id = ?",
+                    (1 if enabled else 0, owner_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE whisper_alerts
+                    SET enabled = ?, eventsub_id = ?
+                    WHERE owner_id = ?
+                    """,
+                    (1 if enabled else 0, eventsub_id, owner_id),
+                )
+
+    def disable_whisper_alerts_for_twitch_user(self, twitch_user_id: str) -> list[int]:
+        if not twitch_user_id:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT owner_id FROM whisper_alerts
+                WHERE twitch_user_id = ? AND enabled = 1
+                """,
+                (twitch_user_id,),
+            ).fetchall()
+            conn.execute(
+                """
+                UPDATE whisper_alerts
+                SET enabled = 0, eventsub_id = ''
+                WHERE twitch_user_id = ?
+                """,
+                (twitch_user_id,),
+            )
+        return [int(r["owner_id"]) for r in rows]
+
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str]
     ) -> int:
@@ -3511,6 +3695,24 @@ class PostgresDatabase:
                     next_sync_at TIMESTAMPTZ NOT NULL,
                     last_sync_at TIMESTAMPTZ
                 )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS whisper_alerts (
+                    owner_id BIGINT PRIMARY KEY,
+                    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    twitch_login TEXT NOT NULL DEFAULT '',
+                    refresh_token TEXT NOT NULL DEFAULT '',
+                    eventsub_id TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_whisper_alerts_twitch_user
+                ON whisper_alerts(twitch_user_id)
                 """
             )
             cur.execute(
@@ -5382,6 +5584,132 @@ class PostgresDatabase:
             sync.refresh_token = decrypt_secret(sync.refresh_token)
             out.append(sync)
         return out
+
+    def get_whisper_alert(self, owner_id: int) -> WhisperAlert | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM whisper_alerts WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        alert = _row_to_whisper_alert(row)
+        alert.refresh_token = decrypt_secret(alert.refresh_token)
+        return alert
+
+    def get_whisper_alerts_by_twitch_user_id(
+        self, twitch_user_id: str
+    ) -> list[WhisperAlert]:
+        from token_crypto import decrypt_secret
+
+        if not twitch_user_id:
+            return []
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM whisper_alerts
+                WHERE twitch_user_id = %s AND enabled = TRUE
+                ORDER BY owner_id
+                """,
+                (twitch_user_id,),
+            )
+            rows = cur.fetchall()
+        out: list[WhisperAlert] = []
+        for row in rows:
+            alert = _row_to_whisper_alert(row)
+            alert.refresh_token = decrypt_secret(alert.refresh_token)
+            out.append(alert)
+        return out
+
+    def upsert_whisper_alert(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+        eventsub_id: str = "",
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO whisper_alerts (
+                    owner_id, enabled, twitch_user_id, twitch_login,
+                    refresh_token, eventsub_id
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    enabled = EXCLUDED.enabled,
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    refresh_token = EXCLUDED.refresh_token,
+                    eventsub_id = EXCLUDED.eventsub_id
+                """,
+                (
+                    owner_id,
+                    bool(enabled),
+                    twitch_user_id,
+                    twitch_login,
+                    enc,
+                    eventsub_id,
+                ),
+            )
+
+    def set_whisper_alert_enabled(
+        self,
+        owner_id: int,
+        enabled: bool,
+        *,
+        eventsub_id: str | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if eventsub_id is None:
+                cur.execute(
+                    "UPDATE whisper_alerts SET enabled = %s WHERE owner_id = %s",
+                    (bool(enabled), owner_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE whisper_alerts
+                    SET enabled = %s, eventsub_id = %s
+                    WHERE owner_id = %s
+                    """,
+                    (bool(enabled), eventsub_id, owner_id),
+                )
+
+    def disable_whisper_alerts_for_twitch_user(self, twitch_user_id: str) -> list[int]:
+        if not twitch_user_id:
+            return []
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT owner_id FROM whisper_alerts
+                WHERE twitch_user_id = %s AND enabled = TRUE
+                """,
+                (twitch_user_id,),
+            )
+            rows = cur.fetchall()
+            cur.execute(
+                """
+                UPDATE whisper_alerts
+                SET enabled = FALSE, eventsub_id = ''
+                WHERE twitch_user_id = %s
+                """,
+                (twitch_user_id,),
+            )
+        return [int(r["owner_id"]) for r in rows]
 
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str]

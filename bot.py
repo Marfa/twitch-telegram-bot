@@ -7,6 +7,7 @@ import logging
 import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 from telegram import (
     InlineKeyboardButton,
@@ -75,6 +76,7 @@ from i18n import (
     edit_options_keyboard,
     ignore_keywords_keyboard,
     ignored_words_keyboard,
+    whisper_alerts_keyboard,
     advanced_mode_keyboard,
     beta_mode_keyboard,
     image_ask_keyboard,
@@ -5864,6 +5866,9 @@ async def complete_twitch_import(
 
         await complete_premium_oauth(application, owner_id, error, token_info)
         return
+    if purpose == "whispers":
+        await complete_whisper_oauth(application, owner_id, error, token_info)
+        return
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
@@ -8554,6 +8559,275 @@ async def receive_ignored_words_cancel(
     return ConversationHandler.END
 
 
+def _whisper_alerts_ready() -> bool:
+    from config import twitch_eventsub_callback_url, twitch_oauth_redirect_uri
+
+    return bool(twitch_oauth_redirect_uri() and twitch_eventsub_callback_url())
+
+
+def _enable_whisper_eventsub(
+    db: Database,
+    twitch: TwitchClient,
+    owner_id: int,
+    *,
+    access: str,
+    refresh: str,
+    twitch_user_id: str,
+    twitch_login: str,
+) -> str:
+    from eventsub import eventsub_callback_url, eventsub_secret
+
+    callback = eventsub_callback_url()
+    if not callback:
+        raise RuntimeError("no_callback")
+    sub_id = twitch.create_whisper_eventsub(
+        access,
+        user_id=twitch_user_id,
+        callback=callback,
+        secret=eventsub_secret(),
+    )
+    db.upsert_whisper_alert(
+        owner_id,
+        enabled=True,
+        twitch_user_id=twitch_user_id,
+        twitch_login=twitch_login,
+        refresh_token=refresh,
+        eventsub_id=sub_id,
+    )
+    return sub_id
+
+
+async def _send_whisper_oauth_prompt(
+    bot: Any,
+    twitch: TwitchClient,
+    user_id: int,
+    lang: str,
+) -> None:
+    from config import twitch_oauth_redirect_uri
+    from health import create_oauth_state
+    from twitch import WHISPERS_SCOPE
+
+    if not _whisper_alerts_ready():
+        await bot.send_message(user_id, t("whisper_alerts_oauth_unavailable", lang))
+        return
+    redirect = twitch_oauth_redirect_uri()
+    state = create_oauth_state(user_id, lang, purpose="whispers")
+    url = twitch.build_authorize_url(
+        redirect_uri=redirect, state=state, scopes=WHISPERS_SCOPE
+    )
+    await bot.send_message(
+        user_id,
+        t("whisper_alerts_oauth_prompt", lang),
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("whisper_alerts_oauth_button", lang), url=url
+                    )
+                ]
+            ]
+        ),
+    )
+
+
+async def open_whisper_alerts_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    row = db.get_whisper_alert(user_id)
+    enabled = bool(row and row.enabled)
+    await update.effective_message.reply_text(
+        t("whisper_alerts_screen", lang),
+        parse_mode=ParseMode.HTML,
+        reply_markup=whisper_alerts_keyboard(lang, enabled=enabled),
+    )
+
+
+async def on_whisper_alerts_toggle(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from twitch import WHISPERS_SCOPE
+
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    db.upsert_user(user_id)
+    row = db.get_whisper_alert(user_id)
+    currently_on = bool(row and row.enabled)
+    if currently_on:
+        await query.answer()
+        if row and row.eventsub_id:
+            try:
+                twitch.delete_eventsub_subscription(row.eventsub_id)
+            except Exception as exc:
+                logger.warning("Delete whisper EventSub failed: %s", exc)
+        db.set_whisper_alert_enabled(user_id, False, eventsub_id="")
+        analytics.capture(user_id, "whisper_alerts_toggled", {"enabled": False})
+        await query.edit_message_reply_markup(
+            reply_markup=whisper_alerts_keyboard(lang, enabled=False)
+        )
+        return
+    if not _whisper_alerts_ready():
+        await query.answer()
+        await context.bot.send_message(
+            user_id, t("whisper_alerts_oauth_unavailable", lang)
+        )
+        return
+    if not row or not row.refresh_token:
+        await query.answer()
+        await _send_whisper_oauth_prompt(context.bot, twitch, user_id, lang)
+        return
+    try:
+        token_data = twitch.refresh_user_token(row.refresh_token)
+        access = token_data.get("access_token") or ""
+        refresh = token_data.get("refresh_token") or row.refresh_token
+        if not access or not twitch.token_has_scope(access, WHISPERS_SCOPE):
+            await query.answer()
+            await _send_whisper_oauth_prompt(context.bot, twitch, user_id, lang)
+            return
+        user = twitch.get_token_user(access) or {}
+        twitch_user_id = str(user.get("id") or row.twitch_user_id)
+        twitch_login = str(user.get("login") or row.twitch_login)
+        _enable_whisper_eventsub(
+            db,
+            twitch,
+            user_id,
+            access=access,
+            refresh=refresh,
+            twitch_user_id=twitch_user_id,
+            twitch_login=twitch_login,
+        )
+    except Exception as exc:
+        logger.warning("Enable whisper alerts failed: %s", exc)
+        await query.answer()
+        await _send_whisper_oauth_prompt(context.bot, twitch, user_id, lang)
+        return
+    await query.answer()
+    analytics.capture(user_id, "whisper_alerts_toggled", {"enabled": True})
+    await query.edit_message_reply_markup(
+        reply_markup=whisper_alerts_keyboard(lang, enabled=True)
+    )
+
+
+async def complete_whisper_oauth(
+    application: Application,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+) -> None:
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    if error:
+        key = (
+            "whisper_alerts_denied"
+            if error == "access_denied"
+            else "whisper_alerts_failed"
+        )
+        await application.bot.send_message(
+            owner_id,
+            t(key, lang),
+            reply_markup=settings_menu(lang),
+        )
+        return
+    info = token_info or {}
+    access = info.get("access_token") or ""
+    refresh = info.get("refresh_token") or ""
+    twitch_user_id = info.get("twitch_user_id") or ""
+    twitch_login = info.get("twitch_login") or ""
+    if not access or not refresh or not twitch_user_id:
+        await application.bot.send_message(
+            owner_id,
+            t("whisper_alerts_failed", lang),
+            reply_markup=settings_menu(lang),
+        )
+        return
+    try:
+        _enable_whisper_eventsub(
+            db,
+            twitch,
+            owner_id,
+            access=access,
+            refresh=refresh,
+            twitch_user_id=twitch_user_id,
+            twitch_login=twitch_login,
+        )
+    except Exception:
+        logger.exception("Whisper EventSub subscribe failed for user %s", owner_id)
+        await application.bot.send_message(
+            owner_id,
+            t("whisper_alerts_failed", lang),
+            reply_markup=settings_menu(lang),
+        )
+        return
+    analytics.capture(owner_id, "whisper_alerts_toggled", {"enabled": True})
+    await application.bot.send_message(
+        owner_id,
+        t("whisper_alerts_enabled", lang),
+        reply_markup=whisper_alerts_keyboard(lang, enabled=True),
+    )
+
+
+async def notify_whisper_received(application: Application, event: Any) -> None:
+    from eventsub import format_whisper_alert, whisper_conversation_url
+
+    db: Database = application.bot_data["db"]
+    to_user_id = str(getattr(event, "to_user_id", "") or "")
+    from_user_id = str(getattr(event, "from_user_id", "") or "")
+    if not to_user_id or (from_user_id and from_user_id == to_user_id):
+        return
+    alerts = db.get_whisper_alerts_by_twitch_user_id(to_user_id)
+    if not alerts:
+        return
+    for alert in alerts:
+        if db.is_bot_blocked(alert.owner_id):
+            continue
+        lang = db.get_user_locale(alert.owner_id) or DEFAULT_LOCALE
+        to_login = str(getattr(event, "to_user_login", "") or "") or alert.twitch_login
+        url = whisper_conversation_url(
+            to_login=to_login,
+            from_login=str(getattr(event, "from_user_login", "") or ""),
+        )
+        text = format_whisper_alert(lang, event, url=url)
+        try:
+            await application.bot.send_message(
+                alert.owner_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+        except Forbidden:
+            db.set_bot_blocked(alert.owner_id, True)
+        except BadRequest as exc:
+            logger.warning(
+                "Cannot send whisper alert to %s: %s", alert.owner_id, exc
+            )
+
+
+async def on_whisper_eventsub_revoked(
+    application: Application, twitch_user_id: str
+) -> None:
+    db: Database = application.bot_data["db"]
+    owner_ids = db.disable_whisper_alerts_for_twitch_user(twitch_user_id)
+    for owner_id in owner_ids:
+        if db.is_bot_blocked(owner_id):
+            continue
+        lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+        try:
+            await application.bot.send_message(
+                owner_id, t("whisper_alerts_revoked", lang)
+            )
+        except Forbidden:
+            db.set_bot_blocked(owner_id, True)
+        except BadRequest as exc:
+            logger.warning("Cannot send whisper revoke notice to %s: %s", owner_id, exc)
+
+
 async def _refresh_sys_notifications_menu(
     query, context: ContextTypes.DEFAULT_TYPE, lang: str, user_id: int
 ) -> None:
@@ -9484,7 +9758,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     beta_features.load_manifest()
     async def post_init(application: Application) -> None:
         from config import POSTHOG_ISSUE_WEBHOOK_SECRET, twitch_oauth_redirect_uri
-        from health import mark_ready, register_oauth_bridge, register_posthog_issue_bridge
+        from health import (
+            mark_ready,
+            register_eventsub_bridge,
+            register_oauth_bridge,
+            register_posthog_issue_bridge,
+        )
 
         await _restore_broadcast_jobs(application)
         loop = asyncio.get_running_loop()
@@ -9513,6 +9792,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 await notify_admins_posthog_issue(application, payload)
 
             register_posthog_issue_bridge(loop, on_posthog_issue)
+
+        async def on_eventsub_whisper(event: Any) -> None:
+            await notify_whisper_received(application, event)
+
+        async def on_eventsub_revoke(twitch_user_id: str) -> None:
+            await on_whisper_eventsub_revoked(application, twitch_user_id)
+
+        register_eventsub_bridge(
+            loop, on_whisper=on_eventsub_whisper, on_revoke=on_eventsub_revoke
+        )
         # Ready only after Application init — avoid deploy cutting over before polling.
         mark_ready()
 
@@ -9688,11 +9977,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("whisper_alerts"), open_whisper_alerts_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("beta_mode"), open_beta_mode_menu),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(on_advanced_mode_toggle, pattern=r"^advanced_mode:toggle$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_whisper_alerts_toggle, pattern=r"^whisper_alerts:toggle$"),
         group=0,
     )
     app.add_handler(
@@ -10174,7 +10471,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_sel:|delete_go$|delete_clear$|delete_type:|list_type:|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
-                r"advanced_mode:|"
+                r"advanced_mode:|whisper_alerts:|"
                 r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
             ),
         ),
@@ -10206,6 +10503,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("language")
                 | _btn_filter("sys_notifications")
                 | _btn_filter("ignored_words")
+                | _btn_filter("whisper_alerts")
                 | _btn_filter("advanced_mode")
                 | _btn_filter("sync_subs")
                 | _btn_filter("admin")

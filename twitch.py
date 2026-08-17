@@ -16,6 +16,7 @@ from config import TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 FOLLOWS_SCOPE = "user:read:follows"
 SCHEDULE_SCOPE = "channel:manage:schedule"
 SUBSCRIPTIONS_SCOPE = "user:read:subscriptions"
+WHISPERS_SCOPE = "user:read:whispers"
 # Schedule publish may overwrite twitch_sync used by follow import — keep both.
 SCHEDULE_OAUTH_SCOPES = f"{SCHEDULE_SCOPE} {FOLLOWS_SCOPE}"
 
@@ -474,6 +475,94 @@ class TwitchClient:
         resp.raise_for_status()
         users = resp.json().get("data", [])
         return users[0] if users else None
+
+    def create_whisper_eventsub(
+        self,
+        user_access_token: str,
+        *,
+        user_id: str,
+        callback: str,
+        secret: str,
+    ) -> str:
+        """Subscribe to user.whisper.message; returns EventSub id."""
+        body = {
+            "type": "user.whisper.message",
+            "version": "1",
+            "condition": {"user_id": str(user_id)},
+            "transport": {
+                "method": "webhook",
+                "callback": callback,
+                "secret": secret,
+            },
+        }
+        resp = self._session.post(
+            "https://api.twitch.tv/helix/eventsub/subscriptions",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=20,
+        )
+        if resp.status_code == 409:
+            existing = self.find_whisper_eventsub_id(str(user_id))
+            if existing:
+                return existing
+        resp.raise_for_status()
+        rows = resp.json().get("data") or []
+        if not rows:
+            raise RuntimeError("eventsub_empty")
+        return str(rows[0]["id"])
+
+    def find_whisper_eventsub_id(self, twitch_user_id: str) -> str:
+        cursor: str | None = None
+        target = str(twitch_user_id)
+        while True:
+            params: dict[str, str] = {
+                "type": "user.whisper.message",
+                "first": "100",
+            }
+            if cursor:
+                params["after"] = cursor
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/eventsub/subscriptions",
+                headers=self._headers(),
+                params=params,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            for row in payload.get("data") or []:
+                if not isinstance(row, dict):
+                    continue
+                cond = row.get("condition") or {}
+                if not isinstance(cond, dict):
+                    continue
+                if str(cond.get("user_id") or "") != target:
+                    continue
+                status = str(row.get("status") or "")
+                if status in (
+                    "enabled",
+                    "webhook_callback_verification_pending",
+                ):
+                    return str(row.get("id") or "")
+            cursor = (payload.get("pagination") or {}).get("cursor") or None
+            if not cursor:
+                return ""
+
+    def delete_eventsub_subscription(self, subscription_id: str) -> None:
+        if not subscription_id:
+            return
+        resp = self._session.delete(
+            "https://api.twitch.tv/helix/eventsub/subscriptions",
+            headers=self._headers(),
+            params={"id": subscription_id},
+            timeout=15,
+        )
+        if resp.status_code in (404, 204):
+            return
+        resp.raise_for_status()
 
     def check_user_subscription(
         self,

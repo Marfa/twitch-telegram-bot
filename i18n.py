@@ -40,6 +40,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_cancel": "Cancel",
         "btn_sys_notifications": "🔔 System alerts",
         "btn_ignored_words": "🚫 Ignored words",
+        "btn_whisper_alerts": "💬 Whisper alerts",
         "btn_advanced_mode": "🎛 Advanced mode",
         "btn_beta_mode": "🧪 Beta mode",
         "btn_sys_updates": "📬 Bot update alerts",
@@ -605,6 +606,33 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ignored_words_cancel": "Cancel",
         "ignored_words_saved": "✅ Ignored words saved.",
         "ignored_words_cleared": "✅ Ignored words cleared.",
+        "whisper_alerts_screen": (
+            "<b>Whisper alerts</b>\n\n"
+            "When this option is on, you will get alerts about new Twitch "
+            "direct messages."
+        ),
+        "whisper_alerts_enable": "Enable",
+        "whisper_alerts_oauth_prompt": (
+            "Authorize the bot on Twitch so it can notify you about incoming whispers."
+        ),
+        "whisper_alerts_oauth_button": "Authorize on Twitch",
+        "whisper_alerts_oauth_unavailable": (
+            "Whisper alerts are not configured on this server "
+            "(set PUBLIC_BASE_URL and the OAuth redirect URL in Twitch Console)."
+        ),
+        "whisper_alerts_enabled": "✅ Whisper alerts are on.",
+        "whisper_alerts_disabled": "Whisper alerts are off.",
+        "whisper_alerts_failed": "Could not enable whisper alerts. Try again.",
+        "whisper_alerts_denied": "Twitch authorization was cancelled.",
+        "whisper_alerts_revoked": (
+            "Twitch stopped whisper alerts. Open Settings → Whisper alerts to turn them on again."
+        ),
+        "whisper_alert_message": (
+            "💬 New Twitch whisper\n\n"
+            "From: <b>{name}</b> (@{login})\n"
+            "{text}\n\n"
+            '<a href="{url}">Open conversation</a>'
+        ),
         "advanced_mode_screen": (
             "When advanced mode is on, creating or editing an alert shows extra options:\n"
             "• Ignore keywords (skip the alert if the title or category matches stop words)\n"
@@ -1203,6 +1231,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_wizard_cancel": "Отмена",
         "btn_sys_notifications": "🔔 Системные уведомления",
         "btn_ignored_words": "🚫 Игнорируемые слова",
+        "btn_whisper_alerts": "💬 Оповещения об ЛС",
         "btn_advanced_mode": "🎛 Продвинутый режим",
         "btn_beta_mode": "🧪 Бета-режим",
         "btn_sys_updates": "📬 Получение оповещений об обновлениях",
@@ -1876,6 +1905,33 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ignored_words_cancel": "Отмена",
         "ignored_words_saved": "✅ Игнорируемые слова сохранены.",
         "ignored_words_cleared": "✅ Игнорируемые слова очищены.",
+        "whisper_alerts_screen": (
+            "<b>Оповещения об ЛС</b>\n\n"
+            "При включении этой опции вы будете получать оповещения о новых "
+            "личных сообщениях на Twitch."
+        ),
+        "whisper_alerts_enable": "Включить",
+        "whisper_alerts_oauth_prompt": (
+            "Авторизуйте бота на Twitch, чтобы получать оповещения о входящих личных сообщениях."
+        ),
+        "whisper_alerts_oauth_button": "Авторизоваться на Twitch",
+        "whisper_alerts_oauth_unavailable": (
+            "Оповещения об ЛС не настроены на этом сервере "
+            "(нужны PUBLIC_BASE_URL и OAuth Redirect URL в Twitch Console)."
+        ),
+        "whisper_alerts_enabled": "✅ Оповещения об ЛС включены.",
+        "whisper_alerts_disabled": "Оповещения об ЛС выключены.",
+        "whisper_alerts_failed": "Не удалось включить оповещения об ЛС. Попробуйте ещё раз.",
+        "whisper_alerts_denied": "Авторизация Twitch отменена.",
+        "whisper_alerts_revoked": (
+            "Twitch отключил оповещения об ЛС. Включите их снова в Настройках → Оповещения об ЛС."
+        ),
+        "whisper_alert_message": (
+            "💬 Новое личное сообщение на Twitch\n\n"
+            "От: <b>{name}</b> (@{login})\n"
+            "{text}\n\n"
+            '<a href="{url}">Открыть переписку</a>'
+        ),
         "advanced_mode_screen": (
             "При активации продвинутого режима в создании или редактировании "
             "сообщения у вас появятся дополнительные опции:\n"
@@ -2560,6 +2616,7 @@ def all_menu_buttons() -> set[str]:
         "back",
         "sys_notifications",
         "ignored_words",
+        "whisper_alerts",
         "advanced_mode",
         "beta_mode",
         "sync_subs",
@@ -2633,10 +2690,13 @@ def settings_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(btn("ignored_words", lang)),
-                KeyboardButton(btn("advanced_mode", lang)),
+                KeyboardButton(btn("whisper_alerts", lang)),
             ],
             [
+                KeyboardButton(btn("advanced_mode", lang)),
                 KeyboardButton(btn("beta_mode", lang)),
+            ],
+            [
                 KeyboardButton(btn("sys_notifications", lang)),
             ],
             [
@@ -3254,6 +3314,20 @@ def ignored_words_keyboard(lang: str, *, has_words: bool) -> InlineKeyboardMarku
         ]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def whisper_alerts_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
+    mark = "✅ " if enabled else "⬜️ "
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    mark + t("whisper_alerts_enable", lang),
+                    callback_data="whisper_alerts:toggle",
+                )
+            ]
+        ]
+    )
 
 
 def advanced_mode_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:

@@ -39,6 +39,13 @@ PosthogIssueHandler = Callable[[dict[str, Any]], Awaitable[None]]
 _posthog_issue_loop: asyncio.AbstractEventLoop | None = None
 _posthog_issue_on_event: PosthogIssueHandler | None = None
 _POSTHOG_BODY_MAX = 256_000
+_EVENTSUB_BODY_MAX = 256_000
+
+EventSubWhisperHandler = Callable[[Any], Awaitable[None]]
+EventSubRevokeHandler = Callable[[str], Awaitable[None]]
+_eventsub_loop: asyncio.AbstractEventLoop | None = None
+_eventsub_on_whisper: EventSubWhisperHandler | None = None
+_eventsub_on_revoke: EventSubRevokeHandler | None = None
 
 
 def mark_ready() -> None:
@@ -112,6 +119,18 @@ def register_posthog_issue_bridge(
     global _posthog_issue_loop, _posthog_issue_on_event
     _posthog_issue_loop = loop
     _posthog_issue_on_event = on_event
+
+
+def register_eventsub_bridge(
+    loop: asyncio.AbstractEventLoop,
+    *,
+    on_whisper: EventSubWhisperHandler,
+    on_revoke: EventSubRevokeHandler,
+) -> None:
+    global _eventsub_loop, _eventsub_on_whisper, _eventsub_on_revoke
+    _eventsub_loop = loop
+    _eventsub_on_whisper = on_whisper
+    _eventsub_on_revoke = on_revoke
 
 
 def parse_posthog_issue_payload(raw: dict[str, Any]) -> dict[str, str] | None:
@@ -241,6 +260,69 @@ def _handle_posthog_issue_post(
     return 202, b"accepted"
 
 
+def _schedule_eventsub_whisper(event: Any) -> None:
+    if _eventsub_loop is None or _eventsub_on_whisper is None:
+        logger.error("EventSub whisper with no bridge registered")
+        return
+    fut = asyncio.run_coroutine_threadsafe(
+        _eventsub_on_whisper(event),
+        _eventsub_loop,
+    )
+
+    def _done(f: Any) -> None:
+        try:
+            f.result()
+        except Exception:
+            logger.exception("EventSub whisper notify failed")
+
+    fut.add_done_callback(_done)
+
+
+def _schedule_eventsub_revoke(twitch_user_id: str) -> None:
+    if not twitch_user_id:
+        return
+    if _eventsub_loop is None or _eventsub_on_revoke is None:
+        logger.error("EventSub revocation with no bridge registered")
+        return
+    fut = asyncio.run_coroutine_threadsafe(
+        _eventsub_on_revoke(twitch_user_id),
+        _eventsub_loop,
+    )
+
+    def _done(f: Any) -> None:
+        try:
+            f.result()
+        except Exception:
+            logger.exception("EventSub revocation handler failed")
+
+    fut.add_done_callback(_done)
+
+
+def _handle_eventsub_post(
+    handler: BaseHTTPRequestHandler,
+) -> tuple[int, bytes, str]:
+    from eventsub import eventsub_secret, handle_eventsub_post
+
+    length_raw = handler.headers.get("Content-Length") or "0"
+    try:
+        length = int(length_raw)
+    except ValueError:
+        return 400, b"bad content-length", "text/plain"
+    if length < 0 or length > _EVENTSUB_BODY_MAX:
+        return 413, b"payload too large", "text/plain"
+    body = handler.rfile.read(length)
+    result = handle_eventsub_post(
+        headers=handler.headers,
+        body=body,
+        secret=eventsub_secret(),
+    )
+    if result.whisper is not None:
+        _schedule_eventsub_whisper(result.whisper)
+    if result.revoked_user_id:
+        _schedule_eventsub_revoke(result.revoked_user_id)
+    return result.status, result.body, result.content_type
+
+
 def _schedule_oauth_complete(
     telegram_user_id: int,
     followed: list[dict[str, Any]] | None,
@@ -304,9 +386,8 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         if not user:
             raise RuntimeError("no_user")
         twitch_user_id = str(user["id"])
-        if purpose == "schedule":
-            followed = []
-        elif purpose == "premium":
+        twitch_login = str(user.get("login") or "")
+        if purpose in ("schedule", "premium", "whispers"):
             followed = []
         else:
             followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
@@ -322,6 +403,7 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         "access_token": access,
         "refresh_token": refresh,
         "twitch_user_id": twitch_user_id,
+        "twitch_login": twitch_login,
         "purpose": purpose,
     }
     if purpose == "premium":
@@ -483,6 +565,15 @@ class _HealthHandler(BaseHTTPRequestHandler):
             status, body = _handle_posthog_issue_post(self)
             self.send_response(status)
             self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+            return
+        if path == "/hooks/eventsub":
+            status, body, content_type = _handle_eventsub_post(self)
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if body:

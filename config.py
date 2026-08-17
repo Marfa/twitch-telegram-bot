@@ -58,6 +58,12 @@ def twitch_oauth_redirect_uri() -> str:
     return f"{PUBLIC_BASE_URL}/oauth/twitch/callback"
 
 
+def twitch_eventsub_callback_url() -> str:
+    if not PUBLIC_BASE_URL:
+        return ""
+    return f"{PUBLIC_BASE_URL}/hooks/eventsub"
+
+
 def parse_admin_user_ids(raw: str | None = None) -> frozenset[int]:
     source = os.getenv("ADMIN_USER_IDS", "") if raw is None else raw
     ids: list[int] = []

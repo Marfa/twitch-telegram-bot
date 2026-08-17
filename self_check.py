@@ -10,6 +10,7 @@ from links import parse_telegram_topic_link, chat_ref_to_id
 from twitch import (
     FOLLOWS_SCOPE,
     SCHEDULE_SCOPE,
+    WHISPERS_SCOPE,
     TwitchClient,
     filter_streams_for_watch,
     find_placeholder_typos,
@@ -225,6 +226,96 @@ def main() -> None:
     assert pop_oauth_state(state) is None
     state2 = create_oauth_state(42, "en", purpose="schedule")
     assert pop_oauth_state(state2) == (42, "en", "schedule")
+    state3 = create_oauth_state(7, "ru", purpose="whispers")
+    assert pop_oauth_state(state3) == (7, "ru", "whispers")
+    assert WHISPERS_SCOPE == "user:read:whispers"
+
+    import hashlib
+    import hmac as hmac_mod
+    from datetime import datetime as dt
+    from i18n import t as i18n_t
+    from eventsub import (
+        format_whisper_alert,
+        handle_eventsub_post,
+        parse_whisper_event,
+        remember_message_id,
+        verify_signature,
+        whisper_conversation_url,
+    )
+
+    secret = "s3cRe7s3cRe7"
+    body = b'{"challenge":"abc-challenge"}'
+    mid = "msg-fresh-1"
+    ts = dt.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sig = "sha256=" + hmac_mod.new(
+        secret.encode(), (mid + ts).encode() + body, hashlib.sha256
+    ).hexdigest()
+    assert verify_signature(
+        secret=secret, message_id=mid, timestamp=ts, body=body, signature=sig
+    )
+    assert not verify_signature(
+        secret=secret, message_id=mid, timestamp=ts, body=body, signature="sha256=dead"
+    )
+    challenge = handle_eventsub_post(
+        headers={
+            "Twitch-Eventsub-Message-Id": mid,
+            "Twitch-Eventsub-Message-Timestamp": ts,
+            "Twitch-Eventsub-Message-Signature": sig,
+            "Twitch-Eventsub-Message-Type": "webhook_callback_verification",
+        },
+        body=body,
+        secret=secret,
+    )
+    assert challenge.status == 200
+    assert challenge.body == b"abc-challenge"
+    payload = {
+        "subscription": {
+            "id": "sub-1",
+            "type": "user.whisper.message",
+            "condition": {"user_id": "42"},
+        },
+        "event": {
+            "from_user_id": "1",
+            "from_user_login": "alice",
+            "from_user_name": "Alice",
+            "to_user_id": "42",
+            "to_user_login": "bobby",
+            "whisper_id": "w1",
+            "whisper": {"text": "hi <b>there</b>"},
+        },
+    }
+    parsed = parse_whisper_event(payload)
+    assert parsed is not None
+    assert parsed.from_user_login == "alice"
+    assert parsed.text == "hi <b>there</b>"
+    url = whisper_conversation_url(to_login="bobby", from_login="alice")
+    assert url == "https://www.twitch.tv/popout/bobby/whisper"
+    assert whisper_conversation_url() == "https://www.twitch.tv/inbox"
+    formatted = format_whisper_alert("ru", parsed, url=url)
+    assert "Alice" in formatted
+    assert "@alice" in formatted
+    assert "hi &lt;b&gt;there&lt;/b&gt;" in formatted
+    assert "Открыть переписку" in formatted
+    nbody = json.dumps(payload).encode()
+    nid = "msg-notify-1"
+    nts = dt.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    nsig = "sha256=" + hmac_mod.new(
+        secret.encode(), (nid + nts).encode() + nbody, hashlib.sha256
+    ).hexdigest()
+    headers_n = {
+        "Twitch-Eventsub-Message-Id": nid,
+        "Twitch-Eventsub-Message-Timestamp": nts,
+        "Twitch-Eventsub-Message-Signature": nsig,
+        "Twitch-Eventsub-Message-Type": "notification",
+    }
+    first = handle_eventsub_post(headers=headers_n, body=nbody, secret=secret)
+    assert first.status == 204 and first.whisper is not None
+    dup = handle_eventsub_post(headers=headers_n, body=nbody, secret=secret)
+    assert dup.status == 204 and dup.whisper is None
+    assert remember_message_id(nid) is False
+    assert i18n_t("whisper_alerts_enable", "ru") == "Включить"
+    assert "личных сообщениях" in i18n_t("whisper_alerts_screen", "ru")
+    assert i18n_t("btn_whisper_alerts", "ru")
 
     created = parse_posthog_issue_payload(
         {
@@ -312,14 +403,23 @@ def main() -> None:
             btn("feedback", loc),
         ]
         settings_kb = settings_menu(loc).keyboard
-        partner_back_row = next(
+        ignored_row = next(
+            row
+            for row in settings_kb
+            if btn("ignored_words", loc) in [b.text for b in row]
+        )
+        assert [b.text for b in ignored_row] == [
+            btn("ignored_words", loc),
+            btn("whisper_alerts", loc),
+        ]
+        partner_row = next(
             row
             for row in settings_kb
             if btn("partner", loc) in [b.text for b in row]
         )
-        assert [b.text for b in partner_back_row] == [
+        assert [b.text for b in partner_row] == [
+            btn("language", loc),
             btn("partner", loc),
-            btn("back", loc),
         ]
         suggest_kb = watch_suggest_keyboard(loc, offer_create_alerts=True)
         cbs = [
@@ -965,6 +1065,40 @@ def main() -> None:
         assert db.get_twitch_sync(1).refresh_token == "rtok2"
         assert db.delete_twitch_sync(1) is True
         assert db.get_twitch_sync(1) is None
+        db.upsert_whisper_alert(
+            11,
+            enabled=True,
+            twitch_user_id="tw-w",
+            twitch_login="bob",
+            refresh_token="wtok",
+            eventsub_id="es-1",
+        )
+        with db._conn() as conn:
+            wraw = conn.execute(
+                "SELECT refresh_token FROM whisper_alerts WHERE owner_id = 11"
+            ).fetchone()["refresh_token"]
+        assert str(wraw).startswith("enc:v1:")
+        assert "wtok" not in str(wraw)
+        walert = db.get_whisper_alert(11)
+        assert walert is not None
+        assert walert.enabled is True
+        assert walert.refresh_token == "wtok"
+        assert walert.twitch_login == "bob"
+        found = db.get_whisper_alerts_by_twitch_user_id("tw-w")
+        assert len(found) == 1 and found[0].owner_id == 11
+        db.set_whisper_alert_enabled(11, False, eventsub_id="")
+        assert db.get_whisper_alert(11).enabled is False
+        db.upsert_whisper_alert(
+            12,
+            enabled=True,
+            twitch_user_id="tw-w",
+            twitch_login="bob",
+            refresh_token="wtok2",
+            eventsub_id="es-2",
+        )
+        disabled = db.disable_whisper_alerts_for_twitch_user("tw-w")
+        assert 12 in disabled
+        assert db.get_whisper_alerts_by_twitch_user_id("tw-w") == []
         from token_crypto import encrypt_secret, decrypt_secret
 
         assert decrypt_secret(encrypt_secret("secret-token")) == "secret-token"
