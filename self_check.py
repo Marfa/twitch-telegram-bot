@@ -348,6 +348,23 @@ def main() -> None:
         }
     )
     assert reopened is not None and reopened["kind"] == "reopened"
+    report = parse_posthog_issue_payload(
+        {
+            "kind": "$scout_report_emitted",
+            "title": "fix(bot): example",
+            "summary": "Something broke",
+            "report_url": "https://us.posthog.com/project/1/inbox/reports/x",
+            "outcome": "surfaced",
+        }
+    )
+    assert report is not None and report["kind"] == "report"
+    assert parse_posthog_issue_payload(
+        {
+            "kind": "$scout_report_emitted",
+            "title": "held back",
+            "outcome": "held_back",
+        }
+    ) is None
     assert parse_posthog_issue_payload({"event": {"event": "$pageview"}}) is None
     assert TwitchClient.is_one_off_schedule_forbidden(
         Exception("403 Client Error: single segment creation not authorized for url: x")

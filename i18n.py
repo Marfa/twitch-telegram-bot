@@ -790,6 +790,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "weekly_new_users": "New users: {count}\nPaid users (Stars): {paid}",
         "posthog_issue_created": "🔴 New Issue",
         "posthog_issue_reopened": "🔄 Issue reopened",
+        "posthog_report_created": "📋 New Inbox Report",
         "posthog_issue_body": (
             "{title}\n\n"
             "<b>{name}</b>\n"
@@ -2096,6 +2097,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "weekly_new_users": "Новых пользователей: {count}\nПлатных (Stars): {paid}",
         "posthog_issue_created": "🔴 Новый Issue",
         "posthog_issue_reopened": "🔄 Issue снова открыт",
+        "posthog_report_created": "📋 Новый Report",
         "posthog_issue_body": (
             "{title}\n\n"
             "<b>{name}</b>\n"

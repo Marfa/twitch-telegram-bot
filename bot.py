@@ -9710,9 +9710,12 @@ async def notify_admins_posthog_issue(
     desc_block = html.escape(desc_ru) + "\n" if desc_ru else ""
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
-        title_key = (
-            "posthog_issue_reopened" if kind == "reopened" else "posthog_issue_created"
-        )
+        if kind == "report":
+            title_key = "posthog_report_created"
+        elif kind == "reopened":
+            title_key = "posthog_issue_reopened"
+        else:
+            title_key = "posthog_issue_created"
         text = t(
             "posthog_issue_body",
             lang,

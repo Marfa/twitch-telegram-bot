@@ -285,7 +285,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `HF_TEXT_MODEL` | HF model (default `Qwen/Qwen2.5-7B-Instruct`) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |
 | `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
-| `POSTHOG_ISSUE_WEBHOOK_SECRET` | Bearer secret for `POST /hooks/posthog-issues` (new/reopened Issue → admins) |
+| `POSTHOG_ISSUE_WEBHOOK_SECRET` | Bearer secret for `POST /hooks/posthog-issues` (Issue + Inbox Report → admins) |
 
 Without Groq/HF keys, **I'm feeling lucky** still works from the local template pool in the DB.
 
@@ -298,6 +298,7 @@ Optional. Use the **Project API key** (`phc_…`) from Project settings → Proj
 | `/start`, alerts, import, premium, blocks | Activity / Product analytics → Trends |
 | Unhandled exceptions | Error tracking |
 | New / reopened Issue | Alert → HTTP webhook → Telegram admins (RU via DeepL) |
+| New Inbox Report (`$scout_report_emitted`, `outcome=surfaced`) | Same |
 | `logger.warning` / `logger.error` / `exception` | Logs (`service.name=twitch-telegram-bot`, no INFO) |
 | Admin stats snapshot | `daily_bot_stats` event daily at 03:00 UTC |
 
@@ -318,10 +319,10 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue webhook |
+| `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue/Report webhook |
 | `db.py` | SQLite or PostgreSQL, `lucky_templates` pool, watch filters, referrals |
 
-Twitch Helix poll ~60 s, Statuspage ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue webhook.
+Twitch Helix poll ~60 s, Statuspage ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 
 ## License
 

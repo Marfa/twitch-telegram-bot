@@ -143,16 +143,19 @@ def parse_posthog_issue_payload(raw: dict[str, Any]) -> dict[str, str] | None:
     url = ""
     fingerprint = ""
     status = ""
+    outcome = ""
     # Custom body from our HogFunction inputs.body
-    if any(k in raw for k in ("name", "fingerprint", "kind", "description")) and not isinstance(
-        raw.get("event"), dict
-    ):
+    if any(
+        k in raw
+        for k in ("name", "fingerprint", "kind", "description", "title", "summary")
+    ) and not isinstance(raw.get("event"), dict):
         kind = str(raw.get("kind") or raw.get("event") or "")
-        name = str(raw.get("name") or "").strip()
-        description = str(raw.get("description") or "").strip()
-        url = str(raw.get("url") or "").strip()
-        fingerprint = str(raw.get("fingerprint") or "").strip()
+        name = str(raw.get("name") or raw.get("title") or "").strip()
+        description = str(raw.get("description") or raw.get("summary") or "").strip()
+        url = str(raw.get("url") or raw.get("report_url") or "").strip()
+        fingerprint = str(raw.get("fingerprint") or raw.get("report_id") or "").strip()
         status = str(raw.get("status") or "").strip()
+        outcome = str(raw.get("outcome") or "").strip()
     else:
         event = raw.get("event")
         if isinstance(event, dict):
@@ -160,18 +163,39 @@ def parse_posthog_issue_payload(raw: dict[str, Any]) -> dict[str, str] | None:
             props = event.get("properties")
             if not isinstance(props, dict):
                 props = {}
-            name = str(props.get("name") or "").strip()
-            description = str(props.get("description") or "").strip()
-            fingerprint = str(props.get("fingerprint") or "").strip()
+            name = str(props.get("name") or props.get("title") or "").strip()
+            description = str(props.get("description") or props.get("summary") or "").strip()
+            fingerprint = str(props.get("fingerprint") or props.get("report_id") or "").strip()
             status = str(props.get("status") or "").strip()
-            url = str(raw.get("url") or props.get("url") or "").strip()
+            outcome = str(props.get("outcome") or "").strip()
+            url = str(
+                raw.get("url")
+                or props.get("url")
+                or props.get("report_url")
+                or ""
+            ).strip()
         else:
             kind = str(raw.get("kind") or raw.get("event") or "")
-            name = str(raw.get("name") or "").strip()
-            description = str(raw.get("description") or "").strip()
-            url = str(raw.get("url") or "").strip()
-            fingerprint = str(raw.get("fingerprint") or "").strip()
+            name = str(raw.get("name") or raw.get("title") or "").strip()
+            description = str(raw.get("description") or raw.get("summary") or "").strip()
+            url = str(raw.get("url") or raw.get("report_url") or "").strip()
+            fingerprint = str(raw.get("fingerprint") or raw.get("report_id") or "").strip()
             status = str(raw.get("status") or "").strip()
+            outcome = str(raw.get("outcome") or "").strip()
+
+    if kind == "$scout_report_emitted":
+        if outcome and outcome != "surfaced":
+            return None
+        if not name and not description:
+            return None
+        return {
+            "kind": "report",
+            "name": name or "Report",
+            "description": description,
+            "url": url,
+            "fingerprint": fingerprint,
+            "status": status,
+        }
 
     allowed = {
         "$error_tracking_issue_created",
