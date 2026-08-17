@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import logging
+import re
 
 import requests
 
@@ -12,6 +14,40 @@ logger = logging.getLogger(__name__)
 _DEEPL_SOURCE = {"en": "EN", "ru": "RU"}
 _DEEPL_TARGET = {"en": "EN-US", "ru": "RU"}
 _DEEPL_TIMEOUT = 30
+
+
+def markdown_to_telegram_html(text: str) -> str:
+    """Minimal Markdown → Telegram HTML (bold, links, inline code)."""
+    if not text:
+        return ""
+    slots: list[str] = []
+
+    def put(fragment: str) -> str:
+        slots.append(fragment)
+        return f"\x00MD{len(slots) - 1}\x00"
+
+    text = re.sub(
+        r"\[([^\]]+)\]\(([^)]+)\)",
+        lambda m: put(
+            f'<a href="{html.escape(m.group(2), quote=True)}">'
+            f"{html.escape(m.group(1))}</a>"
+        ),
+        text,
+    )
+    text = re.sub(
+        r"\*\*([^*]+)\*\*",
+        lambda m: put(f"<b>{html.escape(m.group(1))}</b>"),
+        text,
+    )
+    text = re.sub(
+        r"`([^`]+)`",
+        lambda m: put(f"<code>{html.escape(m.group(1))}</code>"),
+        text,
+    )
+    text = html.escape(text)
+    for i, fragment in enumerate(slots):
+        text = text.replace(f"\x00MD{i}\x00", fragment)
+    return text
 
 
 def _deepl_base_url(api_key: str) -> str:

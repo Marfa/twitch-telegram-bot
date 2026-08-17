@@ -9682,7 +9682,7 @@ async def notify_admins_posthog_issue(
 ) -> None:
     """Telegram DM to ADMIN_USER_IDS for PostHog Issue created/reopened."""
     from config import ADMIN_USER_IDS
-    from translate import translate_text
+    from translate import markdown_to_telegram_html, translate_text
 
     if not ADMIN_USER_IDS:
         return
@@ -9699,15 +9699,18 @@ async def notify_admins_posthog_issue(
         name_ru = name
     desc_ru = ""
     if description:
+        if len(description) > 1200:
+            description = description[:1197] + "…"
+        desc_html = markdown_to_telegram_html(description)
         try:
-            desc_ru = translate_text(description, target_lang="ru")
+            desc_ru = translate_text(desc_html, target_lang="ru")
         except Exception:
             logger.exception("DeepL description translate failed for PostHog issue")
-            desc_ru = description
-        if len(desc_ru) > 400:
-            desc_ru = desc_ru[:397] + "…"
+            desc_ru = desc_html
+        if len(desc_ru) > 1200:
+            desc_ru = desc_ru[:1197] + "…"
     link_block = f"\n\n{html.escape(url)}" if url else ""
-    desc_block = html.escape(desc_ru) + "\n" if desc_ru else ""
+    desc_block = desc_ru + "\n" if desc_ru else ""
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
         if kind == "report":

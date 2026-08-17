@@ -23,7 +23,7 @@ from twitch import (
     should_ignore_stream,
     twitch_status_fingerprint,
 )
-from translate import build_translations, translate_text
+from translate import build_translations, markdown_to_telegram_html, translate_text
 from bot import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
@@ -1433,7 +1433,17 @@ def main() -> None:
     assert "⏸" in tr("sync_disable", "ru")
     assert "⏸" in tr("toggle_off", "ru")
 
+    from translate import markdown_to_telegram_html
+
     assert translate_text("hello", target_lang="en", source_lang="en") == "hello"
+    assert (
+        markdown_to_telegram_html("**Доказательства**\n\n- item")
+        == "<b>Доказательства</b>\n\n- item"
+    )
+    assert (
+        markdown_to_telegram_html("[logs](https://example.com)")
+        == '<a href="https://example.com">logs</a>'
+    )
     assert build_translations("hello", "en", {"en"}) == {"en": "hello"}
     assert build_translations("hello", "en", {"en", "ru"})["en"] == "hello"
 
