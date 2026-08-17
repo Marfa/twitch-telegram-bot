@@ -2703,10 +2703,14 @@ def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(btn("whisper_alerts", lang))],
-            [KeyboardButton(btn("create_schedule", lang))],
-            [KeyboardButton(btn("watch", lang))],
-            [KeyboardButton(btn("back", lang))],
+            [
+                KeyboardButton(btn("whisper_alerts", lang)),
+                KeyboardButton(btn("create_schedule", lang)),
+            ],
+            [
+                KeyboardButton(btn("watch", lang)),
+                KeyboardButton(btn("back", lang)),
+            ],
         ],
         resize_keyboard=True,
     )

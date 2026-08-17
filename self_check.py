@@ -416,12 +416,10 @@ def main() -> None:
             btn("settings", loc),
             btn("feedback", loc),
         ]
-        other_btns = [b.text for row in other_menu(loc).keyboard for b in row]
-        assert other_btns == [
-            btn("whisper_alerts", loc),
-            btn("create_schedule", loc),
-            btn("watch", loc),
-            btn("back", loc),
+        other_kb = other_menu(loc).keyboard
+        assert [[b.text for b in row] for row in other_kb] == [
+            [btn("whisper_alerts", loc), btn("create_schedule", loc)],
+            [btn("watch", loc), btn("back", loc)],
         ]
         settings_kb = settings_menu(loc).keyboard
         ignored_row = next(
