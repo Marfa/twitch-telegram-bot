@@ -30,6 +30,7 @@ from bot import (
     _edit_present_types,
     _format_alert_history_block,
     _format_twitch_status_message,
+    _format_posthog_status_message,
     _format_vod_timestamp,
     _format_watch_vod_suggestions,
     _help_text,
@@ -2060,6 +2061,24 @@ def main() -> None:
     assert "All Systems Operational" in msg_ok
     assert tr("broadcast_started", "ru")
     assert "status.twitch.com" in tr("sys_notifications_menu", "ru")
+
+    ph_ok = {
+        "overall": "operational",
+        "components": [{"id": "us-app", "name": "App", "status": "operational"}],
+        "incidents": [],
+    }
+    ph_bad = {
+        "overall": "partial_outage",
+        "components": [{"id": "us-app", "name": "App", "status": "partial_outage"}],
+        "incidents": [{"id": "us-inc", "name": "App partial outage", "status": "investigating"}],
+    }
+    ph_msg_ru = _format_posthog_status_message("ru", ph_bad)
+    assert "PostHog Status" in ph_msg_ru
+    assert "App" in ph_msg_ru
+    assert "posthogstatus.com/us" in ph_msg_ru
+    ph_msg_ok = _format_posthog_status_message("en", ph_ok)
+    assert "All Systems Operational" in ph_msg_ok
+    assert "EU Cloud" not in ph_msg_ok
 
     def _fake_sub(**kwargs):
         base = dict(

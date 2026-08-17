@@ -162,6 +162,13 @@ _TWITCH_COMPONENT_KEYS = {
     "major_outage": "twitch_comp_major",
     "under_maintenance": "twitch_comp_maintenance",
 }
+_POSTHOG_OVERALL_KEYS = {
+    "operational": "twitch_indicator_none",
+    "degraded_performance": "twitch_indicator_minor",
+    "partial_outage": "twitch_indicator_major",
+    "major_outage": "twitch_indicator_critical",
+    "under_maintenance": "twitch_indicator_maintenance",
+}
 
 (
     LANG_SELECT,
@@ -9254,6 +9261,77 @@ async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
 
 
+def _format_posthog_status_message(lang: str, snapshot: dict) -> str:
+    overall = str(snapshot.get("overall") or "operational")
+    overall_key = _POSTHOG_OVERALL_KEYS.get(overall)
+    headline = (
+        t(overall_key, lang) if overall_key else _twitch_status_label(lang, overall)
+    )
+    lines = [
+        t("posthog_status_title", lang),
+        "",
+        headline,
+    ]
+    affected = [
+        comp
+        for comp in snapshot.get("components") or []
+        if isinstance(comp, dict)
+        and str(comp.get("status") or "operational") != "operational"
+    ]
+    if affected:
+        lines.append("")
+        lines.append(t("twitch_status_affected", lang))
+        for comp in affected:
+            name = html.escape(str(comp.get("name") or "?"))
+            label = html.escape(_twitch_status_label(lang, str(comp.get("status") or "")))
+            lines.append(f"• <b>{name}</b> — {label}")
+    incidents = [
+        inc for inc in snapshot.get("incidents") or [] if isinstance(inc, dict)
+    ]
+    if incidents:
+        lines.append("")
+        lines.append(t("twitch_status_incidents", lang))
+        for inc in incidents:
+            name = html.escape(str(inc.get("name") or "?").strip() or "?")
+            lines.append(f"• {name}")
+    lines.append("")
+    lines.append(
+        f'<a href="{analytics.POSTHOG_US_STATUS_PAGE_URL}">'
+        f"{analytics.POSTHOG_US_STATUS_PAGE_URL}</a>"
+    )
+    return "\n".join(lines)
+
+
+async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll posthogstatus.com/us; notify admins on US Cloud changes."""
+    from config import ADMIN_USER_IDS
+
+    if not ADMIN_USER_IDS:
+        return
+    try:
+        summary = await asyncio.to_thread(analytics.fetch_posthog_status)
+        fingerprint = analytics.posthog_us_fingerprint(summary)
+    except Exception as exc:
+        logger.warning("PostHog status poll failed: %s", exc)
+        return
+
+    bot_data = context.application.bot_data
+    previous = bot_data.get("posthog_us_status_fingerprint")
+    bot_data["posthog_us_status_fingerprint"] = fingerprint
+    if previous is None:
+        return
+    if fingerprint == previous:
+        return
+
+    db: Database = bot_data["db"]
+    snapshot = analytics.posthog_us_snapshot(summary)
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        await _send_dm_html(
+            context.bot, db, admin_id, _format_posthog_status_message(lang, snapshot)
+        )
+
+
 def _seconds_until_next_weekly_report() -> float:
     now = datetime.now(SCHEDULE_TZ)
     # Next Monday 10:00 MSK
@@ -10160,6 +10238,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
+    app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)
     app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
     app.job_queue.run_repeating(refresh_premium_twitch_job, interval=3600, first=120)
     app.job_queue.run_repeating(

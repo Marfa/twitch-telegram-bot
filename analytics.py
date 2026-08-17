@@ -8,6 +8,8 @@ import logging
 import re
 from typing import Any
 
+import requests
+
 logger = logging.getLogger(__name__)
 
 _SERVICE_NAME = "twitch-telegram-bot"
@@ -227,6 +229,106 @@ def capture_bot_stats(stats: Any, *, timestamp: Any | None = None) -> None:
     )
 
 
+POSTHOG_STATUS_URL = "https://www.posthogstatus.com/api/status"
+POSTHOG_US_STATUS_PAGE_URL = "https://www.posthogstatus.com/us"
+_US_CLOUD_PREFIX = "US Cloud"
+_STATUS_RANK = {
+    "operational": 0,
+    "under_maintenance": 1,
+    "degraded_performance": 2,
+    "partial_outage": 3,
+    "major_outage": 4,
+}
+
+
+def fetch_posthog_status(session: requests.Session | None = None) -> dict[str, Any]:
+    """Fetch PostHog status JSON (posthogstatus.com)."""
+    http = session if session is not None else requests
+    response = http.get(
+        POSTHOG_STATUS_URL,
+        timeout=15,
+        headers={"User-Agent": "twitch-telegram-bot/status-poll"},
+    )
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError("PostHog status payload is not an object")
+    return data
+
+
+def _is_us_cloud_name(name: str) -> bool:
+    return name.startswith(_US_CLOUD_PREFIX)
+
+
+def _worst_status(statuses: list[str]) -> str:
+    worst = "operational"
+    worst_rank = 0
+    for status in statuses:
+        rank = _STATUS_RANK.get(status, 0)
+        if rank > worst_rank:
+            worst = status
+            worst_rank = rank
+    return worst
+
+
+def posthog_us_snapshot(summary: dict[str, Any]) -> dict[str, Any]:
+    """US Cloud slice of posthogstatus.com (matches /us)."""
+    group = None
+    for item in summary.get("component_groups") or []:
+        if isinstance(item, dict) and _is_us_cloud_name(str(item.get("name") or "")):
+            group = item
+            break
+    components: list[dict[str, Any]] = []
+    if group:
+        for comp in group.get("components") or []:
+            if isinstance(comp, dict):
+                components.append(comp)
+    us_ids = {str(comp.get("id") or "") for comp in components if comp.get("id")}
+    incidents: list[dict[str, Any]] = []
+    incident_statuses: list[str] = []
+    for incident in summary.get("active_incidents") or []:
+        if not isinstance(incident, dict):
+            continue
+        hit = False
+        for affected in incident.get("affected_components") or []:
+            if not isinstance(affected, dict):
+                continue
+            if str(affected.get("component_id") or "") in us_ids:
+                hit = True
+            elif _is_us_cloud_name(str(affected.get("group_name") or "")):
+                hit = True
+            else:
+                continue
+            incident_statuses.append(str(affected.get("status") or "operational"))
+        if hit:
+            incidents.append(incident)
+    overall = _worst_status(
+        [str(comp.get("status") or "operational") for comp in components]
+        + incident_statuses
+    )
+    return {"overall": overall, "components": components, "incidents": incidents}
+
+
+def posthog_us_fingerprint(
+    summary: dict[str, Any],
+) -> tuple[str, tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """Comparable US Cloud snapshot: overall, components, active incidents."""
+    snapshot = posthog_us_snapshot(summary)
+    components = [
+        (str(comp.get("id") or ""), str(comp.get("status") or "operational"))
+        for comp in snapshot["components"]
+        if comp.get("id")
+    ]
+    components.sort(key=lambda item: item[0])
+    incidents = [
+        (str(incident.get("id") or ""), str(incident.get("status") or ""))
+        for incident in snapshot["incidents"]
+        if incident.get("id")
+    ]
+    incidents.sort(key=lambda item: item[0])
+    return snapshot["overall"], tuple(components), tuple(incidents)
+
+
 def _self_check() -> None:
     assert distinct_id(1) == distinct_id(1)
     assert distinct_id(1) != distinct_id(2)
@@ -270,6 +372,71 @@ def _self_check() -> None:
     assert f.filter(rec2) is True
     assert "[redacted]" in rec2.getMessage()
     assert "supersecret" not in rec2.getMessage()
+
+    status_ok = {
+        "component_groups": [
+            {
+                "name": "US Cloud \U0001f1fa\U0001f1f8",
+                "components": [
+                    {"id": "us-app", "name": "App", "status": "operational"},
+                ],
+            },
+            {
+                "name": "EU Cloud \U0001f1ea\U0001f1fa",
+                "components": [
+                    {"id": "eu-app", "name": "App", "status": "major_outage"},
+                ],
+            },
+        ],
+        "active_incidents": [
+            {
+                "id": "eu-only",
+                "name": "EU App down",
+                "status": "investigating",
+                "affected_components": [
+                    {
+                        "component_id": "eu-app",
+                        "group_name": "EU Cloud \U0001f1ea\U0001f1fa",
+                        "status": "major_outage",
+                    }
+                ],
+            }
+        ],
+    }
+    status_bad = {
+        "component_groups": [
+            {
+                "name": "US Cloud \U0001f1fa\U0001f1f8",
+                "components": [
+                    {"id": "us-app", "name": "App", "status": "partial_outage"},
+                ],
+            },
+            status_ok["component_groups"][1],
+        ],
+        "active_incidents": [
+            {
+                "id": "us-inc",
+                "name": "App partial outage",
+                "status": "investigating",
+                "affected_components": [
+                    {
+                        "component_id": "us-app",
+                        "group_name": "US Cloud \U0001f1fa\U0001f1f8",
+                        "status": "partial_outage",
+                    }
+                ],
+            }
+        ],
+    }
+    fp_ok = posthog_us_fingerprint(status_ok)
+    fp_bad = posthog_us_fingerprint(status_bad)
+    assert fp_ok[0] == "operational"
+    assert ("us-app", "operational") in fp_ok[1]
+    assert all(item[0] != "eu-app" for item in fp_ok[1])
+    assert fp_ok[2] == ()
+    assert fp_ok != fp_bad
+    assert fp_bad[0] == "partial_outage"
+    assert ("us-inc", "investigating") in fp_bad[2]
     print("analytics ok")
 
 
