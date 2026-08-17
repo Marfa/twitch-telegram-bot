@@ -2671,9 +2671,9 @@ def main_menu(
         ],
         [
             KeyboardButton(btn("other", lang)),
+            KeyboardButton(btn("settings", lang)),
         ],
         [
-            KeyboardButton(btn("settings", lang)),
             KeyboardButton(btn("feedback", lang)),
         ],
     ]

@@ -407,15 +407,21 @@ def main() -> None:
         assert main_btns.index(btn("other", loc)) < main_btns.index(
             btn("settings", loc)
         )
-        settings_feedback_row = next(
+        other_settings_row = next(
             row
             for row in main_kb
-            if btn("settings", loc) in [b.text for b in row]
+            if btn("other", loc) in [b.text for b in row]
         )
-        assert [b.text for b in settings_feedback_row] == [
+        assert [b.text for b in other_settings_row] == [
+            btn("other", loc),
             btn("settings", loc),
-            btn("feedback", loc),
         ]
+        feedback_row = next(
+            row
+            for row in main_kb
+            if btn("feedback", loc) in [b.text for b in row]
+        )
+        assert [b.text for b in feedback_row] == [btn("feedback", loc)]
         other_kb = other_menu(loc).keyboard
         assert [[b.text for b in row] for row in other_kb] == [
             [btn("whisper_alerts", loc), btn("create_schedule", loc)],
