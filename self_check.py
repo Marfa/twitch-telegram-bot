@@ -36,7 +36,10 @@ from bot import (
     _format_watch_vod_suggestions,
     _help_text,
     _is_link_preview_disabled,
+    _is_unchanged_message_edit,
+    _load_posthog_seen_report_ids,
     _message_link,
+    _save_posthog_seen_report_ids,
     _parse_broadcast_recipient_ids,
     _parse_sb_edit_f_id,
     _parse_segment_start,
@@ -69,6 +72,7 @@ from db import (
 )
 from i18n import SUPPORTED_LOCALES, btn, t as tr
 from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
+from telegram.error import BadRequest
 from premium import FEATURE_IDS
 from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
@@ -365,6 +369,19 @@ def main() -> None:
             "outcome": "held_back",
         }
     ) is None
+    assert _is_unchanged_message_edit(
+        BadRequest(
+            "Message is not modified: specified new message content and reply markup "
+            "are exactly the same as a current content and reply markup of the message"
+        )
+    )
+    assert not _is_unchanged_message_edit(BadRequest("Chat not found"))
+    assert not _is_unchanged_message_edit(RuntimeError("not modified"))
+    with tempfile.TemporaryDirectory() as tmp:
+        seen_path = Path(tmp) / "posthog_seen_reports.json"
+        assert _load_posthog_seen_report_ids(seen_path) == set()
+        _save_posthog_seen_report_ids(seen_path, {"b", "a"})
+        assert _load_posthog_seen_report_ids(seen_path) == {"a", "b"}
     assert parse_posthog_issue_payload({"event": {"event": "$pageview"}}) is None
     assert TwitchClient.is_one_off_schedule_forbidden(
         Exception("403 Client Error: single segment creation not authorized for url: x")
@@ -1608,6 +1625,8 @@ def main() -> None:
     assert "receive_ignore_keywords_back" in bot_src
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
+    assert "_is_unchanged_message_edit(err)" in bot_src
+    assert "posthog_seen_reports.json" in bot_src
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
     assert "editUserStarSubscription" in ptb_edit
     assert "editUserStartSubscription" not in ptb_edit

@@ -7,6 +7,7 @@ import logging
 import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from telegram import (
@@ -10124,11 +10125,47 @@ async def notify_admins_posthog_issue(
             logger.warning("Cannot send PostHog issue to admin %s: %s", admin_id, exc)
 
 
+_POSTHOG_SEEN_REPORTS_MAX = 200
+
+
+def _is_unchanged_message_edit(exc: BaseException) -> bool:
+    return isinstance(exc, BadRequest) and "not modified" in str(exc).lower()
+
+
+def _posthog_seen_reports_path() -> Path:
+    from config import DATABASE_PATH
+
+    return Path(DATABASE_PATH).expanduser().resolve().parent / "posthog_seen_reports.json"
+
+
+def _load_posthog_seen_report_ids(path: Path) -> set[str]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return set()
+    if isinstance(raw, list):
+        return {str(x) for x in raw if x}
+    if isinstance(raw, dict) and isinstance(raw.get("ids"), list):
+        return {str(x) for x in raw["ids"] if x}
+    return set()
+
+
+def _save_posthog_seen_report_ids(path: Path, ids: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kept = sorted(ids)[-_POSTHOG_SEEN_REPORTS_MAX:]
+    path.write_text(json.dumps(kept), encoding="utf-8")
+
+
 async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Poll PostHog Inbox reports API and notify admins about new ones."""
     from config import POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID
 
     if not POSTHOG_PERSONAL_API_KEY:
+        if not context.application.bot_data.get("_posthog_poll_key_warned"):
+            context.application.bot_data["_posthog_poll_key_warned"] = True
+            logger.warning(
+                "PostHog Inbox reports poll skipped: POSHTOG_API_KEY_PERSONAL unset"
+            )
         return
 
     host = "https://us.posthog.com"
@@ -10152,25 +10189,29 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
     if not reports:
         return
 
+    path = _posthog_seen_reports_path()
     seen: set[str] = context.application.bot_data.setdefault(
         "_posthog_seen_reports", set()
     )
-    first_run = not seen
+    seen.update(_load_posthog_seen_report_ids(path))
+    seeded = path.is_file()
 
     for report in reports:
         rid = str(report.get("id") or "")
         if not rid or rid in seen:
             continue
         seen.add(rid)
-        if first_run:
+        if not seeded:
             continue
         title = (report.get("title") or "").strip()
+        if not title:
+            continue
         summary = (report.get("summary") or "").strip()
         status = report.get("status") or ""
         pr_url = report.get("implementation_pr_url") or ""
-        report_url = f"{host}/project/{POSTHOG_PROJECT_ID}/inbox"
-        if not title:
-            continue
+        report_url = (
+            f"{host}/project/{POSTHOG_PROJECT_ID}/inbox/reports/{rid}"
+        )
         payload = {
             "kind": "report",
             "name": title,
@@ -10180,6 +10221,11 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
             "status": status,
         }
         await notify_admins_posthog_issue(context.application, payload)
+
+    try:
+        _save_posthog_seen_report_ids(path, seen)
+    except OSError:
+        logger.warning("Could not persist PostHog seen reports", exc_info=True)
 
 
 async def _restore_broadcast_jobs(app: Application) -> None:
@@ -10210,6 +10256,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     if isinstance(err, NetworkError) and not isinstance(err, BadRequest):
         logger.warning(t("network_transient", DEFAULT_LOCALE, err=err))
+        return
+    if isinstance(err, BaseException) and _is_unchanged_message_edit(err):
         return
     logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
     user_id = None

@@ -308,6 +308,7 @@ python main.py
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Без ключа аналитика выключена |
 | `POSTHOG_HOST` | Ingestion host (по умолчанию `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Секрет Bearer для `POST /hooks/posthog-issues` (Issue + Inbox Report → админам) |
+| `POSHTOG_API_KEY_PERSONAL` / `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) для polling Inbox Reports. Пусто = polling выкл |
 
 Без ключей Groq/HF кнопка **Мне повезёт** всё равно работает — из локального пула шаблонов в БД.
 
@@ -320,7 +321,7 @@ python main.py
 | `/start`, алерты, импорт, premium, блоки | Activity / Product analytics → Trends |
 | Необработанные исключения | Error tracking |
 | Новый / reopen Issue | Alert → HTTP webhook → Telegram админам (RU через DeepL) |
-| Новый Inbox Report (`$scout_report_emitted`, `outcome=surfaced`) | То же |
+| Новый Inbox Report (`$scout_report_emitted`, `outcome=surfaced`) | Webhook + polling `signals/reports/` каждые 5 мин (reports без Scout-события тоже) |
 | `logger.warning` / `logger.error` / `exception` | Logs (`service.name=twitch-telegram-bot`, без INFO) |
 | Снимок админ-статистики | событие `daily_bot_stats` каждый день в 03:00 UTC |
 
