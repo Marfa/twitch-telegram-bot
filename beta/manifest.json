@@ -9,6 +9,15 @@
       "issue_label": "beta/deleted-subscriptions-cart",
       "stage": "beta",
       "created_at": "2026-08-18"
+    },
+    {
+      "id": "schedule-fix-day",
+      "branch": "feat/schedule-fix-day",
+      "title_key": "beta_feat_schedule_fix_day",
+      "description_key": "beta_feat_schedule_fix_day_desc",
+      "issue_label": "beta/schedule-fix-day",
+      "stage": "beta",
+      "created_at": "2026-08-18"
     }
   ]
 }

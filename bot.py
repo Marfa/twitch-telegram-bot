@@ -100,6 +100,7 @@ from i18n import (
     settings_menu,
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
+    stream_schedule_fix_day_keyboard,
     stream_schedule_duration_keyboard,
     stream_schedule_publish_keyboard,
     format_stream_schedule_prompt_date,
@@ -226,7 +227,11 @@ _POSTHOG_OVERALL_KEYS = {
     GLOBAL_IGNORE_KEYWORDS,
     ADMIN_MSG_AUDIENCE,
     ADMIN_MSG_IDS,
-) = range(52)
+    STREAM_SCHEDULE_MODE,
+    STREAM_SCHEDULE_FIX_DAY,
+    STREAM_SCHEDULE_FIX_GAME,
+    STREAM_SCHEDULE_FIX_TIME,
+) = range(56)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -3667,19 +3672,107 @@ async def _finish_subscription(
     return ConversationHandler.END
 
 
+_SCHEDULE_FIX_DAY_BETA_ID = "schedule-fix-day"
+
+
 async def start_stream_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     context.user_data.clear()
+    db: Database = context.application.bot_data["db"]
+    if not beta_features.is_enabled(db, user_id, _SCHEDULE_FIX_DAY_BETA_ID):
+        await update.effective_message.reply_text(
+            t("stream_schedule_intro", lang),
+            parse_mode=ParseMode.HTML,
+        )
+        await update.effective_message.reply_text(
+            t("stream_schedule_confirm", lang),
+            reply_markup=stream_schedule_confirm_keyboard(lang),
+        )
+        return STREAM_SCHEDULE_CONFIRM
     await update.effective_message.reply_text(
-        t("stream_schedule_intro", lang),
+        t("stream_schedule_mode_intro", lang),
         parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("stream_schedule_mode_week_btn", lang),
+                        callback_data="stream_sched:mode:week",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        t("stream_schedule_mode_day_btn", lang),
+                        callback_data="stream_sched:mode:day",
+                    )
+                ],
+            ]
+        ),
     )
-    await update.effective_message.reply_text(
-        t("stream_schedule_confirm", lang),
-        reply_markup=stream_schedule_confirm_keyboard(lang),
+    return STREAM_SCHEDULE_MODE
+
+
+async def stream_schedule_mode_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    mode = (query.data or "").split(":")[-1]
+    if mode == "week":
+        await query.edit_message_text(
+            t("stream_schedule_intro", lang),
+            parse_mode=ParseMode.HTML,
+            reply_markup=stream_schedule_confirm_keyboard(lang),
+        )
+        return STREAM_SCHEDULE_CONFIRM
+
+    # Day fix mode.
+    dates = _next_week_dates(datetime.now(SCHEDULE_TZ).date())
+    context.user_data["stream_schedule_fix_dates"] = dates
+    await query.edit_message_text(
+        t("stream_schedule_fix_day_prompt", lang),
+        reply_markup=stream_schedule_fix_day_keyboard(lang, dates),
     )
-    return STREAM_SCHEDULE_CONFIRM
+    return STREAM_SCHEDULE_FIX_DAY
+
+
+async def stream_schedule_fix_day_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    dates: list[date] = context.user_data.get("stream_schedule_fix_dates") or []
+    try:
+        idx = int((query.data or "").split(":")[-1])
+    except ValueError:
+        idx = -1
+    if idx < 0 or idx >= len(dates):
+        await query.edit_message_text(t("stream_schedule_fix_day_prompt", lang))
+        return STREAM_SCHEDULE_FIX_DAY
+
+    day_date = dates[idx]
+    context.user_data["stream_schedule_fix_date"] = day_date
+    context.user_data["stream_schedule_clear_mode"] = "day"
+
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+
+    await context.bot.send_message(
+        user_id,
+        t(
+            "stream_schedule_fix_game_prompt",
+            lang,
+            date=format_stream_schedule_prompt_date(day_date, lang),
+        ),
+    )
+    await _pulse_wizard_keyboard(context.bot, user_id, lang, back=False)
+    return STREAM_SCHEDULE_FIX_GAME
 
 
 async def stream_schedule_confirm_callback(
@@ -3736,6 +3829,55 @@ async def stream_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYP
         }
     )
     return await _advance_stream_schedule_day(update, context, lang)
+
+
+async def stream_schedule_fix_game(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    text = (update.effective_message.text or "").strip()
+    if is_menu_button(text) or text in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return STREAM_SCHEDULE_FIX_GAME
+    if not text:
+        await update.effective_message.reply_text(t("stream_schedule_game_empty", lang))
+        return STREAM_SCHEDULE_FIX_GAME
+    context.user_data["stream_schedule_fix_game"] = text
+    return await _prompt_stream_schedule_fix_time(update, context, lang)
+
+
+async def _prompt_stream_schedule_fix_time(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    await update.effective_message.reply_text(
+        t("stream_schedule_fix_time_prompt", lang)
+    )
+    await _pulse_wizard_keyboard(
+        context.bot, update.effective_user.id, lang, back=False
+    )
+    return STREAM_SCHEDULE_FIX_TIME
+
+
+async def stream_schedule_fix_time(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    text = (update.effective_message.text or "").strip()
+    if is_menu_button(text) or text in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return STREAM_SCHEDULE_FIX_TIME
+    parsed_time = _parse_stream_time(text)
+    if not parsed_time:
+        await update.effective_message.reply_text(
+            t("stream_schedule_time_invalid", lang)
+        )
+        return STREAM_SCHEDULE_FIX_TIME
+    day_date: date = context.user_data["stream_schedule_fix_date"]
+    game_text = context.user_data.pop("stream_schedule_fix_game", "")
+    context.user_data["stream_schedule_entries"] = [
+        {"date": day_date, "time": parsed_time, "game": game_text}
+    ]
+    return await _finish_stream_schedule(update, context, lang)
 
 
 async def stream_schedule_skip_callback(
@@ -3820,12 +3962,14 @@ async def stream_schedule_duration_callback(
         )
         return ConversationHandler.END
 
+    clear_mode = context.user_data.get("stream_schedule_clear_mode", "all")
     _pending_schedule_publishes(context.application)[user_id] = {
         "entries": [
             {"date": e["date"].isoformat(), "time": e["time"], "game": e["game"]}
             for e in entries
         ],
         "duration": duration_min,
+        "clear_mode": clear_mode,
     }
     context.user_data.clear()
     return await _start_schedule_publish_auth(update, context, user_id, lang)
@@ -3930,11 +4074,14 @@ async def _complete_schedule_publish(
     if isinstance(pending, list):
         # Legacy in-memory shape from older deploys
         entries, duration_min = pending, _SCHEDULE_DEFAULT_DURATION_MIN
+        clear_mode = "all"
     elif isinstance(pending, dict):
         entries = pending.get("entries") or []
         duration_min = int(pending.get("duration") or _SCHEDULE_DEFAULT_DURATION_MIN)
+        clear_mode = pending.get("clear_mode") or "all"
     else:
         entries, duration_min = [], _SCHEDULE_DEFAULT_DURATION_MIN
+        clear_mode = "all"
     if not entries or not token_info:
         await application.bot.send_message(
             owner_id,
@@ -3949,9 +4096,24 @@ async def _complete_schedule_publish(
     twitch: TwitchClient = application.bot_data["twitch"]
 
     try:
-        await asyncio.to_thread(
-            twitch.clear_channel_schedule, access, twitch_user_id
-        )
+        unique_dates = {e.get("date") for e in entries if e.get("date")}
+        if clear_mode == "day" and len(unique_dates) == 1:
+            first = next(iter(unique_dates))
+            y, m, d = (int(x) for x in str(first).split("-", 2))
+            day_start_local = datetime(y, m, d, 0, 0, tzinfo=SCHEDULE_TZ)
+            day_start_iso = day_start_local.astimezone(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            await asyncio.to_thread(
+                twitch.clear_schedule_for_day,
+                access,
+                twitch_user_id,
+                start_time=day_start_iso,
+            )
+        else:
+            await asyncio.to_thread(
+                twitch.clear_channel_schedule, access, twitch_user_id
+            )
     except Exception as exc:
         logger.warning(
             "Failed to clear Twitch schedule before publish (user=%s): %s",
@@ -10564,6 +10726,27 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(admin_schedule_callback, pattern=r"^sched:"),
+            ],
+            STREAM_SCHEDULE_MODE: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    stream_schedule_mode_callback, pattern=r"^stream_sched:mode:"
+                ),
+            ],
+            STREAM_SCHEDULE_FIX_DAY: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    stream_schedule_fix_day_callback,
+                    pattern=r"^stream_sched:fix_day:\d+$",
+                ),
+            ],
+            STREAM_SCHEDULE_FIX_GAME: [
+                _wiz_cancel,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_fix_game),
+            ],
+            STREAM_SCHEDULE_FIX_TIME: [
+                _wiz_cancel,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_fix_time),
             ],
             STREAM_SCHEDULE_CONFIRM: [
                 _wiz_cancel,

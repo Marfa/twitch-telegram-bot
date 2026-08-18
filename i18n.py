@@ -450,6 +450,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "- 15 July 15:30 Sovereign Syndicate\n"
             "- 17 July 15:30 Sovereign Syndicate"
         ),
+        "stream_schedule_mode_intro": (
+            "Use this menu to either create a weekly schedule (starting on Monday) "
+            "or fix a single day slot.\n\n"
+            "<b>Example:</b>\n"
+            "- 13 July 15:30 Sovereign Syndicate\n"
+            "- 14 July 15:30 Sovereign Syndicate\n"
+            "- 15 July 15:30 Sovereign Syndicate\n"
+            "- 17 July 15:30 Sovereign Syndicate"
+        ),
+        "stream_schedule_mode_week_btn": "Create schedule for the week",
+        "stream_schedule_mode_day_btn": "Fix slots for a day",
         "stream_schedule_confirm": "Create the schedule?",
         "stream_schedule_yes": "✅ Yes",
         "stream_schedule_no": "❌ No",
@@ -457,6 +468,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_time_prompt": "Enter the planned stream start time in 15:30 format.",
         "stream_schedule_time_invalid": "Enter time in HH:MM format, e.g. 15:30.",
         "stream_schedule_game_empty": "Enter the stream title or game name.",
+        "stream_schedule_fix_day_prompt": "Which day should I fix schedule slots for?",
+        "stream_schedule_fix_game_prompt": (
+            "What do you want to stream on {date}?\n\n"
+            "Only one slot can be filled."
+        ),
+        "stream_schedule_fix_time_prompt": "Enter the planned stream start time in 15:30 format.",
         "stream_schedule_no_stream": "No stream planned",
         "stream_schedule_finish": "Finish schedule",
         "stream_schedule_line": "- {date} {time} {game}",
@@ -666,6 +683,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "beta_feat_deleted_subscriptions_cart": "Deleted subscriptions cart",
         "beta_feat_deleted_subscriptions_cart_desc": (
             "Store deleted subscriptions for 10 days (30 with Premium) and restore them from the cart."
+        ),
+        "beta_feat_schedule_fix_day": "Fix schedule slots for a day",
+        "beta_feat_schedule_fix_day_desc": (
+            "Fix a single day in your stream schedule without recreating the whole week."
         ),
         "wizard_simple_mode_note": (
             "<b>You are in simplified mode. Open Settings → Advanced mode "
@@ -1668,6 +1689,18 @@ _STRINGS: dict[str, dict[str, str]] = {
             "- 15 июля 15:30 Sovereign Syndicate\n"
             "- 17 июля 15:30 Sovereign Syndicate"
         ),
+        "stream_schedule_mode_intro": (
+            "С помощью этого меню вы можете создать расписание на неделю "
+            "(с ближайшего понедельника по воскресенье) или поправить "
+            "слот только на один день.\n\n"
+            "<b>Пример:</b>\n"
+            "- 13 июля 15:30 Sovereign Syndicate\n"
+            "- 14 июля 15:30 Sovereign Syndicate\n"
+            "- 15 июля 15:30 Sovereign Syndicate\n"
+            "- 17 июля 15:30 Sovereign Syndicate"
+        ),
+        "stream_schedule_mode_week_btn": "Создать расписание на неделю",
+        "stream_schedule_mode_day_btn": "Поправить слоты на день",
         "stream_schedule_confirm": "Сформировать расписание?",
         "stream_schedule_yes": "✅ Да",
         "stream_schedule_no": "❌ Нет",
@@ -1675,6 +1708,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_time_prompt": "Укажите планируемое время старта стрима в формате 15:30.",
         "stream_schedule_time_invalid": "Укажите время в формате ЧЧ:ММ, например 15:30.",
         "stream_schedule_game_empty": "Введите название игры или стрима.",
+        "stream_schedule_fix_day_prompt": "На какой день поправить слоты расписания?",
+        "stream_schedule_fix_game_prompt": (
+            "Что вы хотите стримить на {date}?\n\n"
+            "Заполнить можно только один слот."
+        ),
+        "stream_schedule_fix_time_prompt": "Укажите планируемое время старта стрима в формате 15:30.",
         "stream_schedule_no_stream": "Стрим не планируется",
         "stream_schedule_finish": "Завершить создание расписания",
         "stream_schedule_line": "- {date} {time} {game}",
@@ -1993,6 +2032,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "beta_feat_deleted_subscriptions_cart": "Корзина удалённых подписок",
         "beta_feat_deleted_subscriptions_cart_desc": (
             "Сохраняет удалённые подписки на 10 дней (30 с Premium) и позволяет восстановить их из корзины."
+        ),
+        "beta_feat_schedule_fix_day": "Поправить слоты на день",
+        "beta_feat_schedule_fix_day_desc": (
+            "Позволяет поправить один день в расписании стримов, не пересоздавая всю неделю."
         ),
         "wizard_simple_mode_note": (
             "<b>Вы работаете в упрощённом режиме, перейдите в Настройках "
@@ -3868,6 +3911,20 @@ def stream_schedule_day_keyboard(
             ]
         )
     return InlineKeyboardMarkup(rows) if rows else None
+
+
+def stream_schedule_fix_day_keyboard(
+    lang: str, dates: list[date]
+) -> InlineKeyboardMarkup:
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, d in enumerate(dates):
+        # Short day buttons; the full date is shown in the next prompt.
+        day_short = _WEEKDAYS[loc][d.weekday()].upper()
+        rows.append(
+            [InlineKeyboardButton(day_short, callback_data=f"stream_sched:fix_day:{i}")]
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def schedule_keyboard(
