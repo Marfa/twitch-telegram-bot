@@ -399,6 +399,47 @@ class TwitchClient:
                 break
         return deleted
 
+    def clear_schedule_for_day(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        *,
+        start_time: str,
+        duration: int = 1440,
+        max_rounds: int = 50,
+    ) -> int:
+        """Delete existing schedule segments overlapping a single local day.
+
+        `start_time` must be the day start (00:00) in schedule time converted to UTC
+        in Helix ISO format (e.g. `YYYY-MM-DDT00:00:00Z`).
+        """
+        deleted = 0
+        day_start = self._parse_schedule_time(start_time).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for _ in range(max(1, max_rounds)):
+            segments = self.get_schedule_segments(
+                broadcaster_id, first=25, start_time=day_start
+            )
+            if not segments:
+                break
+            ids = self.overlapping_schedule_segment_ids(
+                segments, start_time=day_start, duration=duration
+            )
+            if not ids:
+                break
+            progress = False
+            for sid in ids:
+                try:
+                    self.delete_schedule_segment(user_access_token, broadcaster_id, sid)
+                    deleted += 1
+                    progress = True
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to delete schedule segment %s (day clear): %s", sid, exc
+                    )
+            if not progress:
+                break
+        return deleted
+
     def validate_user_token(self, user_access_token: str) -> dict[str, Any]:
         """Validate a user access token; returns Twitch payload (scopes, user_id, …)."""
         resp = self._session.get(
