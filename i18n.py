@@ -469,11 +469,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_time_invalid": "Enter time in HH:MM format, e.g. 15:30.",
         "stream_schedule_game_empty": "Enter the stream title or game name.",
         "stream_schedule_fix_day_prompt": "Which day should I fix schedule slots for?",
-        "stream_schedule_fix_game_prompt": (
-            "What do you want to stream on {date}?\n\n"
-            "Only one slot can be filled."
-        ),
+        "stream_schedule_fix_game_prompt": "What do you want to stream on {date}?",
         "stream_schedule_fix_time_prompt": "Enter the planned stream start time in 15:30 format.",
+        "stream_schedule_more_prompt": "Add another slot?",
+        "stream_schedule_more_yes": "✅ Yes",
+        "stream_schedule_more_no": "❌ No",
+        "stream_schedule_occupied_header": "Slots on {date}:",
+        "stream_schedule_occupied_empty": "No slots on {date} yet.",
+        "stream_schedule_occupied_line": "- {time} {game}",
+        "stream_schedule_edit_slot": "✏️ Edit",
+        "stream_schedule_add_slot": "➕ Add slot",
+        "stream_schedule_slots_done": "Done",
         "stream_schedule_no_stream": "No stream planned",
         "stream_schedule_finish": "Finish schedule",
         "stream_schedule_line": "- {date} {time} {game}",
@@ -483,6 +489,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_duration_prompt": (
             "How long is a typical stream (hours)?\n"
             "Existing Twitch schedule slots will be cleared before sync."
+        ),
+        "stream_schedule_duration_prompt_keep": (
+            "How long is a typical stream (hours)?\n"
+            "Only overlapping slots will be replaced."
         ),
         "stream_schedule_duration_hour": "{hours} h",
         "stream_schedule_duration_unsure": "Not sure",
@@ -1709,11 +1719,17 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_time_invalid": "Укажите время в формате ЧЧ:ММ, например 15:30.",
         "stream_schedule_game_empty": "Введите название игры или стрима.",
         "stream_schedule_fix_day_prompt": "На какой день поправить слоты расписания?",
-        "stream_schedule_fix_game_prompt": (
-            "Что вы хотите стримить на {date}?\n\n"
-            "Заполнить можно только один слот."
-        ),
+        "stream_schedule_fix_game_prompt": "Что вы хотите стримить на {date}?",
         "stream_schedule_fix_time_prompt": "Укажите планируемое время старта стрима в формате 15:30.",
+        "stream_schedule_more_prompt": "Добавить ещё слот?",
+        "stream_schedule_more_yes": "✅ Да",
+        "stream_schedule_more_no": "❌ Нет",
+        "stream_schedule_occupied_header": "Слоты на {date}:",
+        "stream_schedule_occupied_empty": "На {date} пока нет слотов.",
+        "stream_schedule_occupied_line": "- {time} {game}",
+        "stream_schedule_edit_slot": "✏️ Редактировать",
+        "stream_schedule_add_slot": "➕ Добавить слот",
+        "stream_schedule_slots_done": "Готово",
         "stream_schedule_no_stream": "Стрим не планируется",
         "stream_schedule_finish": "Завершить создание расписания",
         "stream_schedule_line": "- {date} {time} {game}",
@@ -1723,6 +1739,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_duration_prompt": (
             "Сколько обычно длится стрим (в часах)?\n"
             "Перед синхронизацией все текущие слоты на Twitch будут удалены."
+        ),
+        "stream_schedule_duration_prompt_keep": (
+            "Сколько обычно длится стрим (в часах)?\n"
+            "Затираются только пересекающиеся слоты."
         ),
         "stream_schedule_duration_hour": "{hours} ч",
         "stream_schedule_duration_unsure": "Не уверен",
@@ -3890,7 +3910,7 @@ def image_position_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 def stream_schedule_day_keyboard(
     lang: str, *, show_finish: bool, show_skip: bool = True
-) -> InlineKeyboardMarkup | None:
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if show_skip:
         rows.append(
@@ -3910,7 +3930,78 @@ def stream_schedule_day_keyboard(
                 )
             ]
         )
-    return InlineKeyboardMarkup(rows) if rows else None
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def stream_schedule_more_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_more_yes", lang),
+                    callback_data="stream_sched:more:1",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_more_no", lang),
+                    callback_data="stream_sched:more:0",
+                )
+            ],
+        ]
+    )
+
+
+def stream_schedule_occupied_keyboard(
+    lang: str, slots: list[dict]
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, slot in enumerate(slots):
+        if not slot.get("id"):
+            continue
+        label = f"{slot.get('time', '')} {slot.get('game', '')}".strip()
+        if len(label) > 48:
+            label = label[:45] + "…"
+        rows.append(
+            [
+                InlineKeyboardButton(label or "—", callback_data="stream_sched:noop"),
+                InlineKeyboardButton(
+                    t("stream_schedule_edit_slot", lang),
+                    callback_data=f"stream_sched:edit:{i}",
+                ),
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("stream_schedule_add_slot", lang),
+                callback_data="stream_sched:add",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("stream_schedule_slots_done", lang),
+                callback_data="stream_sched:slots_done",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def stream_schedule_fix_day_keyboard(
@@ -3924,6 +4015,13 @@ def stream_schedule_fix_day_keyboard(
         rows.append(
             [InlineKeyboardButton(day_short, callback_data=f"stream_sched:fix_day:{i}")]
         )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
+            )
+        ]
+    )
     return InlineKeyboardMarkup(rows)
 
 

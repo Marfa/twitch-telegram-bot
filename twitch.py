@@ -334,6 +334,7 @@ class TwitchClient:
         *,
         start_time: str,
         duration: int = 120,
+        exclude_ids: tuple[str, ...] | list[str] = (),
     ) -> int:
         """Delete existing segments that would overlap a new one. Returns deleted count."""
         day_start = self._parse_schedule_time(start_time).replace(
@@ -347,14 +348,19 @@ class TwitchClient:
         ids = self.overlapping_schedule_segment_ids(
             existing, start_time=start_time, duration=duration
         )
+        skipped = {str(x) for x in exclude_ids if x}
+        deleted = 0
         for sid in ids:
+            if sid in skipped:
+                continue
             try:
                 self.delete_schedule_segment(user_access_token, broadcaster_id, sid)
+                deleted += 1
             except Exception as exc:
                 logger.warning(
                     "Failed to delete overlapping schedule segment %s: %s", sid, exc
                 )
-        return len(ids)
+        return deleted
 
     def clear_channel_schedule(
         self,
@@ -745,6 +751,91 @@ class TwitchClient:
                 response=resp,
             )
         return resp.json()
+
+    def update_schedule_segment(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        segment_id: str,
+        *,
+        start_time: str = "",
+        timezone: str = "",
+        duration: int | None = None,
+        title: str | None = None,
+        category_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Update a schedule segment. Raises on error."""
+        body: dict[str, Any] = {}
+        if start_time:
+            body["start_time"] = start_time
+        if timezone:
+            body["timezone"] = timezone
+        if duration is not None:
+            body["duration"] = str(max(1, int(duration)))
+        if title is not None:
+            body["title"] = title[:140]
+        if category_id:
+            body["category_id"] = category_id
+        resp = self._session.patch(
+            "https://api.twitch.tv/helix/schedule/segment",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+                "Content-Type": "application/json",
+            },
+            params={"broadcaster_id": broadcaster_id, "id": segment_id},
+            json=body,
+            timeout=15,
+        )
+        if not resp.ok:
+            detail = resp.text
+            try:
+                err = resp.json()
+                detail = err.get("message") or err.get("error") or detail
+            except Exception:
+                pass
+            raise requests.HTTPError(
+                f"{resp.status_code} Client Error: {detail} for url: {resp.url}",
+                response=resp,
+            )
+        return resp.json()
+
+    def update_schedule_segment_with_overlap_replace(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        segment_id: str,
+        *,
+        start_time: str,
+        timezone: str,
+        duration: int = 120,
+        title: str = "",
+        category_id: str = "",
+    ) -> dict[str, Any]:
+        """Update a segment; on overlap delete conflicting others and retry once."""
+        kwargs = dict(
+            user_access_token=user_access_token,
+            broadcaster_id=broadcaster_id,
+            segment_id=segment_id,
+            start_time=start_time,
+            timezone=timezone,
+            duration=duration,
+            title=title,
+            category_id=category_id,
+        )
+        try:
+            return self.update_schedule_segment(**kwargs)
+        except Exception as exc:
+            if not self.is_overlapping_schedule(exc):
+                raise
+            self.delete_overlapping_schedule_segments(
+                user_access_token,
+                broadcaster_id,
+                start_time=start_time,
+                duration=duration,
+                exclude_ids=(segment_id,),
+            )
+            return self.update_schedule_segment(**kwargs)
 
     def create_schedule_segment_with_fallback(
         self,

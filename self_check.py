@@ -418,6 +418,9 @@ def main() -> None:
     assert tr("stream_schedule_publishing", "ru")
     assert tr("stream_schedule_publishing", "en")
     assert tr("stream_schedule_duration_prompt", "ru")
+    assert tr("stream_schedule_duration_prompt_keep", "ru")
+    assert tr("stream_schedule_more_prompt", "ru")
+    assert tr("stream_schedule_add_slot", "en")
     assert tr("stream_schedule_duration_unsure", "en")
     from i18n import (
         main_menu,
