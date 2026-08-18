@@ -719,7 +719,7 @@ class Database(Protocol):
 
     def enable_all_subscriptions(self, owner_id: int, *, demo: bool = False) -> int: ...
 
-    def delete_subscription(self, sub_id: int, owner_id: int) -> bool: ...
+    def delete_subscription(self, sub_id: int, owner_id: int, *, to_cart: bool = True) -> bool: ...
 
     def list_deleted_subscriptions(
         self,
@@ -1016,7 +1016,7 @@ class Database(Protocol):
     def disable_whisper_alerts_for_twitch_user(self, twitch_user_id: str) -> list[int]: ...
 
     def delete_synced_subscriptions_missing(
-        self, owner_id: int, keep_twitch_user_ids: set[str]
+        self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
     ) -> int: ...
 
     def get_unfollowed_manual_alert_streamers(
@@ -1033,6 +1033,7 @@ class Database(Protocol):
         twitch_user_ids: set[str],
         *,
         is_demo: bool = False,
+        to_cart: bool = True,
     ) -> int: ...
 
     def is_beta_enrolled(self, user_id: int, feature_id: str) -> bool: ...
@@ -1611,7 +1612,7 @@ class SqliteDatabase:
             return int(cur.rowcount)
 
 
-    def delete_subscription(self, sub_id: int, owner_id: int) -> bool:
+    def delete_subscription(self, sub_id: int, owner_id: int, *, to_cart: bool = True) -> bool:
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM subscriptions WHERE id = ? AND owner_id = ?",
@@ -1620,21 +1621,22 @@ class SqliteDatabase:
             if not row:
                 return False
             sub = _row_to_sub(row)
-            payload = _subscription_cart_snapshot(sub)
-            deleted_at = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                """
-                INSERT INTO deleted_subscriptions_cart (
-                    owner_id, is_demo, deleted_at, subscription_json
-                ) VALUES (?, ?, ?, ?)
-                """,
-                (
-                    owner_id,
-                    int(bool(sub.is_demo)),
-                    deleted_at,
-                    json.dumps(payload, ensure_ascii=False),
-                ),
-            )
+            if to_cart:
+                payload = _subscription_cart_snapshot(sub)
+                deleted_at = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    """
+                    INSERT INTO deleted_subscriptions_cart (
+                        owner_id, is_demo, deleted_at, subscription_json
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        owner_id,
+                        int(bool(sub.is_demo)),
+                        deleted_at,
+                        json.dumps(payload, ensure_ascii=False),
+                    ),
+                )
             cur = conn.execute(
                 "DELETE FROM subscriptions WHERE id = ? AND owner_id = ?",
                 (sub_id, owner_id),
@@ -3392,7 +3394,7 @@ class SqliteDatabase:
         return [int(r["owner_id"]) for r in rows]
 
     def delete_synced_subscriptions_missing(
-        self, owner_id: int, keep_twitch_user_ids: set[str]
+        self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
     ) -> int:
         """Delete pristine (unedited) sync-origin subs not in keep set."""
         with self._conn() as conn:
@@ -3409,21 +3411,22 @@ class SqliteDatabase:
                 if str(r["twitch_user_id"]) in keep_twitch_user_ids:
                     continue
                 sub = _row_to_sub(r)
-                payload = _subscription_cart_snapshot(sub)
-                deleted_at = datetime.now(timezone.utc).isoformat()
-                conn.execute(
-                    """
-                    INSERT INTO deleted_subscriptions_cart (
-                        owner_id, is_demo, deleted_at, subscription_json
-                    ) VALUES (?, ?, ?, ?)
-                    """,
-                    (
-                        owner_id,
-                        int(bool(sub.is_demo)),
-                        deleted_at,
-                        json.dumps(payload, ensure_ascii=False),
-                    ),
-                )
+                if to_cart:
+                    payload = _subscription_cart_snapshot(sub)
+                    deleted_at = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        """
+                        INSERT INTO deleted_subscriptions_cart (
+                            owner_id, is_demo, deleted_at, subscription_json
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            owner_id,
+                            int(bool(sub.is_demo)),
+                            deleted_at,
+                            json.dumps(payload, ensure_ascii=False),
+                        ),
+                    )
                 conn.execute(
                     "DELETE FROM subscriptions WHERE id = ? AND owner_id = ?",
                     (int(sub.id), owner_id),
@@ -3467,6 +3470,7 @@ class SqliteDatabase:
         twitch_user_ids: set[str],
         *,
         is_demo: bool = False,
+        to_cart: bool = True,
     ) -> int:
         ids = {str(u).strip() for u in twitch_user_ids if str(u).strip()}
         if not ids:
@@ -3484,21 +3488,22 @@ class SqliteDatabase:
                 if str(r["twitch_user_id"]) not in ids:
                     continue
                 sub = _row_to_sub(r)
-                payload = _subscription_cart_snapshot(sub)
-                deleted_at = datetime.now(timezone.utc).isoformat()
-                conn.execute(
-                    """
-                    INSERT INTO deleted_subscriptions_cart (
-                        owner_id, is_demo, deleted_at, subscription_json
-                    ) VALUES (?, ?, ?, ?)
-                    """,
-                    (
-                        owner_id,
-                        int(bool(sub.is_demo)),
-                        deleted_at,
-                        json.dumps(payload, ensure_ascii=False),
-                    ),
-                )
+                if to_cart:
+                    payload = _subscription_cart_snapshot(sub)
+                    deleted_at = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        """
+                        INSERT INTO deleted_subscriptions_cart (
+                            owner_id, is_demo, deleted_at, subscription_json
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            owner_id,
+                            int(bool(sub.is_demo)),
+                            deleted_at,
+                            json.dumps(payload, ensure_ascii=False),
+                        ),
+                    )
                 conn.execute(
                     "DELETE FROM subscriptions WHERE id = ? AND owner_id = ?",
                     (int(sub.id), owner_id),
@@ -4263,7 +4268,7 @@ class PostgresDatabase:
             )
             return int(cur.rowcount)
 
-    def delete_subscription(self, sub_id: int, owner_id: int) -> bool:
+    def delete_subscription(self, sub_id: int, owner_id: int, *, to_cart: bool = True) -> bool:
         with self._conn() as conn:
             cur = self._cursor(conn)
             row = cur.execute(
@@ -4273,21 +4278,22 @@ class PostgresDatabase:
             if not row:
                 return False
             sub = _row_to_sub(row)
-            payload = _subscription_cart_snapshot(sub)
-            deleted_at = datetime.now(timezone.utc)
-            cur.execute(
-                """
-                INSERT INTO deleted_subscriptions_cart (
-                    owner_id, is_demo, deleted_at, subscription_json
-                ) VALUES (%s, %s, %s, %s)
-                """,
-                (
-                    owner_id,
-                    bool(sub.is_demo),
-                    deleted_at,
-                    json.dumps(payload, ensure_ascii=False),
-                ),
-            )
+            if to_cart:
+                payload = _subscription_cart_snapshot(sub)
+                deleted_at = datetime.now(timezone.utc)
+                cur.execute(
+                    """
+                    INSERT INTO deleted_subscriptions_cart (
+                        owner_id, is_demo, deleted_at, subscription_json
+                    ) VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        owner_id,
+                        bool(sub.is_demo),
+                        deleted_at,
+                        json.dumps(payload, ensure_ascii=False),
+                    ),
+                )
             cur.execute(
                 "DELETE FROM subscriptions WHERE id = %s AND owner_id = %s",
                 (sub_id, owner_id),
@@ -6156,7 +6162,7 @@ class PostgresDatabase:
         return [int(r["owner_id"]) for r in rows]
 
     def delete_synced_subscriptions_missing(
-        self, owner_id: int, keep_twitch_user_ids: set[str]
+        self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -6174,21 +6180,22 @@ class PostgresDatabase:
                 if str(r["twitch_user_id"]) in keep_twitch_user_ids:
                     continue
                 sub = _row_to_sub(r)
-                payload = _subscription_cart_snapshot(sub)
-                deleted_at = datetime.now(timezone.utc)
-                cur.execute(
-                    """
-                    INSERT INTO deleted_subscriptions_cart (
-                        owner_id, is_demo, deleted_at, subscription_json
-                    ) VALUES (%s, %s, %s, %s)
-                    """,
-                    (
-                        owner_id,
-                        bool(sub.is_demo),
-                        deleted_at,
-                        json.dumps(payload, ensure_ascii=False),
-                    ),
-                )
+                if to_cart:
+                    payload = _subscription_cart_snapshot(sub)
+                    deleted_at = datetime.now(timezone.utc)
+                    cur.execute(
+                        """
+                        INSERT INTO deleted_subscriptions_cart (
+                            owner_id, is_demo, deleted_at, subscription_json
+                        ) VALUES (%s, %s, %s, %s)
+                        """,
+                        (
+                            owner_id,
+                            bool(sub.is_demo),
+                            deleted_at,
+                            json.dumps(payload, ensure_ascii=False),
+                        ),
+                    )
                 cur.execute(
                     "DELETE FROM subscriptions WHERE id = %s AND owner_id = %s",
                     (int(sub.id), owner_id),
@@ -6233,6 +6240,7 @@ class PostgresDatabase:
         twitch_user_ids: set[str],
         *,
         is_demo: bool = False,
+        to_cart: bool = True,
     ) -> int:
         ids = {str(u).strip() for u in twitch_user_ids if str(u).strip()}
         if not ids:
@@ -6252,21 +6260,22 @@ class PostgresDatabase:
                 if str(r["twitch_user_id"]) not in ids:
                     continue
                 sub = _row_to_sub(r)
-                payload = _subscription_cart_snapshot(sub)
-                deleted_at = datetime.now(timezone.utc)
-                cur.execute(
-                    """
-                    INSERT INTO deleted_subscriptions_cart (
-                        owner_id, is_demo, deleted_at, subscription_json
-                    ) VALUES (%s, %s, %s, %s)
-                    """,
-                    (
-                        owner_id,
-                        bool(sub.is_demo),
-                        deleted_at,
-                        json.dumps(payload, ensure_ascii=False),
-                    ),
-                )
+                if to_cart:
+                    payload = _subscription_cart_snapshot(sub)
+                    deleted_at = datetime.now(timezone.utc)
+                    cur.execute(
+                        """
+                        INSERT INTO deleted_subscriptions_cart (
+                            owner_id, is_demo, deleted_at, subscription_json
+                        ) VALUES (%s, %s, %s, %s)
+                        """,
+                        (
+                            owner_id,
+                            bool(sub.is_demo),
+                            deleted_at,
+                            json.dumps(payload, ensure_ascii=False),
+                        ),
+                    )
                 cur.execute(
                     "DELETE FROM subscriptions WHERE id = %s AND owner_id = %s",
                     (int(sub.id), owner_id),

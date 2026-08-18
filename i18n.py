@@ -663,6 +663,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "beta_mode_admin_toggle": "Admins always have beta access.",
         "beta_mode_opt_in": "✅ Joined beta: {name}",
         "beta_mode_opt_out": "Left beta: {name}",
+        "beta_feat_deleted_subscriptions_cart": "Deleted subscriptions cart",
+        "beta_feat_deleted_subscriptions_cart_desc": (
+            "Store deleted subscriptions for 10 days (30 with Premium) and restore them from the cart."
+        ),
         "wizard_simple_mode_note": (
             "<b>You are in simplified mode. Open Settings → Advanced mode "
             "to show all wizard steps.</b>"
@@ -1986,6 +1990,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "beta_mode_admin_toggle": "У админов бета-доступ всегда включён.",
         "beta_mode_opt_in": "✅ Вы в бете: {name}",
         "beta_mode_opt_out": "Вы вышли из беты: {name}",
+        "beta_feat_deleted_subscriptions_cart": "Корзина удалённых подписок",
+        "beta_feat_deleted_subscriptions_cart_desc": (
+            "Сохраняет удалённые подписки на 10 дней (30 с Premium) и позволяет восстановить их из корзины."
+        ),
         "wizard_simple_mode_note": (
             "<b>Вы работаете в упрощённом режиме, перейдите в Настройках "
             "в продвинутый режим для отображения всех шагов мастера.</b>"
