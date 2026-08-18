@@ -3728,8 +3728,10 @@ async def stream_schedule_mode_callback(
         )
         return STREAM_SCHEDULE_CONFIRM
 
-    # Day fix mode.
-    dates = _next_week_dates(datetime.now(SCHEDULE_TZ).date())
+    # Day fix mode — remaining days of the current week (Mon–Sun), including today.
+    today = datetime.now(SCHEDULE_TZ).date()
+    monday = today - timedelta(days=today.weekday())
+    dates = [monday + timedelta(days=i) for i in range(7) if monday + timedelta(days=i) >= today]
     context.user_data["stream_schedule_fix_dates"] = dates
     await query.edit_message_text(
         t("stream_schedule_fix_day_prompt", lang),
@@ -3770,8 +3772,8 @@ async def stream_schedule_fix_day_callback(
             lang,
             date=format_stream_schedule_prompt_date(day_date, lang),
         ),
+        reply_markup=_wizard(lang, back=False),
     )
-    await _pulse_wizard_keyboard(context.bot, user_id, lang, back=False)
     return STREAM_SCHEDULE_FIX_GAME
 
 
@@ -3850,10 +3852,8 @@ async def _prompt_stream_schedule_fix_time(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     await update.effective_message.reply_text(
-        t("stream_schedule_fix_time_prompt", lang)
-    )
-    await _pulse_wizard_keyboard(
-        context.bot, update.effective_user.id, lang, back=False
+        t("stream_schedule_fix_time_prompt", lang),
+        reply_markup=_wizard(lang, back=False),
     )
     return STREAM_SCHEDULE_FIX_TIME
 
