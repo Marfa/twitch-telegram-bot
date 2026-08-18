@@ -30,9 +30,9 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
-| Subscriptions | List, edit all fields, enable/disable, delete |
+| Subscriptions | List, edit all fields, enable/disable, delete; **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium) (🧪 beta) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
-| Stream schedule | In **📦 Other**: weekly text wizard; publish to Twitch is **Premium** (slot duration, full clear of old slots) |
+| Stream schedule | In **📦 Other**: weekly text wizard or **fix slots for a day** (🧪 beta); publish to Twitch is **Premium** (slot duration, clear old slots — full or selected day only) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
 | Premium | 7-day trial; Stars month/year/lifetime; à la carte (incl. advanced mode, 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
@@ -156,7 +156,16 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 
 ### Stream schedule
 
-**📅 Create schedule** in **📦 Other** (everyone) — wizard for publication text for the upcoming week (nearest Monday through Sunday):
+**📅 Create schedule** in **📦 Other** (everyone). Users enrolled in the `schedule-fix-day` beta (🧪 Beta mode) get a choice:
+
+| Mode | What it does |
+|---|---|
+| **Create schedule for the week** | Weekly text wizard Monday through Sunday (same as before) |
+| **Fix slots for a day** (🧪 beta) | Pick one day → game → time → publish; only that day's segments are cleared on Twitch |
+
+Without beta opt-in, `/schedule` goes straight to the old weekly flow.
+
+**Weekly wizard:**
 
 1. Description and format example
 2. Confirm “Create the schedule?”
@@ -177,8 +186,20 @@ Optionally **publish to Twitch** (**Premium**):
 
 1. Slot duration: 1–4 h or “Not sure” (default 2 h)
 2. OAuth / saved token with `channel:manage:schedule`
-3. All existing channel schedule segments are deleted before creating new ones
+3. Existing schedule segments are cleared before creating new ones (full clear for weekly mode; selected day only for "Fix slots for a day")
 4. Segments are one-off (Partner/Affiliate) or weekly recurring (fallback)
+
+### Deleted subscriptions cart
+
+🧪 Beta feature `deleted-subscriptions-cart` — enable in **⚙️ Settings → 🧪 Beta mode**.
+
+When a subscription is deleted (manually or via Twitch sync) it is saved to the cart. The **🗑 Delete subscription** menu shows a **🧺 Cart** button:
+
+- Lists deleted subscriptions from the last **10 days** (free) or **30 days** (Premium)
+- Multi-select + **♻️ Restore selected**
+- Partial restore with a message when the subscription limit is hit
+
+Without beta opt-in the cart is hidden and deleted subscriptions are not saved.
 
 ### Menu and commands
 
@@ -200,6 +221,7 @@ Optionally **publish to Twitch** (**Premium**):
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ⚙️ Settings | Premium, sync, ignored words, advanced mode, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
+| ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
 | ↳ 🎛 Advanced mode | Ignore / delay / repeats / delete in the wizard; Premium; off by default |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
@@ -314,6 +336,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `analytics.py` | PostHog: usage events, errors, WARNING+ Logs, daily `daily_bot_stats` |
 | `i18n.py` | Strings and keyboards (ru/en) |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
+| `beta.py` | Beta catalog (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |
 | `hf_text.py` | AI templates: Groq → HF → local pool |
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
