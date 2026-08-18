@@ -141,7 +141,11 @@ def is_enabled(db: Database, user_id: int, feature_id: str) -> bool:
 
 
 def is_enrolled(db: Database, user_id: int, feature_id: str) -> bool:
-    """UI checkbox state (admins always enrolled for active betas)."""
+    """UI checkbox state — False in demo so the toggle matches reality."""
+    from demo_mode import is_active
+
+    if is_active(user_id):
+        return False
     feat = get_feature(feature_id)
     if feat is None or feat.stage not in _VISIBLE_STAGES:
         return False
@@ -152,8 +156,12 @@ def is_enrolled(db: Database, user_id: int, feature_id: str) -> bool:
 
 def enrollment_counts(db: Database, user_id: int) -> tuple[int, int]:
     """(joined visible betas, total visible betas) for the Settings button."""
+    from demo_mode import is_active
+
     features = list_features()
     total = len(features)
+    if is_active(user_id):
+        return 0, total
     joined = sum(1 for feat in features if is_enrolled(db, user_id, feat.id))
     return joined, total
 
