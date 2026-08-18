@@ -5579,19 +5579,23 @@ def _edit_present_types(subs: list[Subscription]) -> list[str]:
 
 
 def _alert_type_pick_keyboard(
-    lang: str, types: list[str], prefix: str
+    lang: str,
+    types: list[str],
+    prefix: str,
+    extra_rows: list[list[InlineKeyboardButton]] | None = None,
 ) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+    rows: list[list[InlineKeyboardButton]] = [
         [
-            [
-                InlineKeyboardButton(
-                    t(f"alert_type_{kind}", lang),
-                    callback_data=f"{prefix}:{kind}",
-                )
-            ]
-            for kind in types
+            InlineKeyboardButton(
+                t(f"alert_type_{kind}", lang),
+                callback_data=f"{prefix}:{kind}",
+            )
         ]
-    )
+        for kind in types
+    ]
+    if extra_rows:
+        rows.extend(extra_rows)
+    return InlineKeyboardMarkup(rows)
 
 
 def _edit_type_keyboard(lang: str, types: list[str]) -> InlineKeyboardMarkup:
@@ -6652,11 +6656,12 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     context.user_data["delete_selected"] = set()
     types = _edit_present_types(subs)
     if len(types) > 1:
-        markup = _alert_type_pick_keyboard(lang, types, "delete_type")
+        extra_rows = None
         if _deleted_subscriptions_cart_enabled(db, user_id):
-            markup.inline_keyboard.append(
+            extra_rows = [
                 [InlineKeyboardButton(t("btn_cart", lang), callback_data="delete_cart_open")]
-            )
+            ]
+        markup = _alert_type_pick_keyboard(lang, types, "delete_type", extra_rows)
         await update.effective_message.reply_text(
             t("delete_type_pick", lang),
             reply_markup=markup,
