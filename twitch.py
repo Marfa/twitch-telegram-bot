@@ -830,6 +830,32 @@ class TwitchClient:
             logger.warning("IGDB recently released failed (%s)", exc)
         return self.igdb_random_games(n)
 
+    def igdb_top100_games(self, n: int = 5) -> list[dict[str, Any]]:
+        """Random sample from IGDB top ~100 (like igdb.com/top-100/games)."""
+        headers = self._igdb_headers()
+        want = max(1, n)
+        body = (
+            f"fields name, external_games.external_game_source, "
+            f"external_games.category, external_games.uid, external_games.url;\n"
+            f"where {_IGDB_WHERE_TWITCH};\n"
+            f"sort total_rating_count desc;\n"
+            f"limit 100;"
+        )
+        try:
+            resp = self._session.post(
+                _IGDB_GAMES_URL, headers=headers, data=body, timeout=15
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+            if isinstance(rows, list) and rows:
+                pool = list(rows)
+                if len(pool) <= want:
+                    return pool
+                return random.sample(pool, want)
+        except Exception as exc:
+            logger.warning("IGDB top-100 failed (%s)", exc)
+        return self.igdb_random_games(n)
+
     def _igdb_twitch_uid(self, game: dict[str, Any]) -> str:
         """Twitch category id from IGDB game row (expanded or via external_games ids)."""
         eg_list = game.get("external_games") or []

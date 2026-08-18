@@ -4292,10 +4292,14 @@ def _lucky_streams_from_igdb(
     cats2, streams = _pick_lang_then_any(recent_rows)
     if streams:
         return cats2, streams, []
-    # VOD for all categories from both batches (random first), lang then any.
+    top_rows = twitch.igdb_top100_games(5)
+    cats3, streams = _pick_lang_then_any(top_rows)
+    if streams:
+        return cats3, streams, []
+    # VOD for all categories from all batches (random first), lang then any.
     use_cats: list[dict[str, str]] = []
     seen_ids: set[str] = set()
-    for group in (cats, cats2):
+    for group in (cats, cats2, cats3):
         for cat in group:
             cid = str(cat.get("id") or "")
             if not cid or cid in seen_ids:
