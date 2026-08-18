@@ -8787,7 +8787,7 @@ def _beta_mode_features_block(
             )
         )
     block = "\n\n".join(lines)
-    if beta_features.is_admin(user_id):
+    if beta_features.is_admin(user_id) and not demo_mode.is_active(user_id):
         block += f"\n\n<i>{html.escape(t('beta_mode_admin_note', lang))}</i>"
     return block, kb_rows
 
@@ -8826,7 +8826,7 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer()
         return
     title = t(feat.title_key, lang)
-    if beta_features.is_admin(user_id):
+    if beta_features.is_admin(user_id) and not demo_mode.is_active(user_id):
         await query.answer(t("beta_mode_admin_toggle", lang), show_alert=True)
         return
     enrolled = beta_features.is_enrolled(db, user_id, feature_id)
