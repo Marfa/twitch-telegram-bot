@@ -272,6 +272,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Delete previous bot messages (+ delete-fail notify)\n"
             "• Publish schedule to Twitch\n"
             "• Alert history for 60 days (7 days on free)\n\n"
+            "• Restore deleted subscriptions from cart for 30 days (10 on free)\n\n"
             "How to get:\n"
             "• Pay for a subscription (buttons below), or\n"
             "• Active Twitch subscription to https://www.twitch.tv/{channel}\n\n"
@@ -300,6 +301,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_delete_prev": "Delete previous messages",
         "premium_feat_schedule_publish": "Publish schedule to Twitch",
         "premium_feat_alert_history": "Alert history for 60 days",
+        "premium_feat_deleted_subscriptions_cart": "Deleted subscriptions cart for 30 days",
         "premium_feat_line": "• {name} until {until}",
         "premium_feat_line_canceled": "• {name} until {until} (auto-renew off)",
         "premium_feat_pick": (
@@ -1003,6 +1005,20 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_none": "Nothing selected.",
         "subs_deleted": "Deleted subscriptions: {count}.",
         "sub_deleted": "Subscription #{sub_id} deleted.",
+        "btn_cart": "🧺 Cart",
+        "cart_prompt": (
+            "Deleted subscriptions cart\n"
+            "(last {days} day(s)). Select items to restore."
+        ),
+        "cart_empty": "No deleted subscriptions in the last {days} day(s).",
+        "cart_restore_go": "♻️ Restore selected ({count})",
+        "cart_restore_none": "Nothing selected.",
+        "cart_clear": "Clear selection",
+        "cart_restored": "Restored subscriptions: {count}.",
+        "cart_restored_partial": (
+            "Restored {restored}. Not restored due to subscription limit "
+            "({limit} max): {skipped}. Get Premium to increase the limit."
+        ),
         "edit_pick": "Choose a subscription to edit:",
         "edit_type_pick": "Choose an alert type to edit:",
         "list_type_pick": "Choose an alert type to view:",
@@ -1465,6 +1481,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Удаление предыдущих сообщений бота (+ уведомление об ошибках)\n"
             "• Публикация расписания на Twitch\n"
             "• История оповещений за 60 дней (на бесплатном — 7 дней)\n\n"
+            "• Корзина удалённых подписок: восстановление на 30 дней "
+            "(на бесплатном — 10)\n\n"
             "Как получить:\n"
             "• Оплата подписки (кнопки ниже), или\n"
             "• Активная подписка Twitch на https://www.twitch.tv/{channel}\n\n"
@@ -1493,6 +1511,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_delete_prev": "Удаление предыдущих сообщений",
         "premium_feat_schedule_publish": "Публикация расписания на Twitch",
         "premium_feat_alert_history": "История оповещений за 60 дней",
+        "premium_feat_deleted_subscriptions_cart": "Корзина удалённых подписок на 30 дней",
         "premium_feat_line": "• {name} до {until}",
         "premium_feat_line_canceled": "• {name} до {until} (автопродление выкл.)",
         "premium_feat_pick": (
@@ -2313,6 +2332,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_none": "Ничего не выбрано.",
         "subs_deleted": "Удалено подписок: {count}.",
         "sub_deleted": "Подписка #{sub_id} удалена.",
+        "btn_cart": "🧺 Корзина",
+        "cart_prompt": (
+            "Корзина удалённых подписок\n"
+            "(за последние {days} дней). Отметьте для восстановления."
+        ),
+        "cart_empty": "В корзине нет удалённых подписок за последние {days} дней.",
+        "cart_restore_go": "♻️ Восстановить выбранные ({count})",
+        "cart_restore_none": "Ничего не выбрано.",
+        "cart_clear": "Сбросить выбор",
+        "cart_restored": "Восстановлено подписок: {count}.",
+        "cart_restored_partial": (
+            "Восстановлено: {restored}. Из‑за лимита подписок "
+            "(максимум {limit}) не восстановлено: {skipped}. "
+            "Для увеличения лимита приобретите премиум."
+        ),
         "edit_pick": "Выберите подписку для редактирования:",
         "edit_type_pick": "Выберите тип оповещения для редактирования:",
         "list_type_pick": "Выберите тип оповещения для просмотра:",

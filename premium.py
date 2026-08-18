@@ -38,6 +38,7 @@ FEATURE_IDS: tuple[str, ...] = (
     "advanced_mode",
     "schedule_publish",
     "alert_history",
+    "deleted_subscriptions_cart",
 )
 
 # Wizard steps bundled into advanced_mode (legacy à la carte ids still honored).
@@ -61,6 +62,11 @@ _LEGACY_ADVANCED_FEATURE_IDS: tuple[str, ...] = (
 ALERT_HISTORY_FREE_DAYS = 7
 ALERT_HISTORY_PREMIUM_DAYS = 60
 
+# Deleted subscriptions "cart" retention.
+DELETED_SUBSCRIPTIONS_CART_FREE_DAYS = 10
+DELETED_SUBSCRIPTIONS_CART_PREMIUM_DAYS = 30
+DELETED_SUBSCRIPTIONS_CART_MAX_DAYS = DELETED_SUBSCRIPTIONS_CART_PREMIUM_DAYS
+
 _FEATURE_LABEL_KEYS = {
     "extra_alerts": "premium_feat_extra_alerts",
     "alert_types": "premium_feat_alert_types",
@@ -72,7 +78,19 @@ _FEATURE_LABEL_KEYS = {
     "delete_prev": "premium_feat_delete_prev",
     "schedule_publish": "premium_feat_schedule_publish",
     "alert_history": "premium_feat_alert_history",
+    "deleted_subscriptions_cart": "premium_feat_deleted_subscriptions_cart",
 }
+
+
+def deleted_subscriptions_cart_days(db: "Database", user_id: int) -> int:
+    """10 days for free, 30 days if feature (or full plan) is active."""
+    ensure_trial_expired(db, user_id)
+    # Full plan also satisfies has_feature_sync(), so users get 30 days.
+    return (
+        DELETED_SUBSCRIPTIONS_CART_PREMIUM_DAYS
+        if has_feature_sync(db, user_id, "deleted_subscriptions_cart")
+        else DELETED_SUBSCRIPTIONS_CART_FREE_DAYS
+    )
 
 
 @dataclass(frozen=True)
