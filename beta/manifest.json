@@ -1,3 +1,14 @@
 {
-  "features": []
+  "features": [
+    {
+      "id": "deleted-subscriptions-cart",
+      "branch": "feat/deleted-subscriptions-cart",
+      "title_key": "beta_feat_deleted_subscriptions_cart",
+      "description_key": "beta_feat_deleted_subscriptions_cart_desc",
+      "premium_feature_id": "deleted_subscriptions_cart",
+      "issue_label": "beta/deleted-subscriptions-cart",
+      "stage": "beta",
+      "created_at": "2026-08-18"
+    }
+  ]
 }

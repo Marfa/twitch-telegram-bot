@@ -365,6 +365,13 @@ def _sub_in_current_mode(sub: Subscription, owner_id: int) -> bool:
     return bool(sub.is_demo) == demo_mode.is_active(owner_id)
 
 
+_CART_BETA_ID = "deleted-subscriptions-cart"
+
+
+def _deleted_subscriptions_cart_enabled(db: Database, user_id: int) -> bool:
+    return beta_features.is_enabled(db, user_id, _CART_BETA_ID)
+
+
 def import_followed_as_subscriptions(
     db: Database,
     owner_id: int,
@@ -375,6 +382,7 @@ def import_followed_as_subscriptions(
     prune_missing: bool = False,
     enabled: bool = False,
     is_demo: bool = False,
+    delete_to_cart: bool = False,
 ) -> tuple[int, int, int, int, list[Subscription], list[dict[str, str]]]:
     """Create DM subscriptions from Helix followed channels.
 
@@ -430,7 +438,9 @@ def import_followed_as_subscriptions(
     removed = 0
     ask_streamers: list[dict[str, str]] = []
     if prune_missing:
-        removed = db.delete_synced_subscriptions_missing(owner_id, follow_ids)
+        removed = db.delete_synced_subscriptions_missing(
+            owner_id, follow_ids, to_cart=delete_to_cart
+        )
         ask_streamers = db.get_unfollowed_manual_alert_streamers(
             owner_id, follow_ids, is_demo=is_demo
         )
@@ -5776,7 +5786,10 @@ async def on_sync_unfollow_answer(
         ids = {str(s.get("user_id") or "").strip() for s in streamers}
         ids.discard("")
         db.delete_subscriptions_for_twitch_users(
-            owner_id, ids, is_demo=demo_mode.is_active(owner_id)
+            owner_id,
+            ids,
+            is_demo=demo_mode.is_active(owner_id),
+            to_cart=_deleted_subscriptions_cart_enabled(db, owner_id),
         )
         await query.edit_message_text(
             t("sync_unfollow_deleted", lang, list=names),
@@ -5861,6 +5874,7 @@ async def _run_followed_import(
         prune_missing=prune_missing,
         enabled=enabled,
         is_demo=demo_mode.is_active(owner_id),
+        delete_to_cart=_deleted_subscriptions_cart_enabled(db, owner_id),
     )
 
 
@@ -6154,6 +6168,7 @@ async def _sync_owner_follows(
         prune_missing=True,
         enabled=True,
         is_demo=demo_mode.is_active(row.owner_id),
+        delete_to_cart=_deleted_subscriptions_cart_enabled(db, row.owner_id),
     )
     if advance_schedule and row.period_days > 0:
         next_at = _next_sync_iso(row.period_days, from_dt=now)
@@ -6637,9 +6652,14 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     context.user_data["delete_selected"] = set()
     types = _edit_present_types(subs)
     if len(types) > 1:
+        markup = _alert_type_pick_keyboard(lang, types, "delete_type")
+        if _deleted_subscriptions_cart_enabled(db, user_id):
+            markup.inline_keyboard.append(
+                [InlineKeyboardButton(t("btn_cart", lang), callback_data="delete_cart_open")]
+            )
         await update.effective_message.reply_text(
             t("delete_type_pick", lang),
-            reply_markup=_alert_type_pick_keyboard(lang, types, "delete_type"),
+            reply_markup=markup,
         )
     else:
         await update.effective_message.reply_text(
@@ -6716,6 +6736,10 @@ def _delete_pick_keyboard(
         rows.append(
             [InlineKeyboardButton(t("delete_clear", lang), callback_data="delete_clear")]
         )
+    if _deleted_subscriptions_cart_enabled(db, owner_id):
+        rows.append(
+            [InlineKeyboardButton(t("btn_cart", lang), callback_data="delete_cart_open")]
+        )
     return InlineKeyboardMarkup(rows)
 
 
@@ -6750,6 +6774,182 @@ async def on_delete_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+def _delete_cart_keyboard(
+    lang: str,
+    items: list,
+    selected: set[int],
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, item in enumerate(items, 1):
+        cart_id = int(item.cart_id)
+        display = str(getattr(item, "twitch_username", "") or "") or str(
+            getattr(item, "twitch_user_id", "") or ""
+        )
+        mark = "✅ " if cart_id in selected else ""
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{mark}♻️ #{idx} {display}".strip(),
+                    callback_data=f"delete_cart_sel:{cart_id}",
+                )
+            ]
+        )
+    if selected:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("cart_clear", lang),
+                    callback_data="delete_cart_clear",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("cart_restore_go", lang, count=len(selected)),
+                callback_data="delete_cart_restore_go",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+async def on_delete_cart_open(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        return
+    is_demo = demo_mode.is_active(user_id)
+    days = prem.deleted_subscriptions_cart_days(db, user_id)
+    items = db.list_deleted_subscriptions(
+        user_id, days=days, is_demo=is_demo, limit=100
+    )
+
+    context.user_data["delete_cart_selected"] = set()
+    context.user_data["delete_cart_days"] = days
+    context.user_data["delete_cart_items"] = items
+    context.user_data["delete_cart_order"] = [int(i.cart_id) for i in items]
+
+    text = t("cart_prompt", lang, days=days)
+    if not items:
+        text = t("cart_empty", lang, days=days)
+
+    await query.edit_message_text(
+        text,
+        reply_markup=_delete_cart_keyboard(lang, items, set()),
+    )
+
+
+async def on_delete_cart_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        return
+    cart_id = int((query.data or "").split(":", 1)[-1])
+
+    selected: set[int] = context.user_data.setdefault("delete_cart_selected", set())
+    if cart_id in selected:
+        selected.discard(cart_id)
+    else:
+        selected.add(cart_id)
+
+    items = context.user_data.get("delete_cart_items") or []
+    days = int(context.user_data.get("delete_cart_days") or 10)
+    if not items:
+        db: Database = context.application.bot_data["db"]
+        is_demo = demo_mode.is_active(user_id)
+        items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
+        context.user_data["delete_cart_items"] = items
+        context.user_data["delete_cart_order"] = [int(i.cart_id) for i in items]
+
+    await query.edit_message_reply_markup(
+        reply_markup=_delete_cart_keyboard(lang, items, selected)
+    )
+
+
+async def on_delete_cart_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        return
+    context.user_data["delete_cart_selected"] = set()
+    items = context.user_data.get("delete_cart_items") or []
+    await query.edit_message_reply_markup(
+        reply_markup=_delete_cart_keyboard(lang, items, set())
+    )
+
+
+async def on_delete_cart_restore_go(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        return
+    selected: set[int] = set(context.user_data.get("delete_cart_selected") or ())
+    if not selected:
+        await query.answer(t("cart_restore_none", lang), show_alert=True)
+        return
+
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    days = int(context.user_data.get("delete_cart_days") or prem.deleted_subscriptions_cart_days(db, user_id))
+    is_demo = demo_mode.is_active(user_id)
+
+    remaining = max(0, int(MAX_SUBSCRIPTIONS_PER_OWNER) - len(_subs_for_owner(db, user_id)))
+    if remaining <= 0:
+        await query.answer(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+            show_alert=True,
+        )
+        return
+
+    order: list[int] = context.user_data.get("delete_cart_order") or []
+    selected_in_order = [cid for cid in order if cid in selected]
+    restore_ids = selected_in_order[:remaining]
+    restored = db.restore_deleted_subscriptions(
+        user_id, restore_ids, days=days, is_demo=is_demo
+    )
+    limit_skipped = max(0, len(selected_in_order) - remaining)
+
+    # Re-load cart (restored items disappear from DB cart).
+    items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
+    context.user_data["delete_cart_selected"] = set()
+    context.user_data["delete_cart_items"] = items
+    context.user_data["delete_cart_order"] = [int(i.cart_id) for i in items]
+
+    if limit_skipped > 0:
+        restored_text = t(
+            "cart_restored_partial",
+            lang,
+            restored=restored,
+            skipped=limit_skipped,
+            limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+        )
+    else:
+        restored_text = t("cart_restored", lang, count=restored)
+    if not items:
+        main_text = t("cart_empty", lang, days=days)
+    else:
+        main_text = t("cart_prompt", lang, days=days)
+    await query.edit_message_text(
+        restored_text + "\n\n" + main_text,
+        reply_markup=_delete_cart_keyboard(lang, items, set()),
+    )
+
+
 async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = query.from_user.id
@@ -6761,11 +6961,12 @@ async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await query.answer()
     db: Database = context.application.bot_data["db"]
     deleted = 0
+    to_cart = _deleted_subscriptions_cart_enabled(db, user_id)
     for sub_id in list(selected):
         sub = db.get_subscription(sub_id, user_id)
         if sub is None or not _sub_in_current_mode(sub, user_id):
             continue
-        if db.delete_subscription(sub_id, user_id):
+        if db.delete_subscription(sub_id, user_id, to_cart=to_cart):
             deleted += 1
     context.user_data["delete_selected"] = set()
     context.user_data.pop("delete_type", None)
@@ -10076,6 +10277,22 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_type, pattern=r"^delete_type:\w+$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_delete_cart_open, pattern=r"^delete_cart_open$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_delete_cart_sel, pattern=r"^delete_cart_sel:\d+$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_delete_cart_restore_go, pattern=r"^delete_cart_restore_go$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_delete_cart_clear, pattern=r"^delete_cart_clear$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_watch_again, pattern=r"^watch:again$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_watch_create_alerts, pattern=r"^watch:create_alerts$"),
@@ -10514,7 +10731,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             wake_stuck_on_menu_callback,
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
-                r"delete_sel:|delete_go$|delete_clear$|delete_type:|list_type:|"
+                r"delete_sel:|delete_go$|delete_clear$|delete_type:|"
+                r"delete_cart_open$|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
+                r"list_type:|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
                 r"advanced_mode:|whisper_alerts:|"
