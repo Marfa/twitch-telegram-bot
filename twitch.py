@@ -704,6 +704,14 @@ class TwitchClient:
         """True when Twitch rejects a segment that overlaps an existing one."""
         return "overlapping segment" in cls._schedule_error_detail(exc)
 
+    @classmethod
+    def is_recurring_start_forbidden(cls, exc: BaseException) -> bool:
+        """True when Twitch rejects start_time on a recurring segment."""
+        detail = cls._schedule_error_detail(exc)
+        return "firstoccurrencedate" in detail or (
+            "recurring" in detail and "start" in detail
+        )
+
     def create_schedule_segment(
         self,
         user_access_token: str,
@@ -811,8 +819,13 @@ class TwitchClient:
         duration: int = 120,
         title: str = "",
         category_id: str = "",
-    ) -> dict[str, Any]:
-        """Update a segment; on overlap delete conflicting others and retry once."""
+    ) -> tuple[dict[str, Any], bool]:
+        """Update a segment; on overlap or recurring-time restriction, replace.
+
+        Recurring segments cannot get a new start_time (Twitch 400 FirstOccurrenceDate).
+        In that case the old segment is deleted and a new one is created.
+        Returns (response_json, used_recurring_create).
+        """
         kwargs = dict(
             user_access_token=user_access_token,
             broadcaster_id=broadcaster_id,
@@ -823,19 +836,44 @@ class TwitchClient:
             title=title,
             category_id=category_id,
         )
-        try:
+
+        def _update() -> dict[str, Any]:
             return self.update_schedule_segment(**kwargs)
-        except Exception as exc:
-            if not self.is_overlapping_schedule(exc):
-                raise
-            self.delete_overlapping_schedule_segments(
+
+        def _recreate() -> tuple[dict[str, Any], bool]:
+            self.delete_schedule_segment(
+                user_access_token, broadcaster_id, segment_id
+            )
+            return self.create_schedule_segment_with_fallback(
                 user_access_token,
                 broadcaster_id,
                 start_time=start_time,
+                timezone=timezone,
                 duration=duration,
-                exclude_ids=(segment_id,),
+                title=title,
+                category_id=category_id,
             )
-            return self.update_schedule_segment(**kwargs)
+
+        try:
+            return _update(), False
+        except Exception as exc:
+            if self.is_overlapping_schedule(exc):
+                self.delete_overlapping_schedule_segments(
+                    user_access_token,
+                    broadcaster_id,
+                    start_time=start_time,
+                    duration=duration,
+                    exclude_ids=(segment_id,),
+                )
+                try:
+                    return _update(), False
+                except Exception as retry_exc:
+                    if self.is_recurring_start_forbidden(retry_exc):
+                        return _recreate()
+                    raise
+            if self.is_recurring_start_forbidden(exc):
+                return _recreate()
+            raise
 
     def create_schedule_segment_with_fallback(
         self,

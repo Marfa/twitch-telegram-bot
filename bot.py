@@ -633,6 +633,32 @@ def _day_slots_view(context: ContextTypes.DEFAULT_TYPE) -> list[dict]:
     return slots
 
 
+def _schedule_publish_error_text(exc: BaseException, date_raw: str, lang: str) -> str:
+    from twitch import TwitchClient
+
+    pretty = str(date_raw or "").strip()
+    try:
+        y, m, d = (int(x) for x in pretty.split("-", 2))
+        pretty = format_stream_schedule_date(date(y, m, d), lang)
+    except (TypeError, ValueError):
+        pass
+    detail = TwitchClient._schedule_error_detail(exc)
+    raw = str(exc).lower()
+    if TwitchClient.is_recurring_start_forbidden(exc):
+        key = "stream_schedule_err_recurring_time"
+    elif TwitchClient.is_overlapping_schedule(exc):
+        key = "stream_schedule_err_overlap"
+    elif TwitchClient.is_one_off_schedule_forbidden(exc):
+        key = "stream_schedule_err_one_off"
+    elif "401" in raw or "unauthorized" in detail:
+        key = "stream_schedule_err_auth"
+    elif "404" in raw or "not found" in detail:
+        key = "stream_schedule_err_not_found"
+    else:
+        key = "stream_schedule_err_generic"
+    return t(key, lang, date=pretty)
+
+
 def _pending_schedule_preview(context: ContextTypes.DEFAULT_TYPE) -> list[dict]:
     items = list(context.user_data.get("stream_schedule_entries") or [])
     for upd in context.user_data.get("stream_schedule_updates") or []:
@@ -4417,7 +4443,7 @@ async def _complete_schedule_publish(
     for upd in updates:
         start_iso, game_text, category_id = _start_and_category(upd)
         try:
-            twitch.update_schedule_segment_with_overlap_replace(
+            _, recurring = twitch.update_schedule_segment_with_overlap_replace(
                 access,
                 twitch_user_id,
                 str(upd["id"]),
@@ -4427,9 +4453,11 @@ async def _complete_schedule_publish(
                 title=game_text or "",
                 category_id=category_id,
             )
+            if recurring:
+                used_recurring_fallback = True
             ok_count += 1
         except Exception as exc:
-            errors.append(f"{upd.get('date')}: {exc}")
+            errors.append(_schedule_publish_error_text(exc, str(upd.get("date") or ""), lang))
     for entry in entries:
         start_iso, game_text, category_id = _start_and_category(entry)
         try:
@@ -4449,7 +4477,7 @@ async def _complete_schedule_publish(
                 used_recurring_fallback = True
             ok_count += 1
         except Exception as exc:
-            errors.append(f"{entry['date']}: {exc}")
+            errors.append(_schedule_publish_error_text(exc, str(entry.get("date") or ""), lang))
 
     total = len(entries) + len(updates)
     if ok_count == total:
@@ -4460,9 +4488,15 @@ async def _complete_schedule_publish(
         )
         text = t(key, lang)
     elif ok_count > 0:
-        text = t("stream_schedule_publish_partial", lang, ok=ok_count, total=total, errors="; ".join(errors))
+        text = t(
+            "stream_schedule_publish_partial",
+            lang,
+            ok=ok_count,
+            total=total,
+            errors="\n".join(errors),
+        )
     else:
-        text = t("stream_schedule_publish_fail", lang, error="; ".join(errors))
+        text = t("stream_schedule_publish_fail", lang, error="\n".join(errors))
 
     buttons = []
     if refresh:

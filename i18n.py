@@ -451,13 +451,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "- 17 July 15:30 Sovereign Syndicate"
         ),
         "stream_schedule_mode_intro": (
-            "Use this menu to either create a weekly schedule (starting on Monday) "
-            "or fix a single day slot.\n\n"
-            "<b>Example:</b>\n"
-            "- 13 July 15:30 Sovereign Syndicate\n"
-            "- 14 July 15:30 Sovereign Syndicate\n"
-            "- 15 July 15:30 Sovereign Syndicate\n"
-            "- 17 July 15:30 Sovereign Syndicate"
+            "Use this menu to either create a weekly schedule "
+            "(from the next Monday through Sunday) or fix a slot for a single day."
         ),
         "stream_schedule_mode_week_btn": "Create schedule for the week",
         "stream_schedule_mode_day_btn": "Fix slots for a day",
@@ -506,7 +501,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(one-off slots are only available for Partner/Affiliate)."
         ),
         "stream_schedule_publish_fail": "❌ Failed to publish schedule: {error}",
-        "stream_schedule_publish_partial": "⚠️ Published {ok}/{total} segments. Errors: {errors}",
+        "stream_schedule_publish_partial": "⚠️ Saved {ok} of {total} slots.\n{errors}",
+        "stream_schedule_err_recurring_time": (
+            "{date}: Twitch does not allow changing the time of a weekly repeating slot this way."
+        ),
+        "stream_schedule_err_overlap": "{date}: this time overlaps another slot.",
+        "stream_schedule_err_one_off": (
+            "{date}: one-off slots need Partner/Affiliate; weekly repeating slots are used instead."
+        ),
+        "stream_schedule_err_auth": "{date}: no permission to manage the schedule. Authorize again.",
+        "stream_schedule_err_not_found": "{date}: slot not found — it may have already been removed.",
+        "stream_schedule_err_generic": "{date}: could not save this slot.",
         "stream_schedule_save_token": "💾 Save authorization",
         "stream_schedule_token_saved": "Authorization data saved. Next time you won't need to re-authorize.",
         "channel_not_parsed": (
@@ -1702,12 +1707,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_mode_intro": (
             "С помощью этого меню вы можете создать расписание на неделю "
             "(с ближайшего понедельника по воскресенье) или поправить "
-            "слот только на один день.\n\n"
-            "<b>Пример:</b>\n"
-            "- 13 июля 15:30 Sovereign Syndicate\n"
-            "- 14 июля 15:30 Sovereign Syndicate\n"
-            "- 15 июля 15:30 Sovereign Syndicate\n"
-            "- 17 июля 15:30 Sovereign Syndicate"
+            "слот только на один день."
         ),
         "stream_schedule_mode_week_btn": "Создать расписание на неделю",
         "stream_schedule_mode_day_btn": "Поправить слоты на день",
@@ -1756,7 +1756,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "(разовые сегменты доступны только Partner/Affiliate)."
         ),
         "stream_schedule_publish_fail": "❌ Не удалось опубликовать расписание: {error}",
-        "stream_schedule_publish_partial": "⚠️ Опубликовано {ok}/{total} сегментов. Ошибки: {errors}",
+        "stream_schedule_publish_partial": "⚠️ Сохранено {ok} из {total}.\n{errors}",
+        "stream_schedule_err_recurring_time": (
+            "{date}: Twitch не даёт менять время у еженедельного слота таким способом."
+        ),
+        "stream_schedule_err_overlap": "{date}: это время пересекается с другим слотом.",
+        "stream_schedule_err_one_off": (
+            "{date}: разовые слоты доступны только Partner/Affiliate; нужен еженедельный слот."
+        ),
+        "stream_schedule_err_auth": "{date}: нет доступа к расписанию. Авторизуйтесь заново.",
+        "stream_schedule_err_not_found": "{date}: слот не найден — возможно, его уже удалили.",
+        "stream_schedule_err_generic": "{date}: не удалось сохранить этот слот.",
         "stream_schedule_save_token": "💾 Сохранить авторизацию",
         "stream_schedule_token_saved": "Данные авторизации сохранены. В следующий раз повторная авторизация не потребуется.",
         "channel_not_parsed": (

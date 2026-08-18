@@ -387,6 +387,12 @@ def main() -> None:
         Exception("403 Client Error: single segment creation not authorized for url: x")
     )
     assert not TwitchClient.is_one_off_schedule_forbidden(Exception("rate limit exceeded"))
+    assert TwitchClient.is_recurring_start_forbidden(
+        Exception(
+            "400 Client Error: FirstOccurrenceDate can't set FirstOccurrenceDate "
+            "on recurring segments for url: https://api.twitch.tv/helix/schedule/segment"
+        )
+    )
     assert TwitchClient.is_overlapping_schedule(
         Exception("400 Client Error: Segment cannot create overlapping segment for url: x")
     )
@@ -421,6 +427,9 @@ def main() -> None:
     assert tr("stream_schedule_duration_prompt_keep", "ru")
     assert tr("stream_schedule_more_prompt", "ru")
     assert tr("stream_schedule_add_slot", "en")
+    assert "Пример" not in tr("stream_schedule_mode_intro", "ru")
+    assert "Example" not in tr("stream_schedule_mode_intro", "en")
+    assert "{date}" in tr("stream_schedule_err_generic", "ru")
     assert tr("stream_schedule_duration_unsure", "en")
     from i18n import (
         main_menu,
