@@ -9601,11 +9601,9 @@ def _format_posthog_status_message(lang: str, snapshot: dict) -> str:
 
 
 async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Poll posthogstatus.com/us; notify admins on US Cloud changes."""
+    """Poll posthogstatus.com/us; notify admins and active beta testers on changes."""
     from config import ADMIN_USER_IDS
 
-    if not ADMIN_USER_IDS:
-        return
     try:
         summary = await asyncio.to_thread(analytics.fetch_posthog_status)
         fingerprint = analytics.posthog_us_fingerprint(summary)
@@ -9622,12 +9620,22 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     db: Database = bot_data["db"]
+    user_ids = set(ADMIN_USER_IDS)
+    user_ids.update(beta_features.user_ids_with_active_enrollment(db))
+    if not user_ids:
+        return
+
     snapshot = analytics.posthog_us_snapshot(summary)
-    for admin_id in ADMIN_USER_IDS:
-        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
-        await _send_dm_html(
-            context.bot, db, admin_id, _format_posthog_status_message(lang, snapshot)
-        )
+    messages = {
+        locale: _format_posthog_status_message(locale, snapshot)
+        for locale in SUPPORTED_LOCALES
+    }
+    locale_rows = db.get_user_locales(list(user_ids))
+    for uid in user_ids:
+        locale = locale_rows.get(uid) or DEFAULT_LOCALE
+        message = messages.get(locale) or messages[DEFAULT_LOCALE]
+        await _send_dm_html(context.bot, db, uid, message)
+        await asyncio.sleep(_BROADCAST_SEND_PAUSE)
 
 
 def _seconds_until_next_weekly_report() -> float:

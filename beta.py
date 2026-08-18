@@ -158,6 +158,20 @@ def enrollment_counts(db: Database, user_id: int) -> tuple[int, int]:
     return joined, total
 
 
+def user_ids_with_active_enrollment(db: Database) -> list[int]:
+    """Users opted into at least one currently alpha/beta feature."""
+    from demo_mode import is_active
+
+    feature_ids = [feat.id for feat in list_features(stages=_ACTIVE_STAGES)]
+    if not feature_ids:
+        return []
+    return [
+        uid
+        for uid in db.list_beta_enrolled_user_ids(feature_ids)
+        if not is_active(uid)
+    ]
+
+
 def grants_premium_feature(db: Database, user_id: int, premium_feature_id: str) -> bool:
     """Beta bypass for prem.has_feature_sync (alpha/beta stages only)."""
     from demo_mode import is_active
@@ -247,6 +261,16 @@ def _self_check() -> None:
         assert enrollment_counts(db, 1) == (1, 1)
         assert grants_premium_feature(db, 1, "alert_history")
         assert not grants_premium_feature(db, 1, "twitch_sync")
+        assert user_ids_with_active_enrollment(db) == [1]
+        db.set_beta_enrollment(1, "demo_feat", False)
+        assert user_ids_with_active_enrollment(db) == []
+        db.set_beta_enrollment(1, "demo_feat", True)
+        db.set_beta_enrollment(2, "retired_feat", True)
+        assert user_ids_with_active_enrollment(db) == [1]
+        db.upsert_user(3)
+        db.set_beta_enrollment(3, "demo_feat", True)
+        db.set_bot_blocked(3, True)
+        assert user_ids_with_active_enrollment(db) == [1]
         import config
 
         old_admins = config.ADMIN_USER_IDS
@@ -256,6 +280,11 @@ def _self_check() -> None:
             assert is_enrolled(db, 777, "demo_feat")
         finally:
             config.ADMIN_USER_IDS = old_admins
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw["features"][0]["stage"] = "ga"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        load_manifest(path)
+        assert user_ids_with_active_enrollment(db) == []
         load_manifest(_MANIFEST_PATH)
 
 

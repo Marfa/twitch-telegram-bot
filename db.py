@@ -980,6 +980,8 @@ class Database(Protocol):
 
     def list_beta_enrollments(self, user_id: int) -> set[str]: ...
 
+    def list_beta_enrolled_user_ids(self, feature_ids: list[str]) -> list[int]: ...
+
 
 class SqliteDatabase:
     def __init__(self, path: Path) -> None:
@@ -3276,6 +3278,25 @@ class SqliteDatabase:
                 (user_id,),
             ).fetchall()
         return {str(r["feature_id"]) for r in rows}
+
+    def list_beta_enrolled_user_ids(self, feature_ids: list[str]) -> list[int]:
+        unique = list(dict.fromkeys(str(fid) for fid in feature_ids if str(fid)))
+        if not unique:
+            return []
+        placeholders = ",".join("?" for _ in unique)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT e.user_id AS user_id
+                FROM user_beta_enrollments e
+                LEFT JOIN users u ON u.user_id = e.user_id
+                WHERE e.enrolled = 1
+                  AND e.feature_id IN ({placeholders})
+                  AND COALESCE(u.bot_blocked, 0) = 0
+                """,
+                unique,
+            ).fetchall()
+        return sorted(int(r["user_id"]) for r in rows)
 
 
 class PostgresDatabase:
@@ -5853,6 +5874,26 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return {str(r["feature_id"]) for r in rows}
+
+    def list_beta_enrolled_user_ids(self, feature_ids: list[str]) -> list[int]:
+        unique = list(dict.fromkeys(str(fid) for fid in feature_ids if str(fid)))
+        if not unique:
+            return []
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT DISTINCT e.user_id AS user_id
+                FROM user_beta_enrollments e
+                LEFT JOIN users u ON u.user_id = e.user_id
+                WHERE e.enrolled = TRUE
+                  AND e.feature_id = ANY(%s)
+                  AND COALESCE(u.bot_blocked, FALSE) = FALSE
+                """,
+                (unique,),
+            )
+            rows = cur.fetchall()
+        return sorted(int(r["user_id"]) for r in rows)
 
 
 def open_database(path: Path, database_url: str | None = None) -> Database:
