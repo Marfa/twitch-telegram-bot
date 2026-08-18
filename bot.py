@@ -8845,12 +8845,15 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
     features_block, kb_rows = _beta_mode_features_block(db, user_id, lang)
     text = t("beta_mode_menu", lang, features_block=features_block)
-    await query.edit_message_text(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=beta_mode_keyboard(lang, kb_rows),
-        link_preview_options=LinkPreviewOptions(is_disabled=True),
-    )
+    try:
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=beta_mode_keyboard(lang, kb_rows),
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
+    except BadRequest:
+        pass
     await context.bot.send_message(
         user_id,
         toast,
