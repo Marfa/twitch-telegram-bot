@@ -100,6 +100,9 @@ POSTHOG_HOST = (
 ).rstrip("/")
 # Shared secret for PostHog → bot Issue alerts (Bearer / query). Empty = endpoint off.
 POSTHOG_ISSUE_WEBHOOK_SECRET = os.getenv("POSTHOG_ISSUE_WEBHOOK_SECRET", "").strip()
+# Personal API key for polling Inbox reports API. Empty = polling off.
+POSTHOG_PERSONAL_API_KEY = os.getenv("POSHTOG_API_KEY_PERSONAL", "").strip()
+POSTHOG_PROJECT_ID = os.getenv("POSTHOG_PROJECT_ID", "554824").strip()
 
 
 def validate() -> None:

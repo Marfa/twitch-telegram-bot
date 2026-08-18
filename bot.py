@@ -10121,6 +10121,64 @@ async def notify_admins_posthog_issue(
             logger.warning("Cannot send PostHog issue to admin %s: %s", admin_id, exc)
 
 
+async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll PostHog Inbox reports API and notify admins about new ones."""
+    from config import POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID
+
+    if not POSTHOG_PERSONAL_API_KEY:
+        return
+
+    host = "https://us.posthog.com"
+    url = f"{host}/api/projects/{POSTHOG_PROJECT_ID}/signals/reports/?limit=10"
+
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            url, headers={"Authorization": f"Bearer {POSTHOG_PERSONAL_API_KEY}"}
+        )
+        raw = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(req, timeout=30).read()
+        )
+        data = json.loads(raw)
+    except Exception:
+        logger.warning("PostHog Inbox reports poll failed", exc_info=True)
+        return
+
+    reports = data.get("results") or []
+    if not reports:
+        return
+
+    seen: set[str] = context.application.bot_data.setdefault(
+        "_posthog_seen_reports", set()
+    )
+    first_run = not seen
+
+    for report in reports:
+        rid = str(report.get("id") or "")
+        if not rid or rid in seen:
+            continue
+        seen.add(rid)
+        if first_run:
+            continue
+        title = (report.get("title") or "").strip()
+        summary = (report.get("summary") or "").strip()
+        status = report.get("status") or ""
+        pr_url = report.get("implementation_pr_url") or ""
+        report_url = f"{host}/project/{POSTHOG_PROJECT_ID}/inbox"
+        if not title:
+            continue
+        payload = {
+            "kind": "report",
+            "name": title,
+            "description": summary,
+            "url": pr_url or report_url,
+            "fingerprint": rid,
+            "status": status,
+        }
+        await notify_admins_posthog_issue(context.application, payload)
+
+
 async def _restore_broadcast_jobs(app: Application) -> None:
     db: Database = app.bot_data["db"]
     now = datetime.now(timezone.utc)
@@ -10994,6 +11052,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
     app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)
+    app.job_queue.run_repeating(poll_posthog_inbox_reports, interval=300, first=60)
     app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
     app.job_queue.run_repeating(refresh_premium_twitch_job, interval=3600, first=120)
     app.job_queue.run_repeating(
