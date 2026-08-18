@@ -6,10 +6,14 @@ alwaysApply: false
 
 # Beta feature branch workflow
 
+## Key principle
+
+One bot instance runs on VPS from `main`. Feature code **must be merged into `main`** for live users to see it in Settings → 🧪 Beta mode. The beta gate (`beta_features.is_enabled()`) keeps the feature hidden until a user opts in — deploying a feature branch to VPS is NOT the intended model.
+
 ## When adding a new user-facing capability
 
 1. Create branch `feat/<slug>` (one feature per branch / Cursor chat).
-2. Add entry to [`beta/manifest.json`](beta/manifest.json):
+2. Add entry to [`beta/manifest.json`](beta/manifest.json) with `"stage": "beta"`:
 
 ```json
 {
@@ -19,14 +23,14 @@ alwaysApply: false
   "description_key": "beta_feat_<slug>_desc",
   "premium_feature_id": "<FEATURE_IDS id or omit>",
   "issue_label": "beta/<slug>",
-  "stage": "draft",
+  "stage": "beta",
   "created_at": "YYYY-MM-DD"
 }
 ```
 
 3. Add `beta_feat_<slug>` and `beta_feat_<slug>_desc` to `i18n.py` (en + ru).
-4. Create GitHub label `beta/<slug>`.
-5. Gate new behavior:
+4. Create GitHub label `beta/<slug>` via `gh label create`.
+5. Gate **all** new behavior behind the beta check — UI buttons, handlers, and data-path side effects (e.g. writing to new tables):
 
 ```python
 import beta as beta_features
@@ -35,22 +39,24 @@ if beta_features.is_enabled(db, user_id, "<slug>"):
     ...
 ```
 
-6. Set `stage` to `beta` when ready for testers (visible in Settings → Beta mode).
-7. Open PR; when ready for release add label `beta/ready-to-merge`.
-8. Update [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) if UX changes.
+6. Update [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) if UX changes.
+7. Open PR `feat/<slug>` → `main`.
+8. **Merge PR into `main`** and add label `beta/ready-to-merge` — this deploys gated code to live and starts the 7-day beta timer.
+
+Without merge into `main` the feature will NOT appear in Beta mode on the live bot.
 
 ## Lifecycle (automated)
 
-Daily workflow [`.github/workflows/beta-lifecycle.yml`](../.github/workflows/beta-lifecycle.yml) merges when:
+Daily workflow [`.github/workflows/beta-lifecycle.yml`](../.github/workflows/beta-lifecycle.yml) promotes to GA when **all** conditions are met:
 
 - `stage` is `beta`
-- open PR from `branch` has label `beta/ready-to-merge`
-- PR age ≥ 7 days
+- PR from `branch` has label `beta/ready-to-merge`
+- PR age ≥ 7 days since merge
 - no open Issues with `issue_label`
 - CI green
 
-After merge: `stage` → `ga` (beta UI hidden; premium rules apply to everyone — decision A).
+After promotion: `stage` → `ga` (beta UI hides the feature; premium rules apply to everyone — decision A).
 
 ## Premium during beta
 
-If `premium_feature_id` is set, enrolled users (and admins) get access via `prem.has_feature()` while `stage` is `alpha` or `beta`.
+If `premium_feature_id` is set, enrolled users (and admins) get access via `prem.has_feature()` while `stage` is `alpha` or `beta`. After GA the premium bypass is removed.
