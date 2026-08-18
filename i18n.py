@@ -2977,8 +2977,8 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(btn("admin_withdrawals", lang)),
+                KeyboardButton(btn("demo", lang)),
             ],
-            [KeyboardButton(btn("demo", lang))],
             [KeyboardButton(btn("back", lang))],
         ],
         resize_keyboard=True,

@@ -484,7 +484,13 @@ def main() -> None:
         assert watch_suggest_keyboard(loc).inline_keyboard[0][0].callback_data == (
             "watch:again"
         )
-        admin_btns = [b.text for row in admin_menu(loc).keyboard for b in row]
+        admin_kb = admin_menu(loc).keyboard
+        assert [[b.text for b in row] for row in admin_kb] == [
+            [btn("broadcast", loc), btn("stats", loc)],
+            [btn("admin_withdrawals", loc), btn("demo", loc)],
+            [btn("back", loc)],
+        ]
+        admin_btns = [b.text for row in admin_kb for b in row]
         assert btn("create_schedule", loc) not in admin_btns
         dur_kb = stream_schedule_duration_keyboard(loc)
         assert any(
