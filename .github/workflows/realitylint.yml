@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Stub .env for compose lint
+        run: cp .env.example .env
       - uses: voonterr/realitylint@v1
         with:
           all-docs: "true"

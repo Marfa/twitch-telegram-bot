@@ -484,10 +484,17 @@ def main() -> None:
         subs_kb_pause = subscriptions_menu(loc, pause_notifications=True).keyboard
         assert [[b.text for b in row] for row in subs_kb_pause] == [
             [btn("list", loc), btn("edit", loc)],
-            [btn("delete", loc)],
-            [btn("pause_notifications", loc)],
+            [btn("delete", loc), btn("pause_notifications", loc)],
             [btn("back", loc)],
         ]
+        for subs_rows in (subs_kb, subs_kb_pause):
+            for i, row in enumerate(subs_rows):
+                if i == len(subs_rows) - 1 and len(row) == 1:
+                    continue
+                assert len(row) == 2, (
+                    f"subscriptions_menu row {i} must be paired: "
+                    f"{[b.text for b in row]}"
+                )
         settings_kb = settings_menu(loc).keyboard
         ignored_row = next(
             row

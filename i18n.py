@@ -2857,22 +2857,27 @@ def main_menu(
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
+def _pair_reply_rows(buttons: list[KeyboardButton]) -> list[list[KeyboardButton]]:
+    """Two buttons per row; a lone last button gets its own row."""
+    rows: list[list[KeyboardButton]] = []
+    i = 0
+    while i + 1 < len(buttons):
+        rows.append([buttons[i], buttons[i + 1]])
+        i += 2
+    if i < len(buttons):
+        rows.append([buttons[i]])
+    return rows
+
+
 def subscriptions_menu(
     lang: str, *, pause_notifications: bool = False
 ) -> ReplyKeyboardMarkup:
-    rows: list[list[KeyboardButton]] = [
-        [
-            KeyboardButton(btn("list", lang)),
-            KeyboardButton(btn("edit", lang)),
-        ],
-        [KeyboardButton(btn("delete", lang))],
-    ]
+    keys = ["list", "edit", "delete"]
     if pause_notifications:
-        rows.append([KeyboardButton(btn("pause_notifications", lang))])
-        rows.append([KeyboardButton(btn("back", lang))])
-    else:
-        rows[1].append(KeyboardButton(btn("back", lang)))
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+        keys.append("pause_notifications")
+    keys.append("back")
+    buttons = [KeyboardButton(btn(k, lang)) for k in keys]
+    return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
