@@ -6031,8 +6031,17 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
     state = create_oauth_state(user_id, lang)
     url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
     analytics.capture(user_id, "twitch_import_started")
+    prompt = t("import_oauth_prompt", lang)
+    sync = db.get_twitch_sync(user_id)
+    if sync and sync.period_days > 0:
+        prompt += "\n\n" + t(
+            "import_oauth_sync_note",
+            lang,
+            days=sync.period_days,
+            btn_settings=btn("settings", lang),
+        )
     await update.effective_message.reply_text(
-        t("import_oauth_prompt", lang),
+        prompt,
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton(t("import_oauth_button", lang), url=url)]]
         ),
@@ -9328,9 +9337,6 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer()
         return
     title = t(feat.title_key, lang)
-    if beta_features.is_admin(user_id) and not demo_mode.is_active(user_id):
-        await query.answer(t("beta_mode_admin_toggle", lang), show_alert=True)
-        return
     enrolled = beta_features.is_enrolled(db, user_id, feature_id)
     new_state = not enrolled
     db.set_beta_enrollment(user_id, feature_id, new_state)

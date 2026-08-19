@@ -123,7 +123,14 @@ def is_admin(user_id: int) -> bool:
 
 
 def _user_enrolled(db: Database, user_id: int, feature_id: str) -> bool:
-    return db.is_beta_enrolled(user_id, feature_id)
+    explicit = db.beta_enrollment_explicit(user_id, feature_id)
+    if explicit is not None:
+        return explicit
+    from demo_mode import is_active
+
+    if is_admin(user_id) and not is_active(user_id):
+        return True
+    return False
 
 
 def is_enabled(db: Database, user_id: int, feature_id: str) -> bool:
@@ -135,8 +142,6 @@ def is_enabled(db: Database, user_id: int, feature_id: str) -> bool:
     feat = get_feature(feature_id)
     if feat is None or feat.stage not in _ACTIVE_STAGES:
         return False
-    if is_admin(user_id):
-        return True
     return _user_enrolled(db, user_id, feature_id)
 
 
@@ -145,10 +150,6 @@ def is_enrolled(db: Database, user_id: int, feature_id: str) -> bool:
     feat = get_feature(feature_id)
     if feat is None or feat.stage not in _VISIBLE_STAGES:
         return False
-    from demo_mode import is_active
-
-    if is_admin(user_id) and not is_active(user_id):
-        return True
     return _user_enrolled(db, user_id, feature_id)
 
 
@@ -182,11 +183,10 @@ def grants_premium_feature(db: Database, user_id: int, premium_feature_id: str) 
         return False
     if not premium_feature_id:
         return False
-    admin = is_admin(user_id)
     for feat in list_features(stages=_ACTIVE_STAGES):
         if feat.premium_feature_id != premium_feature_id:
             continue
-        if admin or _user_enrolled(db, user_id, feat.id):
+        if _user_enrolled(db, user_id, feat.id):
             return True
     return False
 
@@ -280,6 +280,11 @@ def _self_check() -> None:
         try:
             assert is_enabled(db, 777, "demo_feat")
             assert is_enrolled(db, 777, "demo_feat")
+            db.set_beta_enrollment(777, "demo_feat", False)
+            assert not is_enabled(db, 777, "demo_feat")
+            assert not is_enrolled(db, 777, "demo_feat")
+            db.set_beta_enrollment(777, "demo_feat", True)
+            assert is_enabled(db, 777, "demo_feat")
         finally:
             config.ADMIN_USER_IDS = old_admins
         raw = json.loads(path.read_text(encoding="utf-8"))

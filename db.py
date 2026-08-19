@@ -1045,6 +1045,8 @@ class Database(Protocol):
 
     def is_beta_enrolled(self, user_id: int, feature_id: str) -> bool: ...
 
+    def beta_enrollment_explicit(self, user_id: int, feature_id: str) -> bool | None: ...
+
     def set_beta_enrollment(
         self, user_id: int, feature_id: str, enrolled: bool
     ) -> None: ...
@@ -3555,6 +3557,10 @@ class SqliteDatabase:
             return removed
 
     def is_beta_enrolled(self, user_id: int, feature_id: str) -> bool:
+        explicit = self.beta_enrollment_explicit(user_id, feature_id)
+        return explicit is True
+
+    def beta_enrollment_explicit(self, user_id: int, feature_id: str) -> bool | None:
         with self._conn() as conn:
             row = conn.execute(
                 """
@@ -3563,7 +3569,9 @@ class SqliteDatabase:
                 """,
                 (user_id, feature_id),
             ).fetchone()
-        return row is not None and bool(row["enrolled"])
+        if row is None:
+            return None
+        return bool(row["enrolled"])
 
     def set_beta_enrollment(
         self, user_id: int, feature_id: str, enrolled: bool
@@ -3586,11 +3594,14 @@ class SqliteDatabase:
             else:
                 conn.execute(
                     """
-                    UPDATE user_beta_enrollments
-                    SET enrolled = 0, opted_out_at = ?
-                    WHERE user_id = ? AND feature_id = ?
+                    INSERT INTO user_beta_enrollments
+                        (user_id, feature_id, enrolled, opted_in_at, opted_out_at)
+                    VALUES (?, ?, 0, ?, ?)
+                    ON CONFLICT(user_id, feature_id) DO UPDATE SET
+                        enrolled = 0,
+                        opted_out_at = excluded.opted_out_at
                     """,
-                    (now, user_id, feature_id),
+                    (user_id, feature_id, now, now),
                 )
 
     def list_beta_enrollments(self, user_id: int) -> set[str]:
@@ -6368,6 +6379,10 @@ class PostgresDatabase:
             return removed
 
     def is_beta_enrolled(self, user_id: int, feature_id: str) -> bool:
+        explicit = self.beta_enrollment_explicit(user_id, feature_id)
+        return explicit is True
+
+    def beta_enrollment_explicit(self, user_id: int, feature_id: str) -> bool | None:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -6378,7 +6393,9 @@ class PostgresDatabase:
                 (user_id, feature_id),
             )
             row = cur.fetchone()
-        return row is not None and bool(row["enrolled"])
+        if row is None:
+            return None
+        return bool(row["enrolled"])
 
     def set_beta_enrollment(
         self, user_id: int, feature_id: str, enrolled: bool
@@ -6401,9 +6418,12 @@ class PostgresDatabase:
             else:
                 cur.execute(
                     """
-                    UPDATE user_beta_enrollments
-                    SET enrolled = FALSE, opted_out_at = NOW()
-                    WHERE user_id = %s AND feature_id = %s
+                    INSERT INTO user_beta_enrollments
+                        (user_id, feature_id, enrolled, opted_in_at, opted_out_at)
+                    VALUES (%s, %s, FALSE, NOW(), NOW())
+                    ON CONFLICT (user_id, feature_id) DO UPDATE SET
+                        enrolled = FALSE,
+                        opted_out_at = EXCLUDED.opted_out_at
                     """,
                     (user_id, feature_id),
                 )

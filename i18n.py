@@ -703,11 +703,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{features_block}"
         ),
         "beta_mode_empty": "There are no active beta features right now.",
-        "beta_mode_admin_note": "Admins have all beta features enabled automatically.",
+        "beta_mode_admin_note": (
+            "Admins have all beta features enabled by default; "
+            "you can turn them off here."
+        ),
         "beta_mode_join": "Join",
         "beta_mode_leave": "Leave",
         "beta_mode_report_bug": "🐛 Report bug",
-        "beta_mode_admin_toggle": "Admins always have beta access.",
         "beta_mode_opt_in": "✅ Joined beta: {name}",
         "beta_mode_opt_out": "Left beta: {name}",
         "beta_feat_deleted_subscriptions_cart": "Deleted subscriptions cart",
@@ -961,6 +963,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "subs_list": "Your subscriptions (tap to enable/disable):\n\n",
         "import_oauth_prompt": (
             "Authorize the bot on Twitch to import channels you follow."
+        ),
+        "import_oauth_sync_note": (
+            "Subscription sync is enabled every {days} day(s).\n"
+            "Manage it in {btn_settings}."
         ),
         "import_oauth_button": "Authorize on Twitch",
         "import_oauth_unavailable": (
@@ -2095,11 +2101,13 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{features_block}"
         ),
         "beta_mode_empty": "Сейчас нет активных бета-функций.",
-        "beta_mode_admin_note": "Админам все бета-функции включены автоматически.",
+        "beta_mode_admin_note": (
+            "У админов все бета-функции включены по умолчанию; "
+            "здесь их можно отключить."
+        ),
         "beta_mode_join": "Присоединиться",
         "beta_mode_leave": "Выйти",
         "beta_mode_report_bug": "🐛 Сообщить об ошибке",
-        "beta_mode_admin_toggle": "У админов бета-доступ всегда включён.",
         "beta_mode_opt_in": "✅ Вы в бете: {name}",
         "beta_mode_opt_out": "Вы вышли из беты: {name}",
         "beta_feat_deleted_subscriptions_cart": "Корзина удалённых подписок",
@@ -2356,7 +2364,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "subs_list": "Ваши подписки (нажмите, чтобы включить/выключить):\n\n",
         "import_oauth_prompt": (
-            "Авторизуйте бота на Twitch, чтобы импортировать каналы, на которые вы подписаны."
+            "Авторизуйте бота на Twitch, чтобы импортировать каналы, "
+            "на которые вы подписаны."
+        ),
+        "import_oauth_sync_note": (
+            "У Вас включена синхронизация подписок с периодом раз в {days} дн.\n"
+            "Для управления перейдите в {btn_settings}."
         ),
         "import_oauth_button": "Авторизоваться на Twitch",
         "import_oauth_unavailable": (
