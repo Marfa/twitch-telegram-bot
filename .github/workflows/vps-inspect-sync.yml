@@ -27,10 +27,17 @@ jobs:
             docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "
               SELECT u.user_id,
                      u.receive_sync_updates,
+                     u.premium_permanent,
+                     u.premium_stars_until,
+                     u.premium_twitch_active,
+                     COALESCE(u.premium_trial_until, 0) AS premium_trial_until,
+                     COALESCE(u.premium_features, '') AS premium_features,
+                     u.first_seen,
                      ts.period_days,
                      ts.next_sync_at,
                      ts.last_sync_at,
-                     (SELECT COUNT(*) FROM subscriptions s WHERE s.owner_id = u.user_id) AS subs
+                     (SELECT COUNT(*) FROM subscriptions s WHERE s.owner_id = u.user_id) AS subs,
+                     (SELECT COUNT(*) FROM subscriptions s WHERE s.owner_id = u.user_id AND s.enabled) AS enabled_subs
               FROM users u
               LEFT JOIN twitch_sync ts ON ts.owner_id = u.user_id
               WHERE u.user_id = ${OID};
