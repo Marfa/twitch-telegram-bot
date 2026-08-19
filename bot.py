@@ -236,11 +236,13 @@ _POSTHOG_OVERALL_KEYS = {
     STREAM_SCHEDULE_FIX_TIME,
     STREAM_SCHEDULE_FIX_SLOTS,
     STREAM_SCHEDULE_MORE,
-) = range(58)
+    PAUSE_ALERTS_DAYS,
+) = range(59)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
 _SYNC_PERIOD_MAX = 365
+_PAUSE_DAYS_MAX = 365
 _WATCH_MAX_CATS = 5
 _WATCH_SUGGEST_N = 5
 _WATCH_CATEGORY_NOTIFY_CAP = 5
@@ -376,10 +378,33 @@ def _sub_in_current_mode(sub: Subscription, owner_id: int) -> bool:
 
 
 _CART_BETA_ID = "deleted-subscriptions-cart"
+_PAUSE_NOTIFICATIONS_BETA_ID = "pause-notifications"
 
 
 def _deleted_subscriptions_cart_enabled(db: Database, user_id: int) -> bool:
     return beta_features.is_enabled(db, user_id, _CART_BETA_ID)
+
+
+def _pause_notifications_enabled(db: Database, user_id: int) -> bool:
+    return beta_features.is_enabled(db, user_id, _PAUSE_NOTIFICATIONS_BETA_ID)
+
+
+def _format_pause_until(until_ts: int, lang: str) -> str:
+    dt = datetime.fromtimestamp(until_ts, tz=timezone.utc).astimezone(SCHEDULE_TZ)
+    return f"{dt.day:02d}.{dt.month:02d}.{dt.year} {dt.hour:02d}:{dt.minute:02d}"
+
+
+def _user_notifications_paused(db: Database, user_id: int) -> bool:
+    if not _pause_notifications_enabled(db, user_id):
+        return False
+    until = db.get_notifications_paused_until(user_id)
+    return until > int(datetime.now(timezone.utc).timestamp())
+
+
+def _subs_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
+    return subscriptions_menu(
+        lang, pause_notifications=_pause_notifications_enabled(db, user_id)
+    )
 
 
 def import_followed_as_subscriptions(
@@ -1700,6 +1725,8 @@ async def _send_notification(
     stream_id: str = "",
     vod_offset_seconds: int | None = None,
 ) -> bool:
+    if _user_notifications_paused(db, sub.owner_id):
+        return True
     if sub.delete_previous and sub.dest_type != "dm":
         to_delete: list[tuple[int, int]] = []
         seen_msg: set[int] = set()
@@ -5790,10 +5817,100 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def open_subscriptions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
     await update.effective_message.reply_text(
         t("menu_subs", lang),
-        reply_markup=subscriptions_menu(lang),
+        reply_markup=_subs_kb(lang, db, user_id),
     )
+
+
+async def start_pause_notifications(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _pause_notifications_enabled(db, user_id):
+        return ConversationHandler.END
+    text = t("pause_notifications_prompt", lang)
+    until = db.get_notifications_paused_until(user_id)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if until > now_ts:
+        text = (
+            text
+            + "\n\n"
+            + t(
+                "pause_notifications_current",
+                lang,
+                until=_format_pause_until(until, lang),
+            )
+        )
+    await update.effective_message.reply_text(
+        text,
+        reply_markup=_wizard(lang, back=False),
+    )
+    return PAUSE_ALERTS_DAYS
+
+
+async def receive_pause_notifications_days(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _pause_notifications_enabled(db, user_id):
+        await update.effective_message.reply_text(
+            t("menu_subs", lang),
+            reply_markup=_subs_kb(lang, db, user_id),
+        )
+        return ConversationHandler.END
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(
+            t("cancelled", lang),
+            reply_markup=_subs_kb(lang, db, user_id),
+        )
+        return ConversationHandler.END
+    if not raw.isdigit() or int(raw) > _PAUSE_DAYS_MAX:
+        await update.effective_message.reply_text(
+            t("pause_notifications_invalid", lang, max_days=_PAUSE_DAYS_MAX)
+        )
+        return PAUSE_ALERTS_DAYS
+    days = int(raw)
+    if days == 0:
+        db.set_notifications_paused_until(user_id, 0)
+        text = t("pause_notifications_resumed", lang)
+    else:
+        until = int(
+            (datetime.now(timezone.utc) + timedelta(days=days)).timestamp()
+        )
+        db.set_notifications_paused_until(user_id, until)
+        text = t(
+            "pause_notifications_applied",
+            lang,
+            days=days,
+            until=_format_pause_until(until, lang),
+        )
+    analytics.capture(user_id, "notifications_paused", {"days": days})
+    await update.effective_message.reply_text(
+        text,
+        reply_markup=_subs_kb(lang, db, user_id),
+    )
+    return ConversationHandler.END
+
+
+async def cancel_pause_notifications(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    context.user_data.clear()
+    await update.effective_message.reply_text(
+        t("cancelled", lang),
+        reply_markup=_subs_kb(lang, db, user_id),
+    )
+    return ConversationHandler.END
 
 
 async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6013,7 +6130,7 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs", lang),
-            reply_markup=subscriptions_menu(lang),
+            reply_markup=_subs_kb(lang, db, user_id),
         )
         return
 
@@ -6034,7 +6151,7 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
     await update.effective_message.reply_text(
         t("menu_subs", lang),
-        reply_markup=subscriptions_menu(lang),
+        reply_markup=_subs_kb(lang, db, user_id),
     )
 
 
@@ -6124,7 +6241,7 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
-            reply_markup=subscriptions_menu(lang),
+            reply_markup=_subs_kb(lang, db, user_id),
         )
         return
 
@@ -6138,7 +6255,7 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(text, reply_markup=markup)
     await update.effective_message.reply_text(
         t("menu_subs", lang),
-        reply_markup=subscriptions_menu(lang),
+        reply_markup=_subs_kb(lang, db, user_id),
     )
 
 
@@ -6246,6 +6363,9 @@ async def _ask_sync_unfollow_if_needed(
     ask_streamers: list[dict[str, str]],
 ) -> None:
     if not ask_streamers:
+        return
+    db: Database = application.bot_data["db"]
+    if _user_notifications_paused(db, owner_id):
         return
     _pending_sync_unfollows(application)[owner_id] = {
         "streamers": ask_streamers,
@@ -6717,7 +6837,11 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
         imported, skipped, limited, removed, ask_streamers = result
         lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
         notify = db.get_receive_sync_updates(row.owner_id) or limited > 0 or removed > 0
-        if notify and (imported or limited or removed):
+        if (
+            notify
+            and (imported or limited or removed)
+            and not _user_notifications_paused(db, row.owner_id)
+        ):
             limit_note, removed_note = _sync_result_notes(
                 lang, limited=limited, removed=removed
             )
@@ -7175,7 +7299,7 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not subs:
         await update.effective_message.reply_text(
             t("no_subs_short", lang),
-            reply_markup=subscriptions_menu(lang),
+            reply_markup=_subs_kb(lang, db, user_id),
         )
         return
     context.user_data["delete_selected"] = set()
@@ -7200,7 +7324,7 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
     await update.effective_message.reply_text(
         t("menu_subs", lang),
-        reply_markup=subscriptions_menu(lang),
+        reply_markup=_subs_kb(lang, db, user_id),
     )
 
 
@@ -7747,6 +7871,8 @@ async def _send_dm_html(
     reply_markup=None,
 ) -> str:
     """Send one DM. Returns 'sent', 'blocked', or 'failed'."""
+    if _user_notifications_paused(db, uid):
+        return "sent"
     kwargs: dict = {}
     if reply_markup is not None:
         kwargs["reply_markup"] = reply_markup
@@ -9565,6 +9691,8 @@ async def notify_whisper_received(application: Application, event: Any) -> None:
     for alert in alerts:
         if db.is_bot_blocked(alert.owner_id):
             continue
+        if _user_notifications_paused(db, alert.owner_id):
+            continue
         lang = db.get_user_locale(alert.owner_id) or DEFAULT_LOCALE
         to_login = str(getattr(event, "to_user_login", "") or "") or alert.twitch_login
         url = whisper_conversation_url(
@@ -9594,6 +9722,8 @@ async def on_whisper_eventsub_revoked(
     owner_ids = db.disable_whisper_alerts_for_twitch_user(twitch_user_id)
     for owner_id in owner_ids:
         if db.is_bot_blocked(owner_id):
+            continue
+        if _user_notifications_paused(db, owner_id):
             continue
         lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
         try:
@@ -9724,6 +9854,8 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
     if sub.twitch_user_id not in live_streams:
         if silent_offline:
+            return
+        if _user_notifications_paused(db, sub.owner_id):
             return
         preview = render_template(
             sub.message_template,
@@ -10984,6 +11116,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(_btn_filter("create_schedule"), start_stream_schedule),
             MessageHandler(_btn_filter("language"), start_language_change),
             MessageHandler(_btn_filter("ignored_words"), start_ignored_words),
+            MessageHandler(_btn_filter("pause_notifications"), start_pause_notifications),
             MessageHandler(_btn_filter("broadcast_new"), admin_broadcast_start),
             CallbackQueryHandler(on_import_mode_sync, pattern=r"^import_mode:sync$"),
             CallbackQueryHandler(on_sync_change_period, pattern=r"^sync:period$"),
@@ -11381,6 +11514,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     receive_watch_save_callback, pattern=r"^watch_save:"
                 ),
             ],
+            PAUSE_ALERTS_DAYS: [
+                MessageHandler(
+                    _btn_filter("wizard_cancel"), cancel_pause_notifications
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_pause_notifications_days
+                ),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
@@ -11456,6 +11597,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("list")
                 | _btn_filter("edit")
                 | _btn_filter("delete")
+                | _btn_filter("pause_notifications")
                 | _btn_filter("alert_history")
                 | _btn_filter("other")
                 | _btn_filter("settings")

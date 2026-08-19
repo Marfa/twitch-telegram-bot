@@ -18,6 +18,15 @@
       "issue_label": "beta/schedule-fix-day",
       "stage": "beta",
       "created_at": "2026-08-18"
+    },
+    {
+      "id": "pause-notifications",
+      "branch": "feat/pause-notifications",
+      "title_key": "beta_feat_pause_notifications",
+      "description_key": "beta_feat_pause_notifications_desc",
+      "issue_label": "beta/pause-notifications",
+      "stage": "beta",
+      "created_at": "2026-08-19"
     }
   ]
 }
