@@ -426,6 +426,11 @@ def import_followed_as_subscriptions(
         if count >= limit:
             limited += 1
             continue
+        sub_enabled = False
+        if enabled:
+            sub_enabled = prem.may_enable_subscription(
+                db, owner_id, demo=is_demo
+            )
         sub_id = db.add_subscription(
             owner_id=owner_id,
             twitch_username=login,
@@ -435,7 +440,7 @@ def import_followed_as_subscriptions(
             chat_id=owner_id,
             thread_id=None,
             disable_link_preview=True,
-            enabled=enabled,
+            enabled=sub_enabled,
             from_twitch_sync=True,
             is_demo=is_demo,
         )
@@ -6627,6 +6632,9 @@ async def _sync_owner_follows(
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
     db: Database = application.bot_data["db"]
+    if not prem.has_feature_sync(db, row.owner_id, "twitch_sync"):
+        logger.info("Skipping Twitch sync for owner %s: no twitch_sync feature", row.owner_id)
+        return 0, 0, 0, 0, []
     twitch: TwitchClient = application.bot_data["twitch"]
     lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
     now = datetime.now(timezone.utc)
@@ -6785,13 +6793,41 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     owner_id = query.from_user.id
     lang = _user_lang(context, owner_id)
     db: Database = context.application.bot_data["db"]
+    demo = demo_mode.is_active(owner_id)
+    slots = prem.active_subscription_slots(db, owner_id, demo=demo)
+    if not slots.unlimited and slots.remaining <= 0:
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_active_limit", lang, limit=prem.free_active_limit())
+        )
+        await send_premium_screen(context.bot, owner_id, lang, db)
+        return
+    max_count = None if slots.unlimited else slots.remaining
     count = db.enable_all_subscriptions(
-        owner_id, demo=demo_mode.is_active(owner_id)
+        owner_id, demo=demo, max_count=max_count
     )
-    if count:
-        await query.edit_message_text(t("enable_all_done", lang, count=count))
-    else:
+    if not count:
         await query.edit_message_text(t("enable_all_none", lang))
+        return
+    if not slots.unlimited:
+        still_paused = sum(
+            1
+            for s in _subs_for_owner(db, owner_id)
+            if not s.enabled and not getattr(s, "trial_paused", False)
+        )
+        if still_paused > 0:
+            await query.edit_message_text(
+                t(
+                    "enable_all_partial",
+                    lang,
+                    count=count,
+                    limit=prem.free_active_limit(),
+                    remaining=still_paused,
+                )
+            )
+            return
+    await query.edit_message_text(t("enable_all_done", lang, count=count))
 
 
 async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7415,10 +7451,17 @@ async def on_delete_cart_restore_go(
     order: list[int] = context.user_data.get("delete_cart_order") or []
     selected_in_order = [cid for cid in order if cid in selected]
     restore_ids = selected_in_order[:remaining]
-    restored = db.restore_deleted_subscriptions(
-        user_id, restore_ids, days=days, is_demo=is_demo
+    active_slots = prem.active_subscription_slots(db, user_id, demo=is_demo)
+    max_enabled = None if active_slots.unlimited else active_slots.remaining
+    restored, enabled_restored = db.restore_deleted_subscriptions(
+        user_id,
+        restore_ids,
+        days=days,
+        is_demo=is_demo,
+        max_enabled=max_enabled,
     )
     limit_skipped = max(0, len(selected_in_order) - remaining)
+    paused_due_active = max(0, restored - enabled_restored)
 
     # Re-load cart (restored items disappear from DB cart).
     items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
@@ -7436,6 +7479,13 @@ async def on_delete_cart_restore_go(
         )
     else:
         restored_text = t("cart_restored", lang, count=restored)
+    if paused_due_active > 0:
+        restored_text += t(
+            "cart_restored_active_paused",
+            lang,
+            paused=paused_due_active,
+            limit=prem.free_active_limit(),
+        )
     if not items:
         main_text = t("cart_empty", lang, days=days)
     else:

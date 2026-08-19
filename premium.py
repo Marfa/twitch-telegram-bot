@@ -460,23 +460,60 @@ def twitch_channel_login() -> str:
     return PREMIUM_TWITCH_LOGIN
 
 
-def can_enable_more(db: Database, user_id: int) -> bool:
+@dataclass(frozen=True)
+class ActiveSubscriptionSlots:
+    unlimited: bool
+    remaining: int
+
+
+def active_subscription_slots(
+    db: Database, user_id: int, *, demo: bool | None = None
+) -> ActiveSubscriptionSlots:
+    """Single source of truth for the free active-alert cap (extra_alerts bypass).
+
+    Use `.remaining` for bulk caps (enable-all, restore, sync import).
+    Use `may_enable_subscription()` for a yes/no before enabling one row.
+    """
     from demo_mode import is_active
 
     ensure_trial_expired(db, user_id)
-    demo = is_active(user_id)
+    if demo is None:
+        demo = is_active(user_id)
     if not demo and has_feature_sync(db, user_id, "extra_alerts"):
+        return ActiveSubscriptionSlots(unlimited=True, remaining=0)
+    remaining = max(
+        0,
+        PREMIUM_FREE_ACTIVE_LIMIT
+        - db.count_enabled_subscriptions(user_id, demo=demo),
+    )
+    return ActiveSubscriptionSlots(unlimited=False, remaining=remaining)
+
+
+def may_enable_subscription(
+    db: Database, user_id: int, *, demo: bool | None = None
+) -> bool:
+    slots = active_subscription_slots(db, user_id, demo=demo)
+    return slots.unlimited or slots.remaining > 0
+
+
+async def may_enable_subscription_async(
+    bot: Bot, db: Database, user_id: int, *, demo: bool | None = None
+) -> bool:
+    from demo_mode import is_active
+
+    if demo is None:
+        demo = is_active(user_id)
+    if not demo and await has_feature(bot, db, user_id, "extra_alerts"):
         return True
-    return db.count_enabled_subscriptions(user_id, demo=demo) < PREMIUM_FREE_ACTIVE_LIMIT
+    return may_enable_subscription(db, user_id, demo=demo)
+
+
+def can_enable_more(db: Database, user_id: int) -> bool:
+    return may_enable_subscription(db, user_id)
 
 
 async def can_enable_more_async(bot: Bot, db: Database, user_id: int) -> bool:
-    from demo_mode import is_active
-
-    if await has_feature(bot, db, user_id, "extra_alerts"):
-        return True
-    demo = is_active(user_id)
-    return db.count_enabled_subscriptions(user_id, demo=demo) < PREMIUM_FREE_ACTIVE_LIMIT
+    return await may_enable_subscription_async(bot, db, user_id)
 
 
 def ensure_trial_expired(db: Database, user_id: int) -> bool:

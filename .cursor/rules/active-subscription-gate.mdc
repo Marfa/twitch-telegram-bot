@@ -1,0 +1,45 @@
+---
+description: Active subscription limit gate and new-feature checklist (Premium free tier)
+alwaysApply: true
+---
+
+# Active subscription gate
+
+One source of truth: `premium.active_subscription_slots()` and `premium.may_enable_subscription()` in [`premium.py`](premium.py).
+
+- **`active_subscription_slots(db, user_id, *, demo=None)`** → `ActiveSubscriptionSlots(unlimited, remaining)` — for bulk ops (cap how many rows to enable).
+- **`may_enable_subscription(db, user_id, *, demo=None)`** → `bool` — before setting `enabled=True` on create/restore/sync for one row.
+- **`may_enable_subscription_async(bot, db, user_id, *, demo=None)`** — same in handlers (includes free-chat Premium via `has_feature`).
+- **`can_enable_more` / `can_enable_more_async`** — thin aliases; do not reimplement the limit elsewhere.
+
+Do **not** set `enabled=True` on new/restored/bulk-enabled subscriptions without going through the gate.
+
+Separate limits (do not confuse):
+
+| Limit | Config | What it caps |
+|-------|--------|--------------|
+| Active alerts (free) | `PREMIUM_FREE_ACTIVE_LIMIT` (5) | `enabled=True` count — **this gate** |
+| Total subscriptions | `MAX_SUBSCRIPTIONS_PER_OWNER` | all rows (active + paused) |
+| Twitch auto-sync access | Premium `twitch_sync` | who may configure/run follow sync |
+
+Bypass: `extra_alerts` feature or full Premium plan (`has_feature_sync` / `may_enable_subscription_async`).
+
+---
+
+## Checklist — new feature (before merge)
+
+If the feature touches subscriptions, imports, sync, restore, or bulk enable, **complete every item**:
+
+1. **Gate** — Any path that creates a subscription or flips `enabled` to `True` uses `may_enable_subscription` / `active_subscription_slots` (or existing toggle via `can_enable_more_async`). No raw `enabled=True` without the gate except demo seed (`is_demo=True`) or user already on full Premium path documented in code review.
+
+2. **Grep** — Search the diff for `enabled=True`, `enable_all`, `restore_deleted`, `import_followed`, `SET enabled`. Each hit must either use the gate or be listed as exempt with reason.
+
+3. **Total vs active** — If the feature adds rows, also check `MAX_SUBSCRIPTIONS_PER_OWNER` where other create paths check it.
+
+4. **Premium feature** — If the feature is Premium-gated (`has_feature`), confirm expired Premium does not leave a background job running that bypasses the active gate (see `_sync_owner_follows` + `twitch_sync` check).
+
+5. **User notice** — If the user hits a limit (active or total), they get a Telegram message — not silent failure.
+
+6. **self_check** — Non-trivial bulk/enable logic: add or extend a case in [`self_check.py`](self_check.py) with a **free** test user (no `extra_alerts`) proving the 6th subscription stays paused when 5 are active.
+
+7. **i18n** — New user-facing limit/partial-success strings in `i18n.py` (en + ru).

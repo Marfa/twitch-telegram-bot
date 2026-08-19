@@ -717,7 +717,9 @@ class Database(Protocol):
 
     def toggle_subscription(self, sub_id: int, owner_id: int) -> bool | None: ...
 
-    def enable_all_subscriptions(self, owner_id: int, *, demo: bool = False) -> int: ...
+    def enable_all_subscriptions(
+        self, owner_id: int, *, demo: bool = False, max_count: int | None = None
+    ) -> int: ...
 
     def delete_subscription(self, sub_id: int, owner_id: int, *, to_cart: bool = True) -> bool: ...
 
@@ -737,7 +739,8 @@ class Database(Protocol):
         *,
         days: int,
         is_demo: bool,
-    ) -> int: ...
+        max_enabled: int | None = None,
+    ) -> tuple[int, int]: ...
 
     def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool: ...
 
@@ -1600,14 +1603,22 @@ class SqliteDatabase:
             )
         return bool(new_state)
 
-    def enable_all_subscriptions(self, owner_id: int, *, demo: bool = False) -> int:
+    def enable_all_subscriptions(
+        self, owner_id: int, *, demo: bool = False, max_count: int | None = None
+    ) -> int:
+        sub = """
+            SELECT id FROM subscriptions
+            WHERE owner_id = ? AND enabled = 0 AND is_demo = ? AND trial_paused = 0
+            ORDER BY id
+        """
+        params: list[object] = [owner_id, int(bool(demo))]
+        if max_count is not None:
+            sub += " LIMIT ?"
+            params.append(max(0, int(max_count)))
         with self._conn() as conn:
             cur = conn.execute(
-                """
-                UPDATE subscriptions SET enabled = 1
-                WHERE owner_id = ? AND enabled = 0 AND is_demo = ?
-                """,
-                (owner_id, int(bool(demo))),
+                f"UPDATE subscriptions SET enabled = 1 WHERE id IN ({sub})",
+                params,
             )
             return int(cur.rowcount)
 
@@ -1697,15 +1708,16 @@ class SqliteDatabase:
         *,
         days: int,
         is_demo: bool,
-    ) -> int:
+        max_enabled: int | None = None,
+    ) -> tuple[int, int]:
         if not cart_ids:
-            return 0
+            return 0, 0
         days = max(1, int(days))
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         cutoff_iso = cutoff.astimezone(timezone.utc).isoformat()
         cart_ids = [int(i) for i in cart_ids if str(i)]
         if not cart_ids:
-            return 0
+            return 0, 0
 
         placeholders = ",".join("?" for _ in cart_ids)
         with self._conn() as conn:
@@ -1720,13 +1732,18 @@ class SqliteDatabase:
                 """,
                 (owner_id, int(bool(is_demo)), *cart_ids, cutoff_iso),
             ).fetchall()
-            restored = 0
+            restored = enabled_restored = 0
             for r in rows:
                 try:
                     payload = json.loads(r["subscription_json"] or "{}")
                 except Exception:
                     continue
-                payload["enabled"] = True
+                sub_enabled = True
+                if max_enabled is not None:
+                    sub_enabled = enabled_restored < max(0, int(max_enabled))
+                payload["enabled"] = sub_enabled
+                if sub_enabled:
+                    enabled_restored += 1
                 conn.execute(
                     """
                     INSERT INTO subscriptions (
@@ -1786,7 +1803,7 @@ class SqliteDatabase:
                     (int(r["id"]), owner_id),
                 )
                 restored += 1
-            return restored
+            return restored, enabled_restored
 
     def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool:
         mark_sync_edited = bool(fields.pop("mark_sync_edited", True))
@@ -4256,15 +4273,24 @@ class PostgresDatabase:
             )
         return new_state
 
-    def enable_all_subscriptions(self, owner_id: int, *, demo: bool = False) -> int:
+    def enable_all_subscriptions(
+        self, owner_id: int, *, demo: bool = False, max_count: int | None = None
+    ) -> int:
+        sub = """
+            SELECT id FROM subscriptions
+            WHERE owner_id = %s AND enabled = FALSE AND is_demo = %s
+              AND trial_paused = FALSE
+            ORDER BY id
+        """
+        params: list[object] = [owner_id, bool(demo)]
+        if max_count is not None:
+            sub += " LIMIT %s"
+            params.append(max(0, int(max_count)))
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
-                """
-                UPDATE subscriptions SET enabled = TRUE
-                WHERE owner_id = %s AND enabled = FALSE AND is_demo = %s
-                """,
-                (owner_id, bool(demo)),
+                f"UPDATE subscriptions SET enabled = TRUE WHERE id IN ({sub})",
+                params,
             )
             return int(cur.rowcount)
 
@@ -4354,13 +4380,14 @@ class PostgresDatabase:
         *,
         days: int,
         is_demo: bool,
-    ) -> int:
+        max_enabled: int | None = None,
+    ) -> tuple[int, int]:
         if not cart_ids:
-            return 0
+            return 0, 0
         days = max(1, int(days))
         cart_ids = [int(i) for i in cart_ids if str(i)]
         if not cart_ids:
-            return 0
+            return 0, 0
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         max_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
@@ -4382,17 +4409,23 @@ class PostgresDatabase:
             ).fetchall()
 
         restored_ids: list[int] = []
+        enabled_restored = 0
         for r in rows:
             try:
                 payload = json.loads(r.get("subscription_json") or "{}")
             except Exception:
                 continue
-            payload["enabled"] = True
+            sub_enabled = True
+            if max_enabled is not None:
+                sub_enabled = enabled_restored < max(0, int(max_enabled))
+            payload["enabled"] = sub_enabled
+            if sub_enabled:
+                enabled_restored += 1
             self.add_subscription(owner_id=owner_id, **payload)
             restored_ids.append(int(r["id"]))
 
         if not restored_ids:
-            return 0
+            return 0, 0
         with self._conn() as conn:
             cur = self._cursor(conn)
             del_placeholders = ",".join(["%s" for _ in restored_ids])
@@ -4406,7 +4439,7 @@ class PostgresDatabase:
                 (owner_id, bool(is_demo), *restored_ids),
             )
 
-        return len(restored_ids)
+        return len(restored_ids), enabled_restored
 
     def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool:
         mark_sync_edited = bool(fields.pop("mark_sync_edited", True))

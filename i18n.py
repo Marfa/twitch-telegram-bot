@@ -1030,6 +1030,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "oauth_web_failed_body": "Return to Telegram and try again.",
         "enable_all": "✅ Enable all",
         "enable_all_done": "Enabled {count} subscription(s).",
+        "enable_all_partial": (
+            "Enabled {count} subscription(s). "
+            "Free plan allows {limit} active — {remaining} still paused."
+        ),
         "enable_all_none": "Nothing to enable — all subscriptions are already on.",
         "toggle_off": "⏸ Off",
         "toggle_on": "✅ On",
@@ -1058,6 +1062,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "cart_restored_partial": (
             "Restored {restored}. Not restored due to subscription limit "
             "({limit} max): {skipped}. Get Premium to increase the limit."
+        ),
+        "cart_restored_active_paused": (
+            "\n{paused} restored on pause — free plan allows {limit} active alerts."
         ),
         "edit_pick": "Choose a subscription to edit:",
         "edit_type_pick": "Choose an alert type to edit:",
@@ -2398,6 +2405,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "oauth_web_failed_body": "Вернитесь в Telegram и попробуйте снова.",
         "enable_all": "✅ Включить все",
         "enable_all_done": "Включено подписок: {count}.",
+        "enable_all_partial": (
+            "Включено подписок: {count}. "
+            "На бесплатном плане лимит {limit} активных — ещё {remaining} на паузе."
+        ),
         "enable_all_none": "Нечего включать — все подписки уже активны.",
         "toggle_off": "⏸ Выкл",
         "toggle_on": "✅ Вкл",
@@ -2427,6 +2438,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Восстановлено: {restored}. Из‑за лимита подписок "
             "(максимум {limit}) не восстановлено: {skipped}. "
             "Для увеличения лимита приобретите премиум."
+        ),
+        "cart_restored_active_paused": (
+            "\n{paused} восстановлено на паузе — на бесплатном плане лимит {limit} активных."
         ),
         "edit_pick": "Выберите подписку для редактирования:",
         "edit_type_pick": "Выберите тип оповещения для редактирования:",

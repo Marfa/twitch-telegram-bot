@@ -975,6 +975,8 @@ def main() -> None:
         assert stats.sys_other == 1
         db.set_premium_stars(1, charge_id="c", until_unix=10**12, canceled=False)
         assert db.get_bot_stats().premium_paid == 1
+        import premium as prem
+
         paused_id = db.add_subscription(
             owner_id=1,
             twitch_username="other",
@@ -1027,6 +1029,54 @@ def main() -> None:
         assert sync_subs[0].enabled is True
         assert sync_subs[0].from_twitch_sync is True
         assert sync_subs[0].disable_link_preview is True
+        free_sync_owner = 88006
+        db.upsert_user(free_sync_owner)
+        prem.ensure_trial_expired(db, free_sync_owner)
+        plimit = prem.free_active_limit()
+        for i in range(plimit):
+            db.add_subscription(
+                owner_id=free_sync_owner,
+                twitch_username=f"on{i}",
+                twitch_user_id=f"on{i}",
+                message_template="t",
+                dest_type="dm",
+                chat_id=free_sync_owner,
+                thread_id=None,
+                enabled=True,
+            )
+        _, _, _, _, capped_subs, _ = import_followed_as_subscriptions(
+            db,
+            free_sync_owner,
+            [{"broadcaster_id": "9001", "broadcaster_login": "over"}],
+            template="t",
+            limit=25,
+            enabled=True,
+        )
+        assert len(capped_subs) == 1 and capped_subs[0].enabled is False
+        restore_owner = 88007
+        db.upsert_user(restore_owner)
+        restore_ids: list[int] = []
+        for login in ("rc1", "rc2", "rc3"):
+            sid = db.add_subscription(
+                owner_id=restore_owner,
+                twitch_username=login,
+                twitch_user_id=login,
+                message_template="t",
+                dest_type="dm",
+                chat_id=restore_owner,
+                thread_id=None,
+                enabled=False,
+            )
+            assert db.delete_subscription(sid, restore_owner, to_cart=True)
+            items = db.list_deleted_subscriptions(
+                restore_owner, days=30, is_demo=False, limit=10
+            )
+            restore_ids = [int(i.cart_id) for i in items]
+        restored_n, enabled_n = db.restore_deleted_subscriptions(
+            restore_owner, restore_ids, days=30, is_demo=False, max_enabled=1
+        )
+        assert restored_n == 3 and enabled_n == 1
+        assert db.count_enabled_subscriptions(restore_owner) == 1
         # Prune: remove sync-origin "newbie" when follows only keep CHANNEL
         imported2, skipped2, limited2, removed2, _, ask2 = import_followed_as_subscriptions(
             db,
@@ -1120,6 +1170,23 @@ def main() -> None:
         assert dry_templates == 0 and dry_previews == 0
         assert db.enable_all_subscriptions(1) >= 1
         assert db.get_subscription(paused_id, 1).enabled is True
+        cap_owner = 88001
+        for login in ("c1", "c2", "c3"):
+            db.add_subscription(
+                owner_id=cap_owner,
+                twitch_username=login,
+                twitch_user_id=login,
+                message_template="t",
+                dest_type="dm",
+                chat_id=cap_owner,
+                thread_id=None,
+                enabled=False,
+            )
+        assert db.count_enabled_subscriptions(cap_owner) == 0
+        assert db.enable_all_subscriptions(cap_owner, max_count=2) == 2
+        assert db.count_enabled_subscriptions(cap_owner) == 2
+        assert db.enable_all_subscriptions(cap_owner, max_count=10) == 1
+        assert db.count_enabled_subscriptions(cap_owner) == 3
         assert db.get_twitch_sync(1) is None
         db.upsert_twitch_sync(
             owner_id=1,
