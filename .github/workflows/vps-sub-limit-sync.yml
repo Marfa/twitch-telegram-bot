@@ -1,0 +1,72 @@
+name: VPS sub limit and follow sync
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Raise sub limit, audit, force sync
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            cp -a .env /tmp/twitch-telegram-bot.env.bak
+            git fetch --prune origin
+            git reset --hard origin/main
+            cp -a /tmp/twitch-telegram-bot.env.bak .env
+            if grep -q '^MAX_SUBSCRIPTIONS_PER_OWNER=' .env; then
+              sed -i 's/^MAX_SUBSCRIPTIONS_PER_OWNER=.*/MAX_SUBSCRIPTIONS_PER_OWNER=2000/' .env
+            elif grep -q '^# MAX_SUBSCRIPTIONS_PER_OWNER=' .env; then
+              sed -i 's/^# MAX_SUBSCRIPTIONS_PER_OWNER=.*/MAX_SUBSCRIPTIONS_PER_OWNER=2000/' .env
+            else
+              printf '\nMAX_SUBSCRIPTIONS_PER_OWNER=2000\n' >> .env
+            fi
+            echo "=== MAX_SUBSCRIPTIONS in .env ==="
+            grep MAX_SUBSCRIPTIONS_PER_OWNER .env
+            docker compose -f compose.vps.yml up -d --build --force-recreate --no-deps bot
+            ok=0
+            for _ in $(seq 1 30); do
+              if curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            test "$ok" = 1
+            echo "=== owners at limit (before sync) ==="
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "
+              SELECT s.owner_id,
+                     COUNT(*) AS subs,
+                     SUM(CASE WHEN s.enabled THEN 1 ELSE 0 END) AS enabled,
+                     SUM(CASE WHEN NOT s.enabled THEN 1 ELSE 0 END) AS disabled,
+                     EXISTS (
+                       SELECT 1 FROM twitch_sync ts
+                       WHERE ts.owner_id = s.owner_id AND ts.period_days > 0
+                     ) AS has_sync
+              FROM subscriptions s
+              GROUP BY s.owner_id
+              HAVING COUNT(*) >= 25
+              ORDER BY subs DESC;
+            "
+            echo "=== audit + force sync ==="
+            docker compose -f compose.vps.yml exec -T bot python scripts/vps-audit-and-sync-follows.py --audit-only --sync-all
+            echo "=== owners at limit (after sync) ==="
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "
+              SELECT s.owner_id,
+                     COUNT(*) AS subs,
+                     SUM(CASE WHEN s.enabled THEN 1 ELSE 0 END) AS enabled,
+                     SUM(CASE WHEN NOT s.enabled THEN 1 ELSE 0 END) AS disabled
+              FROM subscriptions s
+              GROUP BY s.owner_id
+              HAVING COUNT(*) >= 25
+              ORDER BY subs DESC;
+            "
