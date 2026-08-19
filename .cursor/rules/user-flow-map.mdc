@@ -20,10 +20,10 @@ alwaysApply: false
 ## Что сделать
 
 1. Обновить `docs/user-flow-map.ru.md`: тексты, кнопки, переходы, mermaid при необходимости.
-2. Скопировать ту же версию **с заменой файла** в  
-   `/Users/konstantiedokucaev/Obsidian Full/New DB/@inbox/user-flow-map.ru.md`  
-   (если путь доступен).
+2. Опционально: если у maintainer настроен `OBSIDIAN_USER_FLOW_MAP` (абсолютный путь к vault-копии), скопировать туда ту же версию с заменой файла. Без переменной — шаг пропустить.
 3. Включить обновление карты в тот же коммит, что и UX-изменения (если пользователь просит коммит).
+
+Authority: `i18n.py` + `bot.py` — канон; карта — derived view ([`docs/authority-map.md`](docs/authority-map.md)).
 
 ## Не трогать карту
 
