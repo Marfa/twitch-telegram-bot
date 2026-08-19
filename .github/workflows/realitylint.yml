@@ -1,0 +1,19 @@
+name: RealityLint (README drift)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  realitylint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: voonterr/realitylint@v1
+        with:
+          all-docs: "true"
+          fail-on: error
+
