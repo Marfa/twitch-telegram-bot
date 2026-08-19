@@ -308,7 +308,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |
 | `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Bearer secret for `POST /hooks/posthog-issues` (Issue + Inbox Report → admins) |
-| `POSHTOG_API_KEY_PERSONAL` / `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) for Inbox reports polling. Empty = polling off |
+| `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) for Inbox reports polling. Empty = polling off |
 
 Without Groq/HF keys, **I'm feeling lucky** still works from the local template pool in the DB.
 

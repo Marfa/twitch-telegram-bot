@@ -10539,7 +10539,7 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
         if not context.application.bot_data.get("_posthog_poll_key_warned"):
             context.application.bot_data["_posthog_poll_key_warned"] = True
             logger.warning(
-                "PostHog Inbox reports poll skipped: POSHTOG_API_KEY_PERSONAL unset"
+                "PostHog Inbox reports poll skipped: POSTHOG_API_KEY_PERSONAL unset"
             )
         return
 

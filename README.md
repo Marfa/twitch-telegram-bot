@@ -308,7 +308,7 @@ python main.py
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Без ключа аналитика выключена |
 | `POSTHOG_HOST` | Ingestion host (по умолчанию `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Секрет Bearer для `POST /hooks/posthog-issues` (Issue + Inbox Report → админам) |
-| `POSHTOG_API_KEY_PERSONAL` / `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) для polling Inbox Reports. Пусто = polling выкл |
+| `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) для polling Inbox Reports. Пусто = polling выкл |
 
 Без ключей Groq/HF кнопка **Мне повезёт** всё равно работает — из локального пула шаблонов в БД.
 
