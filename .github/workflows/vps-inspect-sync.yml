@@ -1,0 +1,37 @@
+name: VPS inspect twitch sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner_id:
+        description: Telegram owner_id to inspect
+        required: true
+        default: "150697169"
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect twitch_sync row
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            OID="${{ github.event.inputs.owner_id }}"
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "
+              SELECT u.user_id,
+                     u.receive_sync_updates,
+                     ts.period_days,
+                     ts.next_sync_at,
+                     ts.last_sync_at,
+                     (SELECT COUNT(*) FROM subscriptions s WHERE s.owner_id = u.user_id) AS subs
+              FROM users u
+              LEFT JOIN twitch_sync ts ON ts.owner_id = u.user_id
+              WHERE u.user_id = ${OID};
+            "

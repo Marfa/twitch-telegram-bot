@@ -6642,15 +6642,14 @@ async def _sync_owner_follows(
     except Exception:
         logger.exception("Twitch sync failed for owner %s", row.owner_id)
         db.delete_twitch_sync(row.owner_id)
-        if db.get_receive_sync_updates(row.owner_id):
-            try:
-                await application.bot.send_message(
-                    row.owner_id,
-                    t("sync_job_failed", lang),
-                    reply_markup=_menu(lang, row.owner_id),
-                )
-            except Exception:
-                logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
+        try:
+            await application.bot.send_message(
+                row.owner_id,
+                t("sync_job_failed", lang),
+                reply_markup=_menu(lang, row.owner_id),
+            )
+        except Exception:
+            logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
         return None
 
     imported, skipped, limited, removed, _new, ask_streamers = import_followed_as_subscriptions(
@@ -6709,28 +6708,28 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
         imported, skipped, limited, removed, ask_streamers = result
         lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
-        if imported or limited or removed:
-            if db.get_receive_sync_updates(row.owner_id):
-                limit_note, removed_note = _sync_result_notes(
-                    lang, limited=limited, removed=removed
+        notify = db.get_receive_sync_updates(row.owner_id) or limited > 0 or removed > 0
+        if notify and (imported or limited or removed):
+            limit_note, removed_note = _sync_result_notes(
+                lang, limited=limited, removed=removed
+            )
+            try:
+                await context.bot.send_message(
+                    row.owner_id,
+                    t(
+                        "sync_job_done",
+                        lang,
+                        imported=imported,
+                        skipped=skipped,
+                        limit_note=limit_note,
+                        removed_note=removed_note,
+                    ),
+                    reply_markup=_menu(lang, row.owner_id),
                 )
-                try:
-                    await context.bot.send_message(
-                        row.owner_id,
-                        t(
-                            "sync_job_done",
-                            lang,
-                            imported=imported,
-                            skipped=skipped,
-                            limit_note=limit_note,
-                            removed_note=removed_note,
-                        ),
-                        reply_markup=_menu(lang, row.owner_id),
-                    )
-                except Exception:
-                    logger.exception(
-                        "Cannot notify owner %s about sync result", row.owner_id
-                    )
+            except Exception:
+                logger.exception(
+                    "Cannot notify owner %s about sync result", row.owner_id
+                )
         try:
             await _ask_sync_unfollow_if_needed(
                 context.application, row.owner_id, lang, ask_streamers
