@@ -25,6 +25,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_list": "📋 My subscriptions",
         "btn_edit": "✏️ Edit subscription",
         "btn_delete": "🗑 Delete subscription",
+        "btn_pause_notifications": "⏸ Pause notifications",
         "btn_feedback": "🐛 Report a problem",
         "btn_create_schedule": "📅 Create schedule",
         "btn_alert_history": "📜 Alert history",
@@ -203,6 +204,20 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_exclude": "excluded",
         "watch_mature_label_allow": "allowed",
         "menu_subs": "Manage subscriptions:",
+        "pause_notifications_prompt": (
+            "You can pause any notifications (stream alerts and system) "
+            "for a number of days.\n\n"
+            "Enter how long to pause notifications. 0 days turns notifications back on."
+        ),
+        "pause_notifications_current": "Notifications are currently paused until {until}.",
+        "pause_notifications_invalid": (
+            "Enter a whole number of days from 0 to {max_days}."
+        ),
+        "pause_notifications_applied": (
+            "Notifications paused for {days} day(s), until {until}. "
+            "Subscriptions stay active — messages just will not be sent to you."
+        ),
+        "pause_notifications_resumed": "Notifications are on again.",
         "menu_settings": "Settings:",
         "menu_other": "Other:",
         "alert_history_title": "Alert history — last {days} days ({n}):",
@@ -702,6 +717,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "beta_feat_schedule_fix_day": "Fix schedule slots for a day",
         "beta_feat_schedule_fix_day_desc": (
             "Fix a single day in your stream schedule without recreating the whole week."
+        ),
+        "beta_feat_pause_notifications": "Pause notifications",
+        "beta_feat_pause_notifications_desc": (
+            "Temporarily stop stream and system notifications for a number of days "
+            "without pausing subscriptions. 0 days turns them back on."
         ),
         "wizard_simple_mode_note": (
             "<b>You are in simplified mode. Open Settings → Advanced mode "
@@ -1281,6 +1301,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_list": "📋 Мои подписки",
         "btn_edit": "✏️ Редактировать подписку",
         "btn_delete": "🗑 Удалить подписку",
+        "btn_pause_notifications": "⏸ Приостановить оповещения",
         "btn_feedback": "🐛 Сообщить о проблеме",
         "btn_create_schedule": "📅 Создать расписание",
         "btn_alert_history": "📜 История оповещений",
@@ -1459,6 +1480,21 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_mature_label_exclude": "исключены",
         "watch_mature_label_allow": "разрешены",
         "menu_subs": "Управление подписками:",
+        "pause_notifications_prompt": (
+            "Вы можете приостановить любые оповещения (о стримах и системные) "
+            "на указанный период в днях.\n\n"
+            "Укажите на какое время приостановить оповещения. "
+            "0 дней снова включить оповещения."
+        ),
+        "pause_notifications_current": "Сейчас оповещения приостановлены до {until}.",
+        "pause_notifications_invalid": (
+            "Введите целое число дней от 0 до {max_days}."
+        ),
+        "pause_notifications_applied": (
+            "Оповещения приостановлены на {days} дн., до {until}. "
+            "Подписки остаются активными — сообщения просто не будут приходить."
+        ),
+        "pause_notifications_resumed": "Оповещения снова включены.",
         "menu_settings": "Настройки:",
         "menu_other": "Прочее:",
         "alert_history_title": "История оповещений — за {days} дн. ({n}):",
@@ -2073,6 +2109,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "beta_feat_schedule_fix_day": "Поправить слоты на день",
         "beta_feat_schedule_fix_day_desc": (
             "Позволяет поправить один день в расписании стримов, не пересоздавая всю неделю."
+        ),
+        "beta_feat_pause_notifications": "Приостановить оповещения",
+        "beta_feat_pause_notifications_desc": (
+            "Временно не получать оповещения о стримах и системные на указанное число дней, "
+            "не ставя подписки на паузу. 0 дней снова включает оповещения."
         ),
         "wizard_simple_mode_note": (
             "<b>Вы работаете в упрощённом режиме, перейдите в Настройках "
@@ -2752,6 +2793,7 @@ def all_menu_buttons() -> set[str]:
         "list",
         "edit",
         "delete",
+        "pause_notifications",
         "feedback",
         "create_schedule",
         "alert_history",
@@ -2815,20 +2857,22 @@ def main_menu(
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
-def subscriptions_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
+def subscriptions_menu(
+    lang: str, *, pause_notifications: bool = False
+) -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = [
         [
-            [
-                KeyboardButton(btn("list", lang)),
-                KeyboardButton(btn("edit", lang)),
-            ],
-            [
-                KeyboardButton(btn("delete", lang)),
-                KeyboardButton(btn("back", lang)),
-            ],
+            KeyboardButton(btn("list", lang)),
+            KeyboardButton(btn("edit", lang)),
         ],
-        resize_keyboard=True,
-    )
+        [KeyboardButton(btn("delete", lang))],
+    ]
+    if pause_notifications:
+        rows.append([KeyboardButton(btn("pause_notifications", lang))])
+        rows.append([KeyboardButton(btn("back", lang))])
+    else:
+        rows[1].append(KeyboardButton(btn("back", lang)))
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:

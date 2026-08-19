@@ -53,6 +53,8 @@ from bot import (
     category_change_events,
     migrate_import_sync_subscriptions,
     needs_live_game_recheck,
+    _format_pause_until,
+    _user_notifications_paused,
 )
 from db import (
     AlertHistoryEntry,
@@ -436,6 +438,7 @@ def main() -> None:
         admin_menu,
         other_menu,
         settings_menu,
+        subscriptions_menu,
         stream_schedule_duration_keyboard,
         watch_suggest_keyboard,
     )
@@ -472,6 +475,18 @@ def main() -> None:
         assert [[b.text for b in row] for row in other_kb] == [
             [btn("whisper_alerts", loc), btn("create_schedule", loc)],
             [btn("watch", loc), btn("back", loc)],
+        ]
+        subs_kb = subscriptions_menu(loc).keyboard
+        assert [[b.text for b in row] for row in subs_kb] == [
+            [btn("list", loc), btn("edit", loc)],
+            [btn("delete", loc), btn("back", loc)],
+        ]
+        subs_kb_pause = subscriptions_menu(loc, pause_notifications=True).keyboard
+        assert [[b.text for b in row] for row in subs_kb_pause] == [
+            [btn("list", loc), btn("edit", loc)],
+            [btn("delete", loc)],
+            [btn("pause_notifications", loc)],
+            [btn("back", loc)],
         ]
         settings_kb = settings_menu(loc).keyboard
         ignored_row = next(
@@ -1424,6 +1439,14 @@ def main() -> None:
         db.set_receive_bot_updates(1, True)
         db.set_receive_availability_updates(1, True)
         db.set_receive_other_updates(1, True)
+        assert db.get_notifications_paused_until(1) == 0
+        pause_until = int(
+            (datetime.now(timezone.utc) + timedelta(days=3)).timestamp()
+        )
+        db.set_notifications_paused_until(1, pause_until)
+        assert db.get_notifications_paused_until(1) == pause_until
+        db.set_notifications_paused_until(1, 0)
+        assert db.get_notifications_paused_until(1) == 0
         db.set_bot_blocked(1, True)
         assert db.is_bot_blocked(1) is True
         assert 1 not in db.get_bot_update_recipients()
@@ -2441,9 +2464,38 @@ def main() -> None:
         assert beta_mod.enrollment_counts(bdb, 99) == (1, 1)
         beta_mod.load_manifest(beta_mod.manifest_path())
 
+    from i18n import beta_mode_btn, is_menu_button
+
+    pause_ids = {f.id for f in beta_mod.list_features()}
+    assert "pause-notifications" in pause_ids
+    pause_feat = beta_mod.get_feature("pause-notifications")
+    assert pause_feat is not None and pause_feat.stage == "beta"
+    assert btn("pause_notifications", "ru") == "⏸ Приостановить оповещения"
+    assert btn("pause_notifications", "en") == "⏸ Pause notifications"
+    assert "0 дней" in tr("pause_notifications_prompt", "ru")
+    assert "0 days" in tr("pause_notifications_prompt", "en")
+    assert is_menu_button(btn("pause_notifications", "ru"))
+    with tempfile.TemporaryDirectory() as pause_tmp:
+        pdb = SqliteDatabase(Path(pause_tmp) / "pause.db")
+        pdb.upsert_user(501)
+        assert not _user_notifications_paused(pdb, 501)
+        until = int((datetime.now(timezone.utc) + timedelta(days=2)).timestamp())
+        pdb.set_notifications_paused_until(501, until)
+        assert not _user_notifications_paused(pdb, 501)
+        pdb.set_beta_enrollment(501, "pause-notifications", True)
+        assert _user_notifications_paused(pdb, 501)
+        pdb.set_notifications_paused_until(501, 0)
+        assert not _user_notifications_paused(pdb, 501)
+        expired = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
+        pdb.set_notifications_paused_until(501, expired)
+        assert not _user_notifications_paused(pdb, 501)
+    until_label = _format_pause_until(
+        int(datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc).timestamp()), "ru"
+    )
+    assert "2026" in until_label
+
     assert btn("beta_mode", "ru") == "🧪 Бета-режим"
     assert btn("beta_mode", "en") == "🧪 Beta mode"
-    from i18n import beta_mode_btn, is_menu_button
 
     assert beta_mode_btn("ru", 0, 0) == "🧪 Бета-режим (0/0)"
     assert beta_mode_btn("en", 1, 3) == "🧪 Beta mode (1/3)"

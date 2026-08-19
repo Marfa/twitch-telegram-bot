@@ -850,6 +850,10 @@ class Database(Protocol):
 
     def set_receive_sync_updates(self, user_id: int, enabled: bool) -> None: ...
 
+    def get_notifications_paused_until(self, user_id: int) -> int: ...
+
+    def set_notifications_paused_until(self, user_id: int, until_ts: int) -> None: ...
+
     def get_global_ignore_keywords(self, user_id: int) -> str: ...
 
     def set_global_ignore_keywords(self, user_id: int, keywords: str) -> None: ...
@@ -1287,6 +1291,7 @@ class SqliteDatabase:
             ("premium_trial_used", "INTEGER NOT NULL DEFAULT 0"),
             ("premium_features", "TEXT NOT NULL DEFAULT ''"),
             ("advanced_mode", "INTEGER"),
+            ("notifications_paused_until", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if col not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
@@ -2459,6 +2464,27 @@ class SqliteDatabase:
                     receive_sync_updates = excluded.receive_sync_updates
                 """,
                 (user_id, int(enabled)),
+            )
+
+    def get_notifications_paused_until(self, user_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT notifications_paused_until FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return 0
+        return int(row["notifications_paused_until"] or 0)
+
+    def set_notifications_paused_until(self, user_id: int, until_ts: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, notifications_paused_until) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    notifications_paused_until = excluded.notifications_paused_until
+                """,
+                (user_id, int(until_ts)),
             )
 
     def get_global_ignore_keywords(self, user_id: int) -> str:
@@ -3924,6 +3950,7 @@ class PostgresDatabase:
                 "premium_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
                 "premium_features TEXT NOT NULL DEFAULT ''",
                 "advanced_mode INTEGER",
+                "notifications_paused_until BIGINT NOT NULL DEFAULT 0",
             ):
                 cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
             if not had_premium:
@@ -5150,6 +5177,30 @@ class PostgresDatabase:
                     receive_sync_updates = EXCLUDED.receive_sync_updates
                 """,
                 (user_id, enabled),
+            )
+
+    def get_notifications_paused_until(self, user_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT notifications_paused_until FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return 0
+        return int(row["notifications_paused_until"] or 0)
+
+    def set_notifications_paused_until(self, user_id: int, until_ts: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, notifications_paused_until) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    notifications_paused_until = EXCLUDED.notifications_paused_until
+                """,
+                (user_id, int(until_ts)),
             )
 
     def get_global_ignore_keywords(self, user_id: int) -> str:
