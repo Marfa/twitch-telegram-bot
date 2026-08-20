@@ -1025,7 +1025,7 @@ def main() -> None:
             template=tr("import_default_template", "en"),
             limit=25,
         )
-        assert imported == 1 and skipped == 1 and limited == 0 and removed == 0
+        assert imported == 1 and skipped == 1 and limited == 0 and removed == []
         assert ask0 == []
         assert len(new_subs) == 1
         assert new_subs[0].twitch_username == "newbie"
@@ -1060,7 +1060,8 @@ def main() -> None:
             limit=25,
             prune_missing=True,
         )
-        assert imported2 == 0 and skipped2 == 1 and removed2 == 2  # newbie + synced
+        assert imported2 == 0 and skipped2 == 1 and len(removed2) == 2  # newbie + synced
+        assert set(removed2) == {"newbie", "synced"}
         # Manual paused "other" (999) is not in follows → ask before delete
         assert any(s["user_id"] == "999" for s in ask2)
         assert db.get_subscription(new_subs[0].id, 1) is None
@@ -1092,11 +1093,40 @@ def main() -> None:
             limit=25,
             prune_missing=True,
         )
-        assert removed_edit == 0
+        assert removed_edit == []
         assert any(s["user_id"] == "666" for s in ask_edit)
         assert db.get_subscription(edited_id, 1) is not None
         db.delete_subscriptions_for_twitch_users(1, {"666"})
         assert db.get_subscription(edited_id, 1) is None
+        db.upsert_twitch_sync(
+            owner_id=1,
+            twitch_user_id="sync-self",
+            refresh_token="rtok-self",
+            period_days=7,
+            next_sync_at="2030-01-01T00:00:00+00:00",
+        )
+        self_alert_id = db.add_subscription(
+            owner_id=1,
+            twitch_username="marfapr",
+            twitch_user_id="sync-self",
+            message_template=tr("import_default_template", "en"),
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            enabled=True,
+        )
+        _, _, _, _, _, ask_self = import_followed_as_subscriptions(
+            db,
+            1,
+            [{"broadcaster_id": "123", "broadcaster_login": CHANNEL}],
+            template=tr("import_default_template", "en"),
+            limit=25,
+            prune_missing=True,
+        )
+        assert not any(s["user_id"] == "sync-self" for s in ask_self)
+        assert db.get_subscription(self_alert_id, 1) is not None
+        db.delete_subscriptions_for_twitch_users(1, {"sync-self"})
+        db.delete_twitch_sync(1)
         # Restore a manual paused row for later assertions that expect paused_id
         paused_id = db.add_subscription(
             owner_id=1,

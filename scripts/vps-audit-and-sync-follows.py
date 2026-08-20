@@ -83,7 +83,7 @@ async def sync_one(db: Database, twitch: TwitchClient, row: TwitchSync) -> dict:
         db.delete_twitch_sync(row.owner_id)
         return {"owner_id": row.owner_id, "ok": False, "error": "auth_failed"}
 
-    imported, skipped, limited, removed, _new, _ask = import_followed_as_subscriptions(
+    imported, skipped, limited, removed_names, _new, _ask = import_followed_as_subscriptions(
         db,
         row.owner_id,
         followed,
@@ -110,7 +110,7 @@ async def sync_one(db: Database, twitch: TwitchClient, row: TwitchSync) -> dict:
         "imported": imported,
         "skipped": skipped,
         "limited": limited,
-        "removed": removed,
+        "removed": len(removed_names),
         "subs_total": len(subs_after),
         "subs_enabled": enabled_after,
     }

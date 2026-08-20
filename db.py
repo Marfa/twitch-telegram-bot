@@ -1024,7 +1024,7 @@ class Database(Protocol):
 
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
-    ) -> int: ...
+    ) -> list[str]: ...
 
     def get_unfollowed_manual_alert_streamers(
         self,
@@ -3440,7 +3440,7 @@ class SqliteDatabase:
 
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
-    ) -> int:
+    ) -> list[str]:
         """Delete pristine (unedited) sync-origin subs not in keep set."""
         with self._conn() as conn:
             rows = conn.execute(
@@ -3451,11 +3451,14 @@ class SqliteDatabase:
                 """,
                 (owner_id,),
             ).fetchall()
-            removed = 0
+            removed_logins: dict[str, str] = {}
             for r in rows:
                 if str(r["twitch_user_id"]) in keep_twitch_user_ids:
                     continue
                 sub = _row_to_sub(r)
+                login = str(sub.twitch_username or sub.twitch_user_id or "").strip()
+                if login:
+                    removed_logins.setdefault(login.lower(), login)
                 if to_cart:
                     payload = _subscription_cart_snapshot(sub)
                     deleted_at = datetime.now(timezone.utc).isoformat()
@@ -3476,8 +3479,7 @@ class SqliteDatabase:
                     "DELETE FROM subscriptions WHERE id = ? AND owner_id = ?",
                     (int(sub.id), owner_id),
                 )
-                removed += 1
-            return removed
+            return [removed_logins[k] for k in sorted(removed_logins)]
 
     def get_unfollowed_manual_alert_streamers(
         self,
@@ -6258,7 +6260,7 @@ class PostgresDatabase:
 
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
-    ) -> int:
+    ) -> list[str]:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -6270,11 +6272,14 @@ class PostgresDatabase:
                 (owner_id,),
             )
             rows = cur.fetchall()
-            removed = 0
+            removed_logins: dict[str, str] = {}
             for r in rows:
                 if str(r["twitch_user_id"]) in keep_twitch_user_ids:
                     continue
                 sub = _row_to_sub(r)
+                login = str(sub.twitch_username or sub.twitch_user_id or "").strip()
+                if login:
+                    removed_logins.setdefault(login.lower(), login)
                 if to_cart:
                     payload = _subscription_cart_snapshot(sub)
                     deleted_at = datetime.now(timezone.utc)
@@ -6295,8 +6300,7 @@ class PostgresDatabase:
                     "DELETE FROM subscriptions WHERE id = %s AND owner_id = %s",
                     (int(sub.id), owner_id),
                 )
-                removed += 1
-            return removed
+            return [removed_logins[k] for k in sorted(removed_logins)]
 
     def get_unfollowed_manual_alert_streamers(
         self,

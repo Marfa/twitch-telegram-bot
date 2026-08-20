@@ -983,7 +983,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{removed_note}{limit_note}"
         ),
         "import_limit_note": "\nLimit reached ({limit}): {limited} channel(s) not imported.",
-        "import_removed_note": "\nRemoved (unfollowed): {removed}",
+        "import_removed_note": "\nRemoved (unfollowed): {list}",
         "import_failed": "Twitch authorization failed. Try again: ⬇️ Import from Twitch.",
         "import_denied": "Twitch authorization was cancelled.",
         "import_empty": "No followed channels to import.",
@@ -2386,7 +2386,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{removed_note}{limit_note}"
         ),
         "import_limit_note": "\nЛимит ({limit}): не импортировано каналов: {limited}.",
-        "import_removed_note": "\nУдалено (отписка): {removed}",
+        "import_removed_note": "\nУдалено (отписка): {list}",
         "import_failed": "Не удалось авторизоваться на Twitch. Попробуйте снова: ⬇️ Импорт подписок из Twitch.",
         "import_denied": "Авторизация на Twitch отменена.",
         "import_empty": "Нет каналов для импорта.",

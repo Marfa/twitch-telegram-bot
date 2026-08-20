@@ -418,14 +418,14 @@ def import_followed_as_subscriptions(
     enabled: bool = False,
     is_demo: bool = False,
     delete_to_cart: bool = False,
-) -> tuple[int, int, int, int, list[Subscription], list[dict[str, str]]]:
+) -> tuple[int, int, int, list[str], list[Subscription], list[dict[str, str]]]:
     """Create DM subscriptions from Helix followed channels.
 
     Import path keeps enabled=False (paused). Periodic sync passes enabled=True.
     New rows are marked from_twitch_sync=True. When prune_missing=True, pristine
     sync-origin subs absent from follows are deleted; edited/manual leftovers are
     returned in ask_streamers for user confirmation.
-    Returns (imported, skipped, limited, removed, new_subs, ask_streamers).
+    Returns (imported, skipped, limited, removed_names, new_subs, ask_streamers).
     """
     existing_subs = [
         s for s in db.get_subscriptions_by_owner(owner_id) if s.is_demo is is_demo
@@ -475,16 +475,19 @@ def import_followed_as_subscriptions(
         existing.add(twitch_user_id)
         count += 1
         imported += 1
-    removed = 0
+    removed_names: list[str] = []
     ask_streamers: list[dict[str, str]] = []
     if prune_missing:
-        removed = db.delete_synced_subscriptions_missing(
+        sync = db.get_twitch_sync(owner_id)
+        if sync and sync.twitch_user_id:
+            follow_ids.add(str(sync.twitch_user_id))
+        removed_names = db.delete_synced_subscriptions_missing(
             owner_id, follow_ids, to_cart=delete_to_cart
         )
         ask_streamers = db.get_unfollowed_manual_alert_streamers(
             owner_id, follow_ids, is_demo=is_demo
         )
-    return imported, skipped, limited, removed, new_subs, ask_streamers
+    return imported, skipped, limited, removed_names, new_subs, ask_streamers
 
 
 LEGACY_IMPORT_TEMPLATES = frozenset(
@@ -6296,12 +6299,13 @@ async def _deliver_import_result(
     limited: int,
     new_subs: list[Subscription],
     *,
-    removed: int = 0,
+    removed_names: list[str] | None = None,
     ask_streamers: list[dict[str, str]] | None = None,
 ) -> None:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
-    if imported == 0 and skipped == 0 and limited == 0 and removed == 0 and not ask_streamers:
+    removed_names = removed_names or []
+    if imported == 0 and skipped == 0 and limited == 0 and not removed_names and not ask_streamers:
         await application.bot.send_message(
             owner_id,
             t("import_empty", lang),
@@ -6322,8 +6326,10 @@ async def _deliver_import_result(
             limited=limited,
         )
     removed_note = ""
-    if removed:
-        removed_note = t("import_removed_note", lang, removed=removed)
+    if removed_names:
+        removed_note = t(
+            "import_removed_note", lang, list=", ".join(removed_names)
+        )
     header = t(
         "import_success",
         lang,
@@ -6340,7 +6346,7 @@ async def _deliver_import_result(
             "imported": imported,
             "skipped": skipped,
             "limited": limited,
-            "removed": removed,
+            "removed": len(removed_names),
             "empty": False,
         },
     )
@@ -6381,7 +6387,7 @@ async def _ask_sync_unfollow_if_needed(
         "expires": datetime.now(timezone.utc).timestamp() + _PENDING_SYNC_UNFOLLOW_TTL_SEC,
     }
     names = ", ".join(
-        f"@{html.escape(s.get('user_login') or s.get('user_id') or '?')}"
+        html.escape(s.get("user_login") or s.get("user_id") or "?")
         for s in ask_streamers
     )
     await application.bot.send_message(
@@ -6406,7 +6412,7 @@ async def on_sync_unfollow_answer(
         return
     streamers: list[dict[str, str]] = list(pending.get("streamers") or [])
     names = ", ".join(
-        f"@{html.escape(s.get('user_login') or s.get('user_id') or '?')}"
+        html.escape(s.get("user_login") or s.get("user_id") or "?")
         for s in streamers
     )
     if data == "sync_unfollow:yes":
@@ -6488,7 +6494,7 @@ async def _run_followed_import(
     *,
     prune_missing: bool = False,
     enabled: bool = False,
-) -> tuple[int, int, int, int, list[Subscription], list[dict[str, str]]]:
+) -> tuple[int, int, int, list[str], list[Subscription], list[dict[str, str]]]:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
     db: Database = application.bot_data["db"]
@@ -6570,12 +6576,12 @@ async def on_import_mode_once(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(t("import_pending_expired", lang))
         return
     await query.edit_message_text(t("import_mode_once", lang))
-    imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
+    imported, skipped, limited, removed_names, new_subs, ask_streamers = await _run_followed_import(
         context.application, owner_id, pending["followed"]
     )
     await _deliver_import_result(
         context.application, owner_id, lang, imported, skipped, limited, new_subs,
-        removed=removed,
+        removed_names=removed_names,
         ask_streamers=ask_streamers,
     )
 
@@ -6598,12 +6604,12 @@ async def on_import_mode_sync(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not refresh:
         pending = _pop_pending_import(context.application, owner_id)
         await query.edit_message_text(t("import_sync_no_refresh", lang))
-        imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
+        imported, skipped, limited, removed_names, new_subs, ask_streamers = await _run_followed_import(
             context.application, owner_id, pending["followed"]
         )
         await _deliver_import_result(
             context.application, owner_id, lang, imported, skipped, limited, new_subs,
-            removed=removed,
+            removed_names=removed_names,
             ask_streamers=ask_streamers,
         )
         return ConversationHandler.END
@@ -6658,12 +6664,12 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     twitch_user_id = token_info.get("twitch_user_id") or ""
     if not refresh or not twitch_user_id:
         await update.effective_message.reply_text(t("import_sync_no_refresh", lang))
-        imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
+        imported, skipped, limited, removed_names, new_subs, ask_streamers = await _run_followed_import(
             context.application, user_id, pending["followed"]
         )
         await _deliver_import_result(
             context.application, user_id, lang, imported, skipped, limited, new_subs,
-            removed=removed,
+            removed_names=removed_names,
             ask_streamers=ask_streamers,
         )
         return ConversationHandler.END
@@ -6679,12 +6685,12 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await update.effective_message.reply_text(
         t("import_sync_enabled", lang, days=days),
     )
-    imported, skipped, limited, removed, new_subs, ask_streamers = await _run_followed_import(
+    imported, skipped, limited, removed_names, new_subs, ask_streamers = await _run_followed_import(
         context.application, user_id, pending["followed"], enabled=True
     )
     await _deliver_import_result(
         context.application, user_id, lang, imported, skipped, limited, new_subs,
-        removed=removed,
+        removed_names=removed_names,
         ask_streamers=ask_streamers,
     )
     context.user_data.pop("sync_days_mode", None)
@@ -6756,14 +6762,14 @@ async def _sync_owner_follows(
     row: TwitchSync,
     *,
     advance_schedule: bool = True,
-) -> tuple[int, int, int, int, list[dict[str, str]]] | None:
-    """Run one follow sync. Returns (imported, skipped, limited, removed, ask) or None on auth failure."""
+) -> tuple[int, int, int, list[str], list[dict[str, str]]] | None:
+    """Run one follow sync. Returns (imported, skipped, limited, removed_names, ask) or None on auth failure."""
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
     db: Database = application.bot_data["db"]
     if not prem.has_feature_sync(db, row.owner_id, "twitch_sync"):
         logger.info("Skipping Twitch sync for owner %s: no twitch_sync feature", row.owner_id)
-        return 0, 0, 0, 0, []
+        return 0, 0, 0, [], []
     twitch: TwitchClient = application.bot_data["twitch"]
     lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
     now = datetime.now(timezone.utc)
@@ -6789,7 +6795,7 @@ async def _sync_owner_follows(
             logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
         return None
 
-    imported, skipped, limited, removed, _new, ask_streamers = import_followed_as_subscriptions(
+    imported, skipped, limited, removed_names, _new, ask_streamers = import_followed_as_subscriptions(
         db,
         row.owner_id,
         followed,
@@ -6810,11 +6816,11 @@ async def _sync_owner_follows(
         last_sync_at=now.isoformat(),
         next_sync_at=next_at,
     )
-    return imported, skipped, limited, removed, ask_streamers
+    return imported, skipped, limited, removed_names, ask_streamers
 
 
 def _sync_result_notes(
-    lang: str, *, limited: int, removed: int
+    lang: str, *, limited: int, removed_names: list[str]
 ) -> tuple[str, str]:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
@@ -6827,8 +6833,10 @@ def _sync_result_notes(
             limited=limited,
         )
     removed_note = ""
-    if removed:
-        removed_note = t("import_removed_note", lang, removed=removed)
+    if removed_names:
+        removed_note = t(
+            "import_removed_note", lang, list=", ".join(removed_names)
+        )
     return limit_note, removed_note
 
 
@@ -6843,16 +6851,20 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
         result = await _sync_owner_follows(context.application, row)
         if result is None:
             continue
-        imported, skipped, limited, removed, ask_streamers = result
+        imported, skipped, limited, removed_names, ask_streamers = result
         lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
-        notify = db.get_receive_sync_updates(row.owner_id) or limited > 0 or removed > 0
+        notify = (
+            db.get_receive_sync_updates(row.owner_id)
+            or limited > 0
+            or bool(removed_names)
+        )
         if (
             notify
-            and (imported or limited or removed)
+            and (imported or limited or removed_names)
             and not _user_notifications_paused(db, row.owner_id)
         ):
             limit_note, removed_note = _sync_result_notes(
-                lang, limited=limited, removed=removed
+                lang, limited=limited, removed_names=removed_names
             )
             try:
                 await context.bot.send_message(
@@ -6895,11 +6907,11 @@ async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     result = await _sync_owner_follows(context.application, sync, advance_schedule=True)
     if result is None:
         return
-    imported, skipped, limited, removed, ask_streamers = result
+    imported, skipped, limited, removed_names, ask_streamers = result
     limit_note, removed_note = _sync_result_notes(
-        lang, limited=limited, removed=removed
+        lang, limited=limited, removed_names=removed_names
     )
-    if imported or limited or removed:
+    if imported or limited or removed_names:
         text = t(
             "sync_now_ok",
             lang,
