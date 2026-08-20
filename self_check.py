@@ -36,6 +36,7 @@ from bot import (
     _format_watch_vod_suggestions,
     _help_text,
     _is_link_preview_disabled,
+    _is_http_timeout,
     _is_unchanged_message_edit,
     _load_posthog_seen_report_ids,
     _message_link,
@@ -384,6 +385,12 @@ def main() -> None:
         assert _load_posthog_seen_report_ids(seen_path) == set()
         _save_posthog_seen_report_ids(seen_path, {"b", "a"})
         assert _load_posthog_seen_report_ids(seen_path) == {"a", "b"}
+    assert _is_http_timeout(TimeoutError("timed out"))
+    import urllib.error
+
+    assert _is_http_timeout(urllib.error.URLError(TimeoutError("timed out")))
+    assert not _is_http_timeout(urllib.error.URLError("connection refused"))
+    assert not _is_http_timeout(RuntimeError("boom"))
     assert parse_posthog_issue_payload({"event": {"event": "$pageview"}}) is None
     assert TwitchClient.is_one_off_schedule_forbidden(
         Exception("403 Client Error: single segment creation not authorized for url: x")

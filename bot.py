@@ -10686,6 +10686,13 @@ def _save_posthog_seen_report_ids(path: Path, ids: set[str]) -> None:
     path.write_text(json.dumps(kept), encoding="utf-8")
 
 
+def _is_http_timeout(exc: BaseException) -> bool:
+    """True for socket/urlopen timeouts (incl. URLError wrapping TimeoutError)."""
+    if isinstance(exc, TimeoutError):
+        return True
+    return isinstance(getattr(exc, "reason", None), TimeoutError)
+
+
 async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Poll PostHog Inbox reports API and notify admins about new ones."""
     from config import POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID
@@ -10701,17 +10708,21 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
     host = "https://us.posthog.com"
     url = f"{host}/api/projects/{POSTHOG_PROJECT_ID}/signals/reports/?limit=10"
 
-    try:
-        import urllib.request
+    import urllib.request
 
-        req = urllib.request.Request(
-            url, headers={"Authorization": f"Bearer {POSTHOG_PERSONAL_API_KEY}"}
-        )
+    req = urllib.request.Request(
+        url, headers={"Authorization": f"Bearer {POSTHOG_PERSONAL_API_KEY}"}
+    )
+    try:
         raw = await asyncio.to_thread(
             lambda: urllib.request.urlopen(req, timeout=30).read()
         )
         data = json.loads(raw)
-    except Exception:
+    except Exception as exc:
+        # Transient API slowness: next 5m poll recovers; avoid ERROR→Scout noise.
+        if _is_http_timeout(exc):
+            logger.warning("PostHog Inbox reports poll timed out: %s", exc)
+            return
         logger.exception("PostHog Inbox reports poll failed")
         return
 
