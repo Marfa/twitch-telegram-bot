@@ -10676,7 +10676,7 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
     if not POSTHOG_PERSONAL_API_KEY:
         if not context.application.bot_data.get("_posthog_poll_key_warned"):
             context.application.bot_data["_posthog_poll_key_warned"] = True
-            logger.warning(
+            logger.error(
                 "PostHog Inbox reports poll skipped: POSTHOG_API_KEY_PERSONAL unset"
             )
         return
@@ -10695,7 +10695,7 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
         )
         data = json.loads(raw)
     except Exception:
-        logger.warning("PostHog Inbox reports poll failed", exc_info=True)
+        logger.exception("PostHog Inbox reports poll failed")
         return
 
     reports = data.get("results") or []
