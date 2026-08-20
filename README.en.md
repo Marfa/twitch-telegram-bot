@@ -146,11 +146,11 @@ The bot polls live streams by `game_id` and notifies when a **new** matching str
 
 ### Import from Twitch
 
-**⬇️ Import from Twitch** — Twitch OAuth, then choose **one-time import** or **sync**:
+**⬇️ Import subscriptions** — Twitch OAuth, then choose **one-time import** or **sync**:
 
 - one-time — same as before, token not stored;
 - sync — period in days, refresh token stored encrypted; each run adds new follows (**enabled**) and removes unedited sync imports on unfollow; if an alert was **edited** or is **manual**, the bot asks “Delete alerts?” (Yes / No);
-- on import, alerts are created **paused** (DM to self); Settings → **Subscription sync** (change period / disable).
+- on import, alerts are created **paused** (DM to self); Settings → **Sync** (change period / disable).
 
 Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (see `PUBLIC_BASE_URL`).
 
@@ -171,7 +171,7 @@ Without beta opt-in, `/schedule` goes straight to the old weekly flow.
 2. Confirm “Create the schedule?”
 3. For each day: game/stream title and time (`15:30`)
 4. **No stream planned** — skip the day
-5. From day 2 — **Finish schedule** (not shown on the last day)
+5. From day 2 — **Finish** (not shown on the last day)
 
 Result — ready-to-post text, for example:
 
@@ -220,7 +220,7 @@ Without beta opt-in the button is hidden.
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
-| ⬇️ Import from Twitch | OAuth → one-time or sync |
+| ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete; **⏸ Pause notifications** (🧪 beta) |
 | 📜 Alert history | DM: 7 days free / 60 days Premium |
 | 📦 Other | Whisper alerts, schedule, what to watch |
@@ -255,7 +255,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit subscription** — same order as creation: template (**Clean title** checkbox), image, ignore / delay / repeats / delete (edit-menu items only in **advanced mode**), link preview (hidden when an image is set), schedule reminders (if enabled at creation), destination. For **category change** with delete enabled — a separate «delete other alerts too» option.
+**Edit** — same order as creation: template (**Clean title** checkbox), image, ignore / delay / repeats / delete (edit-menu items only in **advanced mode**), link preview (hidden when an image is set), schedule reminders (if enabled at creation), destination. For **category change** with delete enabled — a separate «delete other alerts too» option.
 
 Notification template example:
 

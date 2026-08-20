@@ -20,10 +20,10 @@ SCHEDULE_TZ_NAME = "Europe/Moscow"
 _STRINGS: dict[str, dict[str, str]] = {
     "en": {
         "btn_new": "➕ New subscription",
-        "btn_import_twitch": "⬇️ Import from Twitch",
+        "btn_import_twitch": "⬇️ Import subscriptions",
         "btn_manage": "📋 Manage subscriptions",
         "btn_list": "📋 My subscriptions",
-        "btn_edit": "✏️ Edit subscription",
+        "btn_edit": "✏️ Edit",
         "btn_delete": "🗑 Delete subscription",
         "btn_pause_notifications": "⏸ Pause notifications",
         "btn_feedback": "🐛 Report a problem",
@@ -46,8 +46,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_whisper_alerts": "💬 Whisper alerts",
         "btn_advanced_mode": "🎛 Advanced mode",
         "btn_beta_mode": "🧪 Beta mode",
-        "btn_sys_updates": "📬 Bot update alerts",
-        "btn_sync_subs": "🔄 Subscription sync",
+        "btn_sync_subs": "🔄 Sync",
         "btn_premium": "⭐ Premium",
         "btn_premium_pay": "Pay with Stars",
         "btn_premium_trial": "Trial period",
@@ -66,7 +65,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_skip": "Skip",
         "btn_premium_oferta": "Offer",
         "btn_partner": "🤝 Partner program",
-        "btn_partner_stats": "📈 My stats",
+        "btn_partner_stats": "📈 Statistics",
         "btn_partner_link": "🔗 Get link",
         "btn_partner_withdraw": "💸 Request withdrawal",
         "btn_partner_withdrawals": "📋 My requests",
@@ -143,7 +142,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_pick_empty": "No saved filters left. Starting a new search.",
         "watch_delete_pick": "Choose filters to delete (tap to select):",
         "watch_delete_go": "🗑 Delete selected ({count})",
-        "watch_delete_clear": "Clear selection",
+        "watch_delete_clear": "Clear",
         "watch_delete_none": "Nothing selected.",
         "watch_delete_back": "« Back",
         "watch_deleted": "Deleted filters: {count}",
@@ -230,7 +229,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "alert_history_type_end": "Stream ended",
         "alert_history_type_category": "Category change",
         "alert_history_type_schedule": "Schedule reminder",
-        "btn_alert_history_more": "Show more",
+        "btn_alert_history_more": "More",
         "menu_partner": "Partner program:",
         "partner_intro": (
             "Invite friends with your link. You get {percent}% of every Stars Premium "
@@ -271,7 +270,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "admin_withdrawals_title": "Pending withdrawals:",
         "admin_withdrawal_line": "#{id} — user <code>{user_id}</code> — {amount} Stars",
         "btn_wd_paid": "✅ Paid",
-        "btn_wd_reject": "❌ Reject",
+        "btn_wd_reject": "❌ Cancel",
         "admin_wd_resolved_paid": "Request #{id} marked as paid.",
         "admin_wd_resolved_rejected": "Request #{id} rejected, balance restored.",
         "admin_wd_already": "Request #{id} is already resolved ({status}).",
@@ -491,7 +490,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_add_slot": "➕ Add slot",
         "stream_schedule_slots_done": "Done",
         "stream_schedule_no_stream": "No stream planned",
-        "stream_schedule_finish": "Finish schedule",
+        "stream_schedule_finish": "Finish",
         "stream_schedule_line": "- {date} {time} {game}",
         "stream_schedule_publish_prompt": "Publish schedule on Twitch?",
         "stream_schedule_publish_yes": "✅ Publish on Twitch",
@@ -603,7 +602,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "lucky_full_wizard": "🛠 Full wizard",
         "image_ask": "Add an image?",
         "image_add": "🖼 Add",
-        "image_skip": "Skip ⏭",
+        "image_skip": "Skip",
         "edit_image_prompt": "Change the image for this subscription?",
         "edit_image_replace": "🖼 Replace",
         "edit_image_keep": "Leave as is",
@@ -634,7 +633,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Send the list or tap Skip.\n"
             "Tap «Use global list» to apply Settings → Ignored words and continue."
         ),
-        "ignore_keywords_skip": "Skip ⏭",
+        "ignore_keywords_skip": "Skip",
         "ignore_keywords_use_global": "Use global list",
         "ignore_keywords_yes_note": "Ignore keywords: {keywords}",
         "ignore_keywords_yes_global_note": "Ignore keywords: {keywords} (+ global list)",
@@ -709,7 +708,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "beta_mode_join": "Join",
         "beta_mode_leave": "Leave",
-        "beta_mode_report_bug": "🐛 Report bug",
+        "beta_mode_report_bug": "🐛 Report a problem",
         "beta_mode_opt_in": "✅ Joined beta: {name}",
         "beta_mode_opt_out": "Left beta: {name}",
         "beta_feat_deleted_subscriptions_cart": "Deleted subscriptions cart",
@@ -837,8 +836,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "You already have subscriptions that will send alerts for this streamer "
             "to the same destination. Delete other notifications too?"
         ),
-        "delete_sibling_yes": "✅ Yes — delete all",
-        "delete_sibling_no": "❌ No — only category changes",
+        "delete_sibling_yes": "✅ Yes, delete",
+        "delete_sibling_no": "❌ Category changes only",
         "delete_old_yes": "✅ Yes, delete",
         "delete_old_no": "❌ No",
         "delete_fail_notify_text": (
@@ -984,7 +983,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "import_limit_note": "\nLimit reached ({limit}): {limited} channel(s) not imported.",
         "import_removed_note": "\nRemoved (unfollowed): {list}",
-        "import_failed": "Twitch authorization failed. Try again: ⬇️ Import from Twitch.",
+        "import_failed": "Twitch authorization failed. Try again: ⬇️ Import subscriptions.",
         "import_denied": "Twitch authorization was cancelled.",
         "import_empty": "No followed channels to import.",
         "import_mode_prompt": (
@@ -1007,10 +1006,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Twitch did not return a refresh token. "
             "One-time import only — try Sync again after reconnecting."
         ),
-        "import_pending_expired": "Import session expired. Tap ⬇️ Import from Twitch again.",
+        "import_pending_expired": "Import session expired. Tap ⬇️ Import subscriptions again.",
         "sync_menu_off": (
             "Subscription sync is off.\n\n"
-            "To enable it, open Import from Twitch."
+            "To enable it, open Import subscriptions."
         ),
         "sync_menu_on": (
             "Subscription sync is on.\n"
@@ -1018,7 +1017,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Next sync: {next_at}"
         ),
         "sync_change_period": "⏱ Change period",
-        "sync_now": "🔄 Sync now",
+        "sync_now": "🔄 Sync",
         "sync_disable": "⏸ Disable sync",
         "sync_disabled": "Sync disabled. Twitch token removed.",
         "sync_period_updated": "Sync period updated: every {days} day(s).",
@@ -1071,7 +1070,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_pick": "Choose subscriptions to delete (tap to select):",
         "delete_type_pick": "Choose an alert type to delete:",
         "delete_go": "🗑 Delete selected ({count})",
-        "delete_clear": "Clear selection",
+        "delete_clear": "Clear",
         "delete_none": "Nothing selected.",
         "subs_deleted": "Deleted subscriptions: {count}.",
         "sub_deleted": "Subscription #{sub_id} deleted.",
@@ -1083,7 +1082,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "cart_empty": "No deleted subscriptions in the last {days} day(s).",
         "cart_restore_go": "♻️ Restore selected ({count})",
         "cart_restore_none": "Nothing selected.",
-        "cart_clear": "Clear selection",
+        "cart_clear": "Clear",
         "cart_restored": "Restored subscriptions: {count}.",
         "cart_restored_partial": (
             "Restored {restored}. Not restored due to subscription limit "
@@ -1254,7 +1253,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_pick_hour": "——— Select hour ———",
         "schedule_pick_minutes": "Select minutes ↘",
         "schedule_saved_time": "Saved time ↘",
-        "schedule_apply": "Apply time",
+        "schedule_apply": "Apply",
         "schedule_show_calendar": "🗓 Show calendar",
         "schedule_minutes_header": "——— Select minutes ———",
         "sys_notifications_menu": (
@@ -1302,10 +1301,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "ru": {
         "btn_new": "➕ Новая подписка",
-        "btn_import_twitch": "⬇️ Импорт подписок из Twitch",
+        "btn_import_twitch": "⬇️ Импорт подписок",
         "btn_manage": "📋 Управление подписками",
         "btn_list": "📋 Мои подписки",
-        "btn_edit": "✏️ Редактировать подписку",
+        "btn_edit": "✏️ Редактировать",
         "btn_delete": "🗑 Удалить подписку",
         "btn_pause_notifications": "⏸ Приостановить оповещения",
         "btn_feedback": "🐛 Сообщить о проблеме",
@@ -1322,14 +1321,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_stats": "📊 Статистика",
         "btn_back": "◀️ Главное меню",
         "btn_wizard_back": "« Назад",
-        "btn_wizard_cancel": "Отмена",
+        "btn_wizard_cancel": "Отменить",
         "btn_sys_notifications": "🔔 Системные уведомления",
         "btn_ignored_words": "🚫 Игнорируемые слова",
         "btn_whisper_alerts": "💬 Оповещения об ЛС",
         "btn_advanced_mode": "🎛 Продвинутый режим",
         "btn_beta_mode": "🧪 Бета-режим",
-        "btn_sys_updates": "📬 Получение оповещений об обновлениях",
-        "btn_sync_subs": "🔄 Синхронизация подписок",
+        "btn_sync_subs": "🔄 Синхронизировать",
         "btn_premium": "⭐ Премиум",
         "btn_premium_pay": "Оплатить подписку",
         "btn_premium_trial": "Пробный период",
@@ -1348,7 +1346,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium_skip": "Пропустить",
         "btn_premium_oferta": "Оферта",
         "btn_partner": "🤝 Партнёрка",
-        "btn_partner_stats": "📈 Моя статистика",
+        "btn_partner_stats": "📈 Статистика",
         "btn_partner_link": "🔗 Получить ссылку",
         "btn_partner_withdraw": "💸 Запросить вывод",
         "btn_partner_withdrawals": "📋 Мои заявки",
@@ -1425,7 +1423,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_pick_empty": "Сохранённых фильтров больше нет. Начинаем новый поиск.",
         "watch_delete_pick": "Выберите фильтры для удаления (нажмите, чтобы отметить):",
         "watch_delete_go": "🗑 Удалить выбранные ({count})",
-        "watch_delete_clear": "Сбросить выбор",
+        "watch_delete_clear": "Сбросить",
         "watch_delete_none": "Ничего не выбрано.",
         "watch_delete_back": "« Назад",
         "watch_deleted": "Удалено фильтров: {count}",
@@ -1513,7 +1511,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "alert_history_type_end": "Эфир окончен",
         "alert_history_type_category": "Смена категории",
         "alert_history_type_schedule": "Напоминание о стриме",
-        "btn_alert_history_more": "Показать больше",
+        "btn_alert_history_more": "Ещё",
         "menu_partner": "Партнёрская программа:",
         "partner_intro": (
             "Приглашайте друзей по своей ссылке. Вы получаете {percent}% от каждой "
@@ -1554,7 +1552,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "admin_withdrawals_title": "Заявки на вывод:",
         "admin_withdrawal_line": "#{id} — пользователь <code>{user_id}</code> — {amount} Stars",
         "btn_wd_paid": "✅ Выплачено",
-        "btn_wd_reject": "❌ Отклонить",
+        "btn_wd_reject": "❌ Отменить",
         "admin_wd_resolved_paid": "Заявка #{id} отмечена как выплаченная.",
         "admin_wd_resolved_rejected": "Заявка #{id} отклонена, баланс возвращён.",
         "admin_wd_already": "Заявка #{id} уже обработана ({status}).",
@@ -1780,7 +1778,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_add_slot": "➕ Добавить слот",
         "stream_schedule_slots_done": "Готово",
         "stream_schedule_no_stream": "Стрим не планируется",
-        "stream_schedule_finish": "Завершить создание расписания",
+        "stream_schedule_finish": "Завершить",
         "stream_schedule_line": "- {date} {time} {game}",
         "stream_schedule_publish_prompt": "Опубликовать расписание на Twitch?",
         "stream_schedule_publish_yes": "✅ Опубликовать на Twitch",
@@ -1991,7 +1989,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "lucky_full_wizard": "🛠 Перейти к полному мастеру",
         "image_ask": "Добавить изображение?",
         "image_add": "🖼 Добавить",
-        "image_skip": "Пропустить ⏭",
+        "image_skip": "Пропустить",
         "edit_image_prompt": "Изменить изображение для этой подписки?",
         "edit_image_replace": "🖼 Заменить",
         "edit_image_keep": "Оставить как есть",
@@ -2024,7 +2022,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Нажмите «Использовать глобальный список», чтобы применить "
             "Настройки → Игнорируемые слова и перейти дальше."
         ),
-        "ignore_keywords_skip": "Пропустить ⏭",
+        "ignore_keywords_skip": "Пропустить",
         "ignore_keywords_use_global": "Использовать глобальный список",
         "ignore_keywords_yes_note": "Игнорировать ключевые слова: {keywords}",
         "ignore_keywords_yes_global_note": (
@@ -2045,10 +2043,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ignored_words_hint_empty": "Отправьте слова, чтобы добавить в список.",
         "ignored_words_hint_edit": (
             "Отправьте слова, чтобы добавить (они допишутся к списку). "
-            "«Очистить» — удалить список. «Отмена» — без изменений."
+            "«Очистить» — удалить список. «Отменить» — без изменений."
         ),
         "ignored_words_clear": "Очистить список",
-        "ignored_words_cancel": "Отмена",
+        "ignored_words_cancel": "Отменить",
         "ignored_words_saved": "✅ Игнорируемые слова сохранены.",
         "ignored_words_cleared": "✅ Игнорируемые слова очищены.",
         "whisper_alerts_screen": (
@@ -2107,7 +2105,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "beta_mode_join": "Присоединиться",
         "beta_mode_leave": "Выйти",
-        "beta_mode_report_bug": "🐛 Сообщить об ошибке",
+        "beta_mode_report_bug": "🐛 Сообщить о проблеме",
         "beta_mode_opt_in": "✅ Вы в бете: {name}",
         "beta_mode_opt_out": "Вы вышли из беты: {name}",
         "beta_feat_deleted_subscriptions_cart": "Корзина удалённых подписок",
@@ -2236,8 +2234,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "У вас уже есть подписки, по которым бот будет отправлять оповещения. "
             "Удалять другие уведомления?"
         ),
-        "delete_sibling_yes": "✅ Да — удалять все",
-        "delete_sibling_no": "❌ Нет — только смену категории",
+        "delete_sibling_yes": "✅ Да, удалять",
+        "delete_sibling_no": "❌ Только смену категории",
         "delete_old_yes": "✅ Да, удалять",
         "delete_old_no": "❌ Нет",
         "delete_fail_notify_text": (
@@ -2387,7 +2385,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "import_limit_note": "\nЛимит ({limit}): не импортировано каналов: {limited}.",
         "import_removed_note": "\nУдалено (отписка): {list}",
-        "import_failed": "Не удалось авторизоваться на Twitch. Попробуйте снова: ⬇️ Импорт подписок из Twitch.",
+        "import_failed": "Не удалось авторизоваться на Twitch. Попробуйте снова: ⬇️ Импорт подписок.",
         "import_denied": "Авторизация на Twitch отменена.",
         "import_empty": "Нет каналов для импорта.",
         "import_mode_prompt": (
@@ -2410,10 +2408,10 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Twitch не вернул refresh token. "
             "Доступен только одноразовый импорт — попробуйте синхронизацию снова."
         ),
-        "import_pending_expired": "Сессия импорта истекла. Нажмите ⬇️ Импорт подписок из Twitch снова.",
+        "import_pending_expired": "Сессия импорта истекла. Нажмите ⬇️ Импорт подписок снова.",
         "sync_menu_off": (
             "Синхронизация подписок выключена.\n\n"
-            "Чтобы включить, перейдите в меню Импорт подписок из Twitch."
+            "Чтобы включить, перейдите в меню Импорт подписок."
         ),
         "sync_menu_on": (
             "Синхронизация подписок включена.\n"
@@ -2421,7 +2419,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Следующая сверка: {next_at}"
         ),
         "sync_change_period": "⏱ Изменить период",
-        "sync_now": "🔄 Синхронизировать сейчас",
+        "sync_now": "🔄 Синхронизировать",
         "sync_disable": "⏸ Отключить синхронизацию",
         "sync_disabled": "Синхронизация отключена. Токен Twitch удалён.",
         "sync_period_updated": "Период синхронизации: раз в {days} дн.",
@@ -2474,7 +2472,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_pick": "Выберите подписки для удаления (нажмите, чтобы отметить):",
         "delete_type_pick": "Выберите тип оповещения для удаления:",
         "delete_go": "🗑 Удалить выбранные ({count})",
-        "delete_clear": "Сбросить выбор",
+        "delete_clear": "Сбросить",
         "delete_none": "Ничего не выбрано.",
         "subs_deleted": "Удалено подписок: {count}.",
         "sub_deleted": "Подписка #{sub_id} удалена.",
@@ -2486,7 +2484,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "cart_empty": "В корзине нет удалённых подписок за последние {days} дней.",
         "cart_restore_go": "♻️ Восстановить выбранные ({count})",
         "cart_restore_none": "Ничего не выбрано.",
-        "cart_clear": "Сбросить выбор",
+        "cart_clear": "Сбросить",
         "cart_restored": "Восстановлено подписок: {count}.",
         "cart_restored_partial": (
             "Восстановлено: {restored}. Из‑за лимита подписок "
@@ -2563,9 +2561,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Пустое сообщение или «Пропустить» — отключить фильтр."
         ),
         "edit_ignore_keywords_hint_cancel": (
-            "«Отмена» — без изменений. Пустое сообщение — отключить фильтр."
+            "«Отменить» — без изменений. Пустое сообщение — отключить фильтр."
         ),
-        "ignore_keywords_cancel": "Отмена",
+        "ignore_keywords_cancel": "Отменить",
         "ignore_keywords_current_none": "нет",
         "edit_updated": "✅ Подписка #{sub_id} обновлена.",
         "edit_delay_prompt": (
@@ -2658,7 +2656,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "schedule_pick_hour": "——— Выберите час ———",
         "schedule_pick_minutes": "Выберите минуты ↘",
         "schedule_saved_time": "Запомненное время ↘",
-        "schedule_apply": "Применить время",
+        "schedule_apply": "Применить",
         "schedule_show_calendar": "🗓 Показать календарь",
         "schedule_minutes_header": "——— Выберите минуты ———",
         "sys_notifications_menu": (
