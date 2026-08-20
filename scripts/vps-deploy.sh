@@ -24,6 +24,17 @@ git reset --hard "origin/$BRANCH"
 cp -a /tmp/twitch-telegram-bot.env.bak .env
 rm -f /tmp/twitch-telegram-bot.env.bak
 
+# One-shot: typo POSHTOG_API_KEY_PERSONAL on VPS → POSTHOG_API_KEY_PERSONAL
+if grep -q '^POSHTOG_API_KEY_PERSONAL=' .env; then
+  if grep -qE '^POSTHOG_API_KEY_PERSONAL=.+' .env; then
+    sed -i '/^POSHTOG_API_KEY_PERSONAL=/d' .env
+  else
+    sed -i '/^POSTHOG_API_KEY_PERSONAL=/d' .env
+    sed -i 's/^POSHTOG_API_KEY_PERSONAL=/POSTHOG_API_KEY_PERSONAL=/' .env
+  fi
+  echo "env: POSHTOG_API_KEY_PERSONAL → POSTHOG_API_KEY_PERSONAL"
+fi
+
 # Dump 17 and restore into 18 before compose up (no-op once db is already 18).
 if [[ -f scripts/pg-upgrade-to-18.sh ]]; then
   bash scripts/pg-upgrade-to-18.sh
