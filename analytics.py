@@ -232,6 +232,15 @@ def capture_bot_stats(stats: Any, *, timestamp: Any | None = None) -> None:
 POSTHOG_STATUS_URL = "https://www.posthogstatus.com/api/status"
 POSTHOG_US_STATUS_PAGE_URL = "https://www.posthogstatus.com/us"
 _US_CLOUD_PREFIX = "US Cloud"
+# Only these US Cloud components trigger bot alerts (name match on status API).
+POSTHOG_US_WATCHED_COMPONENTS = frozenset(
+    {
+        "App",
+        "Logs",
+        "Error Tracking",
+        "Destination Delivery",
+    }
+)
 _STATUS_RANK = {
     "operational": 0,
     "under_maintenance": 1,
@@ -272,7 +281,7 @@ def _worst_status(statuses: list[str]) -> str:
 
 
 def posthog_us_snapshot(summary: dict[str, Any]) -> dict[str, Any]:
-    """US Cloud slice of posthogstatus.com (matches /us)."""
+    """US Cloud slice of posthogstatus.com (watched components only)."""
     group = None
     for item in summary.get("component_groups") or []:
         if isinstance(item, dict) and _is_us_cloud_name(str(item.get("name") or "")):
@@ -281,8 +290,11 @@ def posthog_us_snapshot(summary: dict[str, Any]) -> dict[str, Any]:
     components: list[dict[str, Any]] = []
     if group:
         for comp in group.get("components") or []:
-            if isinstance(comp, dict):
-                components.append(comp)
+            if not isinstance(comp, dict):
+                continue
+            if str(comp.get("name") or "") not in POSTHOG_US_WATCHED_COMPONENTS:
+                continue
+            components.append(comp)
     us_ids = {str(comp.get("id") or "") for comp in components if comp.get("id")}
     incidents: list[dict[str, Any]] = []
     incident_statuses: list[str] = []
@@ -293,12 +305,9 @@ def posthog_us_snapshot(summary: dict[str, Any]) -> dict[str, Any]:
         for affected in incident.get("affected_components") or []:
             if not isinstance(affected, dict):
                 continue
-            if str(affected.get("component_id") or "") in us_ids:
-                hit = True
-            elif _is_us_cloud_name(str(affected.get("group_name") or "")):
-                hit = True
-            else:
+            if str(affected.get("component_id") or "") not in us_ids:
                 continue
+            hit = True
             incident_statuses.append(str(affected.get("status") or "operational"))
         if hit:
             incidents.append(incident)
@@ -379,6 +388,12 @@ def _self_check() -> None:
                 "name": "US Cloud \U0001f1fa\U0001f1f8",
                 "components": [
                     {"id": "us-app", "name": "App", "status": "operational"},
+                    {"id": "us-logs", "name": "Logs", "status": "operational"},
+                    {
+                        "id": "us-query",
+                        "name": "Querying",
+                        "status": "major_outage",
+                    },
                 ],
             },
             {
@@ -400,7 +415,19 @@ def _self_check() -> None:
                         "status": "major_outage",
                     }
                 ],
-            }
+            },
+            {
+                "id": "us-query-only",
+                "name": "Querying down",
+                "status": "investigating",
+                "affected_components": [
+                    {
+                        "component_id": "us-query",
+                        "group_name": "US Cloud \U0001f1fa\U0001f1f8",
+                        "status": "major_outage",
+                    }
+                ],
+            },
         ],
     }
     status_bad = {
@@ -409,6 +436,12 @@ def _self_check() -> None:
                 "name": "US Cloud \U0001f1fa\U0001f1f8",
                 "components": [
                     {"id": "us-app", "name": "App", "status": "partial_outage"},
+                    {"id": "us-logs", "name": "Logs", "status": "operational"},
+                    {
+                        "id": "us-query",
+                        "name": "Querying",
+                        "status": "major_outage",
+                    },
                 ],
             },
             status_ok["component_groups"][1],
@@ -432,7 +465,9 @@ def _self_check() -> None:
     fp_bad = posthog_us_fingerprint(status_bad)
     assert fp_ok[0] == "operational"
     assert ("us-app", "operational") in fp_ok[1]
+    assert ("us-logs", "operational") in fp_ok[1]
     assert all(item[0] != "eu-app" for item in fp_ok[1])
+    assert all(item[0] != "us-query" for item in fp_ok[1])
     assert fp_ok[2] == ()
     assert fp_ok != fp_bad
     assert fp_bad[0] == "partial_outage"

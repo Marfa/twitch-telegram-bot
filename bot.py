@@ -7890,6 +7890,7 @@ async def _send_dm_html(
     message: str,
     *,
     reply_markup=None,
+    disable_web_page_preview: bool = False,
 ) -> str:
     """Send one DM. Returns 'sent', 'blocked', or 'failed'."""
     if _user_notifications_paused(db, uid):
@@ -7897,6 +7898,8 @@ async def _send_dm_html(
     kwargs: dict = {}
     if reply_markup is not None:
         kwargs["reply_markup"] = reply_markup
+    if disable_web_page_preview:
+        kwargs["disable_web_page_preview"] = True
     try:
         try:
             await bot.send_message(
@@ -10505,7 +10508,7 @@ def _format_posthog_status_message(lang: str, snapshot: dict) -> str:
 
 
 async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Poll posthogstatus.com/us; notify admins and active beta testers on changes."""
+    """Poll posthogstatus.com/us (App/Logs/Error Tracking/Destination Delivery)."""
     from config import ADMIN_USER_IDS
 
     try:
@@ -10538,7 +10541,9 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
     for uid in user_ids:
         locale = locale_rows.get(uid) or DEFAULT_LOCALE
         message = messages.get(locale) or messages[DEFAULT_LOCALE]
-        await _send_dm_html(context.bot, db, uid, message)
+        await _send_dm_html(
+            context.bot, db, uid, message, disable_web_page_preview=True
+        )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
 
 
