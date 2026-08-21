@@ -22,7 +22,8 @@
       notFound: "Streamer not found",
       badQuery: "Enter a name or Twitch link",
       beta: "Enable «Twitch stream chat» in Settings → Beta mode.",
-      authFail: "Open this screen from the bot menu button «Chat».",
+      authFail: "Open Chat from the bot menu button (or /start, then Chat).",
+      authEmpty: "Telegram did not pass login data. Close the Mini App, tap /start, then Chat again.",
       simple: "Simple",
       embed: "Embed",
       quota: "{n} messages left today",
@@ -30,6 +31,7 @@
       limitHit: "Daily limit reached. Premium unlocks unlimited chat.",
       needAuth: "Log in with Twitch to send messages.",
       sendFail: "Could not send message.",
+      loadFail: "Could not load data ({error}). Close and open Chat again.",
       connecting: "Connecting to chat…",
       disconnected: "Chat disconnected. Reconnecting…",
     },
@@ -45,7 +47,8 @@
       notFound: "Стример не найден",
       badQuery: "Введите имя или ссылку Twitch",
       beta: "Включите «Чат стримов Twitch» в Настройки → Режим бета.",
-      authFail: "Откройте экран кнопкой меню бота «Чат».",
+      authFail: "Откройте «Чат» кнопкой меню бота (или /start, затем снова Чат).",
+      authEmpty: "Telegram не передал вход. Закройте мини-апп, нажмите /start, затем снова «Чат».",
       simple: "Простой",
       embed: "Embed",
       quota: "Осталось сообщений сегодня: {n}",
@@ -53,6 +56,7 @@
       limitHit: "Дневной лимит. Premium снимает ограничение.",
       needAuth: "Войдите в Twitch, чтобы писать.",
       sendFail: "Не удалось отправить.",
+      loadFail: "Не удалось загрузить данные ({error}). Закройте и снова откройте «Чат».",
       connecting: "Подключение к чату…",
       disconnected: "Чат отключён. Переподключение…",
     },
@@ -65,6 +69,7 @@
   let useFallback = false;
   let ircSocket = null;
   let ircTimer = null;
+  let appToken = "";
 
   function setLang(code) {
     lang = String(code || "").toLowerCase().startsWith("ru") ? "ru" : "en";
@@ -78,11 +83,43 @@
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
   }
 
+  function takeTokenFromUrl() {
+    const params = new URLSearchParams(location.search);
+    let token = params.get("t") || params.get("token") || "";
+    if (!token && location.hash) {
+      const hp = new URLSearchParams(location.hash.replace(/^#/, ""));
+      token = hp.get("t") || hp.get("token") || "";
+    }
+    if (!token) {
+      try {
+        token = sessionStorage.getItem("chat_t") || "";
+      } catch (_) {}
+    }
+    if (token) {
+      appToken = token;
+      try {
+        sessionStorage.setItem("chat_t", token);
+      } catch (_) {}
+      params.delete("t");
+      params.delete("token");
+      const q = params.toString();
+      const clean =
+        location.pathname + (q ? "?" + q : "") + (location.hash ? "" : "");
+      try {
+        history.replaceState(null, "", clean);
+      } catch (_) {}
+    }
+    return appToken;
+  }
+
   function detectLang() {
     const q = new URLSearchParams(location.search).get("lang");
     if (q) return q;
     const tgLang =
-      (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) ||
+      (tg &&
+        tg.initDataUnsafe &&
+        tg.initDataUnsafe.user &&
+        tg.initDataUnsafe.user.language_code) ||
       "";
     return tgLang;
   }
@@ -93,14 +130,21 @@
 
   async function api(path, opts) {
     const options = opts || {};
-    const headers = Object.assign(
-      {
-        Authorization: "tma " + initData(),
-        "X-Telegram-Init-Data": initData(),
-      },
-      options.headers || {}
-    );
-    const res = await fetch(path, Object.assign({}, options, { headers }));
+    const headers = Object.assign({}, options.headers || {});
+    const idata = initData();
+    if (idata) {
+      headers.Authorization = "tma " + idata;
+      headers["X-Telegram-Init-Data"] = idata;
+    }
+    if (appToken) {
+      headers["X-Chat-Token"] = appToken;
+      if (!headers.Authorization) headers.Authorization = "Bearer " + appToken;
+    }
+    let url = path;
+    if (appToken && url.indexOf("t=") === -1) {
+      url += (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + encodeURIComponent(appToken);
+    }
+    const res = await fetch(url, Object.assign({}, options, { headers }));
     let body = {};
     try {
       body = await res.json();
@@ -115,6 +159,12 @@
     el("fatal").classList.remove("hidden");
     el("view-home").classList.add("hidden");
     el("view-chat").classList.add("hidden");
+  }
+
+  function authErrorMessage(error) {
+    if (error === "beta_required") return t.beta;
+    if (error === "unauthorized_empty") return t.authEmpty;
+    return t.authFail;
   }
 
   function renderAuth() {
@@ -218,12 +268,6 @@
         "/chat?parent=" +
         encodeURIComponent(parent) +
         "&darkpopout";
-      // If iframe stays blank / blocked, user can switch to Simple.
-      window.setTimeout(() => {
-        if (!useFallback && current) {
-          // Soft nudge only once via button label already visible.
-        }
-      }, 4000);
     }
   }
 
@@ -235,10 +279,7 @@
       row.textContent = text;
     } else {
       row.innerHTML =
-        '<span class="nick">' +
-        escapeHtml(nick) +
-        "</span>" +
-        escapeHtml(text);
+        '<span class="nick">' + escapeHtml(nick) + "</span>" + escapeHtml(text);
     }
     list.appendChild(row);
     list.scrollTop = list.scrollHeight;
@@ -321,18 +362,15 @@
   }
 
   async function boot() {
+    takeTokenFromUrl();
     setLang(detectLang());
-    if (!initData()) {
-      showFatal(t.authFail);
+    if (!initData() && !appToken) {
+      showFatal(t.authEmpty);
       return;
     }
-    const { status, body } = await api("/app/chat/api/session");
-    if (status === 403 && body.error === "beta_required") {
-      showFatal(t.beta);
-      return;
-    }
+    const { body } = await api("/app/chat/api/session");
     if (!body.ok) {
-      showFatal(t.authFail);
+      showFatal(authErrorMessage(body.error));
       return;
     }
     session = body;
@@ -345,7 +383,10 @@
       renderOnline([]);
       const hint = el("search-hint");
       hint.classList.remove("hidden");
-      hint.textContent = t.sendFail;
+      hint.textContent = t.loadFail.replace(
+        "{error}",
+        online.body.error || "error"
+      );
     }
   }
 
@@ -363,12 +404,13 @@
       "/app/chat/api/resolve?q=" + encodeURIComponent(q)
     );
     if (!body.ok) {
-      hint.textContent =
-        body.error === "not_found"
-          ? t.notFound
-          : body.error === "bad_query"
-            ? t.badQuery
-            : t.notFound;
+      if (body.error === "bad_query") hint.textContent = t.badQuery;
+      else if (body.error === "not_found") hint.textContent = t.notFound;
+      else if ((body.error || "").startsWith("unauthorized"))
+        hint.textContent = authErrorMessage(body.error);
+      else if (body.error === "beta_required") hint.textContent = t.beta;
+      else
+        hint.textContent = t.loadFail.replace("{error}", body.error || "error");
       return;
     }
     if (!body.online) {
@@ -413,6 +455,7 @@
       body: JSON.stringify({
         broadcaster_login: current.login,
         message: text,
+        token: appToken,
       }),
     });
     if (!body.ok) {

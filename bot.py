@@ -9653,7 +9653,10 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
     from chat_webapp import BETA_FEATURE_ID, chat_webapp_url
 
     lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
-    url = chat_webapp_url(lang=lang if lang in SUPPORTED_LOCALES else None)
+    url = chat_webapp_url(
+        lang=lang if lang in SUPPORTED_LOCALES else None,
+        user_id=user_id,
+    )
     enabled = bool(url) and beta_features.is_enabled(db, user_id, BETA_FEATURE_ID)
     try:
         if enabled:

@@ -2576,9 +2576,11 @@ def main() -> None:
     assert tr("beta_feat_stream_chat", "en")
     from chat_webapp import (
         WEBAPP_DIR,
-        embed_parent_host,
+        chat_webapp_url,
+        make_webapp_token,
         static_file,
         validate_webapp_init_data,
+        validate_webapp_token,
     )
     from premium import CHAT_FREE_DAILY_SEND_LIMIT, chat_daily_send_limit
 
@@ -2588,12 +2590,18 @@ def main() -> None:
     assert '/app/chat/app.js' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
-    from chat_webapp import chat_webapp_url
     from unittest.mock import patch
 
-    with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"):
+    with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"), patch(
+        "chat_webapp.TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
+    ):
         assert chat_webapp_url(lang="ru") == "https://example.com/app/chat/?lang=ru"
         assert chat_webapp_url() == "https://example.com/app/chat/"
+        tok = make_webapp_token(42)
+        assert validate_webapp_token(tok) == 42
+        assert validate_webapp_token("1:1:dead") is None
+        url = chat_webapp_url(lang="ru", user_id=42)
+        assert "lang=ru" in url and "t=" in url
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
         cdb.upsert_user(777)

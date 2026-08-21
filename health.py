@@ -585,17 +585,36 @@ def _read_json_body(handler: BaseHTTPRequestHandler, max_bytes: int = 16_384) ->
     return data if isinstance(data, dict) else None
 
 
-def _webapp_init_data(handler: BaseHTTPRequestHandler, body: dict | None = None) -> str:
+def _webapp_credentials(
+    handler: BaseHTTPRequestHandler, body: dict | None = None
+) -> tuple[str, str]:
+    """Return (init_data, app_token) from headers / query / JSON body."""
+    init_data = ""
+    token = ""
     auth = handler.headers.get("Authorization") or ""
     if auth.lower().startswith("tma "):
-        return auth[4:].strip()
-    header = handler.headers.get("X-Telegram-Init-Data") or ""
-    if header.strip():
-        return header.strip()
-    if body and isinstance(body.get("init_data"), str):
-        return body["init_data"]
+        init_data = auth[4:].strip()
+    elif auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    header_init = handler.headers.get("X-Telegram-Init-Data") or ""
+    if header_init.strip():
+        init_data = header_init.strip()
+    header_token = handler.headers.get("X-Chat-Token") or ""
+    if header_token.strip():
+        token = header_token.strip()
+    if body:
+        if isinstance(body.get("init_data"), str) and body["init_data"].strip():
+            init_data = body["init_data"].strip()
+        if isinstance(body.get("token"), str) and body["token"].strip():
+            token = body["token"].strip()
+        if isinstance(body.get("t"), str) and body["t"].strip():
+            token = body["t"].strip()
     query = parse_qs(urlparse(handler.path).query)
-    return (query.get("initData") or query.get("init_data") or [""])[0]
+    if not init_data:
+        init_data = (query.get("initData") or query.get("init_data") or [""])[0]
+    if not token:
+        token = (query.get("t") or query.get("token") or [""])[0]
+    return init_data, token
 
 
 def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
@@ -639,25 +658,27 @@ def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
             handler.wfile.write(body)
             return True
     if path == "/app/chat/api/session":
-        init_data = _webapp_init_data(handler)
-        status, payload = chat_webapp.api_session(init_data)
+        init_data, token = _webapp_credentials(handler)
+        status, payload = chat_webapp.api_session(init_data=init_data, token=token)
         _json_response(handler, status, payload)
         return True
     if path == "/app/chat/api/online":
-        init_data = _webapp_init_data(handler)
-        status, payload = chat_webapp.api_online(init_data)
+        init_data, token = _webapp_credentials(handler)
+        status, payload = chat_webapp.api_online(init_data=init_data, token=token)
         _json_response(handler, status, payload)
         return True
     if path == "/app/chat/api/resolve":
         query = parse_qs(urlparse(handler.path).query)
         q = (query.get("q") or [""])[0]
-        init_data = _webapp_init_data(handler)
-        status, payload = chat_webapp.api_resolve(init_data, q)
+        init_data, token = _webapp_credentials(handler)
+        status, payload = chat_webapp.api_resolve(
+            init_data=init_data, token=token, query=q
+        )
         _json_response(handler, status, payload)
         return True
     if path == "/app/chat/api/oauth-url":
-        init_data = _webapp_init_data(handler)
-        status, payload = chat_webapp.api_oauth_url(init_data)
+        init_data, token = _webapp_credentials(handler)
+        status, payload = chat_webapp.api_oauth_url(init_data=init_data, token=token)
         _json_response(handler, status, payload)
         return True
     if path.startswith("/app/chat"):
@@ -677,9 +698,10 @@ def _handle_chat_webapp_post(handler: BaseHTTPRequestHandler) -> bool:
     if body is None:
         _json_response(handler, 400, {"ok": False, "error": "bad_json"})
         return True
-    init_data = _webapp_init_data(handler, body)
+    init_data, token = _webapp_credentials(handler, body)
     status, payload = chat_webapp.api_send(
-        init_data,
+        init_data=init_data,
+        token=token,
         broadcaster_login=str(body.get("broadcaster_login") or ""),
         message=str(body.get("message") or ""),
     )

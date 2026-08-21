@@ -1,4 +1,4 @@
-"""Twitch stream chat Mini App: initData auth, online list, resolve, send limits."""
+"""Twitch stream chat Mini App: auth, online list, resolve, send limits."""
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +8,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from config import PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
 from premium import CHAT_FREE_DAILY_SEND_LIMIT, chat_daily_send_limit
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 BETA_FEATURE_ID = "stream-chat"
 WEBAPP_DIR = Path(__file__).resolve().parent / "webapp" / "chat"
 _INIT_DATA_MAX_AGE_SEC = 86_400
+_WEBAPP_TOKEN_TTL_SEC = 7 * 86_400
 _STATIC_NAMES = frozenset({"index.html", "app.js", "style.css"})
 
 _db: Any = None
@@ -30,13 +31,53 @@ def register_chat_webapp(*, db: Any, twitch: Any) -> None:
     _twitch = twitch
 
 
-def chat_webapp_url(*, lang: str | None = None) -> str:
+def make_webapp_token(user_id: int, *, ttl_sec: int = _WEBAPP_TOKEN_TTL_SEC) -> str:
+    """Short-lived HMAC token so the Mini App works even if initData is empty."""
+    exp = int(time.time()) + max(60, int(ttl_sec))
+    msg = f"{int(user_id)}:{exp}"
+    sig = hmac.new(
+        TELEGRAM_BOT_TOKEN.encode("utf-8"),
+        msg.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    return f"{msg}:{sig}"
+
+
+def validate_webapp_token(token: str) -> int | None:
+    raw = (token or "").strip()
+    if not raw or not TELEGRAM_BOT_TOKEN or raw.count(":") != 2:
+        return None
+    uid_s, exp_s, sig = raw.split(":", 2)
+    try:
+        user_id = int(uid_s)
+        exp = int(exp_s)
+    except ValueError:
+        return None
+    if user_id <= 0 or exp < int(time.time()):
+        return None
+    msg = f"{user_id}:{exp}"
+    expect = hmac.new(
+        TELEGRAM_BOT_TOKEN.encode("utf-8"),
+        msg.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    if not hmac.compare_digest(expect, sig):
+        return None
+    return user_id
+
+
+def chat_webapp_url(*, lang: str | None = None, user_id: int | None = None) -> str:
     if not PUBLIC_BASE_URL:
         return ""
     base = f"{PUBLIC_BASE_URL}/app/chat/"
+    params: dict[str, str] = {}
     if lang in ("en", "ru"):
-        return f"{base}?lang={lang}"
-    return base
+        params["lang"] = lang
+    if user_id is not None:
+        params["t"] = make_webapp_token(int(user_id))
+    if not params:
+        return base
+    return f"{base}?{urlencode(params)}"
 
 
 def embed_parent_host() -> str:
@@ -87,15 +128,26 @@ def validate_webapp_init_data(init_data: str) -> dict[str, Any] | None:
     return user
 
 
-def _require_user(init_data: str) -> tuple[dict[str, Any] | None, str | None]:
+def _require_user(
+    *,
+    init_data: str = "",
+    token: str = "",
+) -> tuple[dict[str, Any] | None, str | None]:
     import beta as beta_features
 
-    user = validate_webapp_init_data(init_data)
-    if user is None:
-        return None, "unauthorized"
+    user_id: int | None = validate_webapp_token(token) if token else None
+    user: dict[str, Any] | None = None
+    if user_id is None:
+        user = validate_webapp_init_data(init_data)
+        if user is None:
+            if not (init_data or "").strip() and not (token or "").strip():
+                return None, "unauthorized_empty"
+            return None, "unauthorized"
+        user_id = int(user["id"])
+    else:
+        user = {"id": user_id}
     if _db is None:
         return None, "unavailable"
-    user_id = int(user["id"])
     if not beta_features.is_enabled(_db, user_id, BETA_FEATURE_ID):
         return None, "beta_required"
     return user, None
@@ -105,11 +157,15 @@ def _utc_day() -> str:
     return time.strftime("%Y-%m-%d", time.gmtime())
 
 
-def api_session(init_data: str) -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data)
+def _err(code: int, error: str) -> tuple[int, dict[str, Any]]:
+    return code, {"ok": False, "error": error}
+
+
+def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
+    user, err = _require_user(init_data=init_data, token=token)
     if err or user is None:
-        code = 401 if err == "unauthorized" else 403
-        return code, {"ok": False, "error": err or "unauthorized"}
+        code = 401 if (err or "").startswith("unauthorized") else 403
+        return _err(code, err or "unauthorized")
     user_id = int(user["id"])
     lang = _db.get_user_locale(user_id) or "en"
     auth = _db.get_chat_auth(user_id)
@@ -132,13 +188,13 @@ def api_session(init_data: str) -> tuple[int, dict[str, Any]]:
     }
 
 
-def api_online(init_data: str) -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data)
+def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
+    user, err = _require_user(init_data=init_data, token=token)
     if err or user is None:
-        code = 401 if err == "unauthorized" else 403
-        return code, {"ok": False, "error": err or "unauthorized"}
+        code = 401 if (err or "").startswith("unauthorized") else 403
+        return _err(code, err or "unauthorized")
     if _twitch is None:
-        return 503, {"ok": False, "error": "unavailable"}
+        return _err(503, "unavailable")
     user_id = int(user["id"])
     import demo_mode
 
@@ -150,7 +206,7 @@ def api_online(init_data: str) -> tuple[int, dict[str, Any]]:
             if s.enabled and bool(s.is_demo) == demo and s.twitch_user_id
         ]
         if not subs:
-            return 200, {"ok": True, "streams": []}
+            return 200, {"ok": True, "streams": [], "subscribed": 0}
         by_uid = {str(s.twitch_user_id): s for s in subs}
         live = _twitch.get_live_streams(list(by_uid.keys()))
         streams: list[dict[str, Any]] = []
@@ -171,26 +227,32 @@ def api_online(init_data: str) -> tuple[int, dict[str, Any]]:
                 }
             )
         streams.sort(key=lambda s: (-int(s["viewer_count"]), str(s["login"])))
-        return 200, {"ok": True, "streams": streams}
+        return 200, {
+            "ok": True,
+            "streams": streams,
+            "subscribed": len(by_uid),
+        }
     except Exception:
         logger.exception("chat api_online failed user=%s", user_id)
-        return 502, {"ok": False, "error": "twitch_error"}
+        return _err(502, "twitch_error")
 
 
-def api_resolve(init_data: str, query: str) -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data)
+def api_resolve(
+    *, init_data: str = "", token: str = "", query: str = ""
+) -> tuple[int, dict[str, Any]]:
+    user, err = _require_user(init_data=init_data, token=token)
     if err or user is None:
-        code = 401 if err == "unauthorized" else 403
-        return code, {"ok": False, "error": err or "unauthorized"}
+        code = 401 if (err or "").startswith("unauthorized") else 403
+        return _err(code, err or "unauthorized")
     if _twitch is None:
-        return 503, {"ok": False, "error": "unavailable"}
+        return _err(503, "unavailable")
     login = _twitch.parse_username(query or "")
     if not login:
-        return 400, {"ok": False, "error": "bad_query"}
+        return _err(400, "bad_query")
     try:
         profile = _twitch.get_user(login)
         if not profile:
-            return 404, {"ok": False, "error": "not_found"}
+            return _err(404, "not_found")
         uid = str(profile["id"])
         live_map = _twitch.get_live_streams([uid])
         stream = live_map.get(uid)
@@ -207,23 +269,23 @@ def api_resolve(init_data: str, query: str) -> tuple[int, dict[str, Any]]:
         }
     except Exception:
         logger.exception("chat api_resolve failed login=%s", login)
-        return 502, {"ok": False, "error": "twitch_error"}
+        return _err(502, "twitch_error")
 
 
-def api_oauth_url(init_data: str) -> tuple[int, dict[str, Any]]:
+def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
     from config import twitch_oauth_redirect_uri
     from health import create_oauth_state
     from twitch import CHAT_OAUTH_SCOPES
 
-    user, err = _require_user(init_data)
+    user, err = _require_user(init_data=init_data, token=token)
     if err or user is None:
-        code = 401 if err == "unauthorized" else 403
-        return code, {"ok": False, "error": err or "unauthorized"}
+        code = 401 if (err or "").startswith("unauthorized") else 403
+        return _err(code, err or "unauthorized")
     if _twitch is None:
-        return 503, {"ok": False, "error": "unavailable"}
+        return _err(503, "unavailable")
     redirect = twitch_oauth_redirect_uri()
     if not redirect:
-        return 503, {"ok": False, "error": "oauth_unavailable"}
+        return _err(503, "oauth_unavailable")
     user_id = int(user["id"])
     lang = _db.get_user_locale(user_id) or "en"
     state = create_oauth_state(user_id, lang, purpose="chat")
@@ -234,24 +296,28 @@ def api_oauth_url(init_data: str) -> tuple[int, dict[str, Any]]:
 
 
 def api_send(
-    init_data: str, *, broadcaster_login: str, message: str
+    *,
+    init_data: str = "",
+    token: str = "",
+    broadcaster_login: str = "",
+    message: str = "",
 ) -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data)
+    user, err = _require_user(init_data=init_data, token=token)
     if err or user is None:
-        code = 401 if err == "unauthorized" else 403
-        return code, {"ok": False, "error": err or "unauthorized"}
+        code = 401 if (err or "").startswith("unauthorized") else 403
+        return _err(code, err or "unauthorized")
     if _twitch is None:
-        return 503, {"ok": False, "error": "unavailable"}
+        return _err(503, "unavailable")
     user_id = int(user["id"])
     text = (message or "").strip()
     if not text or len(text) > 500:
-        return 400, {"ok": False, "error": "bad_message"}
+        return _err(400, "bad_message")
     login = _twitch.parse_username(broadcaster_login or "")
     if not login:
-        return 400, {"ok": False, "error": "bad_channel"}
+        return _err(400, "bad_channel")
     auth = _db.get_chat_auth(user_id)
     if not auth or not auth.refresh_token:
-        return 401, {"ok": False, "error": "twitch_auth_required"}
+        return _err(401, "twitch_auth_required")
     limit = chat_daily_send_limit(_db, user_id)
     day = _utc_day()
     sent = _db.get_chat_send_count(user_id, day)
@@ -265,7 +331,7 @@ def api_send(
         }
     broadcaster = _twitch.get_user(login)
     if not broadcaster:
-        return 404, {"ok": False, "error": "not_found"}
+        return _err(404, "not_found")
     try:
         token_data = _twitch.refresh_user_token(auth.refresh_token)
         access = token_data.get("access_token") or ""
@@ -287,7 +353,7 @@ def api_send(
         )
     except Exception as exc:
         logger.warning("chat send failed user=%s: %s", user_id, exc)
-        return 502, {"ok": False, "error": "send_failed"}
+        return _err(502, "send_failed")
     new_count = _db.increment_chat_send_count(user_id, day)
     remaining = None if limit is None else max(0, int(limit) - new_count)
     return 200, {
