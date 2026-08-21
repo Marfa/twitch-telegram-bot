@@ -14,10 +14,13 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     LinkPreviewOptions,
+    MenuButtonCommands,
+    MenuButtonWebApp,
     MessageOriginChannel,
     MessageOriginChat,
     ReplyKeyboardMarkup,
     Update,
+    WebAppInfo,
 )
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Conflict, Forbidden, NetworkError, RetryAfter
@@ -1878,6 +1881,8 @@ async def _send_welcome(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    await sync_stream_chat_menu_button(context.bot, db, user_id)
     await update.effective_message.reply_text(
         t("start_welcome", lang),
         reply_markup=_menu(lang, user_id),
@@ -1934,6 +1939,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     await query.edit_message_text(t("lang_set", lang))
     after = context.user_data.pop("after_lang", "welcome")
+    await sync_stream_chat_menu_button(context.bot, db, query.from_user.id)
     if after == "help":
         await context.bot.send_message(
             query.from_user.id,
@@ -6531,6 +6537,9 @@ async def complete_twitch_import(
     if purpose == "whispers":
         await complete_whisper_oauth(application, owner_id, error, token_info)
         return
+    if purpose == "chat":
+        await complete_chat_oauth(application, owner_id, error, token_info)
+        return
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
@@ -9360,6 +9369,8 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "beta_feature_opt_in" if new_state else "beta_feature_opt_out",
         {"feature_id": feature_id, "premium_feature_id": feat.premium_feature_id or ""},
     )
+    if feature_id == "stream-chat":
+        await sync_stream_chat_menu_button(context.bot, db, user_id)
     toast = t(
         "beta_mode_opt_in" if new_state else "beta_mode_opt_out",
         lang,
@@ -9634,6 +9645,71 @@ async def on_whisper_alerts_toggle(
     analytics.capture(user_id, "whisper_alerts_toggled", {"enabled": True})
     await query.edit_message_reply_markup(
         reply_markup=whisper_alerts_keyboard(lang, enabled=True)
+    )
+
+
+async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> None:
+    """Show or clear the Chat Menu Button for a private chat."""
+    from chat_webapp import BETA_FEATURE_ID, chat_webapp_url
+
+    url = chat_webapp_url()
+    enabled = bool(url) and beta_features.is_enabled(db, user_id, BETA_FEATURE_ID)
+    try:
+        if enabled:
+            lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
+            await bot.set_chat_menu_button(
+                chat_id=user_id,
+                menu_button=MenuButtonWebApp(
+                    text=t("menu_btn_chat", lang),
+                    web_app=WebAppInfo(url=url),
+                ),
+            )
+        else:
+            await bot.set_chat_menu_button(
+                chat_id=user_id,
+                menu_button=MenuButtonCommands(),
+            )
+    except Exception:
+        logger.exception("Failed to sync stream-chat menu button for %s", user_id)
+
+
+async def complete_chat_oauth(
+    application: Application,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+) -> None:
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    if error:
+        await application.bot.send_message(
+            owner_id,
+            t("chat_oauth_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    info = token_info or {}
+    refresh = info.get("refresh_token") or ""
+    twitch_user_id = info.get("twitch_user_id") or ""
+    twitch_login = info.get("twitch_login") or ""
+    if not refresh or not twitch_user_id:
+        await application.bot.send_message(
+            owner_id,
+            t("chat_oauth_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    db.upsert_chat_auth(
+        owner_id,
+        twitch_user_id=twitch_user_id,
+        twitch_login=twitch_login,
+        refresh_token=refresh,
+    )
+    analytics.capture(owner_id, "stream_chat_oauth_linked", {"twitch_login": twitch_login})
+    await application.bot.send_message(
+        owner_id,
+        t("chat_oauth_done", lang),
+        reply_markup=_menu(lang, owner_id),
     )
 
 
@@ -10820,6 +10896,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
     beta_features.load_manifest()
     async def post_init(application: Application) -> None:
+        from chat_webapp import register_chat_webapp
         from config import POSTHOG_ISSUE_WEBHOOK_SECRET, twitch_oauth_redirect_uri
         from health import (
             mark_ready,
@@ -10830,6 +10907,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
         await _restore_broadcast_jobs(application)
         loop = asyncio.get_running_loop()
+        register_chat_webapp(db=db, twitch=twitch)
         redirect_uri = twitch_oauth_redirect_uri()
         if redirect_uri:
 

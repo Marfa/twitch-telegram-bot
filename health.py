@@ -411,7 +411,7 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
             raise RuntimeError("no_user")
         twitch_user_id = str(user["id"])
         twitch_login = str(user.get("login") or "")
-        if purpose in ("schedule", "premium", "whispers"):
+        if purpose in ("schedule", "premium", "whispers", "chat"):
             followed = []
         else:
             followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
@@ -530,6 +530,120 @@ def _oferta_page() -> bytes:
     ).encode("utf-8")
 
 
+def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _read_json_body(handler: BaseHTTPRequestHandler, max_bytes: int = 16_384) -> dict | None:
+    length_raw = handler.headers.get("Content-Length") or "0"
+    try:
+        length = int(length_raw)
+    except ValueError:
+        return None
+    if length < 0 or length > max_bytes:
+        return None
+    try:
+        raw = handler.rfile.read(length)
+        data = json.loads(raw.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _webapp_init_data(handler: BaseHTTPRequestHandler, body: dict | None = None) -> str:
+    auth = handler.headers.get("Authorization") or ""
+    if auth.lower().startswith("tma "):
+        return auth[4:].strip()
+    if body and isinstance(body.get("init_data"), str):
+        return body["init_data"]
+    query = parse_qs(urlparse(handler.path).query)
+    return (query.get("initData") or query.get("init_data") or [""])[0]
+
+
+def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
+    """Serve Mini App static + GET APIs. Returns True if handled."""
+    import chat_webapp
+
+    path = handler._path_only()
+    if path in ("/app/chat", "/app/chat/"):
+        static = chat_webapp.static_file("index.html")
+        if not static:
+            handler.send_response(404)
+            handler.end_headers()
+            return True
+        body, ctype = static
+        handler.send_response(200)
+        handler.send_header("Content-Type", ctype)
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+        return True
+    if path.startswith("/app/chat/") and path.count("/") == 3:
+        name = path.rsplit("/", 1)[-1]
+        static = chat_webapp.static_file(name)
+        if static:
+            body, ctype = static
+            handler.send_response(200)
+            handler.send_header("Content-Type", ctype)
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+            return True
+    if path == "/app/chat/api/session":
+        init_data = _webapp_init_data(handler)
+        status, payload = chat_webapp.api_session(init_data)
+        _json_response(handler, status, payload)
+        return True
+    if path == "/app/chat/api/online":
+        init_data = _webapp_init_data(handler)
+        status, payload = chat_webapp.api_online(init_data)
+        _json_response(handler, status, payload)
+        return True
+    if path == "/app/chat/api/resolve":
+        query = parse_qs(urlparse(handler.path).query)
+        q = (query.get("q") or [""])[0]
+        init_data = _webapp_init_data(handler)
+        status, payload = chat_webapp.api_resolve(init_data, q)
+        _json_response(handler, status, payload)
+        return True
+    if path == "/app/chat/api/oauth-url":
+        init_data = _webapp_init_data(handler)
+        status, payload = chat_webapp.api_oauth_url(init_data)
+        _json_response(handler, status, payload)
+        return True
+    if path.startswith("/app/chat"):
+        handler.send_response(404)
+        handler.end_headers()
+        return True
+    return False
+
+
+def _handle_chat_webapp_post(handler: BaseHTTPRequestHandler) -> bool:
+    import chat_webapp
+
+    path = handler._path_only()
+    if path != "/app/chat/api/send":
+        return False
+    body = _read_json_body(handler)
+    if body is None:
+        _json_response(handler, 400, {"ok": False, "error": "bad_json"})
+        return True
+    init_data = _webapp_init_data(handler, body)
+    status, payload = chat_webapp.api_send(
+        init_data,
+        broadcaster_login=str(body.get("broadcaster_login") or ""),
+        message=str(body.get("message") or ""),
+    )
+    _json_response(handler, status, payload)
+    return True
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     timeout = 60  # half-open clients must not hold a worker forever
 
@@ -550,6 +664,9 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if path.startswith("/app/chat"):
+            if _handle_chat_webapp_get(self):
+                return
         if path == "/placeholders":
             query = parse_qs(urlparse(self.path).query)
             lang = (query.get("lang") or ["en"])[0]
@@ -585,6 +702,9 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self._path_only()
+        if path.startswith("/app/chat"):
+            if _handle_chat_webapp_post(self):
+                return
         if path == "/hooks/posthog-issues":
             status, body = _handle_posthog_issue_post(self)
             self.send_response(status)

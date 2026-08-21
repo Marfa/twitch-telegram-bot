@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Chat</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="bar">
+      <div id="auth-status" class="auth"></div>
+      <button type="button" id="btn-login" class="btn ghost hidden">Twitch</button>
+    </header>
+
+    <section id="view-home" class="view">
+      <form id="search-form" class="search">
+        <input id="search-input" type="search" enterkeyhint="search"
+               autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="Name or twitch.tv / m.twitch.tv link">
+        <button type="submit" class="btn">Go</button>
+      </form>
+      <p id="search-hint" class="hint hidden"></p>
+      <h2 class="section-title" id="online-title">Live now</h2>
+      <div id="online-list" class="list"></div>
+      <p id="online-empty" class="hint hidden">No live streams among your active subscriptions.</p>
+    </section>
+
+    <section id="view-chat" class="view hidden">
+      <div class="chat-top">
+        <button type="button" id="btn-back" class="btn ghost">←</button>
+        <div class="chat-meta">
+          <strong id="chat-title">—</strong>
+          <span id="chat-sub" class="muted"></span>
+        </div>
+        <button type="button" id="btn-fallback" class="btn ghost hidden">Simple</button>
+      </div>
+      <div id="embed-wrap" class="embed-wrap hidden">
+        <iframe id="embed-frame" title="Twitch chat" allowfullscreen></iframe>
+      </div>
+      <div id="fallback-wrap" class="fallback-wrap hidden">
+        <div id="msg-list" class="msg-list"></div>
+        <form id="send-form" class="send">
+          <input id="send-input" type="text" maxlength="500" autocomplete="off"
+                 placeholder="Message">
+          <button type="submit" class="btn" id="btn-send">Send</button>
+        </form>
+        <p id="send-quota" class="hint"></p>
+      </div>
+    </section>
+
+    <p id="fatal" class="fatal hidden"></p>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

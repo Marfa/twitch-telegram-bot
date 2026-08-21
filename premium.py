@@ -39,6 +39,7 @@ FEATURE_IDS: tuple[str, ...] = (
     "schedule_publish",
     "alert_history",
     "deleted_subscriptions_cart",
+    "stream_chat",
 )
 
 # Wizard steps bundled into advanced_mode (legacy à la carte ids still honored).
@@ -79,7 +80,11 @@ _FEATURE_LABEL_KEYS = {
     "schedule_publish": "premium_feat_schedule_publish",
     "alert_history": "premium_feat_alert_history",
     "deleted_subscriptions_cart": "premium_feat_deleted_subscriptions_cart",
+    "stream_chat": "premium_feat_stream_chat",
 }
+
+# Free Mini App chat: read unlimited; send capped unless stream_chat / full plan.
+CHAT_FREE_DAILY_SEND_LIMIT = 20
 
 
 def deleted_subscriptions_cart_days(db: "Database", user_id: int) -> int:
@@ -91,6 +96,14 @@ def deleted_subscriptions_cart_days(db: "Database", user_id: int) -> int:
         if has_feature_sync(db, user_id, "deleted_subscriptions_cart")
         else DELETED_SUBSCRIPTIONS_CART_FREE_DAYS
     )
+
+
+def chat_daily_send_limit(db: "Database", user_id: int) -> int | None:
+    """None = unlimited (Premium stream_chat / full plan); else free daily cap."""
+    ensure_trial_expired(db, user_id)
+    if has_feature_sync(db, user_id, "stream_chat"):
+        return None
+    return CHAT_FREE_DAILY_SEND_LIMIT
 
 
 @dataclass(frozen=True)

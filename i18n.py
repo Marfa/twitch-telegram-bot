@@ -316,6 +316,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_schedule_publish": "Publish schedule to Twitch",
         "premium_feat_alert_history": "Alert history for 60 days",
         "premium_feat_deleted_subscriptions_cart": "Deleted subscriptions cart for 30 days",
+        "premium_feat_stream_chat": "Unlimited Twitch stream chat in the Mini App",
         "premium_feat_line": "• {name} until {until}",
         "premium_feat_line_canceled": "• {name} until {until} (auto-renew off)",
         "premium_feat_pick": (
@@ -720,6 +721,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Temporarily stop stream and system notifications for a number of days "
             "without pausing subscriptions. 0 days turns them back on."
         ),
+        "beta_feat_stream_chat": "Twitch stream chat",
+        "beta_feat_stream_chat_desc": (
+            "Menu button «Chat» opens a Mini App: online streamers from your active "
+            "subscriptions, search by name or link, and stream chat (Twitch embed with "
+            "fallback). Free: read + 20 messages/day; Premium unlocks unlimited sends."
+        ),
+        "menu_btn_chat": "Chat",
+        "chat_oauth_done": (
+            "Twitch account linked for chat. Open the Chat menu button again."
+        ),
+        "chat_oauth_failed": "Could not link Twitch for chat. Try again from the Mini App.",
         "wizard_simple_mode_note": (
             "<b>You are in simplified mode. Open Settings → Advanced mode "
             "to show all wizard steps.</b>"
@@ -1595,6 +1607,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "premium_feat_schedule_publish": "Публикация расписания на Twitch",
         "premium_feat_alert_history": "История оповещений за 60 дней",
         "premium_feat_deleted_subscriptions_cart": "Корзина удалённых подписок на 30 дней",
+        "premium_feat_stream_chat": "Безлимитный чат стримов Twitch в мини-приложении",
         "premium_feat_line": "• {name} до {until}",
         "premium_feat_line_canceled": "• {name} до {until} (автопродление выкл.)",
         "premium_feat_pick": (
@@ -2111,6 +2124,19 @@ _STRINGS: dict[str, dict[str, str]] = {
         "beta_feat_pause_notifications_desc": (
             "Временно не получать оповещения о стримах и системные на указанное число дней, "
             "не ставя подписки на паузу. 0 дней снова включает оповещения."
+        ),
+        "beta_feat_stream_chat": "Чат стримов Twitch",
+        "beta_feat_stream_chat_desc": (
+            "Кнопка меню «Чат» открывает мини-приложение: онлайн-стримеры из активных "
+            "подписок, поиск по имени или ссылке и чат стрима (embed Twitch с запасным "
+            "режимом). Бесплатно: чтение + 20 сообщений в день; Premium — без лимита."
+        ),
+        "menu_btn_chat": "Чат",
+        "chat_oauth_done": (
+            "Аккаунт Twitch привязан для чата. Снова откройте кнопку меню «Чат»."
+        ),
+        "chat_oauth_failed": (
+            "Не удалось привязать Twitch для чата. Попробуйте снова из мини-приложения."
         ),
         "wizard_simple_mode_note": (
             "<b>Вы работаете в упрощённом режиме, перейдите в Настройках "
