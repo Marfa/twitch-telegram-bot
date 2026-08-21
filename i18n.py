@@ -457,12 +457,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_alert_upcoming": "• Alert: upcoming stream reminder",
         "finish_setup_first": "Finish the subscription setup or tap /cancel.",
         "stream_schedule_intro": (
-            "Use this menu to build text for publishing your weekly schedule, starting on Monday.\n\n"
-            "<b>Example:</b>\n"
-            "- 13 July 15:30 Sovereign Syndicate\n"
-            "- 14 July 15:30 Sovereign Syndicate\n"
-            "- 15 July 15:30 Sovereign Syndicate\n"
-            "- 17 July 15:30 Sovereign Syndicate"
+            "Use this menu to create a weekly schedule "
+            "(from the next Monday through Sunday)."
         ),
         "stream_schedule_mode_intro": (
             "Use this menu to either create a weekly schedule "
@@ -1743,13 +1739,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "sub_list_alert_upcoming": "• Оповещение: напоминание о предстоящем стриме",
         "finish_setup_first": "Сначала завершите настройку подписки или нажмите /cancel.",
         "stream_schedule_intro": (
-            "С помощью этого меню вы можете сформировать текст для публикации "
-            "вашего расписания на неделю, начиная с понедельника.\n\n"
-            "<b>Пример:</b>\n"
-            "- 13 июля 15:30 Sovereign Syndicate\n"
-            "- 14 июля 15:30 Sovereign Syndicate\n"
-            "- 15 июля 15:30 Sovereign Syndicate\n"
-            "- 17 июля 15:30 Sovereign Syndicate"
+            "С помощью этого меню вы можете создать расписание на неделю "
+            "(с ближайшего понедельника по воскресенье)."
         ),
         "stream_schedule_mode_intro": (
             "С помощью этого меню вы можете создать расписание на неделю "

@@ -438,6 +438,10 @@ def main() -> None:
     assert tr("stream_schedule_add_slot", "en")
     assert "Пример" not in tr("stream_schedule_mode_intro", "ru")
     assert "Example" not in tr("stream_schedule_mode_intro", "en")
+    assert "Пример" not in tr("stream_schedule_intro", "ru")
+    assert "Example" not in tr("stream_schedule_intro", "en")
+    assert "Sovereign" not in tr("stream_schedule_intro", "ru")
+    assert "Sovereign" not in tr("stream_schedule_mode_intro", "ru")
     assert "{date}" in tr("stream_schedule_err_generic", "ru")
     assert tr("stream_schedule_duration_unsure", "en")
     from i18n import (
