@@ -757,7 +757,7 @@ async def _prompt_stream_schedule_time(
 ) -> int:
     keyboard = stream_schedule_day_keyboard(
         lang,
-        show_finish=_stream_schedule_show_finish(context),
+        show_finish=False,
         show_skip=False,
     )
     await update.effective_message.reply_text(
