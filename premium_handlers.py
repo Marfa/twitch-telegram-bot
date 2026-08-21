@@ -363,7 +363,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if fid in selected:
             selected.discard(fid)
         else:
-            if fid in prem.FEATURE_IDS:
+            if fid in prem.purchasable_feature_ids():
                 selected.add(fid)
         context.user_data["premium_feat_sel"] = sorted(selected)
         await query.edit_message_text(
@@ -433,7 +433,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         selected = [
             f
             for f in (context.user_data.get("premium_feat_sel") or [])
-            if f in prem.FEATURE_IDS and f not in owned
+            if f in prem.purchasable_feature_ids() and f not in owned
         ]
         if not selected:
             await query.answer(t("premium_pay_failed", lang), show_alert=True)

@@ -6,7 +6,7 @@ Canonical sources of truth for humans and AI agents. When docs or rules conflict
 |---|---|---|---|
 | Runtime behavior | `bot.py`, `db.py`, `twitch.py`, … | — | Deployed from `main` |
 | UI strings (en/ru) | `i18n.py` | `docs/user-flow-map.ru.md` | Update the map when user-facing paths change |
-| Premium entitlements | `premium.py` (`FEATURE_IDS`, gates) | Premium screens in `premium_handlers.py` | `active_subscription_slots()` / `may_enable_subscription()` — single gate |
+| Premium entitlements | `premium.py` (`FEATURE_IDS`, `purchasable_feature_ids()`, gates) | Premium screens in `premium_handlers.py` | `purchasable_feature_ids()` hides ids still in alpha/beta; `active_subscription_slots()` / `may_enable_subscription()` — active-alert gate |
 | Beta features (opt-in) | `beta/manifest.json` | `beta.py` runtime view | Lifecycle: `.github/workflows/beta-lifecycle.yml` |
 | Beta enrollment state | DB (`beta_enrollments`) | — | Per-user opt-in |
 | Config defaults | `config.py` | — | |
@@ -37,7 +37,7 @@ Add a GA feature registry only if you introduce gradual rollout or automated dep
 
 | From | Must align with |
 |---|---|
-| `beta/manifest.json` → `premium_feature_id` | `premium.FEATURE_IDS` |
+| `beta/manifest.json` → `premium_feature_id` | `premium.FEATURE_IDS` (+ hidden from à la carte via `purchasable_feature_ids()` until GA) |
 | `docs/user-flow-map.ru.md` | `i18n.py` (ru) + `bot.py` handlers |
 | `.cursor/rules/active-subscription-gate.mdc` | `premium.may_enable_subscription()` callers |
 | `.env.example` | `config.py` env reads |

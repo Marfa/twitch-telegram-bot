@@ -1899,6 +1899,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<li>публикация расписания на Twitch;</li>"
             "<li>история оповещений за 60 дней "
             "(на бесплатном плане — 7 дней).</li>"
+            "{extra_features}"
             "</ul>"
             "<p>Состав функций может уточняться в интерфейсе Бота. "
             "Бесплатный пробный период — {trial_days} дней "
@@ -3047,11 +3048,11 @@ def premium_features_keyboard(
     owned: set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from config import PREMIUM_FREE_ACTIVE_LIMIT
-    from premium import FEATURE_IDS, feature_label_key, stars_feature_price
+    from premium import feature_label_key, purchasable_feature_ids, stars_feature_price
 
     owned = owned or set()
     rows: list[list[InlineKeyboardButton]] = []
-    for fid in FEATURE_IDS:
+    for fid in purchasable_feature_ids():
         if fid in owned:
             continue
         mark = "✅" if fid in selected else "⬜️"

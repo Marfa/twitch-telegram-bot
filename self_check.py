@@ -1938,6 +1938,20 @@ def main() -> None:
             for b in row
             if (b.callback_data or "").startswith("premium:feat_toggle:")
         }
+        purchasable = set(prem.purchasable_feature_ids())
+        assert "stream_chat" not in purchasable
+        assert "deleted_subscriptions_cart" not in purchasable
+        assert "alert_history" in purchasable
+        toggle_ids = {
+            (b.callback_data or "").split(":")[-1]
+            for row in premium_features_keyboard(
+                "ru", set(), user_id=249097744, owned=set()
+            ).inline_keyboard
+            for b in row
+            if (b.callback_data or "").startswith("premium:feat_toggle:")
+        }
+        assert "stream_chat" not in toggle_ids
+        assert "deleted_subscriptions_cart" not in toggle_ids
         db.upsert_user(2)
         assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
     assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
@@ -1958,6 +1972,7 @@ def main() -> None:
         feat_stars=20,
         feat_rub="40",
         rub_per_star=2,
+        extra_features="",
     )
     from unittest.mock import patch
 
@@ -2554,6 +2569,8 @@ def main() -> None:
     assert "stream-chat" in {f.id for f in beta_mod.list_features()}
     sc_feat = beta_mod.get_feature("stream-chat")
     assert sc_feat is not None and sc_feat.premium_feature_id == "stream_chat"
+    assert "stream_chat" not in prem.purchasable_feature_ids()
+    assert "deleted_subscriptions_cart" not in prem.purchasable_feature_ids()
     assert tr("menu_btn_chat", "ru") == "Чат"
     assert tr("premium_feat_stream_chat", "ru")
     assert tr("beta_feat_stream_chat", "en")

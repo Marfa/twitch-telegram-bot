@@ -232,9 +232,29 @@ def feature_label_key(feature_id: str) -> str:
     return _FEATURE_LABEL_KEYS.get(feature_id, feature_id)
 
 
+def premium_feature_in_unreleased_beta(premium_feature_id: str) -> bool:
+    """True while a beta manifest entry still gates this Premium id (alpha/beta)."""
+    import beta as beta_features
+
+    if not premium_feature_id:
+        return False
+    for feat in beta_features.list_features(stages=frozenset({"alpha", "beta"})):
+        if feat.premium_feature_id == premium_feature_id:
+            return True
+    return False
+
+
+def purchasable_feature_ids() -> tuple[str, ...]:
+    """FEATURE_IDS visible in à la carte Stars purchase (hides unreleased betas)."""
+    return tuple(
+        fid for fid in FEATURE_IDS if not premium_feature_in_unreleased_beta(fid)
+    )
+
+
 def invoice_payload(user_id: int, kind: str = "month", features: list[str] | None = None) -> str:
     if kind == "feat":
-        ids = ",".join(f for f in (features or []) if f in FEATURE_IDS)
+        allowed = set(purchasable_feature_ids())
+        ids = ",".join(f for f in (features or []) if f in allowed)
         return f"{PREMIUM_INVOICE_PREFIX}feat:{user_id}:{ids}"
     if kind in ("month", "year", "life"):
         return f"{PREMIUM_INVOICE_PREFIX}{kind}:{user_id}"
@@ -607,7 +627,10 @@ def apply_features_payment(
     until_unix: int,
     stars_paid: int | None = None,
 ) -> None:
-    ids = list(feature_ids)
+    allowed = set(purchasable_feature_ids())
+    ids = [fid for fid in feature_ids if fid in allowed]
+    if not ids:
+        return
     db.extend_premium_features(
         user_id,
         ids,

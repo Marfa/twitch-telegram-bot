@@ -487,6 +487,34 @@ def _fmt_rub(amount: int) -> str:
     return f"{amount:,}".replace(",", "\u00a0")
 
 
+def _oferta_extra_features_html() -> str:
+    """À la carte Premium items not in the static offer list (only after GA)."""
+    from config import PREMIUM_FREE_ACTIVE_LIMIT
+    from i18n import t
+    from premium import feature_label_key, purchasable_feature_ids
+
+    # Covered by the hand-written bullets in oferta_page_body (ru).
+    static = frozenset(
+        {
+            "extra_alerts",
+            "alert_types",
+            "twitch_sync",
+            "advanced_mode",
+            "schedule_publish",
+            "alert_history",
+        }
+    )
+    parts: list[str] = []
+    for fid in purchasable_feature_ids():
+        if fid in static:
+            continue
+        label = html.escape(
+            t(feature_label_key(fid), "ru", free_limit=PREMIUM_FREE_ACTIVE_LIMIT)
+        )
+        parts.append(f"<li>{label};</li>")
+    return "".join(parts)
+
+
 def _oferta_page() -> bytes:
     """Public offer for paid Premium (Russian legal text; always ru)."""
     from config import (
@@ -519,6 +547,7 @@ def _oferta_page() -> bytes:
         feat_stars=PREMIUM_STARS_FEATURE,
         feat_rub=_fmt_rub(PREMIUM_STARS_FEATURE * rub_per_star),
         rub_per_star=rub_per_star,
+        extra_features=_oferta_extra_features_html(),
     )
     return (
         "<!DOCTYPE html><html lang='ru'><head><meta charset='utf-8'>"

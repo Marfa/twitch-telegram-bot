@@ -30,11 +30,11 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
-| Subscriptions | List, edit all fields, enable/disable, delete; **⏸ Pause notifications** for N days without pausing subscriptions (🧪 beta); **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium) (🧪 beta) |
+| Subscriptions | List, edit all fields, enable/disable, delete; **⏸ Pause notifications** for N days without pausing subscriptions (🧪 beta); **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium) (🧪 beta); **💬 Stream chat** — Mini App with embed/fallback (🧪 beta) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | In **📦 Other**: weekly text wizard or **fix slots for a day** (🧪 beta); publish to Twitch is **Premium** (slot duration, clear old slots — full or selected day only) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | 7-day trial; Stars month/year/lifetime; à la carte (incl. advanced mode, 60-day history); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
+| Premium | 7-day trial; Stars month/year/lifetime; à la carte (advanced mode, 60-day history; cart / stream chat — after those betas go public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
@@ -199,7 +199,15 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 - Multi-select + **♻️ Restore selected**
 - Partial restore with a message when the subscription limit is hit
 
-Without beta opt-in the cart is hidden and deleted subscriptions are not saved.
+Without beta opt-in the cart is hidden and deleted subscriptions are not saved. The à la carte Premium item for the cart appears after the beta goes public (GA).
+
+### Twitch stream chat
+
+🧪 Beta feature `stream-chat` — enable in **⚙️ Settings → 🧪 Beta mode**.
+
+After opt-in, a **Chat** menu button appears next to the message field → Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + simple fallback). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
+
+Without beta opt-in the menu button is hidden. The à la carte Premium item for unlimited chat appears after the beta goes public (GA).
 
 ### Pause notifications
 
