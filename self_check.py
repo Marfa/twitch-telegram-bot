@@ -2239,7 +2239,7 @@ def main() -> None:
         assert db.get_advanced_mode_setting(91) is True
         assert db.get_advanced_mode_setting(77) is False  # not entitled
         assert on_n >= 1 and off_n >= 1
-        assert tr("btn_alert_history_more", "ru") == "Показать больше"
+        assert tr("btn_alert_history_more", "ru") == "Ещё"
         assert tr("alert_history_go_stream", "ru") == "Перейти к стриму"
         assert "<b>📅 " in tr("alert_history_day", "ru", date="пятница, 14 августа")
         assert _format_vod_timestamp(45) == "45s"
