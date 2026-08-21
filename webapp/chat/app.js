@@ -67,14 +67,24 @@
   let ircTimer = null;
 
   function setLang(code) {
-    lang = code === "ru" ? "ru" : "en";
+    lang = String(code || "").toLowerCase().startsWith("ru") ? "ru" : "en";
     t = i18n[lang];
+    document.documentElement.lang = lang;
     el("online-title").textContent = t.live;
     el("online-empty").textContent = t.empty;
     el("search-input").placeholder = t.searchPh;
     el("search-form").querySelector('button[type="submit"]').textContent = t.go;
     el("btn-login").textContent = t.login;
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
+  }
+
+  function detectLang() {
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q) return q;
+    const tgLang =
+      (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) ||
+      "";
+    return tgLang;
   }
 
   function initData() {
@@ -84,7 +94,10 @@
   async function api(path, opts) {
     const options = opts || {};
     const headers = Object.assign(
-      { "Authorization": "tma " + initData() },
+      {
+        Authorization: "tma " + initData(),
+        "X-Telegram-Init-Data": initData(),
+      },
       options.headers || {}
     );
     const res = await fetch(path, Object.assign({}, options, { headers }));
@@ -308,6 +321,7 @@
   }
 
   async function boot() {
+    setLang(detectLang());
     if (!initData()) {
       showFatal(t.authFail);
       return;
@@ -322,10 +336,17 @@
       return;
     }
     session = body;
-    setLang(body.lang || "en");
+    setLang(body.lang || detectLang() || "en");
     renderAuth();
     const online = await api("/app/chat/api/online");
-    if (online.body.ok) renderOnline(online.body.streams || []);
+    if (online.body.ok) {
+      renderOnline(online.body.streams || []);
+    } else {
+      renderOnline([]);
+      const hint = el("search-hint");
+      hint.classList.remove("hidden");
+      hint.textContent = t.sendFail;
+    }
   }
 
   el("search-form").addEventListener("submit", async (e) => {

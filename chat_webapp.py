@@ -30,10 +30,13 @@ def register_chat_webapp(*, db: Any, twitch: Any) -> None:
     _twitch = twitch
 
 
-def chat_webapp_url() -> str:
+def chat_webapp_url(*, lang: str | None = None) -> str:
     if not PUBLIC_BASE_URL:
         return ""
-    return f"{PUBLIC_BASE_URL}/app/chat/"
+    base = f"{PUBLIC_BASE_URL}/app/chat/"
+    if lang in ("en", "ru"):
+        return f"{base}?lang={lang}"
+    return base
 
 
 def embed_parent_host() -> str:
@@ -52,6 +55,8 @@ def validate_webapp_init_data(init_data: str) -> dict[str, Any] | None:
     received_hash = pairs.pop("hash", None)
     if not received_hash:
         return None
+    # Newer Telegram clients also send signature; it is not part of the hash check.
+    pairs.pop("signature", None)
     check_list = [f"{k}={v}" for k, v in sorted(pairs.items())]
     data_check_string = "\n".join(check_list)
     secret_key = hmac.new(
@@ -137,33 +142,39 @@ def api_online(init_data: str) -> tuple[int, dict[str, Any]]:
     user_id = int(user["id"])
     import demo_mode
 
-    demo = demo_mode.is_active(user_id)
-    subs = [
-        s
-        for s in _db.get_subscriptions_by_owner(user_id)
-        if s.enabled and bool(s.is_demo) == demo and s.twitch_user_id
-    ]
-    if not subs:
-        return 200, {"ok": True, "streams": []}
-    by_uid = {s.twitch_user_id: s for s in subs}
-    live = _twitch.get_live_streams(list(by_uid.keys()))
-    streams: list[dict[str, Any]] = []
-    for uid, stream in live.items():
-        sub = by_uid.get(uid)
-        login = (stream.get("user_login") or (sub.twitch_username if sub else "") or "").lower()
-        streams.append(
-            {
-                "login": login,
-                "display_name": stream.get("user_name")
-                or (sub.twitch_username if sub else login),
-                "title": stream.get("title") or "",
-                "game_name": stream.get("game_name") or "",
-                "viewer_count": int(stream.get("viewer_count") or 0),
-                "twitch_user_id": uid,
-            }
-        )
-    streams.sort(key=lambda s: (-int(s["viewer_count"]), str(s["login"])))
-    return 200, {"ok": True, "streams": streams}
+    try:
+        demo = demo_mode.is_active(user_id)
+        subs = [
+            s
+            for s in _db.get_subscriptions_by_owner(user_id)
+            if s.enabled and bool(s.is_demo) == demo and s.twitch_user_id
+        ]
+        if not subs:
+            return 200, {"ok": True, "streams": []}
+        by_uid = {str(s.twitch_user_id): s for s in subs}
+        live = _twitch.get_live_streams(list(by_uid.keys()))
+        streams: list[dict[str, Any]] = []
+        for uid, stream in live.items():
+            sub = by_uid.get(str(uid))
+            login = (
+                stream.get("user_login") or (sub.twitch_username if sub else "") or ""
+            ).lower()
+            streams.append(
+                {
+                    "login": login,
+                    "display_name": stream.get("user_name")
+                    or (sub.twitch_username if sub else login),
+                    "title": stream.get("title") or "",
+                    "game_name": stream.get("game_name") or "",
+                    "viewer_count": int(stream.get("viewer_count") or 0),
+                    "twitch_user_id": str(uid),
+                }
+            )
+        streams.sort(key=lambda s: (-int(s["viewer_count"]), str(s["login"])))
+        return 200, {"ok": True, "streams": streams}
+    except Exception:
+        logger.exception("chat api_online failed user=%s", user_id)
+        return 502, {"ok": False, "error": "twitch_error"}
 
 
 def api_resolve(init_data: str, query: str) -> tuple[int, dict[str, Any]]:
@@ -176,23 +187,27 @@ def api_resolve(init_data: str, query: str) -> tuple[int, dict[str, Any]]:
     login = _twitch.parse_username(query or "")
     if not login:
         return 400, {"ok": False, "error": "bad_query"}
-    profile = _twitch.get_user(login)
-    if not profile:
-        return 404, {"ok": False, "error": "not_found"}
-    uid = str(profile["id"])
-    live_map = _twitch.get_live_streams([uid])
-    stream = live_map.get(uid)
-    online = stream is not None
-    return 200, {
-        "ok": True,
-        "login": str(profile.get("login") or login).lower(),
-        "display_name": profile.get("display_name") or profile.get("login") or login,
-        "twitch_user_id": uid,
-        "online": online,
-        "title": (stream or {}).get("title") or "",
-        "game_name": (stream or {}).get("game_name") or "",
-        "viewer_count": int((stream or {}).get("viewer_count") or 0),
-    }
+    try:
+        profile = _twitch.get_user(login)
+        if not profile:
+            return 404, {"ok": False, "error": "not_found"}
+        uid = str(profile["id"])
+        live_map = _twitch.get_live_streams([uid])
+        stream = live_map.get(uid)
+        online = stream is not None
+        return 200, {
+            "ok": True,
+            "login": str(profile.get("login") or login).lower(),
+            "display_name": profile.get("display_name") or profile.get("login") or login,
+            "twitch_user_id": uid,
+            "online": online,
+            "title": (stream or {}).get("title") or "",
+            "game_name": (stream or {}).get("game_name") or "",
+            "viewer_count": int((stream or {}).get("viewer_count") or 0),
+        }
+    except Exception:
+        logger.exception("chat api_resolve failed login=%s", login)
+        return 502, {"ok": False, "error": "twitch_error"}
 
 
 def api_oauth_url(init_data: str) -> tuple[int, dict[str, Any]]:

@@ -589,6 +589,9 @@ def _webapp_init_data(handler: BaseHTTPRequestHandler, body: dict | None = None)
     auth = handler.headers.get("Authorization") or ""
     if auth.lower().startswith("tma "):
         return auth[4:].strip()
+    header = handler.headers.get("X-Telegram-Init-Data") or ""
+    if header.strip():
+        return header.strip()
     if body and isinstance(body.get("init_data"), str):
         return body["init_data"]
     query = parse_qs(urlparse(handler.path).query)
@@ -600,7 +603,16 @@ def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
     import chat_webapp
 
     path = handler._path_only()
-    if path in ("/app/chat", "/app/chat/"):
+    if path == "/app/chat":
+        # Relative app.js/style.css break without a trailing slash.
+        query = urlparse(handler.path).query
+        loc = "/app/chat/" + (f"?{query}" if query else "")
+        handler.send_response(302)
+        handler.send_header("Location", loc)
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+        return True
+    if path == "/app/chat/":
         static = chat_webapp.static_file("index.html")
         if not static:
             handler.send_response(404)
@@ -609,6 +621,7 @@ def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
         body, ctype = static
         handler.send_response(200)
         handler.send_header("Content-Type", ctype)
+        handler.send_header("Cache-Control", "no-store")
         handler.send_header("Content-Length", str(len(body)))
         handler.end_headers()
         handler.wfile.write(body)
@@ -620,6 +633,7 @@ def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
             body, ctype = static
             handler.send_response(200)
             handler.send_header("Content-Type", ctype)
+            handler.send_header("Cache-Control", "no-store")
             handler.send_header("Content-Length", str(len(body)))
             handler.end_headers()
             handler.wfile.write(body)

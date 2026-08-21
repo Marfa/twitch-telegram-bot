@@ -2585,8 +2585,15 @@ def main() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
+    assert '/app/chat/app.js' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
+    from chat_webapp import chat_webapp_url
+    from unittest.mock import patch
+
+    with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"):
+        assert chat_webapp_url(lang="ru") == "https://example.com/app/chat/?lang=ru"
+        assert chat_webapp_url() == "https://example.com/app/chat/"
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
         cdb.upsert_user(777)
