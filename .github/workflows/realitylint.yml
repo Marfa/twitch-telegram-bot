@@ -11,7 +11,7 @@ jobs:
   realitylint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Stub .env for compose lint
         run: cp .env.example .env
       - uses: voonterr/realitylint@v1
