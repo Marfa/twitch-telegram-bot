@@ -1,0 +1,53 @@
+name: Remove old PG17 volume
+
+on:
+  workflow_dispatch:
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove unused Postgres 17 Docker volume
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            img="$(docker compose -f compose.vps.yml ps -q db | xargs -r docker inspect -f '{{.Config.Image}}')"
+            echo "db image: ${img:-none}"
+            case "${img:-}" in
+              *postgres:18*) ;;
+              *)
+                echo "ERROR: refuse to delete while db is not postgres:18"
+                exit 1
+                ;;
+            esac
+            echo "=== volumes matching pg-data ==="
+            docker volume ls | grep pg-data || true
+            removed=0
+            while IFS= read -r vol; do
+              [[ -n "$vol" ]] || continue
+              case "$vol" in
+                *pg-data-18*)
+                  echo "keep $vol"
+                  ;;
+                *pg-data*)
+                  echo "removing $vol"
+                  docker volume rm "$vol"
+                  removed=1
+                  ;;
+              esac
+            done < <(docker volume ls -q | grep pg-data || true)
+            if [[ "$removed" -eq 0 ]]; then
+              echo "no old pg-data volume found (already gone)"
+            fi
+            echo "=== volumes after ==="
+            docker volume ls | grep pg-data || true
+            curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:8080/health
+            echo
+            echo "health ok"
