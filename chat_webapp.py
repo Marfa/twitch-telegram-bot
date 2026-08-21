@@ -141,7 +141,13 @@ def _require_user(
         user = validate_webapp_init_data(init_data)
         if user is None:
             if not (init_data or "").strip() and not (token or "").strip():
+                logger.info("chat auth: empty initData and token")
                 return None, "unauthorized_empty"
+            logger.info(
+                "chat auth: rejected init_len=%s token_len=%s",
+                len((init_data or "").strip()),
+                len((token or "").strip()),
+            )
             return None, "unauthorized"
         user_id = int(user["id"])
     else:

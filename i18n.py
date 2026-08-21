@@ -9,6 +9,7 @@ from telegram import (
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
 SUPPORTED_LOCALES = ("en", "ru")
@@ -728,6 +729,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "fallback). Free: read + 20 messages/day; Premium unlocks unlimited sends."
         ),
         "menu_btn_chat": "Chat",
+        "chat_open_hint": (
+            "Open stream chat with the button below (or the «Chat» key on the keyboard)."
+        ),
         "chat_oauth_done": (
             "Twitch account linked for chat. Open the Chat menu button again."
         ),
@@ -2133,6 +2137,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "режимом). Бесплатно: чтение + 20 сообщений в день; Premium — без лимита."
         ),
         "menu_btn_chat": "Чат",
+        "chat_open_hint": (
+            "Откройте чат стримов кнопкой ниже (или клавишей «Чат» на клавиатуре)."
+        ),
         "chat_oauth_done": (
             "Аккаунт Twitch привязан для чата. Снова откройте кнопку меню «Чат»."
         ),
@@ -2860,7 +2867,11 @@ def all_wizard_nav_buttons() -> set[str]:
 
 
 def main_menu(
-    lang: str, *, is_admin: bool = False, demo_active: bool = False
+    lang: str,
+    *,
+    is_admin: bool = False,
+    demo_active: bool = False,
+    chat_webapp_url: str | None = None,
 ) -> ReplyKeyboardMarkup:
     rows = [
         [
@@ -2879,6 +2890,16 @@ def main_menu(
             KeyboardButton(btn("feedback", lang)),
         ],
     ]
+    if chat_webapp_url:
+        rows.insert(
+            0,
+            [
+                KeyboardButton(
+                    t("menu_btn_chat", lang),
+                    web_app=WebAppInfo(url=chat_webapp_url),
+                )
+            ],
+        )
     if demo_active:
         rows.append([KeyboardButton(btn("demo", lang))])
     elif is_admin:

@@ -4,8 +4,10 @@
 
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) {
-    tg.ready();
-    tg.expand();
+    try {
+      tg.ready();
+      tg.expand();
+    } catch (_) {}
   }
 
   const el = (id) => document.getElementById(id);
@@ -22,8 +24,9 @@
       notFound: "Streamer not found",
       badQuery: "Enter a name or Twitch link",
       beta: "Enable «Twitch stream chat» in Settings → Beta mode.",
-      authFail: "Open Chat from the bot menu button (or /start, then Chat).",
-      authEmpty: "Telegram did not pass login data. Close the Mini App, tap /start, then Chat again.",
+      authFail: "Open Chat from the bot: /start, then the «Chat» button.",
+      authEmpty:
+        "No login token. Close this window, tap /start in the bot, then open «Chat» from the keyboard.",
       simple: "Simple",
       embed: "Embed",
       quota: "{n} messages left today",
@@ -34,6 +37,7 @@
       loadFail: "Could not load data ({error}). Close and open Chat again.",
       connecting: "Connecting to chat…",
       disconnected: "Chat disconnected. Reconnecting…",
+      loading: "Loading…",
     },
     ru: {
       live: "Сейчас в эфире",
@@ -47,8 +51,9 @@
       notFound: "Стример не найден",
       badQuery: "Введите имя или ссылку Twitch",
       beta: "Включите «Чат стримов Twitch» в Настройки → Режим бета.",
-      authFail: "Откройте «Чат» кнопкой меню бота (или /start, затем снова Чат).",
-      authEmpty: "Telegram не передал вход. Закройте мини-апп, нажмите /start, затем снова «Чат».",
+      authFail: "Откройте «Чат» из бота: /start, затем кнопка «Чат».",
+      authEmpty:
+        "Нет токена входа. Закройте окно, нажмите /start в боте, затем «Чат» на клавиатуре.",
       simple: "Простой",
       embed: "Embed",
       quota: "Осталось сообщений сегодня: {n}",
@@ -59,6 +64,7 @@
       loadFail: "Не удалось загрузить данные ({error}). Закройте и снова откройте «Чат».",
       connecting: "Подключение к чату…",
       disconnected: "Чат отключён. Переподключение…",
+      loading: "Загрузка…",
     },
   };
 
@@ -70,6 +76,7 @@
   let ircSocket = null;
   let ircTimer = null;
   let appToken = "";
+  let urlLang = "";
 
   function setLang(code) {
     lang = String(code || "").toLowerCase().startsWith("ru") ? "ru" : "en";
@@ -86,33 +93,47 @@
   function takeTokenFromUrl() {
     const params = new URLSearchParams(location.search);
     let token = params.get("t") || params.get("token") || "";
+    const langParam = params.get("lang") || "";
+    if (langParam) urlLang = langParam;
     if (!token && location.hash) {
-      const hp = new URLSearchParams(location.hash.replace(/^#/, ""));
+      const hp = new URLSearchParams(location.hash.replace(/^#\/?/, "").replace(/^\?/, ""));
       token = hp.get("t") || hp.get("token") || "";
+      if (!urlLang) urlLang = hp.get("lang") || "";
     }
     if (!token) {
       try {
-        token = sessionStorage.getItem("chat_t") || "";
+        token = sessionStorage.getItem("chat_t") || localStorage.getItem("chat_t") || "";
+      } catch (_) {}
+    }
+    if (!urlLang) {
+      try {
+        urlLang = sessionStorage.getItem("chat_lang") || "";
       } catch (_) {}
     }
     if (token) {
       appToken = token;
       try {
         sessionStorage.setItem("chat_t", token);
+        localStorage.setItem("chat_t", token);
       } catch (_) {}
       params.delete("t");
       params.delete("token");
       const q = params.toString();
-      const clean =
-        location.pathname + (q ? "?" + q : "") + (location.hash ? "" : "");
+      const clean = location.pathname + (q ? "?" + q : "");
       try {
         history.replaceState(null, "", clean);
+      } catch (_) {}
+    }
+    if (urlLang) {
+      try {
+        sessionStorage.setItem("chat_lang", urlLang);
       } catch (_) {}
     }
     return appToken;
   }
 
   function detectLang() {
+    if (urlLang) return urlLang;
     const q = new URLSearchParams(location.search).get("lang");
     if (q) return q;
     const tgLang =
@@ -362,30 +383,38 @@
   }
 
   async function boot() {
-    takeTokenFromUrl();
-    setLang(detectLang());
-    if (!initData() && !appToken) {
-      showFatal(t.authEmpty);
-      return;
-    }
-    const { body } = await api("/app/chat/api/session");
-    if (!body.ok) {
-      showFatal(authErrorMessage(body.error));
-      return;
-    }
-    session = body;
-    setLang(body.lang || detectLang() || "en");
-    renderAuth();
-    const online = await api("/app/chat/api/online");
-    if (online.body.ok) {
-      renderOnline(online.body.streams || []);
-    } else {
-      renderOnline([]);
-      const hint = el("search-hint");
-      hint.classList.remove("hidden");
-      hint.textContent = t.loadFail.replace(
-        "{error}",
-        online.body.error || "error"
+    try {
+      takeTokenFromUrl();
+      setLang(detectLang() || "en");
+      el("online-empty").classList.remove("hidden");
+      el("online-empty").textContent = t.loading;
+      if (!initData() && !appToken) {
+        showFatal(t.authEmpty);
+        return;
+      }
+      const { body } = await api("/app/chat/api/session");
+      if (!body.ok) {
+        showFatal(authErrorMessage(body.error));
+        return;
+      }
+      session = body;
+      setLang(urlLang || body.lang || detectLang() || "en");
+      renderAuth();
+      const online = await api("/app/chat/api/online");
+      if (online.body.ok) {
+        renderOnline(online.body.streams || []);
+      } else {
+        renderOnline([]);
+        const hint = el("search-hint");
+        hint.classList.remove("hidden");
+        hint.textContent = t.loadFail.replace(
+          "{error}",
+          online.body.error || "error"
+        );
+      }
+    } catch (err) {
+      showFatal(
+        t.loadFail.replace("{error}", (err && err.message) || "boot")
       );
     }
   }
@@ -400,25 +429,32 @@
       return;
     }
     hint.textContent = "…";
-    const { body } = await api(
-      "/app/chat/api/resolve?q=" + encodeURIComponent(q)
-    );
-    if (!body.ok) {
-      if (body.error === "bad_query") hint.textContent = t.badQuery;
-      else if (body.error === "not_found") hint.textContent = t.notFound;
-      else if ((body.error || "").startsWith("unauthorized"))
-        hint.textContent = authErrorMessage(body.error);
-      else if (body.error === "beta_required") hint.textContent = t.beta;
-      else
-        hint.textContent = t.loadFail.replace("{error}", body.error || "error");
-      return;
+    try {
+      const { body } = await api(
+        "/app/chat/api/resolve?q=" + encodeURIComponent(q)
+      );
+      if (!body.ok) {
+        if (body.error === "bad_query") hint.textContent = t.badQuery;
+        else if (body.error === "not_found") hint.textContent = t.notFound;
+        else if ((body.error || "").startsWith("unauthorized"))
+          hint.textContent = authErrorMessage(body.error);
+        else if (body.error === "beta_required") hint.textContent = t.beta;
+        else
+          hint.textContent = t.loadFail.replace("{error}", body.error || "error");
+        return;
+      }
+      if (!body.online) {
+        hint.textContent = t.offline;
+        return;
+      }
+      hint.classList.add("hidden");
+      openChat(body);
+    } catch (err) {
+      hint.textContent = t.loadFail.replace(
+        "{error}",
+        (err && err.message) || "search"
+      );
     }
-    if (!body.online) {
-      hint.textContent = t.offline;
-      return;
-    }
-    hint.classList.add("hidden");
-    openChat(body);
   });
 
   el("btn-back").addEventListener("click", closeChat);
@@ -482,3 +518,4 @@
 
   boot();
 })();
+)
