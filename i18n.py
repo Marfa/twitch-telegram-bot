@@ -489,7 +489,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "stream_schedule_finish": "Finish",
         "stream_schedule_line": "- {date} {time} {game}",
         "stream_schedule_publish_prompt": "Publish schedule on Twitch?",
-        "stream_schedule_publish_yes": "✅ Publish on Twitch",
+        "stream_schedule_publish_yes": "✅ Yes",
         "stream_schedule_publish_no": "❌ No",
         "stream_schedule_duration_prompt": (
             "How long is a typical stream (hours)?\n"
