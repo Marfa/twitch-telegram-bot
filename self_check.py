@@ -2550,6 +2550,56 @@ def main() -> None:
     assert is_menu_button(beta_mode_btn("ru", 2, 5))
     assert not is_menu_button("not a menu button")
 
+    assert "stream_chat" in FEATURE_IDS
+    assert "stream-chat" in {f.id for f in beta_mod.list_features()}
+    sc_feat = beta_mod.get_feature("stream-chat")
+    assert sc_feat is not None and sc_feat.premium_feature_id == "stream_chat"
+    assert tr("menu_btn_chat", "ru") == "Чат"
+    assert tr("premium_feat_stream_chat", "ru")
+    assert tr("beta_feat_stream_chat", "en")
+    from chat_webapp import (
+        WEBAPP_DIR,
+        embed_parent_host,
+        static_file,
+        validate_webapp_init_data,
+    )
+    from premium import CHAT_FREE_DAILY_SEND_LIMIT, chat_daily_send_limit
+
+    assert (WEBAPP_DIR / "index.html").is_file()
+    assert static_file("index.html") is not None
+    assert static_file("app.js") is not None
+    assert validate_webapp_init_data("") is None
+    assert validate_webapp_init_data("hash=deadbeef") is None
+    with tempfile.TemporaryDirectory() as chat_tmp:
+        cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
+        cdb.upsert_user(777)
+        ensure_trial_expired(cdb, 777)
+        assert chat_daily_send_limit(cdb, 777) == CHAT_FREE_DAILY_SEND_LIMIT
+        assert cdb.get_chat_send_count(777, "2026-08-21") == 0
+        assert cdb.increment_chat_send_count(777, "2026-08-21") == 1
+        assert cdb.increment_chat_send_count(777, "2026-08-21") == 2
+        cdb.upsert_chat_auth(
+            777,
+            twitch_user_id="1",
+            twitch_login="viewer",
+            refresh_token="refresh-token-value",
+        )
+        auth = cdb.get_chat_auth(777)
+        assert auth is not None
+        assert auth.twitch_login == "viewer"
+        assert auth.refresh_token == "refresh-token-value"
+        cdb.set_beta_enrollment(777, "stream-chat", True)
+        assert chat_daily_send_limit(cdb, 777) is None
+        import time as _t
+
+        cdb.upsert_user(778)
+        ensure_trial_expired(cdb, 778)
+        assert chat_daily_send_limit(cdb, 778) == CHAT_FREE_DAILY_SEND_LIMIT
+        cdb.extend_premium_features(
+            778, ["stream_chat"], until_unix=int(_t.time()) + 3600, charge_id="chat1"
+        )
+        assert chat_daily_send_limit(cdb, 778) is None
+
     print("ok")
 
 

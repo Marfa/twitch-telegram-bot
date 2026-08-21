@@ -463,6 +463,14 @@ class WhisperAlert:
     eventsub_id: str
 
 
+@dataclass
+class ChatAuth:
+    owner_id: int
+    twitch_user_id: str
+    twitch_login: str
+    refresh_token: str
+
+
 def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
     scheduled_at = row["scheduled_at"]
     if scheduled_at is not None and not isinstance(scheduled_at, str):
@@ -506,6 +514,15 @@ def _row_to_whisper_alert(row: Any) -> WhisperAlert:
         twitch_login=str(row["twitch_login"] or ""),
         refresh_token=str(row["refresh_token"] or ""),
         eventsub_id=str(row["eventsub_id"] or ""),
+    )
+
+
+def _row_to_chat_auth(row: Any) -> ChatAuth:
+    return ChatAuth(
+        owner_id=int(row["owner_id"]),
+        twitch_user_id=str(row["twitch_user_id"] or ""),
+        twitch_login=str(row["twitch_login"] or ""),
+        refresh_token=str(row["refresh_token"] or ""),
     )
 
 
@@ -1022,6 +1039,23 @@ class Database(Protocol):
 
     def disable_whisper_alerts_for_twitch_user(self, twitch_user_id: str) -> list[int]: ...
 
+    def get_chat_auth(self, owner_id: int) -> ChatAuth | None: ...
+
+    def upsert_chat_auth(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None: ...
+
+    def delete_chat_auth(self, owner_id: int) -> None: ...
+
+    def get_chat_send_count(self, owner_id: int, day: str) -> int: ...
+
+    def increment_chat_send_count(self, owner_id: int, day: str) -> int: ...
+
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
     ) -> list[str]: ...
@@ -1394,6 +1428,26 @@ class SqliteDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_whisper_alerts_twitch_user
             ON whisper_alerts(twitch_user_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_auth (
+                owner_id INTEGER PRIMARY KEY,
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                twitch_login TEXT NOT NULL DEFAULT '',
+                refresh_token TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_send_daily (
+                owner_id INTEGER NOT NULL,
+                day TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (owner_id, day)
+            )
             """
         )
         conn.execute(
@@ -3438,6 +3492,74 @@ class SqliteDatabase:
             )
         return [int(r["owner_id"]) for r in rows]
 
+    def get_chat_auth(self, owner_id: int) -> ChatAuth | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM chat_auth WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return None
+        auth = _row_to_chat_auth(row)
+        auth.refresh_token = decrypt_secret(auth.refresh_token)
+        return auth
+
+    def upsert_chat_auth(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_auth (
+                    owner_id, twitch_user_id, twitch_login, refresh_token
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    twitch_user_id = excluded.twitch_user_id,
+                    twitch_login = excluded.twitch_login,
+                    refresh_token = excluded.refresh_token
+                """,
+                (owner_id, twitch_user_id, twitch_login, enc),
+            )
+
+    def delete_chat_auth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM chat_auth WHERE owner_id = ?", (owner_id,))
+
+    def get_chat_send_count(self, owner_id: int, day: str) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT count FROM chat_send_daily WHERE owner_id = ? AND day = ?",
+                (owner_id, day),
+            ).fetchone()
+        return int(row["count"]) if row else 0
+
+    def increment_chat_send_count(self, owner_id: int, day: str) -> int:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_send_daily (owner_id, day, count)
+                VALUES (?, ?, 1)
+                ON CONFLICT(owner_id, day) DO UPDATE SET
+                    count = chat_send_daily.count + 1
+                """,
+                (owner_id, day),
+            )
+            row = conn.execute(
+                "SELECT count FROM chat_send_daily WHERE owner_id = ? AND day = ?",
+                (owner_id, day),
+            ).fetchone()
+        return int(row["count"]) if row else 1
+
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True
     ) -> list[str]:
@@ -4073,6 +4195,26 @@ class PostgresDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_whisper_alerts_twitch_user
                 ON whisper_alerts(twitch_user_id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_auth (
+                    owner_id BIGINT PRIMARY KEY,
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    twitch_login TEXT NOT NULL DEFAULT '',
+                    refresh_token TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_send_daily (
+                    owner_id BIGINT NOT NULL,
+                    day TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (owner_id, day)
+                )
                 """
             )
             cur.execute(
@@ -6257,6 +6399,82 @@ class PostgresDatabase:
                 (twitch_user_id,),
             )
         return [int(r["owner_id"]) for r in rows]
+
+    def get_chat_auth(self, owner_id: int) -> ChatAuth | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM chat_auth WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        auth = _row_to_chat_auth(row)
+        auth.refresh_token = decrypt_secret(auth.refresh_token)
+        return auth
+
+    def upsert_chat_auth(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO chat_auth (
+                    owner_id, twitch_user_id, twitch_login, refresh_token
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    refresh_token = EXCLUDED.refresh_token
+                """,
+                (owner_id, twitch_user_id, twitch_login, enc),
+            )
+
+    def delete_chat_auth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("DELETE FROM chat_auth WHERE owner_id = %s", (owner_id,))
+
+    def get_chat_send_count(self, owner_id: int, day: str) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT count FROM chat_send_daily WHERE owner_id = %s AND day = %s",
+                (owner_id, day),
+            )
+            row = cur.fetchone()
+        return int(row["count"]) if row else 0
+
+    def increment_chat_send_count(self, owner_id: int, day: str) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO chat_send_daily (owner_id, day, count)
+                VALUES (%s, %s, 1)
+                ON CONFLICT(owner_id, day) DO UPDATE SET
+                    count = chat_send_daily.count + 1
+                """,
+                (owner_id, day),
+            )
+            cur.execute(
+                "SELECT count FROM chat_send_daily WHERE owner_id = %s AND day = %s",
+                (owner_id, day),
+            )
+            row = cur.fetchone()
+        return int(row["count"]) if row else 1
 
     def delete_synced_subscriptions_missing(
         self, owner_id: int, keep_twitch_user_ids: set[str], *, to_cart: bool = True

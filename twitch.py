@@ -17,6 +17,9 @@ FOLLOWS_SCOPE = "user:read:follows"
 SCHEDULE_SCOPE = "channel:manage:schedule"
 SUBSCRIPTIONS_SCOPE = "user:read:subscriptions"
 WHISPERS_SCOPE = "user:read:whispers"
+CHAT_READ_SCOPE = "user:read:chat"
+CHAT_WRITE_SCOPE = "user:write:chat"
+CHAT_OAUTH_SCOPES = f"{CHAT_READ_SCOPE} {CHAT_WRITE_SCOPE}"
 # Schedule publish may overwrite twitch_sync used by follow import — keep both.
 SCHEDULE_OAUTH_SCOPES = f"{SCHEDULE_SCOPE} {FOLLOWS_SCOPE}"
 
@@ -522,6 +525,33 @@ class TwitchClient:
         resp.raise_for_status()
         users = resp.json().get("data", [])
         return users[0] if users else None
+
+    def send_chat_message(
+        self,
+        user_access_token: str,
+        *,
+        broadcaster_id: str,
+        sender_id: str,
+        message: str,
+    ) -> dict[str, Any]:
+        """Send a chat message as the authorized user (Helix)."""
+        resp = self._session.post(
+            "https://api.twitch.tv/helix/chat/messages",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "broadcaster_id": str(broadcaster_id),
+                "sender_id": str(sender_id),
+                "message": message,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        return data[0] if data else {}
 
     def create_whisper_eventsub(
         self,
