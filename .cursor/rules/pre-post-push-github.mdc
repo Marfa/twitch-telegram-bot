@@ -1,5 +1,5 @@
 ---
-description: Before/after git push — PRs, Dependabot/malware, green Actions
+description: Before/after git push — PRs, security alerts, green Actions
 alwaysApply: true
 ---
 
@@ -24,7 +24,7 @@ Do not push until open PRs and security alerts are consciously handled (fixed, m
 ## After every `git push`
 
 1. Watch https://github.com/Marfa/twitch-telegram-bot/actions (`gh run list` / `gh run watch`).
-2. Drive failed workflows to **green**: read failed logs, fix root cause, push follow-up, re-check until Self-check / Security / Deploy succeed (or report a blocker that needs the user).
+2. Drive failed workflows to **green**: read failed logs, fix root cause, push follow-up, re-check until Actions succeed (or report a blocker that needs the user).
 
 ## Commands (typical)
 
