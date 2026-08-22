@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import requests
 
@@ -30,6 +30,32 @@ TWITCH_URL_RE = re.compile(
     re.IGNORECASE,
 )
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
+
+# ponytail: public Twitch web player Client-ID for gql.twitch.tv only (undocumented; may break).
+_TWITCH_GQL_WEB_CLIENT_ID = "kimne78kx3ncx6brgo4" "mv6wki5h1ko"
+_CHANNEL_ABOUT_GQL = """
+query ChannelAboutLinks($login: String!) {
+  user(login: $login) {
+    panels {
+      id
+      type
+      ... on DefaultPanel {
+        title
+        description
+        imageURL
+        linkURL
+      }
+    }
+    channel {
+      socialMedias {
+        name
+        title
+        url
+      }
+    }
+  }
+}
+"""
 
 _IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 _IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
@@ -134,6 +160,84 @@ class TwitchClient:
                 if login:
                     out[login] = user
         return out
+
+    @staticmethod
+    def _about_link_key(url: str) -> str:
+        parsed = urlparse((url or "").strip().lower().rstrip("/"))
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return ""
+        path = parsed.path.rstrip("/")
+        return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+    def get_channel_about_links(self, login: str) -> list[dict[str, str]]:
+        """Panels + social links from twitch.tv/{login}/about (via internal GQL)."""
+        login = (login or "").strip().lower()
+        if not login:
+            return []
+        resp = self._session.post(
+            "https://gql.twitch.tv/gql",
+            headers={
+                "Client-ID": _TWITCH_GQL_WEB_CLIENT_ID,
+                "Referer": "https://www.twitch.tv/",
+                "Content-Type": "application/json",
+            },
+            json={"query": _CHANNEL_ABOUT_GQL, "variables": {"login": login}},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        user = (resp.json().get("data") or {}).get("user") or {}
+        if not user:
+            return []
+
+        seen: set[str] = set()
+        links: list[dict[str, str]] = []
+
+        def add(*, url: str, label: str, image_url: str = "", kind: str) -> None:
+            raw = (url or "").strip()
+            key = self._about_link_key(raw)
+            if not key or key in seen:
+                return
+            seen.add(key)
+            parsed = urlparse(raw)
+            text = (label or "").strip()
+            if not text:
+                text = parsed.netloc.removeprefix("www.")
+            links.append(
+                {
+                    "url": raw,
+                    "label": text,
+                    "image_url": (image_url or "").strip(),
+                    "kind": kind,
+                }
+            )
+
+        for panel in user.get("panels") or []:
+            if not isinstance(panel, dict):
+                continue
+            link_url = str(panel.get("linkURL") or "")
+            if not link_url:
+                continue
+            title = str(panel.get("title") or "").strip()
+            desc = str(panel.get("description") or "").strip()
+            label = title or (desc.split("\n", 1)[0][:120] if desc else "")
+            add(
+                url=link_url,
+                label=label,
+                image_url=str(panel.get("imageURL") or ""),
+                kind="panel",
+            )
+
+        channel = user.get("channel") or {}
+        for item in channel.get("socialMedias") or []:
+            if not isinstance(item, dict):
+                continue
+            link_url = str(item.get("url") or "")
+            if link_url.startswith("mailto:"):
+                continue
+            label = str(item.get("title") or item.get("name") or "").strip()
+            add(url=link_url, label=label, kind="social")
+
+        return links
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Helix allows at most 100 user_id params per /streams request."""

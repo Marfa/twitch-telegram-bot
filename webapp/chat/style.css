@@ -141,13 +141,37 @@ html, body {
   flex-direction: column;
   gap: 8px;
 }
-.info-links a {
-  color: var(--btn);
-  font-size: 14px;
-  word-break: break-all;
-  text-decoration: none;
+.info-link-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
 }
-.info-links a:hover { text-decoration: underline; }
+.info-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--line);
+}
+.info-link-body {
+  flex: 1;
+  min-width: 0;
+}
+.info-link-body strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.3;
+  word-break: break-word;
+}
 .muted { color: var(--muted); font-size: 12px; }
 .embed-wrap, .fallback-wrap {
   flex: 1;

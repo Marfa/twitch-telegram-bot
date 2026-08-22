@@ -34,7 +34,7 @@
       simple: "Simple",
       embed: "Embed",
       info: "Info",
-      infoEmpty: "No links in the channel description.",
+      infoEmpty: "No links on the channel About page.",
       infoLoadFail: "Could not load channel info.",
       quota: "{n} messages left today",
       unlimited: "Unlimited sends",
@@ -69,7 +69,7 @@
       simple: "Простой",
       embed: "Embed",
       info: "Информация",
-      infoEmpty: "В описании канала нет ссылок.",
+      infoEmpty: "На странице «О канале» нет ссылок.",
       infoLoadFail: "Не удалось загрузить информацию о канале.",
       quota: "Осталось сообщений сегодня: {n}",
       unlimited: "Безлимитная отправка",
@@ -318,14 +318,25 @@
     }
     links.forEach((item) => {
       const li = document.createElement("li");
-      const a = document.createElement("a");
-      a.href = item.url;
-      a.textContent = item.label || item.url;
-      a.addEventListener("click", (e) => {
-        e.preventDefault();
-        openExternal(item.url);
-      });
-      li.appendChild(a);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "info-link-btn";
+      if (item.image_url) {
+        const img = document.createElement("img");
+        img.className = "info-thumb";
+        img.alt = "";
+        img.loading = "lazy";
+        img.src = item.image_url;
+        btn.appendChild(img);
+      }
+      const body = document.createElement("div");
+      body.className = "info-link-body";
+      const label = document.createElement("strong");
+      label.textContent = item.label || item.url;
+      body.appendChild(label);
+      btn.appendChild(body);
+      btn.addEventListener("click", () => openExternal(item.url));
+      li.appendChild(btn);
       list.appendChild(li);
     });
   }

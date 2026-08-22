@@ -2588,7 +2588,7 @@ def main() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=7' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+    assert '/app/chat/app.js?v=8' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
     from unittest.mock import patch
@@ -2611,11 +2611,9 @@ def main() -> None:
         alert_url = alert_chat_button_url(login="SomeStreamer", lang="ru", user_id=42)
         assert "login=someStreamer" in alert_url or "login=SomeStreamer" in alert_url
         assert "open=1" in alert_url and "t=" in alert_url
-        from chat_webapp import _links_from_description
+        from twitch import TwitchClient
 
-        links = _links_from_description("Follow https://example.com/a and http://test.org/x.")
-        assert len(links) == 2
-        assert links[0]["url"] == "https://example.com/a"
+        assert TwitchClient._about_link_key("https://VK.com/stopgameru/") == "https://vk.com/stopgameru"
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
         cdb.upsert_user(777)

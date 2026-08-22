@@ -5,7 +5,6 @@ import hashlib
 import hmac
 import json
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -245,30 +244,10 @@ def _err(code: int, error: str) -> tuple[int, dict[str, Any]]:
     return code, {"ok": False, "error": error}
 
 
-_URL_IN_TEXT_RE = re.compile(r"https?://[^\s\]\)<>\"']+", re.IGNORECASE)
-
-
 def _profile_image_url(profile: dict[str, Any] | None) -> str:
     if not profile:
         return ""
     return str(profile.get("profile_image_url") or "").strip()
-
-
-def _links_from_description(text: str) -> list[dict[str, str]]:
-    if not (text or "").strip():
-        return []
-    seen: set[str] = set()
-    links: list[dict[str, str]] = []
-    for match in _URL_IN_TEXT_RE.finditer(text):
-        url = match.group(0).rstrip(".,;:!?)\"'")
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            continue
-        if url in seen:
-            continue
-        seen.add(url)
-        links.append({"url": url, "label": url})
-    return links
 
 
 def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
@@ -409,14 +388,13 @@ def api_info(
         profile = _twitch.get_user(login)
         if not profile:
             return _err(404, "not_found")
-        description = str(profile.get("description") or "")
+        links = _twitch.get_channel_about_links(login)
         return 200, {
             "ok": True,
             "login": str(profile.get("login") or login).lower(),
             "display_name": profile.get("display_name") or profile.get("login") or login,
             "profile_image_url": _profile_image_url(profile),
-            "description": description,
-            "links": _links_from_description(description),
+            "links": links,
         }
     except Exception:
         logger.exception("chat api_info failed login=%s", login)
