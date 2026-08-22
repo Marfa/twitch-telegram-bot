@@ -742,6 +742,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Show link preview in notifications?",
         "link_preview_on": "✅ Show preview",
         "link_preview_off": "❌ Hide preview",
+        "chat_button_prompt": "Add a button to open stream chat?",
+        "chat_button_yes": "✅ Yes",
+        "chat_button_no": "❌ No",
+        "edit_chat_button": "💬 Chat button",
+        "edit_chat_button_menu": "Add «Go to stream chat» button on alerts?",
+        "alert_chat_button": "Go to stream chat",
+        "preview_blocked_chat_button": "Link preview cannot be enabled while the chat button is on.",
+        "sub_list_chat_button_yes": "• Chat button: on",
         "delay_prompt": "Delay notification after stream start?",
         "delay_no": "❌ No",
         "delay_yes": "✅ Yes",
@@ -2152,6 +2160,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         "link_preview_prompt": "Показывать превью ссылок в уведомлениях?",
         "link_preview_on": "✅ Показывать превью",
         "link_preview_off": "❌ Скрыть превью",
+        "chat_button_prompt": "Добавить кнопку для перехода в Чат?",
+        "chat_button_yes": "✅ Да",
+        "chat_button_no": "❌ Нет",
+        "edit_chat_button": "💬 Кнопка чата",
+        "edit_chat_button_menu": "Добавить кнопку «Перейти в чат стрима» в оповещения?",
+        "alert_chat_button": "Перейти в чат стрима",
+        "preview_blocked_chat_button": "Превью ссылок нельзя включить, пока включена кнопка чата.",
+        "sub_list_chat_button_yes": "• Кнопка чата: да",
         "delay_prompt": "Отложить отправку уведомления после начала стрима",
         "delay_no": "❌ Нет",
         "delay_yes": "✅ Да",
@@ -3490,6 +3506,15 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def chat_button_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("chat_button_yes", lang), callback_data="chat_button:1")],
+            [InlineKeyboardButton(t("chat_button_no", lang), callback_data="chat_button:0")],
+        ]
+    )
+
+
 def ignore_keywords_keyboard(
     lang: str,
     *,
@@ -4309,6 +4334,15 @@ def edit_options_keyboard(
                 )
             ]
         )
+    if show_advanced:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("edit_chat_button", lang),
+                    callback_data=f"edit_f:{sub_id}:chat_button",
+                )
+            ]
+        )
     rows.append(
         [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")]
     )
@@ -4343,6 +4377,13 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
             [
                 [InlineKeyboardButton(t("preview_yes", lang), callback_data=f"edit_set:{sub_id}:preview:1")],
                 [InlineKeyboardButton(t("preview_no", lang), callback_data=f"edit_set:{sub_id}:preview:0")],
+            ]
+        )
+    if field == "chat_button":
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(t("chat_button_yes", lang), callback_data=f"edit_set:{sub_id}:chat_button:1")],
+                [InlineKeyboardButton(t("chat_button_no", lang), callback_data=f"edit_set:{sub_id}:chat_button:0")],
             ]
         )
     if field == "repeat":

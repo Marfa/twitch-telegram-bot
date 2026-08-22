@@ -102,6 +102,23 @@ def chat_webapp_url(*, lang: str | None = None, user_id: int | None = None) -> s
     return f"{base}?{urlencode(params)}"
 
 
+def alert_chat_button_url(
+    *, login: str, lang: str | None = None, user_id: int | None = None
+) -> str:
+    if not PUBLIC_BASE_URL:
+        return ""
+    login = (login or "").strip().lower()
+    if not login:
+        return ""
+    base = f"{PUBLIC_BASE_URL}/app/chat/"
+    params: dict[str, str] = {"login": login, "open": "1"}
+    if lang in ("en", "ru"):
+        params["lang"] = lang
+    if user_id is not None:
+        params["t"] = make_webapp_token(int(user_id), lang=lang)
+    return f"{base}?{urlencode(params)}"
+
+
 def embed_parent_host() -> str:
     if not PUBLIC_BASE_URL:
         return ""

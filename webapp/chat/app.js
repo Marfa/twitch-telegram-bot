@@ -459,6 +459,20 @@
       session = body;
       setLang(urlLang || body.lang || detectLang() || "en");
       renderAuth();
+      const params = new URLSearchParams(location.search);
+      const openLogin = (params.get("login") || "").trim();
+      const autoOpen = params.get("open") === "1";
+      if (autoOpen && openLogin) {
+        try {
+          const resolved = await api(
+            "/app/chat/api/resolve?q=" + encodeURIComponent(openLogin)
+          );
+          if (resolved.body.ok && resolved.body.online) {
+            openChat(resolved.body);
+            return;
+          }
+        } catch (_) {}
+      }
       const online = await api("/app/chat/api/online");
       if (online.body.ok) {
         renderOnline(online.body.streams || [], online.body);

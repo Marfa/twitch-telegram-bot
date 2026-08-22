@@ -89,6 +89,7 @@ from i18n import (
     import_mode_keyboard,
     language_keyboard,
     link_preview_keyboard,
+    chat_button_keyboard,
     lucky_preview_keyboard,
     main_menu,
     other_menu,
@@ -199,6 +200,7 @@ _POSTHOG_OVERALL_KEYS = {
     REPEAT_MUTE_MINUTES,
     SCHEDULE_REMINDER_ASK,
     SCHEDULE_REMINDER_MINUTES,
+    CHAT_BUTTON_ASK,
     DEST_TYPE,
     DEST_CHAT,
     DELETE_OLD,
@@ -240,7 +242,7 @@ _POSTHOG_OVERALL_KEYS = {
     STREAM_SCHEDULE_FIX_SLOTS,
     STREAM_SCHEDULE_MORE,
     PAUSE_ALERTS_DAYS,
-) = range(59)
+) = range(60)
 
 _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
@@ -1045,6 +1047,50 @@ async def _prompt_dest_step(
     return DEST_TYPE
 
 
+async def _go_chat_button_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    chat_id = update.effective_user.id
+    text = t("chat_button_prompt", lang)
+    markup = chat_button_keyboard(lang)
+    if update.callback_query:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    _set_wizard_back(context, CHAT_BUTTON_ASK)
+    return CHAT_BUTTON_ASK
+
+
+async def _go_before_dest_step(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not await prem.advanced_mode_on(context.bot, db, user_id):
+        context.user_data.setdefault("attach_chat_button", False)
+        return await _prompt_dest_step(update, context, lang)
+    return await _go_chat_button_prompt(update, context, lang)
+
+
+async def _wizard_back_before_dest(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    if context.user_data.get("lucky_quick"):
+        return await _show_lucky_preview(update, context, lang)
+    if context.user_data.get("alert_type") == "upcoming":
+        return await _go_schedule_reminder_minutes(update, context, lang)
+    if context.user_data.get("alert_type") in ("end", "category"):
+        after = context.user_data.get("after_delay_state", DELAY_SEND)
+        if after == DELAY_MINUTES:
+            return await _go_delay_minutes_prompt(update, context, lang)
+        return await _go_delay_prompt(update, context, lang)
+    if context.user_data.get("schedule_reminder_offered"):
+        if int(context.user_data.get("schedule_reminder_minutes", 0)) > 0:
+            return await _go_schedule_reminder_minutes(update, context, lang)
+        return await _go_schedule_reminder_ask(update, context, lang)
+    return await _go_repeat_prompt(update, context, lang)
+
+
 async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     has_alert_type = bool(context.user_data.get("alert_type"))
     await update.effective_message.reply_text(
@@ -1232,8 +1278,7 @@ async def _go_after_repeat(
     context.user_data.setdefault("schedule_reminder_configured", False)
     context.user_data.pop("schedule_reminder_offered", None)
     if context.user_data.get("skip_schedule_check"):
-        _set_wizard_back(context, DEST_TYPE)
-        return await _prompt_dest_step(update, context, lang)
+        return await _go_before_dest_step(update, context, lang)
     if context.user_data.get("alert_type") == "upcoming":
         context.user_data["notify_on_live"] = False
         context.user_data["notify_on_end"] = False
@@ -1247,8 +1292,7 @@ async def _go_after_repeat(
         except Exception:
             logger.exception("Twitch schedule check failed for %s", uid)
     if not has_schedule:
-        _set_wizard_back(context, DEST_TYPE)
-        return await _prompt_dest_step(update, context, lang)
+        return await _go_before_dest_step(update, context, lang)
     return await _prompt_schedule_reminder_ask(update, context, lang)
 
 
@@ -1276,6 +1320,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "use_global_ignore",
             "disable_link_preview",
             "strip_name_mentions",
+            "attach_chat_button",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -1356,20 +1401,14 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return await _go_link_preview_prompt(update, context, lang)
         return await _go_schedule_reminder_ask(update, context, lang)
     if state == DEST_TYPE:
-        if context.user_data.get("lucky_quick"):
-            return await _show_lucky_preview(update, context, lang)
-        if context.user_data.get("alert_type") == "upcoming":
-            return await _go_schedule_reminder_minutes(update, context, lang)
-        if context.user_data.get("alert_type") in ("end", "category"):
-            after = context.user_data.get("after_delay_state", DELAY_SEND)
-            if after == DELAY_MINUTES:
-                return await _go_delay_minutes_prompt(update, context, lang)
-            return await _go_delay_prompt(update, context, lang)
-        if context.user_data.get("schedule_reminder_offered"):
-            if int(context.user_data.get("schedule_reminder_minutes", 0)) > 0:
-                return await _go_schedule_reminder_minutes(update, context, lang)
-            return await _go_schedule_reminder_ask(update, context, lang)
-        return await _go_repeat_prompt(update, context, lang)
+        db: Database = context.application.bot_data["db"]
+        if await prem.advanced_mode_on(
+            context.bot, db, update.effective_user.id
+        ):
+            return await _go_chat_button_prompt(update, context, lang)
+        return await _wizard_back_before_dest(update, context, lang)
+    if state == CHAT_BUTTON_ASK:
+        return await _wizard_back_before_dest(update, context, lang)
     if state == DEST_CHAT:
         return await _go_dest_prompt(update, context, lang)
     if state == DELETE_OLD:
@@ -1562,6 +1601,8 @@ def _format_sub_line(
             if sub.disable_link_preview or sub.image_file_id
             else t("sub_list_preview_on", lang)
         )
+    if sub.attach_chat_button:
+        settings.append(t("sub_list_chat_button_yes", lang))
     is_upcoming = (
         sub.schedule_reminder_minutes > 0
         and not sub.notify_on_live
@@ -1680,11 +1721,15 @@ async def _deliver_alert_content(
     image_file_id: str | None = None,
     image_position: str = "",
     disable_link_preview: bool = False,
+    reply_markup=None,
 ):
     """Send alert text, optionally with image above/below. Returns the primary message."""
     thread_kwargs: dict = {}
     if thread_id:
         thread_kwargs["message_thread_id"] = thread_id
+    markup_kwargs: dict = {}
+    if reply_markup is not None:
+        markup_kwargs["reply_markup"] = reply_markup
 
     file_id = image_file_id
     position = (image_position or "").strip()
@@ -1699,25 +1744,60 @@ async def _deliver_alert_content(
             caption=text,
             show_caption_above_media=(position == "after"),
             **thread_kwargs,
+            **markup_kwargs,
         )
     if file_id and position in ("before", "after"):
         if position == "before":
             await bot.send_photo(chat_id=chat_id, photo=file_id, **thread_kwargs)
-            text_kwargs: dict = {"chat_id": chat_id, "text": text, **thread_kwargs}
+            text_kwargs: dict = {
+                "chat_id": chat_id,
+                "text": text,
+                **thread_kwargs,
+                **markup_kwargs,
+            }
             if disable_link_preview:
                 text_kwargs["disable_web_page_preview"] = True
             return await bot.send_message(**text_kwargs)
-        text_kwargs = {"chat_id": chat_id, "text": text, **thread_kwargs}
+        text_kwargs = {
+            "chat_id": chat_id,
+            "text": text,
+            **thread_kwargs,
+            **markup_kwargs,
+        }
         if disable_link_preview:
             text_kwargs["disable_web_page_preview"] = True
         msg = await bot.send_message(**text_kwargs)
         await bot.send_photo(chat_id=chat_id, photo=file_id, **thread_kwargs)
         return msg
 
-    kwargs: dict = {"chat_id": chat_id, "text": text, **thread_kwargs}
+    kwargs: dict = {"chat_id": chat_id, "text": text, **thread_kwargs, **markup_kwargs}
     if disable_link_preview:
         kwargs["disable_web_page_preview"] = True
     return await bot.send_message(**kwargs)
+
+
+def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMarkup | None:
+    if not sub.attach_chat_button:
+        return None
+    from chat_webapp import alert_chat_button_url
+
+    url = alert_chat_button_url(
+        login=sub.twitch_username,
+        lang=lang,
+        user_id=sub.owner_id,
+    )
+    if not url:
+        return None
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("alert_chat_button", lang),
+                    web_app=WebAppInfo(url=url),
+                )
+            ]
+        ]
+    )
 
 
 async def _send_notification(
@@ -1781,6 +1861,13 @@ async def _send_notification(
                         )
 
     try:
+        lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+        chat_markup = _alert_chat_button_markup(sub, lang)
+        preview_off = (
+            bool(sub.disable_link_preview)
+            or bool(sub.image_file_id)
+            or bool(sub.attach_chat_button)
+        )
         msg = await _deliver_alert_content(
             bot,
             chat_id=sub.chat_id,
@@ -1788,7 +1875,8 @@ async def _send_notification(
             thread_id=sub.thread_id,
             image_file_id=sub.image_file_id,
             image_position=sub.image_position,
-            disable_link_preview=bool(sub.disable_link_preview) or bool(sub.image_file_id),
+            disable_link_preview=preview_off,
+            reply_markup=chat_markup,
         )
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
@@ -1800,8 +1888,8 @@ async def _send_notification(
                 thread_id=sub.thread_id,
                 image_file_id=sub.image_file_id,
                 image_position=sub.image_position,
-                disable_link_preview=bool(sub.disable_link_preview)
-                or bool(sub.image_file_id),
+                disable_link_preview=preview_off,
+                reply_markup=chat_markup,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
@@ -2311,6 +2399,20 @@ async def lucky_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data["notify_on_live"] = False
         context.user_data["notify_on_end"] = False
         return await _go_schedule_reminder_minutes(update, context, lang)
+    return await _go_before_dest_step(update, context, lang)
+
+
+async def receive_chat_button_ask(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    yes = query.data.endswith(":1")
+    context.user_data["attach_chat_button"] = yes
+    if yes:
+        context.user_data["disable_link_preview"] = True
+    await query.edit_message_text("✓")
     return await _prompt_dest_step(update, context, lang)
 
 
@@ -2499,6 +2601,13 @@ async def _save_edit_template(
         preview_disabled = _is_link_preview_disabled(update.effective_message)
     if preview_disabled is None:
         preview_disabled = False
+    sub = db.get_subscription(sub_id, owner_id)
+    if sub and sub.attach_chat_button and not preview_disabled:
+        await context.bot.send_message(
+            owner_id, t("preview_blocked_chat_button", lang)
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
     fields: dict[str, object] = {
         "message_template": template,
         "disable_link_preview": bool(preview_disabled),
@@ -2784,8 +2893,7 @@ async def receive_schedule_reminder_ask(
         context.user_data["schedule_reminder_minutes"] = 0
         context.user_data["schedule_reminder_configured"] = False
         context.user_data.pop("notify_on_live", None)
-        _set_wizard_back(context, DEST_TYPE)
-        return await _prompt_dest_step(update, context, lang)
+        return await _go_before_dest_step(update, context, lang)
     context.user_data["notify_on_live"] = False
     await query.edit_message_text("✓")
     await context.bot.send_message(
@@ -2812,8 +2920,7 @@ async def receive_schedule_reminder_minutes(
         return SCHEDULE_REMINDER_MINUTES
     context.user_data["schedule_reminder_minutes"] = int(raw)
     context.user_data["schedule_reminder_configured"] = True
-    _set_wizard_back(context, DEST_TYPE)
-    return await _prompt_dest_step(update, context, lang)
+    return await _go_before_dest_step(update, context, lang)
 
 
 _LIVE_ADDON_CLEAR_KEYS = (
@@ -2826,6 +2933,7 @@ _LIVE_ADDON_CLEAR_KEYS = (
     "use_global_ignore",
     "disable_link_preview",
     "strip_name_mentions",
+    "attach_chat_button",
     "delay_minutes",
     "suppress_repeat_minutes",
     "dest_type",
@@ -3543,8 +3651,10 @@ async def _finish_subscription(
                 delete_previous=delete_previous,
                 notify_delete_fail=notify_delete_fail,
                 disable_link_preview=bool(data.get("disable_link_preview", False))
-                or bool(data.get("image_file_id")),
+                or bool(data.get("image_file_id"))
+                or bool(data.get("attach_chat_button")),
                 strip_name_mentions=bool(data.get("strip_name_mentions")),
+                attach_chat_button=bool(data.get("attach_chat_button")),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
@@ -3607,8 +3717,10 @@ async def _finish_subscription(
                 delete_previous=delete_previous,
                 notify_delete_fail=notify_delete_fail,
                 disable_link_preview=bool(data.get("disable_link_preview", False))
-                or bool(data.get("image_file_id")),
+                or bool(data.get("image_file_id"))
+                or bool(data.get("attach_chat_button")),
                 strip_name_mentions=bool(data.get("strip_name_mentions")),
+                attach_chat_button=bool(data.get("attach_chat_button")),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=(
                     0
@@ -7265,6 +7377,7 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "delete_fail": "edit_delete_fail_menu",
             "delete_other": "edit_delete_other_menu",
             "preview": "edit_preview_menu",
+            "chat_button": "edit_chat_button_menu",
             "repeat": "edit_repeat_menu",
         }
         menu_key = menu_keys[field]
@@ -7306,7 +7419,14 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         kwargs = {"delete_other_alerts": value}
     elif field == "preview":
+        if not value and sub.attach_chat_button:
+            await query.edit_message_text(t("preview_blocked_chat_button", lang))
+            return
         kwargs = {"disable_link_preview": value}
+    elif field == "chat_button":
+        kwargs = {"attach_chat_button": value}
+        if value:
+            kwargs["disable_link_preview"] = True
     elif field == "repeat":
         kwargs = {"suppress_repeat_minutes": 0} if value else None
         if kwargs is None:
@@ -11233,14 +11353,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|repeat)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|repeat)$",
         ),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(
             on_edit_set,
-            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview):[01]$|^edit_set:\d+:repeat:1$",
+            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview|chat_button):[01]$|^edit_set:\d+:repeat:1$",
         ),
         group=0,
     )
@@ -11436,6 +11556,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_edit_schedule_reminder
                 ),
+            ],
+            CHAT_BUTTON_ASK: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(receive_chat_button_ask, pattern=r"^chat_button:"),
             ],
             DEST_TYPE: [
                 _wiz_cancel,

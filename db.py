@@ -359,6 +359,7 @@ class Subscription:
     notify_delete_fail: bool
     disable_link_preview: bool
     strip_name_mentions: bool
+    attach_chat_button: bool
     delay_minutes: int
     suppress_repeat_minutes: int
     schedule_reminder_minutes: int
@@ -413,6 +414,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "notify_delete_fail": bool(sub.notify_delete_fail),
         "disable_link_preview": bool(sub.disable_link_preview),
         "strip_name_mentions": bool(sub.strip_name_mentions),
+        "attach_chat_button": bool(sub.attach_chat_button),
         "delay_minutes": int(sub.delay_minutes),
         "suppress_repeat_minutes": int(sub.suppress_repeat_minutes),
         "schedule_reminder_minutes": int(sub.schedule_reminder_minutes),
@@ -594,6 +596,9 @@ def _row_to_sub(row: Any) -> Subscription:
         strip_name_mentions=bool(row["strip_name_mentions"])
         if "strip_name_mentions" in keys
         else False,
+        attach_chat_button=bool(row["attach_chat_button"])
+        if "attach_chat_button" in keys
+        else False,
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
         schedule_reminder_minutes=int(row["schedule_reminder_minutes"] or 0)
@@ -697,6 +702,7 @@ class Database(Protocol):
         notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
+        attach_chat_button: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -1267,6 +1273,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN strip_name_mentions "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "attach_chat_button" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN attach_chat_button "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -1536,6 +1547,7 @@ class SqliteDatabase:
         notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
+        attach_chat_button: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -1561,14 +1573,14 @@ class SqliteDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    strip_name_mentions,
+                    strip_name_mentions, attach_chat_button,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1582,6 +1594,7 @@ class SqliteDatabase:
                     int(notify_delete_fail),
                     int(disable_link_preview),
                     int(bool(strip_name_mentions)),
+                    int(bool(attach_chat_button)),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -1811,7 +1824,7 @@ class SqliteDatabase:
                         owner_id, twitch_username, twitch_user_id,
                         message_template, dest_type, chat_id, thread_id,
                         delete_previous, notify_delete_fail, disable_link_preview,
-                        strip_name_mentions,
+                        strip_name_mentions, attach_chat_button,
                         delay_minutes, suppress_repeat_minutes,
                         schedule_reminder_minutes, schedule_reminder_configured,
                         ignore_keywords, use_global_ignore,
@@ -1821,7 +1834,7 @@ class SqliteDatabase:
                         notify_on_live, notify_on_end, notify_on_category_change,
                         delete_other_alerts, is_demo
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1836,6 +1849,7 @@ class SqliteDatabase:
                         int(bool(payload.get("notify_delete_fail"))),
                         int(bool(payload.get("disable_link_preview"))),
                         int(bool(payload.get("strip_name_mentions"))),
+                        int(bool(payload.get("attach_chat_button"))),
                         int(payload.get("delay_minutes") or 0),
                         int(payload.get("suppress_repeat_minutes") or 0),
                         int(payload.get("schedule_reminder_minutes") or 0),
@@ -1877,6 +1891,7 @@ class SqliteDatabase:
             "notify_delete_fail",
             "disable_link_preview",
             "strip_name_mentions",
+            "attach_chat_button",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -1901,6 +1916,7 @@ class SqliteDatabase:
                 "notify_delete_fail",
                 "disable_link_preview",
                 "strip_name_mentions",
+                "attach_chat_button",
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",
@@ -4002,6 +4018,13 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS attach_chat_button
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -4314,6 +4337,7 @@ class PostgresDatabase:
         notify_delete_fail: bool = False,
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
+        attach_chat_button: bool = False,
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -4340,14 +4364,14 @@ class PostgresDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    strip_name_mentions,
+                    strip_name_mentions, attach_chat_button,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -4362,6 +4386,7 @@ class PostgresDatabase:
                     notify_delete_fail,
                     disable_link_preview,
                     bool(strip_name_mentions),
+                    bool(attach_chat_button),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -4634,6 +4659,7 @@ class PostgresDatabase:
             "notify_delete_fail",
             "disable_link_preview",
             "strip_name_mentions",
+            "attach_chat_button",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -4658,6 +4684,7 @@ class PostgresDatabase:
                 "notify_delete_fail",
                 "disable_link_preview",
                 "strip_name_mentions",
+                "attach_chat_button",
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",

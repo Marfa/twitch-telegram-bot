@@ -2576,6 +2576,7 @@ def main() -> None:
     assert tr("beta_feat_stream_chat", "en")
     from chat_webapp import (
         WEBAPP_DIR,
+        alert_chat_button_url,
         chat_webapp_url,
         make_webapp_token,
         static_file,
@@ -2587,7 +2588,7 @@ def main() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=5' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+    assert '/app/chat/app.js?v=6' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
     from unittest.mock import patch
@@ -2607,6 +2608,9 @@ def main() -> None:
         assert uid == 42 and loc == "ru"
         url = chat_webapp_url(lang="ru", user_id=42)
         assert "lang=ru" in url and "t=" in url
+        alert_url = alert_chat_button_url(login="SomeStreamer", lang="ru", user_id=42)
+        assert "login=someStreamer" in alert_url or "login=SomeStreamer" in alert_url
+        assert "open=1" in alert_url and "t=" in alert_url
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
         cdb.upsert_user(777)
