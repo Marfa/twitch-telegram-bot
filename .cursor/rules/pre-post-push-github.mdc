@@ -1,0 +1,35 @@
+---
+description: Before/after git push — PRs, Dependabot/malware, green Actions
+alwaysApply: true
+---
+
+# Pre-push / post-push GitHub checks
+
+Repo: [Marfa/twitch-telegram-bot](https://github.com/Marfa/twitch-telegram-bot).
+
+## Before every `git push`
+
+1. **Open PRs** — review and handle https://github.com/Marfa/twitch-telegram-bot/pulls  
+   (`gh pr list`, review/merge/close/comment as needed; do not leave blocking open work ignored).
+
+2. **Security alerts** — check and process:
+   - https://github.com/Marfa/twitch-telegram-bot/security/malware
+   - https://github.com/Marfa/twitch-telegram-bot/security/dependabot  
+   (`gh api` / Dependabot alerts; bump, dismiss with reason, or open fix PR).
+
+Do not push until open PRs and security alerts are consciously handled (fixed, merged, or explicitly deferred with a note to the user).
+
+## After every `git push`
+
+1. Watch https://github.com/Marfa/twitch-telegram-bot/actions (`gh run list` / `gh run watch`).
+2. Drive failed workflows to **green**: read failed logs, fix root cause, push follow-up, re-check until Self-check / Security / Deploy succeed (or report a blocker that needs the user).
+
+## Commands (typical)
+
+```bash
+gh pr list --repo Marfa/twitch-telegram-bot
+gh api "/repos/Marfa/twitch-telegram-bot/dependabot/alerts?state=open"
+gh run list --repo Marfa/twitch-telegram-bot --limit 10
+gh run watch <run-id> --repo Marfa/twitch-telegram-bot
+gh run view <run-id> --repo Marfa/twitch-telegram-bot --log-failed
+```

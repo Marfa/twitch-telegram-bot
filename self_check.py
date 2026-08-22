@@ -2611,8 +2611,6 @@ def main() -> None:
         alert_url = alert_chat_button_url(login="SomeStreamer", lang="ru", user_id=42)
         assert "login=someStreamer" in alert_url or "login=SomeStreamer" in alert_url
         assert "open=1" in alert_url and "t=" in alert_url
-        from twitch import TwitchClient
-
         assert TwitchClient._about_link_key("https://VK.com/stopgameru/") == "https://vk.com/stopgameru"
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
