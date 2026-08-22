@@ -2098,23 +2098,23 @@ def main() -> None:
         apply_features_payment(
             db,
             52,
-            feature_ids=["delay", "repeat"],
+            feature_ids=["alert_history", "extra_alerts"],
             charge_id="feat1",
             until_unix=10**12,
             stars_paid=40,
         )
         st52 = prem.get_status(db, 52)
-        assert st52.feature_active("delay")
-        assert st52.feature_active("repeat")
+        assert st52.feature_active("alert_history")
+        assert st52.feature_active("extra_alerts")
         assert not st52.feature_active("twitch_sync")
         assert st52.is_premium
         assert not st52.has_full_plan
-        assert st52.feature_charge_id("delay") == "feat1"
-        assert prem.has_feature_sync(db, 52, "delay")
+        assert st52.feature_charge_id("alert_history") == "feat1"
+        assert prem.has_feature_sync(db, 52, "alert_history")
         assert not prem.has_feature_sync(db, 52, "twitch_sync")
-        db.clear_premium_feature(52, "delay")
-        assert not prem.get_status(db, 52).feature_active("delay")
-        assert prem.get_status(db, 52).feature_active("repeat")
+        db.clear_premium_feature(52, "alert_history")
+        assert not prem.get_status(db, 52).feature_active("alert_history")
+        assert prem.get_status(db, 52).feature_active("extra_alerts")
 
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "ref.db")
