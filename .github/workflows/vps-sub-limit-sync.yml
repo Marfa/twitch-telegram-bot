@@ -3,6 +3,8 @@ name: VPS sub limit and follow sync
 on:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   run:
     runs-on: ubuntu-latest

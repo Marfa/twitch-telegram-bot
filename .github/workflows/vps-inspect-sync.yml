@@ -8,6 +8,8 @@ on:
         required: true
         default: "150697169"
 
+permissions: {}
+
 jobs:
   inspect:
     runs-on: ubuntu-latest

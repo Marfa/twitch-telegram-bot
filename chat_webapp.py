@@ -20,6 +20,10 @@ WEBAPP_DIR = Path(__file__).resolve().parent / "webapp" / "chat"
 _INIT_DATA_MAX_AGE_SEC = 86_400
 _WEBAPP_TOKEN_TTL_SEC = 7 * 86_400
 _STATIC_NAMES = frozenset({"index.html", "app.js", "style.css"})
+# Pre-resolved paths only — never join user input onto WEBAPP_DIR at call time.
+_STATIC_PATHS: dict[str, Path] = {
+    name: (WEBAPP_DIR / name).resolve() for name in _STATIC_NAMES
+}
 
 _db: Any = None
 _twitch: Any = None
@@ -494,10 +498,8 @@ def api_send(
 
 
 def static_file(name: str) -> tuple[bytes, str] | None:
-    if name not in _STATIC_NAMES:
-        return None
-    path = WEBAPP_DIR / name
-    if not path.is_file():
+    path = _STATIC_PATHS.get(name)
+    if path is None or not path.is_file():
         return None
     data = path.read_bytes()
     if name.endswith(".js"):

@@ -3,6 +3,8 @@ name: Fix VPS bot
 on:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   fix:
     runs-on: ubuntu-latest

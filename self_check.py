@@ -2450,7 +2450,7 @@ def main() -> None:
     msg_ru = _format_twitch_status_message("ru", status_bad)
     assert "Twitch Status" in msg_ru
     assert "Chat" in msg_ru
-    assert "status.twitch.com" in msg_ru
+    assert "https://status.twitch.com" in msg_ru
     msg_ok = _format_twitch_status_message("en", status_ok)
     assert "All Systems Operational" in msg_ok
     assert tr("broadcast_started", "ru")

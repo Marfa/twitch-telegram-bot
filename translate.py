@@ -26,8 +26,9 @@ def markdown_to_telegram_html(text: str) -> str:
         slots.append(fragment)
         return f"\x00MD{len(slots) - 1}\x00"
 
+    # Bounded character classes — avoid polynomial ReDoS on crafted input.
     text = re.sub(
-        r"\[([^\]]+)\]\(([^)]+)\)",
+        r"\[([^\]\n]{1,500})\]\(([^)\n]{1,2000})\)",
         lambda m: put(
             f'<a href="{html.escape(m.group(2), quote=True)}">'
             f"{html.escape(m.group(1))}</a>"
@@ -35,12 +36,12 @@ def markdown_to_telegram_html(text: str) -> str:
         text,
     )
     text = re.sub(
-        r"\*\*([^*]+)\*\*",
+        r"\*\*([^*\n]{1,2000})\*\*",
         lambda m: put(f"<b>{html.escape(m.group(1))}</b>"),
         text,
     )
     text = re.sub(
-        r"`([^`]+)`",
+        r"`([^`\n]{1,2000})`",
         lambda m: put(f"<code>{html.escape(m.group(1))}</code>"),
         text,
     )

@@ -4570,7 +4570,7 @@ async def _complete_schedule_publish(
             logger.warning(
                 "Failed to clear Twitch schedule before publish (user=%s): %s",
                 owner_id,
-                exc,
+                type(exc).__name__,
             )
 
     def _start_and_category(item: dict) -> tuple[str, str, str]:
@@ -9885,11 +9885,7 @@ async def complete_whisper_oauth(
         )
         return
     info = token_info or {}
-    access = info.get("access_token") or ""
-    refresh = info.get("refresh_token") or ""
-    twitch_user_id = info.get("twitch_user_id") or ""
-    twitch_login = info.get("twitch_login") or ""
-    if not access or not twitch_user_id:
+    if not info.get("access_token") or not info.get("twitch_user_id"):
         logger.warning(
             "Whisper OAuth missing token fields for user %s", owner_id
         )
@@ -9899,6 +9895,9 @@ async def complete_whisper_oauth(
             reply_markup=other_menu(lang),
         )
         return
+    refresh = info.get("refresh_token") or ""
+    twitch_user_id = info.get("twitch_user_id") or ""
+    twitch_login = info.get("twitch_login") or ""
     try:
         _enable_whisper_eventsub(
             db,
@@ -9908,8 +9907,13 @@ async def complete_whisper_oauth(
             twitch_user_id=twitch_user_id,
             twitch_login=twitch_login,
         )
-    except Exception:
-        logger.exception("Whisper EventSub subscribe failed for user %s", owner_id)
+    except Exception as exc:
+        # Avoid logger.exception — access/refresh may sit in locals.
+        logger.warning(
+            "Whisper EventSub subscribe failed for user %s (%s)",
+            owner_id,
+            type(exc).__name__,
+        )
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),

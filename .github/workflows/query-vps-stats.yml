@@ -3,6 +3,8 @@ name: Query VPS stats
 on:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   query:
     runs-on: ubuntu-latest

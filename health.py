@@ -416,7 +416,10 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         else:
             followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
     except Exception as exc:
-        logger.warning("Twitch OAuth failed (purpose=%s): %s", purpose, exc)
+        # Do not log exc str — may echo OAuth code / tokens.
+        logger.warning(
+            "Twitch OAuth failed (purpose=%s): %s", purpose, type(exc).__name__
+        )
         _schedule_oauth_complete(telegram_user_id, None, "twitch_api")
         body = _html_page(
             t("oauth_web_failed_title", lang),
@@ -624,7 +627,7 @@ def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
     path = handler._path_only()
     if path == "/app/chat":
         # Relative app.js/style.css break without a trailing slash.
-        query = urlparse(handler.path).query
+        query = urlparse(handler.path).query.replace("\r", "").replace("\n", "")
         loc = "/app/chat/" + (f"?{query}" if query else "")
         handler.send_response(302)
         handler.send_header("Location", loc)
