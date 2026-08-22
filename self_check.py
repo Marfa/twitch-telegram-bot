@@ -2587,7 +2587,7 @@ def main() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+    assert '/app/chat/app.js?v=4' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
     from unittest.mock import patch
