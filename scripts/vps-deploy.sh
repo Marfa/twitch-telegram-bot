@@ -40,7 +40,24 @@ if [[ -f scripts/pg-upgrade-to-18.sh ]]; then
   bash scripts/pg-upgrade-to-18.sh
 fi
 
-docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
+# Build-first: image is compiled while the old bot container still runs;
+# then only bot is recreated (~5–15s gap vs stopping during the whole build).
+wait_db() {
+  local i
+  for i in $(seq 1 30); do
+    if docker compose -f "$COMPOSE_FILE" exec -T db pg_isready -U bot -d bot >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "ERROR: db not ready after 60s" >&2
+  return 1
+}
+
+docker compose -f "$COMPOSE_FILE" up -d db
+wait_db
+docker compose -f "$COMPOSE_FILE" build bot
+docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate --remove-orphans bot
 
 # Nightly Postgres dump (7 newest files under /var/backups/twitch-telegram-bot)
 if [[ -f scripts/pg-backup.sh ]]; then
