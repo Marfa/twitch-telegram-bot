@@ -1,4 +1,3 @@
-(/* global Telegram */)
 (function () {
   "use strict";
 
@@ -542,4 +541,3 @@
 
   boot();
 })();
-)
