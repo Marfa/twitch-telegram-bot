@@ -15,6 +15,9 @@
     en: {
       live: "Live now",
       empty: "No live streams among your active subscriptions.",
+      emptyNone: "No active subscriptions.",
+      emptyOffline: "No one is live ({n} active subscriptions).",
+      stats: "{live} live · {n} subscriptions",
       searchPh: "Name or twitch.tv / m.twitch.tv link",
       go: "Go",
       login: "Log in Twitch",
@@ -42,6 +45,9 @@
     ru: {
       live: "Сейчас в эфире",
       empty: "Нет эфиров среди ваших активных подписок.",
+      emptyNone: "Нет активных подписок.",
+      emptyOffline: "Сейчас никто не в эфире ({n} активных подписок).",
+      stats: "В эфире: {live} · подписок: {n}",
       searchPh: "Имя или ссылка twitch.tv / m.twitch.tv",
       go: "Найти",
       login: "Войти в Twitch",
@@ -216,12 +222,30 @@
     }
   }
 
-  function renderOnline(streams) {
+  function renderOnline(streams, meta) {
     const list = el("online-list");
     list.innerHTML = "";
     const empty = el("online-empty");
+    const stats = el("online-stats");
+    const subscribed = meta && meta.subscribed != null ? meta.subscribed : 0;
+    const live = meta && meta.live != null ? meta.live : streams.length;
+    if (stats) {
+      if (subscribed > 0) {
+        stats.textContent = t.stats
+          .replace("{live}", String(live))
+          .replace("{n}", String(subscribed));
+        stats.classList.remove("hidden");
+      } else {
+        stats.textContent = "";
+        stats.classList.add("hidden");
+      }
+    }
     if (!streams.length) {
       empty.classList.remove("hidden");
+      if (subscribed <= 0) empty.textContent = t.emptyNone;
+      else if (live <= 0)
+        empty.textContent = t.emptyOffline.replace("{n}", String(subscribed));
+      else empty.textContent = t.empty;
       return;
     }
     empty.classList.add("hidden");
@@ -402,9 +426,9 @@
       renderAuth();
       const online = await api("/app/chat/api/online");
       if (online.body.ok) {
-        renderOnline(online.body.streams || []);
+        renderOnline(online.body.streams || [], online.body);
       } else {
-        renderOnline([]);
+        renderOnline([], { subscribed: 0, live: 0 });
         const hint = el("search-hint");
         hint.classList.remove("hidden");
         hint.textContent = t.loadFail.replace(

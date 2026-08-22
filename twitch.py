@@ -103,15 +103,37 @@ class TwitchClient:
         }
 
     def get_user(self, login: str) -> dict[str, Any] | None:
-        resp = self._session.get(
-            "https://api.twitch.tv/helix/users",
-            headers=self._headers(),
-            params={"login": login.lower()},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        users = resp.json().get("data", [])
-        return users[0] if users else None
+        return self.get_users_by_login([login]).get(login.lower())
+
+    def get_users_by_login(self, logins: list[str]) -> dict[str, dict[str, Any]]:
+        """Map lowercase login -> Helix user dict (max 100 logins per request)."""
+        clean = []
+        seen: set[str] = set()
+        for raw in logins:
+            login = (raw or "").strip().lower()
+            if not login or login in seen:
+                continue
+            seen.add(login)
+            clean.append(login)
+        if not clean:
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        chunk_size = 100
+        for i in range(0, len(clean), chunk_size):
+            chunk = clean[i : i + chunk_size]
+            params: list[tuple[str, str]] = [("login", login) for login in chunk]
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/users",
+                headers=self._headers(),
+                params=params,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            for user in resp.json().get("data", []):
+                login = str(user.get("login") or "").lower()
+                if login:
+                    out[login] = user
+        return out
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Helix allows at most 100 user_id params per /streams request."""

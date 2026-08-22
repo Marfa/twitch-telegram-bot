@@ -2600,6 +2600,11 @@ def main() -> None:
         tok = make_webapp_token(42)
         assert validate_webapp_token(tok) == 42
         assert validate_webapp_token("1:1:dead") is None
+        tok_ru = make_webapp_token(42, lang="ru")
+        from chat_webapp import parse_webapp_token
+
+        uid, loc = parse_webapp_token(tok_ru)
+        assert uid == 42 and loc == "ru"
         url = chat_webapp_url(lang="ru", user_id=42)
         assert "lang=ru" in url and "t=" in url
     with tempfile.TemporaryDirectory() as chat_tmp:

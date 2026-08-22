@@ -31,10 +31,16 @@ def register_chat_webapp(*, db: Any, twitch: Any) -> None:
     _twitch = twitch
 
 
-def make_webapp_token(user_id: int, *, ttl_sec: int = _WEBAPP_TOKEN_TTL_SEC) -> str:
+def make_webapp_token(
+    user_id: int,
+    *,
+    lang: str | None = None,
+    ttl_sec: int = _WEBAPP_TOKEN_TTL_SEC,
+) -> str:
     """Short-lived HMAC token so the Mini App works even if initData is empty."""
     exp = int(time.time()) + max(60, int(ttl_sec))
-    msg = f"{int(user_id)}:{exp}"
+    locale = lang if lang in ("en", "ru") else ""
+    msg = f"{int(user_id)}:{exp}:{locale}" if locale else f"{int(user_id)}:{exp}"
     sig = hmac.new(
         TELEGRAM_BOT_TOKEN.encode("utf-8"),
         msg.encode("utf-8"),
@@ -43,26 +49,42 @@ def make_webapp_token(user_id: int, *, ttl_sec: int = _WEBAPP_TOKEN_TTL_SEC) -> 
     return f"{msg}:{sig}"
 
 
-def validate_webapp_token(token: str) -> int | None:
+def parse_webapp_token(token: str) -> tuple[int | None, str | None]:
+    """Return (user_id, lang) from a signed Mini App token."""
     raw = (token or "").strip()
-    if not raw or not TELEGRAM_BOT_TOKEN or raw.count(":") != 2:
-        return None
-    uid_s, exp_s, sig = raw.split(":", 2)
+    if not raw or not TELEGRAM_BOT_TOKEN:
+        return None, None
+    parts = raw.split(":")
+    if len(parts) not in (3, 4):
+        return None, None
+    uid_s, exp_s = parts[0], parts[1]
+    if len(parts) == 3:
+        sig = parts[2]
+        locale = None
+        msg = f"{uid_s}:{exp_s}"
+    else:
+        locale_raw, sig = parts[2], parts[3]
+        locale = locale_raw if locale_raw in ("en", "ru") else None
+        msg = f"{uid_s}:{exp_s}:{locale_raw}" if locale_raw else f"{uid_s}:{exp_s}"
     try:
         user_id = int(uid_s)
         exp = int(exp_s)
     except ValueError:
-        return None
+        return None, None
     if user_id <= 0 or exp < int(time.time()):
-        return None
-    msg = f"{user_id}:{exp}"
+        return None, None
     expect = hmac.new(
         TELEGRAM_BOT_TOKEN.encode("utf-8"),
         msg.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()[:32]
     if not hmac.compare_digest(expect, sig):
-        return None
+        return None, None
+    return user_id, locale
+
+
+def validate_webapp_token(token: str) -> int | None:
+    user_id, _ = parse_webapp_token(token)
     return user_id
 
 
@@ -74,7 +96,7 @@ def chat_webapp_url(*, lang: str | None = None, user_id: int | None = None) -> s
     if lang in ("en", "ru"):
         params["lang"] = lang
     if user_id is not None:
-        params["t"] = make_webapp_token(int(user_id))
+        params["t"] = make_webapp_token(int(user_id), lang=lang)
     if not params:
         return base
     return f"{base}?{urlencode(params)}"
@@ -132,31 +154,69 @@ def _require_user(
     *,
     init_data: str = "",
     token: str = "",
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
     import beta as beta_features
 
-    user_id: int | None = validate_webapp_token(token) if token else None
+    token_lang: str | None = None
+    user_id: int | None = None
+    if token:
+        user_id, token_lang = parse_webapp_token(token)
     user: dict[str, Any] | None = None
     if user_id is None:
         user = validate_webapp_init_data(init_data)
         if user is None:
             if not (init_data or "").strip() and not (token or "").strip():
                 logger.info("chat auth: empty initData and token")
-                return None, "unauthorized_empty"
+                return None, "unauthorized_empty", None
             logger.info(
                 "chat auth: rejected init_len=%s token_len=%s",
                 len((init_data or "").strip()),
                 len((token or "").strip()),
             )
-            return None, "unauthorized"
+            return None, "unauthorized", None
         user_id = int(user["id"])
     else:
         user = {"id": user_id}
     if _db is None:
-        return None, "unavailable"
+        return None, "unavailable", None
     if not beta_features.is_enabled(_db, user_id, BETA_FEATURE_ID):
-        return None, "beta_required"
-    return user, None
+        return None, "beta_required", None
+    if token_lang:
+        user["lang"] = token_lang
+    return user, None, token_lang
+
+
+def _subscription_uids(subs: list[Any]) -> dict[str, Any]:
+    """Map twitch user_id -> subscription, resolving missing ids by login."""
+    by_uid: dict[str, Any] = {}
+    missing: list[Any] = []
+    for sub in subs:
+        uid = str(getattr(sub, "twitch_user_id", "") or "").strip()
+        if uid:
+            by_uid[uid] = sub
+        elif getattr(sub, "twitch_username", ""):
+            missing.append(sub)
+    if not missing or _twitch is None or _db is None:
+        return by_uid
+    logins = list({str(s.twitch_username).lower() for s in missing})
+    try:
+        profiles = _twitch.get_users_by_login(logins)
+    except Exception:
+        logger.exception("chat resolve subscription logins failed")
+        return by_uid
+    for sub in missing:
+        profile = profiles.get(str(sub.twitch_username).lower())
+        if not profile:
+            continue
+        uid = str(profile.get("id") or "")
+        if not uid:
+            continue
+        by_uid[uid] = sub
+        try:
+            _db.update_subscription(int(sub.id), int(sub.owner_id), twitch_user_id=uid)
+        except Exception:
+            logger.debug("chat backfill twitch_user_id failed sub=%s", sub.id)
+    return by_uid
 
 
 def _utc_day() -> str:
@@ -168,12 +228,12 @@ def _err(code: int, error: str) -> tuple[int, dict[str, Any]]:
 
 
 def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data=init_data, token=token)
+    user, err, token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
         code = 401 if (err or "").startswith("unauthorized") else 403
         return _err(code, err or "unauthorized")
     user_id = int(user["id"])
-    lang = _db.get_user_locale(user_id) or "en"
+    lang = token_lang or _db.get_user_locale(user_id) or "en"
     auth = _db.get_chat_auth(user_id)
     limit = chat_daily_send_limit(_db, user_id)
     sent = _db.get_chat_send_count(user_id, _utc_day())
@@ -195,7 +255,7 @@ def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str,
 
 
 def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data=init_data, token=token)
+    user, err, _token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
         code = 401 if (err or "").startswith("unauthorized") else 403
         return _err(code, err or "unauthorized")
@@ -209,11 +269,13 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
         subs = [
             s
             for s in _db.get_subscriptions_by_owner(user_id)
-            if s.enabled and bool(s.is_demo) == demo and s.twitch_user_id
+            if s.enabled and bool(s.is_demo) == demo and s.twitch_username
         ]
         if not subs:
-            return 200, {"ok": True, "streams": [], "subscribed": 0}
-        by_uid = {str(s.twitch_user_id): s for s in subs}
+            return 200, {"ok": True, "streams": [], "subscribed": 0, "live": 0}
+        by_uid = _subscription_uids(subs)
+        if not by_uid:
+            return 200, {"ok": True, "streams": [], "subscribed": 0, "live": 0}
         live = _twitch.get_live_streams(list(by_uid.keys()))
         streams: list[dict[str, Any]] = []
         for uid, stream in live.items():
@@ -237,6 +299,7 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
             "ok": True,
             "streams": streams,
             "subscribed": len(by_uid),
+            "live": len(streams),
         }
     except Exception:
         logger.exception("chat api_online failed user=%s", user_id)
@@ -246,7 +309,7 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
 def api_resolve(
     *, init_data: str = "", token: str = "", query: str = ""
 ) -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data=init_data, token=token)
+    user, err, _token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
         code = 401 if (err or "").startswith("unauthorized") else 403
         return _err(code, err or "unauthorized")
@@ -283,7 +346,7 @@ def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[st
     from health import create_oauth_state
     from twitch import CHAT_OAUTH_SCOPES
 
-    user, err = _require_user(init_data=init_data, token=token)
+    user, err, token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
         code = 401 if (err or "").startswith("unauthorized") else 403
         return _err(code, err or "unauthorized")
@@ -293,7 +356,7 @@ def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[st
     if not redirect:
         return _err(503, "oauth_unavailable")
     user_id = int(user["id"])
-    lang = _db.get_user_locale(user_id) or "en"
+    lang = token_lang or _db.get_user_locale(user_id) or "en"
     state = create_oauth_state(user_id, lang, purpose="chat")
     url = _twitch.build_authorize_url(
         redirect_uri=redirect, state=state, scopes=CHAT_OAUTH_SCOPES
@@ -308,7 +371,7 @@ def api_send(
     broadcaster_login: str = "",
     message: str = "",
 ) -> tuple[int, dict[str, Any]]:
-    user, err = _require_user(init_data=init_data, token=token)
+    user, err, _token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
         code = 401 if (err or "").startswith("unauthorized") else 403
         return _err(code, err or "unauthorized")
