@@ -676,6 +676,15 @@ def _handle_chat_webapp_get(handler: BaseHTTPRequestHandler) -> bool:
         )
         _json_response(handler, status, payload)
         return True
+    if path == "/app/chat/api/info":
+        query = parse_qs(urlparse(handler.path).query)
+        q = (query.get("q") or [""])[0]
+        init_data, token = _webapp_credentials(handler)
+        status, payload = chat_webapp.api_info(
+            init_data=init_data, token=token, query=q
+        )
+        _json_response(handler, status, payload)
+        return True
     if path == "/app/chat/api/oauth-url":
         init_data, token = _webapp_credentials(handler)
         status, payload = chat_webapp.api_oauth_url(init_data=init_data, token=token)

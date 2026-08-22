@@ -35,7 +35,15 @@
           <strong id="chat-title">—</strong>
           <span id="chat-sub" class="muted"></span>
         </div>
-        <button type="button" id="btn-fallback" class="btn btn-sm hidden">Simple</button>
+        <div class="chat-actions">
+          <button type="button" id="btn-info" class="btn btn-sm ghost hidden">Info</button>
+          <button type="button" id="btn-fallback" class="btn btn-sm hidden">Simple</button>
+        </div>
+      </div>
+      <div id="info-panel" class="info-panel hidden">
+        <p id="info-loading" class="hint hidden"></p>
+        <p id="info-empty" class="hint hidden"></p>
+        <ul id="info-links" class="info-links"></ul>
       </div>
       <div id="embed-wrap" class="embed-wrap hidden">
         <iframe id="embed-frame" title="Twitch chat" allowfullscreen></iframe>
@@ -53,6 +61,6 @@
 
     <p id="fatal" class="fatal hidden"></p>
   </div>
-  <script src="/app/chat/app.js?v=6"></script>
+  <script src="/app/chat/app.js?v=7"></script>
 </body>
 </html>

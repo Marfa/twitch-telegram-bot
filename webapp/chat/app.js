@@ -33,6 +33,9 @@
         "No login token. Close this window, tap /start in the bot, then open «Chat» from the keyboard.",
       simple: "Simple",
       embed: "Embed",
+      info: "Info",
+      infoEmpty: "No links in the channel description.",
+      infoLoadFail: "Could not load channel info.",
       quota: "{n} messages left today",
       unlimited: "Unlimited sends",
       limitHit: "Daily limit reached. Premium unlocks unlimited chat.",
@@ -65,6 +68,9 @@
         "Нет токена входа. Закройте окно, нажмите /start в боте, затем «Чат» на клавиатуре.",
       simple: "Простой",
       embed: "Embed",
+      info: "Информация",
+      infoEmpty: "В описании канала нет ссылок.",
+      infoLoadFail: "Не удалось загрузить информацию о канале.",
       quota: "Осталось сообщений сегодня: {n}",
       unlimited: "Безлимитная отправка",
       limitHit: "Дневной лимит. Premium снимает ограничение.",
@@ -87,6 +93,7 @@
   let ircStatusEl = null;
   let appToken = "";
   let urlLang = "";
+  let infoCache = null;
 
   function setLang(code) {
     lang = String(code || "").toLowerCase().startsWith("ru") ? "ru" : "en";
@@ -98,6 +105,8 @@
     el("search-form").querySelector('button[type="submit"]').textContent = t.go;
     el("btn-login").textContent = t.login;
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
+    const infoBtn = el("btn-info");
+    if (infoBtn) infoBtn.textContent = t.info;
     const sendInput = el("send-input");
     const sendBtn = el("btn-send");
     if (sendInput) sendInput.placeholder = t.sendPh;
@@ -259,7 +268,17 @@
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "card";
-      btn.innerHTML =
+      const avatar = document.createElement("img");
+      avatar.className = "card-avatar";
+      avatar.alt = "";
+      avatar.loading = "lazy";
+      avatar.src = s.profile_image_url || "";
+      avatar.addEventListener("error", () => {
+        avatar.removeAttribute("src");
+      });
+      const body = document.createElement("div");
+      body.className = "card-body";
+      body.innerHTML =
         "<strong>" +
         escapeHtml(s.display_name || s.login) +
         "</strong><div class=\"meta\">" +
@@ -268,6 +287,8 @@
         "</div><div class=\"meta\">" +
         escapeHtml(s.title || "") +
         "</div>";
+      btn.appendChild(avatar);
+      btn.appendChild(body);
       btn.addEventListener("click", () => openChat(s));
       list.appendChild(btn);
     });
@@ -281,14 +302,86 @@
       .replace(/"/g, "&quot;");
   }
 
+  function hideInfoPanel() {
+    el("info-panel").classList.add("hidden");
+  }
+
+  function renderInfoLinks(links) {
+    el("info-loading").classList.add("hidden");
+    el("info-empty").classList.add("hidden");
+    const list = el("info-links");
+    list.innerHTML = "";
+    if (!links.length) {
+      el("info-empty").textContent = t.infoEmpty;
+      el("info-empty").classList.remove("hidden");
+      return;
+    }
+    links.forEach((item) => {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = item.url;
+      a.textContent = item.label || item.url;
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        openExternal(item.url);
+      });
+      li.appendChild(a);
+      list.appendChild(li);
+    });
+  }
+
+  function openExternal(url) {
+    if (tg && tg.openLink) tg.openLink(url);
+    else window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  async function toggleInfoPanel() {
+    const panel = el("info-panel");
+    if (!current) return;
+    if (!panel.classList.contains("hidden")) {
+      hideInfoPanel();
+      return;
+    }
+    panel.classList.remove("hidden");
+    if (infoCache && infoCache.login === current.login) {
+      renderInfoLinks(infoCache.links);
+      return;
+    }
+    el("info-empty").classList.add("hidden");
+    el("info-links").innerHTML = "";
+    el("info-loading").textContent = t.loading;
+    el("info-loading").classList.remove("hidden");
+    try {
+      const { body } = await api(
+        "/app/chat/api/info?q=" + encodeURIComponent(current.login)
+      );
+      if (!body.ok) {
+        el("info-loading").classList.add("hidden");
+        el("info-empty").textContent = t.infoLoadFail;
+        el("info-empty").classList.remove("hidden");
+        return;
+      }
+      const links = body.links || [];
+      infoCache = { login: current.login, links: links };
+      renderInfoLinks(links);
+    } catch (_) {
+      el("info-loading").classList.add("hidden");
+      el("info-empty").textContent = t.infoLoadFail;
+      el("info-empty").classList.remove("hidden");
+    }
+  }
+
   function openChat(stream) {
     current = stream;
     useFallback = false;
+    infoCache = null;
+    hideInfoPanel();
     el("view-home").classList.add("hidden");
     el("view-chat").classList.remove("hidden");
     el("chat-title").textContent = stream.display_name || stream.login;
     el("chat-sub").textContent = stream.title || "";
     el("btn-fallback").classList.remove("hidden");
+    el("btn-info").classList.remove("hidden");
     setLang(lang);
     applyChatMode();
   }
@@ -296,9 +389,12 @@
   function closeChat() {
     stopIrc();
     current = null;
+    infoCache = null;
+    hideInfoPanel();
     el("embed-frame").src = "about:blank";
     el("view-chat").classList.add("hidden");
     el("view-home").classList.remove("hidden");
+    el("btn-info").classList.add("hidden");
   }
 
   function applyChatMode() {
@@ -531,6 +627,9 @@
   });
 
   el("btn-back").addEventListener("click", closeChat);
+  el("btn-info").addEventListener("click", () => {
+    toggleInfoPanel();
+  });
   el("btn-fallback").addEventListener("click", () => {
     useFallback = !useFallback;
     setLang(lang);

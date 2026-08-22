@@ -87,7 +87,19 @@ html, body {
   color: var(--fg);
   padding: 12px;
   cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
+.card-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+  background: var(--line);
+}
+.card-body { flex: 1; min-width: 0; }
 .card strong { display: block; margin-bottom: 4px; }
 .card .meta { font-size: 13px; color: var(--muted); }
 .hint { font-size: 13px; color: var(--muted); margin: 4px 0; }
@@ -106,6 +118,36 @@ html, body {
 }
 .chat-meta { flex: 1; min-width: 0; }
 .chat-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.info-panel {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--sec);
+  padding: 10px 12px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.info-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.info-links a {
+  color: var(--btn);
+  font-size: 14px;
+  word-break: break-all;
+  text-decoration: none;
+}
+.info-links a:hover { text-decoration: underline; }
 .muted { color: var(--muted); font-size: 12px; }
 .embed-wrap, .fallback-wrap {
   flex: 1;

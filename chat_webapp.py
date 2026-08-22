@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -244,6 +245,32 @@ def _err(code: int, error: str) -> tuple[int, dict[str, Any]]:
     return code, {"ok": False, "error": error}
 
 
+_URL_IN_TEXT_RE = re.compile(r"https?://[^\s\]\)<>\"']+", re.IGNORECASE)
+
+
+def _profile_image_url(profile: dict[str, Any] | None) -> str:
+    if not profile:
+        return ""
+    return str(profile.get("profile_image_url") or "").strip()
+
+
+def _links_from_description(text: str) -> list[dict[str, str]]:
+    if not (text or "").strip():
+        return []
+    seen: set[str] = set()
+    links: list[dict[str, str]] = []
+    for match in _URL_IN_TEXT_RE.finditer(text):
+        url = match.group(0).rstrip(".,;:!?)\"'")
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        links.append({"url": url, "label": url})
+    return links
+
+
 def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
     user, err, token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
@@ -295,11 +322,14 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
             return 200, {"ok": True, "streams": [], "subscribed": 0, "live": 0}
         live = _twitch.get_live_streams(list(by_uid.keys()))
         streams: list[dict[str, Any]] = []
+        logins: list[str] = []
         for uid, stream in live.items():
             sub = by_uid.get(str(uid))
             login = (
                 stream.get("user_login") or (sub.twitch_username if sub else "") or ""
             ).lower()
+            if login:
+                logins.append(login)
             streams.append(
                 {
                     "login": login,
@@ -311,6 +341,10 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
                     "twitch_user_id": str(uid),
                 }
             )
+        profiles = _twitch.get_users_by_login(logins) if logins else {}
+        for item in streams:
+            profile = profiles.get(str(item.get("login") or "").lower())
+            item["profile_image_url"] = _profile_image_url(profile)
         streams.sort(key=lambda s: (-int(s["viewer_count"]), str(s["login"])))
         return 200, {
             "ok": True,
@@ -352,9 +386,40 @@ def api_resolve(
             "title": (stream or {}).get("title") or "",
             "game_name": (stream or {}).get("game_name") or "",
             "viewer_count": int((stream or {}).get("viewer_count") or 0),
+            "profile_image_url": _profile_image_url(profile),
         }
     except Exception:
         logger.exception("chat api_resolve failed login=%s", login)
+        return _err(502, "twitch_error")
+
+
+def api_info(
+    *, init_data: str = "", token: str = "", query: str = ""
+) -> tuple[int, dict[str, Any]]:
+    user, err, _token_lang = _require_user(init_data=init_data, token=token)
+    if err or user is None:
+        code = 401 if (err or "").startswith("unauthorized") else 403
+        return _err(code, err or "unauthorized")
+    if _twitch is None:
+        return _err(503, "unavailable")
+    login = _twitch.parse_username(query or "")
+    if not login:
+        return _err(400, "bad_query")
+    try:
+        profile = _twitch.get_user(login)
+        if not profile:
+            return _err(404, "not_found")
+        description = str(profile.get("description") or "")
+        return 200, {
+            "ok": True,
+            "login": str(profile.get("login") or login).lower(),
+            "display_name": profile.get("display_name") or profile.get("login") or login,
+            "profile_image_url": _profile_image_url(profile),
+            "description": description,
+            "links": _links_from_description(description),
+        }
+    except Exception:
+        logger.exception("chat api_info failed login=%s", login)
         return _err(502, "twitch_error")
 
 
