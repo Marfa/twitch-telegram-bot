@@ -152,9 +152,6 @@ from hf_text import generate_alert_template
 
 logger = logging.getLogger(__name__)
 
-# Used by `_menu` to attach the Chat WebApp keyboard button (set in post_init).
-_menu_db: Database | None = None
-
 GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
 TWITCH_STATUS_PAGE_URL = "https://status.twitch.com/"
 _TELEGRAM_CAPTION_LIMIT = 1024
@@ -814,22 +811,10 @@ async def _advance_stream_schedule_day(
 
 
 def _menu(lang: str, user_id: int) -> ReplyKeyboardMarkup:
-    chat_url: str | None = None
-    db = _menu_db
-    if db is not None and beta_features.is_enabled(db, user_id, "stream-chat"):
-        from chat_webapp import chat_webapp_url
-
-        url = chat_webapp_url(
-            lang=lang if lang in SUPPORTED_LOCALES else None,
-            user_id=user_id,
-        )
-        if url:
-            chat_url = url
     return main_menu(
         lang,
         is_admin=_is_admin(user_id) and not demo_mode.is_active(user_id),
         demo_active=demo_mode.is_active(user_id),
-        chat_webapp_url=chat_url,
     )
 
 
@@ -10939,8 +10924,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def build_application(token: str, db: Database, twitch: TwitchClient) -> Application:
-    global _menu_db
-    _menu_db = db
     beta_features.load_manifest()
     async def post_init(application: Application) -> None:
         from chat_webapp import register_chat_webapp

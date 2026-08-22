@@ -9,7 +9,6 @@ from telegram import (
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
-    WebAppInfo,
 )
 
 SUPPORTED_LOCALES = ("en", "ru")
@@ -730,7 +729,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "menu_btn_chat": "Chat",
         "chat_open_hint": (
-            "Open stream chat with the button below (or the «Chat» key on the keyboard)."
+            "Open stream chat with the button below (or the «Chat» menu button next to the input)."
         ),
         "chat_oauth_done": (
             "Twitch account linked for chat. Open the Chat menu button again."
@@ -2138,7 +2137,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "menu_btn_chat": "Чат",
         "chat_open_hint": (
-            "Откройте чат стримов кнопкой ниже (или клавишей «Чат» на клавиатуре)."
+            "Откройте чат кнопкой ниже (или «Чат» слева от поля ввода)."
         ),
         "chat_oauth_done": (
             "Аккаунт Twitch привязан для чата. Снова откройте кнопку меню «Чат»."
@@ -2867,11 +2866,7 @@ def all_wizard_nav_buttons() -> set[str]:
 
 
 def main_menu(
-    lang: str,
-    *,
-    is_admin: bool = False,
-    demo_active: bool = False,
-    chat_webapp_url: str | None = None,
+    lang: str, *, is_admin: bool = False, demo_active: bool = False
 ) -> ReplyKeyboardMarkup:
     rows = [
         [
@@ -2890,16 +2885,6 @@ def main_menu(
             KeyboardButton(btn("feedback", lang)),
         ],
     ]
-    if chat_webapp_url:
-        rows.insert(
-            0,
-            [
-                KeyboardButton(
-                    t("menu_btn_chat", lang),
-                    web_app=WebAppInfo(url=chat_webapp_url),
-                )
-            ],
-        )
     if demo_active:
         rows.append([KeyboardButton(btn("demo", lang))])
     elif is_admin:
