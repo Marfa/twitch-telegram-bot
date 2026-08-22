@@ -11,7 +11,7 @@
   <div id="app">
     <header class="bar">
       <div id="auth-status" class="auth"></div>
-      <button type="button" id="btn-login" class="btn ghost hidden">Twitch</button>
+      <button type="button" id="btn-login" class="btn btn-sm hidden">Twitch</button>
     </header>
 
     <section id="view-home" class="view">
@@ -35,7 +35,7 @@
           <strong id="chat-title">—</strong>
           <span id="chat-sub" class="muted"></span>
         </div>
-        <button type="button" id="btn-fallback" class="btn ghost hidden">Simple</button>
+        <button type="button" id="btn-fallback" class="btn btn-sm hidden">Simple</button>
       </div>
       <div id="embed-wrap" class="embed-wrap hidden">
         <iframe id="embed-frame" title="Twitch chat" allowfullscreen></iframe>
@@ -47,12 +47,12 @@
                  placeholder="Message">
           <button type="submit" class="btn" id="btn-send">Send</button>
         </form>
-        <p id="send-quota" class="hint"></p>
+        <p id="send-quota" class="hint hidden"></p>
       </div>
     </section>
 
     <p id="fatal" class="fatal hidden"></p>
   </div>
-  <script src="/app/chat/app.js?v=4"></script>
+  <script src="/app/chat/app.js?v=5"></script>
 </body>
 </html>

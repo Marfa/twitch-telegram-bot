@@ -13,25 +13,29 @@
 html, body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--fg);
 }
 #app {
-  min-height: 100%;
+  height: 100%;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   padding: 12px;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
   gap: 12px;
+  overflow: hidden;
 }
 .hidden { display: none !important; }
 .bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
 }
-.auth { font-size: 13px; color: var(--muted); }
+.auth { font-size: 13px; color: var(--muted); flex: 1; min-width: 0; }
 .btn {
   border: 0;
   border-radius: 10px;
@@ -40,6 +44,12 @@ html, body {
   padding: 10px 14px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 14px;
 }
 .btn.ghost {
   background: transparent;
@@ -86,46 +96,60 @@ html, body {
   padding: 16px;
   text-align: center;
 }
-.view { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.view { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; overflow: hidden; }
+#view-home { overflow-y: auto; min-height: 0; -webkit-overflow-scrolling: touch; }
 .chat-top {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 .chat-meta { flex: 1; min-width: 0; }
 .chat-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .muted { color: var(--muted); font-size: 12px; }
 .embed-wrap, .fallback-wrap {
   flex: 1;
-  min-height: 280px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--line);
   background: #0e0e10;
+  color: #efeff1;
 }
 .embed-wrap iframe {
   border: 0;
   width: 100%;
   height: 100%;
-  min-height: 360px;
   flex: 1;
+  min-height: 0;
 }
 .msg-list {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   font-size: 14px;
+  -webkit-overflow-scrolling: touch;
 }
+.msg { color: #efeff1; word-break: break-word; }
 .msg .nick { color: #bf94ff; font-weight: 600; margin-right: 6px; }
-.msg.system { color: var(--muted); font-style: italic; }
+.msg.system { color: #adadb8; font-style: italic; }
 .send {
   display: flex;
   gap: 8px;
   padding: 8px;
   border-top: 1px solid var(--line);
+  flex-shrink: 0;
+  background: #18181b;
+}
+.send input {
+  background: #0e0e10;
+  color: #efeff1;
+  border-color: rgba(255, 255, 255, 0.12);
 }

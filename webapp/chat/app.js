@@ -20,6 +20,8 @@
       searchPh: "Name or twitch.tv / m.twitch.tv link",
       go: "Go",
       login: "Log in Twitch",
+      send: "Send",
+      sendPh: "Message",
       linked: "Twitch: @{login}",
       notLinked: "Twitch: not linked (needed to send)",
       offline: "Streamer is offline",
@@ -50,6 +52,8 @@
       searchPh: "Имя или ссылка twitch.tv / m.twitch.tv",
       go: "Найти",
       login: "Войти в Twitch",
+      send: "Отправить",
+      sendPh: "Сообщение",
       linked: "Twitch: @{login}",
       notLinked: "Twitch: не привязан (нужен для отправки)",
       offline: "Стример оффлайн",
@@ -80,6 +84,7 @@
   let useFallback = false;
   let ircSocket = null;
   let ircTimer = null;
+  let ircStatusEl = null;
   let appToken = "";
   let urlLang = "";
 
@@ -93,6 +98,10 @@
     el("search-form").querySelector('button[type="submit"]').textContent = t.go;
     el("btn-login").textContent = t.login;
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
+    const sendInput = el("send-input");
+    const sendBtn = el("btn-send");
+    if (sendInput) sendInput.placeholder = t.sendPh;
+    if (sendBtn) sendBtn.textContent = t.send;
   }
 
   function takeTokenFromUrl() {
@@ -209,16 +218,14 @@
 
   function updateQuota() {
     const box = el("send-quota");
-    if (!session) {
+    if (!session || session.unlimited) {
       box.textContent = "";
+      box.classList.add("hidden");
       return;
     }
-    if (session.unlimited) {
-      box.textContent = t.unlimited;
-    } else {
-      const n = session.remaining != null ? session.remaining : 0;
-      box.textContent = t.quota.replace("{n}", String(n));
-    }
+    const n = session.remaining != null ? session.remaining : 0;
+    box.textContent = t.quota.replace("{n}", String(n));
+    box.classList.toggle("hidden", n <= 0);
   }
 
   function renderOnline(streams, meta) {
@@ -276,12 +283,13 @@
 
   function openChat(stream) {
     current = stream;
-    useFallback = !(session && session.prefer_embed);
+    useFallback = false;
     el("view-home").classList.add("hidden");
     el("view-chat").classList.remove("hidden");
     el("chat-title").textContent = stream.display_name || stream.login;
     el("chat-sub").textContent = stream.title || "";
     el("btn-fallback").classList.remove("hidden");
+    setLang(lang);
     applyChatMode();
   }
 
@@ -315,8 +323,27 @@
     }
   }
 
+  function clearIrcStatus() {
+    if (ircStatusEl && ircStatusEl.parentNode) {
+      ircStatusEl.parentNode.removeChild(ircStatusEl);
+    }
+    ircStatusEl = null;
+  }
+
+  function appendSystemMsg(text) {
+    clearIrcStatus();
+    const list = el("msg-list");
+    const row = document.createElement("div");
+    row.className = "msg system";
+    row.textContent = text;
+    list.appendChild(row);
+    ircStatusEl = row;
+    list.scrollTop = list.scrollHeight;
+  }
+
   function appendMsg(nick, text, system) {
     const list = el("msg-list");
+    if (!system) clearIrcStatus();
     const row = document.createElement("div");
     row.className = "msg" + (system ? " system" : "");
     if (system) {
@@ -345,13 +372,14 @@
       ircSocket = null;
     }
     el("msg-list").innerHTML = "";
+    ircStatusEl = null;
   }
 
   function startIrc(channelLogin) {
     stopIrc();
     const chan = String(channelLogin || "").toLowerCase();
     if (!chan) return;
-    appendMsg("", t.connecting, true);
+    appendSystemMsg(t.connecting);
     const nick = "justinfan" + String(Math.floor(80000 + Math.random() * 10000));
     const ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
     ircSocket = ws;
@@ -368,6 +396,14 @@
         if (line.startsWith("PING ")) {
           ws.send("PONG " + line.slice(5));
           return;
+        }
+        if (line.indexOf(" JOIN #") !== -1) {
+          const joinPart = line.slice(line.indexOf(" JOIN #") + 7);
+          const joinChan = joinPart.split(/\s/)[0].replace(/;.*$/, "").toLowerCase();
+          if (joinChan === chan) {
+            clearIrcStatus();
+            return;
+          }
         }
         const priv = line.indexOf(" PRIVMSG #");
         if (priv === -1) return;
@@ -393,7 +429,7 @@
       });
     };
     ws.onclose = () => {
-      appendMsg("", t.disconnected, true);
+      appendSystemMsg(t.disconnected);
       ircTimer = setTimeout(() => {
         if (useFallback && current && current.login === chan) startIrc(chan);
       }, 2500);
@@ -483,6 +519,7 @@
   el("btn-back").addEventListener("click", closeChat);
   el("btn-fallback").addEventListener("click", () => {
     useFallback = !useFallback;
+    setLang(lang);
     applyChatMode();
   });
 
