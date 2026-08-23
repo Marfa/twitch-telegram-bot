@@ -71,6 +71,7 @@ from i18n import (
     channel_dup_keyboard,
     delete_old_keyboard,
     delete_fail_notify_keyboard,
+    delivery_fail_notice_keyboard,
     delete_sibling_keyboard,
     dest_keyboard,
     dest_label,
@@ -1845,6 +1846,7 @@ async def _maybe_notify_delivery_failure(
                 chat_name=chat_label,
                 reason=str(exc),
             ),
+            reply_markup=delivery_fail_notice_keyboard(sub.id, lang),
         )
         _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
     except (BadRequest, Forbidden) as notify_exc:
@@ -7844,6 +7846,25 @@ async def on_delete_cart_restore_go(
     )
 
 
+async def on_delivery_fail_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    to_cart = _deleted_subscriptions_cart_enabled(db, user_id)
+    if not db.delete_subscription(sub_id, user_id, to_cart=to_cart):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    sub_num = _owner_sub_number(db, user_id, sub_id)
+    await query.edit_message_text(t("sub_deleted", lang, sub_id=sub_num))
+
+
 async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = query.from_user.id
@@ -11429,6 +11450,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_edit_type, pattern=r"^edit_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
+        CallbackQueryHandler(on_delivery_fail_delete, pattern=r"^delivery_fail_del:\d+$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
             pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|repeat)$",
@@ -11922,6 +11947,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             wake_stuck_on_menu_callback,
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
+                r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_clear$|delete_type:|"
                 r"delete_cart_open$|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|"

@@ -873,6 +873,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Reason: {reason}\n\n"
             "Make sure the bot is still in the chat and can send messages."
         ),
+        "delivery_fail_edit_btn": "✏️ Edit notification",
+        "delivery_fail_delete_btn": "🗑 Delete notification",
         "delete_fail_yes_note": "Notify on delete failure: yes",
         "delete_fail_no_note": "Notify on delete failure: no",
         "weekly_new_users": "New users: {count}\nPaid users (Stars): {paid}",
@@ -2302,6 +2304,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Причина: {reason}\n\n"
             "Убедитесь, что бот всё ещё в чате и может отправлять сообщения."
         ),
+        "delivery_fail_edit_btn": "✏️ Редактировать оповещение",
+        "delivery_fail_delete_btn": "🗑 Удалить оповещение",
         "delete_fail_yes_note": "Сообщать о проблемах удаления: да",
         "delete_fail_no_note": "Сообщать о проблемах удаления: нет",
         "weekly_new_users": "Новых пользователей: {count}\nПлатных (Stars): {paid}",
@@ -3513,6 +3517,25 @@ def delete_fail_notify_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("delete_fail_yes", lang), callback_data="delete_fail:1")],
             [InlineKeyboardButton(t("delete_fail_no", lang), callback_data="delete_fail:0")],
+        ]
+    )
+
+
+def delivery_fail_notice_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("delivery_fail_edit_btn", lang),
+                    callback_data=f"edit:{sub_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("delivery_fail_delete_btn", lang),
+                    callback_data=f"delivery_fail_del:{sub_id}",
+                )
+            ],
         ]
     )
 

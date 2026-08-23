@@ -1758,6 +1758,11 @@ def main() -> None:
     assert _delivery_fail_chat_label("-1001980871389", -1001980871389) == (
         "-1001980871389"
     )
+    from i18n import delivery_fail_notice_keyboard
+
+    kb = delivery_fail_notice_keyboard(42, "ru")
+    assert kb.inline_keyboard[0][0].callback_data == "edit:42"
+    assert kb.inline_keyboard[1][0].callback_data == "delivery_fail_del:42"
     # PTB 21.8+: subscription_expiration_date is datetime (same formula as premium_handlers)
     stars_exp = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
     until_sub = int(stars_exp.timestamp()) if stars_exp is not None else 0
