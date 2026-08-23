@@ -867,6 +867,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_fail_notice": (
             "Could not delete the previous notification:\n{link}"
         ),
+        "delivery_fail_notice": (
+            "Could not send notification for subscription #{sub_id} "
+            "({twitch_username}) to chat {chat_name}.\n\n"
+            "Reason: {reason}\n\n"
+            "Make sure the bot is still in the chat and can send messages."
+        ),
         "delete_fail_yes_note": "Notify on delete failure: yes",
         "delete_fail_no_note": "Notify on delete failure: no",
         "weekly_new_users": "New users: {count}\nPaid users (Stars): {paid}",
@@ -900,6 +906,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "bot_no_group": "The bot cannot see this group. Add it to the group.",
         "dest_not_admin": (
             "You must be an admin of that channel/group to bind notifications there."
+        ),
+        "bot_cannot_verify_admin": (
+            "The bot cannot verify your admin rights in this chat. "
+            "Add the bot as an administrator (no extra rights required), then try again."
         ),
         "sub_limit": (
             "Subscription limit reached ({limit}). Delete an existing one first."
@@ -2286,6 +2296,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delete_fail_notice": (
             "Не удалось удалить предыдущее оповещение:\n{link}"
         ),
+        "delivery_fail_notice": (
+            "Не удалось отправить оповещение по подписке #{sub_id} "
+            "({twitch_username}) в чат {chat_name}.\n\n"
+            "Причина: {reason}\n\n"
+            "Убедитесь, что бот всё ещё в чате и может отправлять сообщения."
+        ),
         "delete_fail_yes_note": "Сообщать о проблемах удаления: да",
         "delete_fail_no_note": "Сообщать о проблемах удаления: нет",
         "weekly_new_users": "Новых пользователей: {count}\nПлатных (Stars): {paid}",
@@ -2321,6 +2337,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "dest_not_admin": (
             "Чтобы привязать уведомления, вы должны быть администратором "
             "этого канала или группы."
+        ),
+        "bot_cannot_verify_admin": (
+            "Бот не может проверить ваши права администратора в этом чате. "
+            "Назначьте бота администратором (дополнительные права не нужны) и попробуйте снова."
         ),
         "sub_limit": (
             "Достигнут лимит подписок ({limit}). Сначала удалите одну из существующих."

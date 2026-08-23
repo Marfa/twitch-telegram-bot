@@ -1800,6 +1800,61 @@ def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMar
     )
 
 
+# ponytail: in-memory dedupe; resets on restart (acceptable for owner DM notices).
+_DELIVERY_FAIL_NOTICE_COOLDOWN = timedelta(hours=24)
+_delivery_fail_notified: dict[int, datetime] = {}
+
+
+def _delivery_fail_notice_due(sub_id: int, *, now: datetime | None = None) -> bool:
+    last = _delivery_fail_notified.get(sub_id)
+    if last is None:
+        return True
+    at = now or datetime.now(timezone.utc)
+    return at - last >= _DELIVERY_FAIL_NOTICE_COOLDOWN
+
+
+def _delivery_fail_chat_label(display_name: str, chat_id: int) -> str:
+    cid = str(chat_id)
+    if display_name == cid:
+        return cid
+    return f"{display_name} ({chat_id})"
+
+
+async def _maybe_notify_delivery_failure(
+    bot,
+    db: Database,
+    sub: Subscription,
+    exc: BaseException,
+) -> None:
+    if sub.dest_type == "dm":
+        return
+    if not _delivery_fail_notice_due(sub.id):
+        return
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    chat_label = _delivery_fail_chat_label(
+        await _resolve_chat_display_name(bot, sub), sub.chat_id
+    )
+    try:
+        await bot.send_message(
+            sub.owner_id,
+            t(
+                "delivery_fail_notice",
+                lang,
+                sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
+                twitch_username=sub.twitch_username,
+                chat_name=chat_label,
+                reason=str(exc),
+            ),
+        )
+        _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
+    except (BadRequest, Forbidden) as notify_exc:
+        logger.warning(
+            "Cannot notify owner %s about delivery failure: %s",
+            sub.owner_id,
+            notify_exc,
+        )
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -1893,9 +1948,11 @@ async def _send_notification(
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
+            await _maybe_notify_delivery_failure(bot, db, sub, retry_exc)
             return False
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
+        await _maybe_notify_delivery_failure(bot, db, sub, exc)
         return False
 
     if msg and sub.delete_previous and sub.dest_type != "dm":
@@ -1943,10 +2000,23 @@ async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> boo
         return False
 
 
-async def _user_can_manage_chat(bot, chat_id: int, user_id: int) -> bool:
+def _membership_check_blocked(exc: BadRequest | Forbidden) -> bool:
+    msg = str(exc).lower()
+    return "member list is inaccessible" in msg or "chat_admin_required" in msg
+
+
+async def _user_can_manage_chat(bot, chat_id: int, user_id: int) -> bool | None:
     try:
         member = await bot.get_chat_member(chat_id, user_id)
     except (BadRequest, Forbidden) as exc:
+        if _membership_check_blocked(exc):
+            logger.warning(
+                "Cannot verify membership of %s in %s (bot needs admin rights): %s",
+                user_id,
+                chat_id,
+                exc,
+            )
+            return None
         logger.warning(
             "Cannot verify membership of %s in %s: %s", user_id, chat_id, exc
         )
@@ -3349,9 +3419,13 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await message.reply_text(t("bot_no_group", lang))
             return DEST_CHAT
 
-    if not await _user_can_manage_chat(
+    can_manage = await _user_can_manage_chat(
         context.bot, chat_id, update.effective_user.id
-    ):
+    )
+    if can_manage is None:
+        await message.reply_text(t("bot_cannot_verify_admin", lang))
+        return DEST_CHAT
+    if not can_manage:
         await message.reply_text(t("dest_not_admin", lang))
         return DEST_CHAT
 

@@ -1669,7 +1669,14 @@ def main() -> None:
         User,
     )
 
-    from bot import _extract_forward_chat, _parse_dest_input
+    from bot import (
+        _delivery_fail_chat_label,
+        _delivery_fail_notice_due,
+        _extract_forward_chat,
+        _membership_check_blocked,
+        _parse_dest_input,
+        _user_can_manage_chat,
+    )
 
     _now = datetime.now(timezone.utc)
     _pm = Chat(id=7, type="private")
@@ -1718,6 +1725,39 @@ def main() -> None:
     assert _cid is None and _tid is None and _err == tr("fwd_from_dm", "ru")
     _cid, _tid, _err = asyncio.run(_parse_dest_input(None, _fwd_channel, "channel", "ru"))
     assert (_cid, _tid, _err) == (-100123, None, None)
+    assert _membership_check_blocked(BadRequest("Member list is inaccessible"))
+    assert not _membership_check_blocked(BadRequest("User not found"))
+
+    class _BotMemberOk:
+        async def get_chat_member(self, chat_id, user_id):
+            from telegram.constants import ChatMemberStatus
+
+            class _Member:
+                status = ChatMemberStatus.ADMINISTRATOR
+
+            return _Member()
+
+    class _BotMemberBlocked:
+        async def get_chat_member(self, chat_id, user_id):
+            raise BadRequest("Member list is inaccessible")
+
+    assert asyncio.run(_user_can_manage_chat(_BotMemberOk(), -1001, 42)) is True
+    assert asyncio.run(_user_can_manage_chat(_BotMemberBlocked(), -1001, 42)) is None
+    _now = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
+    assert _delivery_fail_notice_due(99, now=_now)
+    from bot import _delivery_fail_notified
+
+    _delivery_fail_notified[99] = _now - timedelta(hours=1)
+    assert not _delivery_fail_notice_due(99, now=_now)
+    _delivery_fail_notified[99] = _now - timedelta(hours=25)
+    assert _delivery_fail_notice_due(99, now=_now)
+    _delivery_fail_notified.pop(99, None)
+    assert _delivery_fail_chat_label("My Group", -1001980871389) == (
+        "My Group (-1001980871389)"
+    )
+    assert _delivery_fail_chat_label("-1001980871389", -1001980871389) == (
+        "-1001980871389"
+    )
     # PTB 21.8+: subscription_expiration_date is datetime (same formula as premium_handlers)
     stars_exp = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
     until_sub = int(stars_exp.timestamp()) if stars_exp is not None else 0

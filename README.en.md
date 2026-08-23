@@ -109,7 +109,7 @@ Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscripti
 - group ID (`-100…`)
 - forwarded message from the group (“Forwarded from: …”)
 
-Bot permissions in a group: **send messages** (admin is not required). Also needs permission to **delete its own messages**.
+Bot permissions in a group: **send messages** (admin is not required for alerts). Also needs permission to **delete its own messages**. During setup the bot must be an **administrator** so Telegram allows checking that you are an admin too; after binding, admin is optional if send/delete rights remain.
 
 After setup the bot sends **“✅ Setup complete!”** to DM and a test message to the chosen chat.
 
