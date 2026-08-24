@@ -11345,6 +11345,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("other"), open_other_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("chat"), open_stream_chat),
         group=0,
     )
