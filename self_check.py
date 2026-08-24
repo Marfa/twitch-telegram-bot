@@ -2730,6 +2730,34 @@ def main() -> None:
         alert_url = alert_chat_button_url(login="SomeStreamer", lang="ru", user_id=42)
         assert "login=somestreamer" in alert_url
         assert "open=1" in alert_url and "t=" in alert_url
+        from types import SimpleNamespace
+
+        from bot import _alert_chat_button_markup
+
+        dm_markup = _alert_chat_button_markup(
+            SimpleNamespace(
+                attach_chat_button=True,
+                dest_type="dm",
+                twitch_username="SomeStreamer",
+                owner_id=42,
+            ),
+            "ru",
+        )
+        assert dm_markup is not None
+        dm_btn = dm_markup.inline_keyboard[0][0]
+        assert dm_btn.web_app is not None and dm_btn.url is None
+        group_markup = _alert_chat_button_markup(
+            SimpleNamespace(
+                attach_chat_button=True,
+                dest_type="group",
+                twitch_username="SomeStreamer",
+                owner_id=42,
+            ),
+            "ru",
+        )
+        assert group_markup is not None
+        group_btn = group_markup.inline_keyboard[0][0]
+        assert group_btn.url and group_btn.web_app is None
         assert TwitchClient._about_link_key("https://VK.com/stopgameru/") == "https://vk.com/stopgameru"
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")

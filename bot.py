@@ -1792,16 +1792,16 @@ def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMar
     )
     if not url:
         return None
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("alert_chat_button", lang),
-                    web_app=WebAppInfo(url=url),
-                )
-            ]
-        ]
-    )
+    # Telegram accepts web_app inline buttons only in private chats with the bot.
+    # Groups/channels get a URL button (same Mini App page) — otherwise Button_type_invalid.
+    if sub.dest_type == "dm":
+        button = InlineKeyboardButton(
+            t("alert_chat_button", lang),
+            web_app=WebAppInfo(url=url),
+        )
+    else:
+        button = InlineKeyboardButton(t("alert_chat_button", lang), url=url)
+    return InlineKeyboardMarkup([[button]])
 
 
 # ponytail: in-memory dedupe; resets on restart (acceptable for owner DM notices).
