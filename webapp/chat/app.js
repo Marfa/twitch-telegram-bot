@@ -225,9 +225,18 @@
     updateQuota();
   }
 
+  function channelUnlimited(login) {
+    if (!session) return false;
+    if (session.unlimited) return true;
+    const promo = session.promo_channels || [];
+    const key = String(login || "").toLowerCase();
+    return promo.some((c) => String(c || "").toLowerCase() === key);
+  }
+
   function updateQuota() {
     const box = el("send-quota");
-    if (!session || session.unlimited) {
+    const login = current && current.login;
+    if (!session || channelUnlimited(login)) {
       box.textContent = "";
       box.classList.add("hidden");
       return;
@@ -395,6 +404,7 @@
     el("btn-info").classList.remove("hidden");
     setLang(lang);
     applyChatMode();
+    updateQuota();
   }
 
   function closeChat() {
@@ -661,7 +671,7 @@
       appendMsg("", t.needAuth, true);
       return;
     }
-    if (!session.unlimited && session.remaining === 0) {
+    if (!session.unlimited && !channelUnlimited(current.login) && session.remaining === 0) {
       appendMsg("", t.limitHit, true);
       return;
     }
@@ -691,7 +701,7 @@
     }
     session.remaining = body.remaining;
     session.sent_today = body.sent_today;
-    session.unlimited = !!body.unlimited;
+    if (body.unlimited) session.unlimited = true;
     updateQuota();
     appendMsg(session.twitch_login || "you", text, false);
   });

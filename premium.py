@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from config import (
     FREE_CHAT_ID,
+    PREMIUM_CHANNEL_STARS,
     PREMIUM_FREE_ACTIVE_LIMIT,
     PREMIUM_STARS_AMOUNT,
     PREMIUM_STARS_FEATURE,
@@ -104,6 +105,36 @@ def chat_daily_send_limit(db: "Database", user_id: int) -> int | None:
     if has_feature_sync(db, user_id, "stream_chat"):
         return None
     return CHAT_FREE_DAILY_SEND_LIMIT
+
+
+def is_promo_channel(login: str | None, db: "Database | None" = None) -> bool:
+    """Config PREMIUM_TWITCH_LOGIN and paid streamer channels are always Premium."""
+    if not login:
+        return False
+    key = str(login).strip().lower()
+    if key == twitch_channel_login():
+        return True
+    if db is None:
+        return False
+    return db.is_premium_channel_login(key)
+
+
+def list_promo_channel_logins(db: "Database") -> list[str]:
+    """Config channel + paid premium channels (unique, lowercased)."""
+    out = [twitch_channel_login()]
+    for login in db.list_premium_channel_logins():
+        if login and login not in out:
+            out.append(login)
+    return out
+
+
+def chat_send_unlimited(
+    db: "Database", user_id: int, *, broadcaster_login: str | None = None
+) -> bool:
+    """True if this send should not consume the free daily chat quota."""
+    if is_promo_channel(broadcaster_login, db):
+        return True
+    return chat_daily_send_limit(db, user_id) is None
 
 
 @dataclass(frozen=True)
@@ -251,11 +282,22 @@ def purchasable_feature_ids() -> tuple[str, ...]:
     )
 
 
-def invoice_payload(user_id: int, kind: str = "month", features: list[str] | None = None) -> str:
+def invoice_payload(
+    user_id: int,
+    kind: str = "month",
+    features: list[str] | None = None,
+    *,
+    twitch_user_id: str = "",
+    twitch_login: str = "",
+) -> str:
     if kind == "feat":
         allowed = set(purchasable_feature_ids())
         ids = ",".join(f for f in (features or []) if f in allowed)
         return f"{PREMIUM_INVOICE_PREFIX}feat:{user_id}:{ids}"
+    if kind == "channel":
+        tid = str(twitch_user_id or "").strip()
+        login = str(twitch_login or "").strip().lower()
+        return f"{PREMIUM_INVOICE_PREFIX}channel:{user_id}:{tid}:{login}"
     if kind in ("month", "year", "life"):
         return f"{PREMIUM_INVOICE_PREFIX}{kind}:{user_id}"
     # legacy: premium:{uid}
@@ -265,8 +307,10 @@ def invoice_payload(user_id: int, kind: str = "month", features: list[str] | Non
 @dataclass(frozen=True)
 class ParsedInvoice:
     user_id: int
-    kind: str  # month | year | life | feat | legacy
+    kind: str  # month | year | life | feat | channel | legacy
     features: tuple[str, ...] = ()
+    twitch_user_id: str = ""
+    twitch_login: str = ""
 
 
 def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
@@ -275,7 +319,7 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
     raw = payload[len(PREMIUM_INVOICE_PREFIX) :]
     if raw.isdigit():
         return ParsedInvoice(user_id=int(raw), kind="legacy")
-    parts = raw.split(":", 2)
+    parts = raw.split(":", 3)
     if len(parts) < 2:
         return None
     kind, uid_s = parts[0], parts[1]
@@ -290,6 +334,16 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
         if not feats:
             return None
         return ParsedInvoice(user_id=uid, kind="feat", features=feats)
+    if kind == "channel":
+        if len(parts) < 4:
+            return None
+        tid = str(parts[2] or "").strip()
+        login = str(parts[3] or "").strip().lower()
+        if not tid or not login:
+            return None
+        return ParsedInvoice(
+            user_id=uid, kind="channel", twitch_user_id=tid, twitch_login=login
+        )
     return None
 
 
@@ -324,8 +378,19 @@ async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
     }
 
 
-def has_feature_sync(db: Database, user_id: int, feature_id: str) -> bool:
-    """DB-only feature check (no free-chat / demo). Call ensure_trial_expired first."""
+def has_feature_sync(
+    db: Database,
+    user_id: int,
+    feature_id: str,
+    *,
+    channel: str | None = None,
+) -> bool:
+    """DB-only feature check (no free-chat / demo). Call ensure_trial_expired first.
+
+    Promo channel (marfapr) unlocks every feature for that channel's alerts/chat.
+    """
+    if is_promo_channel(channel, db):
+        return True
     st = get_status(db, user_id)
     if st.has_full_plan:
         return True
@@ -364,12 +429,19 @@ def is_advanced_mode_enabled(
     return db.owner_has_advanced_subscription_options(user_id)
 
 
-async def advanced_mode_on(bot: Bot, db: Database, user_id: int) -> bool:
-    """Like is_advanced_mode_enabled, but includes free-chat Premium via has_feature."""
+async def advanced_mode_on(
+    bot: Bot, db: Database, user_id: int, *, channel: str | None = None
+) -> bool:
+    """Like is_advanced_mode_enabled, but includes free-chat Premium via has_feature.
+
+    Promo channel (marfapr) always gets the full advanced alert wizard.
+    """
     from demo_mode import is_active
 
     if is_active(user_id):
         return False
+    if is_promo_channel(channel, db):
+        return True
     entitled = await has_feature(bot, db, user_id, "advanced_mode")
     return is_advanced_mode_enabled(db, user_id, entitled=entitled)
 
@@ -409,13 +481,20 @@ def migrate_advanced_mode_defaults(
     return examined, set_on, set_off
 
 
-async def has_feature(bot: Bot, db: Database, user_id: int, feature_id: str) -> bool:
+async def has_feature(
+    bot: Bot,
+    db: Database,
+    user_id: int,
+    feature_id: str,
+    *,
+    channel: str | None = None,
+) -> bool:
     from demo_mode import is_active
 
     ensure_trial_expired(db, user_id)
     if is_active(user_id):
         return False
-    if has_feature_sync(db, user_id, feature_id):
+    if has_feature_sync(db, user_id, feature_id, channel=channel):
         return True
     return await is_free_chat_member(bot, user_id)
 
@@ -477,6 +556,11 @@ def stars_feature_price(user_id: int | None = None) -> int:
     return o if o is not None else PREMIUM_STARS_FEATURE
 
 
+def stars_channel_price(user_id: int | None = None) -> int:
+    o = _stars_override(user_id)
+    return o if o is not None else PREMIUM_CHANNEL_STARS
+
+
 def stars_period() -> int:
     return PREMIUM_SUBSCRIPTION_PERIOD
 
@@ -499,6 +583,19 @@ class ActiveSubscriptionSlots:
     remaining: int
 
 
+def _enabled_count_toward_limit(
+    db: Database, user_id: int, *, demo: bool
+) -> int:
+    """Enabled alerts that consume the free active cap (promo channel excluded)."""
+    return sum(
+        1
+        for s in db.get_subscriptions_by_owner(user_id)
+        if s.enabled
+        and bool(s.is_demo) is bool(demo)
+        and not is_promo_channel(s.twitch_username, db)
+    )
+
+
 def active_subscription_slots(
     db: Database, user_id: int, *, demo: bool | None = None
 ) -> ActiveSubscriptionSlots:
@@ -506,6 +603,7 @@ def active_subscription_slots(
 
     Use `.remaining` for bulk caps (enable-all, restore, sync import).
     Use `may_enable_subscription()` for a yes/no before enabling one row.
+    Promo channel (marfapr) never counts toward the free active cap.
     """
     from demo_mode import is_active
 
@@ -517,23 +615,36 @@ def active_subscription_slots(
     remaining = max(
         0,
         PREMIUM_FREE_ACTIVE_LIMIT
-        - db.count_enabled_subscriptions(user_id, demo=demo),
+        - _enabled_count_toward_limit(db, user_id, demo=demo),
     )
     return ActiveSubscriptionSlots(unlimited=False, remaining=remaining)
 
 
 def may_enable_subscription(
-    db: Database, user_id: int, *, demo: bool | None = None
+    db: Database,
+    user_id: int,
+    *,
+    demo: bool | None = None,
+    twitch_username: str | None = None,
 ) -> bool:
+    if is_promo_channel(twitch_username, db):
+        return True
     slots = active_subscription_slots(db, user_id, demo=demo)
     return slots.unlimited or slots.remaining > 0
 
 
 async def may_enable_subscription_async(
-    bot: Bot, db: Database, user_id: int, *, demo: bool | None = None
+    bot: Bot,
+    db: Database,
+    user_id: int,
+    *,
+    demo: bool | None = None,
+    twitch_username: str | None = None,
 ) -> bool:
     from demo_mode import is_active
 
+    if is_promo_channel(twitch_username, db):
+        return True
     if demo is None:
         demo = is_active(user_id)
     if not demo and await has_feature(bot, db, user_id, "extra_alerts"):
@@ -541,12 +652,22 @@ async def may_enable_subscription_async(
     return may_enable_subscription(db, user_id, demo=demo)
 
 
-def can_enable_more(db: Database, user_id: int) -> bool:
-    return may_enable_subscription(db, user_id)
+def can_enable_more(
+    db: Database, user_id: int, *, twitch_username: str | None = None
+) -> bool:
+    return may_enable_subscription(db, user_id, twitch_username=twitch_username)
 
 
-async def can_enable_more_async(bot: Bot, db: Database, user_id: int) -> bool:
-    return await may_enable_subscription_async(bot, db, user_id)
+async def can_enable_more_async(
+    bot: Bot,
+    db: Database,
+    user_id: int,
+    *,
+    twitch_username: str | None = None,
+) -> bool:
+    return await may_enable_subscription_async(
+        bot, db, user_id, twitch_username=twitch_username
+    )
 
 
 def ensure_trial_expired(db: Database, user_id: int) -> bool:
@@ -646,6 +767,32 @@ def apply_features_payment(
         stars_paid=stars_paid
         if stars_paid is not None
         else stars_feature_price(user_id) * max(1, len(ids)),
+    )
+
+
+def apply_premium_channel_payment(
+    db: Database,
+    user_id: int,
+    *,
+    twitch_user_id: str,
+    twitch_login: str,
+    display_name: str,
+    charge_id: str,
+    stars_paid: int | None = None,
+) -> None:
+    """One-time Stars purchase: channel gets promo (free-tier Premium) status."""
+    db.upsert_premium_channel(
+        twitch_user_id=str(twitch_user_id),
+        twitch_login=str(twitch_login).strip().lower(),
+        display_name=str(display_name or twitch_login),
+        owner_telegram_id=int(user_id),
+        charge_id=charge_id,
+    )
+    credit_referral_commission(
+        db,
+        invitee_id=user_id,
+        charge_id=charge_id,
+        stars_paid=stars_paid if stars_paid is not None else stars_channel_price(user_id),
     )
 
 

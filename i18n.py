@@ -50,6 +50,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium": "⭐ Premium",
         "btn_premium_pay": "Pay with Stars",
         "btn_premium_trial": "Trial period",
+        "btn_premium_channel": "Premium channel (for streamers)",
+        "btn_premium_channel_confirm": "Confirm",
+        "btn_premium_channel_pay": "Pay {stars} Stars",
         "btn_welcome_demo_edit": "Go to alert",
         "btn_welcome_demo_delete": "Delete subscription",
         "btn_premium_trial_confirm": "Activate 7-day trial",
@@ -151,7 +154,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_deleted": "Deleted filters: {count}",
         "watch_suggest_header": "Here's what is live now:",
         "watch_suggest_item": (
-            "{n}. <b>{display}</b> (@{login})\n"
+            "{n}. <b>{display}</b>{premium_badge} (@{login})\n"
             "{title}\n"
             "🎮 {game} · 👁 {viewers}\n"
             "https://twitch.tv/{login}"
@@ -283,16 +286,18 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• More than {free_limit} active alerts (inactive unlimited)\n"
             "• Alert types beyond live start (category / upcoming / stream end)\n"
             "• Twitch follow auto-sync\n"
-            "• Ignore keywords (per alert + global list)\n"
-            "• Delayed send\n"
-            "• Repeat notification mute\n"
-            "• Delete previous bot messages (+ delete-fail notify)\n"
+            "• Advanced mode (ignore keywords, delayed send, repeat mute, "
+            "delete previous bot messages)\n"
             "• Publish schedule to Twitch\n"
-            "• Alert history for 60 days (7 days on free)\n\n"
-            "• Restore deleted subscriptions from cart for 30 days (10 on free)\n\n"
+            "• Alert history for 60 days (7 days on free)\n"
+            "• Restore deleted subscriptions from cart for 30 days (10 on free)\n"
+            "• Unlimited Twitch stream chat in the Mini App\n"
+            "• Premium channel for streamers — free bot interactions for users, "
+            "always in What to watch when matching, recommended to new users\n\n"
             "How to get:\n"
             "• Pay for a subscription (buttons below), or\n"
-            "• Active Twitch subscription to https://www.twitch.tv/{channel}\n\n"
+            "• Active Twitch subscription to https://www.twitch.tv/{channel}, or\n"
+            "• Streamers: one-time Premium channel purchase\n\n"
             "{status}"
         ),
         "premium_status_permanent": "Status: lifetime Premium.",
@@ -437,6 +442,31 @@ _STRINGS: dict[str, dict[str, str]] = {
             "without any setup."
         ),
         "welcome_demo_deleted": "Demo subscription removed.",
+        "premium_channel_intro": (
+            "If you own a Twitch channel, you can make any interactions with it "
+            "free for bot users.\n\n"
+            "Your channel will also always appear in What to watch search results "
+            "when it matches the query. And it will be recommended to new bot users.\n\n"
+            "Confirm channel ownership with the button below. "
+            "Cost: {stars} Stars (one-time)."
+        ),
+        "premium_channel_oauth": (
+            "Authorize on Twitch to confirm you own the channel."
+        ),
+        "premium_channel_oauth_button": "Authorize on Twitch",
+        "premium_channel_confirm_pay": (
+            "You confirmed ownership of {channel}. Pay for Premium channel?"
+        ),
+        "premium_channel_pay_title": "Premium channel",
+        "premium_channel_pay_description": "One-time Premium channel for {channel}",
+        "premium_channel_pay_done": (
+            "Premium channel activated for {channel}. "
+            "Bot users get Premium treatment for this channel."
+        ),
+        "premium_channel_already": "This channel is already a Premium channel.",
+        "premium_channel_badge_title": "Premium channel",
+        "premium_channel_badge": "⭐",
+        "premium_channel_failed": "Could not verify the Twitch channel. Try again.",
         "new_sub_prompt": "Enter a Twitch channel: link, mobile link, or username.",
         "alert_type_prompt": (
             "Here you can set up different Twitch stream alerts. "
@@ -698,7 +728,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "advanced_mode_activate": "Activate mode",
         "advanced_mode_premium_only": (
-            "Advanced mode is available to Premium users only."
+            "Advanced mode activation is available to Premium users only. "
+            "The mode is free for Premium channels."
         ),
         "beta_mode_menu": (
             "🧪 <b>Beta mode</b>\n\n"
@@ -1380,6 +1411,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium": "⭐ Премиум",
         "btn_premium_pay": "Оплатить подписку",
         "btn_premium_trial": "Пробный период",
+        "btn_premium_channel": "Премиум канал (для стримеров)",
+        "btn_premium_channel_confirm": "Подтвердить",
+        "btn_premium_channel_pay": "Оплатить {stars} ⭐",
         "btn_welcome_demo_edit": "Перейти к оповещению",
         "btn_welcome_demo_delete": "Удалить подписку",
         "btn_premium_trial_confirm": "Активировать триал на 7 дней",
@@ -1481,7 +1515,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_deleted": "Удалено фильтров: {count}",
         "watch_suggest_header": "Сейчас в эфире:",
         "watch_suggest_item": (
-            "{n}. <b>{display}</b> (@{login})\n"
+            "{n}. <b>{display}</b>{premium_badge} (@{login})\n"
             "{title}\n"
             "🎮 {game} · 👁 {viewers}\n"
             "https://twitch.tv/{login}"
@@ -1614,17 +1648,20 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• Активных оповещений больше {free_limit} (неактивные без лимита)\n"
             "• Типы кроме старта стрима (категория / скоро / конец)\n"
             "• Автосинхронизация фолловов с Twitch\n"
-            "• Игнор ключевых слов (на алерт + глобальный список)\n"
-            "• Отложенная отправка\n"
-            "• Заглушка повторных уведомлений\n"
-            "• Удаление предыдущих сообщений бота (+ уведомление об ошибках)\n"
+            "• Продвинутый режим (игнор ключевых слов, отложенная отправка, "
+            "заглушка повторов, удаление предыдущих сообщений)\n"
             "• Публикация расписания на Twitch\n"
-            "• История оповещений за 60 дней (на бесплатном — 7 дней)\n\n"
+            "• История оповещений за 60 дней (на бесплатном — 7 дней)\n"
             "• Корзина удалённых подписок: восстановление на 30 дней "
-            "(на бесплатном — 10)\n\n"
+            "(на бесплатном — 10)\n"
+            "• Безлимитный чат стримов Twitch в мини-приложении\n"
+            "• Премиум-канал для стримеров — бесплатные взаимодействия для "
+            "пользователей бота, всегда в «Что посмотреть» при совпадении, "
+            "рекомендация новым пользователям\n\n"
             "Как получить:\n"
             "• Оплата подписки (кнопки ниже), или\n"
-            "• Активная подписка Twitch на https://www.twitch.tv/{channel}\n\n"
+            "• Активная подписка Twitch на https://www.twitch.tv/{channel}, или\n"
+            "• Стримеры: разовая покупка Премиум-канала\n\n"
             "{status}"
         ),
         "premium_status_permanent": "Статус: пожизненный премиум.",
@@ -1772,6 +1809,32 @@ _STRINGS: dict[str, dict[str, str]] = {
             "чтобы вы могли без настройки увидеть, как работает бот."
         ),
         "welcome_demo_deleted": "Демо подписка удалена.",
+        "premium_channel_intro": (
+            "Если вы владелец Twitch-канала, вы можете сделать любые взаимодействия "
+            "с ним для пользователей бота бесплатными.\n\n"
+            "Так же ваш канал всегда будет появляться в поисковой выдаче, "
+            "если он будет соответствовать запросу. И рекомендоваться новым "
+            "пользователям бота.\n\n"
+            "Подтвердите владение каналом по кнопке ниже. "
+            "Стоимость {stars} звёзд (разово)."
+        ),
+        "premium_channel_oauth": (
+            "Авторизуйтесь на Twitch, чтобы подтвердить владение каналом."
+        ),
+        "premium_channel_oauth_button": "Авторизоваться на Twitch",
+        "premium_channel_confirm_pay": (
+            "Вы подтвердили владение каналом {channel}. Оплатить премиум?"
+        ),
+        "premium_channel_pay_title": "Премиум-канал",
+        "premium_channel_pay_description": "Разовый Премиум-канал для {channel}",
+        "premium_channel_pay_done": (
+            "Премиум-канал активирован для {channel}. "
+            "Пользователи бота получают премиум-условия для этого канала."
+        ),
+        "premium_channel_already": "Этот канал уже является Премиум-каналом.",
+        "premium_channel_badge_title": "Премиум-канал",
+        "premium_channel_badge": "⭐",
+        "premium_channel_failed": "Не удалось подтвердить канал Twitch. Попробуйте снова.",
         "new_sub_prompt": "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
         "alert_type_prompt": (
             "Здесь можно настроить различные оповещения о стримах на Twitch. "
@@ -1941,15 +2004,17 @@ _STRINGS: dict[str, dict[str, str]] = {
             "<li>типы оповещений кроме старта стрима "
             "(категория / скоро / конец);</li>"
             "<li>автосинхронизация фолловов с Twitch;</li>"
-            "<li>игнор ключевых слов (на алерт и глобальный список);</li>"
-            "<li>отложенная отправка;</li>"
-            "<li>заглушка повторных уведомлений;</li>"
-            "<li>удаление предыдущих сообщений бота;</li>"
+            "<li>продвинутый режим (игнор ключевых слов, отложенная отправка, "
+            "заглушка повторов, удаление предыдущих сообщений);</li>"
             "<li>публикация расписания на Twitch;</li>"
             "<li>история оповещений за 60 дней "
-            "(на бесплатном плане — 7 дней).</li>"
+            "(на бесплатном плане — 7 дней);</li>"
             "{extra_features}"
             "</ul>"
+            "<p>Отдельно для владельцев каналов: разовый продукт "
+            "«Премиум-канал» — бесплатные взаимодействия с каналом для "
+            "пользователей Бота, показ в поиске «Что посмотреть» при "
+            "совпадении и рекомендация новым пользователям.</p>"
             "<p>Состав функций может уточняться в интерфейсе Бота. "
             "Бесплатный пробный период — {trial_days} дней "
             "(один раз на аккаунт Telegram), если он доступен.</p>"
@@ -1975,7 +2040,9 @@ _STRINGS: dict[str, dict[str, str]] = {
             "{life_stars} Stars — {life_rub}&nbsp;₽;</li>"
             "<li>Одна выбранная функция на месяц: "
             "{feat_stars} Stars — {feat_rub}&nbsp;₽ "
-            "(можно оплатить несколько функций; сумма кратна числу выбранных).</li>"
+            "(можно оплатить несколько функций; сумма кратна числу выбранных);</li>"
+            "<li>Премиум-канал для стримеров (разово): "
+            "{channel_stars} Stars — {channel_rub}&nbsp;₽.</li>"
             "</ul>"
             "<p>Актуальные цены в Stars также отображаются на кнопках оплаты "
             "в разделе «Настройки → Премиум» Бота.</p>"
@@ -2144,7 +2211,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "advanced_mode_activate": "Активировать режим",
         "advanced_mode_premium_only": (
-            "Активация продвинутого режима доступна только Premium-пользователям."
+            "Активация продвинутого режима доступна только Premium-пользователям. "
+            "Режим активирован для Premium-каналов бесплатно."
         ),
         "beta_mode_menu": (
             "🧪 <b>Бета-режим</b>\n\n"
@@ -3066,6 +3134,13 @@ def premium_actions_keyboard(
         [
             InlineKeyboardButton(
                 btn("premium_marfapr", lang), callback_data="premium:marfapr"
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("premium_channel", lang), callback_data="premium:channel"
             )
         ]
     )

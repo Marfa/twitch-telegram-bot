@@ -23,6 +23,7 @@ Separate limits (do not confuse):
 | Twitch auto-sync access | Premium `twitch_sync` | who may configure/run follow sync |
 
 Bypass: `extra_alerts` feature or full Premium plan (`has_feature_sync` / `may_enable_subscription_async`).
+Promo channel (`PREMIUM_TWITCH_LOGIN` / marfapr and paid `premium_channels`): never counts toward the free active cap; `may_enable_subscription(..., twitch_username=…)` is always True for those logins (`is_promo_channel(login, db)`).
 
 ---
 

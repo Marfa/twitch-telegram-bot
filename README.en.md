@@ -34,7 +34,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | In **📦 Other**: weekly text wizard or **fix slots for a day** (🧪 beta); publish to Twitch is **Premium** (slot duration, clear old slots — full or selected day only) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | 7-day trial; Stars month/year/lifetime; à la carte (advanced mode, 60-day history; cart / stream chat — after those betas go public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`) |
+| Premium | 7-day trial; Stars month/year/lifetime; à la carte (advanced mode, 60-day history; cart / stream chat — after betas go public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
@@ -308,6 +308,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `PREMIUM_STARS_YEAR` | Yearly Stars one-shot (default 1000) |
 | `PREMIUM_STARS_LIFETIME` | Lifetime Premium Stars (default 2000) |
 | `PREMIUM_STARS_FEATURE` | Per-feature monthly Stars (default 20) |
+| `PREMIUM_CHANNEL_STARS` | One-time Premium channel for streamers, Stars (default 1500) |
 | `PREMIUM_TRIAL_DAYS` | Trial length in days (default 7) |
 | `PREMIUM_SUBSCRIPTION_PERIOD` | Stars subscription period, seconds (default 2592000 ≈ 30 days) |
 | `PREMIUM_TWITCH_LOGIN` | Twitch login for free Premium via sub (default `marfapr`) |

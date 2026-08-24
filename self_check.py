@@ -1697,9 +1697,18 @@ def main() -> None:
     assert feat_p is not None and feat_p.features == ("advanced_mode", "alert_history")
     # Legacy feature ids are stripped from new invoices → invalid empty feat payload.
     assert parse_invoice_payload(invoice_payload(3, "feat", ["delay", "repeat"])) is None
-    from config import FREE_CHAT_ID
+    ch_p = parse_invoice_payload(
+        invoice_payload(
+            9, "channel", twitch_user_id="42", twitch_login="StreamerX"
+        )
+    )
+    assert ch_p is not None and ch_p.kind == "channel"
+    assert ch_p.user_id == 9 and ch_p.twitch_user_id == "42"
+    assert ch_p.twitch_login == "streamerx"
+    from config import FREE_CHAT_ID, PREMIUM_CHANNEL_STARS
 
     assert FREE_CHAT_ID == -1002155969539
+    assert PREMIUM_CHANNEL_STARS == 1500
     from telegram.constants import ChatMemberStatus
 
     assert hasattr(ChatMemberStatus, "OWNER")
@@ -2014,6 +2023,40 @@ def main() -> None:
                 thread_id=None,
             )
         assert prem.can_enable_more(db, 249097744) is False
+        assert prem.is_promo_channel("marfapr") is True
+        assert prem.is_promo_channel("https://twitch.tv/Other") is False
+        assert prem.is_promo_channel("paidstreamer", db) is False
+        db.upsert_premium_channel(
+            twitch_user_id="pc1",
+            twitch_login="PaidStreamer",
+            display_name="Paid Streamer",
+            owner_telegram_id=1,
+            charge_id="ch_test",
+        )
+        assert prem.is_promo_channel("paidstreamer", db) is True
+        assert "paidstreamer" in prem.list_promo_channel_logins(db)
+        assert prem.can_enable_more(db, 249097744, twitch_username="paidstreamer") is True
+        assert prem.has_feature_sync(db, 249097744, "delay", channel="paidstreamer")
+        assert prem.can_enable_more(db, 249097744, twitch_username="marfapr") is True
+        assert prem.has_feature_sync(db, 249097744, "alert_types", channel="marfapr")
+        assert prem.has_feature_sync(db, 249097744, "delay", channel="MarfaPR")
+        assert not prem.has_feature_sync(db, 249097744, "delay", channel="other")
+        assert prem.chat_send_unlimited(db, 249097744, broadcaster_login="marfapr")
+        assert not prem.chat_send_unlimited(db, 249097744, broadcaster_login="other")
+        # Promo channel does not consume free active slots.
+        db.add_subscription(
+            owner_id=249097744,
+            twitch_username="marfapr",
+            twitch_user_id="promo1",
+            message_template="x",
+            dest_type="dm",
+            chat_id=249097744,
+            thread_id=None,
+            enabled=True,
+        )
+        assert prem.active_subscription_slots(db, 249097744).remaining == 0
+        assert prem.can_enable_more(db, 249097744) is False
+        assert prem.can_enable_more(db, 249097744, twitch_username="marfapr") is True
         kb2 = _premium_markup(
             db, 249097744, "ru", free_chat=True, force_free=False
         )
@@ -2054,7 +2097,11 @@ def main() -> None:
         assert "deleted_subscriptions_cart" not in toggle_ids
         db.upsert_user(2)
         assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
-    assert tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
+    _pt = tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
+    assert "Продвинутый режим" in _pt
+    assert "мини-приложении" in _pt
+    assert "Премиум-канал" in _pt
+    assert "рекомендация" in _pt
     assert tr("btn_premium", "en")
     assert tr("btn_premium_oferta", "ru") == "Оферта"
     assert "Докучаев" in tr(
@@ -2071,6 +2118,8 @@ def main() -> None:
         life_rub="4 000",
         feat_stars=20,
         feat_rub="40",
+        channel_stars=1500,
+        channel_rub="3 000",
         rub_per_star=2,
         extra_features="",
     )
@@ -2283,6 +2332,7 @@ def main() -> None:
         assert "упрощённом режиме" in tr("wizard_simple_mode_note", "ru")
         assert tr("btn_advanced_mode", "ru")
         assert "стоп-слова" in tr("advanced_mode_screen", "ru")
+        assert "Premium-каналов" in tr("advanced_mode_premium_only", "ru")
         db.upsert_user(77)
         assert db.get_advanced_mode_setting(77) is None
         assert not prem.is_advanced_mode_enabled(db, 77)
@@ -2707,7 +2757,7 @@ def main() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=8' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+    assert '/app/chat/app.js?v=9' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
     from unittest.mock import patch

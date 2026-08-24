@@ -605,7 +605,7 @@ class TwitchClient:
                 "client_id": TWITCH_CLIENT_ID,
                 "redirect_uri": redirect_uri,
                 "response_type": "code",
-                "scope": scopes or FOLLOWS_SCOPE,
+                "scope": FOLLOWS_SCOPE if scopes is None else scopes,
                 "state": state,
             }
         )

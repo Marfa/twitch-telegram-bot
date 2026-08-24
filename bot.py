@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 import logging
+import random
 import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
@@ -461,7 +462,7 @@ def import_followed_as_subscriptions(
         sub_enabled = False
         if enabled:
             sub_enabled = prem.may_enable_subscription(
-                db, owner_id, demo=is_demo
+                db, owner_id, demo=is_demo, twitch_username=login
             )
         sub_id = db.add_subscription(
             owner_id=owner_id,
@@ -889,10 +890,12 @@ async def _prompt_repeat_step(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.advanced_mode_on(context.bot, db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
         context.user_data["suppress_repeat_minutes"] = 0
         return await _go_after_repeat(update, context, lang)
-    if not await prem.has_feature(context.bot, db, user_id, "repeat"):
+    if not await prem.has_feature(
+        context.bot, db, user_id, "repeat", channel=_wizard_channel(context)
+    ):
         return await _show_premium_gate(
             update, context, feature="repeat", first_step=False
         )
@@ -1069,7 +1072,7 @@ async def _go_before_dest_step(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.advanced_mode_on(context.bot, db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
         context.user_data.setdefault("attach_chat_button", False)
         return await _prompt_dest_step(update, context, lang)
     return await _go_chat_button_prompt(update, context, lang)
@@ -1185,11 +1188,13 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
 async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.advanced_mode_on(context.bot, db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
         context.user_data["ignore_keywords"] = ""
         context.user_data["use_global_ignore"] = False
         return await _go_after_ignore_keywords(update, context, lang)
-    if not await prem.has_feature(context.bot, db, user_id, "ignore_keywords"):
+    if not await prem.has_feature(
+        context.bot, db, user_id, "ignore_keywords", channel=_wizard_channel(context)
+    ):
         return await _show_premium_gate(
             update, context, feature="ignore_keywords", first_step=False
         )
@@ -1225,10 +1230,12 @@ async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_
 async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.advanced_mode_on(context.bot, db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
         context.user_data["delay_minutes"] = 0
         return await _continue_after_delay(update, context, lang)
-    if not await prem.has_feature(context.bot, db, user_id, "delay"):
+    if not await prem.has_feature(
+        context.bot, db, user_id, "delay", channel=_wizard_channel(context)
+    ):
         return await _show_premium_gate(
             update, context, feature="delay", first_step=False
         )
@@ -1250,6 +1257,11 @@ async def _go_delay_minutes_prompt(update: Update, context: ContextTypes.DEFAULT
     )
     _set_wizard_back(context, DELAY_MINUTES)
     return DELAY_MINUTES
+
+
+def _wizard_channel(context: ContextTypes.DEFAULT_TYPE) -> str | None:
+    raw = context.user_data.get("twitch_username")
+    return str(raw) if raw else None
 
 
 async def _go_repeat_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
@@ -1406,7 +1418,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == DEST_TYPE:
         db: Database = context.application.bot_data["db"]
         if await prem.advanced_mode_on(
-            context.bot, db, update.effective_user.id
+            context.bot, db, update.effective_user.id, channel=_wizard_channel(context)
         ):
             return await _go_chat_button_prompt(update, context, lang)
         return await _wizard_back_before_dest(update, context, lang)
@@ -2040,51 +2052,59 @@ async def _prompt_language(update: Update) -> int:
     return LANG_SELECT
 
 
-async def _ensure_welcome_marfapr_subscription(
+async def _ensure_welcome_premium_channel_subscription(
     application: Application,
     bot,
     user_id: int,
     lang: str,
-) -> int | None:
+) -> tuple[int, str] | None:
+    """First-start demo: random Premium channel (config + paid)."""
     db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
-    login = prem.twitch_channel_login() or "marfapr"
-    for sub in _subs_for_owner(db, user_id):
-        if (
-            sub.twitch_username == login
-            and sub.notify_on_live
-            and not sub.notify_on_category_change
-            and not sub.notify_on_end
-        ):
-            return sub.id
-    user = await asyncio.to_thread(twitch.get_user, login)
-    if not user:
-        logger.warning("Welcome marfapr seed: Twitch user %s not found", login)
-        return None
-    uid = str(user["id"])
-    uname = str(user.get("login") or login).lower()
-    enabled = await prem.can_enable_more_async(bot, db, user_id)
-    sub_id = db.add_subscription(
-        owner_id=user_id,
-        twitch_username=uname,
-        twitch_user_id=uid,
-        message_template=t("import_default_template", lang),
-        dest_type="dm",
-        chat_id=user_id,
-        thread_id=None,
-        disable_link_preview=True,
-        enabled=enabled,
-        notify_on_live=True,
-        notify_on_end=False,
-        notify_on_category_change=False,
-        is_demo=False,
-    )
-    analytics.capture(
-        user_id,
-        "welcome_demo_subscription_created",
-        {"sub_id": sub_id, "enabled": enabled, "channel": uname},
-    )
-    return sub_id
+    candidates = prem.list_promo_channel_logins(db)
+    if not candidates:
+        candidates = [prem.twitch_channel_login() or "marfapr"]
+    random.shuffle(candidates)
+    for login in candidates:
+        for sub in _subs_for_owner(db, user_id):
+            if (
+                sub.twitch_username == login
+                and sub.notify_on_live
+                and not sub.notify_on_category_change
+                and not sub.notify_on_end
+            ):
+                return sub.id, login
+        user = await asyncio.to_thread(twitch.get_user, login)
+        if not user:
+            logger.warning("Welcome premium seed: Twitch user %s not found", login)
+            continue
+        uid = str(user["id"])
+        uname = str(user.get("login") or login).lower()
+        enabled = await prem.may_enable_subscription_async(
+            bot, db, user_id, twitch_username=uname
+        )
+        sub_id = db.add_subscription(
+            owner_id=user_id,
+            twitch_username=uname,
+            twitch_user_id=uid,
+            message_template=t("import_default_template", lang),
+            dest_type="dm",
+            chat_id=user_id,
+            thread_id=None,
+            disable_link_preview=True,
+            enabled=enabled,
+            notify_on_live=True,
+            notify_on_end=False,
+            notify_on_category_change=False,
+            is_demo=False,
+        )
+        analytics.capture(
+            user_id,
+            "welcome_demo_subscription_created",
+            {"sub_id": sub_id, "enabled": enabled, "channel": uname},
+        )
+        return sub_id, uname
+    return None
 
 
 async def _send_welcome_bundle(
@@ -2105,12 +2125,12 @@ async def _send_welcome_bundle(
     )
     if not first_start:
         return
-    sub_id = await _ensure_welcome_marfapr_subscription(
+    seeded = await _ensure_welcome_premium_channel_subscription(
         application, bot, user_id, lang
     )
-    if not sub_id:
+    if not seeded:
         return
-    channel = prem.twitch_channel_login() or "marfapr"
+    sub_id, channel = seeded
     await bot.send_message(
         chat_id,
         t("start_welcome_demo", lang, channel=channel),
@@ -2229,10 +2249,7 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=_menu(lang, user_id),
         )
         return ConversationHandler.END
-    if not await prem.can_enable_more_async(context.bot, db, user_id):
-        return await _show_premium_gate(
-            update, context, feature="active_limit", first_step=True
-        )
+    # Active-limit gate is at finish (promo channel marfapr is always enableable).
     return await _go_alert_type_prompt(update, context, lang)
 
 
@@ -2243,14 +2260,7 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     kind = query.data.split(":", 1)[1]
     if kind not in ("live", "category", "upcoming", "end"):
         return ALERT_TYPE
-    db: Database = context.application.bot_data["db"]
-    if kind != "live" and not await prem.has_feature(
-        context.bot, db, query.from_user.id, "alert_types"
-    ):
-        context.user_data["alert_type"] = kind
-        return await _show_premium_gate(
-            update, context, feature="alert_type", first_step=True
-        )
+    # Non-live types: Premium gate after channel is known (promo channel unlocks).
     context.user_data["alert_type"] = kind
     context.user_data["notify_on_end"] = kind == "end"
     context.user_data["notify_on_category_change"] = kind == "category"
@@ -2293,6 +2303,19 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["twitch_display_name"] = user.get("display_name") or user["login"]
     context.user_data["channel_input_was_url"] = twitch.is_twitch_url(text)
 
+    db: Database = context.application.bot_data["db"]
+    alert_kind = context.user_data.get("alert_type") or "live"
+    if alert_kind != "live" and not await prem.has_feature(
+        context.bot,
+        db,
+        update.effective_user.id,
+        "alert_types",
+        channel=user["login"],
+    ):
+        return await _show_premium_gate(
+            update, context, feature="alert_type", first_step=True
+        )
+
     if context.user_data.get("alert_type") == "upcoming":
         has_schedule = False
         try:
@@ -2305,7 +2328,6 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.effective_message.reply_text(t("alert_type_no_schedule", lang))
             return CHANNEL
 
-    db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
     existing = next(
         (
@@ -2341,7 +2363,9 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(t("sub_not_found", lang))
             return ConversationHandler.END
         sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
-        show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=sub.twitch_username
+        )
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
@@ -3170,17 +3194,19 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, query.from_user.id, "delay"):
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if not await prem.has_feature(
+        context.bot, db, query.from_user.id, "delay", channel=sub.twitch_username
+    ):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
         await send_premium_screen(context.bot, query.from_user.id, lang, db)
-        return ConversationHandler.END
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
@@ -3546,7 +3572,7 @@ async def _prompt_delete_old(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.advanced_mode_on(context.bot, db, user_id):
+    if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
@@ -3555,7 +3581,9 @@ async def _prompt_delete_old(
         return await _finish_subscription(
             update, context, user_id, chat_id, thread_id
         )
-    if not await prem.has_feature(context.bot, db, user_id, "delete_prev"):
+    if not await prem.has_feature(
+        context.bot, db, user_id, "delete_prev", channel=_wizard_channel(context)
+    ):
         return await _show_premium_gate(
             update, context, feature="delete_old", first_step=False
         )
@@ -3657,7 +3685,9 @@ async def _prompt_delete_fail_notify(
 ) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    if not await prem.has_feature(context.bot, db, user_id, "delete_prev"):
+    if not await prem.has_feature(
+        context.bot, db, user_id, "delete_prev", channel=_wizard_channel(context)
+    ):
         return await _show_premium_gate(
             update, context, feature="delete_fail", first_step=False
         )
@@ -3874,7 +3904,12 @@ async def _finish_subscription(
                 context.user_data.clear()
                 return ConversationHandler.END
             create_enabled = True
-            if not await prem.can_enable_more_async(context.bot, db, owner_id):
+            if not await prem.can_enable_more_async(
+                context.bot,
+                db,
+                owner_id,
+                twitch_username=str(data.get("twitch_username") or ""),
+            ):
                 create_enabled = False
             sub_id = db.add_subscription(
                 owner_id=owner_id,
@@ -4936,8 +4971,24 @@ def _watch_prefs_summary(prefs: WatchPrefs, lang: str) -> str:
     )
 
 
+def _premium_channel_badge_html(lang: str, *, login: str, db: Database) -> str:
+    if not prem.is_promo_channel(login, db):
+        return ""
+    from config import PUBLIC_BASE_URL
+
+    tip = html.escape(t("premium_channel_badge_title", lang))
+    star = html.escape(t("premium_channel_badge", lang))
+    href = html.escape(
+        f"{PUBLIC_BASE_URL}/app/premium-channel"
+        if PUBLIC_BASE_URL
+        else "https://twitch.tv/" + login
+    )
+    # title= works in some Telegram clients / webviews on hover & long-press.
+    return f' <a href="{href}" title="{tip}">{star}</a>'
+
+
 def _format_watch_suggestions(
-    streams: list[dict], prefs: WatchPrefs, lang: str
+    streams: list[dict], prefs: WatchPrefs, lang: str, *, db: Database
 ) -> str:
     lines = [
         t("watch_suggest_header", lang),
@@ -4946,11 +4997,13 @@ def _format_watch_suggestions(
         "",
     ]
     for i, s in enumerate(streams, start=1):
-        login = html.escape(str(s.get("user_login") or ""))
-        display = html.escape(str(s.get("user_name") or login))
+        login_raw = str(s.get("user_login") or "").lower()
+        login = html.escape(login_raw)
+        display = html.escape(str(s.get("user_name") or login_raw))
         title = html.escape(str(s.get("title") or "—"))
         game = html.escape(str(s.get("game_name") or "—"))
         viewers = int(s.get("viewer_count") or 0)
+        badge = _premium_channel_badge_html(lang, login=login_raw, db=db)
         lines.append(
             t(
                 "watch_suggest_item",
@@ -4961,6 +5014,7 @@ def _format_watch_suggestions(
                 title=title,
                 game=game,
                 viewers=viewers,
+                premium_badge=badge,
             )
         )
         lines.append("")
@@ -5006,8 +5060,58 @@ def _format_watch_vod_suggestions(
     return "\n".join(lines).rstrip()
 
 
+def _promo_channel_user_ids(db: Database, twitch: TwitchClient) -> list[str]:
+    """Twitch user ids for config + paid promo channels."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    login = prem.twitch_channel_login()
+    try:
+        user = twitch.get_user(login)
+    except Exception:
+        user = None
+    if user:
+        uid = str(user["id"])
+        ids.append(uid)
+        seen.add(uid)
+    for ch in db.list_premium_channels():
+        uid = str(ch.twitch_user_id)
+        if uid and uid not in seen:
+            ids.append(uid)
+            seen.add(uid)
+    return ids
+
+
+def _promo_streams_matching(
+    db: Database, twitch: TwitchClient, prefs: WatchPrefs
+) -> list[dict]:
+    """Live promo channels that match watch filters (extra slots)."""
+    uids = _promo_channel_user_ids(db, twitch)
+    if not uids:
+        return []
+    try:
+        live = twitch.get_live_streams(uids)
+    except Exception:
+        logger.exception("promo live streams fetch failed")
+        return []
+    streams = list(live.values())
+    cat_ids = {str(c.get("id") or "") for c in prefs.categories if c.get("id")}
+    if cat_ids:
+        streams = [s for s in streams if str(s.get("game_id") or "") in cat_ids]
+    if prefs.language:
+        streams = [
+            s for s in streams if (s.get("language") or "") == prefs.language
+        ]
+    return filter_streams_for_watch(
+        streams,
+        min_viewers=prefs.min_viewers,
+        max_viewers=prefs.max_viewers,
+        exclude_mature=prefs.exclude_mature,
+        tags=prefs.tags,
+    )
+
+
 async def _fetch_watch_suggestions(
-    twitch: TwitchClient, prefs: WatchPrefs
+    twitch: TwitchClient, prefs: WatchPrefs, *, db: Database | None = None
 ) -> list[dict]:
     pooled: list[dict] = []
     for cat in prefs.categories:
@@ -5029,7 +5133,20 @@ async def _fetch_watch_suggestions(
         exclude_mature=prefs.exclude_mature,
         tags=prefs.tags,
     )
-    return pick_random_streams(filtered, _WATCH_SUGGEST_N)
+    picked = pick_random_streams(filtered, _WATCH_SUGGEST_N)
+    if db is None:
+        return picked
+    promo = await asyncio.to_thread(_promo_streams_matching, db, twitch, prefs)
+    if not promo:
+        return picked
+    seen = {str(s.get("user_id") or s.get("user_login") or "").lower() for s in picked}
+    extra: list[dict] = []
+    for s in promo:
+        key = str(s.get("user_id") or s.get("user_login") or "").lower()
+        if key and key not in seen:
+            extra.append(s)
+            seen.add(key)
+    return extra + picked
 
 
 def _bot_lang_to_twitch(lang: str) -> str:
@@ -5217,7 +5334,9 @@ async def _send_watch_suggestions(
     twitch: TwitchClient = context.application.bot_data["twitch"]
     try:
         if streams is None and vods is None:
-            streams = await _fetch_watch_suggestions(twitch, prefs)
+            streams = await _fetch_watch_suggestions(
+                twitch, prefs, db=context.application.bot_data["db"]
+            )
     except Exception:
         logger.exception("watch suggestions failed")
         text = t("watch_suggest_error", lang)
@@ -5235,7 +5354,9 @@ async def _send_watch_suggestions(
         return
 
     if streams:
-        text = _format_watch_suggestions(streams, prefs, lang)
+        text = _format_watch_suggestions(
+            streams, prefs, lang, db=context.application.bot_data["db"]
+        )
     elif vods:
         text = _format_watch_vod_suggestions(vods, prefs, lang)
     elif allow_vod:
@@ -6816,6 +6937,11 @@ async def complete_twitch_import(
 
         await complete_premium_oauth(application, owner_id, error, token_info)
         return
+    if purpose == "premium_channel":
+        from premium_handlers import complete_premium_channel_oauth
+
+        await complete_premium_channel_oauth(application, owner_id, error, token_info)
+        return
     if purpose == "whispers":
         await complete_whisper_oauth(application, owner_id, error, token_info)
         return
@@ -7230,8 +7356,24 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     lang = _user_lang(context, owner_id)
     db: Database = context.application.bot_data["db"]
     demo = demo_mode.is_active(owner_id)
+    # Promo channel alerts never consume free slots — enable them first.
+    promo_enabled = 0
+    for s in _subs_for_owner(db, owner_id):
+        if (
+            s.enabled
+            or getattr(s, "trial_paused", False)
+            or not prem.is_promo_channel(s.twitch_username, db)
+        ):
+            continue
+        if db.toggle_subscription(s.id, owner_id):
+            promo_enabled += 1
     slots = prem.active_subscription_slots(db, owner_id, demo=demo)
     if not slots.unlimited and slots.remaining <= 0:
+        if promo_enabled:
+            await query.edit_message_text(
+                t("enable_all_done", lang, count=promo_enabled)
+            )
+            return
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -7242,7 +7384,7 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     max_count = None if slots.unlimited else slots.remaining
     count = db.enable_all_subscriptions(
         owner_id, demo=demo, max_count=max_count
-    )
+    ) + promo_enabled
     if not count:
         await query.edit_message_text(t("enable_all_none", lang))
         return
@@ -7250,7 +7392,9 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         still_paused = sum(
             1
             for s in _subs_for_owner(db, owner_id)
-            if not s.enabled and not getattr(s, "trial_paused", False)
+            if not s.enabled
+            and not getattr(s, "trial_paused", False)
+            and not prem.is_promo_channel(s.twitch_username, db)
         )
         if still_paused > 0:
             await query.edit_message_text(
@@ -7280,7 +7424,9 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.edit_message_text(t("edit_watch_locked", lang))
         return
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
-    show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
+    show_adv = await prem.advanced_mode_on(
+        context.bot, db, query.from_user.id, channel=sub.twitch_username
+    )
     await query.edit_message_text(
         _edit_menu_text(
             lang,
@@ -7327,17 +7473,23 @@ async def start_edit_ignore_keywords(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, query.from_user.id, "ignore_keywords"):
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if not await prem.has_feature(
+        context.bot,
+        db,
+        query.from_user.id,
+        "ignore_keywords",
+        channel=sub.twitch_username,
+    ):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
         await send_premium_screen(context.bot, query.from_user.id, lang, db)
-        return ConversationHandler.END
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
@@ -7502,7 +7654,9 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(t("sub_not_found", lang))
         return
     if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
-        show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=sub.twitch_username
+        )
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
@@ -7517,7 +7671,9 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if field == "delete_other" and (
         not sub.notify_on_category_change or not sub.delete_previous
     ):
-        show_adv = await prem.advanced_mode_on(context.bot, db, query.from_user.id)
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=sub.twitch_username
+        )
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
@@ -7531,7 +7687,9 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if field in ("delete_old", "delete_fail", "delete_other", "repeat"):
         feat = "repeat" if field == "repeat" else "delete_prev"
-        if not await prem.has_feature(context.bot, db, query.from_user.id, feat):
+        if not await prem.has_feature(
+            context.bot, db, query.from_user.id, feat, channel=sub.twitch_username
+        ):
             from premium_handlers import send_premium_screen
 
             await query.edit_message_text(
@@ -8106,7 +8264,9 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await query.edit_message_text(t("premium_trial_paused_enable", lang))
             await send_premium_screen(context.bot, query.from_user.id, lang, db)
             return
-    if not sub.enabled and not await prem.can_enable_more_async(context.bot, db, query.from_user.id):
+    if not sub.enabled and not await prem.can_enable_more_async(
+        context.bot, db, query.from_user.id, twitch_username=sub.twitch_username
+    ):
         from premium_handlers import send_premium_screen
 
         await query.edit_message_text(
@@ -11686,7 +11846,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_premium_callback_router,
-            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+)$",
+            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+)$",
         ),
         group=0,
     )

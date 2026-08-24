@@ -394,6 +394,16 @@ class DeletedSubscriptionCartItem:
     alert_type: str = "live"
 
 
+@dataclass(frozen=True)
+class PremiumChannel:
+    twitch_user_id: str
+    twitch_login: str
+    display_name: str
+    owner_telegram_id: int
+    charge_id: str
+    paid_at: str
+
+
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
     if payload.get("notify_on_category_change"):
         return "category"
@@ -1127,6 +1137,24 @@ class Database(Protocol):
 
     def list_beta_enrolled_user_ids(self, feature_ids: list[str]) -> list[int]: ...
 
+    def is_premium_channel_login(self, login: str) -> bool: ...
+
+    def list_premium_channel_logins(self) -> list[str]: ...
+
+    def list_premium_channels(self) -> list[PremiumChannel]: ...
+
+    def get_premium_channel(self, twitch_user_id: str) -> PremiumChannel | None: ...
+
+    def upsert_premium_channel(
+        self,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        display_name: str,
+        owner_telegram_id: int,
+        charge_id: str,
+    ) -> None: ...
+
 
 class SqliteDatabase:
     def __init__(self, path: Path) -> None:
@@ -1564,6 +1592,24 @@ class SqliteDatabase:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS premium_channels (
+                twitch_user_id TEXT PRIMARY KEY,
+                twitch_login TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                owner_telegram_id INTEGER NOT NULL,
+                charge_id TEXT NOT NULL DEFAULT '',
+                paid_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_premium_channels_login
+            ON premium_channels(twitch_login)
+            """
+        )
         _seed_lucky_templates_sqlite(conn)
 
     def add_subscription(
@@ -1827,17 +1873,27 @@ class SqliteDatabase:
                 (owner_id, int(bool(is_demo)), *cart_ids, cutoff_iso),
             ).fetchall()
             restored = enabled_restored = 0
+            slots_used = 0
             for r in rows:
                 try:
                     payload = json.loads(r["subscription_json"] or "{}")
                 except Exception:
                     continue
-                sub_enabled = True
-                if max_enabled is not None:
-                    sub_enabled = enabled_restored < max(0, int(max_enabled))
+                from premium import is_promo_channel
+
+                login = str(payload.get("twitch_username") or "")
+                promo = is_promo_channel(login, self)
+                if promo:
+                    sub_enabled = True
+                elif max_enabled is not None:
+                    sub_enabled = slots_used < max(0, int(max_enabled))
+                else:
+                    sub_enabled = True
                 payload["enabled"] = sub_enabled
                 if sub_enabled:
                     enabled_restored += 1
+                    if not promo:
+                        slots_used += 1
                 conn.execute(
                     """
                     INSERT INTO subscriptions (
@@ -3816,6 +3872,102 @@ class SqliteDatabase:
             ).fetchall()
         return sorted(int(r["user_id"]) for r in rows)
 
+    def is_premium_channel_login(self, login: str) -> bool:
+        key = (login or "").strip().lower()
+        if not key:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM premium_channels WHERE twitch_login = ?",
+                (key,),
+            ).fetchone()
+        return row is not None
+
+    def list_premium_channel_logins(self) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT twitch_login FROM premium_channels ORDER BY twitch_login"
+            ).fetchall()
+        return [str(r["twitch_login"]).lower() for r in rows]
+
+    def list_premium_channels(self) -> list[PremiumChannel]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT twitch_user_id, twitch_login, display_name,
+                       owner_telegram_id, charge_id, paid_at
+                FROM premium_channels
+                ORDER BY paid_at DESC
+                """
+            ).fetchall()
+        return [
+            PremiumChannel(
+                twitch_user_id=str(r["twitch_user_id"]),
+                twitch_login=str(r["twitch_login"]).lower(),
+                display_name=str(r["display_name"] or r["twitch_login"]),
+                owner_telegram_id=int(r["owner_telegram_id"]),
+                charge_id=str(r["charge_id"] or ""),
+                paid_at=str(r["paid_at"] or ""),
+            )
+            for r in rows
+        ]
+
+    def get_premium_channel(self, twitch_user_id: str) -> PremiumChannel | None:
+        uid = str(twitch_user_id or "").strip()
+        if not uid:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT twitch_user_id, twitch_login, display_name,
+                       owner_telegram_id, charge_id, paid_at
+                FROM premium_channels WHERE twitch_user_id = ?
+                """,
+                (uid,),
+            ).fetchone()
+        if not row:
+            return None
+        return PremiumChannel(
+            twitch_user_id=str(row["twitch_user_id"]),
+            twitch_login=str(row["twitch_login"]).lower(),
+            display_name=str(row["display_name"] or row["twitch_login"]),
+            owner_telegram_id=int(row["owner_telegram_id"]),
+            charge_id=str(row["charge_id"] or ""),
+            paid_at=str(row["paid_at"] or ""),
+        )
+
+    def upsert_premium_channel(
+        self,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        display_name: str,
+        owner_telegram_id: int,
+        charge_id: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO premium_channels (
+                    twitch_user_id, twitch_login, display_name,
+                    owner_telegram_id, charge_id, paid_at
+                ) VALUES (?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(twitch_user_id) DO UPDATE SET
+                    twitch_login = excluded.twitch_login,
+                    display_name = excluded.display_name,
+                    owner_telegram_id = excluded.owner_telegram_id,
+                    charge_id = excluded.charge_id,
+                    paid_at = datetime('now')
+                """,
+                (
+                    str(twitch_user_id),
+                    str(twitch_login).strip().lower(),
+                    str(display_name or twitch_login),
+                    int(owner_telegram_id),
+                    str(charge_id or ""),
+                ),
+            )
+
 
 class PostgresDatabase:
     def __init__(self, database_url: str) -> None:
@@ -4364,6 +4516,24 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS premium_channels (
+                    twitch_user_id TEXT PRIMARY KEY,
+                    twitch_login TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    owner_telegram_id BIGINT NOT NULL,
+                    charge_id TEXT NOT NULL DEFAULT '',
+                    paid_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_premium_channels_login
+                ON premium_channels(twitch_login)
+                """
+            )
             _seed_lucky_templates_pg(cur)
 
     def add_subscription(
@@ -4648,17 +4818,27 @@ class PostgresDatabase:
 
         restored_ids: list[int] = []
         enabled_restored = 0
+        slots_used = 0
         for r in rows:
             try:
                 payload = json.loads(r.get("subscription_json") or "{}")
             except Exception:
                 continue
-            sub_enabled = True
-            if max_enabled is not None:
-                sub_enabled = enabled_restored < max(0, int(max_enabled))
+            from premium import is_promo_channel
+
+            login = str(payload.get("twitch_username") or "")
+            promo = is_promo_channel(login, self)
+            if promo:
+                sub_enabled = True
+            elif max_enabled is not None:
+                sub_enabled = slots_used < max(0, int(max_enabled))
+            else:
+                sub_enabled = True
             payload["enabled"] = sub_enabled
             if sub_enabled:
                 enabled_restored += 1
+                if not promo:
+                    slots_used += 1
             self.add_subscription(owner_id=owner_id, **payload)
             restored_ids.append(int(r["id"]))
 
@@ -6766,6 +6946,117 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return sorted(int(r["user_id"]) for r in rows)
+
+    def is_premium_channel_login(self, login: str) -> bool:
+        key = (login or "").strip().lower()
+        if not key:
+            return False
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT 1 FROM premium_channels WHERE twitch_login = %s",
+                (key,),
+            )
+            row = cur.fetchone()
+        return row is not None
+
+    def list_premium_channel_logins(self) -> list[str]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT twitch_login FROM premium_channels ORDER BY twitch_login"
+            )
+            rows = cur.fetchall()
+        return [str(r["twitch_login"]).lower() for r in rows]
+
+    def list_premium_channels(self) -> list[PremiumChannel]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT twitch_user_id, twitch_login, display_name,
+                       owner_telegram_id, charge_id, paid_at
+                FROM premium_channels
+                ORDER BY paid_at DESC
+                """
+            )
+            rows = cur.fetchall()
+        out: list[PremiumChannel] = []
+        for r in rows:
+            paid = r["paid_at"]
+            paid_s = paid.isoformat() if hasattr(paid, "isoformat") else str(paid or "")
+            out.append(
+                PremiumChannel(
+                    twitch_user_id=str(r["twitch_user_id"]),
+                    twitch_login=str(r["twitch_login"]).lower(),
+                    display_name=str(r["display_name"] or r["twitch_login"]),
+                    owner_telegram_id=int(r["owner_telegram_id"]),
+                    charge_id=str(r["charge_id"] or ""),
+                    paid_at=paid_s,
+                )
+            )
+        return out
+
+    def get_premium_channel(self, twitch_user_id: str) -> PremiumChannel | None:
+        uid = str(twitch_user_id or "").strip()
+        if not uid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT twitch_user_id, twitch_login, display_name,
+                       owner_telegram_id, charge_id, paid_at
+                FROM premium_channels WHERE twitch_user_id = %s
+                """,
+                (uid,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        paid = row["paid_at"]
+        paid_s = paid.isoformat() if hasattr(paid, "isoformat") else str(paid or "")
+        return PremiumChannel(
+            twitch_user_id=str(row["twitch_user_id"]),
+            twitch_login=str(row["twitch_login"]).lower(),
+            display_name=str(row["display_name"] or row["twitch_login"]),
+            owner_telegram_id=int(row["owner_telegram_id"]),
+            charge_id=str(row["charge_id"] or ""),
+            paid_at=paid_s,
+        )
+
+    def upsert_premium_channel(
+        self,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        display_name: str,
+        owner_telegram_id: int,
+        charge_id: str,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO premium_channels (
+                    twitch_user_id, twitch_login, display_name,
+                    owner_telegram_id, charge_id, paid_at
+                ) VALUES (%s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (twitch_user_id) DO UPDATE SET
+                    twitch_login = EXCLUDED.twitch_login,
+                    display_name = EXCLUDED.display_name,
+                    owner_telegram_id = EXCLUDED.owner_telegram_id,
+                    charge_id = EXCLUDED.charge_id,
+                    paid_at = NOW()
+                """,
+                (
+                    str(twitch_user_id),
+                    str(twitch_login).strip().lower(),
+                    str(display_name or twitch_login),
+                    int(owner_telegram_id),
+                    str(charge_id or ""),
+                ),
+            )
 
 
 def open_database(path: Path, database_url: str | None = None) -> Database:

@@ -605,6 +605,147 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 [[InlineKeyboardButton(btn("premium_marfapr", lang), url=url)]]
             ),
         )
+        return
+
+    if action == "channel":
+        stars = prem.stars_channel_price(user_id)
+        await query.edit_message_text(
+            t("premium_channel_intro", lang, stars=stars),
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            btn("premium_channel_confirm", lang),
+                            callback_data="premium:channel_confirm",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            btn("premium_feat_back", lang),
+                            callback_data="premium:feat_back",
+                        )
+                    ],
+                ]
+            ),
+        )
+        return
+
+    if action == "channel_confirm":
+        redirect = twitch_oauth_redirect_uri()
+        if not redirect:
+            await query.edit_message_text(t("import_failed", lang))
+            return
+        state = create_oauth_state(user_id, lang, purpose="premium_channel")
+        url = twitch.build_authorize_url(
+            redirect_uri=redirect,
+            state=state,
+            scopes="",
+        )
+        await query.edit_message_text(
+            t("premium_channel_oauth", lang),
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            t("premium_channel_oauth_button", lang), url=url
+                        )
+                    ]
+                ]
+            ),
+        )
+        return
+
+    if action == "channel_pay":
+        pending = context.application.bot_data.get("pending_premium_channel") or {}
+        info = pending.get(user_id)
+        if not info:
+            await query.edit_message_text(t("premium_channel_failed", lang))
+            return
+        login = str(info.get("twitch_login") or "")
+        tid = str(info.get("twitch_user_id") or "")
+        if not login or not tid:
+            await query.edit_message_text(t("premium_channel_failed", lang))
+            return
+        if db.get_premium_channel(tid) is not None or prem.is_promo_channel(login, db):
+            await query.edit_message_text(t("premium_channel_already", lang))
+            return
+        stars = prem.stars_channel_price(user_id)
+        await _send_invoice_link(
+            query,
+            title=t("premium_channel_pay_title", lang),
+            description=t(
+                "premium_channel_pay_description", lang, channel=login
+            ),
+            payload=prem.invoice_payload(
+                user_id,
+                "channel",
+                twitch_user_id=tid,
+                twitch_login=login,
+            ),
+            stars=stars,
+            lang=lang,
+            subscription_period=None,
+        )
+        return
+
+
+async def complete_premium_channel_oauth(
+    application: Application,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+) -> None:
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    menu = main_menu(
+        lang,
+        is_admin=False,
+        demo_active=demo_mode.is_active(owner_id),
+    )
+    if error or not token_info:
+        await application.bot.send_message(
+            owner_id, t("premium_channel_failed", lang), reply_markup=menu
+        )
+        return
+    login = str(token_info.get("twitch_login") or "").strip().lower()
+    tid = str(token_info.get("twitch_user_id") or "").strip()
+    display = str(
+        token_info.get("twitch_display_name") or login
+    ).strip() or login
+    if not login or not tid:
+        await application.bot.send_message(
+            owner_id, t("premium_channel_failed", lang), reply_markup=menu
+        )
+        return
+    if db.get_premium_channel(tid) is not None or (
+        login == prem.twitch_channel_login()
+    ):
+        await application.bot.send_message(
+            owner_id, t("premium_channel_already", lang), reply_markup=menu
+        )
+        return
+    pending = application.bot_data.setdefault("pending_premium_channel", {})
+    pending[owner_id] = {
+        "twitch_user_id": tid,
+        "twitch_login": login,
+        "display_name": display,
+    }
+    stars = prem.stars_channel_price(owner_id)
+    channel_label = display if display.lower() != login else login
+    await application.bot.send_message(
+        owner_id,
+        t("premium_channel_confirm_pay", lang, channel=channel_label),
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("btn_premium_channel_pay", lang, stars=stars),
+                        callback_data="premium:channel_pay",
+                    )
+                ]
+            ]
+        ),
+    )
 
 
 async def complete_premium_oauth(
@@ -756,6 +897,32 @@ async def successful_premium_payment(
             stars_paid=stars_paid
             or prem.stars_feature_price(parsed.user_id) * max(1, len(parsed.features)),
         )
+    elif parsed.kind == "channel":
+        pending = context.application.bot_data.get("pending_premium_channel") or {}
+        info = pending.pop(parsed.user_id, None) or {}
+        display = str(info.get("display_name") or parsed.twitch_login)
+        prem.apply_premium_channel_payment(
+            db,
+            parsed.user_id,
+            twitch_user_id=parsed.twitch_user_id,
+            twitch_login=parsed.twitch_login,
+            display_name=display,
+            charge_id=charge_id,
+            stars_paid=stars_paid or prem.stars_channel_price(parsed.user_id),
+        )
+        analytics.capture(
+            parsed.user_id,
+            "premium_channel_purchased",
+            {
+                "stars": stars_paid,
+                "twitch_login": parsed.twitch_login,
+                "twitch_user_id": parsed.twitch_user_id,
+            },
+        )
+        await msg.reply_text(
+            t("premium_channel_pay_done", lang, channel=display or parsed.twitch_login)
+        )
+        return
     analytics.capture(
         parsed.user_id,
         "premium_purchased",

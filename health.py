@@ -370,6 +370,14 @@ def _schedule_oauth_complete(
     fut.add_done_callback(_done)
 
 
+def _premium_channel_tip_page(lang: str) -> bytes:
+    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, t
+
+    locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    title = t("premium_channel_badge_title", locale)
+    return _html_page(title, title)
+
+
 def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
     from i18n import DEFAULT_LOCALE, t
 
@@ -411,7 +419,7 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
             raise RuntimeError("no_user")
         twitch_user_id = str(user["id"])
         twitch_login = str(user.get("login") or "")
-        if purpose in ("schedule", "premium", "whispers", "chat"):
+        if purpose in ("schedule", "premium", "premium_channel", "whispers", "chat"):
             followed = []
         else:
             followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
@@ -431,6 +439,7 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         "refresh_token": refresh,
         "twitch_user_id": twitch_user_id,
         "twitch_login": twitch_login,
+        "twitch_display_name": str(user.get("display_name") or twitch_login),
         "purpose": purpose,
     }
     if purpose == "premium":
@@ -521,6 +530,7 @@ def _oferta_extra_features_html() -> str:
 def _oferta_page() -> bytes:
     """Public offer for paid Premium (Russian legal text; always ru)."""
     from config import (
+        PREMIUM_CHANNEL_STARS,
         PREMIUM_FREE_ACTIVE_LIMIT,
         PREMIUM_STARS_AMOUNT,
         PREMIUM_STARS_FEATURE,
@@ -549,6 +559,8 @@ def _oferta_page() -> bytes:
         life_rub=_fmt_rub(PREMIUM_STARS_LIFETIME * rub_per_star),
         feat_stars=PREMIUM_STARS_FEATURE,
         feat_rub=_fmt_rub(PREMIUM_STARS_FEATURE * rub_per_star),
+        channel_stars=PREMIUM_CHANNEL_STARS,
+        channel_rub=_fmt_rub(PREMIUM_CHANNEL_STARS * rub_per_star),
         rub_per_star=rub_per_star,
         extra_features=_oferta_extra_features_html(),
     )
@@ -744,6 +756,17 @@ class _HealthHandler(BaseHTTPRequestHandler):
         if path.startswith("/app/chat"):
             if _handle_chat_webapp_get(self):
                 return
+        if path == "/app/premium-channel":
+            query = parse_qs(urlparse(self.path).query)
+            lang = (query.get("lang") or ["en"])[0]
+            body = _premium_channel_tip_page(lang)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/placeholders":
             query = parse_qs(urlparse(self.path).query)
             lang = (query.get("lang") or ["en"])[0]

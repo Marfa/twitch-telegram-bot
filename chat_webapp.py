@@ -11,7 +11,13 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 from config import PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
-from premium import CHAT_FREE_DAILY_SEND_LIMIT, chat_daily_send_limit
+from premium import (
+    CHAT_FREE_DAILY_SEND_LIMIT,
+    chat_daily_send_limit,
+    chat_send_unlimited,
+    is_promo_channel,
+    list_promo_channel_logins,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +283,7 @@ def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str,
         "sent_today": sent,
         "remaining": remaining,
         "prefer_embed": unlimited,
+        "promo_channels": list_promo_channel_logins(_db),
         "embed_parent": embed_parent_host(),
     }
 
@@ -451,10 +458,11 @@ def api_send(
     auth = _db.get_chat_auth(user_id)
     if not auth or not auth.refresh_token:
         return _err(401, "twitch_auth_required")
-    limit = chat_daily_send_limit(_db, user_id)
+    unlimited = chat_send_unlimited(_db, user_id, broadcaster_login=login)
     day = _utc_day()
     sent = _db.get_chat_send_count(user_id, day)
-    if limit is not None and sent >= limit:
+    limit = chat_daily_send_limit(_db, user_id)
+    if not unlimited and limit is not None and sent >= limit:
         return 429, {
             "ok": False,
             "error": "daily_limit",
@@ -487,13 +495,17 @@ def api_send(
     except Exception as exc:
         logger.warning("chat send failed user=%s: %s", user_id, exc)
         return _err(502, "send_failed")
-    new_count = _db.increment_chat_send_count(user_id, day)
-    remaining = None if limit is None else max(0, int(limit) - new_count)
+    # Promo channel sends do not consume the free daily quota.
+    if is_promo_channel(login, _db):
+        new_count = sent
+    else:
+        new_count = _db.increment_chat_send_count(user_id, day)
+    remaining = None if unlimited else max(0, int(limit or 0) - new_count)
     return 200, {
         "ok": True,
         "sent_today": new_count,
         "remaining": remaining,
-        "unlimited": limit is None,
+        "unlimited": unlimited,
     }
 
 
