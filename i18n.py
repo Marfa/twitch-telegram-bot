@@ -2905,6 +2905,7 @@ def all_menu_buttons() -> set[str]:
         "back_settings",
         "admin_withdrawals",
         "watch",
+        "chat",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
 
@@ -2964,20 +2965,9 @@ def subscriptions_menu(
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [
-            [
-                KeyboardButton(btn("whisper_alerts", lang)),
-                KeyboardButton(btn("create_schedule", lang)),
-            ],
-            [KeyboardButton(btn("watch", lang))],
-            [
-                KeyboardButton(btn("chat", lang)),
-                KeyboardButton(btn("back", lang)),
-            ],
-        ],
-        resize_keyboard=True,
-    )
+    keys = ["whisper_alerts", "create_schedule", "watch", "chat", "back"]
+    buttons = [KeyboardButton(btn(k, lang)) for k in keys]
+    return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
 
 
 def settings_menu(

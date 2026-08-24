@@ -1546,6 +1546,7 @@ def _help_text(lang: str) -> str:
         btn_whisper_alerts=btn("whisper_alerts", lang),
         btn_create_schedule=btn("create_schedule", lang),
         btn_watch=btn("watch", lang),
+        btn_chat=btn("chat", lang),
         btn_settings=btn("settings", lang),
         btn_feedback=btn("feedback", lang),
     )
