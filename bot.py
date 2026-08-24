@@ -1052,6 +1052,7 @@ async def _go_chat_button_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     chat_id = update.effective_user.id
+    context.user_data["attach_chat_button"] = False
     text = t("chat_button_prompt", lang)
     markup = chat_button_keyboard(lang)
     if update.callback_query:
@@ -8832,6 +8833,49 @@ async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    from chat_webapp import BETA_FEATURE_ID, chat_webapp_url
+
+    if not beta_features.is_enabled(db, user_id, BETA_FEATURE_ID):
+        await update.effective_message.reply_text(
+            t("chat_beta_required", lang),
+            reply_markup=other_menu(lang),
+        )
+        return
+    open_url = chat_webapp_url(
+        lang=lang if lang in SUPPORTED_LOCALES else None,
+        user_id=user_id,
+    )
+    if not open_url:
+        await update.effective_message.reply_text(
+            t("chat_beta_required", lang),
+            reply_markup=other_menu(lang),
+        )
+        return
+    await sync_stream_chat_menu_button(context.bot, db, user_id)
+    await update.effective_message.reply_text(
+        t("chat_open_hint", lang),
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("menu_btn_chat", lang),
+                        web_app=WebAppInfo(url=open_url),
+                    )
+                ]
+            ]
+        ),
+    )
+    await update.effective_message.reply_text(
+        t("menu_other", lang),
+        reply_markup=other_menu(lang),
+    )
+
+
 def _alert_history_type_label(alert_type: str, lang: str) -> str:
     key = {
         "live": "alert_history_type_live",
@@ -11301,6 +11345,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("other"), open_other_menu),
+        MessageHandler(_btn_filter("chat"), open_stream_chat),
         group=0,
     )
     app.add_handler(
@@ -11982,6 +12027,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("admin_withdrawals")
                 | _btn_filter("new")
                 | _btn_filter("watch")
+                | _btn_filter("chat")
                 | _btn_filter("create_schedule")
                 | _btn_filter("back")
                 | _btn_filter("language")

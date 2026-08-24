@@ -72,6 +72,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_back_settings": "◀️ Settings",
         "btn_admin_withdrawals": "💸 Withdrawals",
         "btn_watch": "🎲 What to watch?",
+        "btn_chat": "💬 Chat",
         "watch_cats_prompt": (
             "What to watch — step 1/5\n\n"
             "Type a Twitch category name (game or Just Chatting).\n"
@@ -731,6 +732,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "chat_open_hint": (
             "Open stream chat with the button below (or the «Chat» menu button next to the input)."
         ),
+        "chat_beta_required": (
+            "Enable «Twitch stream chat» in Settings → Beta mode."
+        ),
         "chat_oauth_done": (
             "Twitch account linked for chat. Open the Chat menu button again."
         ),
@@ -981,7 +985,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• {btn_import_twitch} — authorize and import followed channels\n"
             "• {btn_manage} — list, enable/disable, edit, delete\n"
             "• {btn_alert_history} — sent alerts history\n"
-            "• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}\n"
+            "• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}, {btn_chat}\n"
             "• {btn_settings} — premium, sync, system alerts, language, partner program\n"
             "• {btn_feedback}"
         ),
@@ -1384,6 +1388,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_back_settings": "◀️ Настройки",
         "btn_admin_withdrawals": "💸 Выводы",
         "btn_watch": "🎲 Что посмотреть?",
+        "btn_chat": "💬 Чат",
         "watch_cats_prompt": (
             "Что посмотреть — шаг 1/5\n\n"
             "Введите название категории Twitch (игра или Just Chatting).\n"
@@ -2159,6 +2164,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "chat_open_hint": (
             "Откройте чат кнопкой ниже (или «Чат» слева от поля ввода)."
         ),
+        "chat_beta_required": (
+            "Включите «Чат стримов Twitch» в Настройки → Режим бета."
+        ),
         "chat_oauth_done": (
             "Аккаунт Twitch привязан для чата. Снова откройте кнопку меню «Чат»."
         ),
@@ -2415,7 +2423,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "• {btn_import_twitch} — авторизация и импорт фолловов\n"
             "• {btn_manage} — список, вкл/выкл, редактирование, удаление\n"
             "• {btn_alert_history} — история отправленных оповещений\n"
-            "• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}\n"
+            "• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}, {btn_chat}\n"
             "• {btn_settings} — премиум, sync, системные уведомления, язык, партнёрка\n"
             "• {btn_feedback}"
         ),
@@ -2962,8 +2970,9 @@ def other_menu(lang: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(btn("whisper_alerts", lang)),
                 KeyboardButton(btn("create_schedule", lang)),
             ],
+            [KeyboardButton(btn("watch", lang))],
             [
-                KeyboardButton(btn("watch", lang)),
+                KeyboardButton(btn("chat", lang)),
                 KeyboardButton(btn("back", lang)),
             ],
         ],
@@ -3552,8 +3561,8 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
 def chat_button_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t("chat_button_yes", lang), callback_data="chat_button:1")],
             [InlineKeyboardButton(t("chat_button_no", lang), callback_data="chat_button:0")],
+            [InlineKeyboardButton(t("chat_button_yes", lang), callback_data="chat_button:1")],
         ]
     )
 
@@ -4425,8 +4434,8 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
     if field == "chat_button":
         return InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton(t("chat_button_yes", lang), callback_data=f"edit_set:{sub_id}:chat_button:1")],
                 [InlineKeyboardButton(t("chat_button_no", lang), callback_data=f"edit_set:{sub_id}:chat_button:0")],
+                [InlineKeyboardButton(t("chat_button_yes", lang), callback_data=f"edit_set:{sub_id}:chat_button:1")],
             ]
         )
     if field == "repeat":

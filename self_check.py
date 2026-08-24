@@ -485,7 +485,8 @@ def main() -> None:
         other_kb = other_menu(loc).keyboard
         assert [[b.text for b in row] for row in other_kb] == [
             [btn("whisper_alerts", loc), btn("create_schedule", loc)],
-            [btn("watch", loc), btn("back", loc)],
+            [btn("watch", loc)],
+            [btn("chat", loc), btn("back", loc)],
         ]
         subs_kb = subscriptions_menu(loc).keyboard
         assert [[b.text for b in row] for row in subs_kb] == [
