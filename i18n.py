@@ -95,6 +95,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_done": "Done",
         "watch_cats_clear": "Clear list",
         "watch_cats_lucky": "🎲 I'm feeling lucky",
+        "watch_cats_recommended": "Recommended channels",
+        "watch_recommended_header": "Recommended Premium channels:",
+        "watch_recommended_empty": "No Premium channels are live right now.",
         "watch_lucky_searching": "Searching live streams…",
         "watch_lucky_empty": (
             "No live streams for random / recently released games. "
@@ -1456,6 +1459,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "watch_cats_done": "Готово",
         "watch_cats_clear": "Очистить список",
         "watch_cats_lucky": "🎲 Мне повезёт",
+        "watch_cats_recommended": "Рекомендуемые каналы",
+        "watch_recommended_header": "Рекомендуемые Премиум-каналы:",
+        "watch_recommended_empty": "Сейчас нет Премиум-каналов в эфире.",
         "watch_lucky_searching": "Ищем стримы…",
         "watch_lucky_empty": (
             "Нет лайвов по случайным / недавно вышедшим играм. "
@@ -3407,7 +3413,9 @@ def welcome_demo_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def watch_cats_nav_keyboard(lang: str, *, has_cats: bool) -> InlineKeyboardMarkup:
+def watch_cats_nav_keyboard(
+    lang: str, *, has_cats: bool, show_recommended: bool = False
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -3415,6 +3423,15 @@ def watch_cats_nav_keyboard(lang: str, *, has_cats: bool) -> InlineKeyboardMarku
             )
         ]
     ]
+    if show_recommended:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("watch_cats_recommended", lang),
+                    callback_data="watch_cat:recommended",
+                )
+            ]
+        )
     if has_cats:
         rows.append(
             [InlineKeyboardButton(t("watch_cats_done", lang), callback_data="watch_cat:done")]

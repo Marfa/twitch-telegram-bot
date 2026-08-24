@@ -4988,14 +4988,18 @@ def _premium_channel_badge_html(lang: str, *, login: str, db: Database) -> str:
 
 
 def _format_watch_suggestions(
-    streams: list[dict], prefs: WatchPrefs, lang: str, *, db: Database
+    streams: list[dict],
+    prefs: WatchPrefs,
+    lang: str,
+    *,
+    db: Database,
+    header_key: str = "watch_suggest_header",
+    include_prefs: bool = True,
 ) -> str:
-    lines = [
-        t("watch_suggest_header", lang),
-        "",
-        _watch_prefs_summary(prefs, lang),
-        "",
-    ]
+    lines = [t(header_key, lang), ""]
+    if include_prefs:
+        lines.append(_watch_prefs_summary(prefs, lang))
+        lines.append("")
     for i, s in enumerate(streams, start=1):
         login_raw = str(s.get("user_login") or "").lower()
         login = html.escape(login_raw)
@@ -5108,6 +5112,47 @@ def _promo_streams_matching(
         exclude_mature=prefs.exclude_mature,
         tags=prefs.tags,
     )
+
+
+def _live_promo_streams(db: Database, twitch: TwitchClient) -> list[dict]:
+    """All currently live Premium / promo channels (no watch filters)."""
+    uids = _promo_channel_user_ids(db, twitch)
+    if not uids:
+        return []
+    try:
+        live = twitch.get_live_streams(uids)
+    except Exception:
+        logger.exception("live promo streams fetch failed")
+        return []
+    return list(live.values())
+
+
+def _watch_cats_keyboard(
+    context: ContextTypes.DEFAULT_TYPE, lang: str, *, has_cats: bool
+) -> InlineKeyboardMarkup:
+    return watch_cats_nav_keyboard(
+        lang,
+        has_cats=has_cats,
+        show_recommended=bool(context.user_data.get("watch_has_recommended")),
+    )
+
+
+async def _refresh_watch_recommended_flag(
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    twitch: TwitchClient,
+) -> bool:
+    streams = await asyncio.to_thread(_live_promo_streams, db, twitch)
+    flag = bool(streams)
+    context.user_data["watch_has_recommended"] = flag
+    return flag
+
+
+async def _fetch_recommended_promo_streams(
+    db: Database, twitch: TwitchClient, *, n: int = _WATCH_SUGGEST_N
+) -> list[dict]:
+    streams = await asyncio.to_thread(_live_promo_streams, db, twitch)
+    return pick_random_streams(streams, n)
 
 
 async def _fetch_watch_suggestions(
@@ -5267,12 +5312,102 @@ def _set_watch_lucky_mode(
     modes = context.application.bot_data.setdefault("watch_lucky_mode", {})
     if enabled:
         modes[user_id] = True
+        _set_watch_recommended_mode(context, user_id, enabled=False)
     else:
         modes.pop(user_id, None)
 
 
 def _watch_lucky_mode(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
     return bool((context.application.bot_data.get("watch_lucky_mode") or {}).get(user_id))
+
+
+def _set_watch_recommended_mode(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int, *, enabled: bool
+) -> None:
+    modes = context.application.bot_data.setdefault("watch_recommended_mode", {})
+    if enabled:
+        modes[user_id] = True
+        # Mutual exclusion with lucky "again" path.
+        context.application.bot_data.setdefault("watch_lucky_mode", {}).pop(user_id, None)
+    else:
+        modes.pop(user_id, None)
+
+
+def _watch_recommended_mode(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    return bool(
+        (context.application.bot_data.get("watch_recommended_mode") or {}).get(user_id)
+    )
+
+
+async def _send_recommended_promo_suggestions(
+    *,
+    bot,
+    chat_id: int,
+    user_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    edit_message=None,
+) -> None:
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    _set_watch_recommended_mode(context, user_id, enabled=True)
+    try:
+        streams = await _fetch_recommended_promo_streams(db, twitch)
+    except Exception:
+        logger.exception("watch recommended fetch failed")
+        text = t("watch_suggest_error", lang)
+        markup = watch_suggest_keyboard(lang, offer_create_alerts=False)
+        if edit_message is not None:
+            try:
+                await edit_message.edit_text(text, reply_markup=markup)
+                return
+            except BadRequest:
+                pass
+        await bot.send_message(chat_id, text, reply_markup=markup)
+        return
+    if not streams:
+        text = t("watch_recommended_empty", lang)
+        markup = watch_suggest_keyboard(lang, offer_create_alerts=False)
+    else:
+        prefs = WatchPrefs(
+            categories=[],
+            min_viewers=0,
+            max_viewers=None,
+            language=None,
+            tags=[],
+            exclude_mature=False,
+        )
+        context.application.bot_data.setdefault("watch_last_prefs", {})[user_id] = prefs
+        text = _format_watch_suggestions(
+            streams,
+            prefs,
+            lang,
+            db=db,
+            header_key="watch_recommended_header",
+            include_prefs=False,
+        )
+        markup = watch_suggest_keyboard(lang, offer_create_alerts=False)
+    if edit_message is not None:
+        try:
+            await edit_message.edit_text(
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            return
+        except BadRequest:
+            pass
+    await bot.send_message(
+        chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+    )
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
 
 async def _fetch_watch_vod_suggestions(
@@ -5465,6 +5600,9 @@ async def _go_watch_pick_prompt(
 async def _go_watch_categories_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    await _refresh_watch_recommended_flag(context, db, twitch)
     cats = context.user_data.setdefault("watch_categories", [])
     if cats:
         text = t(
@@ -5479,7 +5617,7 @@ async def _go_watch_categories_prompt(
         text = t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS)
     await update.effective_message.reply_text(
         text,
-        reply_markup=watch_cats_nav_keyboard(lang, has_cats=bool(cats)),
+        reply_markup=_watch_cats_keyboard(context, lang, has_cats=bool(cats)),
         parse_mode=ParseMode.HTML,
     )
     _set_wizard_back(context, WATCH_CATEGORIES)
@@ -5587,6 +5725,7 @@ async def start_what_to_watch(
     filters = db.get_watch_filters(user_id)
     context.user_data.clear()
     _set_watch_lucky_mode(context, user_id, enabled=False)
+    _set_watch_recommended_mode(context, user_id, enabled=False)
     analytics.capture(
         user_id,
         "watch_opened",
@@ -5612,6 +5751,15 @@ async def on_watch_again(
     await query.answer()
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
+    if _watch_recommended_mode(context, user_id):
+        await _send_recommended_promo_suggestions(
+            bot=context.bot,
+            chat_id=query.message.chat_id,
+            user_id=user_id,
+            context=context,
+            edit_message=query.message,
+        )
+        return
     if _watch_lucky_mode(context, user_id):
         try:
             await query.edit_message_text(t("watch_lucky_searching", lang))
@@ -5874,7 +6022,7 @@ async def receive_watch_category_text(
     if len(cats) >= _WATCH_MAX_CATS:
         await update.effective_message.reply_text(
             t("watch_cats_full", lang, max=_WATCH_MAX_CATS),
-            reply_markup=watch_cats_nav_keyboard(lang, has_cats=True),
+            reply_markup=_watch_cats_keyboard(context, lang, has_cats=True),
         )
         return WATCH_CATEGORIES
     query = (update.effective_message.text or "").strip()
@@ -5928,7 +6076,7 @@ async def _add_watch_category(
             max=_WATCH_MAX_CATS,
             list=", ".join(c["name"] for c in cats),
         ),
-        reply_markup=watch_cats_nav_keyboard(lang, has_cats=True),
+        reply_markup=_watch_cats_keyboard(context, lang, has_cats=True),
     )
     return WATCH_CATEGORIES
 
@@ -5968,13 +6116,13 @@ async def receive_watch_category_callback(
             try:
                 await query.edit_message_text(
                     t("watch_lucky_empty", lang),
-                    reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+                    reply_markup=_watch_cats_keyboard(context, lang, has_cats=False),
                 )
             except BadRequest:
                 await context.bot.send_message(
                     query.message.chat_id,
                     t("watch_lucky_empty", lang),
-                    reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+                    reply_markup=_watch_cats_keyboard(context, lang, has_cats=False),
                 )
             return WATCH_CATEGORIES
         prefs = WatchPrefs(
@@ -6013,6 +6161,37 @@ async def receive_watch_category_callback(
             allow_vod=False,
         )
         return ConversationHandler.END
+    if data == "watch_cat:recommended":
+        db: Database = context.application.bot_data["db"]
+        twitch: TwitchClient = context.application.bot_data["twitch"]
+        streams = await _fetch_recommended_promo_streams(db, twitch)
+        context.user_data["watch_has_recommended"] = bool(streams)
+        if not streams:
+            try:
+                await query.edit_message_text(
+                    t("watch_recommended_empty", lang),
+                    reply_markup=_watch_cats_keyboard(context, lang, has_cats=False),
+                )
+            except BadRequest:
+                await context.bot.send_message(
+                    query.message.chat_id,
+                    t("watch_recommended_empty", lang),
+                    reply_markup=_watch_cats_keyboard(context, lang, has_cats=False),
+                )
+            return WATCH_CATEGORIES
+        analytics.capture(
+            user_id,
+            "watch_recommended",
+            {"streams": len(streams)},
+        )
+        await _send_recommended_promo_suggestions(
+            bot=context.bot,
+            chat_id=query.message.chat_id,
+            user_id=user_id,
+            context=context,
+            edit_message=query.message,
+        )
+        return ConversationHandler.END
     if data == "watch_cat:done":
         cats = context.user_data.get("watch_categories") or []
         if not cats:
@@ -6027,7 +6206,7 @@ async def receive_watch_category_callback(
         context.user_data["watch_categories"] = []
         await query.edit_message_text(
             t("watch_cats_prompt", lang, max=_WATCH_MAX_CATS),
-            reply_markup=watch_cats_nav_keyboard(lang, has_cats=False),
+            reply_markup=_watch_cats_keyboard(context, lang, has_cats=False),
             parse_mode=ParseMode.HTML,
         )
         return WATCH_CATEGORIES
