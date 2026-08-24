@@ -131,6 +131,7 @@ from i18n import (
     watch_suggest_keyboard,
     watch_tags_keyboard,
     watch_viewers_keyboard,
+    welcome_demo_keyboard,
     wizard_menu,
 )
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
@@ -2039,15 +2040,99 @@ async def _prompt_language(update: Update) -> int:
     return LANG_SELECT
 
 
-async def _send_welcome(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    user_id = update.effective_user.id
-    db: Database = context.application.bot_data["db"]
-    await sync_stream_chat_menu_button(context.bot, db, user_id)
-    await update.effective_message.reply_text(
+async def _ensure_welcome_marfapr_subscription(
+    application: Application,
+    bot,
+    user_id: int,
+    lang: str,
+) -> int | None:
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    login = prem.twitch_channel_login() or "marfapr"
+    for sub in _subs_for_owner(db, user_id):
+        if (
+            sub.twitch_username == login
+            and sub.notify_on_live
+            and not sub.notify_on_category_change
+            and not sub.notify_on_end
+        ):
+            return sub.id
+    user = await asyncio.to_thread(twitch.get_user, login)
+    if not user:
+        logger.warning("Welcome marfapr seed: Twitch user %s not found", login)
+        return None
+    uid = str(user["id"])
+    uname = str(user.get("login") or login).lower()
+    enabled = await prem.can_enable_more_async(bot, db, user_id)
+    sub_id = db.add_subscription(
+        owner_id=user_id,
+        twitch_username=uname,
+        twitch_user_id=uid,
+        message_template=t("import_default_template", lang),
+        dest_type="dm",
+        chat_id=user_id,
+        thread_id=None,
+        disable_link_preview=True,
+        enabled=enabled,
+        notify_on_live=True,
+        notify_on_end=False,
+        notify_on_category_change=False,
+        is_demo=False,
+    )
+    analytics.capture(
+        user_id,
+        "welcome_demo_subscription_created",
+        {"sub_id": sub_id, "enabled": enabled, "channel": uname},
+    )
+    return sub_id
+
+
+async def _send_welcome_bundle(
+    application: Application,
+    bot,
+    chat_id: int,
+    user_id: int,
+    lang: str,
+    *,
+    first_start: bool = False,
+) -> None:
+    db: Database = application.bot_data["db"]
+    await sync_stream_chat_menu_button(bot, db, user_id)
+    await bot.send_message(
+        chat_id,
         t("start_welcome", lang),
         reply_markup=_menu(lang, user_id),
+    )
+    if not first_start:
+        return
+    sub_id = await _ensure_welcome_marfapr_subscription(
+        application, bot, user_id, lang
+    )
+    if not sub_id:
+        return
+    channel = prem.twitch_channel_login() or "marfapr"
+    await bot.send_message(
+        chat_id,
+        t("start_welcome_demo", lang, channel=channel),
+        reply_markup=welcome_demo_keyboard(lang, sub_id),
+    )
+
+
+async def _send_welcome(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    *,
+    first_start: bool = False,
+) -> int:
+    user_id = update.effective_user.id
+    await _send_welcome_bundle(
+        context.application,
+        context.bot,
+        update.effective_chat.id,
+        user_id,
+        lang,
+        first_start=first_start,
     )
     return ConversationHandler.END
 
@@ -2056,6 +2141,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
+    is_first_start = not db.user_exists(user_id)
     db.upsert_user(user_id)
     _apply_referral_start_arg(db, user_id, context.args)
     lang = db.get_user_locale(user_id)
@@ -2065,12 +2151,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         {
             "has_locale": bool(lang),
             "has_start_arg": bool(context.args),
+            "is_first_start": is_first_start,
         },
     )
     if not lang:
         context.user_data["after_lang"] = "welcome"
+        context.user_data["first_welcome"] = is_first_start
         return await _prompt_language(update)
-    return await _send_welcome(update, context, lang)
+    return await _send_welcome(update, context, lang, first_start=is_first_start)
 
 
 def _apply_referral_start_arg(db: Database, user_id: int, args: list[str] | None) -> None:
@@ -2101,6 +2189,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     await query.edit_message_text(t("lang_set", lang))
     after = context.user_data.pop("after_lang", "welcome")
+    first_start = context.user_data.pop("first_welcome", False)
     await sync_stream_chat_menu_button(context.bot, db, query.from_user.id)
     if after == "help":
         await context.bot.send_message(
@@ -2116,10 +2205,13 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             reply_markup=_settings_kb(lang, db, query.from_user.id),
         )
         return ConversationHandler.END
-    await context.bot.send_message(
+    await _send_welcome_bundle(
+        context.application,
+        context.bot,
         query.from_user.id,
-        t("start_welcome", lang),
-        reply_markup=_menu(lang, query.from_user.id),
+        query.from_user.id,
+        lang,
+        first_start=first_start,
     )
     return ConversationHandler.END
 
@@ -7848,6 +7940,25 @@ async def on_delete_cart_restore_go(
     )
 
 
+async def on_welcome_demo_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    sub_id = int(query.data.split(":", 1)[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    to_cart = _deleted_subscriptions_cart_enabled(db, user_id)
+    if not db.delete_subscription(sub_id, user_id, to_cart=to_cart):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    analytics.capture(user_id, "welcome_demo_subscription_deleted", {"sub_id": sub_id})
+    await query.edit_message_text(t("welcome_demo_deleted", lang))
+
+
 async def on_delivery_fail_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -11499,6 +11610,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_edit_type, pattern=r"^edit_type:\w+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
+        CallbackQueryHandler(on_welcome_demo_delete, pattern=r"^welcome_del:\d+$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_delivery_fail_delete, pattern=r"^delivery_fail_del:\d+$"),
         group=0,
     )
@@ -11996,6 +12111,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             wake_stuck_on_menu_callback,
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
+                r"welcome_del:\d+$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_clear$|delete_type:|"
                 r"delete_cart_open$|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"

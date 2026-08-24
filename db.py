@@ -787,6 +787,8 @@ class Database(Protocol):
 
     def upsert_user(self, user_id: int) -> None: ...
 
+    def user_exists(self, user_id: int) -> bool: ...
+
     def count_new_users_since(self, since: datetime) -> int: ...
 
     def count_stars_payers_since(self, since: datetime) -> int: ...
@@ -2076,6 +2078,14 @@ class SqliteDatabase:
                 """,
                 (user_id,),
             )
+
+    def user_exists(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return row is not None
 
     def count_new_users_since(self, since: datetime) -> int:
         since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
@@ -4861,6 +4871,16 @@ class PostgresDatabase:
                 """,
                 (user_id,),
             )
+
+    def user_exists(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT 1 FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        return row is not None
 
     def count_new_users_since(self, since: datetime) -> int:
         since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)

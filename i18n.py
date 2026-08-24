@@ -50,6 +50,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium": "⭐ Premium",
         "btn_premium_pay": "Pay with Stars",
         "btn_premium_trial": "Trial period",
+        "btn_welcome_demo_edit": "Go to alert",
+        "btn_welcome_demo_delete": "Delete subscription",
         "btn_premium_trial_confirm": "Activate 7-day trial",
         "btn_premium_month": "Monthly — {stars} Stars",
         "btn_premium_year": "Yearly — {stars} Stars",
@@ -430,6 +432,11 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Commands help: /help\n"
             "Tap New subscription to add a new subscription."
         ),
+        "start_welcome_demo": (
+            "A demo alert for {channel} was added so you can see how the bot works "
+            "without any setup."
+        ),
+        "welcome_demo_deleted": "Demo subscription removed.",
         "new_sub_prompt": "Enter a Twitch channel: link, mobile link, or username.",
         "alert_type_prompt": (
             "Here you can set up different Twitch stream alerts. "
@@ -1366,6 +1373,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "btn_premium": "⭐ Премиум",
         "btn_premium_pay": "Оплатить подписку",
         "btn_premium_trial": "Пробный период",
+        "btn_welcome_demo_edit": "Перейти к оповещению",
+        "btn_welcome_demo_delete": "Удалить подписку",
         "btn_premium_trial_confirm": "Активировать триал на 7 дней",
         "btn_premium_month": "Подписка на месяц — {stars} ⭐",
         "btn_premium_year": "Подписка на год — {stars} ⭐",
@@ -1751,6 +1760,11 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Справка по командам: /help\n"
             "Нажмите кнопку Новая подписка, чтобы добавить новую подписку."
         ),
+        "start_welcome_demo": (
+            "Вам была добавлена демо подписка на канал {channel}, "
+            "чтобы вы могли без настройки увидеть, как работает бот."
+        ),
+        "welcome_demo_deleted": "Демо подписка удалена.",
         "new_sub_prompt": "Укажите канал Twitch: ссылку, мобильную ссылку или username.",
         "alert_type_prompt": (
             "Здесь можно настроить различные оповещения о стримах на Twitch. "
@@ -3281,6 +3295,25 @@ def language_keyboard() -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton("English", callback_data="lang:en")],
             [InlineKeyboardButton("Русский", callback_data="lang:ru")],
+        ]
+    )
+
+
+def welcome_demo_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    btn("welcome_demo_edit", lang),
+                    callback_data=f"edit:{sub_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("welcome_demo_delete", lang),
+                    callback_data=f"welcome_del:{sub_id}",
+                )
+            ],
         ]
     )
 

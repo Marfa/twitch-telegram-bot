@@ -774,6 +774,9 @@ def main() -> None:
         assert btn("sync_subs", loc)
         assert btn("language", loc)
         assert tr("start_welcome", loc)
+        assert tr("start_welcome_demo", loc, channel="marfapr")
+        assert btn("welcome_demo_edit", loc)
+        assert btn("welcome_demo_delete", loc)
         assert tr("watch_cats_prompt", loc, max=5)
         assert tr("watch_cats_lucky", loc)
         assert tr("watch_lucky_searching", loc)
@@ -925,9 +928,17 @@ def main() -> None:
             else:
                 _os.environ[k] = v
 
+    from i18n import welcome_demo_keyboard
+
+    kb = welcome_demo_keyboard("ru", 42)
+    assert kb.inline_keyboard[0][0].callback_data == "edit:42"
+    assert kb.inline_keyboard[1][0].callback_data == "welcome_del:42"
+
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "test.db")
+        assert not db.user_exists(1)
         db.upsert_user(1)
+        assert db.user_exists(1)
         assert db.get_user_locale(1) is None
         db.set_user_locale(1, "en")
         assert db.get_user_locale(1) == "en"
