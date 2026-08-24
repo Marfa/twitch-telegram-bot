@@ -391,6 +391,34 @@ class DeletedSubscriptionCartItem:
     deleted_at: str
     twitch_username: str
     twitch_user_id: str
+    alert_type: str = "live"
+
+
+def alert_type_from_payload(payload: dict[str, Any]) -> str:
+    if payload.get("notify_on_category_change"):
+        return "category"
+    if payload.get("notify_on_end"):
+        return "end"
+    reminder = int(payload.get("schedule_reminder_minutes") or 0)
+    if reminder > 0 and not payload.get("notify_on_live"):
+        return "upcoming"
+    return "live"
+
+
+def _cart_item_from_row(row_id: int, deleted_at: object, subscription_json: object) -> DeletedSubscriptionCartItem:
+    try:
+        payload = json.loads(subscription_json or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return DeletedSubscriptionCartItem(
+        cart_id=int(row_id),
+        deleted_at=str(deleted_at),
+        twitch_username=str(payload.get("twitch_username") or ""),
+        twitch_user_id=str(payload.get("twitch_user_id") or ""),
+        alert_type=alert_type_from_payload(payload),
+    )
 
 
 def is_category_watch_sub(sub: Subscription) -> bool:
@@ -792,6 +820,8 @@ class Database(Protocol):
     def count_new_users_since(self, since: datetime) -> int: ...
 
     def count_stars_payers_since(self, since: datetime) -> int: ...
+
+    def list_active_trial_users(self, *, now_unix: int | None = None) -> list[tuple[int, int]]: ...
 
     def set_referred_by(self, user_id: int, referrer_id: int) -> bool: ...
 
@@ -1760,22 +1790,10 @@ class SqliteDatabase:
                 """,
                 (owner_id, int(bool(is_demo)), effective_cutoff_iso, limit),
             ).fetchall()
-        out: list[DeletedSubscriptionCartItem] = []
-        for r in rows:
-            # We only need a small subset in the UI.
-            try:
-                payload = json.loads(r["subscription_json"] or "{}")
-            except Exception:
-                payload = {}
-            out.append(
-                DeletedSubscriptionCartItem(
-                    cart_id=int(r["id"]),
-                    deleted_at=str(r["deleted_at"]),
-                    twitch_username=str(payload.get("twitch_username") or ""),
-                    twitch_user_id=str(payload.get("twitch_user_id") or ""),
-                )
-            )
-        return out
+        return [
+            _cart_item_from_row(int(r["id"]), r["deleted_at"], r["subscription_json"])
+            for r in rows
+        ]
 
     def restore_deleted_subscriptions(
         self,
@@ -2110,6 +2128,20 @@ class SqliteDatabase:
                 (since_s,),
             ).fetchone()
         return int(row["n"]) if row else 0
+
+    def list_active_trial_users(self, *, now_unix: int | None = None) -> list[tuple[int, int]]:
+        now = int(now_unix if now_unix is not None else datetime.now(timezone.utc).timestamp())
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id, COALESCE(premium_trial_until, 0) AS premium_trial_until
+                FROM users
+                WHERE COALESCE(premium_trial_until, 0) > ?
+                ORDER BY premium_trial_until, user_id
+                """,
+                (now,),
+            ).fetchall()
+        return [(int(r["user_id"]), int(r["premium_trial_until"])) for r in rows]
 
     def set_referred_by(self, user_id: int, referrer_id: int) -> bool:
         if user_id == referrer_id or referrer_id <= 0:
@@ -4574,21 +4606,10 @@ class PostgresDatabase:
                 (owner_id, bool(is_demo), effective_cutoff, int(limit)),
             ).fetchall()
 
-        out: list[DeletedSubscriptionCartItem] = []
-        for r in rows:
-            try:
-                payload = json.loads(r.get("subscription_json") or "{}")
-            except Exception:
-                payload = {}
-            out.append(
-                DeletedSubscriptionCartItem(
-                    cart_id=int(r["id"]),
-                    deleted_at=str(r.get("deleted_at")),
-                    twitch_username=str(payload.get("twitch_username") or ""),
-                    twitch_user_id=str(payload.get("twitch_user_id") or ""),
-                )
-            )
-        return out
+        return [
+            _cart_item_from_row(int(r["id"]), r.get("deleted_at"), r.get("subscription_json"))
+            for r in rows
+        ]
 
     def restore_deleted_subscriptions(
         self,
@@ -4907,6 +4928,22 @@ class PostgresDatabase:
             )
             row = cur.fetchone()
         return int(row["n"]) if row else 0
+
+    def list_active_trial_users(self, *, now_unix: int | None = None) -> list[tuple[int, int]]:
+        now = int(now_unix if now_unix is not None else datetime.now(timezone.utc).timestamp())
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id, COALESCE(premium_trial_until, 0) AS premium_trial_until
+                FROM users
+                WHERE COALESCE(premium_trial_until, 0) > %s
+                ORDER BY premium_trial_until, user_id
+                """,
+                (now,),
+            )
+            rows = cur.fetchall()
+        return [(int(r["user_id"]), int(r["premium_trial_until"])) for r in rows]
 
     def set_referred_by(self, user_id: int, referrer_id: int) -> bool:
         if user_id == referrer_id or referrer_id <= 0:

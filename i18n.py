@@ -888,7 +888,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delivery_fail_delete_btn": "🗑 Delete notification",
         "delete_fail_yes_note": "Notify on delete failure: yes",
         "delete_fail_no_note": "Notify on delete failure: no",
-        "weekly_new_users": "New users: {count}\nPaid users (Stars): {paid}",
+        "weekly_new_users": (
+            "New users: {count}\n"
+            "Paid users (Stars): {paid}\n"
+            "Active trials: {trials}{trial_list}"
+        ),
+        "weekly_trial_line": "\n• {user_id} — until {until}",
         "posthog_issue_created": "🔴 New Issue",
         "posthog_issue_reopened": "🔄 Issue reopened",
         "posthog_report_created": "📋 New Inbox Report",
@@ -1121,6 +1126,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Deleted subscriptions cart\n"
             "(last {days} day(s)). Select items to restore."
         ),
+        "cart_type_pick": "Choose an alert type to restore:",
         "cart_empty": "No deleted subscriptions in the last {days} day(s).",
         "cart_restore_go": "♻️ Restore selected ({count})",
         "cart_restore_none": "Nothing selected.",
@@ -2330,7 +2336,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "delivery_fail_delete_btn": "🗑 Удалить оповещение",
         "delete_fail_yes_note": "Сообщать о проблемах удаления: да",
         "delete_fail_no_note": "Сообщать о проблемах удаления: нет",
-        "weekly_new_users": "Новых пользователей: {count}\nПлатных (Stars): {paid}",
+        "weekly_new_users": (
+            "Новых пользователей: {count}\n"
+            "Платных (Stars): {paid}\n"
+            "Активных триалов: {trials}{trial_list}"
+        ),
+        "weekly_trial_line": "\n• {user_id} — до {until}",
         "posthog_issue_created": "🔴 Новый Issue",
         "posthog_issue_reopened": "🔄 Issue снова открыт",
         "posthog_report_created": "📋 Новый Report",
@@ -2567,6 +2578,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "Корзина удалённых подписок\n"
             "(за последние {days} дней). Отметьте для восстановления."
         ),
+        "cart_type_pick": "Выберите тип оповещения для восстановления:",
         "cart_empty": "В корзине нет удалённых подписок за последние {days} дней.",
         "cart_restore_go": "♻️ Восстановить выбранные ({count})",
         "cart_restore_none": "Ничего не выбрано.",

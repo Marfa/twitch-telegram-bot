@@ -7750,6 +7750,31 @@ async def on_delete_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+def _cart_present_types(items: list) -> list[str]:
+    present = {getattr(item, "alert_type", None) or "live" for item in items}
+    return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind in present]
+
+
+def _cart_items_of_type(items: list, kind: str | None) -> list:
+    if kind not in _EDIT_ALERT_TYPE_ORDER:
+        return list(items)
+    return [
+        item
+        for item in items
+        if (getattr(item, "alert_type", None) or "live") == kind
+    ]
+
+
+def _delete_cart_view(items: list, kind: str | None) -> tuple[list[str], str | None, list]:
+    types = _cart_present_types(items)
+    if kind not in types:
+        kind = None
+    if kind is None and len(types) == 1:
+        kind = types[0]
+    view = _cart_items_of_type(items, kind) if kind else list(items)
+    return types, kind, view
+
+
 def _delete_cart_keyboard(
     lang: str,
     items: list,
@@ -7790,6 +7815,24 @@ def _delete_cart_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def _store_delete_cart_state(
+    context: ContextTypes.DEFAULT_TYPE,
+    items: list,
+    *,
+    days: int,
+    kind: str | None,
+    selected: set[int] | None = None,
+) -> tuple[list[str], str | None, list]:
+    types, kind, view = _delete_cart_view(items, kind)
+    context.user_data["delete_cart_days"] = days
+    context.user_data["delete_cart_all_items"] = items
+    context.user_data["delete_cart_items"] = view
+    context.user_data["delete_cart_type"] = kind
+    context.user_data["delete_cart_order"] = [int(i.cart_id) for i in view]
+    context.user_data["delete_cart_selected"] = set(selected or ())
+    return types, kind, view
+
+
 async def on_delete_cart_open(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -7803,19 +7846,59 @@ async def on_delete_cart_open(update: Update, context: ContextTypes.DEFAULT_TYPE
     items = db.list_deleted_subscriptions(
         user_id, days=days, is_demo=is_demo, limit=100
     )
+    await _show_delete_cart(
+        query, context, lang, items, days=days, kind=None, selected=set()
+    )
 
-    context.user_data["delete_cart_selected"] = set()
-    context.user_data["delete_cart_days"] = days
-    context.user_data["delete_cart_items"] = items
-    context.user_data["delete_cart_order"] = [int(i.cart_id) for i in items]
 
-    text = t("cart_prompt", lang, days=days)
+async def _show_delete_cart(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    items: list,
+    *,
+    days: int,
+    kind: str | None,
+    selected: set[int],
+    prefix: str = "",
+) -> None:
+    types, kind, view = _store_delete_cart_state(
+        context, items, days=days, kind=kind, selected=selected
+    )
     if not items:
         text = t("cart_empty", lang, days=days)
+        markup = None
+    elif kind is None and len(types) > 1:
+        text = t("cart_type_pick", lang)
+        markup = _alert_type_pick_keyboard(lang, types, "delete_cart_type")
+    else:
+        text = t("cart_prompt", lang, days=days)
+        if not view:
+            text = t("cart_empty", lang, days=days)
+        markup = _delete_cart_keyboard(lang, view, selected)
+    if prefix:
+        text = prefix + text
+    await query.edit_message_text(text, reply_markup=markup)
 
-    await query.edit_message_text(
-        text,
-        reply_markup=_delete_cart_keyboard(lang, items, set()),
+
+async def on_delete_cart_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        return
+    kind = (query.data or "").split(":", 1)[-1]
+    if kind not in _EDIT_ALERT_TYPE_ORDER:
+        return
+    days = int(context.user_data.get("delete_cart_days") or 10)
+    items = context.user_data.get("delete_cart_all_items")
+    if not items:
+        is_demo = demo_mode.is_active(user_id)
+        items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
+    await _show_delete_cart(
+        query, context, lang, items, days=days, kind=kind, selected=set()
     )
 
 
@@ -7838,11 +7921,14 @@ async def on_delete_cart_sel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     items = context.user_data.get("delete_cart_items") or []
     days = int(context.user_data.get("delete_cart_days") or 10)
     if not items:
-        db: Database = context.application.bot_data["db"]
         is_demo = demo_mode.is_active(user_id)
-        items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
-        context.user_data["delete_cart_items"] = items
-        context.user_data["delete_cart_order"] = [int(i.cart_id) for i in items]
+        all_items = db.list_deleted_subscriptions(
+            user_id, days=days, is_demo=is_demo, limit=100
+        )
+        kind = context.user_data.get("delete_cart_type")
+        _, kind, items = _store_delete_cart_state(
+            context, all_items, days=days, kind=kind, selected=selected
+        )
 
     await query.edit_message_reply_markup(
         reply_markup=_delete_cart_keyboard(lang, items, selected)
@@ -7883,6 +7969,7 @@ async def on_delete_cart_restore_go(
 
     days = int(context.user_data.get("delete_cart_days") or prem.deleted_subscriptions_cart_days(db, user_id))
     is_demo = demo_mode.is_active(user_id)
+    kind = context.user_data.get("delete_cart_type")
 
     remaining = max(0, int(MAX_SUBSCRIPTIONS_PER_OWNER) - len(_subs_for_owner(db, user_id)))
     if remaining <= 0:
@@ -7907,12 +7994,7 @@ async def on_delete_cart_restore_go(
     limit_skipped = max(0, len(selected_in_order) - remaining)
     paused_due_active = max(0, restored - enabled_restored)
 
-    # Re-load cart (restored items disappear from DB cart).
     items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
-    context.user_data["delete_cart_selected"] = set()
-    context.user_data["delete_cart_items"] = items
-    context.user_data["delete_cart_order"] = [int(i.cart_id) for i in items]
-
     if limit_skipped > 0:
         restored_text = t(
             "cart_restored_partial",
@@ -7930,13 +8012,15 @@ async def on_delete_cart_restore_go(
             paused=paused_due_active,
             limit=prem.free_active_limit(),
         )
-    if not items:
-        main_text = t("cart_empty", lang, days=days)
-    else:
-        main_text = t("cart_prompt", lang, days=days)
-    await query.edit_message_text(
-        restored_text + "\n\n" + main_text,
-        reply_markup=_delete_cart_keyboard(lang, items, set()),
+    await _show_delete_cart(
+        query,
+        context,
+        lang,
+        items,
+        days=days,
+        kind=kind,
+        selected=set(),
+        prefix=restored_text + "\n\n",
     )
 
 
@@ -11062,14 +11146,33 @@ async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     since = datetime.now(timezone.utc) - timedelta(days=7)
     count = db.count_new_users_since(since)
     paid = db.count_stars_payers_since(since)
-    if count <= 0 and paid <= 0:
+    trials = db.list_active_trial_users()
+    if count <= 0 and paid <= 0 and not trials:
         return
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        trial_list = "".join(
+            t(
+                "weekly_trial_line",
+                lang,
+                user_id=user_id,
+                until=datetime.fromtimestamp(until, tz=timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M UTC"
+                ),
+            )
+            for user_id, until in trials
+        )
         try:
             await context.bot.send_message(
                 admin_id,
-                t("weekly_new_users", lang, count=count, paid=paid),
+                t(
+                    "weekly_new_users",
+                    lang,
+                    count=count,
+                    paid=paid,
+                    trials=len(trials),
+                    trial_list=trial_list,
+                ),
             )
         except (BadRequest, Forbidden) as exc:
             logger.warning("Cannot send weekly report to admin %s: %s", admin_id, exc)
@@ -11586,6 +11689,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_type, pattern=r"^delete_type:\w+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_delete_cart_open, pattern=r"^delete_cart_open$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_delete_cart_type, pattern=r"^delete_cart_type:\w+$"),
         group=0,
     )
     app.add_handler(
@@ -12114,7 +12221,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"welcome_del:\d+$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_clear$|delete_type:|"
-                r"delete_cart_open$|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
+                r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"

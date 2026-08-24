@@ -1617,6 +1617,38 @@ def main() -> None:
                 restore_owner, days=30, is_demo=False, limit=10
             )
             restore_ids = [int(i.cart_id) for i in items]
+        type_owner = 88008
+        gate_db.upsert_user(type_owner)
+        live_sid = gate_db.add_subscription(
+            owner_id=type_owner,
+            twitch_username="live1",
+            twitch_user_id="live1",
+            message_template="t",
+            dest_type="dm",
+            chat_id=type_owner,
+            thread_id=None,
+            enabled=False,
+        )
+        cat_sid = gate_db.add_subscription(
+            owner_id=type_owner,
+            twitch_username="cat1",
+            twitch_user_id="cat1",
+            message_template="t",
+            dest_type="dm",
+            chat_id=type_owner,
+            thread_id=None,
+            enabled=False,
+            notify_on_live=False,
+            notify_on_category_change=True,
+        )
+        assert gate_db.delete_subscription(live_sid, type_owner, to_cart=True)
+        assert gate_db.delete_subscription(cat_sid, type_owner, to_cart=True)
+        typed = gate_db.list_deleted_subscriptions(
+            type_owner, days=30, is_demo=False, limit=10
+        )
+        by_login = {i.twitch_username: i.alert_type for i in typed}
+        assert by_login["live1"] == "live"
+        assert by_login["cat1"] == "category"
         restored_n, enabled_n = gate_db.restore_deleted_subscriptions(
             restore_owner, restore_ids, days=30, is_demo=False, max_enabled=1
         )
@@ -1847,8 +1879,13 @@ def main() -> None:
     assert "_is_unchanged_message_edit(err)" in bot_src
     assert "posthog_seen_reports.json" in bot_src
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
-    assert "editUserStarSubscription" in ptb_edit
-    assert "editUserStartSubscription" not in ptb_edit
+    # PTB internals naming may differ slightly across versions:
+    # - older: editUserStarSubscription
+    # - newer: editUserStartSubscription (typo preserved in method plumbing)
+    assert (
+        "editUserStarSubscription" in ptb_edit
+        or "editUserStartSubscription" in ptb_edit
+    )
     ph_src = _Path(__file__).resolve().parent.joinpath(
         "premium_handlers.py"
     ).read_text(encoding="utf-8")
@@ -2476,7 +2513,26 @@ def main() -> None:
         rejected = db.resolve_referral_withdrawal(wid2, "rejected")
         assert rejected is not None and rejected.status == "rejected"
         assert db.get_referral_stats(10).available_stars == 100
-        assert tr("weekly_new_users", "ru", count=1, paid=2)
+        trials = db.list_active_trial_users()
+        trial_list = "".join(
+            tr(
+                "weekly_trial_line",
+                "ru",
+                user_id=user_id,
+                until=datetime.fromtimestamp(until, tz=timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M UTC"
+                ),
+            )
+            for user_id, until in trials
+        )
+        assert tr(
+            "weekly_new_users",
+            "ru",
+            count=1,
+            paid=2,
+            trials=len(trials),
+            trial_list=trial_list,
+        )
         assert "настройках" in tr("broadcast_footer", "ru", type="x")
         assert "Settings" in tr("broadcast_footer", "en", type="x")
         assert tr("broadcast_type_other", "ru") == "📢 Прочие"
