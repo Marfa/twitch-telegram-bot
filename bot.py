@@ -11147,7 +11147,7 @@ async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     count = db.count_new_users_since(since)
     paid = db.count_stars_payers_since(since)
     trials = db.list_active_trial_users()
-    if count <= 0 and paid <= 0 and not trials:
+    if count <= 0 and paid <= 0:
         return
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
