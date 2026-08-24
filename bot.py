@@ -10384,7 +10384,20 @@ async def on_sys_sync_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
 
-def _format_stats(stats: BotStats, lang: str) -> str:
+def _format_stats(stats: BotStats, lang: str, *, trials: list[tuple[int, int]] | None = None) -> str:
+    if trials is None:
+        trials = []
+    trial_list = "".join(
+        t(
+            "weekly_trial_line",
+            lang,
+            user_id=user_id,
+            until=datetime.fromtimestamp(until, tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M UTC"
+            ),
+        )
+        for user_id, until in trials
+    )
     return t(
         "bot_stats",
         lang,
@@ -10396,6 +10409,8 @@ def _format_stats(stats: BotStats, lang: str) -> str:
         unique_owners=stats.unique_owners,
         unique_twitch_channels=stats.unique_twitch_channels,
         premium_paid=stats.premium_paid,
+        trials=len(trials),
+        trial_list=trial_list,
         sys_updates=stats.sys_updates,
         sys_availability=stats.sys_availability,
         sys_other=stats.sys_other,
@@ -10413,8 +10428,9 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     stats = db.get_bot_stats()
+    trials = db.list_active_trial_users()
     await update.effective_message.reply_text(
-        _format_stats(stats, lang),
+        _format_stats(stats, lang, trials=trials),
         reply_markup=admin_menu(lang),
     )
 
