@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import random
 import time
 from pathlib import Path
 from typing import Any
@@ -260,6 +261,74 @@ def _profile_image_url(profile: dict[str, Any] | None) -> str:
     return str(profile.get("profile_image_url") or "").strip()
 
 
+def _stream_cards_from_live(
+    live: dict[str, dict[str, Any]],
+    *,
+    by_uid: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    streams: list[dict[str, Any]] = []
+    logins: list[str] = []
+    for uid, stream in live.items():
+        sub = (by_uid or {}).get(str(uid))
+        login = (
+            stream.get("user_login") or (sub.twitch_username if sub else "") or ""
+        ).lower()
+        if login:
+            logins.append(login)
+        streams.append(
+            {
+                "login": login,
+                "display_name": stream.get("user_name")
+                or (sub.twitch_username if sub else login),
+                "title": stream.get("title") or "",
+                "game_name": stream.get("game_name") or "",
+                "viewer_count": int(stream.get("viewer_count") or 0),
+                "twitch_user_id": str(uid),
+            }
+        )
+    profiles = _twitch.get_users_by_login(logins) if logins and _twitch else {}
+    for item in streams:
+        profile = profiles.get(str(item.get("login") or "").lower())
+        item["profile_image_url"] = _profile_image_url(profile)
+    streams.sort(key=lambda s: (-int(s["viewer_count"]), str(s["login"])))
+    return streams
+
+
+_OTHER_PROMO_STREAMS_N = 5
+
+
+def _other_promo_streams(user_id: int, *, sub_logins: set[str]) -> list[dict[str, Any]]:
+    """Up to 5 random live Premium channels not in the user's subscriptions (free users)."""
+    if _twitch is None or _db is None:
+        return []
+    if chat_daily_send_limit(_db, user_id) is None:
+        return []
+    candidates = [
+        login
+        for login in list_promo_channel_logins(_db)
+        if login and login not in sub_logins
+    ]
+    if not candidates:
+        return []
+    try:
+        profiles = _twitch.get_users_by_login(candidates)
+    except Exception:
+        logger.exception("chat other promo resolve failed user=%s", user_id)
+        return []
+    uids = [str(p["id"]) for p in profiles.values() if p.get("id")]
+    if not uids:
+        return []
+    try:
+        live = _twitch.get_live_streams(uids)
+    except Exception:
+        logger.exception("chat other promo live failed user=%s", user_id)
+        return []
+    if not live:
+        return []
+    picked_uids = random.sample(list(live.keys()), min(_OTHER_PROMO_STREAMS_N, len(live)))
+    return _stream_cards_from_live({uid: live[uid] for uid in picked_uids})
+
+
 def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
     user, err, token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
@@ -300,46 +369,27 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
 
     try:
         demo = demo_mode.is_active(user_id)
-        subs = [
+        owner_subs = [
             s
             for s in _db.get_subscriptions_by_owner(user_id)
-            if s.enabled and bool(s.is_demo) == demo and s.twitch_username
+            if bool(s.is_demo) == demo and s.twitch_username
         ]
-        if not subs:
-            return 200, {"ok": True, "streams": [], "subscribed": 0, "live": 0}
-        by_uid = _subscription_uids(subs)
-        if not by_uid:
-            return 200, {"ok": True, "streams": [], "subscribed": 0, "live": 0}
-        live = _twitch.get_live_streams(list(by_uid.keys()))
+        sub_logins = {str(s.twitch_username).lower() for s in owner_subs}
+        subs = [s for s in owner_subs if s.enabled]
         streams: list[dict[str, Any]] = []
-        logins: list[str] = []
-        for uid, stream in live.items():
-            sub = by_uid.get(str(uid))
-            login = (
-                stream.get("user_login") or (sub.twitch_username if sub else "") or ""
-            ).lower()
-            if login:
-                logins.append(login)
-            streams.append(
-                {
-                    "login": login,
-                    "display_name": stream.get("user_name")
-                    or (sub.twitch_username if sub else login),
-                    "title": stream.get("title") or "",
-                    "game_name": stream.get("game_name") or "",
-                    "viewer_count": int(stream.get("viewer_count") or 0),
-                    "twitch_user_id": str(uid),
-                }
-            )
-        profiles = _twitch.get_users_by_login(logins) if logins else {}
-        for item in streams:
-            profile = profiles.get(str(item.get("login") or "").lower())
-            item["profile_image_url"] = _profile_image_url(profile)
-        streams.sort(key=lambda s: (-int(s["viewer_count"]), str(s["login"])))
+        subscribed = 0
+        if subs:
+            by_uid = _subscription_uids(subs)
+            subscribed = len(by_uid)
+            if by_uid:
+                live = _twitch.get_live_streams(list(by_uid.keys()))
+                streams = _stream_cards_from_live(live, by_uid=by_uid)
+        other_streams = _other_promo_streams(user_id, sub_logins=sub_logins)
         return 200, {
             "ok": True,
             "streams": streams,
-            "subscribed": len(by_uid),
+            "other_streams": other_streams,
+            "subscribed": subscribed,
             "live": len(streams),
         }
     except Exception:

@@ -2757,7 +2757,7 @@ def main() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=9' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+    assert '/app/chat/app.js?v=10' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
     from unittest.mock import patch
@@ -2838,6 +2838,64 @@ def main() -> None:
             778, ["stream_chat"], until_unix=int(_t.time()) + 3600, charge_id="chat1"
         )
         assert chat_daily_send_limit(cdb, 778) is None
+
+        import chat_webapp as cw
+
+        cdb.upsert_user(779)
+        ensure_trial_expired(cdb, 779)
+        assert chat_daily_send_limit(cdb, 779) == CHAT_FREE_DAILY_SEND_LIMIT
+        cdb.upsert_premium_channel(
+            twitch_user_id="200",
+            twitch_login="paidstreamer",
+            display_name="Paid Streamer",
+            owner_telegram_id=1,
+            charge_id="pc_test",
+        )
+        cdb.add_subscription(
+            owner_id=779,
+            twitch_username="marfapr",
+            twitch_user_id="100",
+            message_template="x",
+            dest_type="dm",
+            chat_id=779,
+            thread_id=None,
+            enabled=True,
+        )
+
+        class _FakeTwitchOther:
+            def get_users_by_login(self, logins):
+                ids = {"marfapr": "100", "paidstreamer": "200"}
+                return {
+                    login: {"id": ids[login], "login": login, "profile_image_url": ""}
+                    for login in logins
+                    if login in ids
+                }
+
+            def get_live_streams(self, uids):
+                names = {"100": "marfapr", "200": "paidstreamer"}
+                out = {}
+                for uid in uids:
+                    login = names.get(str(uid), f"u{uid}")
+                    out[str(uid)] = {
+                        "user_id": str(uid),
+                        "user_login": login,
+                        "user_name": login,
+                        "title": "live",
+                        "game_name": "Game",
+                        "viewer_count": 42,
+                    }
+                return out
+
+        fake = _FakeTwitchOther()
+        with patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", fake):
+            other = cw._other_promo_streams(779, sub_logins={"marfapr"})
+        assert len(other) == 1
+        assert other[0]["login"] == "paidstreamer"
+        cdb.extend_premium_features(
+            779, ["stream_chat"], until_unix=int(_t.time()) + 3600, charge_id="chat2"
+        )
+        with patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", fake):
+            assert cw._other_promo_streams(779, sub_logins=set()) == []
 
     print("ok")
 

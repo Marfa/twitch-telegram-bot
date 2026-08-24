@@ -45,6 +45,7 @@
       connecting: "Connecting to chat…",
       disconnected: "Chat disconnected. Reconnecting…",
       loading: "Loading…",
+      otherStreamers: "Other streamers",
     },
     ru: {
       live: "Сейчас в эфире",
@@ -80,6 +81,7 @@
       connecting: "Подключение к чату…",
       disconnected: "Чат отключён. Переподключение…",
       loading: "Загрузка…",
+      otherStreamers: "Другие стримеры",
     },
   };
 
@@ -246,6 +248,35 @@
     box.classList.toggle("hidden", n <= 0);
   }
 
+  function appendStreamCard(list, s) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "card";
+    const avatar = document.createElement("img");
+    avatar.className = "card-avatar";
+    avatar.alt = "";
+    avatar.loading = "lazy";
+    avatar.src = s.profile_image_url || "";
+    avatar.addEventListener("error", () => {
+      avatar.removeAttribute("src");
+    });
+    const body = document.createElement("div");
+    body.className = "card-body";
+    body.innerHTML =
+      "<strong>" +
+      escapeHtml(s.display_name || s.login) +
+      "</strong><div class=\"meta\">" +
+      escapeHtml(s.game_name || "") +
+      (s.viewer_count ? " · " + s.viewer_count : "") +
+      "</div><div class=\"meta\">" +
+      escapeHtml(s.title || "") +
+      "</div>";
+    btn.appendChild(avatar);
+    btn.appendChild(body);
+    btn.addEventListener("click", () => openChat(s));
+    list.appendChild(btn);
+  }
+
   function renderOnline(streams, meta) {
     const list = el("online-list");
     list.innerHTML = "";
@@ -273,34 +304,20 @@
       return;
     }
     empty.classList.add("hidden");
-    streams.forEach((s) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "card";
-      const avatar = document.createElement("img");
-      avatar.className = "card-avatar";
-      avatar.alt = "";
-      avatar.loading = "lazy";
-      avatar.src = s.profile_image_url || "";
-      avatar.addEventListener("error", () => {
-        avatar.removeAttribute("src");
-      });
-      const body = document.createElement("div");
-      body.className = "card-body";
-      body.innerHTML =
-        "<strong>" +
-        escapeHtml(s.display_name || s.login) +
-        "</strong><div class=\"meta\">" +
-        escapeHtml(s.game_name || "") +
-        (s.viewer_count ? " · " + s.viewer_count : "") +
-        "</div><div class=\"meta\">" +
-        escapeHtml(s.title || "") +
-        "</div>";
-      btn.appendChild(avatar);
-      btn.appendChild(body);
-      btn.addEventListener("click", () => openChat(s));
-      list.appendChild(btn);
-    });
+    streams.forEach((s) => appendStreamCard(list, s));
+  }
+
+  function renderOtherStreams(streams) {
+    const section = el("other-section");
+    const list = el("other-list");
+    list.innerHTML = "";
+    if (!session || session.unlimited || !streams || !streams.length) {
+      section.classList.add("hidden");
+      return;
+    }
+    section.classList.remove("hidden");
+    el("other-title").textContent = t.otherStreamers;
+    streams.forEach((s) => appendStreamCard(list, s));
   }
 
   function escapeHtml(s) {
@@ -593,8 +610,10 @@
       const online = await api("/app/chat/api/online");
       if (online.body.ok) {
         renderOnline(online.body.streams || [], online.body);
+        renderOtherStreams(online.body.other_streams || []);
       } else {
         renderOnline([], { subscribed: 0, live: 0 });
+        renderOtherStreams([]);
         const hint = el("search-hint");
         hint.classList.remove("hidden");
         hint.textContent = t.loadFail.replace(
