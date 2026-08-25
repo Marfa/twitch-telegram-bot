@@ -5,6 +5,7 @@ __pycache__/
 venv/
 data/
 tmp/
+snapshots/
 *.db
 migration_dump.sql
 migration_vps_status.txt

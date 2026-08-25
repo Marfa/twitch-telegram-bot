@@ -4,19 +4,20 @@ Canonical sources of truth for humans and AI agents. When docs or rules conflict
 
 | Domain | Canonical SoR | Derived / non-authoritative | Notes |
 |---|---|---|---|
-| Runtime behavior | `bot.py`, `db.py`, `twitch.py`, … | — | Deployed from `main` |
-| UI strings (en/ru) | `i18n.py` | `docs/user-flow-map.ru.md` | Update the map when user-facing paths change |
+| Runtime behavior | `bot.py`, `handlers/`, `db/`, `twitch.py`, … | — | Deployed from `main` |
+| UI strings (en/ru) | `locales/*.json` | `i18n.py` loader + keyboards; `docs/user-flow-map.ru.md` | Update the map when user-facing paths change |
 | Premium entitlements | `premium.py` (`FEATURE_IDS`, `purchasable_feature_ids()`, gates) | Premium screens in `premium_handlers.py` | `purchasable_feature_ids()` hides ids still in alpha/beta; `active_subscription_slots()` / `may_enable_subscription()` — active-alert gate |
 | Beta features (opt-in) | `beta/manifest.json` | `beta.py` runtime view | Lifecycle: `.github/workflows/beta-lifecycle.yml` |
 | Beta enrollment state | DB (`beta_enrollments`) | — | Per-user opt-in |
 | Config defaults | `config.py` | — | |
 | Runtime secrets | `.env` (not in git) | `.env.example` | Contract for devs |
-| User / subscription data | DB (`db.py` schema) | — | SQLite local; Postgres on VPS |
+| User / subscription data | DB (`db/` schema) | — | SQLite local; Postgres on VPS |
 | Env contract | `.env.example` | README Quick Start | |
 | Deploy topology | `compose.yml`, `compose.vps.yml` | VPS scripts in `scripts/` | |
 | Onboarding | `README.md`, `README.en.md` | — | Update both when product surface changes |
 | Agent execution hints | `.cursor/rules/*.mdc` | — | Cursor adapter; not runtime authority |
-| Characterization checks | `self_check.py` | — | CI: `.github/workflows/self-check.yml` |
+| Characterization checks | `self_check/` (`python -m self_check`) | — | CI: `.github/workflows/self-check.yml` |
+| Locale strings | `locales/en.json`, `locales/ru.json` | `i18n.py` loader + keyboards | |
 | Static marketing assets | `assets/` | — | |
 | Runtime analytics | PostHog (external) | `analytics.py` | Observations only — not product authority |
 | AI templates («Мне повезёт») | Groq / HF APIs + DB pool | — | Runtime-generated |

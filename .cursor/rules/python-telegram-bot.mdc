@@ -11,19 +11,19 @@ Source: adapted from [awesome-cursorrules](https://github.com/PatrickJS/awesome-
 ## Stack
 
 - Python 3.13, `python-telegram-bot` (async), `requests`, SQLite locally / PostgreSQL via `DATABASE_URL` + `psycopg`
-- Flat modules at repo root (`bot.py`, `db.py`, `config.py`, …) — do not invent a `src/` layout
+- Flat layout at repo root (`bot.py`, `config.py`, …) plus packages `db/`, `handlers/`, `self_check/` — do not invent a `src/` layout
 - Config only from env (`.env` / `.env.example`); never commit secrets
-- Checks: prefer existing `self_check.py` over adding a full pytest tree unless asked
+- Checks: prefer existing `python -m self_check` over adding a full pytest tree unless asked
 
 ## Style
 
 - Match surrounding file: snake_case, early returns, async handlers as `async def`
 - Type hints where the file already uses them; do not mass-annotate untouched code
 - No new dependencies without explicit approval
-- Keep handlers small; reuse helpers already in `bot.py` / `db.py` / `i18n.py`
+- Keep handlers small; reuse helpers in `bot_helpers.py` / `handlers/` / `db/` / `i18n.py`
 
 ## Safety
 
-- Parameterized SQL only (`db.py` patterns); no string-built queries
+- Parameterized SQL only (`db/` patterns); no string-built queries
 - Do not log tokens, OAuth codes, or raw `.env` values
 - Validate Telegram/Twitch user input at trust boundaries

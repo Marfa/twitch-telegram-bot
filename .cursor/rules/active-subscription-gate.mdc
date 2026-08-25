@@ -41,6 +41,6 @@ If the feature touches subscriptions, imports, sync, restore, or bulk enable, **
 
 5. **User notice** — If the user hits a limit (active or total), they get a Telegram message — not silent failure.
 
-6. **self_check** — Non-trivial bulk/enable logic: add or extend a case in [`self_check.py`](self_check.py) with a **free** test user (no `extra_alerts`) proving the 6th subscription stays paused when 5 are active.
+6. **self_check** — Non-trivial bulk/enable logic: add or extend a case in [`self_check/`](self_check/) (`python -m self_check`) with a **free** test user (no `extra_alerts`) proving the 6th subscription stays paused when 5 are active.
 
 7. **i18n** — New user-facing limit/partial-success strings in `i18n.py` (en + ru).
