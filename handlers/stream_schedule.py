@@ -11,15 +11,17 @@ from telegram.error import BadRequest
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import beta as beta_features
-from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang
+from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang, _wizard
 from db import Database
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
     SCHEDULE_TZ_NAME,
+    all_wizard_nav_buttons,
     format_stream_schedule_date,
     format_stream_schedule_prompt_date,
     format_stream_schedule_result,
+    is_menu_button,
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
     stream_schedule_duration_keyboard,
