@@ -32,11 +32,11 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
 | Subscriptions | List, edit all fields, enable/disable, delete; **⏸ Pause notifications** for N days without pausing subscriptions (🧪 beta); **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium) (🧪 beta); **💬 Stream chat** — Mini App with embed/fallback (🧪 beta) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
-| Stream schedule | In **📦 Other**: weekly text wizard or **fix slots for a day** (🧪 beta); publish to Twitch is **Premium** (slot duration, clear old slots — full or selected day only) |
+| Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day** (🧪 beta), **Time zone** (UTC); publish to Twitch is **Premium** |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | 7-day trial; Stars month/year/lifetime; à la carte (advanced mode, 60-day history; cart / stream chat — after betas go public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
+| Premium | 7-day trial (alerts pause + DM notice when it ends); Stars month/year/lifetime; à la carte (advanced mode, 60-day history; cart / stream chat — after betas go public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
-| Admin | Background broadcast with type footer; “bot update” type also refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
+| Admin | Background broadcast with type footer; scheduled sends use MSK (UTC+3) by default, users with a saved UTC offset get local wall-clock time; stats after all UTC waves; “bot update” refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
@@ -156,20 +156,21 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 
 ### Stream schedule
 
-**📅 Create schedule** in **📦 Other** (everyone). Users enrolled in the `schedule-fix-day` beta (🧪 Beta mode) get a choice:
+**📅 Manage schedule** in **📦 Other** (everyone). Users enrolled in the `schedule-fix-day` beta (🧪 Beta mode) get a choice:
 
 | Mode | What it does |
 |---|---|
 | **Create schedule for the week** | Weekly text wizard Monday through Sunday (same as before) |
 | **Fix slots for a day** (🧪 beta) | Pick one day → game → time → publish; only that day's segments are cleared on Twitch |
+| **Time zone** | Set UTC offset (`UTC+3`, `UTC-5`, …); saved for Twitch publishing |
 
-Without beta opt-in, `/schedule` goes straight to the old weekly flow.
+Without beta opt-in, `/schedule` goes straight to the weekly flow (**Time zone** on the weekly confirm screen).
 
 **Weekly wizard:**
 
 1. Description and format example
 2. Confirm “Create the schedule?”
-3. For each day: game/stream title and time (`15:30`)
+3. For each day: game/stream title and time (`15:30`) — in **your** time zone
 4. **No stream planned** — skip the day
 5. From day 2 — **Finish** (not shown on the last day)
 
@@ -184,10 +185,12 @@ Dates and month names follow the user’s language.
 
 Optionally **publish to Twitch** (**Premium**):
 
-1. Slot duration: 1–4 h or “Not sure” (default 2 h)
-2. OAuth / saved token with `channel:manage:schedule`
-3. Existing schedule segments are cleared before creating new ones (full clear for weekly mode; selected day only for "Fix slots for a day")
-4. Segments are one-off (Partner/Affiliate) or weekly recurring (fallback)
+1. Confirm “Publish schedule on Twitch?”
+2. If no time zone is saved yet — enter UTC (example: New York `UTC-5`)
+3. Slot duration: 1–4 h or “Not sure” (default 2 h)
+4. OAuth / saved token with `channel:manage:schedule`
+5. Existing segments are cleared before creating new ones (full clear for weekly mode; selected day only for "Fix slots for a day")
+6. Segments are one-off (Partner/Affiliate) or weekly recurring (fallback); Helix gets the chosen UTC offset
 
 ### Deleted subscriptions cart
 
@@ -224,7 +227,7 @@ Without beta opt-in the button is hidden.
 | `/start` | Main menu |
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
-| `/schedule` | Create schedule |
+| `/schedule` | Manage schedule |
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
@@ -233,7 +236,7 @@ Without beta opt-in the button is hidden.
 | 📜 Alert history | DM: 7 days free / 60 days Premium |
 | 📦 Other | Whisper alerts, schedule, what to watch |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
-| ↳ 📅 Create schedule | Weekly text; Twitch sync — Premium |
+| ↳ 📅 Manage schedule | Weekly text, time zone; Twitch sync — Premium |
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ⚙️ Settings | Premium, sync, ignored words, advanced mode, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
@@ -243,7 +246,7 @@ Without beta opt-in the button is hidden.
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
 | ↳ 🌐 Language | Russian / English |
 | ⚙️ Admin | Broadcast, stats, withdrawals, demo mode (`ADMIN_USER_IDS` only) |
-| ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, or “Other”, scheduled send; footer with type and how to disable in Settings |
+| ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, or “Other”; scheduled send (MSK default, per-user UTC offset when set); final stats after all UTC waves; footer with type and how to disable in Settings |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
 | ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium; same snapshot sent daily to PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Demo mode | Start from Admin: free-user menu without Premium, demo subscriptions; **Admin is hidden**, «Demo mode» stays on the main menu — press again to exit and wipe all demo data |
@@ -354,7 +357,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `handlers/` | Domain handlers: wizard, subscriptions, watch, broadcast, schedule, settings, … |
 | `bot_helpers.py` | Shared UI helpers (menu, wizard, admin, DM) |
 | `db/` | SQLite or PostgreSQL, `lucky_templates` pool, watch filters, referrals |
-| `self_check/` | Characterization checks (`python -m self_check`) |
+| `self_check/` | Characterization checks + handler smoke (`python -m self_check`; CI: ruff F821) |
 | `analytics.py` | PostHog: usage events, errors, WARNING+ Logs, daily `daily_bot_stats` |
 | `locales/` + `i18n.py` | Strings (ru/en) and keyboards |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |

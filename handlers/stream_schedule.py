@@ -482,11 +482,6 @@ async def _finish_stream_schedule(
             user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
         return ConversationHandler.END
-    db: Database = context.application.bot_data["db"]
-    if db.get_schedule_utc_offset_minutes(user_id) is None:
-        return await _prompt_schedule_tz(
-            update, context, lang, resume="publish_prompt"
-        )
     return await _prompt_publish_on_twitch(update, context, lang)
 
 
