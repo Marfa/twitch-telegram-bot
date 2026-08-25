@@ -1724,7 +1724,7 @@ async def _parse_dest_input(
         try:
             chat_id, thread_id = await _resolve_from_topic_link(bot, topic)
             return chat_id, thread_id, None
-        except BadRequest:
+        except (BadRequest, Forbidden):
             return None, None, t("group_not_found", lang)
 
     fwd_chat, fwd_thread = _extract_forward_chat(message)
