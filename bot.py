@@ -185,6 +185,7 @@ from handlers.alert_history import (
     show_alert_history,
 )
 from handlers.monitoring import (
+    TWITCH_STATUS_HOST,
     TWITCH_STATUS_PAGE_URL,
     _format_posthog_status_message,
     _format_twitch_status_message,

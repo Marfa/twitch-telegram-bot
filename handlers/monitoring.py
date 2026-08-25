@@ -20,7 +20,8 @@ from twitch import fetch_twitch_status_summary, twitch_status_fingerprint
 
 logger = logging.getLogger(__name__)
 
-TWITCH_STATUS_PAGE_URL = "https://status.twitch.com/"
+TWITCH_STATUS_HOST = "status.twitch.com"
+TWITCH_STATUS_PAGE_URL = f"https://{TWITCH_STATUS_HOST}/"
 
 _TWITCH_INDICATOR_KEYS = {
     "none": "twitch_indicator_none",
