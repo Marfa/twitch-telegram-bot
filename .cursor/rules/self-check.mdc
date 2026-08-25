@@ -12,6 +12,8 @@ Do not add a `tests/` tree or `unittest`/`pytest` scaffold unless the user expli
 
 - `python -m self_check` — characterization and regression checks
 - `self_check/checks_handler_smoke.py` — handler entrypoints with mocks (post-split NameErrors, Forbidden soft-fail)
+- `self_check/checks_flow_nav.py` — Cancel/Back/menu on submenu keyboards and wizard screens
+- `self_check/checks_callback_wiring.py` — Level C: menu `_btn_filter` keys and inline `callback_data` vs `bot.py` patterns
 
 ## Style (borrow from unittest.mdc, adapted)
 
@@ -29,3 +31,32 @@ Do not add a `tests/` tree or `unittest`/`pytest` scaffold unless the user expli
 
 - `ruff check --select F821` in `.github/workflows/self-check.yml` catches undefined names
 - Run `python -m self_check` locally before push when touching handlers, premium, or db entitlement
+
+## Flow-nav maintenance checklist
+
+Map ([`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md)) = human checklist; CI runs only what is coded in `checks_flow_nav.py`.
+
+**When to add or update** (`flow-nav-scenarios.mdc` — ask user first):
+
+| Trigger | Action |
+|---------|--------|
+| New submenu / wizard screen / keyboard in `i18n.py` | Static row in `_check_*_keyboards` and/or `_scenario_*` |
+| Bug: user stuck without Cancel/Back/menu | Scenario for that handler + UX fix if needed |
+| Prompt text only, same buttons | No test change |
+| UX PR | Update map § + README if needed; `python -m self_check` green |
+
+**Before push (UX-touching PR):**
+
+1. `docs/user-flow-map.ru.md` updated if paths changed?
+2. User asked about `checks_flow_nav` scenario for §N ([`flow-nav-scenarios.mdc`](flow-nav-scenarios.mdc))?
+3. `python -m self_check` passes?
+
+**Priority for new scenarios:** (1) section touched in PR, (2) multi-step wizards §2 §5 §11, (3) rest on demand.
+
+**Not covered yet (add when those flows change):** beta mode screen, deep §11 partner/referral wizards, Telethon E2E.
+
+## Files
+
+- `self_check/flow_nav.py` — `markup_has_escape_hatch`, `turn_has_escape_hatch`
+- `self_check/checks_flow_nav.py` — static keyboard audit + `_scenario_*`
+- `self_check/checks_callback_wiring.py` — `_keyboard_samples()` + `_EXTRA_CALLBACKS`; extend when adding keyboards/callbacks

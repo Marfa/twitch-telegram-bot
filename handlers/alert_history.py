@@ -11,7 +11,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 import premium as prem
-from bot_helpers import _user_lang
+from bot_helpers import _menu, _user_lang
 from db import AlertHistoryEntry, Database
 from i18n import SCHEDULE_TZ, btn, format_stream_schedule_prompt_date, t
 from twitch import TwitchClient
@@ -220,9 +220,15 @@ def _build_alert_history_chunks(
     return chunks
 
 
+def _alert_history_menu_row(lang: str) -> list[InlineKeyboardButton]:
+    return [
+        InlineKeyboardButton(btn("back", lang), callback_data="alert_history:menu")
+    ]
+
+
 def _alert_history_nav_keyboard(
     lang: str, page: int, total: int, *, show_more: bool
-) -> InlineKeyboardMarkup | None:
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if total > 1:
         nav: list[InlineKeyboardButton] = []
@@ -256,7 +262,8 @@ def _alert_history_nav_keyboard(
                 )
             ]
         )
-    return InlineKeyboardMarkup(rows) if rows else None
+    rows.append(_alert_history_menu_row(lang))
+    return InlineKeyboardMarkup(rows)
 
 
 async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -275,23 +282,20 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _fill_alert_history_vods(twitch, db, items)
 
     if not items:
-        more_kb = (
-            None
-            if deep
-            else InlineKeyboardMarkup(
+        empty_rows: list[list[InlineKeyboardButton]] = []
+        if not deep:
+            empty_rows.append(
                 [
-                    [
-                        InlineKeyboardButton(
-                            btn("alert_history_more", lang),
-                            callback_data="alert_history:more",
-                        )
-                    ]
+                    InlineKeyboardButton(
+                        btn("alert_history_more", lang),
+                        callback_data="alert_history:more",
+                    )
                 ]
             )
-        )
+        empty_rows.append(_alert_history_menu_row(lang))
         await update.effective_message.reply_text(
             t("alert_history_empty", lang),
-            reply_markup=more_kb,
+            reply_markup=InlineKeyboardMarkup(empty_rows),
             disable_web_page_preview=True,
         )
         return
@@ -371,4 +375,22 @@ async def on_alert_history_more(
     from premium_handlers import send_premium_screen
 
     await send_premium_screen(context.bot, user_id, lang, db)
+
+
+async def on_alert_history_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    context.user_data.pop("alert_history_pages", None)
+    context.user_data.pop("alert_history_deep", None)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except BadRequest:
+        pass
+    await context.bot.send_message(
+        user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+    )
 

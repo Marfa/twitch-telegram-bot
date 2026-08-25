@@ -436,6 +436,7 @@ async def _prompt_schedule_tz(
             await context.bot.send_message(user_id, text)
     else:
         await context.bot.send_message(user_id, text)
+    await _pulse_wizard_keyboard(context.bot, user_id, lang, back=False)
     return STREAM_SCHEDULE_TZ
 
 

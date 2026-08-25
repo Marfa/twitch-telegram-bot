@@ -200,7 +200,7 @@ def check_handlers() -> None:
         for b in row
         if b.callback_data
     }
-    assert aud_cb == {"admin_audience:ids", "admin_audience:all"}
+    assert aud_cb == {"admin_audience:ids", "admin_audience:all", "admin_audience:cancel"}
     assert tr("broadcast_audience_ids", "ru") == "Указать ID"
     assert tr("broadcast_audience_all", "ru") == "Разослать всем"
     owned_kb = premium_owned_keyboard(
@@ -833,7 +833,13 @@ def check_handlers() -> None:
             for row in nav_free_one.inline_keyboard
             for b in row
         )
-        assert _alert_history_nav_keyboard("ru", 0, 1, show_more=False) is None
+        nav_premium_one = _alert_history_nav_keyboard("ru", 0, 1, show_more=False)
+        assert nav_premium_one is not None
+        assert any(
+            b.callback_data == "alert_history:menu"
+            for row in nav_premium_one.inline_keyboard
+            for b in row
+        )
         fat_items = [
             AlertHistoryEntry(
                 id=i,

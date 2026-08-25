@@ -542,13 +542,20 @@ def admin_wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
     return wizard_menu(lang, back=back)
 
 
-def language_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("English", callback_data="lang:en")],
-            [InlineKeyboardButton("Русский", callback_data="lang:ru")],
-        ]
-    )
+def language_keyboard(lang: str | None = None) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("English", callback_data="lang:en")],
+        [InlineKeyboardButton("Русский", callback_data="lang:ru")],
+    ]
+    if lang:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="lang:cancel"
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def welcome_demo_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
@@ -1113,6 +1120,11 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
                     callback_data="admin_type:other",
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="admin_type:cancel"
+                )
+            ],
         ]
     )
 
@@ -1130,6 +1142,11 @@ def admin_other_audience_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     t("broadcast_audience_all", lang),
                     callback_data="admin_audience:all",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="admin_audience:cancel"
                 )
             ],
         ]
@@ -1259,6 +1276,11 @@ def stream_schedule_mode_keyboard(lang: str) -> InlineKeyboardMarkup:
                     callback_data="stream_sched:tz:mode",
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
+                )
+            ],
         ]
     )
 
@@ -1287,6 +1309,11 @@ def stream_schedule_duration_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     t("stream_schedule_duration_unsure", lang),
                     callback_data="stream_sched:duration:0",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
                 )
             ],
         ]

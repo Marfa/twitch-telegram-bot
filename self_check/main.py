@@ -39,6 +39,11 @@ def main() -> None:
     check_db_premium()
     check_handlers()
     check_handler_smoke()
+    from .checks_callback_wiring import check_callback_wiring
+    from .checks_flow_nav import check_flow_nav
+
+    check_flow_nav()
+    check_callback_wiring()
     print("ok")
 
 

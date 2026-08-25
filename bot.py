@@ -179,6 +179,7 @@ from handlers.alert_history import (
     _twitch_vod_url,
     _vod_id_from_videos,
     _vod_offset_seconds,
+    on_alert_history_menu,
     on_alert_history_more,
     on_alert_history_noop,
     on_alert_history_page,
@@ -586,6 +587,7 @@ from handlers.subscriptions import (
     start_edit_template,
     start_pause_notifications,
     start_twitch_import,
+    cancel_twitch_import,
     sync_twitch_follows,
     receive_edit_ignore_keywords,
     receive_edit_ignore_keywords_skip,
@@ -1636,6 +1638,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(cancel_twitch_import, pattern=r"^import_oauth:cancel$"),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("admin"), open_admin_menu),
         group=0,
     )
@@ -1706,6 +1712,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_alert_history_more, pattern=r"^alert_history:more$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_alert_history_menu, pattern=r"^alert_history:menu$"),
         group=0,
     )
     app.add_handler(
@@ -1923,7 +1933,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(start_watch_change, pattern=r"^watch:change$"),
         ],
         states={
-            LANG_SELECT: [CallbackQueryHandler(receive_language, pattern=r"^lang:")],
+            LANG_SELECT: [
+                CallbackQueryHandler(cancel, pattern=r"^lang:cancel$"),
+                CallbackQueryHandler(receive_language, pattern=r"^lang:(en|ru)$"),
+            ],
             ALERT_TYPE: [
                 _wiz_cancel,
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
@@ -2125,11 +2138,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             ADMIN_MSG_TYPE: [
                 _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^admin_type:cancel$"),
                 CallbackQueryHandler(admin_select_type, pattern=r"^admin_type:"),
             ],
             ADMIN_MSG_AUDIENCE: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(cancel, pattern=r"^admin_audience:cancel$"),
                 CallbackQueryHandler(admin_audience_callback, pattern=r"^admin_audience:"),
             ],
             ADMIN_MSG_IDS: [
@@ -2149,6 +2164,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             STREAM_SCHEDULE_MODE: [
                 _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
                 CallbackQueryHandler(
                     stream_schedule_mode_callback, pattern=r"^stream_sched:mode:"
                 ),

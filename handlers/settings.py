@@ -140,7 +140,7 @@ async def start_language_change(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["after_lang"] = "settings"
     await update.effective_message.reply_text(
         t("lang_pick", lang),
-        reply_markup=language_keyboard(),
+        reply_markup=language_keyboard(lang),
     )
     return _lang_select_state()
 

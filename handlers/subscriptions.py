@@ -605,8 +605,29 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.effective_message.reply_text(
         prompt,
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(t("import_oauth_button", lang), url=url)]]
+            [
+                [InlineKeyboardButton(t("import_oauth_button", lang), url=url)],
+                [
+                    InlineKeyboardButton(
+                        btn("wizard_cancel", lang), callback_data="import_oauth:cancel"
+                    )
+                ],
+            ]
         ),
+    )
+
+
+async def cancel_twitch_import(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    await query.edit_message_text(t("cancelled", lang))
+    await context.bot.send_message(
+        user_id, t("menu_subs", lang), reply_markup=_subs_kb(lang, db, user_id)
     )
 
 

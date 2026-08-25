@@ -1,0 +1,45 @@
+---
+description: Ask user about checks_flow_nav scenario when user-facing screens change
+globs: bot.py,i18n.py,handlers/**/*.py,docs/user-flow-map.ru.md,self_check/checks_flow_nav.py
+alwaysApply: false
+---
+
+# Flow-nav scenarios (Cancel / Back / menu)
+
+Invariant: every wizard/submenu screen exposes **Отменить**, **« Назад**, or **menu Reply** (see `self_check/flow_nav.py`).
+
+Map: [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) — backlog by §; not machine-readable.
+
+## When this rule applies
+
+New or changed **navigable UX**: screens, Reply/Inline keyboards, ConversationHandler steps, menu entries (`i18n.py`, `bot.py`, `handlers/`).
+
+Skip: text-only prompt changes, internal refactor, §12 out-of-menu notifications.
+
+## Required — ask the user
+
+Before finishing the task, **ask explicitly** (do not add a scenario silently):
+
+> Добавить сценарий в `checks_flow_nav.py` для §N (*кратко: какой экран*)?
+
+- **§N** — номер раздела из `user-flow-map.ru.md` (или «новый §» если раздела ещё нет).
+- If the user declines — note in the PR/commit message that nav check was skipped.
+- If the user agrees — implement in the same change set and run `python -m self_check`.
+
+Use AskQuestion or plain text when AskQuestion is unavailable.
+
+## Where to implement
+
+| Case | Where |
+|------|--------|
+| New/changed `ReplyKeyboardMarkup` / standalone inline keyboard in `i18n.py` | `_check_submenu_reply_keyboards` or `_check_inline_wizard_keyboards` |
+| New handler entry / wizard step | New `_scenario_*` in `checks_flow_nav.py` using `_BotCapture` |
+| Inline paired with `_pulse_wizard_keyboard` | Dynamic scenario; patch pulse → `cap.note_pulse()` or assert inline Cancel |
+
+Copy patterns from existing `_scenario_subscriptions`, `_scenario_admin_broadcast`.
+
+## UX fix vs test-only
+
+If the scenario fails because the screen has no escape hatch — **fix the keyboard/handler first** (button or `_pulse_wizard_keyboard`), then add the test.
+
+Authority: [`self-check.mdc`](self-check.mdc), [`user-flow-map.mdc`](user-flow-map.mdc).
