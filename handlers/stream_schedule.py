@@ -11,12 +11,12 @@ from telegram.error import BadRequest
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import beta as beta_features
+import premium as prem
 from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang, _wizard
 from db import Database
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
-    SCHEDULE_TZ_NAME,
     all_wizard_nav_buttons,
     format_stream_schedule_date,
     format_stream_schedule_prompt_date,
@@ -26,6 +26,7 @@ from i18n import (
     stream_schedule_day_keyboard,
     stream_schedule_duration_keyboard,
     stream_schedule_fix_day_keyboard,
+    stream_schedule_mode_keyboard,
     stream_schedule_more_keyboard,
     stream_schedule_occupied_keyboard,
     stream_schedule_publish_keyboard,
@@ -41,7 +42,67 @@ def _log_schedule_clear_failed(exc_type: str) -> None:
 
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
+_UTC_OFFSET_PATTERN = re.compile(
+    r"^\s*(?:UTC|GMT)?\s*([+-])?\s*(\d{1,2})(?:\s*:\s*(\d{2}))?\s*$",
+    re.IGNORECASE,
+)
 _SCHEDULE_DEFAULT_DURATION_MIN = 120
+_UTC_OFFSET_MIN = -12 * 60
+_UTC_OFFSET_MAX = 14 * 60
+
+
+def parse_utc_offset_text(raw: str) -> int | None:
+    """Parse 'UTC+3', 'UTC-5', '+5:30', 'UTC' → offset minutes from UTC."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if re.fullmatch(r"(?i)UTC|GMT", text):
+        return 0
+    match = _UTC_OFFSET_PATTERN.fullmatch(text)
+    if not match:
+        return None
+    sign = -1 if match.group(1) == "-" else 1
+    hours = int(match.group(2))
+    minutes = int(match.group(3) or 0)
+    if hours > 14 or minutes > 59:
+        return None
+    total = sign * (hours * 60 + minutes)
+    if total < _UTC_OFFSET_MIN or total > _UTC_OFFSET_MAX:
+        return None
+    return total
+
+
+def format_utc_offset(offset_minutes: int) -> str:
+    sign = "+" if offset_minutes >= 0 else "-"
+    abs_m = abs(int(offset_minutes))
+    hours, minutes = divmod(abs_m, 60)
+    if minutes:
+        return f"UTC{sign}{hours}:{minutes:02d}"
+    return f"UTC{sign}{hours}"
+
+
+def offset_minutes_to_tzinfo(offset_minutes: int) -> timezone:
+    return timezone(timedelta(minutes=int(offset_minutes)))
+
+
+def offset_minutes_to_iana(offset_minutes: int) -> str:
+    """Fixed-offset IANA name for Helix (Etc/GMT signs are inverted vs UTC)."""
+    mins = int(offset_minutes)
+    if mins % 60 != 0:
+        return "Etc/UTC"
+    hours = mins // 60
+    if hours == 0:
+        return "Etc/UTC"
+    if hours > 0:
+        return f"Etc/GMT-{hours}"
+    return f"Etc/GMT+{-hours}"
+
+
+def _user_schedule_tz(db: Database, user_id: int) -> timezone:
+    offset = db.get_schedule_utc_offset_minutes(user_id)
+    if offset is None:
+        return SCHEDULE_TZ
+    return offset_minutes_to_tzinfo(offset)
 
 
 def _sched_states():
@@ -57,6 +118,7 @@ def _sched_states():
         STREAM_SCHEDULE_MORE,
         STREAM_SCHEDULE_PUBLISH,
         STREAM_SCHEDULE_TIME,
+        STREAM_SCHEDULE_TZ,
     )
 
     return {
@@ -71,6 +133,7 @@ def _sched_states():
         "STREAM_SCHEDULE_MORE": STREAM_SCHEDULE_MORE,
         "STREAM_SCHEDULE_PUBLISH": STREAM_SCHEDULE_PUBLISH,
         "STREAM_SCHEDULE_TIME": STREAM_SCHEDULE_TIME,
+        "STREAM_SCHEDULE_TZ": STREAM_SCHEDULE_TZ,
     }
 
 
@@ -102,8 +165,11 @@ def _stream_schedule_show_finish(context: ContextTypes.DEFAULT_TYPE) -> bool:
     return index >= 1 and index < len(dates) - 1
 
 
-def _init_stream_schedule(context: ContextTypes.DEFAULT_TYPE) -> None:
-    today = datetime.now(SCHEDULE_TZ).date()
+def _init_stream_schedule(
+    context: ContextTypes.DEFAULT_TYPE, *, local_tz: timezone | None = None
+) -> None:
+    tz = local_tz or SCHEDULE_TZ
+    today = datetime.now(tz).date()
     context.user_data["stream_schedule_dates"] = _next_week_dates(today)
     context.user_data["stream_schedule_index"] = 0
     context.user_data["stream_schedule_entries"] = []
@@ -125,8 +191,15 @@ def _schedule_segment_game(seg: dict) -> str:
     return title
 
 
-def _slots_on_local_day(twitch: TwitchClient, broadcaster_id: str, day: date) -> list[dict]:
-    day_start = datetime(day.year, day.month, day.day, 0, 0, tzinfo=SCHEDULE_TZ)
+def _slots_on_local_day(
+    twitch: TwitchClient,
+    broadcaster_id: str,
+    day: date,
+    *,
+    local_tz: timezone | None = None,
+) -> list[dict]:
+    tz = local_tz or SCHEDULE_TZ
+    day_start = datetime(day.year, day.month, day.day, 0, 0, tzinfo=tz)
     start_iso = day_start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     segs = twitch.get_schedule_segments(
         broadcaster_id, first=25, start_time=start_iso
@@ -139,7 +212,7 @@ def _slots_on_local_day(twitch: TwitchClient, broadcaster_id: str, day: date) ->
             continue
         raw = seg.get("start_time") or ""
         try:
-            local = twitch._parse_schedule_time(str(raw)).astimezone(SCHEDULE_TZ)
+            local = twitch._parse_schedule_time(str(raw)).astimezone(tz)
         except Exception:
             continue
         if local.date() != day:
@@ -320,22 +393,81 @@ async def _prompt_stream_schedule_time(
     return STREAM_SCHEDULE_TIME
 
 
-async def _finish_stream_schedule(
+async def _prompt_publish_on_twitch(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
     STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
+    user_id = update.effective_user.id
+    await context.bot.send_message(
+        user_id,
+        t("stream_schedule_publish_prompt", lang),
+        reply_markup=stream_schedule_publish_keyboard(lang),
+    )
+    return STREAM_SCHEDULE_PUBLISH
 
+
+async def _prompt_schedule_tz(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    *,
+    resume: str,
+) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_TZ = _st["STREAM_SCHEDULE_TZ"]
+    user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    context.user_data["stream_schedule_tz_resume"] = resume
+    current = db.get_schedule_utc_offset_minutes(user_id)
+    if current is None:
+        text = t("stream_schedule_tz_prompt", lang)
+    else:
+        text = t(
+            "stream_schedule_tz_prompt_current",
+            lang,
+            tz=format_utc_offset(current),
+        )
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text)
+        except BadRequest:
+            await context.bot.send_message(user_id, text)
+    else:
+        await context.bot.send_message(user_id, text)
+    return STREAM_SCHEDULE_TZ
+
+
+async def _prompt_duration_after_publish_yes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
+    user_id = update.effective_user.id
+    text = t(
+        (
+            "stream_schedule_duration_prompt_keep"
+            if context.user_data.get("stream_schedule_clear_mode") == "overlap"
+            else "stream_schedule_duration_prompt"
+        ),
+        lang,
+    )
+    markup = stream_schedule_duration_keyboard(lang)
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text, reply_markup=markup)
+        except BadRequest:
+            await context.bot.send_message(user_id, text, reply_markup=markup)
+    else:
+        await context.bot.send_message(user_id, text, reply_markup=markup)
+    return STREAM_SCHEDULE_DURATION
+
+
+async def _finish_stream_schedule(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
     user_id = update.effective_user.id
     items = _pending_schedule_preview(context)
     text = format_stream_schedule_result(items, lang) if items else "—"
@@ -350,12 +482,12 @@ async def _finish_stream_schedule(
             user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
         return ConversationHandler.END
-    await context.bot.send_message(
-        user_id,
-        t("stream_schedule_publish_prompt", lang),
-        reply_markup=stream_schedule_publish_keyboard(lang),
-    )
-    return STREAM_SCHEDULE_PUBLISH
+    db: Database = context.application.bot_data["db"]
+    if db.get_schedule_utc_offset_minutes(user_id) is None:
+        return await _prompt_schedule_tz(
+            update, context, lang, resume="publish_prompt"
+        )
+    return await _prompt_publish_on_twitch(update, context, lang)
 
 
 async def _advance_stream_schedule_day(
@@ -374,16 +506,7 @@ async def _advance_stream_schedule_day(
 async def start_stream_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     _st = _sched_states()
     STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
     STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -402,22 +525,64 @@ async def start_stream_schedule(update: Update, context: ContextTypes.DEFAULT_TY
     await update.effective_message.reply_text(
         t("stream_schedule_mode_intro", lang),
         parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        t("stream_schedule_mode_week_btn", lang),
-                        callback_data="stream_sched:mode:week",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        t("stream_schedule_mode_day_btn", lang),
-                        callback_data="stream_sched:mode:day",
-                    )
-                ],
-            ]
-        ),
+        reply_markup=stream_schedule_mode_keyboard(lang),
+    )
+    return STREAM_SCHEDULE_MODE
+
+
+async def stream_schedule_tz_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    resume = (query.data or "").rsplit(":", 1)[-1]
+    if resume not in ("mode", "confirm"):
+        resume = "mode"
+    return await _prompt_schedule_tz(update, context, lang, resume=resume)
+
+
+async def stream_schedule_tz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
+    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
+    STREAM_SCHEDULE_TZ = _st["STREAM_SCHEDULE_TZ"]
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
+        context.user_data.clear()
+        await update.effective_message.reply_text(
+            t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        )
+        return ConversationHandler.END
+    offset = parse_utc_offset_text(raw)
+    if offset is None:
+        await update.effective_message.reply_text(t("stream_schedule_tz_invalid", lang))
+        return STREAM_SCHEDULE_TZ
+
+    db: Database = context.application.bot_data["db"]
+    db.set_schedule_utc_offset_minutes(user_id, offset)
+    label = format_utc_offset(offset)
+    await update.effective_message.reply_text(
+        t("stream_schedule_tz_saved", lang, tz=label)
+    )
+    resume = context.user_data.pop("stream_schedule_tz_resume", "mode")
+    if resume == "publish_prompt":
+        return await _prompt_publish_on_twitch(update, context, lang)
+    if resume == "duration":
+        return await _prompt_duration_after_publish_yes(update, context, lang)
+    if resume == "confirm":
+        await update.effective_message.reply_text(
+            t("stream_schedule_confirm", lang),
+            reply_markup=stream_schedule_confirm_keyboard(lang),
+        )
+        return STREAM_SCHEDULE_CONFIRM
+    await update.effective_message.reply_text(
+        t("stream_schedule_mode_intro", lang),
+        parse_mode=ParseMode.HTML,
+        reply_markup=stream_schedule_mode_keyboard(lang),
     )
     return STREAM_SCHEDULE_MODE
 
@@ -427,16 +592,7 @@ async def stream_schedule_mode_callback(
 ) -> int:
     _st = _sched_states()
     STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
     STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
 
     query = update.callback_query
     await query.answer()
@@ -451,7 +607,9 @@ async def stream_schedule_mode_callback(
         return STREAM_SCHEDULE_CONFIRM
 
     # Day fix mode — remaining days of the current week (Mon–Sun), including today.
-    today = datetime.now(SCHEDULE_TZ).date()
+    db: Database = context.application.bot_data["db"]
+    local_tz = _user_schedule_tz(db, query.from_user.id)
+    today = datetime.now(local_tz).date()
     monday = today - timedelta(days=today.weekday())
     dates = [monday + timedelta(days=i) for i in range(7) if monday + timedelta(days=i) >= today]
     context.user_data["stream_schedule_fix_dates"] = dates
@@ -591,7 +749,11 @@ async def stream_schedule_fix_day_callback(
     if broadcaster_id:
         try:
             existing = await asyncio.to_thread(
-                _slots_on_local_day, twitch, broadcaster_id, day_date
+                _slots_on_local_day,
+                twitch,
+                broadcaster_id,
+                day_date,
+                local_tz=_user_schedule_tz(db, user_id),
             )
         except Exception:
             logger.exception("Failed to load Twitch schedule slots for user=%s", user_id)
@@ -688,7 +850,12 @@ async def stream_schedule_confirm_callback(
             reply_markup=_menu(lang, query.from_user.id),
         )
         return ConversationHandler.END
-    _init_stream_schedule(context)
+    _init_stream_schedule(
+        context,
+        local_tz=_user_schedule_tz(
+            context.application.bot_data["db"], query.from_user.id
+        ),
+    )
     return await _prompt_stream_schedule_game(update, context, lang)
 
 
@@ -925,18 +1092,9 @@ async def stream_schedule_publish_callback(
         await send_premium_screen(context.bot, user_id, lang, db)
         return ConversationHandler.END
 
-    await query.edit_message_text(
-        t(
-            (
-                "stream_schedule_duration_prompt_keep"
-                if context.user_data.get("stream_schedule_clear_mode") == "overlap"
-                else "stream_schedule_duration_prompt"
-            ),
-            lang,
-        ),
-        reply_markup=stream_schedule_duration_keyboard(lang),
-    )
-    return STREAM_SCHEDULE_DURATION
+    if db.get_schedule_utc_offset_minutes(user_id) is None:
+        return await _prompt_schedule_tz(update, context, lang, resume="duration")
+    return await _prompt_duration_after_publish_yes(update, context, lang)
 
 
 async def stream_schedule_duration_callback(
@@ -964,7 +1122,11 @@ async def stream_schedule_duration_callback(
         )
         return ConversationHandler.END
 
+    db: Database = context.application.bot_data["db"]
     clear_mode = context.user_data.get("stream_schedule_clear_mode", "all")
+    offset_minutes = db.get_schedule_utc_offset_minutes(user_id)
+    if offset_minutes is None:
+        return await _prompt_schedule_tz(update, context, lang, resume="duration")
 
     def _iso_date(value: date | str) -> str:
         if isinstance(value, date):
@@ -988,6 +1150,7 @@ async def stream_schedule_duration_callback(
         ],
         "duration": duration_min,
         "clear_mode": clear_mode,
+        "utc_offset_minutes": int(offset_minutes),
     }
     context.user_data.clear()
     return await _start_schedule_publish_auth(update, context, user_id, lang)
@@ -1094,15 +1257,24 @@ async def _complete_schedule_publish(
         entries, duration_min = pending, _SCHEDULE_DEFAULT_DURATION_MIN
         clear_mode = "all"
         updates: list[dict] = []
+        offset_minutes = None
     elif isinstance(pending, dict):
         entries = pending.get("entries") or []
         updates = pending.get("updates") or []
         duration_min = int(pending.get("duration") or _SCHEDULE_DEFAULT_DURATION_MIN)
         clear_mode = pending.get("clear_mode") or "all"
+        offset_minutes = pending.get("utc_offset_minutes")
     else:
         entries, duration_min = [], _SCHEDULE_DEFAULT_DURATION_MIN
         clear_mode = "all"
         updates = []
+        offset_minutes = None
+    if offset_minutes is None:
+        offset_minutes = db.get_schedule_utc_offset_minutes(owner_id)
+    if offset_minutes is None:
+        offset_minutes = int(SCHEDULE_TZ.utcoffset(None).total_seconds() // 60)
+    local_tz = offset_minutes_to_tzinfo(int(offset_minutes))
+    tz_name = offset_minutes_to_iana(int(offset_minutes))
     if (not entries and not updates) or not token_info:
         await application.bot.send_message(
             owner_id,
@@ -1122,7 +1294,7 @@ async def _complete_schedule_publish(
             if clear_mode == "day" and len(unique_dates) == 1:
                 first = next(iter(unique_dates))
                 y, m, d = (int(x) for x in str(first).split("-", 2))
-                day_start_local = datetime(y, m, d, 0, 0, tzinfo=SCHEDULE_TZ)
+                day_start_local = datetime(y, m, d, 0, 0, tzinfo=local_tz)
                 day_start_iso = day_start_local.astimezone(timezone.utc).strftime(
                     "%Y-%m-%dT%H:%M:%SZ"
                 )
@@ -1142,7 +1314,7 @@ async def _complete_schedule_publish(
     def _start_and_category(item: dict) -> tuple[str, str, str]:
         hour, minute = (int(x) for x in item["time"].split(":", 1))
         y, m, d = (int(x) for x in str(item["date"]).split("-", 2))
-        local_dt = datetime(y, m, d, hour, minute, tzinfo=SCHEDULE_TZ)
+        local_dt = datetime(y, m, d, hour, minute, tzinfo=local_tz)
         start_iso = local_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         game_text = item.get("game", "")
         category_id = ""
@@ -1167,7 +1339,7 @@ async def _complete_schedule_publish(
                 twitch_user_id,
                 str(upd["id"]),
                 start_time=start_iso,
-                timezone=SCHEDULE_TZ_NAME,
+                timezone=tz_name,
                 duration=duration_min,
                 title=game_text or "",
                 category_id=category_id,
@@ -1185,7 +1357,7 @@ async def _complete_schedule_publish(
                 access,
                 twitch_user_id,
                 start_time=start_iso,
-                timezone=SCHEDULE_TZ_NAME,
+                timezone=tz_name,
                 duration=duration_min,
                 title=game_text or "",
                 category_id=category_id,

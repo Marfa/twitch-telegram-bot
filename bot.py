@@ -309,6 +309,8 @@ from handlers.stream_schedule import (
     stream_schedule_publish_callback,
     stream_schedule_skip_callback,
     stream_schedule_time,
+    stream_schedule_tz,
+    stream_schedule_tz_callback,
 )
 
 from handlers.settings import (
@@ -633,6 +635,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_TIME,
     STREAM_SCHEDULE_PUBLISH,
     STREAM_SCHEDULE_DURATION,
+    STREAM_SCHEDULE_TZ,
     SYNC_DAYS,
     PREMIUM_GATE,
     WATCH_PICK,
@@ -654,7 +657,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_FIX_SLOTS,
     STREAM_SCHEDULE_MORE,
     PAUSE_ALERTS_DAYS,
-) = range(60)
+) = range(61)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2149,6 +2152,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     stream_schedule_mode_callback, pattern=r"^stream_sched:mode:"
                 ),
+                CallbackQueryHandler(
+                    stream_schedule_tz_callback, pattern=r"^stream_sched:tz:"
+                ),
             ],
             STREAM_SCHEDULE_FIX_DAY: [
                 _wiz_cancel,
@@ -2198,6 +2204,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     stream_schedule_confirm_callback, pattern=r"^stream_sched:confirm:"
                 ),
+                CallbackQueryHandler(
+                    stream_schedule_tz_callback, pattern=r"^stream_sched:tz:"
+                ),
             ],
             STREAM_SCHEDULE_GAME: [
                 _wiz_cancel,
@@ -2218,6 +2227,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     stream_schedule_publish_callback, pattern=r"^stream_sched:publish:"
                 ),
+            ],
+            STREAM_SCHEDULE_TZ: [
+                _wiz_cancel,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_tz),
             ],
             STREAM_SCHEDULE_DURATION: [
                 _wiz_cancel,

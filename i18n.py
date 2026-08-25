@@ -1228,6 +1228,37 @@ def stream_schedule_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("stream_schedule_yes", lang), callback_data="stream_sched:confirm:1")],
             [InlineKeyboardButton(t("stream_schedule_no", lang), callback_data="stream_sched:confirm:0")],
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_mode_tz_btn", lang),
+                    callback_data="stream_sched:tz:confirm",
+                )
+            ],
+        ]
+    )
+
+
+def stream_schedule_mode_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_mode_week_btn", lang),
+                    callback_data="stream_sched:mode:week",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_mode_day_btn", lang),
+                    callback_data="stream_sched:mode:day",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_mode_tz_btn", lang),
+                    callback_data="stream_sched:tz:mode",
+                )
+            ],
         ]
     )
 

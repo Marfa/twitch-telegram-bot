@@ -1474,6 +1474,9 @@ async def receive_watch_language_text(
 async def receive_watch_nav_back(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
+    # Lazy: handlers.wizard imports this module at top level.
+    from handlers.wizard import wizard_back
+
     query = update.callback_query
     await query.answer()
     return await wizard_back(update, context)

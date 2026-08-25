@@ -346,6 +346,12 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS schedule_utc_offset_minutes INTEGER
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS watch_prefs TEXT NOT NULL DEFAULT ''
                 """
             )
@@ -456,6 +462,18 @@ class PostgresDatabase:
                 """
                 ALTER TABLE scheduled_broadcasts
                 ADD COLUMN IF NOT EXISTS recipient_ids TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE scheduled_broadcasts
+                ADD COLUMN IF NOT EXISTS sent_utc_offsets TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE scheduled_broadcasts
+                ADD COLUMN IF NOT EXISTS sent_count INTEGER NOT NULL DEFAULT 0
                 """
             )
             cur.execute(
@@ -1209,6 +1227,23 @@ class PostgresDatabase:
             rows = cur.fetchall()
         return [(int(r["user_id"]), int(r["premium_trial_until"])) for r in rows]
 
+    def list_expired_trial_users(self, *, now_unix: int | None = None) -> list[tuple[int, int]]:
+        now = int(now_unix if now_unix is not None else datetime.now(timezone.utc).timestamp())
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id, COALESCE(premium_trial_until, 0) AS premium_trial_until
+                FROM users
+                WHERE COALESCE(premium_trial_until, 0) > 0
+                  AND COALESCE(premium_trial_until, 0) <= %s
+                ORDER BY premium_trial_until, user_id
+                """,
+                (now,),
+            )
+            rows = cur.fetchall()
+        return [(int(r["user_id"]), int(r["premium_trial_until"])) for r in rows]
+
     def set_referred_by(self, user_id: int, referrer_id: int) -> bool:
         if user_id == referrer_id or referrer_id <= 0:
             return False
@@ -1801,6 +1836,129 @@ class PostgresDatabase:
                 (user_id, hour, minute),
             )
 
+    def get_schedule_utc_offset_minutes(self, user_id: int) -> int | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT schedule_utc_offset_minutes FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row or row["schedule_utc_offset_minutes"] is None:
+            return None
+        return int(row["schedule_utc_offset_minutes"])
+
+    def set_schedule_utc_offset_minutes(self, user_id: int, offset_minutes: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, schedule_utc_offset_minutes)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    schedule_utc_offset_minutes = EXCLUDED.schedule_utc_offset_minutes
+                """,
+                (user_id, int(offset_minutes)),
+            )
+
+    def get_schedule_utc_offsets_for_users(
+        self, user_ids: list[int]
+    ) -> dict[int, int | None]:
+        if not user_ids:
+            return {}
+        unique = list(dict.fromkeys(int(uid) for uid in user_ids))
+        out: dict[int, int | None] = {uid: None for uid in unique}
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id, schedule_utc_offset_minutes
+                FROM users WHERE user_id = ANY(%s)
+                """,
+                (unique,),
+            )
+            rows = cur.fetchall()
+        for row in rows:
+            val = row["schedule_utc_offset_minutes"]
+            out[int(row["user_id"])] = int(val) if val is not None else None
+        return out
+
+    def record_broadcast_offset_sent(
+        self, broadcast_id: int, utc_offset_minutes: int, sent: int
+    ) -> None:
+        off = int(utc_offset_minutes)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT sent_utc_offsets, sent_count
+                FROM scheduled_broadcasts
+                WHERE id = %s AND sent_at IS NULL
+                """,
+                (broadcast_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return
+            parts = [
+                p.strip()
+                for p in str(row["sent_utc_offsets"] or "").split(",")
+                if p.strip()
+            ]
+            token = str(off)
+            if token not in parts:
+                parts.append(token)
+            cur.execute(
+                """
+                UPDATE scheduled_broadcasts
+                SET sent_utc_offsets = %s,
+                    sent_count = COALESCE(sent_count, 0) + %s
+                WHERE id = %s
+                """,
+                (",".join(parts), int(sent), broadcast_id),
+            )
+
+    def get_broadcast_sent_offsets(self, broadcast_id: int) -> set[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT sent_utc_offsets FROM scheduled_broadcasts WHERE id = %s",
+                (broadcast_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return set()
+        out: set[int] = set()
+        for part in str(row["sent_utc_offsets"] or "").split(","):
+            part = part.strip()
+            if part:
+                out.add(int(part))
+        return out
+
+    def reset_broadcast_send_progress(self, broadcast_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE scheduled_broadcasts
+                SET sent_utc_offsets = '', sent_count = 0
+                WHERE id = %s AND sent_at IS NULL
+                """,
+                (broadcast_id,),
+            )
+
+    def get_broadcast_sent_count(self, broadcast_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT sent_count FROM scheduled_broadcasts WHERE id = %s",
+                (broadcast_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return 0
+        return int(row["sent_count"] or 0)
+
     def get_watch_prefs(self, user_id: int) -> WatchPrefs | None:
         filters = self.get_watch_filters(user_id)
         return filters[0].prefs if filters else None
@@ -2219,7 +2377,9 @@ class PostgresDatabase:
             cur.execute(
                 """
                 SELECT id, msg_type, text, scheduled_at, created_by,
-                       COALESCE(recipient_ids, '') AS recipient_ids
+                       COALESCE(recipient_ids, '') AS recipient_ids,
+                       COALESCE(sent_utc_offsets, '') AS sent_utc_offsets,
+                       COALESCE(sent_count, 0) AS sent_count
                 FROM scheduled_broadcasts
                 WHERE sent_at IS NULL
                 ORDER BY scheduled_at
@@ -2235,7 +2395,9 @@ class PostgresDatabase:
             cur.execute(
                 """
                 SELECT id, msg_type, text, scheduled_at, created_by,
-                       COALESCE(recipient_ids, '') AS recipient_ids
+                       COALESCE(recipient_ids, '') AS recipient_ids,
+                       COALESCE(sent_utc_offsets, '') AS sent_utc_offsets,
+                       COALESCE(sent_count, 0) AS sent_count
                 FROM scheduled_broadcasts
                 WHERE sent_at IS NULL AND scheduled_at <= %s
                 ORDER BY scheduled_at
@@ -2251,7 +2413,9 @@ class PostgresDatabase:
             cur.execute(
                 """
                 SELECT id, msg_type, text, scheduled_at, created_by,
-                       COALESCE(recipient_ids, '') AS recipient_ids
+                       COALESCE(recipient_ids, '') AS recipient_ids,
+                       COALESCE(sent_utc_offsets, '') AS sent_utc_offsets,
+                       COALESCE(sent_count, 0) AS sent_count
                 FROM scheduled_broadcasts
                 WHERE id = %s AND sent_at IS NULL
                 """,

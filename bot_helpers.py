@@ -59,7 +59,7 @@ async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = T
             chat_id, "·", reply_markup=_wizard(lang, back=back)
         )
         await bot.delete_message(chat_id, msg.message_id)
-    except BadRequest:
+    except (BadRequest, Forbidden):
         pass
 
 

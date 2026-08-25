@@ -495,18 +495,63 @@ def check_handlers() -> None:
         ok, reason = start_trial(db, 50)
         assert ok and reason == "started"
         assert prem.is_premium(db, 50)
+        st_trial = prem.get_status(db, 50)
+        assert st_trial.trial_active and st_trial.has_full_plan
+        # Full plan unlocks every FEATURE_IDS entry (not only is_premium).
+        for fid in prem.FEATURE_IDS:
+            assert prem.has_feature_sync(db, 50, fid), fid
+        for fid in ("ignore_keywords", "delay", "repeat", "delete_prev"):
+            assert prem.has_feature_sync(db, 50, fid), fid
+        assert prem.active_subscription_slots(db, 50).unlimited is True
         ok2, reason2 = start_trial(db, 50)
         assert not ok2 and reason2 == "active"
-        # Force expire
+        # Force expire: features close by clock; ensure_trial_expired pauses subs.
         db.set_premium_trial(50, until_unix=1, used=True)
+        assert not prem.get_status(db, 50).trial_active
+        assert not prem.get_status(db, 50).has_full_plan
+        for fid in prem.FEATURE_IDS:
+            assert not prem.has_feature_sync(db, 50, fid), fid
+        assert db.get_subscription(sid, 50).enabled is True  # pause is lazy
         assert prem.ensure_trial_expired(db, 50) is True
         sub = db.get_subscription(sid, 50)
         assert sub is not None
         assert sub.enabled is False
         assert sub.trial_paused is True
+        assert prem.get_status(db, 50).trial_until == 0
+        assert prem.active_subscription_slots(db, 50).unlimited is False
         assert prem.is_live_only_alert(sub)
         ok3, reason3 = start_trial(db, 50)
         assert not ok3 and reason3 == "used"
+
+        # Background sweep: expire all due trials in one pass.
+        db.upsert_user(60)
+        db.upsert_user(61)
+        db.upsert_user(62)
+        s60 = db.add_subscription(
+            60, "a", "1", "hi", "dm", 60, None, enabled=True, notify_on_live=True
+        )
+        s61 = db.add_subscription(
+            61, "b", "2", "hi", "dm", 61, None, enabled=True, notify_on_live=True
+        )
+        future = int(__import__("time").time()) + 86400
+        recent = int(__import__("time").time()) - 30
+        db.set_premium_trial(60, until_unix=1, used=True)
+        db.set_premium_trial(61, until_unix=recent, used=True)
+        db.set_premium_trial(62, until_unix=future, used=True)
+        expired = prem.expire_due_trials(db)
+        assert len(expired) == 2
+        by_uid = {uid: until for uid, until in expired}
+        assert 60 in by_uid and 61 in by_uid
+        assert not prem.trial_expiry_should_notify(by_uid[60], max_age_sec=120)
+        assert prem.trial_expiry_should_notify(by_uid[61], max_age_sec=120)
+        assert db.get_premium_status(60).trial_until == 0
+        assert db.get_premium_status(61).trial_until == 0
+        assert db.get_premium_status(62).trial_until == future
+        assert db.get_subscription(s60, 60).enabled is False
+        assert db.get_subscription(s60, 60).trial_paused is True
+        assert db.get_subscription(s61, 61).trial_paused is True
+        assert prem.expire_due_trials(db) == []
+
         db.upsert_user(51)
         apply_lifetime_payment(db, 51, charge_id="life1", stars_paid=2000)
         assert prem.get_status(db, 51).permanent

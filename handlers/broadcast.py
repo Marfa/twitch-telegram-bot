@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -95,30 +95,6 @@ def _utc_iso_to_schedule(scheduled_at: str) -> dict:
         "minute": local.minute,
         "show_minutes": True,
     }
-
-
-def _broadcast_job_name(broadcast_id: int) -> str:
-    return f"broadcast_{broadcast_id}"
-
-
-def _cancel_broadcast_job(job_queue, broadcast_id: int) -> None:
-    for job in job_queue.get_jobs_by_name(_broadcast_job_name(broadcast_id)):
-        job.schedule_removal()
-
-
-def _schedule_broadcast_job(job_queue, broadcast_id: int, scheduled_at: str) -> None:
-    _cancel_broadcast_job(job_queue, broadcast_id)
-    due = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-    if due.tzinfo is None:
-        due = due.replace(tzinfo=timezone.utc)
-    when = (due - datetime.now(timezone.utc)).total_seconds()
-    if when > 0:
-        job_queue.run_once(
-            _run_scheduled_broadcast,
-            when=when,
-            data={"broadcast_id": broadcast_id},
-            name=_broadcast_job_name(broadcast_id),
-        )
 
 
 def _scheduled_text_preview(text: str, limit: int = 120) -> str:
@@ -356,6 +332,158 @@ def _schedule_to_utc_iso(schedule: dict) -> str:
     return local_dt.astimezone(timezone.utc).isoformat()
 
 
+def _default_broadcast_utc_offset() -> int:
+    return int(SCHEDULE_TZ.utcoffset(None).total_seconds() // 60)
+
+
+def _schedule_wall_clock(scheduled_at: str) -> tuple[date, int, int]:
+    dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    local = dt.astimezone(SCHEDULE_TZ)
+    return local.date(), local.hour, local.minute
+
+
+def _utc_due_for_offset(
+    day: date, hour: int, minute: int, utc_offset_minutes: int
+) -> datetime:
+    local_tz = timezone(timedelta(minutes=int(utc_offset_minutes)))
+    local_dt = datetime(day.year, day.month, day.day, hour, minute, tzinfo=local_tz)
+    return local_dt.astimezone(timezone.utc)
+
+
+def _broadcast_recipient_ids(
+    db: Database,
+    msg_type: str,
+    recipient_ids: list[int] | None,
+) -> list[int]:
+    if recipient_ids is not None:
+        return list(recipient_ids)
+    if msg_type == "bot_update":
+        return db.get_bot_update_recipients()
+    if msg_type == "availability":
+        return db.get_availability_recipients()
+    if msg_type == "other":
+        return db.get_other_recipients()
+    return db.get_notify_user_ids()
+
+
+def _broadcast_offset_groups(
+    db: Database, user_ids: list[int]
+) -> dict[int, list[int]]:
+    default_off = _default_broadcast_utc_offset()
+    offsets = db.get_schedule_utc_offsets_for_users(user_ids)
+    groups: dict[int, list[int]] = {}
+    for uid in user_ids:
+        off = offsets.get(uid)
+        key = int(off) if off is not None else default_off
+        groups.setdefault(key, []).append(uid)
+    return groups
+
+
+def _broadcast_waves(db: Database, item) -> list[tuple[int, datetime]]:
+    user_ids = _broadcast_recipient_ids(
+        db, item.msg_type, _parse_broadcast_recipient_ids(item.recipient_ids or "") or None
+    )
+    user_ids = [uid for uid in user_ids if not db.is_bot_blocked(uid)]
+    day, hour, minute = _schedule_wall_clock(item.scheduled_at)
+    waves: dict[int, datetime] = {}
+    for offset in _broadcast_offset_groups(db, user_ids):
+        waves[offset] = _utc_due_for_offset(day, hour, minute, offset)
+    return sorted(waves.items(), key=lambda pair: pair[1])
+
+
+def _broadcast_job_name(broadcast_id: int) -> str:
+    return f"broadcast_{broadcast_id}"
+
+
+def _broadcast_offset_job_name(broadcast_id: int, utc_offset_minutes: int) -> str:
+    return f"broadcast_{broadcast_id}_tz_{int(utc_offset_minutes)}"
+
+
+def _cancel_broadcast_job(job_queue, broadcast_id: int) -> None:
+    for job in job_queue.get_jobs_by_name(_broadcast_job_name(broadcast_id)):
+        job.schedule_removal()
+
+
+def _cancel_broadcast_jobs(job_queue, db: Database, broadcast_id: int) -> None:
+    _cancel_broadcast_job(job_queue, broadcast_id)
+    item = db.get_scheduled_broadcast(broadcast_id)
+    if not item:
+        return
+    for offset, _ in _broadcast_waves(db, item):
+        name = _broadcast_offset_job_name(broadcast_id, offset)
+        for job in job_queue.get_jobs_by_name(name):
+            job.schedule_removal()
+
+
+def _schedule_broadcast_job(job_queue, db: Database, broadcast_id: int) -> None:
+    _schedule_broadcast_waves(job_queue, db, broadcast_id)
+
+
+def _schedule_broadcast_waves(job_queue, db: Database, broadcast_id: int) -> None:
+    _cancel_broadcast_jobs(job_queue, db, broadcast_id)
+    item = db.get_scheduled_broadcast(broadcast_id)
+    if not item:
+        return
+    now = datetime.now(timezone.utc)
+    sent = db.get_broadcast_sent_offsets(broadcast_id)
+    for offset, due_utc in _broadcast_waves(db, item):
+        if offset in sent:
+            continue
+        when = max(0.0, (due_utc - now).total_seconds())
+        job_queue.run_once(
+            _run_scheduled_broadcast,
+            when=when,
+            data={"broadcast_id": broadcast_id, "utc_offset": offset},
+            name=_broadcast_offset_job_name(broadcast_id, offset),
+        )
+
+
+async def _run_broadcast_offset_wave(
+    context: ContextTypes.DEFAULT_TYPE, item, utc_offset: int
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    if utc_offset in db.get_broadcast_sent_offsets(item.id):
+        return
+    source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+    recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
+    sent, _failed, _total = await _send_admin_broadcast(
+        context,
+        item.msg_type,
+        item.text,
+        source_lang=source_lang,
+        recipient_ids=recipients or None,
+        utc_offset_filter=utc_offset,
+    )
+    db.record_broadcast_offset_sent(item.id, utc_offset, sent)
+    await _maybe_finish_broadcast(context, item)
+
+
+async def _maybe_finish_broadcast(
+    context: ContextTypes.DEFAULT_TYPE, item
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    waves = _broadcast_waves(db, item)
+    target_offsets = {offset for offset, _ in waves}
+    if not target_offsets.issubset(db.get_broadcast_sent_offsets(item.id)):
+        return
+    recipients = _broadcast_recipient_ids(
+        db,
+        item.msg_type,
+        _parse_broadcast_recipient_ids(item.recipient_ids or "") or None,
+    )
+    total = len([uid for uid in recipients if not db.is_bot_blocked(uid)])
+    sent = db.get_broadcast_sent_count(item.id)
+    await _report_broadcast_done(
+        context,
+        item.created_by,
+        sent=sent,
+        total=total,
+    )
+    db.mark_scheduled_broadcast_sent(item.id)
+
+
 def _claim_broadcast_send(bot_data: dict, broadcast_id: int) -> bool:
     """Prevent double-send if a job and the pending poll race."""
     sending: set[int] = bot_data.setdefault("sending_broadcasts", set())
@@ -371,6 +499,25 @@ def _release_broadcast_send(bot_data: dict, broadcast_id: int) -> None:
         sending.discard(broadcast_id)
 
 
+def _claim_broadcast_wave_send(
+    bot_data: dict, broadcast_id: int, utc_offset: int
+) -> bool:
+    sending: set[tuple[int, int]] = bot_data.setdefault("sending_broadcast_waves", set())
+    key = (broadcast_id, int(utc_offset))
+    if key in sending:
+        return False
+    sending.add(key)
+    return True
+
+
+def _release_broadcast_wave_send(
+    bot_data: dict, broadcast_id: int, utc_offset: int
+) -> None:
+    sending = bot_data.get("sending_broadcast_waves")
+    if isinstance(sending, set):
+        sending.discard((broadcast_id, int(utc_offset)))
+
+
 async def _send_admin_broadcast(
     context: ContextTypes.DEFAULT_TYPE,
     msg_type: str,
@@ -378,19 +525,19 @@ async def _send_admin_broadcast(
     *,
     source_lang: str | None = None,
     recipient_ids: list[int] | None = None,
+    utc_offset_filter: int | None = None,
 ) -> tuple[int, int, int]:
     db: Database = context.application.bot_data["db"]
-    if recipient_ids is not None:
-        user_ids = [uid for uid in recipient_ids if not db.is_bot_blocked(uid)]
-    elif msg_type == "bot_update":
-        user_ids = db.get_bot_update_recipients()
-    elif msg_type == "availability":
-        user_ids = db.get_availability_recipients()
-    elif msg_type == "other":
-        user_ids = db.get_other_recipients()
-    else:
+    user_ids = _broadcast_recipient_ids(db, msg_type, recipient_ids)
+    user_ids = [uid for uid in user_ids if not db.is_bot_blocked(uid)]
+    if utc_offset_filter is not None:
+        default_off = _default_broadcast_utc_offset()
+        offsets = db.get_schedule_utc_offsets_for_users(user_ids)
         user_ids = [
-            uid for uid in db.get_notify_user_ids() if not db.is_bot_blocked(uid)
+            uid
+            for uid in user_ids
+            if (offsets.get(uid) if offsets.get(uid) is not None else default_off)
+            == int(utc_offset_filter)
         ]
     source = source_lang or DEFAULT_LOCALE
     locale_rows = db.get_user_locales(user_ids)
@@ -571,33 +718,21 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
         broadcast_id = db.add_scheduled_broadcast(
             msg_type, text, scheduled_at, user_id, recipient_ids=recipient_ids_raw
         )
-        when = (
-            datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-            - datetime.now(timezone.utc)
-        ).total_seconds()
         context.user_data.clear()
-        if when <= 0:
+        _schedule_broadcast_waves(context.job_queue, db, broadcast_id)
+        when_local = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00")).astimezone(
+            SCHEDULE_TZ
+        )
+        when_label = when_local.strftime("%d.%m.%Y %H:%M MSK")
+        msk_due = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+        if msk_due.tzinfo is None:
+            msk_due = msk_due.replace(tzinfo=timezone.utc)
+        if msk_due <= datetime.now(timezone.utc):
             try:
                 await query.edit_message_text(t("broadcast_started", lang))
             except BadRequest:
                 pass
-            context.job_queue.run_once(
-                _run_scheduled_broadcast,
-                when=0,
-                data={"broadcast_id": broadcast_id},
-                name=_broadcast_job_name(broadcast_id),
-            )
         else:
-            context.job_queue.run_once(
-                _run_scheduled_broadcast,
-                when=when,
-                data={"broadcast_id": broadcast_id},
-                name=_broadcast_job_name(broadcast_id),
-            )
-            when_local = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00")).astimezone(
-                SCHEDULE_TZ
-            )
-            when_label = when_local.strftime("%d.%m.%Y %H:%M MSK")
             await query.edit_message_text(
                 t("broadcast_scheduled", lang, when=when_label)
             )
@@ -608,37 +743,48 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
-    broadcast_id = context.job.data["broadcast_id"]
+    broadcast_id = int(context.job.data["broadcast_id"])
+    utc_offset = context.job.data.get("utc_offset")
     bot_data = context.application.bot_data
-    if not _claim_broadcast_send(bot_data, broadcast_id):
-        return
     db: Database = bot_data["db"]
+
+    if utc_offset is None:
+        if not _claim_broadcast_send(bot_data, broadcast_id):
+            return
+        try:
+            item = db.get_scheduled_broadcast(broadcast_id)
+            if not item:
+                return
+            source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+            recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
+            sent, _failed, total = await _send_admin_broadcast(
+                context,
+                item.msg_type,
+                item.text,
+                source_lang=source_lang,
+                recipient_ids=recipients or None,
+            )
+            db.mark_scheduled_broadcast_sent(broadcast_id)
+            await _report_broadcast_done(
+                context,
+                item.created_by,
+                sent=sent,
+                total=total,
+            )
+        finally:
+            _release_broadcast_send(bot_data, broadcast_id)
+        return
+
+    offset = int(utc_offset)
+    if not _claim_broadcast_wave_send(bot_data, broadcast_id, offset):
+        return
     try:
-        pending = db.get_pending_scheduled_broadcasts()
-        item = next((b for b in pending if b.id == broadcast_id), None)
-        if not item:
-            unsent = db.get_unsent_scheduled_broadcasts()
-            item = next((b for b in unsent if b.id == broadcast_id), None)
+        item = db.get_scheduled_broadcast(broadcast_id)
         if not item:
             return
-        source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-        recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
-        sent, _failed, total = await _send_admin_broadcast(
-            context,
-            item.msg_type,
-            item.text,
-            source_lang=source_lang,
-            recipient_ids=recipients or None,
-        )
-        db.mark_scheduled_broadcast_sent(broadcast_id)
-        await _report_broadcast_done(
-            context,
-            item.created_by,
-            sent=sent,
-            total=total,
-        )
+        await _run_broadcast_offset_wave(context, item, offset)
     finally:
-        _release_broadcast_send(bot_data, broadcast_id)
+        _release_broadcast_wave_send(bot_data, broadcast_id, offset)
 
 
 async def admin_scheduled_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -703,7 +849,7 @@ async def on_sb_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     broadcast_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
     if db.delete_scheduled_broadcast(broadcast_id):
-        _cancel_broadcast_job(context.application.job_queue, broadcast_id)
+        _cancel_broadcast_jobs(context.application.job_queue, db, broadcast_id)
         await query.edit_message_text(t("scheduled_deleted", lang, id=broadcast_id))
     else:
         await query.edit_message_text(t("scheduled_not_found", lang))
@@ -988,32 +1134,27 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
         minute = int(schedule["minute"])
         db.set_saved_schedule(user_id, hour, minute)
         scheduled_at = _schedule_to_utc_iso(schedule)
-        when = (
-            datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-            - datetime.now(timezone.utc)
-        ).total_seconds()
-        if when <= 0:
-            _cancel_broadcast_job(context.application.job_queue, int(broadcast_id))
-            try:
-                await query.edit_message_text(t("broadcast_started", lang))
-            except BadRequest:
-                pass
-            context.application.job_queue.run_once(
-                _run_scheduled_broadcast,
-                when=0,
-                data={"broadcast_id": int(broadcast_id)},
-                name=_broadcast_job_name(int(broadcast_id)),
-            )
-        elif db.update_scheduled_broadcast(int(broadcast_id), scheduled_at=scheduled_at):
-            _schedule_broadcast_job(
-                context.application.job_queue, int(broadcast_id), scheduled_at
-            )
-            when_label = _format_scheduled_at_label(scheduled_at)
-            await query.edit_message_text(
-                t("scheduled_updated", lang, id=broadcast_id) + f"\n{when_label}"
-            )
-        else:
+        msk_due = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+        if msk_due.tzinfo is None:
+            msk_due = msk_due.replace(tzinfo=timezone.utc)
+        when = (msk_due - datetime.now(timezone.utc)).total_seconds()
+        if not db.update_scheduled_broadcast(int(broadcast_id), scheduled_at=scheduled_at):
             await query.edit_message_text(t("scheduled_not_found", lang))
+        else:
+            db.reset_broadcast_send_progress(int(broadcast_id))
+            _schedule_broadcast_waves(
+                context.application.job_queue, db, int(broadcast_id)
+            )
+            if when <= 0:
+                try:
+                    await query.edit_message_text(t("broadcast_started", lang))
+                except BadRequest:
+                    pass
+            else:
+                when_label = _format_scheduled_at_label(scheduled_at)
+                await query.edit_message_text(
+                    t("scheduled_updated", lang, id=broadcast_id) + f"\n{when_label}"
+                )
         context.user_data.clear()
         await context.bot.send_message(
             user_id,
@@ -1028,46 +1169,21 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     bot_data = context.application.bot_data
-    for item in db.get_pending_scheduled_broadcasts():
-        if not _claim_broadcast_send(bot_data, item.id):
-            continue
-        try:
-            source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-            recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
-            sent, _failed, total = await _send_admin_broadcast(
-                context,
-                item.msg_type,
-                item.text,
-                source_lang=source_lang,
-                recipient_ids=recipients or None,
-            )
-            db.mark_scheduled_broadcast_sent(item.id)
-            await _report_broadcast_done(
-                context,
-                item.created_by,
-                sent=sent,
-                total=total,
-            )
-        finally:
-            _release_broadcast_send(bot_data, item.id)
+    now = datetime.now(timezone.utc)
+    for item in db.get_unsent_scheduled_broadcasts():
+        sent_offsets = db.get_broadcast_sent_offsets(item.id)
+        for offset, due_utc in _broadcast_waves(db, item):
+            if offset in sent_offsets or due_utc > now:
+                continue
+            if not _claim_broadcast_wave_send(bot_data, item.id, offset):
+                continue
+            try:
+                await _run_broadcast_offset_wave(context, item, offset)
+            finally:
+                _release_broadcast_wave_send(bot_data, item.id, offset)
 
 
 async def _restore_broadcast_jobs(app: Application) -> None:
     db: Database = app.bot_data["db"]
-    now = datetime.now(timezone.utc)
     for item in db.get_unsent_scheduled_broadcasts():
-        try:
-            due = datetime.fromisoformat(item.scheduled_at.replace("Z", "+00:00"))
-            if due.tzinfo is None:
-                due = due.replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-        delta = (due - now).total_seconds()
-        if delta <= 0:
-            continue
-        app.job_queue.run_once(
-            _run_scheduled_broadcast,
-            when=delta,
-            data={"broadcast_id": item.id},
-            name=f"broadcast_{item.id}",
-        )
+        _schedule_broadcast_waves(app.job_queue, db, item.id)

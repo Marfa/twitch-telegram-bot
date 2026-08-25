@@ -474,6 +474,8 @@ class ScheduledBroadcast:
     scheduled_at: str
     created_by: int
     recipient_ids: str = ""
+    sent_utc_offsets: str = ""
+    sent_count: int = 0
 
 
 @dataclass
@@ -512,6 +514,14 @@ def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
         recipient_ids = str(row["recipient_ids"] or "")
     except (KeyError, IndexError, TypeError):
         recipient_ids = ""
+    try:
+        sent_utc_offsets = str(row["sent_utc_offsets"] or "")
+    except (KeyError, IndexError, TypeError):
+        sent_utc_offsets = ""
+    try:
+        sent_count = int(row["sent_count"] or 0)
+    except (KeyError, IndexError, TypeError):
+        sent_count = 0
     return ScheduledBroadcast(
         id=int(row["id"]),
         msg_type=str(row["msg_type"]),
@@ -519,6 +529,8 @@ def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
         scheduled_at=str(scheduled_at),
         created_by=int(row["created_by"]),
         recipient_ids=recipient_ids,
+        sent_utc_offsets=sent_utc_offsets,
+        sent_count=sent_count,
     )
 
 

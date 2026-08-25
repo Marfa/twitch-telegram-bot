@@ -182,12 +182,39 @@ async def _send_delayed_category_notification(
 
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
+    import premium as prem
     from bot import (
         _effective_ignore_keywords,
         _render_sub_template,
     )
+    from bot_helpers import _user_lang
+    from config import CHECK_INTERVAL
 
     db: Database = context.application.bot_data["db"]
+    expired_trials = prem.expire_due_trials(db)
+    if expired_trials:
+        logger.info("Expired %s premium trial(s)", len(expired_trials))
+        max_age = max(int(CHECK_INTERVAL) * 2, 120)
+        now = int(datetime.now(timezone.utc).timestamp())
+        for user_id, trial_until in expired_trials:
+            if not prem.trial_expiry_should_notify(
+                trial_until, now=now, max_age_sec=max_age
+            ):
+                continue
+            if db.is_bot_blocked(user_id):
+                continue
+            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
+            try:
+                await context.bot.send_message(
+                    user_id, t("premium_trial_expired", lang)
+                )
+            except Forbidden:
+                db.set_bot_blocked(user_id, True)
+            except BadRequest:
+                logger.exception(
+                    "Failed to send trial expiry notice to %s", user_id
+                )
+
     twitch: TwitchClient = context.application.bot_data["twitch"]
     last_live: dict[str, bool] = context.application.bot_data.setdefault("last_live", {})
     last_games: dict[str, str] = context.application.bot_data.setdefault("last_games", {})

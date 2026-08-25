@@ -683,13 +683,16 @@ async def _deliver_subs_list(
                 await query.edit_message_text(chunk, reply_markup=markup)
             else:
                 await reply_message.reply_text(chunk, reply_markup=markup)
-        except BadRequest:
+        except (BadRequest, Forbidden):
             logger.exception("Failed to send subscriptions list chunk to %s", owner_id)
             if markup is not None:
-                await reply_message.reply_text(
-                    t("subs_list", lang).strip() or "—",
-                    reply_markup=markup,
-                )
+                try:
+                    await reply_message.reply_text(
+                        t("subs_list", lang).strip() or "—",
+                        reply_markup=markup,
+                    )
+                except (BadRequest, Forbidden):
+                    pass
 
 
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -16,6 +16,8 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Undefined names (ruff F821)
+        run: ruff check --select F821 --exclude .venv .
       - name: Run self_check
         run: python -m self_check

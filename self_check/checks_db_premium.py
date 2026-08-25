@@ -725,6 +725,44 @@ def check_db_premium() -> None:
                 (bid2,),
             ).fetchone()["c"]
         assert left == 0
+
+        from datetime import date
+        from handlers.broadcast import (
+            _broadcast_waves,
+            _default_broadcast_utc_offset,
+            _schedule_wall_clock,
+            _utc_due_for_offset,
+        )
+
+        assert _default_broadcast_utc_offset() == 180
+        day, hour, minute = _schedule_wall_clock("2026-08-26T09:00:00+00:00")
+        assert day == date(2026, 8, 26) and hour == 12 and minute == 0
+        due_msk = _utc_due_for_offset(day, hour, minute, 180)
+        due_ny = _utc_due_for_offset(day, hour, minute, -300)
+        assert due_ny > due_msk
+
+        db.upsert_user(701)
+        db.upsert_user(702)
+        db.set_schedule_utc_offset_minutes(702, -300)
+        bid_tz = db.add_scheduled_broadcast(
+            "other", "tz", "2026-08-26T09:00:00+00:00", 1, recipient_ids="701,702"
+        )
+        item_tz = db.get_scheduled_broadcast(bid_tz)
+        assert item_tz is not None
+        waves = _broadcast_waves(db, item_tz)
+        assert len(waves) == 2
+        offsets = {off for off, _ in waves}
+        assert offsets == {180, -300}
+        db.record_broadcast_offset_sent(bid_tz, 180, 1)
+        assert 180 in db.get_broadcast_sent_offsets(bid_tz)
+        assert db.get_broadcast_sent_count(bid_tz) == 1
+        db.record_broadcast_offset_sent(bid_tz, -300, 1)
+        assert offsets.issubset(db.get_broadcast_sent_offsets(bid_tz))
+        assert db.get_broadcast_sent_count(bid_tz) == 2
+        db.reset_broadcast_send_progress(bid_tz)
+        assert db.get_broadcast_sent_offsets(bid_tz) == set()
+        assert db.get_broadcast_sent_count(bid_tz) == 0
+        assert db.delete_scheduled_broadcast(bid_tz)
         assert not db.update_subscription(999, 1, message_template="x")
 
     import premium as prem

@@ -14,14 +14,20 @@ from telegram import (
     WebAppInfo,
 )
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import analytics
 import beta as beta_features
 import demo_mode
 import premium as prem
-from bot_helpers import _menu, _pulse_wizard_keyboard, _settings_kb, _user_lang
+from bot_helpers import (
+    _menu,
+    _pulse_wizard_keyboard,
+    _settings_kb,
+    _user_lang,
+    _user_notifications_paused,
+)
 from db import Database
 from i18n import (
     DEFAULT_LOCALE,

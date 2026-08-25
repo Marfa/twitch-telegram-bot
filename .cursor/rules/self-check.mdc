@@ -1,0 +1,31 @@
+---
+description: Verification via self_check and handler smoke — no unittest scaffold
+globs: self_check/**/*.py,handlers/**/*.py,premium.py,db/**/*.py
+alwaysApply: false
+---
+
+# self_check over unittest
+
+Do not add a `tests/` tree or `unittest`/`pytest` scaffold unless the user explicitly asks.
+
+## Where checks live
+
+- `python -m self_check` — characterization and regression checks
+- `self_check/checks_handler_smoke.py` — handler entrypoints with mocks (post-split NameErrors, Forbidden soft-fail)
+
+## Style (borrow from unittest.mdc, adapted)
+
+- One logical assertion per scenario; name checks after behavior, not implementation
+- Mock **boundaries** only: Telegram `Bot`, Twitch client, OAuth redirects — not internal helpers under test
+- Prefer temp SQLite via `SqliteDatabase` / `open_database` over fixtures spanning the whole app
+- New premium/trial/subscription gates: extend `self_check/checks_handlers.py` or `checks_db_premium.py`, not a new test framework
+
+## When to add smoke
+
+- New handler entrypoint on a cold path (OAuth callback, premium gate, conversation step)
+- Bug class: NameError after module split, missing import, `Forbidden` not caught on `get_chat` / send
+
+## CI
+
+- `ruff check --select F821` in `.github/workflows/self-check.yml` catches undefined names
+- Run `python -m self_check` locally before push when touching handlers, premium, or db entitlement

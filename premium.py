@@ -682,6 +682,33 @@ def ensure_trial_expired(db: Database, user_id: int) -> bool:
     return True
 
 
+def trial_expiry_should_notify(
+    trial_until: int,
+    *,
+    now: int | None = None,
+    max_age_sec: int | None = None,
+) -> bool:
+    """True if expiry is fresh enough to DM the user (skip catch-up backlog)."""
+    from config import CHECK_INTERVAL
+
+    now_ts = int(time.time() if now is None else now)
+    max_age = max_age_sec if max_age_sec is not None else max(int(CHECK_INTERVAL) * 2, 120)
+    age = now_ts - int(trial_until)
+    return 0 <= age <= max_age
+
+
+def expire_due_trials(db: Database) -> list[tuple[int, int]]:
+    """Pause subs for every user whose trial ended but is not yet cleared.
+
+    Returns [(user_id, trial_until), ...] for rows that were just expired.
+    """
+    expired: list[tuple[int, int]] = []
+    for user_id, trial_until in db.list_expired_trial_users():
+        if ensure_trial_expired(db, user_id):
+            expired.append((user_id, trial_until))
+    return expired
+
+
 def start_trial(db: Database, user_id: int) -> tuple[bool, str]:
     """Returns (ok, reason_code). reason: started | used | active | has_premium."""
     ensure_trial_expired(db, user_id)
