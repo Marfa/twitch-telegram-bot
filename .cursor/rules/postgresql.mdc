@@ -6,7 +6,7 @@ alwaysApply: false
 
 # PostgreSQL / database
 
-Source: [awesome-cursorrules postgresql.mdc](https://github.com/PatrickJS/awesome-cursorrules/blob/main/rules/postgresql.mdc) — this bot uses SQLite by default and Postgres when `DATABASE_URL` is set (`db.py` + `psycopg`).
+Source: [awesome-cursorrules postgresql.mdc](https://github.com/PatrickJS/awesome-cursorrules/blob/main/rules/postgresql.mdc) — this bot uses SQLite by default and Postgres when `DATABASE_URL` is set (`db/` package + `psycopg`).
 
 ## Queries
 
@@ -22,7 +22,7 @@ Source: [awesome-cursorrules postgresql.mdc](https://github.com/PatrickJS/awesom
 
 ## Dual backend
 
-- Changes in `db.py` must work for both SQLite and Postgres paths unless the task is VPS-only
+- Changes in `db/` must work for both SQLite and Postgres paths unless the task is VPS-only
 - Normalize `postgres://` → `postgresql://` as existing code does
 - Do not truncate or drop user data from app code
 

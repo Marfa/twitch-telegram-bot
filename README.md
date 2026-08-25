@@ -350,9 +350,13 @@ Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subs
 
 | Модуль | Назначение |
 |---|---|
-| `bot.py` | Wizard, меню, уведомления, «Что посмотреть?», админ-рассылка, Twitch Status, партнёрка, расписание |
+| `bot.py` | Сборка приложения (`build_application`), edit-flow, re-export handlers |
+| `handlers/` | Доменные обработчики: wizard, подписки, watch, broadcast, schedule, settings, … |
+| `bot_helpers.py` | Общие UI-хелперы (меню, wizard, admin, DM) |
+| `db/` | SQLite или PostgreSQL, пул `lucky_templates`, watch-фильтры, рефералы |
+| `self_check/` | Characterization checks (`python -m self_check`) |
 | `analytics.py` | PostHog: usage-события, ошибки, Logs WARNING+, ежедневный `daily_bot_stats` |
-| `i18n.py` | Тексты и клавиатуры (ru/en) |
+| `locales/` + `i18n.py` | Строки (ru/en) и клавиатуры |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), реферальные начисления |
 | `beta.py` | Бета-каталог (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Флаг админского демо-режима (free UX + сброс демо-подписок) |
@@ -361,7 +365,6 @@ Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subs
 | `translate.py` | DeepL для админ-рассылок |
 | `links.py` | Парсинг `t.me/c/…/тема` |
 | `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue/Report webhook |
-| `db.py` | SQLite или PostgreSQL, пул `lucky_templates`, watch-фильтры, рефералы |
 
 Опрос Twitch Helix ~60 сек, Statuspage ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue+Report webhook.
 

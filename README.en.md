@@ -350,9 +350,13 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 
 | Module | Role |
 |---|---|
-| `bot.py` | Wizard, menu, notifications, What to watch?, admin broadcast, Twitch Status, partner program, schedule |
+| `bot.py` | App wiring (`build_application`), edit flow, handler re-exports |
+| `handlers/` | Domain handlers: wizard, subscriptions, watch, broadcast, schedule, settings, … |
+| `bot_helpers.py` | Shared UI helpers (menu, wizard, admin, DM) |
+| `db/` | SQLite or PostgreSQL, `lucky_templates` pool, watch filters, referrals |
+| `self_check/` | Characterization checks (`python -m self_check`) |
 | `analytics.py` | PostHog: usage events, errors, WARNING+ Logs, daily `daily_bot_stats` |
-| `i18n.py` | Strings and keyboards (ru/en) |
+| `locales/` + `i18n.py` | Strings (ru/en) and keyboards |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `beta.py` | Beta catalog (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |
@@ -361,7 +365,6 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue/Report webhook |
-| `db.py` | SQLite or PostgreSQL, `lucky_templates` pool, watch filters, referrals |
 
 Twitch Helix poll ~60 s, Statuspage ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 
