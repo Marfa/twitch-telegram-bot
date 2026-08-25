@@ -34,12 +34,8 @@ from twitch import TwitchClient
 logger = logging.getLogger(__name__)
 
 
-def _log_schedule_clear_failed(user_id: int, exc_type: str) -> None:
-    logger.warning(
-        "Failed to clear Twitch schedule before publish (user=%s): %s",
-        user_id,
-        exc_type,
-    )
+def _log_schedule_clear_failed(exc_type: str) -> None:
+    logger.warning("Failed to clear Twitch schedule before publish (%s)", exc_type)
 
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
@@ -1139,7 +1135,7 @@ async def _complete_schedule_publish(
                     twitch.clear_channel_schedule, access, twitch_user_id
                 )
         except Exception as exc:
-            _log_schedule_clear_failed(owner_id, type(exc).__name__)
+            _log_schedule_clear_failed(type(exc).__name__)
 
     def _start_and_category(item: dict) -> tuple[str, str, str]:
         hour, minute = (int(x) for x in item["time"].split(":", 1))

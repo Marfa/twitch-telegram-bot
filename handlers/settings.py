@@ -42,16 +42,12 @@ from twitch import TwitchClient, merge_ignore_keywords, normalize_ignore_keyword
 logger = logging.getLogger(__name__)
 
 
-def _log_whisper_oauth_missing_fields(user_id: int) -> None:
-    logger.warning("Whisper OAuth missing token fields for user %s", user_id)
+def _log_whisper_oauth_missing_fields() -> None:
+    logger.warning("Whisper OAuth missing token fields")
 
 
-def _log_whisper_eventsub_failed(user_id: int, exc_type: str) -> None:
-    logger.warning(
-        "Whisper EventSub subscribe failed for user %s (%s)",
-        user_id,
-        exc_type,
-    )
+def _log_whisper_eventsub_failed(exc_type: str) -> None:
+    logger.warning("Whisper EventSub subscribe failed (%s)", exc_type)
 
 
 def _log_whisper_eventsub_delete_failed(exc_type: str) -> None:
@@ -648,7 +644,7 @@ async def complete_whisper_oauth(
         return
     info = token_info or {}
     if not info.get("access_token") or not info.get("twitch_user_id"):
-        _log_whisper_oauth_missing_fields(owner_id)
+        _log_whisper_oauth_missing_fields()
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
@@ -669,7 +665,7 @@ async def complete_whisper_oauth(
         )
     except Exception as exc:
         # Avoid logger.exception — access/refresh may sit in locals.
-        _log_whisper_eventsub_failed(owner_id, type(exc).__name__)
+        _log_whisper_eventsub_failed(type(exc).__name__)
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
