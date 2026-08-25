@@ -1735,7 +1735,7 @@ async def _parse_dest_input(
         try:
             chat = await bot.get_chat(text)
             return chat.id, None, None
-        except BadRequest:
+        except (BadRequest, Forbidden):
             key = "dest_not_found_channel" if dest_type == "channel" else "dest_not_found_group"
             return None, None, t(key, lang)
 
@@ -1769,7 +1769,7 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if chat.type != ChatType.CHANNEL:
                 await message.reply_text(t("not_a_channel", lang))
                 return _wz()["DEST_CHAT"]
-        except BadRequest:
+        except (BadRequest, Forbidden):
             await message.reply_text(t("bot_no_channel", lang))
             return _wz()["DEST_CHAT"]
 
@@ -1779,7 +1779,7 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
                 await message.reply_text(t("not_a_group", lang))
                 return _wz()["DEST_CHAT"]
-        except BadRequest:
+        except (BadRequest, Forbidden):
             await message.reply_text(t("bot_no_group", lang))
             return _wz()["DEST_CHAT"]
 
