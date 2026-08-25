@@ -1,7 +1,9 @@
 """Handler self-checks: bot wiring, alert history, premium UI, whispers-related strings."""
 import json
+import re
 from pathlib import Path
 import os
+from urllib.parse import urlparse
 import tempfile
 from datetime import datetime, timedelta, timezone
 
@@ -56,6 +58,8 @@ from bot import (
     needs_live_game_recheck,
     _format_pause_until,
     _user_notifications_paused,
+    TWITCH_STATUS_HOST,
+    TWITCH_STATUS_PAGE_URL,
 )
 from db import (
     AlertHistoryEntry,
@@ -882,11 +886,16 @@ def check_handlers() -> None:
     msg_ru = _format_twitch_status_message("ru", status_bad)
     assert "Twitch Status" in msg_ru
     assert "Chat" in msg_ru
-    assert "https://status.twitch.com" in msg_ru
+    status_host = urlparse(TWITCH_STATUS_PAGE_URL).hostname
+    assert status_host is not None
+    assert any(
+        urlparse(href).hostname == status_host
+        for href in re.findall(r'href="([^"]+)"', msg_ru)
+    )
     msg_ok = _format_twitch_status_message("en", status_ok)
     assert "All Systems Operational" in msg_ok
     assert tr("broadcast_started", "ru")
-    assert "status.twitch.com" in tr("sys_notifications_menu", "ru")
+    assert f"({TWITCH_STATUS_HOST})" in tr("sys_notifications_menu", "ru")
 
     ph_ok = {
         "overall": "operational",

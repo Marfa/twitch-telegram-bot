@@ -41,6 +41,27 @@ from twitch import TwitchClient, merge_ignore_keywords, normalize_ignore_keyword
 
 logger = logging.getLogger(__name__)
 
+
+def _log_whisper_oauth_missing_fields(user_id: int) -> None:
+    logger.warning("Whisper OAuth missing token fields for user %s", user_id)
+
+
+def _log_whisper_eventsub_failed(user_id: int, exc_type: str) -> None:
+    logger.warning(
+        "Whisper EventSub subscribe failed for user %s (%s)",
+        user_id,
+        exc_type,
+    )
+
+
+def _log_whisper_eventsub_delete_failed(exc_type: str) -> None:
+    logger.warning("Delete whisper EventSub failed: %s", exc_type)
+
+
+def _log_whisper_enable_failed(exc_type: str) -> None:
+    logger.warning("Enable whisper alerts failed: %s", exc_type)
+
+
 def _lang_select_state() -> int:
     from bot import LANG_SELECT
 
@@ -491,7 +512,7 @@ async def on_whisper_alerts_toggle(
             try:
                 twitch.delete_eventsub_subscription(row.eventsub_id)
             except Exception as exc:
-                logger.warning("Delete whisper EventSub failed: %s", exc)
+                _log_whisper_eventsub_delete_failed(type(exc).__name__)
         db.set_whisper_alert_enabled(user_id, False, eventsub_id="")
         analytics.capture(user_id, "whisper_alerts_toggled", {"enabled": False})
         await query.edit_message_reply_markup(
@@ -528,7 +549,7 @@ async def on_whisper_alerts_toggle(
             twitch_login=twitch_login,
         )
     except Exception as exc:
-        logger.warning("Enable whisper alerts failed: %s", exc)
+        _log_whisper_enable_failed(type(exc).__name__)
         await query.answer()
         await _send_whisper_oauth_prompt(context.bot, twitch, user_id, lang)
         return
@@ -627,9 +648,7 @@ async def complete_whisper_oauth(
         return
     info = token_info or {}
     if not info.get("access_token") or not info.get("twitch_user_id"):
-        logger.warning(
-            "Whisper OAuth missing token fields for user %s", owner_id
-        )
+        _log_whisper_oauth_missing_fields(owner_id)
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
@@ -650,11 +669,7 @@ async def complete_whisper_oauth(
         )
     except Exception as exc:
         # Avoid logger.exception — access/refresh may sit in locals.
-        logger.warning(
-            "Whisper EventSub subscribe failed for user %s (%s)",
-            owner_id,
-            type(exc).__name__,
-        )
+        _log_whisper_eventsub_failed(owner_id, type(exc).__name__)
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
