@@ -39,7 +39,7 @@ if beta_features.is_enabled(db, user_id, "<slug>"):
     ...
 ```
 
-6. Update [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) if UX changes.
+6. Update [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) and [`README.md`](README.md) + [`README.en.md`](README.en.md) if UX or product surface changes ([`readme.mdc`](readme.mdc)).
 7. Open PR `feat/<slug>` → `main`.
 8. **Merge PR into `main`** and add label `beta/ready-to-merge` — this deploys gated code to live and starts the 7-day beta timer.
 

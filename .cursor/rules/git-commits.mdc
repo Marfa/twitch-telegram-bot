@@ -18,9 +18,11 @@ Inspired by [awesome-cursorrules git-conventional-commit-messages.mdc](https://g
 
 Run `./scripts/cleanup-artifacts.sh` (also via `.git/hooks/post-commit`).
 
-## README on GitHub commits
+## README on product changes
 
-When the user asks to commit and README is part of the change, keep:
+User-facing features, menu labels, Premium gates, env/deploy contract → update **`README.md` and `README.en.md` together** in the same commit as code/locales. See [`readme.mdc`](readme.mdc).
+
+When the user asks to commit and README is part of the change, keep donation block per [`commit.mdc`](commit.mdc):
 
 1. Код подготовлен с помощью Cursor
 2. Донат https://www.donationalerts.com/r/themarfa

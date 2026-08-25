@@ -39,6 +39,7 @@ Add a GA feature registry only if you introduce gradual rollout or automated dep
 | From | Must align with |
 |---|---|
 | `beta/manifest.json` → `premium_feature_id` | `premium.FEATURE_IDS` (+ hidden from à la carte via `purchasable_feature_ids()` until GA) |
+| User-facing feature / menu change | `README.md` + `README.en.md` feature tables; `.cursor/rules/readme.mdc` |
 | `docs/user-flow-map.ru.md` | `i18n.py` (ru) + `bot.py` handlers |
 | `.cursor/rules/active-subscription-gate.mdc` | `premium.may_enable_subscription()` callers |
 | `.env.example` | `config.py` env reads |

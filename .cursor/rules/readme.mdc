@@ -1,0 +1,32 @@
+---
+description: Update README.md and README.en.md when product surface changes
+globs: bot.py,i18n.py,premium_handlers.py,handlers/**,locales/**,config.py,.env.example
+alwaysApply: false
+---
+
+# README (ru + en)
+
+Файлы: [`README.md`](README.md), [`README.en.md`](README.en.md)
+
+## Когда обновлять
+
+Если меняется **поверхность продукта** — то, что README описывает как возможность бота:
+
+- таблица **«Возможность / Как работает»** (новая фича, Premium-gate, бета, переименование кнопок/меню);
+- разделы **Использование** / **Usage** (мастера, шаги, команды);
+- **Quick Start**, env-переменные, Docker/deploy-команды;
+- новые команды бота, OAuth, ссылки на assets.
+
+## Что сделать
+
+1. Обновить `README.md` (ru): feature table и затронутые разделы.
+2. Зеркально обновить `README.en.md` — те же секции и смысл, не дословный машинный перевод.
+3. Если менялись пользовательские пути — параллельно [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) ([`user-flow-map.mdc`](user-flow-map.mdc)).
+4. Включить README в **тот же коммит**, что и код/locales (если пользователь просит коммит).
+5. Блок Cursor + донаты — только по [`commit.mdc`](commit.mdc) (Marfa-репо).
+
+Authority: код + `locales/` — канон; README — onboarding catalog ([`docs/authority-map.md`](docs/authority-map.md)).
+
+## Не трогать README
+
+Рефакторинг без смены UX, внутренние багфиксы, admin/backoffice без новых user-facing обещаний.
