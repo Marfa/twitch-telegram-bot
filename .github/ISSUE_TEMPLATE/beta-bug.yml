@@ -20,7 +20,7 @@ body:
     id: user_id
     attributes:
       label: Telegram user ID
-      description: Optional — copy from Settings → Report a problem
+      description: Optional — copy from Help (main menu /feedback)
       placeholder: "123456789"
   - type: textarea
     id: steps
