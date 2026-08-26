@@ -47,15 +47,20 @@ Without merge into `main` the feature will NOT appear in Beta mode on the live b
 
 ## Lifecycle (automated)
 
-Daily workflow [`.github/workflows/beta-lifecycle.yml`](../.github/workflows/beta-lifecycle.yml) promotes to GA when **all** conditions are met:
+Daily workflow [`.github/workflows/beta-lifecycle.yml`](../.github/workflows/beta-lifecycle.yml) (script [`scripts/beta-lifecycle.py`](../scripts/beta-lifecycle.py)) promotes to GA when **all** conditions are met:
 
 - `stage` is `beta`
-- PR from `branch` has label `beta/ready-to-merge`
-- PR age ≥ 7 days since merge
+- a **merged** PR from `branch` has label `beta/ready-to-merge`
+- ≥ 7 days since that PR's `mergedAt`
 - no open Issues with `issue_label`
-- CI green
 
-After promotion: `stage` → `ga` (beta UI hides the feature; premium rules apply to everyone — decision A).
+The script only flips `stage` → `ga` in `beta/manifest.json`. It does **not** merge PRs — code must already be on `main` (step 8).
+
+After promotion:
+
+- Feature disappears from Settings → 🧪 Beta mode (`stage` not visible)
+- `beta_features.is_enabled()` returns `True` for everyone (feature is GA)
+- Premium bypass ends (`grants_premium_feature` only for alpha/beta) — decision A
 
 ## Premium during beta
 

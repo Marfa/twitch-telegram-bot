@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Promote beta features to GA: merge ready PRs and update beta/manifest.json.
+"""Promote beta features to GA by updating beta/manifest.json.
+
+Expected model (matches .cursor/rules/beta-feature-branch.mdc):
+  1. Feature PR is already merged into main (code live, gated by enrollment).
+  2. Label beta/ready-to-merge marks the start of the 7-day beta window.
+  3. This script flips stage beta → ga when the window elapsed and no open issues.
 
 Run locally or from .github/workflows/beta-lifecycle.yml (needs gh + GITHUB_TOKEN).
 """
@@ -12,11 +17,12 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = REPO_ROOT / "beta" / "manifest.json"
 READY_LABEL = "beta/ready-to-merge"
-MIN_PR_AGE_DAYS = 7
+MIN_MERGED_AGE_DAYS = 7
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -44,102 +50,75 @@ def _gh_json(args: list[str]) -> object | None:
         return None
 
 
-def _pr_age_days(created_at: str) -> float:
-    created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+def _repo() -> str:
+    return os.environ.get("GITHUB_REPOSITORY", "Marfa/twitch-telegram-bot")
+
+
+def _age_days(iso_ts: str) -> float:
+    created = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
     delta = datetime.now(timezone.utc) - created.astimezone(timezone.utc)
     return delta.total_seconds() / 86400.0
 
 
-def _open_issue_count(label: str) -> int:
-    data = _gh_json(
-        [
-            "api",
-            "repos/{owner}/{repo}/issues".format(
-                owner=os.environ.get("GITHUB_REPOSITORY", "Marfa/twitch-telegram-bot").split("/")[0],
-                repo=os.environ.get("GITHUB_REPOSITORY", "Marfa/twitch-telegram-bot").split("/")[1],
-            ),
-            "-f",
-            f"labels={label}",
-            "-f",
-            "state=open",
-            "-f",
-            "per_page=1",
-        ]
-    )
-    if not isinstance(data, list):
-        return 0
-    # gh api issues endpoint returns list; use search for count if needed
-    search = _gh_json(
-        [
-            "api",
-            "search/issues",
-            "-f",
-            f"q=repo:{os.environ.get('GITHUB_REPOSITORY', 'Marfa/twitch-telegram-bot')} "
-            f"is:issue is:open label:{label}",
-        ]
-    )
-    if isinstance(search, dict):
-        return int(search.get("total_count") or 0)
-    return len(data)
+def _label_names(pr: dict[str, object]) -> set[str]:
+    labels = pr.get("labels")
+    if not isinstance(labels, list):
+        return set()
+    out: set[str] = set()
+    for item in labels:
+        if isinstance(item, dict) and item.get("name"):
+            out.add(str(item["name"]))
+    return out
 
 
-def _find_open_pr(branch: str) -> dict[str, object] | None:
-    repo = os.environ.get("GITHUB_REPOSITORY", "Marfa/twitch-telegram-bot")
+def _open_issue_count(label: str) -> int | None:
+    """Return open issue count for label, or None if the check failed."""
+    q = quote(f"repo:{_repo()} is:issue is:open label:{label}")
+    search = _gh_json(["api", f"search/issues?q={q}"])
+    if not isinstance(search, dict) or "total_count" not in search:
+        return None
+    return int(search.get("total_count") or 0)
+
+
+def _list_merged_ready_prs() -> list[dict[str, object]]:
     data = _gh_json(
         [
             "pr",
             "list",
-            "--head",
-            branch,
             "--state",
-            "open",
+            "merged",
+            "--label",
+            READY_LABEL,
             "--json",
-            "number,title,createdAt,labels,statusCheckRollup,headRefName",
+            "number,title,createdAt,mergedAt,labels,headRefName",
             "--limit",
-            "5",
+            "50",
         ]
     )
-    if not isinstance(data, list) or not data:
-        return None
-    for pr in data:
-        if str(pr.get("headRefName") or "") == branch:
-            return pr
-    return data[0] if data else None
+    if not isinstance(data, list):
+        return []
+    return [pr for pr in data if isinstance(pr, dict) and pr.get("mergedAt")]
 
 
-def _pr_has_ready_label(pr: dict[str, object]) -> bool:
-    labels = pr.get("labels")
-    if not isinstance(labels, list):
-        return False
-    for item in labels:
-        if isinstance(item, dict) and item.get("name") == READY_LABEL:
-            return True
-    return False
-
-
-def _pr_ci_green(pr: dict[str, object]) -> bool:
-    rollup = pr.get("statusCheckRollup")
-    if not isinstance(rollup, list) or not rollup:
-        return True
-    for check in rollup:
-        if not isinstance(check, dict):
+def _find_merged_ready_pr(
+    *,
+    branch: str,
+    issue_label: str,
+    ready_prs: list[dict[str, object]],
+) -> dict[str, object] | None:
+    """Match by head branch or by feature issue_label on a ready-to-merge PR."""
+    candidates: list[dict[str, object]] = []
+    for pr in ready_prs:
+        names = _label_names(pr)
+        if READY_LABEL not in names:
             continue
-        state = str(check.get("state") or check.get("conclusion") or "").upper()
-        if state in ("FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED"):
-            return False
-    return True
-
-
-def _merge_pr(number: int) -> bool:
-    proc = _run(
-        ["gh", "pr", "merge", str(number), "--squash", "--delete-branch"],
-        check=False,
-    )
-    if proc.returncode != 0:
-        logger.error("merge failed #%s: %s", number, proc.stderr.strip())
-        return False
-    logger.info("merged PR #%s", number)
-    return True
+        head = str(pr.get("headRefName") or "")
+        if head == branch or issue_label in names:
+            candidates.append(pr)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pr: str(pr.get("mergedAt") or ""), reverse=True)
+    return candidates[0]
 
 
 def main() -> int:
@@ -152,6 +131,7 @@ def main() -> int:
         logger.error("invalid manifest")
         return 1
 
+    ready_prs = _list_merged_ready_prs()
     changed = False
     for entry in features:
         if not isinstance(entry, dict):
@@ -161,31 +141,49 @@ def main() -> int:
         fid = str(entry.get("id") or "")
         branch = str(entry.get("branch") or f"feat/{fid}")
         issue_label = str(entry.get("issue_label") or f"beta/{fid}")
-        pr = _find_open_pr(branch)
+        pr = _find_merged_ready_pr(
+            branch=branch, issue_label=issue_label, ready_prs=ready_prs
+        )
         if pr is None:
-            logger.info("skip %s: no open PR for %s", fid, branch)
+            logger.info(
+                "skip %s: no merged PR with %s matching %s / %s",
+                fid,
+                READY_LABEL,
+                branch,
+                issue_label,
+            )
             continue
-        if not _pr_has_ready_label(pr):
-            logger.info("skip %s: PR #%s lacks %s", fid, pr.get("number"), READY_LABEL)
+        merged_at = str(pr.get("mergedAt") or "")
+        age = _age_days(merged_at) if merged_at else 0.0
+        if age < MIN_MERGED_AGE_DAYS:
+            logger.info(
+                "skip %s: PR #%s merged %.1f days ago (< %s)",
+                fid,
+                pr.get("number"),
+                age,
+                MIN_MERGED_AGE_DAYS,
+            )
             continue
-        created = str(pr.get("createdAt") or "")
-        if created and _pr_age_days(created) < MIN_PR_AGE_DAYS:
-            logger.info("skip %s: PR younger than %s days", fid, MIN_PR_AGE_DAYS)
+        open_issues = _open_issue_count(issue_label)
+        if open_issues is None:
+            logger.info("skip %s: could not check open issues for %s", fid, issue_label)
             continue
-        if _open_issue_count(issue_label) > 0:
-            logger.info("skip %s: open issues with label %s", fid, issue_label)
-            continue
-        if not _pr_ci_green(pr):
-            logger.info("skip %s: CI not green", fid)
-            continue
-        number = int(pr.get("number") or 0)
-        if number <= 0:
-            continue
-        if not _merge_pr(number):
+        if open_issues > 0:
+            logger.info(
+                "skip %s: %s open issue(s) with label %s",
+                fid,
+                open_issues,
+                issue_label,
+            )
             continue
         entry["stage"] = "ga"
         changed = True
-        logger.info("promoted %s to ga", fid)
+        logger.info(
+            "promoted %s to ga (PR #%s, merged %.1f days ago)",
+            fid,
+            pr.get("number"),
+            age,
+        )
 
     if changed:
         MANIFEST.write_text(

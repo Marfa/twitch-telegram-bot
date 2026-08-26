@@ -30,11 +30,11 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
-| Subscriptions | List, edit all fields, enable/disable, delete; **⏸ Pause notifications** for N days without pausing subscriptions (🧪 beta); **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium) (🧪 beta); **💬 Stream chat** — Mini App with embed/fallback (🧪 beta) |
+| Subscriptions | List, edit all fields, enable/disable, delete; **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium); **⏸ Pause notifications** for N days without pausing subscriptions (🧪 beta); **💬 Stream chat** — Mini App with embed/fallback (🧪 beta) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
-| Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day** (🧪 beta), **Time zone** (UTC); publish to Twitch is **Premium** |
+| Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | 7-day trial (alerts pause + DM notice when it ends); Stars month/year/lifetime; à la carte (advanced mode, 60-day history; cart / stream chat — after betas go public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
+| Premium | 7-day trial (alerts pause + DM notice when it ends); Stars month/year/lifetime; à la carte (advanced mode, 60-day history, 30-day cart; stream chat — after the beta goes public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; scheduled sends use MSK (UTC+3) by default, users with a saved UTC offset get local wall-clock time; stats after all UTC waves; “bot update” refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
@@ -156,15 +156,13 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 
 ### Stream schedule
 
-**📅 Manage schedule** in **📦 Other** (everyone). Users enrolled in the `schedule-fix-day` beta (🧪 Beta mode) get a choice:
+**📅 Manage schedule** in **📦 Other** (everyone) — choose a mode:
 
 | Mode | What it does |
 |---|---|
-| **Create schedule for the week** | Weekly text wizard Monday through Sunday (same as before) |
-| **Fix slots for a day** (🧪 beta) | Pick one day → game → time → publish; only that day's segments are cleared on Twitch |
+| **Create schedule for the week** | Weekly text wizard Monday through Sunday |
+| **Fix slots for a day** | Pick one day → game → time → publish; only that day's segments are cleared on Twitch |
 | **Time zone** | Set UTC offset (`UTC+3`, `UTC-5`, …); saved for Twitch publishing |
-
-Without beta opt-in, `/schedule` goes straight to the weekly flow (**Time zone** on the weekly confirm screen).
 
 **Weekly wizard:**
 
@@ -194,15 +192,12 @@ Optionally **publish to Twitch** (**Premium**):
 
 ### Deleted subscriptions cart
 
-🧪 Beta feature `deleted-subscriptions-cart` — enable in **⚙️ Settings → 🧪 Beta mode**.
-
 When a subscription is deleted (manually or via Twitch sync) it is saved to the cart. The **🗑 Delete subscription** menu shows a **🧺 Cart** button:
 
-- Lists deleted subscriptions from the last **10 days** (free) or **30 days** (Premium)
+- If there are several alert types — pick a type first (same as view / edit / delete)
+- Lists deleted subscriptions from the last **10 days** (free) or **30 days** (Premium / à la carte)
 - Multi-select + **♻️ Restore selected**
 - Partial restore with a message when the subscription limit is hit
-
-Without beta opt-in the cart is hidden and deleted subscriptions are not saved. The à la carte Premium item for the cart appears after the beta goes public (GA).
 
 ### Twitch stream chat
 

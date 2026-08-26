@@ -7,7 +7,7 @@
       "description_key": "beta_feat_deleted_subscriptions_cart_desc",
       "premium_feature_id": "deleted_subscriptions_cart",
       "issue_label": "beta/deleted-subscriptions-cart",
-      "stage": "beta",
+      "stage": "ga",
       "created_at": "2026-08-18"
     },
     {
@@ -16,7 +16,7 @@
       "title_key": "beta_feat_schedule_fix_day",
       "description_key": "beta_feat_schedule_fix_day_desc",
       "issue_label": "beta/schedule-fix-day",
-      "stage": "beta",
+      "stage": "ga",
       "created_at": "2026-08-18"
     },
     {

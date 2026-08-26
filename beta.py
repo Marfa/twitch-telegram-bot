@@ -134,13 +134,22 @@ def _user_enrolled(db: Database, user_id: int, feature_id: str) -> bool:
 
 
 def is_enabled(db: Database, user_id: int, feature_id: str) -> bool:
-    """Runtime gate for beta-only code paths."""
+    """Runtime gate for feature code paths.
+
+    - alpha/beta: only enrolled users (and admins unless they opted out)
+    - ga: available to everyone (premium rules still apply via has_feature)
+    - other/missing: off
+    """
     from demo_mode import is_active
 
     if is_active(user_id):
         return False
     feat = get_feature(feature_id)
-    if feat is None or feat.stage not in _ACTIVE_STAGES:
+    if feat is None:
+        return False
+    if feat.stage == "ga":
+        return True
+    if feat.stage not in _ACTIVE_STAGES:
         return False
     return _user_enrolled(db, user_id, feature_id)
 
@@ -291,7 +300,11 @@ def _self_check() -> None:
         raw["features"][0]["stage"] = "ga"
         path.write_text(json.dumps(raw), encoding="utf-8")
         load_manifest(path)
+        assert list_features() == []
         assert user_ids_with_active_enrollment(db) == []
+        # GA: feature is on for everyone; premium bypass is gone.
+        assert is_enabled(db, 1, "demo_feat")
+        assert not grants_premium_feature(db, 1, "alert_history")
         load_manifest(_MANIFEST_PATH)
 
 
