@@ -59,31 +59,6 @@ def placeholders_link_html(lang: str) -> str:
     return f'<a href="{html.escape(url)}">{label}</a>'
 
 
-def oferta_url() -> str:
-    from config import PUBLIC_BASE_URL
-
-    if not PUBLIC_BASE_URL:
-        return ""
-    return f"{PUBLIC_BASE_URL}/oferta"
-
-
-def with_premium_oferta(
-    lang: str, markup: InlineKeyboardMarkup | None
-) -> InlineKeyboardMarkup | None:
-    """Append RU-only «Оферта» URL button at the end of the Premium keyboard."""
-    if lang != "ru":
-        return markup
-    url = oferta_url()
-    if not url:
-        return markup
-    row = [InlineKeyboardButton(btn("premium_oferta", lang), url=url)]
-    if markup is None:
-        return InlineKeyboardMarkup([row])
-    rows = [list(r) for r in markup.inline_keyboard]
-    rows.append(row)
-    return InlineKeyboardMarkup(rows)
-
-
 def channel_dup_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

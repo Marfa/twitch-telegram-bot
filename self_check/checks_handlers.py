@@ -370,39 +370,6 @@ def check_handlers() -> None:
     assert "Премиум-канал" in _pt
     assert "рекомендация" in _pt
     assert tr("btn_premium", "en")
-    assert tr("btn_premium_oferta", "ru") == "Оферта"
-    assert "Докучаев" in tr(
-        "oferta_page_body",
-        "ru",
-        free_limit=5,
-        trial_days=7,
-        channel="marfapr",
-        month_stars=100,
-        month_rub="200",
-        year_stars=1000,
-        year_rub="2 000",
-        life_stars=2000,
-        life_rub="4 000",
-        feat_stars=20,
-        feat_rub="40",
-        channel_stars=1500,
-        channel_rub="3 000",
-        rub_per_star=2,
-        extra_features="",
-    )
-    from unittest.mock import patch
-
-    from i18n import with_premium_oferta
-
-    assert with_premium_oferta("en", None) is None
-    with patch("config.PUBLIC_BASE_URL", "https://example.com"):
-        oferta_kb = with_premium_oferta("ru", None)
-        assert oferta_kb is not None
-        assert oferta_kb.inline_keyboard[-1][0].url == "https://example.com/oferta"
-        assert oferta_kb.inline_keyboard[-1][0].text == "Оферта"
-    from health import _oferta_page
-
-    assert b"760403963548" in _oferta_page()
     assert "Пробный" in tr("btn_premium_trial", "ru") or "триал" in tr(
         "btn_premium_trial", "ru"
     ).lower() or "Пробный" in tr("btn_premium_trial", "ru")
@@ -445,15 +412,6 @@ def check_handlers() -> None:
         assert _premium_markup(db, 2, "ru", free_chat=False, force_free=False) is not None
         assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
         assert _premium_markup(db, 1, "ru", free_chat=False, force_free=True) is not None
-        # Оферта остаётся и у премиум (free-chat / permanent → markup None).
-        with patch("config.PUBLIC_BASE_URL", "https://example.com"):
-            prem_only = with_premium_oferta(
-                "ru",
-                _premium_markup(db, 2, "ru", free_chat=True, force_free=False),
-            )
-            assert prem_only is not None
-            assert len(prem_only.inline_keyboard) == 1
-            assert prem_only.inline_keyboard[0][0].url == "https://example.com/oferta"
         import demo_mode as dm
         from premium_handlers import (
             _blocks_feature_purchase,

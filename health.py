@@ -495,85 +495,6 @@ def _placeholders_page(lang: str) -> bytes:
     ).encode("utf-8")
 
 
-def _fmt_rub(amount: int) -> str:
-    return f"{amount:,}".replace(",", "\u00a0")
-
-
-def _oferta_extra_features_html() -> str:
-    """À la carte Premium items not in the static offer list (only after GA)."""
-    from config import PREMIUM_FREE_ACTIVE_LIMIT
-    from i18n import t
-    from premium import feature_label_key, purchasable_feature_ids
-
-    # Covered by the hand-written bullets in oferta_page_body (ru).
-    static = frozenset(
-        {
-            "extra_alerts",
-            "alert_types",
-            "twitch_sync",
-            "advanced_mode",
-            "schedule_publish",
-            "alert_history",
-        }
-    )
-    parts: list[str] = []
-    for fid in purchasable_feature_ids():
-        if fid in static:
-            continue
-        label = html.escape(
-            t(feature_label_key(fid), "ru", free_limit=PREMIUM_FREE_ACTIVE_LIMIT)
-        )
-        parts.append(f"<li>{label};</li>")
-    return "".join(parts)
-
-
-def _oferta_page() -> bytes:
-    """Public offer for paid Premium (Russian legal text; always ru)."""
-    from config import (
-        PREMIUM_CHANNEL_STARS,
-        PREMIUM_FREE_ACTIVE_LIMIT,
-        PREMIUM_STARS_AMOUNT,
-        PREMIUM_STARS_FEATURE,
-        PREMIUM_STARS_LIFETIME,
-        PREMIUM_STARS_YEAR,
-        PREMIUM_TRIAL_DAYS,
-        PREMIUM_TWITCH_LOGIN,
-    )
-    from i18n import t
-
-    # Orientative Stars→RUB for offer disclosure; Telegram sets the rate when buying Stars.
-    rub_per_star = 2
-    title = html.escape(t("oferta_page_title", "ru"))
-    intro = html.escape(t("oferta_page_intro", "ru"))
-    body = t(
-        "oferta_page_body",
-        "ru",
-        free_limit=PREMIUM_FREE_ACTIVE_LIMIT,
-        trial_days=PREMIUM_TRIAL_DAYS,
-        channel=html.escape(PREMIUM_TWITCH_LOGIN),
-        month_stars=PREMIUM_STARS_AMOUNT,
-        month_rub=_fmt_rub(PREMIUM_STARS_AMOUNT * rub_per_star),
-        year_stars=PREMIUM_STARS_YEAR,
-        year_rub=_fmt_rub(PREMIUM_STARS_YEAR * rub_per_star),
-        life_stars=PREMIUM_STARS_LIFETIME,
-        life_rub=_fmt_rub(PREMIUM_STARS_LIFETIME * rub_per_star),
-        feat_stars=PREMIUM_STARS_FEATURE,
-        feat_rub=_fmt_rub(PREMIUM_STARS_FEATURE * rub_per_star),
-        channel_stars=PREMIUM_CHANNEL_STARS,
-        channel_rub=_fmt_rub(PREMIUM_CHANNEL_STARS * rub_per_star),
-        rub_per_star=rub_per_star,
-        extra_features=_oferta_extra_features_html(),
-    )
-    return (
-        "<!DOCTYPE html><html lang='ru'><head><meta charset='utf-8'>"
-        f"<title>{title}</title>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "</head><body style='font-family:sans-serif;max-width:40rem;"
-        "margin:2rem auto;padding:0 1rem;line-height:1.5'>"
-        f"<h1>{title}</h1><p>{intro}</p>{body}</body></html>"
-    ).encode("utf-8")
-
-
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -771,14 +692,6 @@ class _HealthHandler(BaseHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             lang = (query.get("lang") or ["en"])[0]
             body = _placeholders_page(lang)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        if path == "/oferta":
-            body = _oferta_page()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

@@ -81,6 +81,7 @@ def _msg_update(user_id: int, text: str = "hi"):
 
 
 async def _smoke_schedule(db) -> None:
+    import handlers.stream_schedule as schedule_mod
     from handlers.stream_schedule import (
         _complete_schedule_publish,
         _prompt_stream_schedule_fix_game,
@@ -98,6 +99,10 @@ async def _smoke_schedule(db) -> None:
         stream_schedule_tz,
         stream_schedule_tz_callback,
     )
+
+    # Regression: NameError prem / _wizard (PostHog 01a03a79 / 01a03a80)
+    assert schedule_mod.prem is not None
+    assert callable(schedule_mod._wizard)
 
     st = _sched_states()
     db.upsert_user(_FREE_UID)
