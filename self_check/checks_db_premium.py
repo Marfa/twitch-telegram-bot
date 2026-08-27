@@ -1051,6 +1051,7 @@ def check_db_premium() -> None:
         _build_subs_list_pages,
         _edit_pick_keyboard,
         _format_sub_line,
+        _subs_toggle_keyboard,
     )
 
     with tempfile.TemporaryDirectory() as share_tmp:
@@ -1140,16 +1141,13 @@ def check_db_premium() -> None:
         assert reset.ignore_keywords == ""
         assert reset.attach_chat_button is False
 
-        line = _format_sub_line(
-            src,
-            "ru",
-            1,
-            show_share=True,
-        )
-        assert "Поделиться оповещением" in line
+        line = _format_sub_line(src, "ru", 1)
+        assert "Поделиться оповещением" not in line
         assert "• Оповещение: начало стрима" in line
-        assert line.index("Поделиться") < line.index("Оповещение")
         assert "<a href" not in line
+        kb_rows = _subs_toggle_keyboard(share_db, 9001, "ru", [src])
+        assert len(kb_rows) == 1
+        assert len(kb_rows[0]) == 1  # share beta off for this user by default
 
         long_blocks = [
             (f"block-{i}\n" + ("x" * 500), src) for i in range(12)
