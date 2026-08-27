@@ -358,8 +358,6 @@ def _format_sub_line(
     *,
     chat_display: str | None = None,
     thread_display: str | None = None,
-    share_url: str | None = None,
-    show_share: bool = False,
 ) -> str:
     # Order matches create wizard: image → ignore → preview → delay → repeat
     # → schedule reminder → dest → delete.
@@ -369,8 +367,6 @@ def _format_sub_line(
     )
     keywords = html.escape(sub.ignore_keywords or "")
     settings: list[str] = []
-    if show_share or share_url:
-        settings.append(html.escape(t("sub_list_share", lang)))
     if sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
     elif sub.notify_on_category_change:
@@ -692,7 +688,6 @@ async def _format_subs_overview_lines(
 ) -> tuple[list[str], list[Subscription]]:
     if subs is None:
         subs = _subs_for_owner(db, owner_id)
-    show_share = _share_enabled(db, owner_id)
     lines: list[str] = []
     for sub in subs:
         sub_num = _owner_sub_number(db, owner_id, sub.id)
@@ -704,7 +699,6 @@ async def _format_subs_overview_lines(
                     lang,
                     sub_num,
                     chat_display=chat_display,
-                    show_share=show_share,
                 )
             )
         except Exception:
@@ -722,29 +716,24 @@ def _subs_toggle_keyboard(
     show_share = _share_enabled(db, owner_id)
     rows: list[list[InlineKeyboardButton]] = []
     for s in subs:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    _inline_btn_label(
-                        f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
-                        f"#{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
-                    ),
-                    callback_data=f"toggle:{s.id}",
-                )
-            ]
-        )
-        if show_share:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        _inline_btn_label(
-                            f"{t('sub_list_share', lang)} "
-                            f"#{_owner_sub_number(db, owner_id, s.id)}"
-                        ),
-                        callback_data=f"share_show:{s.id}",
-                    )
-                ]
+        num = _owner_sub_number(db, owner_id, s.id)
+        row = [
+            InlineKeyboardButton(
+                _inline_btn_label(
+                    f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
+                    f"#{num} {s.twitch_username}"
+                ),
+                callback_data=f"toggle:{s.id}",
             )
+        ]
+        if show_share:
+            row.append(
+                InlineKeyboardButton(
+                    _inline_btn_label(f"{t('sub_list_share', lang)} #{num}"),
+                    callback_data=f"share_show:{s.id}",
+                )
+            )
+        rows.append(row)
     return rows
 
 
