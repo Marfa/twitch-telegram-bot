@@ -1043,3 +1043,145 @@ def check_db_premium() -> None:
     assert "функция Premium" in _premium_gate_text(
         "ru", "delay", "пропустите шаг"
     )
+
+    # Share token snapshot + list pagination chunks + free edit resets advanced fields.
+    from db.models import _subscription_cart_snapshot
+    from handlers.subscriptions import (
+        _PICK_PAGE_SIZE,
+        _build_subs_list_pages,
+        _edit_pick_keyboard,
+        _format_sub_line,
+    )
+
+    with tempfile.TemporaryDirectory() as share_tmp:
+        share_db = SqliteDatabase(Path(share_tmp) / "share.db")
+        share_db.upsert_user(9001)
+        share_db.set_user_locale(9001, "ru")
+        src_id = share_db.add_subscription(
+            owner_id=9001,
+            twitch_username="sharechan",
+            twitch_user_id="uid_share",
+            message_template="hi {username}",
+            dest_type="channel",
+            chat_id=-100111,
+            thread_id=7,
+            delay_minutes=15,
+            suppress_repeat_minutes=30,
+            ignore_keywords="spoiler",
+            use_global_ignore=True,
+            attach_chat_button=True,
+            delete_previous=True,
+            notify_delete_fail=True,
+            enabled=True,
+        )
+        src = share_db.get_subscription(src_id, 9001)
+        assert src is not None
+        snap = _subscription_cart_snapshot(src)
+        token = share_db.ensure_alert_share_token(9001, src_id, snap)
+        assert token
+        assert share_db.ensure_alert_share_token(9001, src_id, snap) == token
+        loaded = share_db.get_alert_share_snapshot(token)
+        assert loaded is not None
+        assert loaded["twitch_username"] == "sharechan"
+        assert loaded["delay_minutes"] == 15
+        assert loaded["ignore_keywords"] == "spoiler"
+
+        share_db.upsert_user(9002)
+        share_db.set_user_locale(9002, "ru")
+        assert prem.may_enable_subscription(share_db, 9002)
+        cloned_id = share_db.add_subscription(
+            owner_id=9002,
+            twitch_username=str(loaded["twitch_username"]),
+            twitch_user_id=str(loaded["twitch_user_id"]),
+            message_template=str(loaded["message_template"]),
+            dest_type="dm",
+            chat_id=9002,
+            thread_id=None,
+            delete_previous=bool(loaded.get("delete_previous")),
+            notify_delete_fail=bool(loaded.get("notify_delete_fail")),
+            disable_link_preview=bool(loaded.get("disable_link_preview")),
+            strip_name_mentions=bool(loaded.get("strip_name_mentions")),
+            attach_chat_button=bool(loaded.get("attach_chat_button")),
+            delay_minutes=int(loaded.get("delay_minutes") or 0),
+            suppress_repeat_minutes=int(loaded.get("suppress_repeat_minutes") or 0),
+            ignore_keywords=str(loaded.get("ignore_keywords") or ""),
+            use_global_ignore=bool(loaded.get("use_global_ignore")),
+            enabled=True,
+            from_twitch_sync=False,
+            from_watch_suggest=False,
+            is_demo=False,
+        )
+        cloned = share_db.get_subscription(cloned_id, 9002)
+        assert cloned is not None
+        assert cloned.dest_type == "dm"
+        assert cloned.chat_id == 9002
+        assert cloned.thread_id is None
+        assert cloned.delay_minutes == 15
+        assert cloned.ignore_keywords == "spoiler"
+        assert cloned.attach_chat_button is True
+
+        # Free user without advanced_mode: opening edit resets premium fields.
+        assert not prem.has_feature_sync(share_db, 9002, "advanced_mode")
+        share_db.update_subscription(
+            cloned_id,
+            9002,
+            ignore_keywords="",
+            use_global_ignore=False,
+            delay_minutes=0,
+            suppress_repeat_minutes=0,
+            attach_chat_button=False,
+            delete_previous=False,
+            notify_delete_fail=False,
+            delete_other_alerts=False,
+        )
+        reset = share_db.get_subscription(cloned_id, 9002)
+        assert reset is not None
+        assert reset.delay_minutes == 0
+        assert reset.ignore_keywords == ""
+        assert reset.attach_chat_button is False
+
+        line = _format_sub_line(
+            src,
+            "ru",
+            1,
+            share_url="https://t.me/testbot?start=share_tok",
+        )
+        assert "Поделиться оповещением" in line
+        assert "share_tok" in line
+        assert "• Оповещение: начало стрима" in line
+        assert line.index("Поделиться") < line.index("Оповещение")
+
+        long_blocks = [
+            (f"block-{i}\n" + ("x" * 500), src) for i in range(12)
+        ]
+        pages = _build_subs_list_pages("title\n", long_blocks)
+        assert len(pages) > 1
+        many = [
+            share_db.get_subscription(
+                share_db.add_subscription(
+                    owner_id=9001,
+                    twitch_username=f"u{i}",
+                    twitch_user_id=f"id{i}",
+                    message_template="t",
+                    dest_type="dm",
+                    chat_id=9001,
+                    thread_id=None,
+                    enabled=False,
+                ),
+                9001,
+            )
+            for i in range(_PICK_PAGE_SIZE + 3)
+        ]
+        many = [s for s in many if s is not None]
+        kb0 = _edit_pick_keyboard(share_db, 9001, many, page=0)
+        kb1 = _edit_pick_keyboard(share_db, 9001, many, page=1)
+        assert any(
+            (b.callback_data or "").startswith("edit_page:")
+            for row in kb0.inline_keyboard
+            for b in row
+        )
+        assert any(
+            (b.callback_data or "") == "edit_page:0"
+            for row in kb1.inline_keyboard
+            for b in row
+        )

@@ -28,6 +28,7 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^stream_sched:publish:0$|"
     r"^import_oauth:cancel$|"
     r"^alert_history:menu$|"
+    r"^share_decline$|"
     r"^ignored_words:cancel$|"
     r"^ignore_keywords:(?:cancel|back)$|"
     r"^strip_name:(?:cancel|back)$"
@@ -41,6 +42,7 @@ def _decline_labels() -> set[str]:
         labels.add(t("stream_schedule_no", loc))
         labels.add(t("stream_schedule_publish_no", loc))
         labels.add(t("ignored_words_cancel", loc))
+        labels.add(t("share_decline", loc))
         labels.add(btn("premium_feat_back", loc))
     return labels
 

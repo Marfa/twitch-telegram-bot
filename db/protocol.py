@@ -461,3 +461,9 @@ class Database(Protocol):
         owner_telegram_id: int,
         charge_id: str,
     ) -> None: ...
+
+    def ensure_alert_share_token(
+        self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]
+    ) -> str: ...
+
+    def get_alert_share_snapshot(self, token: str) -> dict[str, Any] | None: ...

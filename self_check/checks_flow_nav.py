@@ -653,6 +653,67 @@ async def _scenario_subscriptions_edit_pick(db) -> None:
     cap.assert_turn("subscriptions_edit_pick")
 
 
+async def _scenario_share_alert_offer(db) -> None:
+    """§1 deep link share confirm — decline is the escape hatch."""
+    from db.models import _subscription_cart_snapshot
+    from handlers.subscriptions import offer_shared_alert, on_share_decline
+
+    sub_id = _seed_live_sub(db, _FREE_UID)
+    sub = db.get_subscription(sub_id, _FREE_UID)
+    assert sub is not None
+    token = db.ensure_alert_share_token(
+        _FREE_UID, sub_id, _subscription_cart_snapshot(sub)
+    )
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await offer_shared_alert(bot, db, _FREE_UID, "ru", token)
+    cap.assert_turn("share_offer")
+
+    update, _query = _cb_update(_FREE_UID, "share_decline", cap)
+    ctx = _ctx(application)
+    await on_share_decline(update, ctx)
+    _query.edit_message_text.assert_awaited()
+
+
+async def _scenario_subscriptions_list_pages(db) -> None:
+    """§4 list pagination — long list yields pages; flip keeps working."""
+    from handlers.subscriptions import list_subscriptions, on_list_page
+
+    for i in range(12):
+        db.add_subscription(
+            owner_id=_FREE_UID,
+            twitch_username=f"pagechan{i}",
+            twitch_user_id=f"page{i}",
+            message_template=("Live {username} " + ("настройки " * 40)),
+            dest_type="dm",
+            chat_id=_FREE_UID,
+            thread_id=None,
+            delay_minutes=i,
+            ignore_keywords="kw " * 20,
+            enabled=False,
+        )
+
+    application, bot = _app(db)
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("list", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions.beta_features.is_enabled", return_value=False
+    ):
+        await list_subscriptions(update, ctx)
+    cap.assert_turn("subscriptions_list_paged")
+    pages = ctx.user_data.get("list_pages") or []
+    assert len(pages) >= 1
+    if len(pages) > 1:
+        update, query = _cb_update(_FREE_UID, "list_page:1", cap)
+        await on_list_page(update, ctx)
+        query.edit_message_text.assert_awaited()
+
+
 async def _scenario_schedule_deep(db) -> None:
     from handlers.stream_schedule import stream_schedule_confirm_callback
 
@@ -755,6 +816,8 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)
+        await _scenario_share_alert_offer(db)
+        await _scenario_subscriptions_list_pages(db)
         await _scenario_schedule_deep(db)
         await _scenario_schedule_publish_chain(db)
         await _scenario_settings_extended(db)

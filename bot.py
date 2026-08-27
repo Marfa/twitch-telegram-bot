@@ -571,6 +571,15 @@ from handlers.subscriptions import (
     on_import_mode_once,
     on_import_mode_sync,
     on_list_type,
+    on_list_page,
+    on_list_page_noop,
+    on_edit_page,
+    on_edit_page_noop,
+    on_delete_page,
+    on_delete_page_noop,
+    on_share_accept,
+    on_share_decline,
+    offer_shared_alert,
     on_sync_change_period,
     on_sync_disable,
     on_sync_now,
@@ -831,7 +840,18 @@ async def _send_welcome(
         lang,
         first_start=first_start,
     )
+    await _maybe_offer_pending_share(context, user_id, lang)
     return ConversationHandler.END
+
+
+async def _maybe_offer_pending_share(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int, lang: str
+) -> None:
+    token = context.user_data.pop("pending_share_token", None)
+    if not token:
+        return
+    db: Database = context.application.bot_data["db"]
+    await offer_shared_alert(context.bot, db, user_id, lang, str(token))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -841,6 +861,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     is_first_start = not db.user_exists(user_id)
     db.upsert_user(user_id)
     _apply_referral_start_arg(db, user_id, context.args)
+    _apply_share_start_arg(db, context, context.args)
     lang = db.get_user_locale(user_id)
     analytics.capture(
         user_id,
@@ -869,6 +890,20 @@ def _apply_referral_start_arg(db: Database, user_id: int, args: list[str] | None
     except ValueError:
         return
     db.set_referred_by(user_id, referrer_id)
+
+
+def _apply_share_start_arg(
+    db: Database, context: ContextTypes.DEFAULT_TYPE, args: list[str] | None
+) -> None:
+    if not args:
+        return
+    raw = (args[0] or "").strip()
+    if not raw.startswith("share_"):
+        return
+    token = raw[6:].strip()
+    if not token or db.get_alert_share_snapshot(token) is None:
+        return
+    context.user_data["pending_share_token"] = token
 
 
 async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -910,6 +945,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         lang,
         first_start=first_start,
     )
+    await _maybe_offer_pending_share(context, query.from_user.id, lang)
     return ConversationHandler.END
 
 
@@ -1878,7 +1914,20 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CallbackQueryHandler(schedule_save_token_callback, pattern=r"^sched_save_token:"), group=0)
     app.add_handler(CallbackQueryHandler(on_list_type, pattern=r"^list_type:\w+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_list_page, pattern=r"^list_page:\d+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_list_page_noop, pattern=r"^list_page:noop$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_type, pattern=r"^edit_type:\w+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_edit_page, pattern=r"^edit_page:\d+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_edit_page_noop, pattern=r"^edit_page:noop$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_delete_page, pattern=r"^delete_page:\d+$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_delete_page_noop, pattern=r"^delete_page:noop$"), group=0
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_share_accept, pattern=r"^share_accept:[A-Za-z0-9_-]+$"),
+        group=0,
+    )
+    app.add_handler(CallbackQueryHandler(on_share_decline, pattern=r"^share_decline$"), group=0)
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_welcome_demo_delete, pattern=r"^welcome_del:\d+$"),

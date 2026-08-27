@@ -636,6 +636,23 @@ class PostgresDatabase:
                 ON premium_channels(twitch_login)
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alert_share_tokens (
+                    token TEXT PRIMARY KEY,
+                    owner_id BIGINT NOT NULL,
+                    source_sub_id BIGINT NOT NULL,
+                    snapshot_json TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_share_tokens_sub
+                ON alert_share_tokens(source_sub_id)
+                """
+            )
             _seed_lucky_templates_pg(cur)
 
     def add_subscription(
@@ -3283,3 +3300,68 @@ class PostgresDatabase:
                     str(charge_id or ""),
                 ),
             )
+
+    def ensure_alert_share_token(
+        self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]
+    ) -> str:
+        payload = json.dumps(snapshot, ensure_ascii=False)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT token FROM alert_share_tokens
+                WHERE source_sub_id = %s
+                """,
+                (int(source_sub_id),),
+            )
+            row = cur.fetchone()
+            if row:
+                token = str(row["token"])
+                cur.execute(
+                    """
+                    UPDATE alert_share_tokens
+                    SET owner_id = %s, snapshot_json = %s
+                    WHERE token = %s
+                    """,
+                    (int(owner_id), payload, token),
+                )
+                return token
+            for _ in range(8):
+                token = secrets.token_urlsafe(12)
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO alert_share_tokens (
+                            token, owner_id, source_sub_id, snapshot_json
+                        ) VALUES (%s, %s, %s, %s)
+                        """,
+                        (token, int(owner_id), int(source_sub_id), payload),
+                    )
+                    return token
+                except Exception:
+                    conn.rollback()
+                    cur = self._cursor(conn)
+                    continue
+            raise RuntimeError("failed to allocate alert share token")
+
+    def get_alert_share_snapshot(self, token: str) -> dict[str, Any] | None:
+        raw = (token or "").strip()
+        if not raw:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT snapshot_json FROM alert_share_tokens
+                WHERE token = %s
+                """,
+                (raw,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row["snapshot_json"] or "{}")
+        except Exception:
+            return None
+        return data if isinstance(data, dict) else None

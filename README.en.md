@@ -30,7 +30,7 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
-| Subscriptions | List, edit all fields, enable/disable, delete; **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium); **⏸ Pause notifications** for N days without pausing subscriptions; **💬 Stream chat** — Mini App with embed/fallback (🧪 beta) |
+| Subscriptions | Paginated list, edit all fields, enable/disable, delete; **Share alert** (🧪 beta) — deep link that clones settings; **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium); **⏸ Pause notifications** for N days without pausing subscriptions; **💬 Stream chat** — Mini App with embed/fallback (🧪 beta) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
