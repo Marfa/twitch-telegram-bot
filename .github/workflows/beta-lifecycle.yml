@@ -9,6 +9,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: read
+  actions: write
 
 concurrency:
   group: beta-lifecycle
@@ -27,6 +28,9 @@ jobs:
         run: python scripts/beta-lifecycle.py
 
       - name: Commit manifest updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           if git diff --quiet beta/manifest.json; then
             echo "No manifest changes"
@@ -37,3 +41,5 @@ jobs:
           git add beta/manifest.json
           git commit -m "Promote beta features to GA"
           git push
+          # GITHUB_TOKEN pushes do not trigger other workflows; deploy explicitly.
+          gh workflow run deploy-vps.yml --repo "$GH_REPO"

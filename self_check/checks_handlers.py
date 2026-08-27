@@ -980,9 +980,9 @@ def check_handlers() -> None:
     from i18n import beta_mode_btn, is_menu_button
 
     pause_ids = {f.id for f in beta_mod.list_features()}
-    assert "pause-notifications" in pause_ids
+    assert "pause-notifications" not in pause_ids
     pause_feat = beta_mod.get_feature("pause-notifications")
-    assert pause_feat is not None and pause_feat.stage == "beta"
+    assert pause_feat is not None and pause_feat.stage == "ga"
     assert btn("pause_notifications", "ru") == "⏸ Приостановить оповещения"
     assert btn("pause_notifications", "en") == "⏸ Pause notifications"
     assert "0 дней" in tr("pause_notifications_prompt", "ru")
@@ -994,8 +994,6 @@ def check_handlers() -> None:
         assert not _user_notifications_paused(pdb, 501)
         until = int((datetime.now(timezone.utc) + timedelta(days=2)).timestamp())
         pdb.set_notifications_paused_until(501, until)
-        assert not _user_notifications_paused(pdb, 501)
-        pdb.set_beta_enrollment(501, "pause-notifications", True)
         assert _user_notifications_paused(pdb, 501)
         pdb.set_notifications_paused_until(501, 0)
         assert not _user_notifications_paused(pdb, 501)
