@@ -101,6 +101,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("edit_page_noop", "edit_page:noop"),
     ("delete_page", "delete_page:1"),
     ("delete_page_noop", "delete_page:noop"),
+    ("share_show", f"share_show:{_SAMPLE_SUB}"),
     ("share_accept", "share_accept:abc123XYZ_-"),
     ("share_decline", "share_decline"),
     ("toggle", f"toggle:{_SAMPLE_SUB}:1"),

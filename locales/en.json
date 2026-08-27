@@ -262,6 +262,7 @@
   "alert_note_end": "When {twitch_username} ends a stream — I'll send a notification.",
   "sub_list_alert_live": "• Alert: stream start",
   "sub_list_share": "Share alert",
+  "share_friend_prompt": "You can share this alert with friends. Opening the link below will create it with the same settings as now.\n\nLink for a friend: {link}",
   "share_offer": "Add an alert for {username}?\nType: {alert_type}\n\nSettings will be copied from the link.",
   "share_accept": "✅ Add",
   "share_decline": "No thanks",

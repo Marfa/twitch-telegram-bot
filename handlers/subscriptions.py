@@ -359,6 +359,7 @@ def _format_sub_line(
     chat_display: str | None = None,
     thread_display: str | None = None,
     share_url: str | None = None,
+    show_share: bool = False,
 ) -> str:
     # Order matches create wizard: image → ignore → preview → delay → repeat
     # → schedule reminder → dest → delete.
@@ -368,10 +369,8 @@ def _format_sub_line(
     )
     keywords = html.escape(sub.ignore_keywords or "")
     settings: list[str] = []
-    if share_url:
-        label = html.escape(t("sub_list_share", lang))
-        href = html.escape(share_url, quote=True)
-        settings.append(f'<a href="{href}">{label}</a>')
+    if show_share or share_url:
+        settings.append(html.escape(t("sub_list_share", lang)))
     if sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
     elif sub.notify_on_category_change:
@@ -486,12 +485,16 @@ async def _bot_username(bot, bot_data: dict | None = None) -> str:
     return username
 
 
+def _share_enabled(db: Database, owner_id: int) -> bool:
+    return beta_features.is_enabled(db, owner_id, _SHARE_BETA_ID)
+
+
 def _share_link_for_sub(
     db: Database, owner_id: int, sub: Subscription, bot_username: str
 ) -> str | None:
     if not bot_username:
         return None
-    if not beta_features.is_enabled(db, owner_id, _SHARE_BETA_ID):
+    if not _share_enabled(db, owner_id):
         return None
     token = db.ensure_alert_share_token(
         owner_id, sub.id, _subscription_cart_snapshot(sub)
@@ -689,10 +692,10 @@ async def _format_subs_overview_lines(
 ) -> tuple[list[str], list[Subscription]]:
     if subs is None:
         subs = _subs_for_owner(db, owner_id)
+    show_share = _share_enabled(db, owner_id)
     lines: list[str] = []
     for sub in subs:
         sub_num = _owner_sub_number(db, owner_id, sub.id)
-        share_url = _share_link_for_sub(db, owner_id, sub, bot_username)
         try:
             chat_display = await _resolve_chat_display_name(bot, sub)
             lines.append(
@@ -701,7 +704,7 @@ async def _format_subs_overview_lines(
                     lang,
                     sub_num,
                     chat_display=chat_display,
-                    share_url=share_url,
+                    show_share=show_share,
                 )
             )
         except Exception:
@@ -716,18 +719,33 @@ async def _format_subs_overview_lines(
 def _subs_toggle_keyboard(
     db: Database, owner_id: int, lang: str, subs: list[Subscription]
 ) -> list[list[InlineKeyboardButton]]:
-    return [
-        [
-            InlineKeyboardButton(
-                _inline_btn_label(
-                    f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
-                    f"#{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
-                ),
-                callback_data=f"toggle:{s.id}",
+    show_share = _share_enabled(db, owner_id)
+    rows: list[list[InlineKeyboardButton]] = []
+    for s in subs:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    _inline_btn_label(
+                        f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
+                        f"#{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
+                    ),
+                    callback_data=f"toggle:{s.id}",
+                )
+            ]
+        )
+        if show_share:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        _inline_btn_label(
+                            f"{t('sub_list_share', lang)} "
+                            f"#{_owner_sub_number(db, owner_id, s.id)}"
+                        ),
+                        callback_data=f"share_show:{s.id}",
+                    )
+                ]
             )
-        ]
-        for s in subs
-    ]
+    return rows
 
 
 def _build_subs_list_pages(
@@ -2748,6 +2766,36 @@ def _share_offer_keyboard(lang: str, token: str) -> InlineKeyboardMarkup:
                 )
             ],
         ]
+    )
+
+
+async def on_share_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _share_enabled(db, user_id):
+        await query.answer()
+        return
+    try:
+        sub_id = int(query.data.split(":", 1)[1])
+    except (TypeError, ValueError, IndexError):
+        await query.answer()
+        return
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        await query.answer(t("sub_not_found", lang), show_alert=True)
+        return
+    bot_username = await _bot_username(context.bot, context.application.bot_data)
+    link = _share_link_for_sub(db, user_id, sub, bot_username)
+    if not link:
+        await query.answer(t("share_invalid", lang), show_alert=True)
+        return
+    await query.answer()
+    await context.bot.send_message(
+        user_id,
+        t("share_friend_prompt", lang, link=link),
+        disable_web_page_preview=True,
     )
 
 

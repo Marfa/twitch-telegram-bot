@@ -579,6 +579,7 @@ from handlers.subscriptions import (
     on_delete_page_noop,
     on_share_accept,
     on_share_decline,
+    on_share_show,
     offer_shared_alert,
     on_sync_change_period,
     on_sync_disable,
@@ -1922,6 +1923,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_page, pattern=r"^delete_page:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_delete_page_noop, pattern=r"^delete_page:noop$"), group=0
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_share_show, pattern=r"^share_show:\d+$"),
+        group=0,
     )
     app.add_handler(
         CallbackQueryHandler(on_share_accept, pattern=r"^share_accept:[A-Za-z0-9_-]+$"),

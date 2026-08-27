@@ -834,6 +834,7 @@ def check_core() -> None:
         assert tr("edit_type_pick", loc)
         assert tr("list_type_pick", loc)
         assert tr("sub_list_share", loc)
+        assert tr("share_friend_prompt", loc, link="https://t.me/bot?start=share_x")
         assert tr("share_offer", loc, username="x", alert_type="live")
         assert tr("share_accept", loc)
         assert tr("share_decline", loc)
