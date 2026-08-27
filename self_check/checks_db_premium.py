@@ -1144,12 +1144,12 @@ def check_db_premium() -> None:
             src,
             "ru",
             1,
-            share_url="https://t.me/testbot?start=share_tok",
+            show_share=True,
         )
         assert "Поделиться оповещением" in line
-        assert "share_tok" in line
         assert "• Оповещение: начало стрима" in line
         assert line.index("Поделиться") < line.index("Оповещение")
+        assert "<a href" not in line
 
         long_blocks = [
             (f"block-{i}\n" + ("x" * 500), src) for i in range(12)
