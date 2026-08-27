@@ -548,12 +548,19 @@ async def _smoke_subscriptions(db) -> None:
 
     reply = MagicMock()
     reply.reply_text = AsyncMock()
+    fake_sub = MagicMock()
+    fake_sub.id = 1
+    fake_sub.enabled = True
+    fake_sub.twitch_username = "x"
     with patch(
         "handlers.subscriptions._format_subs_overview_lines",
-        new=AsyncMock(return_value=(["1. x"], None)),
+        new=AsyncMock(return_value=(["1. x"], [fake_sub])),
+    ), patch(
+        "handlers.subscriptions._bot_username",
+        new=AsyncMock(return_value="testbot"),
     ), patch(
         "handlers.subscriptions._subs_toggle_keyboard",
-        return_value=None,
+        return_value=[],
     ):
         await _deliver_subs_list(
             bot=bot,
@@ -566,19 +573,20 @@ async def _smoke_subscriptions(db) -> None:
     reply.reply_text = AsyncMock(side_effect=Forbidden("blocked"))
     with patch(
         "handlers.subscriptions._format_subs_overview_lines",
-        new=AsyncMock(return_value=(["1. x"], None)),
+        new=AsyncMock(return_value=(["1. x"], [fake_sub])),
+    ), patch(
+        "handlers.subscriptions._bot_username",
+        new=AsyncMock(return_value="testbot"),
     ), patch(
         "handlers.subscriptions._subs_toggle_keyboard",
-        return_value=MagicMock(),
-    ), patch(
-        "handlers.subscriptions._split_telegram_text", return_value=["chunk"]
+        return_value=[],
     ):
         await _deliver_subs_list(
             bot=bot,
             db=db,
             owner_id=_FREE_UID,
             lang="ru",
-            subs=[MagicMock()],
+            subs=[fake_sub],
             reply_message=reply,
         )
 

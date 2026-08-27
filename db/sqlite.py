@@ -511,6 +511,23 @@ class SqliteDatabase:
             ON premium_channels(twitch_login)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_share_tokens (
+                token TEXT PRIMARY KEY,
+                owner_id INTEGER NOT NULL,
+                source_sub_id INTEGER NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_share_tokens_sub
+            ON alert_share_tokens(source_sub_id)
+            """
+        )
         _seed_lucky_templates_sqlite(conn)
 
     def add_subscription(
@@ -2982,3 +2999,62 @@ class SqliteDatabase:
                     str(charge_id or ""),
                 ),
             )
+
+    def ensure_alert_share_token(
+        self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]
+    ) -> str:
+        payload = json.dumps(snapshot, ensure_ascii=False)
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT token FROM alert_share_tokens
+                WHERE source_sub_id = ?
+                """,
+                (int(source_sub_id),),
+            ).fetchone()
+            if row:
+                token = str(row["token"])
+                conn.execute(
+                    """
+                    UPDATE alert_share_tokens
+                    SET owner_id = ?, snapshot_json = ?
+                    WHERE token = ?
+                    """,
+                    (int(owner_id), payload, token),
+                )
+                return token
+            for _ in range(8):
+                token = secrets.token_urlsafe(12)
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO alert_share_tokens (
+                            token, owner_id, source_sub_id, snapshot_json
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (token, int(owner_id), int(source_sub_id), payload),
+                    )
+                    return token
+                except sqlite3.IntegrityError:
+                    continue
+            raise RuntimeError("failed to allocate alert share token")
+
+    def get_alert_share_snapshot(self, token: str) -> dict[str, Any] | None:
+        raw = (token or "").strip()
+        if not raw:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT snapshot_json FROM alert_share_tokens
+                WHERE token = ?
+                """,
+                (raw,),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row["snapshot_json"] or "{}")
+        except Exception:
+            return None
+        return data if isinstance(data, dict) else None

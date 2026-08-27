@@ -25,12 +25,12 @@ from bot_helpers import (
     _pause_notifications_enabled,
     _pulse_wizard_keyboard,
     _settings_kb,
-    _split_telegram_text,
     _user_lang,
     _user_notifications_paused,
     _wizard,
 )
 from db import Database, Subscription, TwitchSync, is_category_watch_sub
+from db.models import _subscription_cart_snapshot, alert_type_from_payload
 from handlers.delivery import _resolve_chat_display_name
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
 from handlers.stream_schedule import _complete_schedule_publish
@@ -53,6 +53,10 @@ from i18n import (
 from twitch import TwitchClient, normalize_ignore_keywords, template_has_link
 
 logger = logging.getLogger(__name__)
+
+_SUBS_LIST_PAGE_LIMIT = 4000
+_PICK_PAGE_SIZE = 8
+_SHARE_BETA_ID = "share-alerts"
 
 
 def _sub_states() -> dict[str, int]:
@@ -354,12 +358,20 @@ def _format_sub_line(
     *,
     chat_display: str | None = None,
     thread_display: str | None = None,
+    share_url: str | None = None,
 ) -> str:
     # Order matches create wizard: image → ignore → preview → delay → repeat
     # → schedule reminder → dest → delete.
     status = "✅" if sub.enabled else "⏸"
-    chat_label = chat_display if chat_display is not None else str(sub.chat_id)
+    chat_label = html.escape(
+        chat_display if chat_display is not None else str(sub.chat_id)
+    )
+    keywords = html.escape(sub.ignore_keywords or "")
     settings: list[str] = []
+    if share_url:
+        label = html.escape(t("sub_list_share", lang))
+        href = html.escape(share_url, quote=True)
+        settings.append(f'<a href="{href}">{label}</a>')
     if sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
     elif sub.notify_on_category_change:
@@ -377,13 +389,9 @@ def _format_sub_line(
     else:
         settings.append(t("sub_list_image_no", lang))
     if sub.ignore_keywords.strip() and sub.use_global_ignore:
-        settings.append(
-            t("sub_list_ignore_yes_global", lang, keywords=sub.ignore_keywords)
-        )
+        settings.append(t("sub_list_ignore_yes_global", lang, keywords=keywords))
     elif sub.ignore_keywords.strip():
-        settings.append(
-            t("sub_list_ignore_yes", lang, keywords=sub.ignore_keywords)
-        )
+        settings.append(t("sub_list_ignore_yes", lang, keywords=keywords))
     elif sub.use_global_ignore:
         settings.append(t("sub_list_ignore_global_only", lang))
     else:
@@ -424,12 +432,14 @@ def _format_sub_line(
         t(
             "sub_list_dest",
             lang,
-            dest=dest_label(sub.dest_type, lang),
+            dest=html.escape(dest_label(sub.dest_type, lang)),
             chat_id=chat_label,
         )
     )
     if sub.thread_id:
-        thread_label = thread_display if thread_display is not None else str(sub.thread_id)
+        thread_label = html.escape(
+            thread_display if thread_display is not None else str(sub.thread_id)
+        )
         settings.append(t("sub_list_thread", lang, thread_id=thread_label))
     if sub.dest_type != "dm":
         settings.append(
@@ -445,11 +455,48 @@ def _format_sub_line(
                 if sub.delete_other_alerts
                 else t("sub_list_delete_other_no", lang)
             )
+    uname = html.escape(sub.twitch_username or "")
     return (
-        f"{status} #{sub_num} — {sub.twitch_username}\n"
+        f"{status} #{sub_num} — {uname}\n"
         + "\n".join(f"   {line}" for line in settings)
     )
 
+
+def _subs_page_nav_row(prefix: str, page: int, total: int) -> list[InlineKeyboardButton]:
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("‹", callback_data=f"{prefix}:{page - 1}"))
+    nav.append(
+        InlineKeyboardButton(f"{page + 1}/{total}", callback_data=f"{prefix}:noop")
+    )
+    if page < total - 1:
+        nav.append(InlineKeyboardButton("›", callback_data=f"{prefix}:{page + 1}"))
+    return nav
+
+
+async def _bot_username(bot, bot_data: dict | None = None) -> str:
+    if bot_data is not None:
+        cached = bot_data.get("bot_username")
+        if cached:
+            return str(cached)
+    me = await bot.get_me()
+    username = (me.username or "").strip()
+    if bot_data is not None and username:
+        bot_data["bot_username"] = username
+    return username
+
+
+def _share_link_for_sub(
+    db: Database, owner_id: int, sub: Subscription, bot_username: str
+) -> str | None:
+    if not bot_username:
+        return None
+    if not beta_features.is_enabled(db, owner_id, _SHARE_BETA_ID):
+        return None
+    token = db.ensure_alert_share_token(
+        owner_id, sub.id, _subscription_cart_snapshot(sub)
+    )
+    return f"https://t.me/{bot_username}?start=share_{token}"
 
 
 def _alert_type_from_sub(sub: Subscription) -> str:
@@ -638,12 +685,14 @@ async def _format_subs_overview_lines(
     lang: str,
     *,
     subs: list[Subscription] | None = None,
+    bot_username: str = "",
 ) -> tuple[list[str], list[Subscription]]:
     if subs is None:
         subs = _subs_for_owner(db, owner_id)
     lines: list[str] = []
     for sub in subs:
         sub_num = _owner_sub_number(db, owner_id, sub.id)
+        share_url = _share_link_for_sub(db, owner_id, sub, bot_username)
         try:
             chat_display = await _resolve_chat_display_name(bot, sub)
             lines.append(
@@ -652,33 +701,74 @@ async def _format_subs_overview_lines(
                     lang,
                     sub_num,
                     chat_display=chat_display,
+                    share_url=share_url,
                 )
             )
         except Exception:
             logger.exception("Failed to format subscription %s for list", sub.id)
+            uname = html.escape(sub.twitch_username or "")
             lines.append(
-                f"{'✅' if sub.enabled else '⏸'} #{sub_num} — {sub.twitch_username}"
+                f"{'✅' if sub.enabled else '⏸'} #{sub_num} — {uname}"
             )
     return lines, subs
 
 
 def _subs_toggle_keyboard(
     db: Database, owner_id: int, lang: str, subs: list[Subscription]
-) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+) -> list[list[InlineKeyboardButton]]:
+    return [
         [
-            [
-                InlineKeyboardButton(
-                    _inline_btn_label(
-                        f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
-                        f"#{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
-                    ),
-                    callback_data=f"toggle:{s.id}",
-                )
-            ]
-            for s in subs
+            InlineKeyboardButton(
+                _inline_btn_label(
+                    f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
+                    f"#{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
+                ),
+                callback_data=f"toggle:{s.id}",
+            )
         ]
-    )
+        for s in subs
+    ]
+
+
+def _build_subs_list_pages(
+    title: str,
+    blocks: list[tuple[str, Subscription]],
+) -> list[tuple[str, list[Subscription]]]:
+    pages: list[tuple[str, list[Subscription]]] = []
+    buf = title
+    page_subs: list[Subscription] = []
+    for block, sub in blocks:
+        candidate = f"{buf}\n{block}" if buf else block
+        if buf and page_subs and len(candidate) > _SUBS_LIST_PAGE_LIMIT:
+            pages.append((buf, page_subs))
+            buf = f"{title}{block}" if title else block
+            page_subs = [sub]
+            if len(buf) > _SUBS_LIST_PAGE_LIMIT:
+                buf = buf[: _SUBS_LIST_PAGE_LIMIT - 1].rstrip() + "…"
+        else:
+            buf = (
+                candidate
+                if len(candidate) <= _SUBS_LIST_PAGE_LIMIT
+                else candidate[: _SUBS_LIST_PAGE_LIMIT - 1].rstrip() + "…"
+            )
+            page_subs.append(sub)
+    if buf or page_subs:
+        pages.append((buf, page_subs))
+    return pages or [(title.strip() or "—", [])]
+
+
+def _subs_list_keyboard(
+    db: Database,
+    owner_id: int,
+    lang: str,
+    page_subs: list[Subscription],
+    page: int,
+    total: int,
+) -> InlineKeyboardMarkup:
+    rows = _subs_toggle_keyboard(db, owner_id, lang, page_subs)
+    if total > 1:
+        rows.append(_subs_page_nav_row("list_page", page, total))
+    return InlineKeyboardMarkup(rows)
 
 
 async def _deliver_subs_list(
@@ -690,30 +780,80 @@ async def _deliver_subs_list(
     subs: list[Subscription],
     reply_message,
     query=None,
+    context: ContextTypes.DEFAULT_TYPE | None = None,
 ) -> None:
-    lines, _ = await _format_subs_overview_lines(
-        bot, db, owner_id, lang, subs=subs
+    bot_data = context.application.bot_data if context is not None else None
+    bot_username = await _bot_username(bot, bot_data)
+    lines, ordered = await _format_subs_overview_lines(
+        bot, db, owner_id, lang, subs=subs, bot_username=bot_username
     )
-    keyboard = _subs_toggle_keyboard(db, owner_id, lang, subs)
-    text = t("subs_list", lang) + "\n".join(lines)
-    chunks = _split_telegram_text(text)
-    for index, chunk in enumerate(chunks):
-        markup = keyboard if index == len(chunks) - 1 else None
+    title = t("subs_list", lang)
+    blocks = list(zip(lines, ordered))
+    pages = _build_subs_list_pages(title, blocks)
+    if context is not None:
+        context.user_data["list_pages"] = pages
+        context.user_data["list_page"] = 0
+    text, page_subs = pages[0]
+    markup = _subs_list_keyboard(db, owner_id, lang, page_subs, 0, len(pages))
+    try:
+        if query is not None:
+            await query.edit_message_text(
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        else:
+            await reply_message.reply_text(
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+    except (BadRequest, Forbidden):
+        logger.exception("Failed to send subscriptions list to %s", owner_id)
         try:
-            if query is not None and index == 0:
-                await query.edit_message_text(chunk, reply_markup=markup)
-            else:
-                await reply_message.reply_text(chunk, reply_markup=markup)
+            await reply_message.reply_text(
+                title.strip() or "—",
+                reply_markup=markup,
+            )
         except (BadRequest, Forbidden):
-            logger.exception("Failed to send subscriptions list chunk to %s", owner_id)
-            if markup is not None:
-                try:
-                    await reply_message.reply_text(
-                        t("subs_list", lang).strip() or "—",
-                        reply_markup=markup,
-                    )
-                except (BadRequest, Forbidden):
-                    pass
+            pass
+
+
+async def on_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if query.data.endswith(":noop"):
+        return
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    try:
+        page = int(query.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError, IndexError):
+        return
+    pages = context.user_data.get("list_pages")
+    if not isinstance(pages, list) or not pages:
+        return
+    page = max(0, min(page, len(pages) - 1))
+    context.user_data["list_page"] = page
+    text, page_subs = pages[page]
+    db: Database = context.application.bot_data["db"]
+    markup = _subs_list_keyboard(db, user_id, lang, page_subs, page, len(pages))
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+async def on_list_page_noop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.callback_query.answer()
 
 
 async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -743,6 +883,7 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
             lang=lang,
             subs=subs,
             reply_message=update.effective_message,
+            context=context,
         )
     await update.effective_message.reply_text(
         t("menu_subs", lang),
@@ -773,6 +914,7 @@ async def on_list_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         subs=filtered,
         reply_message=query.message,
         query=query,
+        context=context,
     )
 
 
@@ -810,21 +952,37 @@ def _edit_type_keyboard(lang: str, types: list[str]) -> InlineKeyboardMarkup:
 
 
 def _edit_pick_keyboard(
-    db: Database, owner_id: int, subs: list[Subscription]
+    db: Database,
+    owner_id: int,
+    subs: list[Subscription],
+    *,
+    page: int = 0,
 ) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+    total = max(1, (len(subs) + _PICK_PAGE_SIZE - 1) // _PICK_PAGE_SIZE) if subs else 1
+    page = max(0, min(page, total - 1))
+    start = page * _PICK_PAGE_SIZE
+    page_subs = subs[start : start + _PICK_PAGE_SIZE]
+    rows: list[list[InlineKeyboardButton]] = [
         [
-            [
-                InlineKeyboardButton(
-                    _inline_btn_label(
-                        f"✏️ #{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
-                    ),
-                    callback_data=f"edit:{s.id}",
-                )
-            ]
-            for s in subs
+            InlineKeyboardButton(
+                _inline_btn_label(
+                    f"✏️ #{_owner_sub_number(db, owner_id, s.id)} {s.twitch_username}"
+                ),
+                callback_data=f"edit:{s.id}",
+            )
         ]
-    )
+        for s in page_subs
+    ]
+    if total > 1:
+        rows.append(_subs_page_nav_row("edit_page", page, total))
+    return InlineKeyboardMarkup(rows)
+
+
+def _store_edit_pick_subs(
+    context: ContextTypes.DEFAULT_TYPE, subs: list[Subscription]
+) -> None:
+    context.user_data["edit_pick_subs"] = [s.id for s in subs]
+    context.user_data["edit_pick_page"] = 0
 
 
 async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -843,6 +1001,7 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     types = _edit_present_types(subs)
     if len(types) == 1:
         text = t("edit_pick", lang)
+        _store_edit_pick_subs(context, subs)
         markup = _edit_pick_keyboard(db, user_id, subs)
     else:
         text = t("edit_type_pick", lang)
@@ -867,10 +1026,47 @@ async def on_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not filtered:
         await query.edit_message_text(t("no_subs_short", lang))
         return
+    _store_edit_pick_subs(context, filtered)
     await query.edit_message_text(
         t("edit_pick", lang),
         reply_markup=_edit_pick_keyboard(db, user_id, filtered),
     )
+
+
+async def on_edit_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if query.data.endswith(":noop"):
+        return
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    try:
+        page = int(query.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError, IndexError):
+        return
+    db: Database = context.application.bot_data["db"]
+    ids = context.user_data.get("edit_pick_subs") or []
+    subs = [
+        s
+        for sid in ids
+        if (s := db.get_subscription(int(sid), user_id)) is not None
+        and _sub_in_current_mode(s, user_id)
+    ]
+    if not subs:
+        await query.edit_message_text(t("no_subs_short", lang))
+        return
+    context.user_data["edit_pick_page"] = page
+    try:
+        await query.edit_message_reply_markup(
+            reply_markup=_edit_pick_keyboard(db, user_id, subs, page=page)
+        )
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+async def on_edit_page_noop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.callback_query.answer()
 
 
 async def _deliver_import_result(
@@ -1601,6 +1797,30 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     show_adv = await prem.advanced_mode_on(
         context.bot, db, query.from_user.id, channel=sub.twitch_username
     )
+    if not show_adv:
+        reset_fields = {
+            "ignore_keywords": "",
+            "use_global_ignore": False,
+            "delay_minutes": 0,
+            "suppress_repeat_minutes": 0,
+            "attach_chat_button": False,
+            "delete_previous": False,
+            "notify_delete_fail": False,
+            "delete_other_alerts": False,
+        }
+        needs_reset = (
+            bool(sub.ignore_keywords.strip())
+            or sub.use_global_ignore
+            or sub.delay_minutes > 0
+            or sub.suppress_repeat_minutes > 0
+            or sub.attach_chat_button
+            or sub.delete_previous
+            or sub.notify_delete_fail
+            or sub.delete_other_alerts
+        )
+        if needs_reset:
+            db.update_subscription(sub_id, query.from_user.id, **reset_fields)
+            sub = db.get_subscription(sub_id, query.from_user.id) or sub
     await query.edit_message_text(
         _edit_menu_text(
             lang,
@@ -1955,6 +2175,7 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
     context.user_data["delete_selected"] = set()
+    context.user_data["delete_page"] = 0
     types = _edit_present_types(subs)
     if len(types) > 1:
         extra_rows: list[list[InlineKeyboardButton]] = []
@@ -1997,6 +2218,7 @@ async def on_delete_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     context.user_data["delete_selected"] = set()
     context.user_data["delete_type"] = kind
+    context.user_data["delete_page"] = 0
     await query.edit_message_text(
         t("delete_pick", lang),
         reply_markup=_delete_pick_keyboard(db, user_id, lang, filtered, set()),
@@ -2019,9 +2241,15 @@ def _delete_pick_keyboard(
     lang: str,
     subs: list[Subscription],
     selected: set[int],
+    *,
+    page: int = 0,
 ) -> InlineKeyboardMarkup:
+    total = max(1, (len(subs) + _PICK_PAGE_SIZE - 1) // _PICK_PAGE_SIZE) if subs else 1
+    page = max(0, min(page, total - 1))
+    start = page * _PICK_PAGE_SIZE
+    page_subs = subs[start : start + _PICK_PAGE_SIZE]
     rows: list[list[InlineKeyboardButton]] = []
-    for s in subs:
+    for s in page_subs:
         mark = "✅ " if s.id in selected else ""
         num = _owner_sub_number(db, owner_id, s.id)
         rows.append(
@@ -2032,6 +2260,8 @@ def _delete_pick_keyboard(
                 )
             ]
         )
+    if total > 1:
+        rows.append(_subs_page_nav_row("delete_page", page, total))
     rows.append(
         [
             InlineKeyboardButton(
@@ -2051,6 +2281,36 @@ def _delete_pick_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+async def on_delete_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if query.data.endswith(":noop"):
+        return
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    try:
+        page = int(query.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError, IndexError):
+        return
+    db: Database = context.application.bot_data["db"]
+    selected: set[int] = set(context.user_data.get("delete_selected") or ())
+    subs = _delete_subs_for_owner(db, user_id, context)
+    context.user_data["delete_page"] = page
+    try:
+        await query.edit_message_reply_markup(
+            reply_markup=_delete_pick_keyboard(
+                db, user_id, lang, subs, selected, page=page
+            )
+        )
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+async def on_delete_page_noop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.callback_query.answer()
+
+
 async def on_delete_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -2064,8 +2324,11 @@ async def on_delete_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         selected.add(sub_id)
     db: Database = context.application.bot_data["db"]
     subs = _delete_subs_for_owner(db, user_id, context)
+    page = int(context.user_data.get("delete_page") or 0)
     await query.edit_message_reply_markup(
-        reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, selected)
+        reply_markup=_delete_pick_keyboard(
+            db, user_id, lang, subs, selected, page=page
+        )
     )
 
 
@@ -2077,8 +2340,9 @@ async def on_delete_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["delete_selected"] = set()
     db: Database = context.application.bot_data["db"]
     subs = _delete_subs_for_owner(db, user_id, context)
+    page = int(context.user_data.get("delete_page") or 0)
     await query.edit_message_reply_markup(
-        reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, set())
+        reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, set(), page=page)
     )
 
 
@@ -2456,4 +2720,144 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text(t(key, lang, sub_id=sub_num))
 
+
+def _share_alert_type_label(payload: dict, lang: str) -> str:
+    kind = alert_type_from_payload(payload)
+    key = {
+        "live": "alert_type_live",
+        "category": "alert_type_category",
+        "upcoming": "alert_type_upcoming",
+        "end": "alert_type_end",
+    }.get(kind, "alert_type_live")
+    return t(key, lang)
+
+
+def _share_offer_keyboard(lang: str, token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("share_accept", lang),
+                    callback_data=f"share_accept:{token}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("share_decline", lang),
+                    callback_data="share_decline",
+                )
+            ],
+        ]
+    )
+
+
+async def offer_shared_alert(
+    bot,
+    db: Database,
+    user_id: int,
+    lang: str,
+    token: str,
+) -> None:
+    snapshot = db.get_alert_share_snapshot(token)
+    if not snapshot:
+        await bot.send_message(user_id, t("share_invalid", lang))
+        return
+    username = str(snapshot.get("twitch_username") or "").strip() or "—"
+    await bot.send_message(
+        user_id,
+        t(
+            "share_offer",
+            lang,
+            username=username,
+            alert_type=_share_alert_type_label(snapshot, lang),
+        ),
+        reply_markup=_share_offer_keyboard(lang, token),
+    )
+
+
+async def on_share_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    token = query.data.split(":", 1)[1]
+    db: Database = context.application.bot_data["db"]
+    context.user_data.pop("pending_share_token", None)
+    snapshot = db.get_alert_share_snapshot(token)
+    if not snapshot:
+        await query.edit_message_text(t("share_invalid", lang))
+        return
+
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(_subs_for_owner(db, user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await query.edit_message_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
+        )
+        return
+
+    login = str(snapshot.get("twitch_username") or "").strip().lower()
+    enabled = await prem.may_enable_subscription_async(
+        context.bot, db, user_id, twitch_username=login
+    )
+    sub_id = db.add_subscription(
+        owner_id=user_id,
+        twitch_username=login,
+        twitch_user_id=str(snapshot.get("twitch_user_id") or ""),
+        message_template=str(snapshot.get("message_template") or ""),
+        dest_type="dm",
+        chat_id=user_id,
+        thread_id=None,
+        delete_previous=bool(snapshot.get("delete_previous")),
+        notify_delete_fail=bool(snapshot.get("notify_delete_fail")),
+        disable_link_preview=bool(snapshot.get("disable_link_preview")),
+        strip_name_mentions=bool(snapshot.get("strip_name_mentions")),
+        attach_chat_button=bool(snapshot.get("attach_chat_button")),
+        delay_minutes=int(snapshot.get("delay_minutes") or 0),
+        suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),
+        schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
+        schedule_reminder_configured=bool(
+            snapshot.get("schedule_reminder_configured")
+        ),
+        ignore_keywords=str(snapshot.get("ignore_keywords") or ""),
+        use_global_ignore=bool(snapshot.get("use_global_ignore")),
+        image_file_id=snapshot.get("image_file_id") or None,
+        image_position=str(snapshot.get("image_position") or ""),
+        enabled=enabled,
+        from_twitch_sync=False,
+        from_watch_suggest=False,
+        category_watch_prefs=str(snapshot.get("category_watch_prefs") or ""),
+        notify_on_live=bool(snapshot.get("notify_on_live", True)),
+        notify_on_end=bool(snapshot.get("notify_on_end")),
+        notify_on_category_change=bool(snapshot.get("notify_on_category_change")),
+        delete_other_alerts=bool(snapshot.get("delete_other_alerts")),
+        is_demo=False,
+    )
+    analytics.capture(
+        user_id,
+        "alert_share_accepted",
+        {"sub_id": sub_id, "enabled": enabled, "channel": login},
+    )
+    sub_num = _owner_sub_number(db, user_id, sub_id)
+    text = t("share_created", lang, sub_id=sub_num, username=login or "—")
+    if not enabled:
+        text += "\n" + t(
+            "share_created_paused",
+            lang,
+            limit=prem.free_active_limit(),
+        )
+    await query.edit_message_text(text)
+    await context.bot.send_message(
+        user_id,
+        t("menu_subs", lang),
+        reply_markup=_subs_kb(lang, db, user_id),
+    )
+
+
+async def on_share_decline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    context.user_data.pop("pending_share_token", None)
+    await query.edit_message_text(t("share_declined", lang))
 
