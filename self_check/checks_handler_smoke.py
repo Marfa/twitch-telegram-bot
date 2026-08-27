@@ -596,6 +596,37 @@ async def _smoke_subscriptions(db) -> None:
         await start_twitch_import(update, ctx)
     update.effective_message.reply_text.assert_awaited()
 
+    # Chat button on + preview left on: still save template, force preview off.
+    from bot import _save_edit_template
+
+    sub_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="chatbtn",
+        twitch_user_id="9001",
+        message_template="old {username}",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        disable_link_preview=False,
+        attach_chat_button=True,
+        enabled=True,
+    )
+    update = _msg_update(_FREE_UID, text="new {username}\nhttps://twitch.tv/{username}")
+    update.effective_message.link_preview_options = None
+    ctx = _ctx(application, user_data={"edit_sub_id": sub_id})
+    state = await _save_edit_template(
+        update, ctx, "ru", "new {username}\nhttps://twitch.tv/{username}"
+    )
+    assert state == ConversationHandler.END
+    saved = db.get_subscription(sub_id, _FREE_UID)
+    assert saved is not None
+    assert saved.message_template.startswith("new ")
+    assert saved.disable_link_preview is True
+    assert all(
+        "превью" not in str(c).lower() and "preview" not in str(c).lower()
+        for c in bot.send_message.await_args_list
+    )
+
 
 async def _smoke_premium_and_menus(db) -> None:
     from bot import (

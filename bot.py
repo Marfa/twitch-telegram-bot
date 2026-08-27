@@ -1050,12 +1050,9 @@ async def _save_edit_template(
     if preview_disabled is None:
         preview_disabled = False
     sub = db.get_subscription(sub_id, owner_id)
-    if sub and sub.attach_chat_button and not preview_disabled:
-        await context.bot.send_message(
-            owner_id, t("preview_blocked_chat_button", lang)
-        )
-        context.user_data.clear()
-        return ConversationHandler.END
+    # Chat button and link preview cannot both be on (Telegram); force preview off.
+    if sub and sub.attach_chat_button:
+        preview_disabled = True
     fields: dict[str, object] = {
         "message_template": template,
         "disable_link_preview": bool(preview_disabled),
