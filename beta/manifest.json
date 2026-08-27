@@ -25,7 +25,7 @@
       "title_key": "beta_feat_pause_notifications",
       "description_key": "beta_feat_pause_notifications_desc",
       "issue_label": "beta/pause-notifications",
-      "stage": "beta",
+      "stage": "ga",
       "created_at": "2026-08-19"
     },
     {
