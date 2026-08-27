@@ -698,6 +698,8 @@
   "schedule_saved_time": "Saved time ↘",
   "schedule_apply": "Apply",
   "schedule_show_calendar": "🗓 Show calendar",
+  "schedule_pick_month": "Select month:",
+  "schedule_pick_day": "Select day ({month}):",
   "schedule_minutes_header": "——— Select minutes ———",
   "sys_notifications_menu": "System notifications:\n\nAvailability alerts also cover Twitch outages (status.twitch.com).",
   "sys_updates_label": "Bot update notifications",

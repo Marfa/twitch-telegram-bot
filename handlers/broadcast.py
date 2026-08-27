@@ -28,8 +28,11 @@ from i18n import (
     admin_wizard_menu,
     all_wizard_nav_buttons,
     broadcast_menu,
+    format_schedule_month_label,
     is_menu_button,
+    schedule_calendar_days_keyboard,
     schedule_keyboard,
+    schedule_month_keyboard,
     scheduled_edit_keyboard,
     scheduled_list_keyboard,
     t,
@@ -332,6 +335,43 @@ def _schedule_to_utc_iso(schedule: dict) -> str:
     return local_dt.astimezone(timezone.utc).isoformat()
 
 
+def _calendar_message(
+    data: str,
+    *,
+    prefix: str,
+    lang: str,
+    schedule: dict,
+    time_title: str,
+    show_send_now: bool,
+) -> tuple[str, object] | None:
+    """Return (text, markup) for calendar navigation callbacks, else None."""
+    if data == f"{prefix}:calendar":
+        return t("schedule_pick_month", lang), schedule_month_keyboard(
+            lang, prefix=prefix
+        )
+    if data == f"{prefix}:time":
+        return time_title, schedule_keyboard(
+            lang, schedule, prefix=prefix, show_send_now=show_send_now
+        )
+    if data.startswith(f"{prefix}:month:"):
+        raw = data.split(":", 2)[2]
+        try:
+            year_s, month_s = raw.split("-", 1)
+            year, month = int(year_s), int(month_s)
+        except ValueError:
+            return None
+        if not (1 <= month <= 12):
+            return None
+        month_label = format_schedule_month_label(year, month, lang)
+        return (
+            t("schedule_pick_day", lang, month=month_label),
+            schedule_calendar_days_keyboard(
+                lang, year, month, schedule, prefix=prefix
+            ),
+        )
+    return None
+
+
 def _default_broadcast_utc_offset() -> int:
     return int(SCHEDULE_TZ.utcoffset(None).total_seconds() // 60)
 
@@ -625,6 +665,18 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
 
     if data == "sched:noop":
         return ADMIN_MSG_SCHEDULE
+    calendar_edit = _calendar_message(
+        data,
+        prefix="sched",
+        lang=lang,
+        schedule=schedule,
+        time_title=t("schedule_title", lang),
+        show_send_now=True,
+    )
+    if calendar_edit is not None:
+        text, markup = calendar_edit
+        await query.edit_message_text(text, reply_markup=markup)
+        return ADMIN_MSG_SCHEDULE
     if data == "sched:toggle_min":
         schedule["show_minutes"] = True
         context.user_data["schedule"] = schedule
@@ -643,6 +695,7 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
         return ADMIN_MSG_SCHEDULE
     if data.startswith("sched:date:"):
         schedule["date_offset"] = int(data.split(":")[2])
+        schedule["date_page"] = int(schedule["date_offset"]) // 3
         context.user_data["schedule"] = schedule
         await query.edit_message_text(
             t("schedule_title", lang),
@@ -1060,11 +1113,24 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
 
     if data == "sb_sched:noop":
         return ADMIN_SB_EDIT_SCHEDULE
+    time_title = t("scheduled_edit_time_title", lang, id=broadcast_id)
+    calendar_edit = _calendar_message(
+        data,
+        prefix="sb_sched",
+        lang=lang,
+        schedule=schedule,
+        time_title=time_title,
+        show_send_now=False,
+    )
+    if calendar_edit is not None:
+        text, markup = calendar_edit
+        await query.edit_message_text(text, reply_markup=markup)
+        return ADMIN_SB_EDIT_SCHEDULE
     if data == "sb_sched:toggle_min":
         schedule["show_minutes"] = True
         context.user_data["schedule"] = schedule
         await query.edit_message_text(
-            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            time_title,
             reply_markup=schedule_keyboard(
                 lang, schedule, prefix="sb_sched", show_send_now=False
             ),
@@ -1074,7 +1140,7 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
         schedule["date_page"] = int(schedule.get("date_page", 0)) + 1
         context.user_data["schedule"] = schedule
         await query.edit_message_text(
-            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            time_title,
             reply_markup=schedule_keyboard(
                 lang, schedule, prefix="sb_sched", show_send_now=False
             ),
@@ -1082,9 +1148,10 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
         return ADMIN_SB_EDIT_SCHEDULE
     if data.startswith("sb_sched:date:"):
         schedule["date_offset"] = int(data.split(":")[2])
+        schedule["date_page"] = int(schedule["date_offset"]) // 3
         context.user_data["schedule"] = schedule
         await query.edit_message_text(
-            t("scheduled_edit_time_title", lang, id=broadcast_id),
+            time_title,
             reply_markup=schedule_keyboard(
                 lang, schedule, prefix="sb_sched", show_send_now=False
             ),

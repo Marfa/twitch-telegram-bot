@@ -863,6 +863,23 @@ def check_handlers() -> None:
         assert "Settings" in tr("broadcast_footer", "en", type="x")
         assert tr("broadcast_type_other", "ru") == "📢 Прочие"
         assert tr("broadcast_type_other", "en") == "📢 Other"
+        assert tr("schedule_pick_month", "ru")
+        assert tr("schedule_pick_day", "en", month="Sep")
+        from i18n import schedule_keyboard, schedule_month_keyboard
+
+        sched_cbs = {
+            (btn.callback_data or "")
+            for row in schedule_keyboard("ru", {"date_page": 0, "date_offset": 0}).inline_keyboard
+            for btn in row
+        }
+        assert "sched:calendar" in sched_cbs
+        month_cbs = {
+            (btn.callback_data or "")
+            for row in schedule_month_keyboard("ru").inline_keyboard
+            for btn in row
+        }
+        assert any(c.startswith("sched:month:") for c in month_cbs)
+        assert "sched:time" in month_cbs
         assert "Partner" in tr("btn_partner", "en") or "🤝" in tr("btn_partner", "en")
 
     status_ok = {

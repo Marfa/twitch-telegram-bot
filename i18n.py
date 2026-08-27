@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar as cal_mod
 import html
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -1178,6 +1179,13 @@ _MONTHS = {
     "en": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
     "ru": ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
 }
+# Nominative short names for month picker buttons (genitive _MONTHS is for date phrases).
+_MONTH_BUTTONS = {
+    "en": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    "ru": ["", "Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"],
+}
+SCHEDULE_CALENDAR_MONTHS = 12
+SCHEDULE_MAX_DAY_OFFSET = 366
 
 
 def _format_schedule_date(d: date, lang: str) -> str:
@@ -1529,6 +1537,90 @@ def stream_schedule_fix_day_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def format_schedule_month_label(year: int, month: int, lang: str) -> str:
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    label = _MONTH_BUTTONS[loc][month]
+    now_year = datetime.now(SCHEDULE_TZ).year
+    if year != now_year:
+        return f"{label} {year}"
+    return label
+
+
+def schedule_month_keyboard(lang: str, *, prefix: str = "sched") -> InlineKeyboardMarkup:
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    now = datetime.now(SCHEDULE_TZ).date()
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    year, month = now.year, now.month
+    for _ in range(SCHEDULE_CALENDAR_MONTHS):
+        label = format_schedule_month_label(year, month, loc)
+        row.append(
+            InlineKeyboardButton(
+                label, callback_data=f"{prefix}:month:{year}-{month:02d}"
+            )
+        )
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    if row:
+        rows.append(row)
+    rows.append(
+        [InlineKeyboardButton(btn("wizard_back", lang), callback_data=f"{prefix}:time")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def schedule_calendar_days_keyboard(
+    lang: str,
+    year: int,
+    month: int,
+    schedule: dict,
+    *,
+    prefix: str = "sched",
+) -> InlineKeyboardMarkup:
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    now = datetime.now(SCHEDULE_TZ).date()
+    selected_offset = int(schedule.get("date_offset", 0))
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(wd, callback_data=f"{prefix}:noop")
+            for wd in _WEEKDAYS[loc]
+        ]
+    ]
+    week: list[InlineKeyboardButton] = []
+    for d in cal_mod.Calendar(firstweekday=0).itermonthdates(year, month):
+        if d.month != month:
+            week.append(InlineKeyboardButton("·", callback_data=f"{prefix}:noop"))
+        else:
+            offset = (d - now).days
+            if offset < 0 or offset > SCHEDULE_MAX_DAY_OFFSET:
+                week.append(
+                    InlineKeyboardButton(str(d.day), callback_data=f"{prefix}:noop")
+                )
+            else:
+                label = f"✅{d.day}" if offset == selected_offset else str(d.day)
+                week.append(
+                    InlineKeyboardButton(
+                        label, callback_data=f"{prefix}:date:{offset}"
+                    )
+                )
+        if len(week) == 7:
+            rows.append(week)
+            week = []
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_back", lang), callback_data=f"{prefix}:calendar"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
 def schedule_keyboard(
     lang: str,
     schedule: dict,
@@ -1545,7 +1637,12 @@ def schedule_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
 
     rows.append(
-        [InlineKeyboardButton(t("schedule_show_calendar", lang), callback_data=f"{prefix}:noop")]
+        [
+            InlineKeyboardButton(
+                t("schedule_show_calendar", lang),
+                callback_data=f"{prefix}:calendar",
+            )
+        ]
     )
 
     date_row: list[InlineKeyboardButton] = []
@@ -1558,7 +1655,8 @@ def schedule_keyboard(
         date_row.append(
             InlineKeyboardButton(label, callback_data=f"{prefix}:date:{offset}")
         )
-    if page < 10:
+    max_page = SCHEDULE_MAX_DAY_OFFSET // 3
+    if page < max_page:
         date_row.append(InlineKeyboardButton("→", callback_data=f"{prefix}:date_next"))
     rows.append(date_row)
 

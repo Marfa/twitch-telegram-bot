@@ -698,6 +698,8 @@
   "schedule_saved_time": "Запомненное время ↘",
   "schedule_apply": "Применить",
   "schedule_show_calendar": "🗓 Показать календарь",
+  "schedule_pick_month": "Выберите месяц:",
+  "schedule_pick_day": "Выберите день ({month}):",
   "schedule_minutes_header": "——— Выберите минуты ———",
   "sys_notifications_menu": "Настройка системных уведомлений:\n\nОповещения о доступности также включают падения Twitch (status.twitch.com).",
   "sys_updates_label": "Оповещения об обновлении бота",
