@@ -152,7 +152,21 @@ def check_core() -> None:
         def get_user(self, login: str):
             return {"login": login} if login.lower() == "shroud" else None
 
-    from twitch import strip_name_mentions_and_commands
+    from twitch import (
+        format_box_art_url,
+        is_game_cover_image,
+        strip_name_mentions_and_commands,
+        template_has_game_placeholder,
+        GAME_COVER_IMAGE_ID,
+    )
+
+    assert is_game_cover_image(GAME_COVER_IMAGE_ID)
+    assert not is_game_cover_image("AgAC_test")
+    assert template_has_game_placeholder("{username} {game}")
+    assert not template_has_game_placeholder("{username} only")
+    assert format_box_art_url(
+        "https://cdn.example/{width}x{height}.jpg", width=1920, height=2560
+    ) == "https://cdn.example/1920x2560.jpg"
 
     cleaned = strip_name_mentions_and_commands(
         "hi @shroud !drop @notarealuser123xx", _FakeTwitch()
@@ -818,6 +832,9 @@ def check_core() -> None:
         assert tr("lucky_btn", loc)
         assert tr("lucky_hint", loc)
         assert tr("image_ask", loc)
+        assert tr("image_game_cover", loc)
+        assert tr("image_game_cover_note", loc)
+        assert tr("sub_list_image_game_cover", loc)
         assert tr("edit_image", loc)
         assert tr("edit_image_prompt", loc)
         assert tr("edit_image_delete", loc)
@@ -845,6 +862,10 @@ def check_core() -> None:
         assert tr("beta_feat_share_alerts", loc)
         assert tr("beta_feat_share_alerts_desc", loc)
         assert tr("delete_type_pick", loc)
+        assert tr("delete_all", loc)
+        assert tr("delete_all_confirm", loc)
+        assert tr("delete_all_yes", loc)
+        assert tr("delete_all_no", loc)
         assert tr("alert_type_no_schedule", loc)
         assert tr("alert_note_live", loc, twitch_username="x")
         assert tr("alert_note_category", loc, twitch_username="x")

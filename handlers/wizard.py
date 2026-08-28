@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import re
+from types import SimpleNamespace
 from typing import Any
 
 from telegram import InlineKeyboardMarkup, Update
@@ -58,12 +59,16 @@ from i18n import (
 )
 from links import TelegramTopicLink, parse_telegram_topic_link
 from twitch import (
+    GAME_COVER_IMAGE_ID,
     TwitchClient,
     find_placeholder_typos,
+    is_game_cover_image,
     merge_ignore_keywords,
     normalize_ignore_keywords,
     preview_stream_title,
     render_template,
+    resolve_sub_image_photo,
+    template_has_game_placeholder,
     template_has_link,
 )
 
@@ -546,7 +551,11 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.get("edit_sub_id") and context.user_data.get("edit_has_image")
     )
     prompt = t("edit_image_prompt", lang) if has_image else t("image_ask", lang)
-    markup = image_edit_keyboard(lang, has_image=has_image)
+    template = str(context.user_data.get("message_template") or "")
+    show_game_cover = template_has_game_placeholder(template)
+    markup = image_edit_keyboard(
+        lang, has_image=has_image, show_game_cover=show_game_cover
+    )
     if update.callback_query:
         await context.bot.send_message(
             chat_id,
@@ -1311,6 +1320,14 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if action == "skip":
         context.user_data["image_file_id"] = None
         context.user_data["image_position"] = ""
+        await query.edit_message_text("✓")
+        if is_edit:
+            return await _save_edit_image(update, context, lang)
+        return await _go_ignore_keywords_prompt(update, context, lang)
+
+    if action == "game_cover":
+        context.user_data["image_file_id"] = GAME_COVER_IMAGE_ID
+        context.user_data["image_position"] = "before"
         await query.edit_message_text("✓")
         if is_edit:
             return await _save_edit_image(update, context, lang)
@@ -2251,12 +2268,15 @@ async def _finish_subscription(
             t("preview_off", lang) if preview_disabled else t("preview_on", lang)
         )
         if has_image:
-            pos = str(data.get("image_position") or "")
-            image_note = (
-                t("image_after_note", lang)
-                if pos == "after"
-                else t("image_before_note", lang)
-            )
+            if is_game_cover_image(data.get("image_file_id")):
+                image_note = t("image_game_cover_note", lang)
+            else:
+                pos = str(data.get("image_position") or "")
+                image_note = (
+                    t("image_after_note", lang)
+                    if pos == "after"
+                    else t("image_before_note", lang)
+                )
         else:
             image_note = t("image_no_note", lang)
         ignore_keywords = str(data.get("ignore_keywords", ""))
@@ -2316,11 +2336,20 @@ async def _finish_subscription(
             alert_note=alert_note,
         )
         try:
+            twitch: TwitchClient = context.application.bot_data["twitch"]
+            preview_stream_payload = {
+                "game_name": "Just Chatting",
+            }
+            preview_image = resolve_sub_image_photo(
+                SimpleNamespace(image_file_id=data.get("image_file_id")),
+                preview_stream_payload,
+                twitch,
+            )
             await _deliver_alert_content(
                 context.bot,
                 chat_id=owner_id,
                 text=preview,
-                image_file_id=data.get("image_file_id") or None,
+                image_file_id=preview_image,
                 image_position=str(data.get("image_position") or ""),
                 disable_link_preview=preview_disabled,
             )

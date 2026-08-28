@@ -11,6 +11,7 @@ from bot_helpers import _user_notifications_paused
 from db import Database, Subscription
 from handlers.alert_history import _vod_offset_seconds
 from i18n import DEFAULT_LOCALE, delivery_fail_notice_keyboard, t
+from twitch import TwitchClient, resolve_sub_image_photo
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,7 @@ async def _send_notification(
     stream: dict | None = None,
     stream_id: str = "",
     vod_offset_seconds: int | None = None,
+    twitch: TwitchClient | None = None,
 ) -> bool:
     if _user_notifications_paused(db, sub.owner_id):
         return True
@@ -260,12 +262,13 @@ async def _send_notification(
             or bool(sub.image_file_id)
             or bool(sub.attach_chat_button)
         )
+        image_photo = resolve_sub_image_photo(sub, stream, twitch)
         msg = await _deliver_alert_content(
             bot,
             chat_id=sub.chat_id,
             text=text,
             thread_id=sub.thread_id,
-            image_file_id=sub.image_file_id,
+            image_file_id=image_photo,
             image_position=sub.image_position,
             disable_link_preview=preview_off,
             reply_markup=chat_markup,
@@ -278,7 +281,7 @@ async def _send_notification(
                 chat_id=sub.chat_id,
                 text=text,
                 thread_id=sub.thread_id,
-                image_file_id=sub.image_file_id,
+                image_file_id=image_photo,
                 image_position=sub.image_position,
                 disable_link_preview=preview_off,
                 reply_markup=chat_markup,

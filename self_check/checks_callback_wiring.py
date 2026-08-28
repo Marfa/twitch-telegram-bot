@@ -110,6 +110,9 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("toggle", f"toggle:{_SAMPLE_SUB}:1"),
     ("enable_all", "enable_all"),
     ("delete_go", "delete_go"),
+    ("delete_all", "delete_all"),
+    ("delete_all_yes", "delete_all:yes"),
+    ("delete_all_no", "delete_all:no"),
     ("delete_sel", f"delete_sel:{_SAMPLE_SUB}"),
     ("watch_again", "watch:again"),
     ("watch_change", "watch:change"),
@@ -140,6 +143,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("import_mode", "import_mode:once"),
     ("import_oauth_cancel", "import_oauth:cancel"),
     ("sched_save_token", "sched_save_token:1"),
+    ("image_ask_game_cover", "image_ask:game_cover"),
 )
 
 

@@ -16,6 +16,7 @@ from i18n import (
     alert_type_keyboard,
     broadcast_menu,
     btn,
+    delete_all_confirm_keyboard,
     ignored_words_keyboard,
     main_menu,
     other_menu,
@@ -188,6 +189,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("ignored_words", ignored_words_keyboard(loc, has_words=False)),
             ("ignored_words_clear", ignored_words_keyboard(loc, has_words=True)),
             ("language_settings", language_keyboard(loc)),
+            ("delete_all_confirm", delete_all_confirm_keyboard(loc)),
             ("watch_cats_nav", watch_cats_nav_keyboard(loc, has_cats=False)),
             ("watch_viewers", watch_viewers_keyboard(loc)),
             ("watch_lang", watch_lang_keyboard(loc)),
@@ -636,6 +638,38 @@ async def _scenario_wizard_finish(db) -> None:
     cap.assert_turn("wizard_finish")
 
 
+async def _scenario_subscriptions_delete(db) -> None:
+    """§4 delete flow — pick, delete-all confirm, No returns to pick."""
+    from handlers.subscriptions import (
+        delete_menu,
+        on_delete_all,
+        on_delete_all_confirm,
+    )
+
+    _seed_live_sub(db, _FREE_UID)
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("delete", "ru"), cap)
+    ctx = _ctx(application)
+    await delete_menu(update, ctx)
+    cap.assert_turn("subscriptions_delete_pick")
+
+    update, _query = _cb_update(_FREE_UID, "delete_all", cap)
+    ctx = _ctx(application, dict(ctx.user_data))
+    await on_delete_all(update, ctx)
+    cap.assert_turn("subscriptions_delete_all_confirm")
+
+    update, query = _cb_update(_FREE_UID, "delete_all:no", cap)
+    await on_delete_all_confirm(update, ctx)
+    query.edit_message_text.assert_awaited()
+    markup = query.edit_message_text.call_args.kwargs.get("reply_markup")
+    assert markup is not None
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("Удалить все" in text for text in labels)
+
+
 async def _scenario_subscriptions_edit_pick(db) -> None:
     from handlers.subscriptions import edit_menu, on_edit_pick
 
@@ -816,6 +850,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)
+        await _scenario_subscriptions_delete(db)
         await _scenario_share_alert_offer(db)
         await _scenario_subscriptions_list_pages(db)
         await _scenario_schedule_deep(db)

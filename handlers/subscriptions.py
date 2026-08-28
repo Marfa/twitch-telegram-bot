@@ -48,9 +48,10 @@ from i18n import (
     subscriptions_menu,
     sync_settings_keyboard,
     sync_unfollow_keyboard,
+    delete_all_confirm_keyboard,
     t,
 )
-from twitch import TwitchClient, normalize_ignore_keywords, template_has_link
+from twitch import TwitchClient, is_game_cover_image, normalize_ignore_keywords, template_has_link
 
 logger = logging.getLogger(__name__)
 
@@ -376,11 +377,14 @@ def _format_sub_line(
     else:
         settings.append(t("sub_list_alert_live", lang))
     if sub.image_file_id:
-        pos = (sub.image_position or "").strip()
-        if pos == "after":
-            settings.append(t("sub_list_image_after", lang))
+        if is_game_cover_image(sub.image_file_id):
+            settings.append(t("sub_list_image_game_cover", lang))
         else:
-            settings.append(t("sub_list_image_before", lang))
+            pos = (sub.image_position or "").strip()
+            if pos == "after":
+                settings.append(t("sub_list_image_after", lang))
+            else:
+                settings.append(t("sub_list_image_before", lang))
     else:
         settings.append(t("sub_list_image_no", lang))
     if sub.ignore_keywords.strip() and sub.use_global_ignore:
@@ -2270,6 +2274,9 @@ def _delete_pick_keyboard(
     if total > 1:
         rows.append(_subs_page_nav_row("delete_page", page, total))
     rows.append(
+        [InlineKeyboardButton(t("delete_all", lang), callback_data="delete_all")]
+    )
+    rows.append(
         [
             InlineKeyboardButton(
                 t("delete_go", lang, count=len(selected)),
@@ -2663,6 +2670,58 @@ async def on_delivery_fail_delete(update: Update, context: ContextTypes.DEFAULT_
         return
     sub_num = _owner_sub_number(db, user_id, sub_id)
     await query.edit_message_text(t("sub_deleted", lang, sub_id=sub_num))
+
+
+async def on_delete_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    subs = _delete_subs_for_owner(db, user_id, context)
+    if not subs:
+        await query.answer(t("no_subs_short", lang), show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(
+        t("delete_all_confirm", lang),
+        reply_markup=delete_all_confirm_keyboard(lang),
+    )
+
+
+async def on_delete_all_confirm(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    choice = query.data.rsplit(":", 1)[-1]
+    db: Database = context.application.bot_data["db"]
+    if choice == "no":
+        await query.answer()
+        subs = _delete_subs_for_owner(db, user_id, context)
+        selected: set[int] = set(context.user_data.get("delete_selected") or ())
+        page = int(context.user_data.get("delete_page") or 0)
+        await query.edit_message_text(
+            t("delete_pick", lang),
+            reply_markup=_delete_pick_keyboard(
+                db, user_id, lang, subs, selected, page=page
+            ),
+        )
+        return
+    if choice != "yes":
+        return
+    await query.answer()
+    subs = _delete_subs_for_owner(db, user_id, context)
+    deleted = 0
+    to_cart = _deleted_subscriptions_cart_enabled(db, user_id)
+    for sub in subs:
+        if not _sub_in_current_mode(sub, user_id):
+            continue
+        if db.delete_subscription(sub.id, user_id, to_cart=to_cart):
+            deleted += 1
+    context.user_data["delete_selected"] = set()
+    context.user_data.pop("delete_type", None)
+    await query.edit_message_text(t("subs_deleted", lang, count=deleted))
 
 
 async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

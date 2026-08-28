@@ -147,6 +147,7 @@ from twitch import (
     preview_stream_title,
     render_template,
     should_ignore_stream,
+    template_has_game_placeholder,
     template_has_link,
     twitch_status_fingerprint,
 )
@@ -559,6 +560,8 @@ from handlers.subscriptions import (
     on_delete_cart_sel,
     on_delete_cart_type,
     on_delete_clear,
+    on_delete_all,
+    on_delete_all_confirm,
     on_delete_go,
     on_delete_sel,
     on_delete_type,
@@ -993,14 +996,18 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     context.user_data["edit_has_image"] = has_image
+    context.user_data["message_template"] = sub.message_template or ""
     if has_image:
         context.user_data["image_file_id"] = sub.image_file_id
         context.user_data["image_position"] = sub.image_position or ""
     await query.edit_message_text("✓")
+    show_game_cover = template_has_game_placeholder(sub.message_template or "")
     await context.bot.send_message(
         query.from_user.id,
         t("edit_image_prompt", lang) if has_image else t("image_ask", lang),
-        reply_markup=image_edit_keyboard(lang, has_image=has_image),
+        reply_markup=image_edit_keyboard(
+            lang, has_image=has_image, show_game_cover=show_game_cover
+        ),
     )
     return IMAGE_ASK
 
@@ -1882,6 +1889,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CallbackQueryHandler(on_enable_all, pattern=r"^enable_all$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_delete_all, pattern=r"^delete_all$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_delete_all_confirm, pattern=r"^delete_all:(yes|no)$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_type, pattern=r"^delete_type:\w+$"), group=0)
@@ -2031,7 +2043,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(
-                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep)$"
+                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep|game_cover)$"
                 ),
             ],
             IMAGE_UPLOAD: [
@@ -2451,7 +2463,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
                 r"welcome_del:\d+$|"
                 r"delivery_fail_del:|"
-                r"delete_sel:|delete_go$|delete_clear$|delete_type:|"
+                r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"
                 r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"

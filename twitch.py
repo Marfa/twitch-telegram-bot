@@ -82,6 +82,51 @@ _FALLBACK_GAMES = (
 )
 
 
+GAME_COVER_IMAGE_ID = "__game_cover__"
+BOX_ART_WIDTH = 1920
+BOX_ART_HEIGHT = 2560
+
+
+def is_game_cover_image(image_file_id: str | None) -> bool:
+    return (image_file_id or "") == GAME_COVER_IMAGE_ID
+
+
+def template_has_game_placeholder(template: str) -> bool:
+    return "{game}" in (template or "")
+
+
+def format_box_art_url(
+    box_art_template: str,
+    *,
+    width: int = BOX_ART_WIDTH,
+    height: int = BOX_ART_HEIGHT,
+) -> str:
+    return (
+        str(box_art_template)
+        .replace("{width}", str(width))
+        .replace("{height}", str(height))
+    )
+
+
+def resolve_sub_image_photo(
+    sub,
+    stream: dict[str, Any] | None,
+    twitch: "TwitchClient | None",
+) -> str | None:
+    fid = sub.image_file_id
+    if not fid:
+        return None
+    if is_game_cover_image(fid):
+        if twitch is None:
+            return None
+        payload = stream or {}
+        return twitch.resolve_box_art_url(
+            game_id=str(payload.get("game_id") or ""),
+            game_name=str(payload.get("game_name") or ""),
+        )
+    return fid
+
+
 class TwitchClient:
     def __init__(self) -> None:
         self._session = requests.Session()
@@ -838,6 +883,62 @@ class TwitchClient:
         )
         resp.raise_for_status()
         return resp.json().get("data") or []
+
+    def get_games(self, game_ids: list[str]) -> list[dict[str, Any]]:
+        ids = [str(i).strip() for i in game_ids if str(i).strip()]
+        if not ids:
+            return []
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/games",
+            headers=self._headers(),
+            params=[("id", i) for i in ids[:100]],
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data") or []
+
+    def resolve_box_art_url(
+        self,
+        *,
+        game_id: str = "",
+        game_name: str = "",
+        width: int = BOX_ART_WIDTH,
+        height: int = BOX_ART_HEIGHT,
+    ) -> str | None:
+        gid = str(game_id or "").strip()
+        if gid:
+            try:
+                rows = self.get_games([gid])
+                if rows:
+                    tpl = str(rows[0].get("box_art_url") or "").strip()
+                    if tpl:
+                        return format_box_art_url(tpl, width=width, height=height)
+            except Exception:
+                logger.exception("Helix games lookup failed for %s", gid)
+        name = str(game_name or "").strip()
+        if not name or name == "—":
+            return None
+        try:
+            found = self.search_categories(name, first=10)
+        except Exception:
+            logger.exception("Twitch category search failed for %s", name)
+            return None
+        if not found:
+            return None
+        want = name.casefold()
+        exact = [
+            c
+            for c in found
+            if str(c.get("name") or "").strip().casefold() == want
+        ]
+        pick = exact[0] if exact else found[0]
+        tpl = str(pick.get("box_art_url") or "").strip()
+        if tpl:
+            return format_box_art_url(tpl, width=width, height=height)
+        cid = str(pick.get("id") or "").strip()
+        if cid:
+            return f"https://static-cdn.jtvnw.net/ttv-boxart/{cid}_IGDB-{width}x{height}.jpg"
+        return None
 
     @staticmethod
     def _schedule_error_detail(exc: BaseException) -> str:

@@ -29,6 +29,7 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^import_oauth:cancel$|"
     r"^alert_history:menu$|"
     r"^share_decline$|"
+    r"^delete_all:no$|"
     r"^ignored_words:cancel$|"
     r"^ignore_keywords:(?:cancel|back)$|"
     r"^strip_name:(?:cancel|back)$"

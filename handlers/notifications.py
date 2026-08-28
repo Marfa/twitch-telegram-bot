@@ -91,6 +91,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
         alert_type="live",
         stream=stream,
         stream_id=str(job_data.get("stream_id") or ""),
+        twitch=twitch,
     )
 
 
@@ -127,6 +128,7 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
         text,
         alert_type="end",
         stream_id=str((context.job.data or {}).get("stream_id") or ""),
+        twitch=twitch,
     )
 
 
@@ -178,6 +180,7 @@ async def _send_delayed_category_notification(
         stream=stream,
         stream_id=str(job_data.get("stream_id") or ""),
         vod_offset_seconds=job_data.get("vod_offset_seconds"),
+        twitch=twitch,
     )
 
 
@@ -295,7 +298,13 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         sub, username, game, title, twitch=twitch, stream=stream
                     )
                     await _send_notification(
-                        context.bot, db, sub, text, alert_type="live", stream=stream
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="live",
+                        stream=stream,
+                        twitch=twitch,
                     )
 
             for uid in went_offline:
@@ -325,6 +334,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         text,
                         alert_type="end",
                         stream_id=stream_id,
+                        twitch=twitch,
                     )
 
             for uid in category_changed:
@@ -369,6 +379,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         stream=stream,
                         stream_id=stream_id,
                         vod_offset_seconds=_vod_offset_seconds(stream),
+                        twitch=twitch,
                     )
 
     if category_watch_subs:
@@ -451,7 +462,13 @@ async def _check_category_watch_alerts(
                 sub, username, game, title, twitch=twitch, stream=stream
             )
             await _send_notification(
-                context.bot, db, sub, text, alert_type="live", stream=stream
+                context.bot,
+                db,
+                sub,
+                text,
+                alert_type="live",
+                stream=stream,
+                twitch=twitch,
             )
             notified += 1
         db.set_category_watch_live_state(sub.id, sorted(current_uids), primed=True)
@@ -524,7 +541,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     extra={"minutes": str(max(1, minutes_left))},
                 )
                 ok = await _send_notification(
-                    context.bot, db, sub, text, alert_type="schedule"
+                    context.bot, db, sub, text, alert_type="schedule", twitch=twitch
                 )
                 if not ok:
                     continue
