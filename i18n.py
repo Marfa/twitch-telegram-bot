@@ -123,6 +123,7 @@ def all_menu_buttons() -> set[str]:
         "broadcast",
         "broadcast_new",
         "scheduled_broadcasts",
+        "sent_broadcasts",
         "stats",
         "back",
         "sys_notifications",
@@ -501,9 +502,31 @@ def broadcast_menu(lang: str) -> ReplyKeyboardMarkup:
         [
             [KeyboardButton(btn("broadcast_new", lang))],
             [KeyboardButton(btn("scheduled_broadcasts", lang))],
+            [KeyboardButton(btn("sent_broadcasts", lang))],
             [KeyboardButton(btn("back", lang))],
         ],
         resize_keyboard=True,
+    )
+
+
+def broadcast_feedback_keyboard(
+    broadcast_id: int, up_count: int, down_count: int
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    f"👍 {up_count}",
+                    callback_data=f"bcf:up:{broadcast_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"👎 {down_count}",
+                    callback_data=f"bcf:down:{broadcast_id}",
+                )
+            ],
+        ]
     )
 
 

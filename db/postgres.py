@@ -457,7 +457,6 @@ class PostgresDatabase:
                 )
                 """
             )
-            cur.execute("DELETE FROM scheduled_broadcasts WHERE sent_at IS NOT NULL")
             cur.execute(
                 """
                 ALTER TABLE scheduled_broadcasts
@@ -474,6 +473,26 @@ class PostgresDatabase:
                 """
                 ALTER TABLE scheduled_broadcasts
                 ADD COLUMN IF NOT EXISTS sent_count INTEGER NOT NULL DEFAULT 0
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS broadcast_deliveries (
+                    broadcast_id INTEGER NOT NULL REFERENCES scheduled_broadcasts(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    PRIMARY KEY (broadcast_id, user_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS broadcast_feedback (
+                    broadcast_id INTEGER NOT NULL REFERENCES scheduled_broadcasts(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL,
+                    vote SMALLINT NOT NULL CHECK (vote IN (1, -1)),
+                    PRIMARY KEY (broadcast_id, user_id)
+                )
                 """
             )
             cur.execute(
@@ -2478,7 +2497,137 @@ class PostgresDatabase:
     def mark_scheduled_broadcast_sent(self, broadcast_id: int) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute("DELETE FROM scheduled_broadcasts WHERE id = %s", (broadcast_id,))
+            cur.execute(
+                "UPDATE scheduled_broadcasts SET sent_at = NOW() WHERE id = %s",
+                (broadcast_id,),
+            )
+
+    def get_sent_broadcasts(self, *, retention_days: int = 30) -> list[ScheduledBroadcast]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, msg_type, text, scheduled_at, created_by,
+                       COALESCE(recipient_ids, '') AS recipient_ids,
+                       COALESCE(sent_utc_offsets, '') AS sent_utc_offsets,
+                       COALESCE(sent_count, 0) AS sent_count,
+                       sent_at
+                FROM scheduled_broadcasts
+                WHERE sent_at IS NOT NULL
+                  AND sent_at >= NOW() - make_interval(days => %s)
+                ORDER BY sent_at ASC
+                """,
+                (int(retention_days),),
+            )
+            rows = cur.fetchall()
+        return [_scheduled_broadcast_from_row(r) for r in rows]
+
+    def purge_old_sent_broadcasts(self, *, retention_days: int = 30) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                DELETE FROM scheduled_broadcasts
+                WHERE sent_at IS NOT NULL
+                  AND sent_at < NOW() - make_interval(days => %s)
+                """,
+                (int(retention_days),),
+            )
+            deleted = int(cur.rowcount)
+        return deleted
+
+    def add_broadcast_delivery(
+        self, broadcast_id: int, user_id: int, message_id: int
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO broadcast_deliveries (broadcast_id, user_id, message_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (broadcast_id, user_id) DO UPDATE
+                SET message_id = EXCLUDED.message_id
+                """,
+                (broadcast_id, user_id, message_id),
+            )
+
+    def get_broadcast_deliveries(
+        self, broadcast_id: int
+    ) -> list[tuple[int, int]]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id, message_id FROM broadcast_deliveries
+                WHERE broadcast_id = %s
+                """,
+                (broadcast_id,),
+            )
+            rows = cur.fetchall()
+        return [(int(r["user_id"]), int(r["message_id"])) for r in rows]
+
+    def get_broadcast_feedback_vote(
+        self, broadcast_id: int, user_id: int
+    ) -> int | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT vote FROM broadcast_feedback
+                WHERE broadcast_id = %s AND user_id = %s
+                """,
+                (broadcast_id, user_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        vote = int(row["vote"])
+        return vote if vote in (1, -1) else None
+
+    def set_broadcast_feedback(
+        self, broadcast_id: int, user_id: int, vote: int
+    ) -> None:
+        if vote not in (1, -1):
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO broadcast_feedback (broadcast_id, user_id, vote)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (broadcast_id, user_id) DO UPDATE
+                SET vote = EXCLUDED.vote
+                """,
+                (broadcast_id, user_id, vote),
+            )
+
+    def clear_broadcast_feedback(self, broadcast_id: int, user_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM broadcast_feedback WHERE broadcast_id = %s AND user_id = %s",
+                (broadcast_id, user_id),
+            )
+
+    def get_broadcast_feedback_counts(self, broadcast_id: int) -> tuple[int, int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT vote, COUNT(*) AS c FROM broadcast_feedback
+                WHERE broadcast_id = %s
+                GROUP BY vote
+                """,
+                (broadcast_id,),
+            )
+            rows = cur.fetchall()
+        up = down = 0
+        for row in rows:
+            if int(row["vote"]) == 1:
+                up = int(row["c"])
+            elif int(row["vote"]) == -1:
+                down = int(row["c"])
+        return up, down
 
     @staticmethod
     def _lucky_locale(locale: str) -> str:

@@ -476,6 +476,10 @@ class ScheduledBroadcast:
     recipient_ids: str = ""
     sent_utc_offsets: str = ""
     sent_count: int = 0
+    sent_at: str | None = None
+
+
+BROADCAST_RETENTION_DAYS = 30
 
 
 @dataclass
@@ -522,6 +526,13 @@ def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
         sent_count = int(row["sent_count"] or 0)
     except (KeyError, IndexError, TypeError):
         sent_count = 0
+    try:
+        sent_at = row["sent_at"]
+        if sent_at is not None and not isinstance(sent_at, str):
+            sent_at = sent_at.isoformat()
+        sent_at = str(sent_at) if sent_at else None
+    except (KeyError, IndexError, TypeError):
+        sent_at = None
     return ScheduledBroadcast(
         id=int(row["id"]),
         msg_type=str(row["msg_type"]),
@@ -531,6 +542,7 @@ def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
         recipient_ids=recipient_ids,
         sent_utc_offsets=sent_utc_offsets,
         sent_count=sent_count,
+        sent_at=sent_at,
     )
 
 

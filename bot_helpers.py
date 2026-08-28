@@ -127,50 +127,55 @@ async def _send_dm_html(
     *,
     reply_markup=None,
     disable_web_page_preview: bool = False,
-) -> str:
-    """Send one DM. Returns 'sent', 'blocked', or 'failed'."""
+    return_message_id: bool = False,
+) -> str | tuple[str, int | None]:
+    """Send one DM. Returns 'sent', 'blocked', or 'failed' (optionally with message_id)."""
     if _user_notifications_paused(db, uid):
-        return "sent"
+        return ("sent", None) if return_message_id else "sent"
     kwargs: dict = {}
     if reply_markup is not None:
         kwargs["reply_markup"] = reply_markup
     if disable_web_page_preview:
         kwargs["disable_web_page_preview"] = True
-    try:
+
+    async def _deliver() -> object | None:
         try:
-            await bot.send_message(
+            return await bot.send_message(
                 uid, message, parse_mode=ParseMode.HTML, **kwargs
             )
         except BadRequest:
-            # Plain legacy text or translation broke tags — send without parse_mode.
-            await bot.send_message(uid, message, **kwargs)
-        return "sent"
+            return await bot.send_message(uid, message, **kwargs)
+
+    def _result(status: str, msg: object | None = None) -> str | tuple[str, int | None]:
+        if return_message_id:
+            mid = getattr(msg, "message_id", None)
+            return status, int(mid) if mid is not None else None
+        return status
+
+    try:
+        msg = await _deliver()
+        return _result("sent", msg)
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
         try:
-            try:
-                await bot.send_message(
-                    uid, message, parse_mode=ParseMode.HTML, **kwargs
-                )
-            except BadRequest:
-                await bot.send_message(uid, message, **kwargs)
-            return "sent"
+            msg = await _deliver()
+            return _result("sent", msg)
         except Forbidden as retry_exc:
             if "blocked" in str(retry_exc).lower():
                 db.set_bot_blocked(uid, True)
-                return "blocked"
+                return _result("blocked")
             logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
-            return "failed"
+            return _result("failed")
         except (BadRequest, RetryAfter) as retry_exc:
             logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
-            return "failed"
+            return _result("failed")
     except Forbidden as exc:
         if "blocked" in str(exc).lower():
             db.set_bot_blocked(uid, True)
-            return "blocked"
+            return _result("blocked")
         logger.warning("Broadcast to %s failed: %s", uid, exc)
-        return "failed"
+        return _result("failed")
     except BadRequest as exc:
         logger.warning("Broadcast to %s failed: %s", uid, exc)
-        return "failed"
+        return _result("failed")
 

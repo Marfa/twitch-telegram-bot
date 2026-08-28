@@ -242,7 +242,9 @@ from handlers.broadcast import (
     admin_sb_schedule_callback,
     admin_schedule_callback,
     admin_scheduled_list,
+    admin_sent_list,
     admin_select_type,
+    on_broadcast_feedback,
     on_sb_delete,
     on_sb_edit_pick,
     on_sb_edit_text_click,
@@ -250,6 +252,7 @@ from handlers.broadcast import (
     on_sb_sched_callback,
     open_broadcast_menu,
     process_scheduled_broadcasts,
+    purge_old_broadcasts,
     receive_sb_edit_text,
 )
 from handlers.notifications import (
@@ -1719,6 +1722,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("scheduled_broadcasts"), admin_scheduled_list),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(_btn_filter("sent_broadcasts"), admin_sent_list),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_broadcast_feedback, pattern=r"^bcf:(up|down):\d+$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_sb_edit_pick, pattern=r"^sb_edit:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_sb_edit_text_click, pattern=r"^sb_edit_f:\d+:text$"),
@@ -2509,6 +2520,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("admin")
                 | _btn_filter("broadcast")
                 | _btn_filter("scheduled_broadcasts")
+                | _btn_filter("sent_broadcasts")
                 | _btn_filter("stats")
             ),
             wake_stuck_on_menu_message,
@@ -2535,6 +2547,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         check_schedule_reminders, interval=SCHEDULE_CHECK_INTERVAL, first=25
     )
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
+    app.job_queue.run_repeating(purge_old_broadcasts, interval=24 * 3600, first=300)
     app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
     app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)
     app.job_queue.run_repeating(poll_posthog_inbox_reports, interval=300, first=60)

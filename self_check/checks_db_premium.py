@@ -719,12 +719,25 @@ def check_db_premium() -> None:
         )
         db.mark_scheduled_broadcast_sent(bid2)
         assert db.get_scheduled_broadcast(bid2) is None
+        sent_items = db.get_sent_broadcasts(retention_days=30)
+        assert any(b.id == bid2 for b in sent_items)
+        up, down = db.get_broadcast_feedback_counts(bid2)
+        assert up == 0 and down == 0
+        db.set_broadcast_feedback(bid2, 1, 1)
+        db.set_broadcast_feedback(bid2, 2, -1)
+        assert db.get_broadcast_feedback_vote(bid2, 1) == 1
+        assert db.get_broadcast_feedback_counts(bid2) == (1, 1)
+        db.clear_broadcast_feedback(bid2, 1)
+        assert db.get_broadcast_feedback_vote(bid2, 1) is None
+        assert db.get_broadcast_feedback_counts(bid2) == (0, 1)
+        db.add_broadcast_delivery(bid2, 1, 100)
+        assert db.get_broadcast_deliveries(bid2) == [(1, 100)]
         with db._conn() as conn:
             left = conn.execute(
                 "SELECT COUNT(*) AS c FROM scheduled_broadcasts WHERE id = ?",
                 (bid2,),
             ).fetchone()["c"]
-        assert left == 0
+        assert left == 1
 
         from datetime import date
         from handlers.broadcast import (

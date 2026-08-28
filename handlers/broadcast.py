@@ -20,6 +20,7 @@ from bot_helpers import (
     _user_lang,
 )
 from db import Database
+from db.models import BROADCAST_RETENTION_DAYS
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
@@ -27,6 +28,7 @@ from i18n import (
     admin_type_keyboard,
     admin_wizard_menu,
     all_wizard_nav_buttons,
+    broadcast_feedback_keyboard,
     broadcast_menu,
     format_schedule_month_label,
     is_menu_button,
@@ -82,6 +84,10 @@ def _format_scheduled_at_label(scheduled_at: str) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(SCHEDULE_TZ).strftime("%d.%m.%Y %H:%M MSK")
+
+
+def _format_sent_at_label(sent_at: str) -> str:
+    return _format_scheduled_at_label(sent_at)
 
 
 def _utc_iso_to_schedule(scheduled_at: str) -> dict:
@@ -492,6 +498,7 @@ async def _run_broadcast_offset_wave(
         context,
         item.msg_type,
         item.text,
+        broadcast_id=item.id,
         source_lang=source_lang,
         recipient_ids=recipients or None,
         utc_offset_filter=utc_offset,
@@ -563,6 +570,7 @@ async def _send_admin_broadcast(
     msg_type: str,
     text: str,
     *,
+    broadcast_id: int,
     source_lang: str | None = None,
     recipient_ids: list[int] | None = None,
     utc_offset_filter: int | None = None,
@@ -590,8 +598,9 @@ async def _send_admin_broadcast(
         source,
         set(user_locales.values()),
     )
-    # Bot-update broadcasts also push the current main ReplyKeyboard.
     attach_menu = msg_type == "bot_update"
+    up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
+    feedback_kb = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
     sent = failed = 0
     for uid in user_ids:
         locale = user_locales[uid]
@@ -602,16 +611,74 @@ async def _send_admin_broadcast(
             type=_broadcast_type_label(msg_type, locale),
         )
         message = f"{body}\n\n{footer}"
-        markup = _menu(locale, uid) if attach_menu else None
         result = await _send_dm_html(
-            context.bot, db, uid, message, reply_markup=markup
+            context.bot,
+            db,
+            uid,
+            message,
+            reply_markup=feedback_kb,
+            return_message_id=True,
         )
-        if result == "sent":
+        status, message_id = result if isinstance(result, tuple) else (result, None)
+        if status == "sent":
             sent += 1
+            if message_id is not None:
+                db.add_broadcast_delivery(broadcast_id, uid, message_id)
+            if attach_menu:
+                await _send_dm_html(
+                    context.bot,
+                    db,
+                    uid,
+                    "\u2800",
+                    reply_markup=_menu(locale, uid),
+                )
         else:
             failed += 1
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
     return sent, failed, len(user_ids)
+
+
+async def _refresh_broadcast_feedback_keyboards(
+    context: ContextTypes.DEFAULT_TYPE, broadcast_id: int
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
+    markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
+    for uid, message_id in db.get_broadcast_deliveries(broadcast_id):
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=uid,
+                message_id=message_id,
+                reply_markup=markup,
+            )
+        except (BadRequest, Forbidden):
+            pass
+        await asyncio.sleep(0.05)
+
+
+async def on_broadcast_feedback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+    parts = query.data.split(":")
+    if len(parts) != 3 or parts[0] != "bcf":
+        return
+    vote_key, raw_id = parts[1], parts[2]
+    if vote_key not in ("up", "down") or not raw_id.isdigit():
+        return
+    vote = 1 if vote_key == "up" else -1
+    broadcast_id = int(raw_id)
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    current = db.get_broadcast_feedback_vote(broadcast_id, user_id)
+    if current == vote:
+        db.clear_broadcast_feedback(broadcast_id, user_id)
+    else:
+        db.set_broadcast_feedback(broadcast_id, user_id, vote)
+    await _refresh_broadcast_feedback_keyboards(context, broadcast_id)
 
 
 async def _report_broadcast_done(
@@ -814,6 +881,7 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context,
                 item.msg_type,
                 item.text,
+                broadcast_id=broadcast_id,
                 source_lang=source_lang,
                 recipient_ids=recipients or None,
             )
@@ -838,6 +906,46 @@ async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
         await _run_broadcast_offset_wave(context, item, offset)
     finally:
         _release_broadcast_wave_send(bot_data, broadcast_id, offset)
+
+
+async def admin_sent_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _can_use_admin_tools(user_id):
+        return
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    items = db.get_sent_broadcasts(retention_days=BROADCAST_RETENTION_DAYS)
+    if not items:
+        await update.effective_message.reply_text(
+            t("sent_empty", lang),
+            reply_markup=broadcast_menu(lang),
+        )
+        return
+
+    lines = [t("sent_list_title", lang)]
+    for item in items:
+        when = _format_sent_at_label(item.sent_at or item.scheduled_at)
+        lines.append(
+            t(
+                "sent_line",
+                lang,
+                id=item.id,
+                when=when,
+                type=_broadcast_type_label(item.msg_type, lang),
+                preview=_scheduled_text_preview(item.text),
+            )
+        )
+    await update.effective_message.reply_text(
+        "\n\n".join(lines),
+        reply_markup=broadcast_menu(lang),
+    )
+
+
+async def purge_old_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    removed = db.purge_old_sent_broadcasts(retention_days=BROADCAST_RETENTION_DAYS)
+    if removed:
+        logger.info("Purged %s sent broadcast(s) older than %s days", removed, BROADCAST_RETENTION_DAYS)
 
 
 async def admin_scheduled_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
