@@ -459,6 +459,7 @@ async def _smoke_wizard(db) -> None:
         receive_channel,
         receive_dest_chat,
         receive_dest_type,
+        receive_ignore_keywords_global_toggle,
         start_new_subscription,
     )
 
@@ -525,6 +526,37 @@ async def _smoke_wizard(db) -> None:
     ctx = _ctx(application, {"twitch_username": "x"})
     state = await cancel(update, ctx)
     assert state == ConversationHandler.END
+
+    # Edit mode: unchecking "use global list" must persist False (not only UI).
+    uid = _FREE_UID + 20
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+    sub_id = db.add_subscription(
+        owner_id=uid,
+        twitch_username="globtoggle",
+        twitch_user_id="9020",
+        message_template="{username} live",
+        dest_type="dm",
+        chat_id=uid,
+        thread_id=None,
+        use_global_ignore=True,
+    )
+    application, bot = _app(db)
+    update, query = _cb_update(uid, "ignore_keywords:global_toggle")
+    ctx = _ctx(
+        application,
+        {
+            "wizard_edit": True,
+            "edit_sub_id": sub_id,
+            "use_global_ignore": True,
+        },
+    )
+    state = await receive_ignore_keywords_global_toggle(update, ctx)
+    assert state == ConversationHandler.END
+    sub = db.get_subscription(sub_id, uid)
+    assert sub is not None
+    assert sub.use_global_ignore is False
+    query.edit_message_text.assert_awaited()
 
 
 async def _smoke_subscriptions(db) -> None:

@@ -1469,26 +1469,15 @@ async def receive_ignore_keywords_global_toggle(
     editing = bool(
         context.user_data.get("wizard_edit") and context.user_data.get("edit_sub_id")
     )
-    if not new_val:
-        as_cancel = bool(context.user_data.get("ignore_keywords_as_cancel"))
-        await query.edit_message_reply_markup(
-            reply_markup=ignore_keywords_keyboard(
-                lang,
-                as_cancel=as_cancel,
-                use_global=False,
-                show_back=not editing and not as_cancel,
-                show_cancel=not as_cancel,
-            )
-        )
-        return _wz()["EDIT_IGNORE_KEYWORDS"] if editing else _wz()["IGNORE_KEYWORDS"]
-
-    await query.edit_message_text("✓")
     if editing:
+        # Edit toggle is apply-and-finish for both directions; create wizard
+        # keeps the flag in user_data until the final save.
         db: Database = context.application.bot_data["db"]
         owner_id = query.from_user.id
         sub_id = int(context.user_data["edit_sub_id"])
         sub_num = _owner_sub_number(db, owner_id, sub_id)
-        if not db.update_subscription(sub_id, owner_id, use_global_ignore=True):
+        await query.edit_message_text("✓")
+        if not db.update_subscription(sub_id, owner_id, use_global_ignore=new_val):
             await context.bot.send_message(owner_id, t("sub_not_found", lang))
         else:
             await context.bot.send_message(
@@ -1499,6 +1488,20 @@ async def receive_ignore_keywords_global_toggle(
         context.user_data.clear()
         return ConversationHandler.END
 
+    if not new_val:
+        as_cancel = bool(context.user_data.get("ignore_keywords_as_cancel"))
+        await query.edit_message_reply_markup(
+            reply_markup=ignore_keywords_keyboard(
+                lang,
+                as_cancel=as_cancel,
+                use_global=False,
+                show_back=not as_cancel,
+                show_cancel=not as_cancel,
+            )
+        )
+        return _wz()["IGNORE_KEYWORDS"]
+
+    await query.edit_message_text("✓")
     context.user_data.setdefault("ignore_keywords", "")
     return await _go_after_ignore_keywords(update, context, lang)
 

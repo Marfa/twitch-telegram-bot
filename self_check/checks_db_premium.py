@@ -615,6 +615,10 @@ def check_db_premium() -> None:
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None
         assert sub.use_global_ignore is True
+        assert db.update_subscription(sub_id, 1, use_global_ignore=False)
+        sub = db.get_subscription(sub_id, 1)
+        assert sub is not None
+        assert sub.use_global_ignore is False
         assert db.get_global_ignore_keywords(1) == ""
         db.set_global_ignore_keywords(1, "irl, chatting")
         assert db.get_global_ignore_keywords(1) == "irl, chatting"
