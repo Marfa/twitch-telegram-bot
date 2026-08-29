@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 from typing import Any
@@ -14,7 +15,7 @@ from telegram import (
     WebAppInfo,
 )
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, RetryAfter
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import analytics
@@ -585,8 +586,74 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
                 chat_id=user_id,
                 menu_button=MenuButtonCommands(),
             )
+    except RetryAfter:
+        raise
     except Exception:
         logger.exception("Failed to sync stream-chat menu button for %s", user_id)
+
+
+def _stream_chat_is_ga() -> bool:
+    from chat_webapp import BETA_FEATURE_ID
+
+    feat = beta_features.get_feature(BETA_FEATURE_ID)
+    return bool(feat and feat.stage == "ga")
+
+
+async def set_default_stream_chat_menu_button(bot: Any) -> None:
+    """Bot-wide default Menu Button (new private chats inherit it)."""
+    from chat_webapp import chat_webapp_url
+
+    if not _stream_chat_is_ga():
+        return
+    url = chat_webapp_url(lang=DEFAULT_LOCALE)
+    if not url:
+        return
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text=t("menu_btn_chat", DEFAULT_LOCALE),
+                web_app=WebAppInfo(url=url),
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to set default stream-chat menu button")
+
+
+async def sync_all_stream_chat_menu_buttons(bot: Any, db: Database) -> None:
+    """Per-chat Menu Button for known users (clears Commands overrides after GA)."""
+    if not _stream_chat_is_ga():
+        return
+    user_ids = sorted({int(uid) for uid in db.get_notify_user_ids()})
+    ok = 0
+    skipped = 0
+    for user_id in user_ids:
+        if db.is_bot_blocked(user_id):
+            skipped += 1
+            continue
+        try:
+            await sync_stream_chat_menu_button(bot, db, user_id)
+            ok += 1
+        except RetryAfter as exc:
+            await asyncio.sleep(float(exc.retry_after) + 0.5)
+            try:
+                await sync_stream_chat_menu_button(bot, db, user_id)
+                ok += 1
+            except Exception:
+                logger.exception("Retry failed stream-chat menu button for %s", user_id)
+        # ponytail: ~20 setChatMenuButton/s; ceiling = Telegram flood control.
+        await asyncio.sleep(0.05)
+    logger.info(
+        "stream-chat menu button bulk sync done: ok=%s skipped_blocked=%s total=%s",
+        ok,
+        skipped,
+        len(user_ids),
+    )
+
+
+async def ensure_stream_chat_menu_buttons_for_all(bot: Any, db: Database) -> None:
+    """Default Menu Button + one bulk pass over users (GA only)."""
+    await set_default_stream_chat_menu_button(bot)
+    await sync_all_stream_chat_menu_buttons(bot, db)
 
 async def complete_chat_oauth(
     application: Application,

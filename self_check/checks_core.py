@@ -52,6 +52,7 @@ from bot import (
     import_followed_as_subscriptions,
     live_transitions,
     category_change_events,
+    end_cover_stream,
     migrate_import_sync_subscriptions,
     needs_live_game_recheck,
     _format_pause_until,
@@ -153,8 +154,10 @@ def check_core() -> None:
             return {"login": login} if login.lower() == "shroud" else None
 
     from twitch import (
+        box_art_cdn_url,
         format_box_art_url,
         is_game_cover_image,
+        resolve_sub_image_photo,
         strip_name_mentions_and_commands,
         template_has_game_placeholder,
         GAME_COVER_IMAGE_ID,
@@ -167,6 +170,44 @@ def check_core() -> None:
     assert format_box_art_url(
         "https://cdn.example/{width}x{height}.jpg", width=1920, height=2560
     ) == "https://cdn.example/1920x2560.jpg"
+    assert (
+        box_art_cdn_url("509658", width=1920, height=2560)
+        == "https://static-cdn.jtvnw.net/ttv-boxart/509658-1920x2560.jpg"
+    )
+
+    class _CoverTwitch:
+        def resolve_box_art_url(self, *, game_id: str = "", game_name: str = "", **_kw):
+            if game_id:
+                return f"https://cdn.example/{game_id}.jpg"
+            if game_name:
+                return f"https://cdn.example/name/{game_name}.jpg"
+            return None
+
+    cover_sub = type("S", (), {"image_file_id": GAME_COVER_IMAGE_ID})()
+    assert (
+        resolve_sub_image_photo(
+            cover_sub, {"game_id": "509658", "game_name": "Just Chatting"}, _CoverTwitch()
+        )
+        == "https://cdn.example/509658.jpg"
+    )
+    # Schedule segments expose category{id,name}, not game_id/game_name.
+    assert (
+        resolve_sub_image_photo(
+            cover_sub,
+            {"category": {"id": "516575", "name": "VALORANT"}},
+            _CoverTwitch(),
+        )
+        == "https://cdn.example/516575.jpg"
+    )
+    assert resolve_sub_image_photo(cover_sub, {}, _CoverTwitch()) is None
+    assert (
+        resolve_sub_image_photo(
+            type("S", (), {"image_file_id": "AgAC_custom"})(),
+            None,
+            None,
+        )
+        == "AgAC_custom"
+    )
 
     cleaned = strip_name_mentions_and_commands(
         "hi @shroud !drop @notarealuser123xx", _FakeTwitch()
@@ -646,18 +687,42 @@ def check_core() -> None:
     assert SCHEDULE_CHECK_INTERVAL >= 60
 
     games: dict[str, str] = {}
-    streams = {"1": {"game_id": "111"}}
-    assert category_change_events(games, ["1"], streams, primed=False) == []
+    names: dict[str, str] = {}
+    streams = {"1": {"game_id": "111", "game_name": "Just Chatting"}}
+    assert category_change_events(
+        games, ["1"], streams, primed=False, last_game_names=names
+    ) == []
     assert games == {"1": "111"}
-    assert category_change_events(games, ["1"], streams, primed=True) == []
-    streams = {"1": {"game_id": "222"}}
-    assert category_change_events(games, ["1"], streams, primed=True) == ["1"]
+    assert names == {"1": "Just Chatting"}
+    assert category_change_events(
+        games, ["1"], streams, primed=True, last_game_names=names
+    ) == []
+    streams = {"1": {"game_id": "222", "game_name": "VALORANT"}}
+    assert category_change_events(
+        games, ["1"], streams, primed=True, last_game_names=names
+    ) == ["1"]
     assert games["1"] == "222"
-    assert category_change_events(games, ["1"], {}, primed=True) == []
+    assert names["1"] == "VALORANT"
+    assert category_change_events(
+        games, ["1"], {}, primed=True, last_game_names=names
+    ) == []
     assert "1" not in games
-    streams = {"1": {"game_id": "222"}}
-    assert category_change_events(games, ["1"], streams, primed=True) == []
+    assert "1" not in names
+    streams = {"1": {"game_id": "222", "game_name": "VALORANT"}}
+    assert category_change_events(
+        games, ["1"], streams, primed=True, last_game_names=names
+    ) == []
     assert games["1"] == "222"
+    assert end_cover_stream(game_id="509658", game_name="Just Chatting") == {
+        "game_id": "509658",
+        "game_name": "Just Chatting",
+    }
+    assert end_cover_stream(game_id="", game_name="") is None
+    assert end_cover_stream(game_id="", game_name="—") is None
+    assert end_cover_stream(game_id="1", game_name="") == {
+        "game_id": "1",
+        "game_name": "",
+    }
 
     assert find_placeholder_typos("{username} {game} {name}") == []
     assert find_placeholder_typos("{game)") == [("{game)", "{game}")]

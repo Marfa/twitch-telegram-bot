@@ -3,19 +3,56 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+import requests
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, WebAppInfo
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
 from bot_helpers import _user_notifications_paused
 from db import Database, Subscription
 from handlers.alert_history import _vod_offset_seconds
 from i18n import DEFAULT_LOCALE, delivery_fail_notice_keyboard, t
-from twitch import TwitchClient, resolve_sub_image_photo
+from twitch import TwitchClient, is_game_cover_image, resolve_sub_image_photo
 
 logger = logging.getLogger(__name__)
 
 _TELEGRAM_CAPTION_LIMIT = 1024
+
+
+def _effective_image_position(sub: Subscription) -> str:
+    position = (sub.image_position or "").strip()
+    if position in ("before", "after"):
+        return position
+    # Game cover always stores "before" in the wizard; recover if position was lost.
+    if is_game_cover_image(sub.image_file_id):
+        return "before"
+    return ""
+
+
+async def _send_photo_with_url_fallback(bot, *, chat_id: int, photo: str, **kwargs):
+    """send_photo by URL; if Telegram cannot fetch the CDN, upload bytes ourselves."""
+    try:
+        return await bot.send_photo(chat_id=chat_id, photo=photo, **kwargs)
+    except BadRequest:
+        if not (isinstance(photo, str) and photo.startswith(("http://", "https://"))):
+            raise
+
+        def _download() -> bytes:
+            resp = requests.get(photo, timeout=20)
+            resp.raise_for_status()
+            return resp.content
+
+        try:
+            data = await asyncio.to_thread(_download)
+        except Exception:
+            logger.exception("Failed to download alert image %s", photo)
+            raise
+        return await bot.send_photo(
+            chat_id=chat_id,
+            photo=InputFile(BytesIO(data), filename="cover.jpg"),
+            **kwargs,
+        )
 
 async def _resolve_chat_display_name(bot, sub: Subscription) -> str:
     try:
@@ -72,19 +109,48 @@ async def _deliver_alert_content(
     if file_id and position in ("before", "after"):
         disable_link_preview = True
 
-    if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
-        return await bot.send_photo(
-            chat_id=chat_id,
-            photo=file_id,
-            caption=text,
-            show_caption_above_media=(position == "after"),
-            **thread_kwargs,
-            **markup_kwargs,
+    async def _photo(**photo_kwargs):
+        return await _send_photo_with_url_fallback(
+            bot, chat_id=chat_id, photo=file_id, **photo_kwargs
         )
-    if file_id and position in ("before", "after"):
+
+    if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
+        try:
+            return await _photo(
+                caption=text,
+                show_caption_above_media=(position == "after"),
+                **thread_kwargs,
+                **markup_kwargs,
+            )
+        except BadRequest as exc:
+            logger.warning(
+                "Photo send failed for %s (%s); falling back to text-only",
+                chat_id,
+                exc,
+            )
+
+    elif file_id and position in ("before", "after"):
         if position == "before":
-            await bot.send_photo(chat_id=chat_id, photo=file_id, **thread_kwargs)
-            text_kwargs: dict = {
+            try:
+                await _photo(**thread_kwargs)
+            except BadRequest as exc:
+                logger.warning(
+                    "Photo send failed for %s (%s); falling back to text-only",
+                    chat_id,
+                    exc,
+                )
+            else:
+                text_kwargs: dict = {
+                    "chat_id": chat_id,
+                    "text": text,
+                    **thread_kwargs,
+                    **markup_kwargs,
+                }
+                if disable_link_preview:
+                    text_kwargs["disable_web_page_preview"] = True
+                return await bot.send_message(**text_kwargs)
+        else:
+            text_kwargs = {
                 "chat_id": chat_id,
                 "text": text,
                 **thread_kwargs,
@@ -92,18 +158,16 @@ async def _deliver_alert_content(
             }
             if disable_link_preview:
                 text_kwargs["disable_web_page_preview"] = True
-            return await bot.send_message(**text_kwargs)
-        text_kwargs = {
-            "chat_id": chat_id,
-            "text": text,
-            **thread_kwargs,
-            **markup_kwargs,
-        }
-        if disable_link_preview:
-            text_kwargs["disable_web_page_preview"] = True
-        msg = await bot.send_message(**text_kwargs)
-        await bot.send_photo(chat_id=chat_id, photo=file_id, **thread_kwargs)
-        return msg
+            msg = await bot.send_message(**text_kwargs)
+            try:
+                await _photo(**thread_kwargs)
+            except BadRequest as exc:
+                logger.warning(
+                    "Photo send failed for %s after text (%s)",
+                    chat_id,
+                    exc,
+                )
+            return msg
 
     kwargs: dict = {"chat_id": chat_id, "text": text, **thread_kwargs, **markup_kwargs}
     if disable_link_preview:
@@ -254,6 +318,10 @@ async def _send_notification(
                             notify_exc,
                         )
 
+    image_photo = None
+    image_position = _effective_image_position(sub)
+    preview_off = False
+    chat_markup = None
     try:
         lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
         chat_markup = _alert_chat_button_markup(sub, lang)
@@ -262,14 +330,22 @@ async def _send_notification(
             or bool(sub.image_file_id)
             or bool(sub.attach_chat_button)
         )
-        image_photo = resolve_sub_image_photo(sub, stream, twitch)
+        image_photo = await asyncio.to_thread(
+            resolve_sub_image_photo, sub, stream, twitch
+        )
+        if is_game_cover_image(sub.image_file_id) and not image_photo:
+            logger.warning(
+                "Game cover unresolved for sub %s (alert_type=%s); sending text only",
+                sub.id,
+                alert_type,
+            )
         msg = await _deliver_alert_content(
             bot,
             chat_id=sub.chat_id,
             text=text,
             thread_id=sub.thread_id,
             image_file_id=image_photo,
-            image_position=sub.image_position,
+            image_position=image_position,
             disable_link_preview=preview_off,
             reply_markup=chat_markup,
         )
@@ -282,7 +358,7 @@ async def _send_notification(
                 text=text,
                 thread_id=sub.thread_id,
                 image_file_id=image_photo,
-                image_position=sub.image_position,
+                image_position=image_position,
                 disable_link_preview=preview_off,
                 reply_markup=chat_markup,
             )
@@ -326,8 +402,6 @@ async def _send_notification(
         except Exception:
             logger.exception("Failed to record alert history for sub %s", sub.id)
     return True
-
-
 
 
 async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> bool:

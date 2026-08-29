@@ -30,11 +30,11 @@ Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
-| Subscriptions | Paginated list, edit all fields, enable/disable, delete; **Share alert** (🧪 beta) — deep link that clones settings; **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium); **⏸ Pause notifications** for N days without pausing subscriptions; **💬 Stream chat** — Mini App with embed/fallback (🧪 beta) |
+| Subscriptions | Paginated list, edit all fields, enable/disable, delete; **Share alert** (🧪 beta) — deep link that clones settings; **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium); **⏸ Pause notifications** for N days without pausing subscriptions; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
-| Premium | 7-day trial (alerts pause + DM notice when it ends); Stars month/year/lifetime; à la carte (advanced mode, 60-day history, 30-day cart; stream chat — after the beta goes public); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
+| Premium | 7-day trial (alerts pause + DM notice when it ends); Stars month/year/lifetime; à la carte (advanced mode, 60-day history, 30-day cart, unlimited stream chat); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; scheduled sends use MSK (UTC+3) by default, users with a saved UTC offset get local wall-clock time; stats after all UTC waves; “bot update” refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
@@ -201,11 +201,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 
 ### Twitch stream chat
 
-🧪 Beta feature `stream-chat` — enable in **⚙️ Settings → 🧪 Beta mode**.
-
-After opt-in, a **Chat** menu button appears next to the message field → Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + simple fallback). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
-
-Without beta opt-in the menu button is hidden. The à la carte Premium item for unlimited chat appears after the beta goes public (GA).
+**Chat** menu button next to the message field (set for everyone on deploy) and **📦 Other → 💬 Chat** → Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + simple fallback). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
 
 ### Pause notifications
 
@@ -225,10 +221,11 @@ Without beta opt-in the menu button is hidden. The à la carte Premium item for 
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 Manage subscriptions | List, edit, delete; **⏸ Pause notifications** |
 | 📜 Alert history | DM: 7 days free / 60 days Premium |
-| 📦 Other | Whisper alerts, schedule, what to watch |
+| 📦 Other | Whisper alerts, schedule, what to watch, chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Weekly text, time zone; Twitch sync — Premium |
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
+| ↳ 💬 Chat | Twitch stream chat Mini App |
 | ⚙️ Settings | Premium, sync, ignored words, advanced mode, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |

@@ -108,6 +108,33 @@ def format_box_art_url(
     )
 
 
+def _stream_game_fields(payload: dict[str, Any]) -> tuple[str, str]:
+    """game_id/game_name from a Helix stream, or category{id,name} from a schedule segment."""
+    game_id = str(payload.get("game_id") or "").strip()
+    game_name = str(payload.get("game_name") or "").strip()
+    if game_id or (game_name and game_name != "—"):
+        return game_id, game_name
+    cat = payload.get("category")
+    if isinstance(cat, dict):
+        return (
+            str(cat.get("id") or "").strip(),
+            str(cat.get("name") or "").strip(),
+        )
+    return game_id, game_name
+
+
+def box_art_cdn_url(
+    game_id: str,
+    *,
+    width: int = BOX_ART_WIDTH,
+    height: int = BOX_ART_HEIGHT,
+    igdb: bool = False,
+) -> str:
+    gid = str(game_id or "").strip()
+    mid = f"{gid}_IGDB" if igdb else gid
+    return f"https://static-cdn.jtvnw.net/ttv-boxart/{mid}-{width}x{height}.jpg"
+
+
 def resolve_sub_image_photo(
     sub,
     stream: dict[str, Any] | None,
@@ -119,11 +146,8 @@ def resolve_sub_image_photo(
     if is_game_cover_image(fid):
         if twitch is None:
             return None
-        payload = stream or {}
-        return twitch.resolve_box_art_url(
-            game_id=str(payload.get("game_id") or ""),
-            game_name=str(payload.get("game_name") or ""),
-        )
+        game_id, game_name = _stream_game_fields(stream or {})
+        return twitch.resolve_box_art_url(game_id=game_id, game_name=game_name)
     return fid
 
 
@@ -915,6 +939,8 @@ class TwitchClient:
                         return format_box_art_url(tpl, width=width, height=height)
             except Exception:
                 logger.exception("Helix games lookup failed for %s", gid)
+            # Stream/segment already has game_id — don't drop the cover if Helix blips.
+            return box_art_cdn_url(gid, width=width, height=height)
         name = str(game_name or "").strip()
         if not name or name == "—":
             return None
@@ -937,7 +963,7 @@ class TwitchClient:
             return format_box_art_url(tpl, width=width, height=height)
         cid = str(pick.get("id") or "").strip()
         if cid:
-            return f"https://static-cdn.jtvnw.net/ttv-boxart/{cid}_IGDB-{width}x{height}.jpg"
+            return box_art_cdn_url(cid, width=width, height=height)
         return None
 
     @staticmethod
