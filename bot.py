@@ -267,6 +267,7 @@ from handlers.notifications import (
     category_change_events,
     check_schedule_reminders,
     check_streams,
+    end_cover_stream,
     live_transitions,
     needs_live_game_recheck,
 )
