@@ -349,7 +349,7 @@ def check_handlers() -> None:
             if (b.callback_data or "").startswith("premium:feat_toggle:")
         }
         purchasable = set(prem.purchasable_feature_ids())
-        assert "stream_chat" not in purchasable
+        assert "stream_chat" in purchasable
         assert "deleted_subscriptions_cart" in purchasable
         assert "alert_history" in purchasable
         toggle_ids = {
@@ -360,7 +360,7 @@ def check_handlers() -> None:
             for b in row
             if (b.callback_data or "").startswith("premium:feat_toggle:")
         }
-        assert "stream_chat" not in toggle_ids
+        assert "stream_chat" in toggle_ids
         assert "deleted_subscriptions_cart" in toggle_ids
         db.upsert_user(2)
         assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
@@ -1031,11 +1031,12 @@ def check_handlers() -> None:
     assert not is_menu_button("not a menu button")
 
     assert "stream_chat" in FEATURE_IDS
-    assert "stream-chat" in {f.id for f in beta_mod.list_features()}
+    assert "stream-chat" not in {f.id for f in beta_mod.list_features()}
     assert "deleted-subscriptions-cart" not in {f.id for f in beta_mod.list_features()}
     sc_feat = beta_mod.get_feature("stream-chat")
     assert sc_feat is not None and sc_feat.premium_feature_id == "stream_chat"
-    assert "stream_chat" not in prem.purchasable_feature_ids()
+    assert sc_feat.stage == "ga"
+    assert "stream_chat" in prem.purchasable_feature_ids()
     assert "deleted_subscriptions_cart" in prem.purchasable_feature_ids()
     assert tr("menu_btn_chat", "ru") == "Чат"
     assert tr("premium_feat_stream_chat", "ru")
@@ -1057,11 +1058,42 @@ def check_handlers() -> None:
     assert '/app/chat/app.js?v=10' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
-    from unittest.mock import patch
+    import asyncio
+    from unittest.mock import AsyncMock, patch
 
     with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"), patch(
         "chat_webapp.TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
     ):
+        from handlers.settings import (
+            set_default_stream_chat_menu_button,
+            sync_all_stream_chat_menu_buttons,
+        )
+
+        mock_bot = AsyncMock()
+        asyncio.run(set_default_stream_chat_menu_button(mock_bot))
+        assert mock_bot.set_chat_menu_button.await_count == 1
+        default_kwargs = mock_bot.set_chat_menu_button.await_args.kwargs
+        assert "chat_id" not in default_kwargs
+        assert default_kwargs["menu_button"].web_app is not None
+
+        class _FakeDb:
+            def get_notify_user_ids(self):
+                return [11, 12]
+
+            def is_bot_blocked(self, uid):
+                return uid == 12
+
+            def get_user_locale(self, uid):
+                return "ru"
+
+        with patch(
+            "handlers.settings.sync_stream_chat_menu_button",
+            new_callable=AsyncMock,
+        ) as sync_one:
+            asyncio.run(sync_all_stream_chat_menu_buttons(AsyncMock(), _FakeDb()))
+            assert sync_one.await_count == 1
+            assert sync_one.await_args.args[2] == 11
+
         assert chat_webapp_url(lang="ru") == "https://example.com/app/chat/?lang=ru"
         assert chat_webapp_url() == "https://example.com/app/chat/"
         tok = make_webapp_token(42)
@@ -1125,7 +1157,8 @@ def check_handlers() -> None:
         assert auth.twitch_login == "viewer"
         assert auth.refresh_token == "refresh-token-value"
         cdb.set_beta_enrollment(777, "stream-chat", True)
-        assert chat_daily_send_limit(cdb, 777) is None
+        # GA: beta enrollment no longer grants unlimited chat.
+        assert chat_daily_send_limit(cdb, 777) == CHAT_FREE_DAILY_SEND_LIMIT
         import time as _t
 
         cdb.upsert_user(778)

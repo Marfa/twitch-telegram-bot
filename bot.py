@@ -1653,6 +1653,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         )
         # Ready only after Application init — avoid deploy cutting over before polling.
         mark_ready()
+        from handlers.settings import ensure_stream_chat_menu_buttons_for_all
+
+        asyncio.create_task(
+            ensure_stream_chat_menu_buttons_for_all(application.bot, db),
+            name="stream-chat-menu-buttons",
+        )
 
     app = (
         Application.builder()
