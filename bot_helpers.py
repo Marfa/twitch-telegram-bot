@@ -183,7 +183,8 @@ GROUP_SETUP_CALLBACK_PATTERN = (
 
 
 def group_setup_callback_filter():
-    return _NON_PRIVATE & filters.UpdateType.CALLBACK_QUERY
+    # CallbackQueryHandler already receives only callback updates.
+    return _NON_PRIVATE
 
 
 def _settings_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
