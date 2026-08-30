@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from telegram.error import Forbidden
+from telegram.constants import ChatType
 from telegram.ext import ConversationHandler
 
 from db import open_database
@@ -496,6 +497,18 @@ async def _smoke_wizard(db) -> None:
         state = await receive_channel(update, ctx)
     assert state == _wz()["TEMPLATE"]
 
+    group_chat_id = -100123456789
+    update = _msg_update(_FREE_UID, "https://twitch.tv/streamer")
+    update.effective_chat = SimpleNamespace(id=group_chat_id)
+    ctx = _ctx(application, {"alert_type": "live", "notify_on_live": True})
+    with patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["TEMPLATE"]
+    update.effective_message.reply_text.assert_awaited()
+    for call in bot.send_message.call_args_list:
+        chat_id = call.kwargs.get("chat_id", call.args[0] if call.args else None)
+        assert chat_id != _FREE_UID, "wizard must not DM user id in group chat"
+
     update, _query = _cb_update(_FREE_UID, "dest:channel")
     ctx = _ctx(application, {"alert_type": "live", "twitch_username": "streamer"})
     state = await receive_dest_type(update, ctx)
@@ -807,6 +820,40 @@ async def _smoke_delivery_and_helpers(db) -> None:
     await check_schedule_reminders(ctx)
 
 
+async def _smoke_group_chat_replies(db) -> None:
+    from bot import cancel
+    from handlers.subscriptions import open_sync_settings
+
+    group_chat_id = -100123456789
+    application, bot = _app(db)
+
+    update, query = _cb_update(_FREE_UID, "x")
+    query.message.chat_id = group_chat_id
+    query.message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
+    update.effective_chat = SimpleNamespace(id=group_chat_id, type=ChatType.SUPERGROUP)
+    ctx = _ctx(application)
+    state = await cancel(update, ctx)
+    assert state == ConversationHandler.END
+    bot.send_message.assert_awaited()
+    sent_chat_id = bot.send_message.call_args.kwargs.get(
+        "chat_id", bot.send_message.call_args.args[0]
+    )
+    assert sent_chat_id == group_chat_id
+
+    bot.send_message.reset_mock()
+    update = _msg_update(_FREE_UID, "sync")
+    update.effective_chat = SimpleNamespace(id=group_chat_id, type=ChatType.SUPERGROUP)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions.prem.has_feature", new=AsyncMock(return_value=False)
+    ):
+        await open_sync_settings(update, ctx)
+    assert bot.send_message.await_count >= 1
+    for call in bot.send_message.call_args_list:
+        cid = call.kwargs.get("chat_id", call.args[0] if call.args else None)
+        assert cid == group_chat_id
+
+
 async def _run_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "smoke.db")
@@ -819,6 +866,7 @@ async def _run_smoke() -> None:
         await _smoke_settings_oauth(db)
         await _smoke_watch(db)
         await _smoke_wizard(db)
+        await _smoke_group_chat_replies(db)
         await _smoke_subscriptions(db)
         await _smoke_premium_and_menus(db)
         await _smoke_delivery_and_helpers(db)

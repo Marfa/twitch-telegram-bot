@@ -235,7 +235,13 @@ async def _show_owned_subscriptions(
 
 
 async def send_premium_screen(
-    bot, user_id: int, lang: str, db: Database, *, edit_message=None
+    bot,
+    user_id: int,
+    lang: str,
+    db: Database,
+    *,
+    edit_message=None,
+    update=None,
 ) -> None:
     # Demo: show free-plan screen even if admin has permanent / free-chat Premium.
     force_free = demo_mode.is_active(user_id)
@@ -262,8 +268,11 @@ async def send_premium_screen(
             disable_web_page_preview=True,
         )
         return
+    from bot_helpers import reply_chat_id
+
+    chat_id = reply_chat_id(update) if update is not None else user_id
     await bot.send_message(
-        user_id,
+        chat_id,
         text,
         reply_markup=markup,
         parse_mode=ParseMode.HTML,
@@ -277,7 +286,7 @@ async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    await send_premium_screen(context.bot, user_id, lang, db)
+    await send_premium_screen(context.bot, user_id, lang, db, update=update)
 
 
 async def _send_invoice_link(

@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 from telegram import ReplyKeyboardMarkup
-from telegram.constants import ParseMode
+from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter
 from telegram.ext import ContextTypes, filters
 
@@ -27,6 +27,26 @@ logger = logging.getLogger(__name__)
 # Soft pacing for mass DM sends — keeps under Telegram flood limits.
 _BROADCAST_SEND_PAUSE = 0.05
 _PAUSE_NOTIFICATIONS_BETA_ID = "pause-notifications"
+
+
+def reply_chat_id(update) -> int:
+    """Chat to reply in — current conversation, not the user's private DM."""
+    if update.effective_chat is not None:
+        return int(update.effective_chat.id)
+    query = update.callback_query
+    if query and query.message:
+        return int(query.message.chat_id)
+    return int(update.effective_user.id)
+
+
+def is_private_chat(update) -> bool:
+    chat = update.effective_chat
+    if chat is not None:
+        return chat.type == ChatType.PRIVATE
+    query = update.callback_query
+    if query and query.message and query.message.chat:
+        return query.message.chat.type == ChatType.PRIVATE
+    return True
 
 
 def _pause_notifications_enabled(db: Database, user_id: int) -> bool:

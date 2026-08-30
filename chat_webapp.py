@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
 from config import PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
 from premium import (
     CHAT_FREE_DAILY_SEND_LIMIT,
@@ -128,6 +130,18 @@ def alert_chat_button_url(
     if user_id is not None:
         params["t"] = make_webapp_token(int(user_id), lang=lang)
     return f"{base}?{urlencode(params)}"
+
+
+def stream_chat_open_markup(lang: str, url: str, *, private: bool) -> InlineKeyboardMarkup:
+    """Inline open-chat button. web_app only works in private chats with the bot."""
+    from i18n import t
+
+    label = t("menu_btn_chat", lang)
+    if private:
+        btn = InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
+    else:
+        btn = InlineKeyboardButton(label, url=url)
+    return InlineKeyboardMarkup([[btn]])
 
 
 def embed_parent_host() -> str:

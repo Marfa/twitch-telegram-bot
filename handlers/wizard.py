@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 import analytics
 import demo_mode
 import premium as prem
-from bot_helpers import _menu, _settings_kb, _user_lang, _wizard
+from bot_helpers import _menu, _settings_kb, _user_lang, _wizard, reply_chat_id
 from db import Database, Subscription
 from handlers.watch import (
     _go_watch_categories_prompt,
@@ -243,6 +243,7 @@ async def _send_prompt_with_wizard_inline(
     lang: str,
     *,
     inline_markup: InlineKeyboardMarkup,
+    update: Update | None = None,
     back: bool = True,
     parse_mode: str | None = ParseMode.HTML,
     disable_web_page_preview: bool = False,
@@ -250,7 +251,6 @@ async def _send_prompt_with_wizard_inline(
     """Send prompt with inline actions (incl. Back/Cancel). No extra carrier message."""
     _ = (lang, back)
     kwargs: dict = {
-        "chat_id": chat_id,
         "text": text,
         "reply_markup": inline_markup,
     }
@@ -258,7 +258,11 @@ async def _send_prompt_with_wizard_inline(
         kwargs["parse_mode"] = parse_mode
     if disable_web_page_preview:
         kwargs["disable_web_page_preview"] = True
-    await bot.send_message(**kwargs)
+    if update and update.effective_message:
+        await update.effective_message.reply_text(**kwargs)
+        return
+    target_chat = update.effective_chat.id if update and update.effective_chat else chat_id
+    await bot.send_message(chat_id=target_chat, **kwargs)
 
 def _render_sub_template(
     sub: Subscription,
@@ -364,9 +368,9 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if action == "get":
         await query.edit_message_text("✓")
-        await send_premium_screen(context.bot, user_id, lang, db)
+        await send_premium_screen(context.bot, user_id, lang, db, update=update)
         await context.bot.send_message(
-            user_id,
+            reply_chat_id(update),
             t("menu_settings", lang),
             reply_markup=_settings_kb(lang, db, user_id),
         )
@@ -538,6 +542,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
             show_back=True,
             show_cancel=True,
         ),
+        update=update,
         back=True,
         disable_web_page_preview=True,
     )
@@ -1157,6 +1162,7 @@ async def receive_template_typo_confirm(
                 show_back=True,
                 show_cancel=True,
             ),
+            update=update,
             back=True,
             disable_web_page_preview=True,
         )
@@ -1231,6 +1237,7 @@ async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 show_back=True,
                 show_cancel=True,
             ),
+            update=update,
             back=True,
             parse_mode=None,
         )

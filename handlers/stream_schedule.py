@@ -1085,7 +1085,7 @@ async def stream_schedule_publish_callback(
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, user_id, lang, db)
+        await send_premium_screen(context.bot, user_id, lang, db, update=update)
         return ConversationHandler.END
 
     if db.get_schedule_utc_offset_minutes(user_id) is None:

@@ -1137,6 +1137,18 @@ def check_handlers() -> None:
         assert group_markup is not None
         group_btn = group_markup.inline_keyboard[0][0]
         assert group_btn.url and group_btn.web_app is None
+        from chat_webapp import stream_chat_open_markup
+
+        priv_chat_kb = stream_chat_open_markup(
+            "ru", "https://example.com/app/chat/", private=True
+        )
+        group_chat_kb = stream_chat_open_markup(
+            "ru", "https://example.com/app/chat/", private=False
+        )
+        priv_chat_btn = priv_chat_kb.inline_keyboard[0][0]
+        group_chat_btn = group_chat_kb.inline_keyboard[0][0]
+        assert priv_chat_btn.web_app is not None and priv_chat_btn.url is None
+        assert group_chat_btn.url and group_chat_btn.web_app is None
         assert TwitchClient._about_link_key("https://VK.com/stopgameru/") == "https://vk.com/stopgameru"
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")

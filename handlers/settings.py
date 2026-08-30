@@ -28,6 +28,8 @@ from bot_helpers import (
     _settings_kb,
     _user_lang,
     _user_notifications_paused,
+    is_private_chat,
+    reply_chat_id,
 )
 from db import Database
 from i18n import (
@@ -98,7 +100,7 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    from chat_webapp import BETA_FEATURE_ID, chat_webapp_url
+    from chat_webapp import BETA_FEATURE_ID, chat_webapp_url, stream_chat_open_markup
 
     if not beta_features.is_enabled(db, user_id, BETA_FEATURE_ID):
         await update.effective_message.reply_text(
@@ -119,15 +121,8 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await sync_stream_chat_menu_button(context.bot, db, user_id)
     await update.effective_message.reply_text(
         t("chat_open_hint", lang),
-        reply_markup=InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        t("menu_btn_chat", lang),
-                        web_app=WebAppInfo(url=open_url),
-                    )
-                ]
-            ]
+        reply_markup=stream_chat_open_markup(
+            lang, open_url, private=is_private_chat(update)
         ),
     )
     await update.effective_message.reply_text(
@@ -184,7 +179,7 @@ async def on_advanced_mode_toggle(update: Update, context: ContextTypes.DEFAULT_
             from premium_handlers import send_premium_screen
 
             await query.answer(t("advanced_mode_premium_only", lang), show_alert=True)
-            await send_premium_screen(context.bot, user_id, lang, db)
+            await send_premium_screen(context.bot, user_id, lang, db, update=update)
             return
         await query.answer()
         db.set_advanced_mode_setting(user_id, True)
@@ -267,29 +262,23 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if feature_id == "stream-chat":
         await sync_stream_chat_menu_button(context.bot, db, user_id)
         if new_state:
-            from chat_webapp import chat_webapp_url
+            from chat_webapp import chat_webapp_url, stream_chat_open_markup
 
             open_url = chat_webapp_url(
                 lang=lang if lang in SUPPORTED_LOCALES else None,
                 user_id=user_id,
             )
             if open_url:
+                chat_id = reply_chat_id(update)
                 await context.bot.send_message(
-                    user_id,
+                    chat_id,
                     t("chat_open_hint", lang),
-                    reply_markup=InlineKeyboardMarkup(
-                        [
-                            [
-                                InlineKeyboardButton(
-                                    t("menu_btn_chat", lang),
-                                    web_app=WebAppInfo(url=open_url),
-                                )
-                            ]
-                        ]
+                    reply_markup=stream_chat_open_markup(
+                        lang, open_url, private=is_private_chat(update)
                     ),
                 )
         await context.bot.send_message(
-            user_id,
+            reply_chat_id(update),
             t("menu_main", lang),
             reply_markup=_menu(lang, user_id),
         )
@@ -327,7 +316,7 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, user_id, lang, db)
+        await send_premium_screen(context.bot, user_id, lang, db, update=update)
         return ConversationHandler.END
     from bot import _ignore_keywords_current_label
 

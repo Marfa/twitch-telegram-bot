@@ -169,6 +169,7 @@ from bot_helpers import (
     _user_lang,
     _user_notifications_paused,
     _wizard,
+    reply_chat_id,
 )
 from handlers.admin_stats import admin_show_stats, _format_stats
 from handlers.alert_history import (
@@ -931,16 +932,17 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     after = context.user_data.pop("after_lang", "welcome")
     first_start = context.user_data.pop("first_welcome", False)
     await sync_stream_chat_menu_button(context.bot, db, query.from_user.id)
+    chat_id = reply_chat_id(update)
     if after == "help":
         await context.bot.send_message(
-            query.from_user.id,
+            chat_id,
             _help_text(lang),
             reply_markup=_menu(lang, query.from_user.id),
         )
         return ConversationHandler.END
     if after == "settings":
         await context.bot.send_message(
-            query.from_user.id,
+            chat_id,
             t("menu_settings", lang),
             reply_markup=_settings_kb(lang, db, query.from_user.id),
         )
@@ -948,7 +950,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _send_welcome_bundle(
         context.application,
         context.bot,
-        query.from_user.id,
+        chat_id,
         query.from_user.id,
         lang,
         first_start=first_start,
@@ -1146,7 +1148,7 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, query.from_user.id, lang, db)
+        await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
@@ -1408,7 +1410,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         except BadRequest:
             pass
         await context.bot.send_message(
-            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            reply_chat_id(update),
+            t("menu_main", lang),
+            reply_markup=_menu(lang, user_id),
         )
     else:
         await update.effective_message.reply_text(

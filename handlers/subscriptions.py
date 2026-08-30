@@ -1506,7 +1506,7 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.effective_message.reply_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, user_id, lang, db)
+        await send_premium_screen(context.bot, user_id, lang, db, update=update)
         return
     sync = db.get_twitch_sync(user_id)
     if not sync or sync.period_days <= 0:
@@ -1760,7 +1760,7 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await query.edit_message_text(
             t("premium_active_limit", lang, limit=prem.free_active_limit())
         )
-        await send_premium_screen(context.bot, owner_id, lang, db)
+        await send_premium_screen(context.bot, owner_id, lang, db, update=update)
         return
     max_count = None if slots.unlimited else slots.remaining
     count = db.enable_all_subscriptions(
@@ -1894,7 +1894,7 @@ async def start_edit_ignore_keywords(
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, query.from_user.id, lang, db)
+        await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
@@ -2100,7 +2100,7 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await query.edit_message_text(
                 t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
             )
-            await send_premium_screen(context.bot, query.from_user.id, lang, db)
+            await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
             return
     if field == "delete_old" and sub.notify_on_category_change:
         menu_key = "edit_delete_old_menu_category"
@@ -2766,7 +2766,7 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             from premium_handlers import send_premium_screen
 
             await query.edit_message_text(t("premium_trial_paused_enable", lang))
-            await send_premium_screen(context.bot, query.from_user.id, lang, db)
+            await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
             return
     if not sub.enabled and not await prem.can_enable_more_async(
         context.bot, db, query.from_user.id, twitch_username=sub.twitch_username
@@ -2776,7 +2776,7 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await query.edit_message_text(
             t("premium_active_limit", lang, limit=prem.free_active_limit())
         )
-        await send_premium_screen(context.bot, query.from_user.id, lang, db)
+        await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
         return
     new_state = db.toggle_subscription(sub_id, query.from_user.id)
     if new_state is None:
