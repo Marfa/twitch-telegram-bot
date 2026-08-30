@@ -74,14 +74,65 @@ async def reply_setup_private_only(update, lang: str) -> None:
         await update.effective_message.reply_text(text)
 
 
+# ponytail: in-memory; one hint per (chat, user) for non-admins until restart
+_group_setup_notified: set[tuple[int, int]] = set()
+
+
+def reset_group_setup_notified() -> None:
+    _group_setup_notified.clear()
+
+
+def should_send_group_setup_hint(chat_id: int, user_id: int) -> bool:
+    """Admins get the hint every time; other users once per chat."""
+    if _is_admin(user_id):
+        return True
+    key = (chat_id, user_id)
+    if key in _group_setup_notified:
+        return False
+    _group_setup_notified.add(key)
+    return True
+
+
+async def handle_group_setup_rejection(
+    update, context: ContextTypes.DEFAULT_TYPE
+) -> bool:
+    """Block group/channel bot setup. Returns True if the update was consumed."""
+    if is_private_chat(update):
+        return False
+    user_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
+    if not should_send_group_setup_hint(chat_id, user_id):
+        if update.callback_query:
+            try:
+                await update.callback_query.answer()
+            except BadRequest:
+                pass
+        return True
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    lang = _user_lang(context, user_id)
+    import analytics
+
+    analytics.capture(
+        user_id,
+        "group_setup_private_hint",
+        {
+            "chat_id": chat_id,
+            **chat_context_properties(update),
+            "is_admin": _is_admin(user_id),
+        },
+    )
+    await reply_setup_private_only(update, lang)
+    return True
+
+
 def dm_only_conv_entry(handler):
     """ConversationHandler entry: refuse bot setup in group/channel chats."""
 
     async def wrapped(update, context: ContextTypes.DEFAULT_TYPE):
         if is_private_chat(update):
             return await handler(update, context)
-        lang = _user_lang(context, update.effective_user.id)
-        await reply_setup_private_only(update, lang)
+        await handle_group_setup_rejection(update, context)
         return ConversationHandler.END
 
     return wrapped

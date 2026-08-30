@@ -16,6 +16,9 @@ Users configure subscriptions, settings, Premium, import, wizards **only in a pr
 
 - Gate: `reject_group_bot_setup` (group `-2`) + `dm_only_conv_entry()` on ConversationHandler entry points
 - User message: `setup_private_only` (i18n)
+- **Admins** in a group: hint **every** attempt
+- **Non-admins** in a group: hint **once per (chat_id, user_id)**; further attempts are silent
+- Analytics: `group_setup_private_hint` event (includes `chat_id`, `chat_type`, `is_admin`)
 - **Not blocked in groups:** `chat` (stream Mini App), `other`, `feedback`, `back`, `/help`
 
 When adding a new **setup** menu button or inline callback, register it in `group_setup_menu_filter()` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.

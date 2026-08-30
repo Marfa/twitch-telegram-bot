@@ -49,7 +49,24 @@ def _check_premium_and_helpers() -> None:
 
 
 async def _check_group_setup_gate() -> None:
-    from bot_helpers import dm_only_conv_entry, reply_setup_private_only
+    from bot_helpers import (
+        dm_only_conv_entry,
+        handle_group_setup_rejection,
+        reply_setup_private_only,
+        reset_group_setup_notified,
+        should_send_group_setup_hint,
+    )
+    from unittest.mock import patch
+
+    reset_group_setup_notified()
+    group_id = -1001
+    assert should_send_group_setup_hint(group_id, 900002)
+    assert not should_send_group_setup_hint(group_id, 900002)
+    assert should_send_group_setup_hint(group_id, 900003)
+    with patch("bot_helpers._is_admin", return_value=True):
+        assert should_send_group_setup_hint(group_id, 900001)
+        assert should_send_group_setup_hint(group_id, 900001)
+    reset_group_setup_notified()
 
     async def _ok_handler(_update, _context):
         return ConversationHandler.END
@@ -86,6 +103,21 @@ async def _check_group_setup_gate() -> None:
     )
     await reply_setup_private_only(cb_update, "ru")
     cb_update.callback_query.answer.assert_awaited()
+
+    ctx = MagicMock()
+    ctx.application.bot_data = {"db": MagicMock(get_user_locale=MagicMock(return_value="ru"))}
+    group_update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=900002),
+        effective_chat=SimpleNamespace(id=group_id, type=ChatType.SUPERGROUP),
+        effective_message=AsyncMock(),
+        callback_query=None,
+    )
+    reset_group_setup_notified()
+    assert await handle_group_setup_rejection(group_update, ctx) is True
+    group_update.effective_message.reply_text.assert_awaited_once()
+    assert await handle_group_setup_rejection(group_update, ctx) is True
+    group_update.effective_message.reply_text.assert_awaited_once()
+    reset_group_setup_notified()
 
 
 def check_group_chat() -> None:

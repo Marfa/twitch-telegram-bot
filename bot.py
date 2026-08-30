@@ -27,6 +27,7 @@ from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Conflict, Forbidden, NetworkError, RetryAfter
 from telegram.ext import (
     Application,
+    ApplicationHandlerStop,
     CallbackQueryHandler,
     ChatMemberHandler,
     CommandHandler,
@@ -174,6 +175,7 @@ from bot_helpers import (
     group_setup_menu_filter,
     GROUP_SETUP_CALLBACK_PATTERN,
     is_private_chat,
+    handle_group_setup_rejection,
     reply_chat_id,
     reply_setup_private_only,
 )
@@ -1697,10 +1699,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     ) -> None:
         if is_private_chat(update):
             return
-        setup_db: Database = context.application.bot_data["db"]
-        setup_db.upsert_user(update.effective_user.id)
-        lang = _user_lang(context, update.effective_user.id)
-        await reply_setup_private_only(update, lang)
+        if await handle_group_setup_rejection(update, context):
+            if update.callback_query:
+                raise ApplicationHandlerStop
 
     app.add_handler(
         MessageHandler(group_setup_menu_filter(), reject_group_bot_setup),
