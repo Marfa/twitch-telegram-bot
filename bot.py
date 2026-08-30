@@ -171,9 +171,9 @@ from bot_helpers import (
     _wizard,
     chat_context_properties,
     dm_only_conv_entry,
-    group_setup_callback_filter,
     group_setup_menu_filter,
     GROUP_SETUP_CALLBACK_PATTERN,
+    is_private_chat,
     reply_chat_id,
     reply_setup_private_only,
 )
@@ -1695,6 +1695,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     async def reject_group_bot_setup(
         update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        if is_private_chat(update):
+            return
         setup_db: Database = context.application.bot_data["db"]
         setup_db.upsert_user(update.effective_user.id)
         lang = _user_lang(context, update.effective_user.id)
@@ -1708,7 +1710,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(
             reject_group_bot_setup,
             pattern=GROUP_SETUP_CALLBACK_PATTERN,
-            filters=group_setup_callback_filter(),
+            block=False,
         ),
         group=-2,
     )

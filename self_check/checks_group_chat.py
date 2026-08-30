@@ -44,7 +44,6 @@ def _check_premium_and_helpers() -> None:
     assert group_btn.inline_keyboard[0][0].url
     assert group_setup_menu_filter() is not None
     assert GROUP_SETUP_CALLBACK_PATTERN.startswith("^")
-
     error_src = (_ROOT / "bot.py").read_text(encoding="utf-8")
     assert "chat_context_properties(update)" in error_src
 

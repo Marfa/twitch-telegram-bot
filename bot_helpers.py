@@ -182,11 +182,6 @@ GROUP_SETUP_CALLBACK_PATTERN = (
 )
 
 
-def group_setup_callback_filter():
-    # CallbackQueryHandler already receives only callback updates.
-    return _NON_PRIVATE
-
-
 def _settings_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
     enrolled, total = beta_features.enrollment_counts(db, user_id)
     return settings_menu(lang, beta_enrolled=enrolled, beta_total=total)
