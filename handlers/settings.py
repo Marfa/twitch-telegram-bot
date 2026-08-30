@@ -300,7 +300,7 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except BadRequest:
         pass
     await context.bot.send_message(
-        user_id,
+        reply_chat_id(update),
         toast,
         reply_markup=_settings_kb(lang, db, user_id),
     )

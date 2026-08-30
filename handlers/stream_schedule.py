@@ -12,7 +12,7 @@ from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import beta as beta_features
 import premium as prem
-from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang, _wizard
+from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang, _wizard, reply_chat_id
 from db import Database
 from i18n import (
     DEFAULT_LOCALE,
@@ -320,14 +320,14 @@ async def _prompt_stream_schedule_game(
     if update.callback_query:
         await update.callback_query.edit_message_text("✓")
         await context.bot.send_message(
-            update.effective_user.id,
+            reply_chat_id(update),
             message,
             reply_markup=keyboard,
         )
     else:
         await update.effective_message.reply_text(message, reply_markup=keyboard)
     await _pulse_wizard_keyboard(
-        context.bot, update.effective_user.id, lang, back=False
+        context.bot, reply_chat_id(update), lang, back=False
     )
     return STREAM_SCHEDULE_GAME
 
@@ -388,7 +388,7 @@ async def _prompt_stream_schedule_time(
         reply_markup=keyboard,
     )
     await _pulse_wizard_keyboard(
-        context.bot, update.effective_user.id, lang, back=False
+        context.bot, reply_chat_id(update), lang, back=False
     )
     return STREAM_SCHEDULE_TIME
 
@@ -398,9 +398,8 @@ async def _prompt_publish_on_twitch(
 ) -> int:
     _st = _sched_states()
     STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    user_id = update.effective_user.id
     await context.bot.send_message(
-        user_id,
+        reply_chat_id(update),
         t("stream_schedule_publish_prompt", lang),
         reply_markup=stream_schedule_publish_keyboard(lang),
     )
@@ -428,15 +427,16 @@ async def _prompt_schedule_tz(
             lang,
             tz=format_utc_offset(current),
         )
+    chat_id = reply_chat_id(update)
     query = update.callback_query
     if query:
         try:
             await query.edit_message_text(text)
         except BadRequest:
-            await context.bot.send_message(user_id, text)
+            await context.bot.send_message(chat_id, text)
     else:
-        await context.bot.send_message(user_id, text)
-    await _pulse_wizard_keyboard(context.bot, user_id, lang, back=False)
+        await context.bot.send_message(chat_id, text)
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=False)
     return STREAM_SCHEDULE_TZ
 
 
@@ -455,14 +455,15 @@ async def _prompt_duration_after_publish_yes(
         lang,
     )
     markup = stream_schedule_duration_keyboard(lang)
+    chat_id = reply_chat_id(update)
     query = update.callback_query
     if query:
         try:
             await query.edit_message_text(text, reply_markup=markup)
         except BadRequest:
-            await context.bot.send_message(user_id, text, reply_markup=markup)
+            await context.bot.send_message(chat_id, text, reply_markup=markup)
     else:
-        await context.bot.send_message(user_id, text, reply_markup=markup)
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
     return STREAM_SCHEDULE_DURATION
 
 
@@ -472,15 +473,16 @@ async def _finish_stream_schedule(
     user_id = update.effective_user.id
     items = _pending_schedule_preview(context)
     text = format_stream_schedule_result(items, lang) if items else "—"
+    chat_id = reply_chat_id(update)
     if update.callback_query:
         await update.callback_query.edit_message_text("✓")
-        await context.bot.send_message(user_id, text)
+        await context.bot.send_message(chat_id, text)
     else:
         await update.effective_message.reply_text(text)
     if not items:
         context.user_data.clear()
         await context.bot.send_message(
-            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
         return ConversationHandler.END
     return await _prompt_publish_on_twitch(update, context, lang)
@@ -654,14 +656,15 @@ async def _show_day_slots(
     slots = _day_slots_view(context)
     text = await _occupied_slots_text(lang, day_date, slots)
     markup = stream_schedule_occupied_keyboard(lang, slots)
+    chat_id = reply_chat_id(update)
     query = update.callback_query
     if query:
         try:
             await query.edit_message_text(text, reply_markup=markup)
         except BadRequest:
-            await context.bot.send_message(user_id, text, reply_markup=markup)
+            await context.bot.send_message(chat_id, text, reply_markup=markup)
     else:
-        await context.bot.send_message(user_id, text, reply_markup=markup)
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
     return STREAM_SCHEDULE_FIX_SLOTS
 
 
@@ -695,7 +698,7 @@ async def _prompt_stream_schedule_fix_game(
         except BadRequest:
             pass
     await context.bot.send_message(
-        update.effective_user.id,
+        reply_chat_id(update),
         text,
         reply_markup=_wizard(lang, back=False),
     )
@@ -841,7 +844,7 @@ async def stream_schedule_confirm_callback(
         context.user_data.clear()
         await query.edit_message_text(t("cancelled", lang))
         await context.bot.send_message(
-            query.from_user.id,
+            reply_chat_id(update),
             t("menu_main", lang),
             reply_markup=_menu(lang, query.from_user.id),
         )
@@ -1073,7 +1076,7 @@ async def stream_schedule_publish_callback(
         context.user_data.clear()
         await query.edit_message_text(t("cancelled", lang) if not publish else "—")
         await context.bot.send_message(
-            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            reply_chat_id(update), t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
         return ConversationHandler.END
 
@@ -1114,7 +1117,7 @@ async def stream_schedule_duration_callback(
         context.user_data.clear()
         await query.edit_message_text(t("stream_schedule_publish_fail", lang, error="no data"))
         await context.bot.send_message(
-            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            reply_chat_id(update), t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
         return ConversationHandler.END
 
@@ -1202,15 +1205,16 @@ async def _start_schedule_publish_auth(
                 "Saved Twitch token unusable for schedule publish (user=%s)", user_id
             )
 
+    chat_id = reply_chat_id(update)
     redirect_uri = twitch_oauth_redirect_uri()
     if not redirect_uri:
         text = t("stream_schedule_publish_auth_unavailable", lang)
         if query:
             await query.edit_message_text(text)
         else:
-            await context.bot.send_message(user_id, text)
+            await context.bot.send_message(chat_id, text)
         await context.bot.send_message(
-            user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
         return ConversationHandler.END
 
@@ -1225,7 +1229,7 @@ async def _start_schedule_publish_auth(
     if query:
         await query.edit_message_text(auth_text, reply_markup=markup)
     else:
-        await context.bot.send_message(user_id, auth_text, reply_markup=markup)
+        await context.bot.send_message(chat_id, auth_text, reply_markup=markup)
     return ConversationHandler.END
 
 
@@ -1433,5 +1437,5 @@ async def schedule_save_token_callback(
         query.message.text + "\n\n" + t("stream_schedule_token_saved", lang)
     )
     await context.bot.send_message(
-        user_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        reply_chat_id(update), t("menu_main", lang), reply_markup=_menu(lang, user_id)
     )

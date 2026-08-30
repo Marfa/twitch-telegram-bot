@@ -120,8 +120,41 @@ async def _check_group_setup_gate() -> None:
     reset_group_setup_notified()
 
 
+def _check_wizard_schedule_reply_targets() -> None:
+    import re
+
+    dm_target = re.compile(
+        r"\.send_message\s*\(\s*"
+        r"(?:user_id|owner_id|query\.from_user\.id|update\.effective_user\.id)\b"
+    )
+    pulse_dm = re.compile(
+        r"_pulse_wizard_keyboard\s*\([^)]*,\s*"
+        r"(?:user_id|update\.effective_user\.id)\b"
+    )
+    badrequest_dm = re.compile(
+        r"except BadRequest:\s*\n\s*await context\.bot\.send_message\s*\(\s*"
+        r"(?:user_id|owner_id|query\.from_user\.id|update\.effective_user\.id)\b"
+    )
+
+    wizard_src = (_ROOT / "handlers/wizard.py").read_text(encoding="utf-8")
+    assert "reply_chat_id" in wizard_src
+    assert not dm_target.search(wizard_src), "wizard.py: use reply_chat_id(update) as send_message chat"
+    assert not pulse_dm.search(wizard_src)
+    assert not badrequest_dm.search(wizard_src)
+
+    sched_src = (_ROOT / "handlers/stream_schedule.py").read_text(encoding="utf-8")
+    assert "reply_chat_id" in sched_src
+    sched_handlers = sched_src.split("async def _complete_schedule_publish", 1)[0]
+    assert not dm_target.search(sched_handlers), (
+        "stream_schedule.py handlers: use reply_chat_id(update) as send_message chat"
+    )
+    assert not pulse_dm.search(sched_handlers)
+    assert not badrequest_dm.search(sched_handlers)
+
+
 def check_group_chat() -> None:
     _check_premium_and_helpers()
+    _check_wizard_schedule_reply_targets()
     import asyncio
 
     asyncio.run(_check_group_setup_gate())

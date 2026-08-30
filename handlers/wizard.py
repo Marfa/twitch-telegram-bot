@@ -447,7 +447,7 @@ async def _prompt_dest_step(
 async def _go_chat_button_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    chat_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
     context.user_data["attach_chat_button"] = False
     text = t("chat_button_prompt", lang)
     markup = chat_button_keyboard(lang)
@@ -498,7 +498,7 @@ async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def _go_alert_type_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    chat_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
     db: Database = context.application.bot_data["db"]
     text = t("alert_type_prompt", lang)
     if not await prem.advanced_mode_on(context.bot, db, chat_id):
@@ -521,7 +521,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data.get("twitch_display_name")
         or context.user_data.get("twitch_username", "")
     )
-    chat_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
     context.user_data.setdefault("strip_name_mentions", False)
     strip_on = bool(context.user_data.get("strip_name_mentions"))
     text = t(
@@ -551,7 +551,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     target = update.effective_message or update.callback_query.message
-    chat_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
     has_image = bool(
         context.user_data.get("edit_sub_id") and context.user_data.get("edit_has_image")
     )
@@ -605,7 +605,7 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
     return _wz()["IGNORE_KEYWORDS"]
 
 async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
-    chat_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
     text = t("link_preview_prompt", lang)
     markup = link_preview_keyboard(lang)
     if update.callback_query:
@@ -627,7 +627,7 @@ async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, l
         return await _show_premium_gate(
             update, context, feature="delay", first_step=False
         )
-    chat_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
     text = t("delay_prompt", lang)
     markup = delay_keyboard(lang)
     if update.callback_query:
@@ -1064,7 +1064,7 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.HTML,
         )
         await context.bot.send_message(
-            query.from_user.id,
+            reply_chat_id(update),
             t("menu_subs", lang),
             reply_markup=_menu(lang, query.from_user.id),
         )
@@ -1133,7 +1133,7 @@ async def receive_template_typo_confirm(
             sub = db.get_subscription(context.user_data["edit_sub_id"], query.from_user.id)
             if not sub:
                 await context.bot.send_message(
-                    query.from_user.id, t("sub_not_found", lang)
+                    reply_chat_id(update), t("sub_not_found", lang)
                 )
                 context.user_data.clear()
                 return ConversationHandler.END
@@ -1200,7 +1200,7 @@ async def _show_lucky_preview(
             )
         except BadRequest:
             await context.bot.send_message(
-                update.effective_user.id,
+                reply_chat_id(update),
                 text,
                 parse_mode=ParseMode.HTML,
                 reply_markup=markup,
@@ -1310,7 +1310,7 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         owner_id = query.from_user.id
         context.user_data.clear()
         await context.bot.send_message(
-            owner_id,
+            reply_chat_id(update),
             "✓",
             reply_markup=_menu(lang, owner_id),
         )
@@ -1342,7 +1342,7 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await query.edit_message_text("✓")
     await context.bot.send_message(
-        query.from_user.id,
+        reply_chat_id(update),
         t("image_send_prompt", lang),
         reply_markup=_wizard(lang, back=not is_edit),
     )
@@ -1530,7 +1530,7 @@ async def receive_delay_send(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["after_delay_state"] = _wz()["DELAY_MINUTES"]
         await query.edit_message_text("✓")
         await context.bot.send_message(
-            query.from_user.id,
+            reply_chat_id(update),
             t("delay_minutes_prompt", lang),
             reply_markup=_wizard(lang),
         )
@@ -1562,7 +1562,7 @@ async def receive_repeat_allow(update: Update, context: ContextTypes.DEFAULT_TYP
         return await _go_after_repeat(update, context, lang)
     await query.edit_message_text("✓")
     await context.bot.send_message(
-        query.from_user.id,
+        reply_chat_id(update),
         t("repeat_mute_prompt", lang),
         reply_markup=_wizard(lang),
     )
@@ -1595,7 +1595,7 @@ async def receive_schedule_reminder_ask(
     context.user_data["notify_on_live"] = False
     await query.edit_message_text("✓")
     await context.bot.send_message(
-        query.from_user.id,
+        reply_chat_id(update),
         t("schedule_reminder_minutes_prompt", lang),
         reply_markup=_wizard(lang),
     )
@@ -1712,7 +1712,7 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             await query.edit_message_text(t("save_failed", lang))
             await context.bot.send_message(
-                query.from_user.id,
+                reply_chat_id(update),
                 t("menu_main", lang),
                 reply_markup=_menu(lang, query.from_user.id),
             )
@@ -1733,7 +1733,7 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     setup_key = "channel_setup" if dest_type == "channel" else "group_setup"
     await query.edit_message_text("✓")
     await context.bot.send_message(
-        query.from_user.id,
+        reply_chat_id(update),
         t(setup_key, lang),
         reply_markup=_wizard(lang),
     )
@@ -1866,7 +1866,7 @@ async def _prompt_delete_old(
         )
     else:
         await context.bot.send_message(
-            update.effective_user.id,
+            reply_chat_id(update),
             text,
             reply_markup=delete_old_keyboard(lang),
         )
@@ -2000,7 +2000,7 @@ async def _finish_subscription(
             sorted(data.keys()),
         )
         await context.bot.send_message(
-            owner_id,
+            reply_chat_id(update),
             t("save_failed", lang),
             reply_markup=_menu(lang, owner_id),
         )
@@ -2017,7 +2017,7 @@ async def _finish_subscription(
             sorted(data.keys()),
         )
         await context.bot.send_message(
-            owner_id,
+            reply_chat_id(update),
             t("save_failed", lang),
             reply_markup=_menu(lang, owner_id),
         )
@@ -2080,7 +2080,7 @@ async def _finish_subscription(
             )
             if not ok:
                 await context.bot.send_message(
-                    owner_id,
+                    reply_chat_id(update),
                     t("sub_not_found", lang),
                     reply_markup=_menu(lang, owner_id),
                 )
@@ -2100,7 +2100,7 @@ async def _finish_subscription(
             )
             if not ok:
                 await context.bot.send_message(
-                    owner_id,
+                    reply_chat_id(update),
                     t("sub_not_found", lang),
                     reply_markup=_menu(lang, owner_id),
                 )
@@ -2112,7 +2112,7 @@ async def _finish_subscription(
 
             if len(_subs_for_owner(db, owner_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
                 await context.bot.send_message(
-                    owner_id,
+                    reply_chat_id(update),
                     t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
                     reply_markup=_menu(lang, owner_id),
                 )
@@ -2170,7 +2170,7 @@ async def _finish_subscription(
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
         await context.bot.send_message(
-            owner_id,
+            reply_chat_id(update),
             t("save_failed", lang),
             reply_markup=_menu(lang, owner_id),
         )
@@ -2215,7 +2215,7 @@ async def _finish_subscription(
         context.user_data.clear()
         context.user_data["pending_live_sub_id"] = sub_id
         await context.bot.send_message(
-            owner_id,
+            reply_chat_id(update),
             t("schedule_live_add_prompt", lang),
             reply_markup=schedule_live_add_keyboard(lang),
         )
