@@ -1,0 +1,48 @@
+---
+description: Group chat vs private DM — replies, setup gate, Mini App buttons
+globs:
+  - bot.py
+  - bot_helpers.py
+  - handlers/**/*.py
+  - premium_handlers.py
+  - chat_webapp.py
+---
+
+# Group chat vs private DM
+
+## Setup (configuration) — DM only
+
+Users configure subscriptions, settings, Premium, import, wizards **only in a private chat** with the bot.
+
+- Gate: `reject_group_bot_setup` (group `-2`) + `dm_only_conv_entry()` on ConversationHandler entry points
+- User message: `setup_private_only` (i18n)
+- **Not blocked in groups:** `chat` (stream Mini App), `other`, `feedback`, `back`, `/help`
+
+When adding a new **setup** menu button or inline callback, register it in `group_setup_menu_filter()` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.
+
+## Replies — current chat, not user DM
+
+When handling an `update`, never use `user_id` / `query.from_user.id` as `send_message` chat_id.
+
+Use:
+
+- `reply_chat_id(update)` — for `bot.send_message`
+- `update.effective_message.reply_text(...)` — when the user sent a message
+- `send_premium_screen(..., update=update)` — premium screen in current chat
+
+Intentional mass/broadcast DM (`_send_dm_html`, delivery failure notices) stays on `user_id`.
+
+## Mini App inline buttons
+
+Telegram allows `web_app` inline buttons **only in private chats** with the bot. In groups/channels use a normal `url` button (same page). Pattern: `stream_chat_open_markup(..., private=is_private_chat(update))` and `_alert_chat_button_markup` in `delivery.py`.
+
+## PostHog exceptions
+
+`error_handler` must attach `chat_context_properties(update)` (`chat_id`, `chat_type`) to `capture_exception`.
+
+## Checklist (PR touching handlers)
+
+1. New `send_message` to a user? → `reply_chat_id(update)` or document as intentional DM.
+2. New setup menu/callback? → add to group setup filters.
+3. New inline `web_app` button? → `private=` branch or URL fallback.
+4. Run `python -m self_check` (`checks_group_chat.py`).

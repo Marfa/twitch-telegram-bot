@@ -413,6 +413,7 @@
   "menu_btn_chat": "Chat",
   "chat_open_hint": "Open stream chat with the button below (or the «Chat» menu button next to the input).",
   "chat_beta_required": "Enable «Twitch stream chat» in Settings → Beta mode.",
+  "setup_private_only": "Bot setup is only available in a private chat with the bot. Open the bot in DM and try again.",
   "chat_oauth_done": "Twitch account linked for chat. Open the Chat menu button again.",
   "chat_oauth_failed": "Could not link Twitch for chat. Try again from the Mini App.",
   "wizard_simple_mode_note": "<b>You are in simplified mode. Open Settings → Advanced mode to show all wizard steps.</b>",

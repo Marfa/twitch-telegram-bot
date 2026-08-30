@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from telegram import ReplyKeyboardMarkup
 from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter
-from telegram.ext import ContextTypes, filters
+from telegram.ext import ContextTypes, ConversationHandler, filters
 
 import beta as beta_features
 import demo_mode
@@ -19,6 +19,7 @@ from i18n import (
     btn,
     main_menu,
     settings_menu,
+    t,
     wizard_menu,
 )
 
@@ -47,6 +48,43 @@ def is_private_chat(update) -> bool:
     if query and query.message and query.message.chat:
         return query.message.chat.type == ChatType.PRIVATE
     return True
+
+
+def chat_context_properties(update) -> dict[str, int | str]:
+    """PostHog-friendly chat context for exception reports."""
+    props: dict[str, int | str] = {}
+    chat = update.effective_chat
+    if chat is None and update.callback_query and update.callback_query.message:
+        chat = update.callback_query.message.chat
+    if chat is not None:
+        props["chat_id"] = int(chat.id)
+        props["chat_type"] = str(chat.type)
+    return props
+
+
+async def reply_setup_private_only(update, lang: str) -> None:
+    text = t("setup_private_only", lang)
+    if update.callback_query:
+        try:
+            await update.callback_query.answer(text, show_alert=True)
+        except BadRequest:
+            pass
+        return
+    if update.effective_message:
+        await update.effective_message.reply_text(text)
+
+
+def dm_only_conv_entry(handler):
+    """ConversationHandler entry: refuse bot setup in group/channel chats."""
+
+    async def wrapped(update, context: ContextTypes.DEFAULT_TYPE):
+        if is_private_chat(update):
+            return await handler(update, context)
+        lang = _user_lang(context, update.effective_user.id)
+        await reply_setup_private_only(update, lang)
+        return ConversationHandler.END
+
+    return wrapped
 
 
 def _pause_notifications_enabled(db: Database, user_id: int) -> bool:
@@ -88,6 +126,64 @@ def _btn_filter(key: str) -> filters.Regex:
     if key == "beta_mode":
         return filters.Regex(rf"^({texts})( \(\d+/\d+\))?$")
     return filters.Regex(f"^({texts})$")
+
+
+_NON_PRIVATE = ~filters.ChatType.PRIVATE
+
+
+def group_setup_menu_filter():
+    """Reply-keyboard actions that configure the bot — DM only (not stream chat)."""
+    return _NON_PRIVATE & (
+        filters.UpdateType.MESSAGE
+        & (
+            _btn_filter("manage")
+            | _btn_filter("import_twitch")
+            | _btn_filter("list")
+            | _btn_filter("edit")
+            | _btn_filter("delete")
+            | _btn_filter("pause_notifications")
+            | _btn_filter("alert_history")
+            | _btn_filter("settings")
+            | _btn_filter("premium")
+            | _btn_filter("partner")
+            | _btn_filter("partner_stats")
+            | _btn_filter("partner_link")
+            | _btn_filter("partner_withdraw")
+            | _btn_filter("partner_withdrawals")
+            | _btn_filter("back_settings")
+            | _btn_filter("admin_withdrawals")
+            | _btn_filter("new")
+            | _btn_filter("watch")
+            | _btn_filter("create_schedule")
+            | _btn_filter("language")
+            | _btn_filter("sys_notifications")
+            | _btn_filter("ignored_words")
+            | _btn_filter("whisper_alerts")
+            | _btn_filter("advanced_mode")
+            | _btn_filter("sync_subs")
+            | _btn_filter("beta_mode")
+            | _btn_filter("admin")
+            | _btn_filter("broadcast")
+            | _btn_filter("scheduled_broadcasts")
+            | _btn_filter("sent_broadcasts")
+            | _btn_filter("stats")
+            | _btn_filter("demo")
+        )
+    )
+
+
+GROUP_SETUP_CALLBACK_PATTERN = (
+    r"^(import_mode:|sync:|edit_f:|edit_set:|watch:|alert_type:|premium_gate:|"
+    r"dup:|dest:|strip_name:|lucky:|image_ask:|image_pos:|ignore_keywords:|"
+    r"template_typo:|list_type:|delete_|enable_all|toggle:|sub_toggle:|"
+    r"sys_updates:|sys_availability:|sys_other:|sys_sync:|advanced_mode:|"
+    r"whisper_alerts:|beta_mode:|premium:|alert_history:|lang:(?!cancel)|"
+    r"sb_edit:|sb_sched:|import_oauth:)"
+)
+
+
+def group_setup_callback_filter():
+    return _NON_PRIVATE & filters.UpdateType.CALLBACK_QUERY
 
 
 def _settings_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:

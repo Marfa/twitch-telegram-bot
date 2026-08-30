@@ -169,7 +169,13 @@ from bot_helpers import (
     _user_lang,
     _user_notifications_paused,
     _wizard,
+    chat_context_properties,
+    dm_only_conv_entry,
+    group_setup_callback_filter,
+    group_setup_menu_filter,
+    GROUP_SETUP_CALLBACK_PATTERN,
     reply_chat_id,
+    reply_setup_private_only,
 )
 from handlers.admin_stats import admin_show_stats, _format_stats
 from handlers.alert_history import (
@@ -1596,7 +1602,14 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     analytics.capture_exception(
         err if isinstance(err, BaseException) else None,
         user_id=user_id,
-        properties={"handler": "telegram_error_handler"},
+        properties={
+            "handler": "telegram_error_handler",
+            **(
+                chat_context_properties(update)
+                if isinstance(update, Update)
+                else {}
+            ),
+        },
     )
     # Best-effort: stop spinner if the handler crashed before answering.
     if isinstance(update, Update) and update.callback_query is not None:
@@ -1678,6 +1691,35 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["twitch_status_fingerprint"] = None
     app.bot_data["sending_broadcasts"] = set()
     app.add_error_handler(error_handler)
+
+    async def reject_group_bot_setup(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        setup_db: Database = context.application.bot_data["db"]
+        setup_db.upsert_user(update.effective_user.id)
+        lang = _user_lang(context, update.effective_user.id)
+        await reply_setup_private_only(update, lang)
+
+    app.add_handler(
+        MessageHandler(group_setup_menu_filter(), reject_group_bot_setup),
+        group=-2,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            reject_group_bot_setup,
+            pattern=GROUP_SETUP_CALLBACK_PATTERN,
+            filters=group_setup_callback_filter(),
+        ),
+        group=-2,
+    )
+    app.add_handler(
+        CommandHandler(
+            ["start", "schedule"],
+            reject_group_bot_setup,
+            filters=~filters.ChatType.PRIVATE,
+        ),
+        group=-2,
+    )
 
     app.add_handler(
         MessageHandler(_btn_filter("feedback"), report_problem),
@@ -1993,29 +2035,63 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     conv = ConversationHandler(
         entry_points=[
-            CommandHandler("start", start),
+            CommandHandler("start", dm_only_conv_entry(start)),
             CommandHandler("help", help_command),
-            CommandHandler("schedule", start_stream_schedule),
-            MessageHandler(_btn_filter("new"), start_new_subscription),
-            MessageHandler(_btn_filter("watch"), start_what_to_watch),
-            MessageHandler(_btn_filter("create_schedule"), start_stream_schedule),
-            MessageHandler(_btn_filter("language"), start_language_change),
-            MessageHandler(_btn_filter("ignored_words"), start_ignored_words),
-            MessageHandler(_btn_filter("pause_notifications"), start_pause_notifications),
-            MessageHandler(_btn_filter("broadcast_new"), admin_broadcast_start),
-            CallbackQueryHandler(on_import_mode_sync, pattern=r"^import_mode:sync$"),
-            CallbackQueryHandler(on_sync_change_period, pattern=r"^sync:period$"),
-            CallbackQueryHandler(start_edit_template, pattern=r"^edit_f:\d+:template$"),
-            CallbackQueryHandler(start_edit_image, pattern=r"^edit_f:\d+:image$"),
-            CallbackQueryHandler(delete_edit_image, pattern=r"^edit_f:\d+:image_del$"),
-            CallbackQueryHandler(start_edit_ignore_keywords, pattern=r"^edit_f:\d+:ignore_keywords$"),
-            CallbackQueryHandler(start_edit_dest, pattern=r"^edit_f:\d+:dest$"),
-            CallbackQueryHandler(start_edit_delay, pattern=r"^edit_f:\d+:delay$"),
-            CallbackQueryHandler(
-                start_edit_schedule_reminder, pattern=r"^edit_f:\d+:sched_remind$"
+            CommandHandler("schedule", dm_only_conv_entry(start_stream_schedule)),
+            MessageHandler(_btn_filter("new"), dm_only_conv_entry(start_new_subscription)),
+            MessageHandler(_btn_filter("watch"), dm_only_conv_entry(start_what_to_watch)),
+            MessageHandler(
+                _btn_filter("create_schedule"), dm_only_conv_entry(start_stream_schedule)
             ),
-            CallbackQueryHandler(start_edit_repeat_mute, pattern=r"^edit_set:\d+:repeat:0$"),
-            CallbackQueryHandler(start_watch_change, pattern=r"^watch:change$"),
+            MessageHandler(
+                _btn_filter("language"), dm_only_conv_entry(start_language_change)
+            ),
+            MessageHandler(
+                _btn_filter("ignored_words"), dm_only_conv_entry(start_ignored_words)
+            ),
+            MessageHandler(
+                _btn_filter("pause_notifications"),
+                dm_only_conv_entry(start_pause_notifications),
+            ),
+            MessageHandler(
+                _btn_filter("broadcast_new"), dm_only_conv_entry(admin_broadcast_start)
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(on_import_mode_sync), pattern=r"^import_mode:sync$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(on_sync_change_period), pattern=r"^sync:period$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_template), pattern=r"^edit_f:\d+:template$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_image), pattern=r"^edit_f:\d+:image$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(delete_edit_image), pattern=r"^edit_f:\d+:image_del$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_ignore_keywords),
+                pattern=r"^edit_f:\d+:ignore_keywords$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_dest), pattern=r"^edit_f:\d+:dest$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_delay), pattern=r"^edit_f:\d+:delay$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_schedule_reminder),
+                pattern=r"^edit_f:\d+:sched_remind$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_repeat_mute),
+                pattern=r"^edit_set:\d+:repeat:0$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_watch_change), pattern=r"^watch:change$"
+            ),
         ],
         states={
             LANG_SELECT: [

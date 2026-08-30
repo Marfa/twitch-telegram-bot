@@ -1485,10 +1485,12 @@ async def receive_ignore_keywords_global_toggle(
         sub_num = _owner_sub_number(db, owner_id, sub_id)
         await query.edit_message_text("✓")
         if not db.update_subscription(sub_id, owner_id, use_global_ignore=new_val):
-            await context.bot.send_message(owner_id, t("sub_not_found", lang))
+            await context.bot.send_message(
+                reply_chat_id(update), t("sub_not_found", lang)
+            )
         else:
             await context.bot.send_message(
-                owner_id,
+                reply_chat_id(update),
                 t("edit_updated", lang, sub_id=sub_num),
                 reply_markup=_menu(lang, owner_id),
             )
@@ -1672,7 +1674,7 @@ async def receive_schedule_live_add(
             dest=dest_label(sub.dest_type, lang),
             thread_note=thread_note,
         )
-        await context.bot.send_message(owner_id, text, reply_markup=_menu(lang, owner_id))
+        await context.bot.send_message(reply_chat_id(update), text, reply_markup=_menu(lang, owner_id))
         context.user_data.clear()
         return ConversationHandler.END
 
@@ -2375,10 +2377,10 @@ async def _finish_subscription(
         except BadRequest:
             pass
 
-    await context.bot.send_message(owner_id, text, reply_markup=_menu(lang, owner_id))
+    await context.bot.send_message(reply_chat_id(update), text, reply_markup=_menu(lang, owner_id))
     if created_disabled:
         await context.bot.send_message(
-            owner_id,
+            reply_chat_id(update),
             t("premium_created_disabled", lang, limit=prem.free_active_limit()),
         )
     return ConversationHandler.END
