@@ -1174,6 +1174,11 @@ def check_db_premium() -> None:
             for row in kb_rows
             for b in row
         )
+        assert all(
+            (src.twitch_username or "") in (b.text or "")
+            for row in kb_rows
+            for b in row
+        )
 
         long_blocks = [
             (f"block-{i}\n" + ("x" * 500), src) for i in range(12)

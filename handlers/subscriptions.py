@@ -747,6 +747,11 @@ async def _format_subs_overview_lines(
     return lines, subs
 
 
+def _sub_action_tag(num: int, username: str) -> str:
+    name = (username or "").strip()
+    return f"#{num} {name}" if name else f"#{num}"
+
+
 def _subs_toggle_keyboard(
     db: Database, owner_id: int, lang: str, subs: list[Subscription]
 ) -> list[list[InlineKeyboardButton]]:
@@ -755,8 +760,9 @@ def _subs_toggle_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
     for s in subs:
         num = _owner_sub_number(db, owner_id, s.id)
+        tag = _sub_action_tag(num, s.twitch_username or "")
         toggle_label = (
-            f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} #{num}"
+            f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
         rows.append(
             [
@@ -765,21 +771,21 @@ def _subs_toggle_keyboard(
                     callback_data=f"toggle:{s.id}",
                 ),
                 InlineKeyboardButton(
-                    _inline_btn_label(f"{t('sub_list_edit', lang)} #{num}"),
+                    _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
                     callback_data=f"edit:{s.id}",
                 ),
             ]
         )
         row2 = [
             InlineKeyboardButton(
-                _inline_btn_label(f"{t('sub_list_delete', lang)} #{num}"),
+                _inline_btn_label(f"{t('sub_list_delete', lang)} {tag}"),
                 callback_data=f"list_del:{s.id}",
             )
         ]
         if show_share:
             row2.append(
                 InlineKeyboardButton(
-                    _inline_btn_label(f"{t('sub_list_share_short', lang)} #{num}"),
+                    _inline_btn_label(f"{t('sub_list_share_short', lang)} {tag}"),
                     callback_data=f"share_show:{s.id}",
                 )
             )
@@ -2874,9 +2880,67 @@ async def on_list_delete_confirm(
         await query.edit_message_text(t("sub_not_found", lang))
 
 
+async def _refresh_current_subs_list(
+    *,
+    bot,
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    owner_id: int,
+    lang: str,
+) -> None:
+    """Rebuild list text+keyboard for the current page; keep the list screen open."""
+    pages = context.user_data.get("list_pages")
+    page = int(context.user_data.get("list_page") or 0)
+    if isinstance(pages, list) and pages:
+        ids: list[int] = []
+        seen: set[int] = set()
+        for _, page_subs in pages:
+            for s in page_subs:
+                sid = int(s.id)
+                if sid not in seen:
+                    seen.add(sid)
+                    ids.append(sid)
+        subs = [
+            s
+            for sid in ids
+            if (s := db.get_subscription(sid, owner_id)) is not None
+            and _sub_in_current_mode(s, owner_id)
+        ]
+    else:
+        subs = _subs_for_owner(db, owner_id)
+    if not subs:
+        await query.edit_message_text(t("no_subs_short", lang))
+        context.user_data.pop("list_pages", None)
+        context.user_data.pop("list_page", None)
+        return
+    bot_username = await _bot_username(bot, context.application.bot_data)
+    lines, ordered = await _format_subs_overview_lines(
+        bot, db, owner_id, lang, subs=subs, bot_username=bot_username
+    )
+    new_pages = _build_subs_list_pages(
+        t("subs_list", lang), list(zip(lines, ordered))
+    )
+    context.user_data["list_pages"] = new_pages
+    page = max(0, min(page, len(new_pages) - 1))
+    context.user_data["list_page"] = page
+    text, page_subs = new_pages[page]
+    markup = _subs_list_keyboard(db, owner_id, lang, page_subs, page, len(new_pages))
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+        await query.edit_message_reply_markup(reply_markup=markup)
+
+
 async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
@@ -2886,32 +2950,48 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         or sub.owner_id != query.from_user.id
         or not _sub_in_current_mode(sub, query.from_user.id)
     ):
+        await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
         return
     if not sub.enabled and getattr(sub, "trial_paused", False):
         if not await prem.has_premium(context.bot, db, query.from_user.id):
             from premium_handlers import send_premium_screen
 
+            await query.answer()
             await query.edit_message_text(t("premium_trial_paused_enable", lang))
-            await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
+            await send_premium_screen(
+                context.bot, query.from_user.id, lang, db, update=update
+            )
             return
     if not sub.enabled and not await prem.can_enable_more_async(
         context.bot, db, query.from_user.id, twitch_username=sub.twitch_username
     ):
         from premium_handlers import send_premium_screen
 
+        await query.answer()
         await query.edit_message_text(
             t("premium_active_limit", lang, limit=prem.free_active_limit())
         )
-        await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
+        await send_premium_screen(
+            context.bot, query.from_user.id, lang, db, update=update
+        )
         return
     new_state = db.toggle_subscription(sub_id, query.from_user.id)
     if new_state is None:
+        await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    key = "sub_enabled" if new_state else "sub_disabled"
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
-    await query.edit_message_text(t(key, lang, sub_id=sub_num))
+    key = "sub_enabled" if new_state else "sub_disabled"
+    await query.answer(t(key, lang, sub_id=sub_num))
+    await _refresh_current_subs_list(
+        bot=context.bot,
+        query=query,
+        context=context,
+        db=db,
+        owner_id=query.from_user.id,
+        lang=lang,
+    )
 
 
 def _share_alert_type_label(payload: dict, lang: str) -> str:
