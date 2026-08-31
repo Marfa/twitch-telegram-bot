@@ -289,6 +289,44 @@ def _pending_schedule_preview(context: ContextTypes.DEFAULT_TYPE) -> list[dict]:
     return items
 
 
+def _pending_schedule_deletes(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
+    return list(context.user_data.get("stream_schedule_deletes") or [])
+
+
+def _has_pending_schedule_changes(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    return bool(
+        _pending_schedule_preview(context) or _pending_schedule_deletes(context)
+    )
+
+
+def _format_schedule_finish_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
+    items = _pending_schedule_preview(context)
+    deletes = _pending_schedule_deletes(context)
+    parts: list[str] = []
+    if items:
+        parts.append(format_stream_schedule_result(items, lang))
+    if deletes:
+        parts.append(t("stream_schedule_deleted_slots", lang, count=len(deletes)))
+    return "\n".join(parts) if parts else "—"
+
+
+def _remove_day_slot(context: ContextTypes.DEFAULT_TYPE, slot_id: str) -> None:
+    sid = str(slot_id or "")
+    if not sid:
+        return
+    existing = context.user_data.get("stream_schedule_existing") or []
+    context.user_data["stream_schedule_existing"] = [
+        s for s in existing if str(s.get("id") or "") != sid
+    ]
+    updates = context.user_data.get("stream_schedule_updates") or []
+    context.user_data["stream_schedule_updates"] = [
+        u for u in updates if str(u.get("id") or "") != sid
+    ]
+    deletes: list[str] = context.user_data.setdefault("stream_schedule_deletes", [])
+    if sid not in deletes:
+        deletes.append(sid)
+
+
 async def _prompt_stream_schedule_game(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
@@ -471,15 +509,14 @@ async def _finish_stream_schedule(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     user_id = update.effective_user.id
-    items = _pending_schedule_preview(context)
-    text = format_stream_schedule_result(items, lang) if items else "—"
+    text = _format_schedule_finish_text(context, lang)
     chat_id = reply_chat_id(update)
     if update.callback_query:
         await update.callback_query.edit_message_text("✓")
         await context.bot.send_message(chat_id, text)
     else:
         await update.effective_message.reply_text(text)
-    if not items:
+    if not _has_pending_schedule_changes(context):
         context.user_data.clear()
         await context.bot.send_message(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
@@ -739,6 +776,7 @@ async def stream_schedule_fix_day_callback(
     context.user_data["stream_schedule_clear_mode"] = "overlap"
     context.user_data.setdefault("stream_schedule_entries", [])
     context.user_data.setdefault("stream_schedule_updates", [])
+    context.user_data.setdefault("stream_schedule_deletes", [])
     context.user_data.pop("stream_schedule_edit_id", None)
 
     db: Database = context.application.bot_data["db"]
@@ -785,6 +823,24 @@ async def stream_schedule_fix_edit_callback(
         return await _show_day_slots(update, context, lang)
     context.user_data["stream_schedule_edit_id"] = slots[idx]["id"]
     return await _prompt_stream_schedule_fix_game(update, context, lang)
+
+
+async def stream_schedule_fix_delete_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    slots = _day_slots_view(context)
+    try:
+        idx = int((query.data or "").split(":")[-1])
+    except ValueError:
+        idx = -1
+    if idx < 0 or idx >= len(slots) or not slots[idx].get("id"):
+        return await _show_day_slots(update, context, lang)
+    _remove_day_slot(context, str(slots[idx]["id"]))
+    context.user_data.pop("stream_schedule_edit_id", None)
+    return await _show_day_slots(update, context, lang)
 
 
 async def stream_schedule_fix_slots_done_callback(
@@ -1072,7 +1128,8 @@ async def stream_schedule_publish_callback(
     publish = query.data.split(":")[-1] == "1"
     entries = context.user_data.get("stream_schedule_entries", [])
     updates = context.user_data.get("stream_schedule_updates", [])
-    if not publish or (not entries and not updates):
+    deletes = context.user_data.get("stream_schedule_deletes", [])
+    if not publish or (not entries and not updates and not deletes):
         context.user_data.clear()
         await query.edit_message_text(t("cancelled", lang) if not publish else "—")
         await context.bot.send_message(
@@ -1113,7 +1170,8 @@ async def stream_schedule_duration_callback(
     )
     entries = context.user_data.get("stream_schedule_entries", [])
     updates = context.user_data.get("stream_schedule_updates", [])
-    if not entries and not updates:
+    deletes = context.user_data.get("stream_schedule_deletes", [])
+    if not entries and not updates and not deletes:
         context.user_data.clear()
         await query.edit_message_text(t("stream_schedule_publish_fail", lang, error="no data"))
         await context.bot.send_message(
@@ -1147,6 +1205,7 @@ async def stream_schedule_duration_callback(
             for u in updates
             if u.get("id")
         ],
+        "deletes": [str(d) for d in deletes if d],
         "duration": duration_min,
         "clear_mode": clear_mode,
         "utc_offset_minutes": int(offset_minutes),
@@ -1257,10 +1316,12 @@ async def _complete_schedule_publish(
         entries, duration_min = pending, _SCHEDULE_DEFAULT_DURATION_MIN
         clear_mode = "all"
         updates: list[dict] = []
+        deletes: list[str] = []
         offset_minutes = None
     elif isinstance(pending, dict):
         entries = pending.get("entries") or []
         updates = pending.get("updates") or []
+        deletes = pending.get("deletes") or []
         duration_min = int(pending.get("duration") or _SCHEDULE_DEFAULT_DURATION_MIN)
         clear_mode = pending.get("clear_mode") or "all"
         offset_minutes = pending.get("utc_offset_minutes")
@@ -1268,6 +1329,7 @@ async def _complete_schedule_publish(
         entries, duration_min = [], _SCHEDULE_DEFAULT_DURATION_MIN
         clear_mode = "all"
         updates = []
+        deletes = []
         offset_minutes = None
     if offset_minutes is None:
         offset_minutes = db.get_schedule_utc_offset_minutes(owner_id)
@@ -1275,7 +1337,7 @@ async def _complete_schedule_publish(
         offset_minutes = int(SCHEDULE_TZ.utcoffset(None).total_seconds() // 60)
     local_tz = offset_minutes_to_tzinfo(int(offset_minutes))
     tz_name = offset_minutes_to_iana(int(offset_minutes))
-    if (not entries and not updates) or not token_info:
+    if (not entries and not updates and not deletes) or not token_info:
         await application.bot.send_message(
             owner_id,
             t("stream_schedule_publish_fail", lang, error="no data"),
@@ -1331,6 +1393,17 @@ async def _complete_schedule_publish(
     errors: list[str] = []
     prefer_recurring = False
     used_recurring_fallback = False
+    for del_id in deletes:
+        try:
+            await asyncio.to_thread(
+                twitch.delete_schedule_segment,
+                access,
+                twitch_user_id,
+                str(del_id),
+            )
+            ok_count += 1
+        except Exception as exc:
+            errors.append(_schedule_publish_error_text(exc, "", lang))
     for upd in updates:
         start_iso, game_text, category_id = _start_and_category(upd)
         try:
@@ -1370,7 +1443,7 @@ async def _complete_schedule_publish(
         except Exception as exc:
             errors.append(_schedule_publish_error_text(exc, str(entry.get("date") or ""), lang))
 
-    total = len(entries) + len(updates)
+    total = len(entries) + len(updates) + len(deletes)
     if ok_count == total:
         key = (
             "stream_schedule_publish_ok_recurring"

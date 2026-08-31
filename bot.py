@@ -313,6 +313,7 @@ from handlers.stream_schedule import (
     stream_schedule_finish_callback,
     stream_schedule_fix_add_callback,
     stream_schedule_fix_day_callback,
+    stream_schedule_fix_delete_callback,
     stream_schedule_fix_edit_callback,
     stream_schedule_fix_game,
     stream_schedule_fix_slots_done_callback,
@@ -2356,6 +2357,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     stream_schedule_fix_edit_callback,
                     pattern=r"^stream_sched:edit:\d+$",
+                ),
+                CallbackQueryHandler(
+                    stream_schedule_fix_delete_callback,
+                    pattern=r"^stream_sched:delete:\d+$",
                 ),
                 CallbackQueryHandler(
                     stream_schedule_fix_slots_done_callback,

@@ -1549,6 +1549,10 @@ def stream_schedule_occupied_keyboard(
                     t("stream_schedule_edit_slot", lang),
                     callback_data=f"stream_sched:edit:{i}",
                 ),
+                InlineKeyboardButton(
+                    t("stream_schedule_delete_slot", lang),
+                    callback_data=f"stream_sched:delete:{i}",
+                ),
             ]
         )
     rows.append(

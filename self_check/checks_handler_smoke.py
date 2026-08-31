@@ -93,6 +93,7 @@ async def _smoke_schedule(db) -> None:
         start_stream_schedule,
         stream_schedule_duration_callback,
         stream_schedule_fix_edit_callback,
+        stream_schedule_fix_delete_callback,
         stream_schedule_fix_game,
         stream_schedule_fix_time,
         stream_schedule_mode_callback,
@@ -221,6 +222,27 @@ async def _smoke_schedule(db) -> None:
         await stream_schedule_fix_edit_callback(update, ctx)
     assert ctx.user_data.get("stream_schedule_edit_id") == "seg1"
     prompt.assert_awaited()
+
+    application, bot = _app(db)
+    update, _query = _cb_update(_FREE_UID, "stream_sched:delete:0")
+    ctx = _ctx(
+        application,
+        {
+            "stream_schedule_fix_date": date.today(),
+            "stream_schedule_existing": [{"id": "seg1", "time": "12:00", "game": "G"}],
+            "stream_schedule_entries": [],
+            "stream_schedule_updates": [],
+            "stream_schedule_deletes": [],
+        },
+    )
+    with patch(
+        "handlers.stream_schedule._show_day_slots",
+        new=AsyncMock(return_value=st["STREAM_SCHEDULE_FIX_SLOTS"]),
+    ) as show_slots:
+        await stream_schedule_fix_delete_callback(update, ctx)
+    assert ctx.user_data["stream_schedule_existing"] == []
+    assert ctx.user_data["stream_schedule_deletes"] == ["seg1"]
+    show_slots.assert_awaited()
 
     application, bot = _app(db)
     update, _query = _cb_update(_FREE_UID, "ss:x")

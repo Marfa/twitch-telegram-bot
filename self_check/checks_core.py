@@ -496,6 +496,8 @@ def check_core() -> None:
     assert tr("stream_schedule_duration_prompt_keep", "ru")
     assert tr("stream_schedule_more_prompt", "ru")
     assert tr("stream_schedule_add_slot", "en")
+    assert tr("stream_schedule_delete_slot", "en")
+    assert tr("stream_schedule_deleted_slots", "en", count=2)
     assert "Пример" not in tr("stream_schedule_mode_intro", "ru")
     assert "Example" not in tr("stream_schedule_mode_intro", "en")
     assert "Пример" not in tr("stream_schedule_intro", "ru")

@@ -303,6 +303,8 @@
   "stream_schedule_occupied_empty": "No slots on {date} yet.",
   "stream_schedule_occupied_line": "- {time} {game}",
   "stream_schedule_edit_slot": "✏️ Edit",
+  "stream_schedule_delete_slot": "🗑 Delete",
+  "stream_schedule_deleted_slots": "🗑 Slots to delete: {count}",
   "stream_schedule_add_slot": "➕ Add slot",
   "stream_schedule_slots_done": "Done",
   "stream_schedule_no_stream": "No stream planned",
