@@ -478,6 +478,78 @@ async def _prompt_schedule_tz(
     return STREAM_SCHEDULE_TZ
 
 
+def _is_delete_only_schedule_publish(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    entries = context.user_data.get("stream_schedule_entries", [])
+    updates = context.user_data.get("stream_schedule_updates", [])
+    deletes = context.user_data.get("stream_schedule_deletes", [])
+    return bool(deletes) and not entries and not updates
+
+
+def _schedule_iso_date(value: date | str) -> str:
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
+
+
+async def _queue_schedule_publish_and_auth(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    lang: str,
+    *,
+    duration_min: int,
+) -> int:
+    entries = context.user_data.get("stream_schedule_entries", [])
+    updates = context.user_data.get("stream_schedule_updates", [])
+    deletes = context.user_data.get("stream_schedule_deletes", [])
+    if not entries and not updates and not deletes:
+        context.user_data.clear()
+        chat_id = reply_chat_id(update)
+        text = t("stream_schedule_publish_fail", lang, error="no data")
+        query = update.callback_query
+        if query:
+            await query.edit_message_text(text)
+        else:
+            await context.bot.send_message(chat_id, text)
+        await context.bot.send_message(
+            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        )
+        return ConversationHandler.END
+
+    db: Database = context.application.bot_data["db"]
+    clear_mode = context.user_data.get("stream_schedule_clear_mode", "all")
+    offset_minutes = db.get_schedule_utc_offset_minutes(user_id)
+    if offset_minutes is None:
+        offset_minutes = int(SCHEDULE_TZ.utcoffset(None).total_seconds() // 60)
+
+    _pending_schedule_publishes(context.application)[user_id] = {
+        "entries": [
+            {
+                "date": _schedule_iso_date(e["date"]),
+                "time": e["time"],
+                "game": e["game"],
+            }
+            for e in entries
+        ],
+        "updates": [
+            {
+                "id": u["id"],
+                "date": _schedule_iso_date(u["date"]),
+                "time": u["time"],
+                "game": u.get("game") or "",
+            }
+            for u in updates
+            if u.get("id")
+        ],
+        "deletes": [str(d) for d in deletes if d],
+        "duration": duration_min,
+        "clear_mode": clear_mode,
+        "utc_offset_minutes": int(offset_minutes),
+    }
+    context.user_data.clear()
+    return await _start_schedule_publish_auth(update, context, user_id, lang)
+
+
 async def _prompt_duration_after_publish_yes(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
@@ -607,6 +679,14 @@ async def stream_schedule_tz(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if resume == "publish_prompt":
         return await _prompt_publish_on_twitch(update, context, lang)
     if resume == "duration":
+        if _is_delete_only_schedule_publish(context):
+            return await _queue_schedule_publish_and_auth(
+                update,
+                context,
+                user_id,
+                lang,
+                duration_min=_SCHEDULE_DEFAULT_DURATION_MIN,
+            )
         return await _prompt_duration_after_publish_yes(update, context, lang)
     if resume == "confirm":
         await update.effective_message.reply_text(
@@ -1148,6 +1228,14 @@ async def stream_schedule_publish_callback(
         await send_premium_screen(context.bot, user_id, lang, db, update=update)
         return ConversationHandler.END
 
+    if _is_delete_only_schedule_publish(context):
+        return await _queue_schedule_publish_and_auth(
+            update,
+            context,
+            user_id,
+            lang,
+            duration_min=_SCHEDULE_DEFAULT_DURATION_MIN,
+        )
     if db.get_schedule_utc_offset_minutes(user_id) is None:
         return await _prompt_schedule_tz(update, context, lang, resume="duration")
     return await _prompt_duration_after_publish_yes(update, context, lang)
@@ -1168,50 +1256,12 @@ async def stream_schedule_duration_callback(
     duration_min = (
         _SCHEDULE_DEFAULT_DURATION_MIN if hours <= 0 else max(1, hours) * 60
     )
-    entries = context.user_data.get("stream_schedule_entries", [])
-    updates = context.user_data.get("stream_schedule_updates", [])
-    deletes = context.user_data.get("stream_schedule_deletes", [])
-    if not entries and not updates and not deletes:
-        context.user_data.clear()
-        await query.edit_message_text(t("stream_schedule_publish_fail", lang, error="no data"))
-        await context.bot.send_message(
-            reply_chat_id(update), t("menu_main", lang), reply_markup=_menu(lang, user_id)
-        )
-        return ConversationHandler.END
-
     db: Database = context.application.bot_data["db"]
-    clear_mode = context.user_data.get("stream_schedule_clear_mode", "all")
-    offset_minutes = db.get_schedule_utc_offset_minutes(user_id)
-    if offset_minutes is None:
+    if db.get_schedule_utc_offset_minutes(user_id) is None:
         return await _prompt_schedule_tz(update, context, lang, resume="duration")
-
-    def _iso_date(value: date | str) -> str:
-        if isinstance(value, date):
-            return value.isoformat()
-        return str(value)
-
-    _pending_schedule_publishes(context.application)[user_id] = {
-        "entries": [
-            {"date": _iso_date(e["date"]), "time": e["time"], "game": e["game"]}
-            for e in entries
-        ],
-        "updates": [
-            {
-                "id": u["id"],
-                "date": _iso_date(u["date"]),
-                "time": u["time"],
-                "game": u.get("game") or "",
-            }
-            for u in updates
-            if u.get("id")
-        ],
-        "deletes": [str(d) for d in deletes if d],
-        "duration": duration_min,
-        "clear_mode": clear_mode,
-        "utc_offset_minutes": int(offset_minutes),
-    }
-    context.user_data.clear()
-    return await _start_schedule_publish_auth(update, context, user_id, lang)
+    return await _queue_schedule_publish_and_auth(
+        update, context, user_id, lang, duration_min=duration_min
+    )
 
 
 async def _start_schedule_publish_auth(

@@ -205,6 +205,28 @@ async def _smoke_schedule(db) -> None:
     assert state == st["STREAM_SCHEDULE_DURATION"]
 
     application, bot = _app(db)
+    update, _query = _cb_update(_FREE_UID, "ss:pub:1")
+    ctx = _ctx(
+        application,
+        {
+            "stream_schedule_entries": [],
+            "stream_schedule_updates": [],
+            "stream_schedule_deletes": ["seg1"],
+            "stream_schedule_clear_mode": "overlap",
+        },
+    )
+    with patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ), patch(
+        "handlers.stream_schedule._start_schedule_publish_auth",
+        new=AsyncMock(return_value=ConversationHandler.END),
+    ) as publish_auth:
+        state = await stream_schedule_publish_callback(update, ctx)
+    assert state == ConversationHandler.END
+    publish_auth.assert_awaited()
+
+    application, bot = _app(db)
     update, _query = _cb_update(_FREE_UID, "ss:fixedit:0")
     ctx = _ctx(
         application,
