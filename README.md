@@ -2,7 +2,8 @@
 
 **Старт, смена категории, скоро стрим или конец эфира — бот напишет туда, куда вы скажете.** Настройка в Telegram.
 
-Готовый бот: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
+> [!IMPORTANT]
+> **Готовый бот:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню
 
 English: [README.en.md](README.en.md)
 

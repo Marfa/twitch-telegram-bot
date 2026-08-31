@@ -2,7 +2,8 @@
 
 **Go-live, category change, upcoming, or stream end — the bot notifies wherever you choose.** Setup in Telegram.
 
-Live bot: [@twitch2telegram_bot](https://t.me/twitch2telegram_bot)
+> [!IMPORTANT]
+> **Live bot:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu
 
 Русский: [README.md](README.md)
 
