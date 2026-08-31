@@ -159,7 +159,9 @@ def _format_pause_until(until_ts: int, lang: str) -> str:
 
 def _subs_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
     return subscriptions_menu(
-        lang, pause_notifications=_pause_notifications_enabled(db, user_id)
+        lang,
+        cart=_deleted_subscriptions_cart_enabled(db, user_id),
+        pause_notifications=_pause_notifications_enabled(db, user_id),
     )
 
 
@@ -519,9 +521,40 @@ def _alert_type_from_sub(sub: Subscription) -> str:
 
 
 async def open_subscriptions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Legacy entry (old «Manage subscriptions» keyboard) → my subscriptions list."""
+    await list_subscriptions(update, context)
+
+
+async def open_cart_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        await update.effective_message.reply_text(
+            t("menu_subs", lang),
+            reply_markup=_subs_kb(lang, db, user_id),
+        )
+        return
+    is_demo = demo_mode.is_active(user_id)
+    days = prem.deleted_subscriptions_cart_days(db, user_id)
+    items = db.list_deleted_subscriptions(
+        user_id, days=days, is_demo=is_demo, limit=100
+    )
+    types, kind, view = _store_delete_cart_state(
+        context, items, days=days, kind=None, selected=set()
+    )
+    if not items:
+        text = t("cart_empty", lang, days=days)
+        markup = None
+    elif kind is None and len(types) > 1:
+        text = t("cart_type_pick", lang)
+        markup = _alert_type_pick_keyboard(lang, types, "delete_cart_type")
+    else:
+        text = t("cart_prompt", lang, days=days)
+        if not view:
+            text = t("cart_empty", lang, days=days)
+        markup = _delete_cart_keyboard(lang, view, set())
+    await update.effective_message.reply_text(text, reply_markup=markup)
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
@@ -717,27 +750,40 @@ async def _format_subs_overview_lines(
 def _subs_toggle_keyboard(
     db: Database, owner_id: int, lang: str, subs: list[Subscription]
 ) -> list[list[InlineKeyboardButton]]:
+    """Per subscription: two rows of actions (toggle/edit; delete[+share if beta])."""
     show_share = _share_enabled(db, owner_id)
     rows: list[list[InlineKeyboardButton]] = []
     for s in subs:
         num = _owner_sub_number(db, owner_id, s.id)
-        row = [
-            InlineKeyboardButton(
-                _inline_btn_label(
-                    f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} "
-                    f"#{num} {s.twitch_username}"
+        toggle_label = (
+            f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} #{num}"
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    _inline_btn_label(toggle_label),
+                    callback_data=f"toggle:{s.id}",
                 ),
-                callback_data=f"toggle:{s.id}",
+                InlineKeyboardButton(
+                    _inline_btn_label(f"{t('sub_list_edit', lang)} #{num}"),
+                    callback_data=f"edit:{s.id}",
+                ),
+            ]
+        )
+        row2 = [
+            InlineKeyboardButton(
+                _inline_btn_label(f"{t('sub_list_delete', lang)} #{num}"),
+                callback_data=f"list_del:{s.id}",
             )
         ]
         if show_share:
-            row.append(
+            row2.append(
                 InlineKeyboardButton(
-                    _inline_btn_label(f"{t('sub_list_share', lang)} #{num}"),
+                    _inline_btn_label(f"{t('sub_list_share_short', lang)} #{num}"),
                     callback_data=f"share_show:{s.id}",
                 )
             )
-        rows.append(row)
+        rows.append(row2)
     return rows
 
 
@@ -2745,6 +2791,87 @@ async def on_delete_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     context.user_data["delete_selected"] = set()
     context.user_data.pop("delete_type", None)
     await query.edit_message_text(t("subs_deleted", lang, count=deleted))
+
+
+async def on_list_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    try:
+        sub_id = int(query.data.split(":", 1)[1])
+    except (TypeError, ValueError, IndexError):
+        return
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    sub_num = _owner_sub_number(db, user_id, sub_id)
+    await query.edit_message_text(
+        t(
+            "list_delete_confirm",
+            lang,
+            sub_id=sub_num,
+            username=sub.twitch_username,
+        ),
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("delete_all_yes", lang),
+                        callback_data=f"list_del_ok:{sub_id}",
+                    ),
+                    InlineKeyboardButton(
+                        t("delete_all_no", lang),
+                        callback_data=f"list_del_no:{sub_id}",
+                    ),
+                ]
+            ]
+        ),
+    )
+
+
+async def on_list_delete_confirm(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    parts = (query.data or "").split(":")
+    if len(parts) != 2:
+        return
+    action, raw_id = parts[0], parts[1]
+    try:
+        sub_id = int(raw_id)
+    except (TypeError, ValueError):
+        return
+    db: Database = context.application.bot_data["db"]
+    if action == "list_del_no":
+        subs = _subs_for_owner(db, user_id)
+        await _deliver_subs_list(
+            bot=context.bot,
+            db=db,
+            owner_id=user_id,
+            lang=lang,
+            subs=subs,
+            reply_message=query.message,
+            query=query,
+            context=context,
+        )
+        return
+    if action != "list_del_ok":
+        return
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    to_cart = _deleted_subscriptions_cart_enabled(db, user_id)
+    if db.delete_subscription(sub_id, user_id, to_cart=to_cart):
+        await query.edit_message_text(t("subs_deleted", lang, count=1))
+    else:
+        await query.edit_message_text(t("sub_not_found", lang))
 
 
 async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

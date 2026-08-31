@@ -111,6 +111,7 @@ def all_menu_buttons() -> set[str]:
         "list",
         "edit",
         "delete",
+        "cart",
         "pause_notifications",
         "feedback",
         "create_schedule",
@@ -159,7 +160,7 @@ def main_menu(
             KeyboardButton(btn("import_twitch", lang)),
         ],
         [
-            KeyboardButton(btn("manage", lang)),
+            KeyboardButton(btn("list", lang)),
             KeyboardButton(btn("alert_history", lang)),
         ],
         [
@@ -190,9 +191,14 @@ def _pair_reply_rows(buttons: list[KeyboardButton]) -> list[list[KeyboardButton]
 
 
 def subscriptions_menu(
-    lang: str, *, pause_notifications: bool = False
+    lang: str,
+    *,
+    cart: bool = False,
+    pause_notifications: bool = False,
 ) -> ReplyKeyboardMarkup:
-    keys = ["list", "edit", "delete"]
+    keys: list[str] = []
+    if cart:
+        keys.append("cart")
     if pause_notifications:
         keys.append("pause_notifications")
     keys.append("back")

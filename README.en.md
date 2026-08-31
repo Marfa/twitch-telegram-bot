@@ -31,7 +31,7 @@
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
-| Subscriptions | Paginated list, edit all fields, enable/disable, delete; **Share alert** (🧪 beta) — deep link that clones settings; **🧺 Deleted subscriptions cart** — restore within 10 days (30 with Premium); **⏸ Pause notifications** for N days without pausing subscriptions; **💬 Stream chat** — Mini App with embed/fallback |
+| Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
@@ -193,7 +193,7 @@ Optionally **publish to Twitch** (**Premium**):
 
 ### Deleted subscriptions cart
 
-When a subscription is deleted (manually or via Twitch sync) it is saved to the cart. The **🗑 Delete subscription** menu shows a **🧺 Cart** button:
+When a subscription is deleted (manually or via Twitch sync) it is saved to the cart. **📋 My subscriptions** includes **🧺 Cart**:
 
 - If there are several alert types — pick a type first (same as view / edit / delete)
 - Lists deleted subscriptions from the last **10 days** (free) or **30 days** (Premium / à la carte)
@@ -206,7 +206,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 
 ### Pause notifications
 
-**📋 Manage subscriptions** includes **⏸ Pause notifications**: enter a number of days (0 turns them back on). Subscriptions stay active; the bot does not deliver stream or system messages until that date.
+**📋 My subscriptions** includes **⏸ Pause notifications**: enter a number of days (0 turns them back on). Subscriptions stay active; the bot does not deliver stream or system messages until that date.
 
 ### Menu and commands
 
@@ -220,7 +220,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
-| 📋 Manage subscriptions | List, edit, delete; **⏸ Pause notifications** |
+| 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
 | 📜 Alert history | DM: 7 days free / 60 days Premium |
 | 📦 Other | Whisper alerts, schedule, what to watch, chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |

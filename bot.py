@@ -590,6 +590,8 @@ from handlers.subscriptions import (
     on_list_type,
     on_list_page,
     on_list_page_noop,
+    on_list_delete,
+    on_list_delete_confirm,
     on_edit_page,
     on_edit_page_noop,
     on_delete_page,
@@ -604,6 +606,7 @@ from handlers.subscriptions import (
     on_sync_unfollow_answer,
     on_toggle,
     on_welcome_demo_delete,
+    open_cart_menu,
     open_subscriptions_menu,
     open_sync_settings,
     receive_pause_notifications_days,
@@ -736,7 +739,7 @@ def _help_text(lang: str) -> str:
         lang,
         btn_new=btn("new", lang),
         btn_import_twitch=btn("import_twitch", lang),
-        btn_manage=btn("manage", lang),
+        btn_list=btn("list", lang),
         btn_alert_history=btn("alert_history", lang),
         btn_other=btn("other", lang),
         btn_whisper_alerts=btn("whisper_alerts", lang),
@@ -1759,6 +1762,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("cart"), open_cart_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("edit"), edit_menu),
         group=0,
     )
@@ -1965,6 +1972,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_delete_go, pattern=r"^delete_go$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_clear, pattern=r"^delete_clear$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_type, pattern=r"^delete_type:\w+$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_list_delete, pattern=r"^list_del:\d+$"), group=0
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_list_delete_confirm, pattern=r"^list_del_(ok|no):\d+$"
+        ),
+        group=0,
+    )
     app.add_handler(
         CallbackQueryHandler(on_delete_cart_open, pattern=r"^delete_cart_open$"),
         group=0,
@@ -2571,7 +2587,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"
                 r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
-                r"list_type:|"
+                r"list_type:|list_del:\d+$|list_del_ok:\d+$|list_del_no:\d+$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
                 r"advanced_mode:|whisper_alerts:|"
@@ -2587,6 +2603,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("manage")
                 | _btn_filter("import_twitch")
                 | _btn_filter("list")
+                | _btn_filter("cart")
                 | _btn_filter("edit")
                 | _btn_filter("delete")
                 | _btn_filter("pause_notifications")

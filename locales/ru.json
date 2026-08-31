@@ -114,7 +114,7 @@
   "watch_create_alerts_none": "Нет фильтра для отслеживания. Сначала снова откройте «Что посмотреть?».",
   "watch_create_alerts_dup": "Оповещение о начале стрима с таким фильтром уже есть.",
   "watch_create_alerts_paused_note": "\n\nОповещение создано на паузе (лимит активных без Premium: {free_limit}).",
-  "edit_watch_locked": "Это оповещение ловит стримы по категории/фильтру с настройками по умолчанию.\nРедактировать нельзя — только удалить (Управление подписками → Удалить).",
+  "edit_watch_locked": "Это оповещение ловит стримы по категории/фильтру с настройками по умолчанию.\nРедактировать нельзя — только удалить (Мои подписки → 🗑).",
   "watch_prefs_summary": "Фильтры: {cats}\nЗрители: {viewers}\nЯзык: {language}\nТеги: {tags}\n18+: {mature}",
   "watch_viewers_label_any": "любое",
   "watch_viewers_label_min": "от {min}",
@@ -123,7 +123,7 @@
   "watch_tags_label_any": "любые",
   "watch_mature_label_exclude": "исключены",
   "watch_mature_label_allow": "разрешены",
-  "menu_subs": "Управление подписками:",
+  "menu_subs": "Мои подписки:",
   "pause_notifications_prompt": "Вы можете приостановить любые оповещения (о стримах и системные) на указанный период в днях.\n\nУкажите на какое время приостановить оповещения. 0 дней снова включить оповещения.",
   "pause_notifications_current": "Сейчас оповещения приостановлены до {until}.",
   "pause_notifications_invalid": "Введите целое число дней от 0 до {max_days}.",
@@ -545,7 +545,7 @@
   "cancelled": "Отменено.",
   "callback_stale": "Бот обновлялся. Нажмите ещё раз или откройте меню.",
   "feedback": "Обратная связь:\n• Telegram: @immarfa\n• GitHub Issues: {github}\n\nПоддержка:\n• Telegram Tribute: https://t.me/tribute/app?startapp=dBlc\n• Криптой: https://nowpayments.io/donation/themarfa\n\nСсылки:\n• Twitch: https://www.twitch.tv/marfapr\n• Telegram: https://t.me/themarfa\n• Сайт: https://blog.themarfa.name/\n\nВаш ID: <code>{user_id}</code>",
-  "help": "Доступные команды:\n/start — главное меню\n/help — эта справка\n/cancel — отменить текущий мастер\n/schedule — создать расписание стримов\n/feedback — помощь\n/settings — настройки\n\nМеню:\n• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n• {btn_import_twitch} — авторизация и импорт фолловов\n• {btn_manage} — список, вкл/выкл, редактирование, удаление\n• {btn_alert_history} — история отправленных оповещений\n• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}, {btn_chat}\n• {btn_settings} — премиум, sync, системные уведомления, язык, партнёрка\n• {btn_feedback}",
+  "help": "Доступные команды:\n/start — главное меню\n/help — эта справка\n/cancel — отменить текущий мастер\n/schedule — создать расписание стримов\n/feedback — помощь\n/settings — настройки\n\nМеню:\n• {btn_new} — канал Twitch, шаблон, опционально картинка, фильтры, куда слать\n• {btn_import_twitch} — авторизация и импорт фолловов\n• {btn_list} — список, вкл/выкл, редактирование, удаление, корзина\n• {btn_alert_history} — история отправленных оповещений\n• {btn_other} — {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}, {btn_chat}\n• {btn_settings} — премиум, sync, системные уведомления, язык, партнёрка\n• {btn_feedback}",
   "no_subs": "Подписок пока нет.\n\nНажмите ➕ Новая подписка.\n\nСправка: /help",
   "subs_list": "Ваши подписки (нажмите, чтобы включить/выключить):\n\n",
   "import_oauth_prompt": "Авторизуйте бота на Twitch, чтобы импортировать каналы, на которые вы подписаны.",
@@ -734,5 +734,9 @@
   "twitch_comp_maintenance": "Техработы",
   "twitch_status_affected": "Затронутые компоненты:",
   "twitch_status_incidents": "Инциденты:",
-  "bot_stats": "📊 Статистика бота\n\nПользователей: {users}\nСоздали оповещение: {unique_owners}\nПолучателей: {notify_users}\nПодписок: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nКаналов Twitch: {unique_twitch_channels}\nПлатный премиум: {premium_paid}\nАктивных триалов: {trials}{trial_list}\n\nСистемные оповещения:\n• Обновление бота: {sys_updates}\n• Доступность бота: {sys_availability}\n• Прочие: {sys_other}\n• Заблокировали бота: {blocked_users}\n\nЯзыки:\n• English: {locale_en}\n• Русский: {locale_ru}\n• Не выбран: {locale_unset}"
+  "bot_stats": "📊 Статистика бота\n\nПользователей: {users}\nСоздали оповещение: {unique_owners}\nПолучателей: {notify_users}\nПодписок: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nКаналов Twitch: {unique_twitch_channels}\nПлатный премиум: {premium_paid}\nАктивных триалов: {trials}{trial_list}\n\nСистемные оповещения:\n• Обновление бота: {sys_updates}\n• Доступность бота: {sys_availability}\n• Прочие: {sys_other}\n• Заблокировали бота: {blocked_users}\n\nЯзыки:\n• English: {locale_en}\n• Русский: {locale_ru}\n• Не выбран: {locale_unset}",
+  "sub_list_edit": "✏️",
+  "sub_list_delete": "🗑",
+  "sub_list_share_short": "📤",
+  "list_delete_confirm": "Удалить подписку #{sub_id} ({username})?"
 }

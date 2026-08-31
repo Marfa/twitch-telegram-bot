@@ -521,8 +521,13 @@ def check_core() -> None:
         main_btns = [b.text for row in main_kb for b in row]
         assert btn("other", loc) in main_btns
         assert btn("alert_history", loc) in main_btns
+        assert btn("list", loc) in main_btns
+        assert btn("manage", loc) not in main_btns
         assert btn("create_schedule", loc) not in main_btns
         assert btn("watch", loc) not in main_btns
+        assert main_btns.index(btn("list", loc)) < main_btns.index(
+            btn("alert_history", loc)
+        )
         assert main_btns.index(btn("alert_history", loc)) < main_btns.index(
             btn("other", loc)
         )
@@ -558,16 +563,20 @@ def check_core() -> None:
             )
         subs_kb = subscriptions_menu(loc).keyboard
         assert [[b.text for b in row] for row in subs_kb] == [
-            [btn("list", loc), btn("edit", loc)],
-            [btn("delete", loc), btn("back", loc)],
+            [btn("back", loc)],
         ]
         subs_kb_pause = subscriptions_menu(loc, pause_notifications=True).keyboard
         assert [[b.text for b in row] for row in subs_kb_pause] == [
-            [btn("list", loc), btn("edit", loc)],
-            [btn("delete", loc), btn("pause_notifications", loc)],
+            [btn("pause_notifications", loc), btn("back", loc)],
+        ]
+        subs_kb_full = subscriptions_menu(
+            loc, cart=True, pause_notifications=True
+        ).keyboard
+        assert [[b.text for b in row] for row in subs_kb_full] == [
+            [btn("cart", loc), btn("pause_notifications", loc)],
             [btn("back", loc)],
         ]
-        for subs_rows in (subs_kb, subs_kb_pause):
+        for subs_rows in (subs_kb, subs_kb_pause, subs_kb_full):
             for i, row in enumerate(subs_rows):
                 if i == len(subs_rows) - 1 and len(row) == 1:
                     continue

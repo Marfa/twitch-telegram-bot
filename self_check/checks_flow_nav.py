@@ -309,29 +309,107 @@ def _seed_live_sub(db, owner_id: int) -> int:
 
 
 async def _scenario_subscriptions(db) -> None:
+    """§4 Мои подписки — list, no-share without beta, delete confirm No, cart, pause."""
+    from i18n import wizard_menu as _wizard_menu
     from handlers.subscriptions import (
         edit_menu,
         list_subscriptions,
+        on_list_delete,
+        on_list_delete_confirm,
+        open_cart_menu,
         open_subscriptions_menu,
+        start_pause_notifications,
     )
 
     sub_id = _seed_live_sub(db, _FREE_UID)
 
     application, bot = _app(db)
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
     cap = _BotCapture()
     cap.wrap(bot)
     update = _msg_update(_FREE_UID, btn("manage", "ru"), cap)
     ctx = _ctx(application)
-    await open_subscriptions_menu(update, ctx)
-    cap.assert_turn("subscriptions_menu")
+    with patch(
+        "handlers.subscriptions.beta_features.is_enabled", return_value=False
+    ):
+        await open_subscriptions_menu(update, ctx)
+    cap.assert_turn("subscriptions_list")
 
     application, bot = _app(db)
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
     cap = _BotCapture()
     cap.wrap(bot)
     update = _msg_update(_FREE_UID, btn("list", "ru"), cap)
     ctx = _ctx(application)
-    await list_subscriptions(update, ctx)
-    cap.assert_turn("subscriptions_list")
+    with patch(
+        "handlers.subscriptions.beta_features.is_enabled", return_value=False
+    ):
+        await list_subscriptions(update, ctx)
+    inline_cbs = [
+        (b.callback_data or "")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert any(cb.startswith("toggle:") for cb in inline_cbs)
+    assert any(cb.startswith("edit:") for cb in inline_cbs)
+    assert any(cb.startswith("list_del:") for cb in inline_cbs)
+    assert not any(cb.startswith("share_show:") for cb in inline_cbs)
+    cap.assert_turn("subscriptions_list_no_share")
+
+    update, _query = _cb_update(_FREE_UID, f"list_del:{sub_id}", cap)
+    ctx = _ctx(application, dict(ctx.user_data))
+    await on_list_delete(update, ctx)
+    cap.assert_turn("subscriptions_list_delete_confirm")
+
+    update, query = _cb_update(_FREE_UID, f"list_del_no:{sub_id}", cap)
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
+    with patch(
+        "handlers.subscriptions.beta_features.is_enabled", return_value=False
+    ):
+        await on_list_delete_confirm(update, ctx)
+    query.edit_message_text.assert_awaited()
+    restored_cbs = [
+        (b.callback_data or "")
+        for row in (query.edit_message_text.call_args.kwargs.get("reply_markup")
+                    or SimpleNamespace(inline_keyboard=[])).inline_keyboard
+        for b in row
+    ]
+    assert any(cb.startswith("list_del:") for cb in restored_cbs)
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("cart", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions.beta_features.is_enabled",
+        side_effect=lambda _db, _uid, feat: feat == "deleted-subscriptions-cart",
+    ), patch(
+        "handlers.subscriptions.prem.deleted_subscriptions_cart_days",
+        return_value=10,
+    ):
+        await open_cart_menu(update, ctx)
+    cap.assert_turn("subscriptions_cart")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("pause_notifications", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions._pause_notifications_enabled", return_value=True
+    ), patch(
+        "handlers.subscriptions._wizard",
+        side_effect=lambda lang, back=True: (
+            cap.note_pulse(),
+            _wizard_menu(lang, back=back),
+        )[1],
+    ):
+        state = await start_pause_notifications(update, ctx)
+    assert state is not None
+    cap.assert_turn("subscriptions_pause")
 
     application, bot = _app(db)
     cap = _BotCapture()
