@@ -952,6 +952,12 @@ def check_core() -> None:
         assert tr("edit_delete_other", loc)
         assert tr("edit_delete_other_menu", loc)
         assert tr("edit_delete_old_menu_category", loc)
+        assert tr("edit_change_type", loc)
+        assert tr("edit_copy", loc)
+        assert tr("edit_copy_change", loc)
+        assert tr("edit_type_changed", loc, alert_type="x")
+        assert tr("edit_copied", loc, sub_id=1, username="x")
+        assert tr("edit_copy_cancelled", loc)
         assert tr("sub_list_delete_other_yes", loc)
         assert tr("sub_list_delete_other_no", loc)
         assert tr("btn_demo", loc)
@@ -1049,4 +1055,27 @@ def check_core() -> None:
     kb = welcome_demo_keyboard("ru", 42)
     assert kb.inline_keyboard[0][0].callback_data == "edit:42"
     assert kb.inline_keyboard[1][0].callback_data == "welcome_del:42"
+
+    from db.models import migrate_sub_fields_for_alert_type
+
+    base = {
+        "dest_type": "channel",
+        "delete_previous": True,
+        "notify_delete_fail": True,
+        "delete_other_alerts": True,
+        "suppress_repeat_minutes": 15,
+        "schedule_reminder_minutes": 30,
+        "schedule_reminder_configured": True,
+        "delay_minutes": 5,
+        "notify_on_live": True,
+        "notify_on_end": False,
+        "notify_on_category_change": False,
+    }
+    cat = migrate_sub_fields_for_alert_type(base, "category")
+    assert cat["notify_on_category_change"] is True
+    assert cat["suppress_repeat_minutes"] == 0
+    assert cat["schedule_reminder_minutes"] == 0
+    upcoming = migrate_sub_fields_for_alert_type(base, "upcoming")
+    assert upcoming["delay_minutes"] == 0
+    assert upcoming["suppress_repeat_minutes"] == 0
 

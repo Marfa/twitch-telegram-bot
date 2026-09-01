@@ -1908,6 +1908,28 @@ def edit_options_keyboard(
                         )
                     ]
                 )
+    rows.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    t("edit_change_type", lang),
+                    callback_data=f"edit_f:{sub_id}:change_type",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("edit_copy", lang),
+                    callback_data=f"edit_f:{sub_id}:copy",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("edit_copy_change", lang),
+                    callback_data=f"edit_f:{sub_id}:copy_change",
+                )
+            ],
+        ]
+    )
     return InlineKeyboardMarkup(rows)
 
 

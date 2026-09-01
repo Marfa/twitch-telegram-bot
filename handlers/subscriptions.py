@@ -30,7 +30,11 @@ from bot_helpers import (
     _wizard,
 )
 from db import Database, Subscription, TwitchSync, is_category_watch_sub
-from db.models import _subscription_cart_snapshot, alert_type_from_payload
+from db.models import (
+    _subscription_cart_snapshot,
+    alert_type_from_payload,
+    migrate_sub_fields_for_alert_type,
+)
 from handlers.delivery import _resolve_chat_display_name
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
 from handlers.stream_schedule import _complete_schedule_publish
@@ -2992,6 +2996,324 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         owner_id=query.from_user.id,
         lang=lang,
     )
+
+
+def _alert_type_label(kind: str, lang: str) -> str:
+    return t(f"alert_type_{kind}", lang)
+
+
+def _other_alert_types(current: str) -> list[str]:
+    return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind != current]
+
+
+def _edit_alert_type_pick_keyboard(
+    sub_id: int,
+    lang: str,
+    *,
+    mode: str,
+    current_type: str,
+) -> InlineKeyboardMarkup:
+    types = _other_alert_types(current_type)
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                _alert_type_label(kind, lang),
+                callback_data=f"edit_type_pick:{mode}:{sub_id}:{kind}",
+            )
+        ]
+        for kind in types
+    ]
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang),
+                callback_data=f"edit_type_pick_cancel:{mode}:{sub_id}",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+_TYPE_MIGRATION_KEYS = (
+    "delete_previous",
+    "notify_delete_fail",
+    "disable_link_preview",
+    "strip_name_mentions",
+    "attach_chat_button",
+    "delay_minutes",
+    "suppress_repeat_minutes",
+    "schedule_reminder_minutes",
+    "schedule_reminder_configured",
+    "notify_on_live",
+    "notify_on_end",
+    "notify_on_category_change",
+    "delete_other_alerts",
+)
+
+
+def _type_migration_kwargs(fields: dict) -> dict:
+    return {key: fields[key] for key in _TYPE_MIGRATION_KEYS if key in fields}
+
+
+async def _alert_type_allowed(
+    bot,
+    db: Database,
+    owner_id: int,
+    sub: Subscription,
+    new_type: str,
+    *,
+    twitch: TwitchClient,
+) -> str | None:
+    if new_type == "live":
+        return None
+    if not await prem.has_feature(
+        bot, db, owner_id, "alert_types", channel=sub.twitch_username
+    ):
+        return "premium"
+    if new_type == "upcoming":
+        try:
+            has_schedule = await asyncio.to_thread(
+                twitch.has_channel_schedule, sub.twitch_user_id
+            )
+        except Exception:
+            logger.exception("Twitch schedule check failed for %s", sub.twitch_user_id)
+            has_schedule = False
+        if not has_schedule:
+            return "no_schedule"
+    return None
+
+
+def _add_subscription_from_snapshot(
+    db: Database,
+    owner_id: int,
+    snapshot: dict,
+    *,
+    enabled: bool,
+) -> int:
+    return db.add_subscription(
+        owner_id=owner_id,
+        twitch_username=str(snapshot.get("twitch_username") or ""),
+        twitch_user_id=str(snapshot.get("twitch_user_id") or ""),
+        message_template=str(snapshot.get("message_template") or ""),
+        dest_type=str(snapshot.get("dest_type") or "dm"),
+        chat_id=int(snapshot.get("chat_id") or owner_id),
+        thread_id=snapshot.get("thread_id"),
+        delete_previous=bool(snapshot.get("delete_previous")),
+        notify_delete_fail=bool(snapshot.get("notify_delete_fail")),
+        disable_link_preview=bool(snapshot.get("disable_link_preview")),
+        strip_name_mentions=bool(snapshot.get("strip_name_mentions")),
+        attach_chat_button=bool(snapshot.get("attach_chat_button")),
+        delay_minutes=int(snapshot.get("delay_minutes") or 0),
+        suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),
+        schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
+        schedule_reminder_configured=bool(snapshot.get("schedule_reminder_configured")),
+        ignore_keywords=str(snapshot.get("ignore_keywords") or ""),
+        use_global_ignore=bool(snapshot.get("use_global_ignore")),
+        image_file_id=snapshot.get("image_file_id") or None,
+        image_position=str(snapshot.get("image_position") or ""),
+        enabled=enabled,
+        from_twitch_sync=bool(snapshot.get("from_twitch_sync")),
+        from_watch_suggest=bool(snapshot.get("from_watch_suggest")),
+        category_watch_prefs=str(snapshot.get("category_watch_prefs") or ""),
+        notify_on_live=bool(snapshot.get("notify_on_live", True)),
+        notify_on_end=bool(snapshot.get("notify_on_end")),
+        notify_on_category_change=bool(snapshot.get("notify_on_category_change")),
+        delete_other_alerts=bool(snapshot.get("delete_other_alerts")),
+        is_demo=bool(snapshot.get("is_demo")),
+    )
+
+
+async def on_edit_change_type_click(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, owner_id)
+    if not sub or not _sub_in_current_mode(sub, owner_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    current = _alert_type_from_sub(sub)
+    if not _other_alert_types(current):
+        await query.answer(t("edit_change_type_cancelled", lang), show_alert=True)
+        return
+    await query.edit_message_text(
+        t("edit_change_type_pick", lang),
+        reply_markup=_edit_alert_type_pick_keyboard(
+            sub_id, lang, mode="change", current_type=current
+        ),
+    )
+
+
+async def on_edit_copy_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, owner_id)
+    if not sub or not _sub_in_current_mode(sub, owner_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(_subs_for_owner(db, owner_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await query.edit_message_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
+        )
+        return
+    enabled = await prem.may_enable_subscription_async(
+        context.bot, db, owner_id, twitch_username=sub.twitch_username
+    )
+    snapshot = _subscription_cart_snapshot(sub)
+    snapshot["enabled"] = enabled
+    snapshot["is_demo"] = demo_mode.is_active(owner_id)
+    new_id = _add_subscription_from_snapshot(db, owner_id, snapshot, enabled=enabled)
+    sub_num = _owner_sub_number(db, owner_id, new_id)
+    text = t(
+        "edit_copied",
+        lang,
+        sub_id=sub_num,
+        username=sub.twitch_username,
+    )
+    if not enabled:
+        text += "\n" + t(
+            "edit_copied_paused", lang, limit=prem.free_active_limit()
+        )
+    await query.edit_message_text(text)
+
+
+async def on_edit_copy_change_click(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, owner_id)
+    if not sub or not _sub_in_current_mode(sub, owner_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(_subs_for_owner(db, owner_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await query.edit_message_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
+        )
+        return
+    current = _alert_type_from_sub(sub)
+    if not _other_alert_types(current):
+        await query.answer(t("edit_copy_cancelled", lang), show_alert=True)
+        return
+    await query.edit_message_text(
+        t("edit_copy_change_pick", lang),
+        reply_markup=_edit_alert_type_pick_keyboard(
+            sub_id, lang, mode="copy", current_type=current
+        ),
+    )
+
+
+async def on_edit_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    lang = _user_lang(context, owner_id)
+    parts = query.data.split(":")
+    if len(parts) != 4:
+        return
+    mode, sub_id_raw, new_type = parts[1], parts[2], parts[3]
+    if mode not in ("change", "copy") or new_type not in _EDIT_ALERT_TYPE_ORDER:
+        return
+    try:
+        sub_id = int(sub_id_raw)
+    except (TypeError, ValueError):
+        return
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, owner_id)
+    if not sub or not _sub_in_current_mode(sub, owner_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if _alert_type_from_sub(sub) == new_type:
+        return
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    block = await _alert_type_allowed(
+        context.bot, db, owner_id, sub, new_type, twitch=twitch
+    )
+    if block == "premium":
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(context.bot, owner_id, lang, db, update=update)
+        return
+    if block == "no_schedule":
+        await query.edit_message_text(t("alert_type_no_schedule", lang))
+        return
+
+    snapshot = migrate_sub_fields_for_alert_type(
+        _subscription_cart_snapshot(sub), new_type
+    )
+    if mode == "change":
+        if not db.update_subscription(
+            sub_id, owner_id, **_type_migration_kwargs(snapshot)
+        ):
+            await query.edit_message_text(t("sub_not_found", lang))
+            return
+        await query.edit_message_text(
+            t(
+                "edit_type_changed",
+                lang,
+                alert_type=_alert_type_label(new_type, lang),
+            )
+        )
+        return
+
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(_subs_for_owner(db, owner_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        await query.edit_message_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
+        )
+        return
+    enabled = await prem.may_enable_subscription_async(
+        context.bot, db, owner_id, twitch_username=sub.twitch_username
+    )
+    snapshot["enabled"] = enabled
+    snapshot["is_demo"] = demo_mode.is_active(owner_id)
+    new_id = _add_subscription_from_snapshot(db, owner_id, snapshot, enabled=enabled)
+    sub_num = _owner_sub_number(db, owner_id, new_id)
+    text = t(
+        "edit_copied",
+        lang,
+        sub_id=sub_num,
+        username=sub.twitch_username,
+    )
+    if not enabled:
+        text += "\n" + t(
+            "edit_copied_paused", lang, limit=prem.free_active_limit()
+        )
+    await query.edit_message_text(text)
+
+
+async def on_edit_type_pick_cancel(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    parts = query.data.split(":")
+    if len(parts) != 3:
+        return
+    mode = parts[1]
+    key = "edit_copy_cancelled" if mode == "copy" else "edit_change_type_cancelled"
+    await query.edit_message_text(t(key, lang))
 
 
 def _share_alert_type_label(payload: dict, lang: str) -> str:

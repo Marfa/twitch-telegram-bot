@@ -20,6 +20,7 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r":back$|"
     r"^watch_nav:(?:back|cancel)$|"
     r"^alert_type:cancel$|"
+    r"^edit_type_pick_cancel:|"
     r"^premium_gate:(?:cancel|skip)$|"
     r"^lang:cancel$|"
     r"^admin_type:cancel$|"

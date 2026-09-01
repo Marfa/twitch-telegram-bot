@@ -408,6 +408,59 @@ def alert_type_from_payload(payload: dict[str, Any]) -> str:
     return "live"
 
 
+def migrate_sub_fields_for_alert_type(
+    fields: dict[str, Any], new_type: str
+) -> dict[str, Any]:
+    """Drop unsupported settings and apply defaults when changing alert type."""
+    out = dict(fields)
+    if new_type == "live":
+        out["notify_on_live"] = True
+        out["notify_on_end"] = False
+        out["notify_on_category_change"] = False
+        out["delete_other_alerts"] = False
+        out["schedule_reminder_minutes"] = 0
+        out["schedule_reminder_configured"] = False
+    elif new_type == "category":
+        out["notify_on_live"] = False
+        out["notify_on_end"] = False
+        out["notify_on_category_change"] = True
+        out["suppress_repeat_minutes"] = 0
+        out["schedule_reminder_minutes"] = 0
+        out["schedule_reminder_configured"] = False
+        if not out.get("delete_previous"):
+            out["delete_other_alerts"] = False
+    elif new_type == "end":
+        out["notify_on_live"] = False
+        out["notify_on_end"] = True
+        out["notify_on_category_change"] = False
+        out["delete_other_alerts"] = False
+        out["suppress_repeat_minutes"] = 0
+        out["schedule_reminder_minutes"] = 0
+        out["schedule_reminder_configured"] = False
+    elif new_type == "upcoming":
+        out["notify_on_live"] = False
+        out["notify_on_end"] = False
+        out["notify_on_category_change"] = False
+        out["delete_other_alerts"] = False
+        out["suppress_repeat_minutes"] = 0
+        out["delay_minutes"] = 0
+        if not out.get("schedule_reminder_configured"):
+            out["schedule_reminder_minutes"] = 0
+            out["schedule_reminder_configured"] = False
+    else:
+        return out
+
+    if str(out.get("dest_type") or "dm") == "dm":
+        out["delete_previous"] = False
+        out["notify_delete_fail"] = False
+        out["delete_other_alerts"] = False
+    if not out.get("delete_previous"):
+        out["notify_delete_fail"] = False
+    if not out.get("notify_on_category_change") or not out.get("delete_previous"):
+        out["delete_other_alerts"] = False
+    return out
+
+
 def _cart_item_from_row(row_id: int, deleted_at: object, subscription_json: object) -> DeletedSubscriptionCartItem:
     try:
         payload = json.loads(subscription_json or "{}")

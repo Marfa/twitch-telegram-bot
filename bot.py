@@ -581,9 +581,14 @@ from handlers.subscriptions import (
     on_delete_type,
     on_delivery_fail_delete,
     on_edit_bool_menu,
+    on_edit_change_type_click,
+    on_edit_copy_click,
+    on_edit_copy_change_click,
     on_edit_pick,
     on_edit_set,
     on_edit_type,
+    on_edit_type_pick,
+    on_edit_type_pick_cancel,
     on_enable_all,
     on_import_mode_once,
     on_import_mode_sync,
@@ -2026,6 +2031,38 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_share_decline, pattern=r"^share_decline$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(
+            on_edit_change_type_click,
+            pattern=r"^edit_f:\d+:change_type$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_edit_copy_click, pattern=r"^edit_f:\d+:copy$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_edit_copy_change_click,
+            pattern=r"^edit_f:\d+:copy_change$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_edit_type_pick,
+            pattern=r"^edit_type_pick:(change|copy):\d+:(live|category|upcoming|end)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_edit_type_pick_cancel,
+            pattern=r"^edit_type_pick_cancel:(change|copy):\d+$",
+        ),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_welcome_demo_delete, pattern=r"^welcome_del:\d+$"),
@@ -2582,7 +2619,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(
             wake_stuck_on_menu_callback,
             pattern=(
-                r"^(edit:\d+$|edit_f:|edit_set:|toggle:|enable_all$|delete:\d+$|"
+                r"^(edit:\d+$|edit_f:|edit_set:|edit_type_pick:|edit_type_pick_cancel:|toggle:|enable_all$|delete:\d+$|"
                 r"welcome_del:\d+$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"

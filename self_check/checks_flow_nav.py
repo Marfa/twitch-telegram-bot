@@ -765,6 +765,46 @@ async def _scenario_subscriptions_edit_pick(db) -> None:
     cap.assert_turn("subscriptions_edit_pick")
 
 
+async def _scenario_subscriptions_edit_type_copy(db) -> None:
+    """§4 edit menu — change type / copy+change with Cancel on type pick."""
+    from handlers.subscriptions import (
+        edit_menu,
+        on_edit_change_type_click,
+        on_edit_copy_change_click,
+        on_edit_pick,
+        on_edit_type_pick_cancel,
+    )
+
+    sub_id = _seed_live_sub(db, _FREE_UID)
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("edit", "ru"), cap)
+    ctx = _ctx(application)
+    await edit_menu(update, ctx)
+    update, _query = _cb_update(_FREE_UID, f"edit:{sub_id}", cap)
+    cap.wrap(bot)
+    with patch("handlers.subscriptions.prem.advanced_mode_on", new=AsyncMock(return_value=True)):
+        await on_edit_pick(update, ctx)
+    cap.assert_turn("subscriptions_edit_menu")
+
+    update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:change_type", cap)
+    await on_edit_change_type_click(update, ctx)
+    cap.assert_turn("subscriptions_edit_change_type_pick")
+
+    update, _query = _cb_update(_FREE_UID, f"edit_type_pick_cancel:change:{sub_id}", cap)
+    await on_edit_type_pick_cancel(update, ctx)
+    _query.edit_message_text.assert_awaited()
+
+    update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:copy_change", cap)
+    await on_edit_copy_change_click(update, ctx)
+    cap.assert_turn("subscriptions_edit_copy_change_pick")
+
+    update, _query = _cb_update(_FREE_UID, f"edit_type_pick_cancel:copy:{sub_id}", cap)
+    await on_edit_type_pick_cancel(update, ctx)
+    _query.edit_message_text.assert_awaited()
+
+
 async def _scenario_share_alert_offer(db) -> None:
     """§1 deep link share confirm — decline is the escape hatch."""
     from db.models import _subscription_cart_snapshot
@@ -928,6 +968,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)
+        await _scenario_subscriptions_edit_type_copy(db)
         await _scenario_subscriptions_delete(db)
         await _scenario_share_alert_offer(db)
         await _scenario_subscriptions_list_pages(db)
