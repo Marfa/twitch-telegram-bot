@@ -255,7 +255,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit** — same order as creation: template (**Clean title** checkbox), image, ignore / delay / repeats / delete (edit-menu items only in **advanced mode**), link preview (hidden when an image is set), schedule reminders (if enabled at creation), destination. For **category change** with delete enabled — a separate «delete other alerts too» option. At the bottom: **Change alert type**, **Copy**, **Copy and change type** (cancel on type pick does not create a copy).
+**Edit** — same order as creation: template (**Clean title** checkbox), image, ignore / delay / repeats / delete (edit-menu items only in **advanced mode**), link preview (hidden when an image is set), schedule reminders (if enabled at creation), destination. For **stream category change** alerts with delete enabled — a separate «delete other alerts too» option. At the bottom: **Change alert type**, **Copy**, **Copy and change type** (cancel on type pick does not create a copy).
 
 Notification template example:
 
