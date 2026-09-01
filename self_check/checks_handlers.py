@@ -959,6 +959,15 @@ def check_handlers() -> None:
             _fake_sub(),
         ]
     ) == ["live", "category", "end"]
+    from handlers.subscriptions import _present_types_for_picker
+
+    assert _present_types_for_picker(
+        [
+            _fake_sub(notify_on_end=True, notify_on_live=False),
+            _fake_sub(notify_on_category_change=True, notify_on_live=False),
+            _fake_sub(),
+        ]
+    ) == ["live", "end"]
 
     import beta as beta_mod
     from premium import ensure_trial_expired, has_feature_sync

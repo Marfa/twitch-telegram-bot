@@ -1055,12 +1055,6 @@ def alert_type_keyboard(lang: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    t("alert_type_category", lang),
-                    callback_data="alert_type:category",
-                )
-            ],
-            [
-                InlineKeyboardButton(
                     t("alert_type_upcoming", lang),
                     callback_data="alert_type:upcoming",
                 )
