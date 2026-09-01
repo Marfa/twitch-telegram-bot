@@ -1,0 +1,84 @@
+name: Count template typos
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Count placeholder typos on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            from collections import Counter
+
+            from config import DATABASE_PATH, DATABASE_URL
+            from twitch import find_placeholder_typos
+
+            rows = []
+            if DATABASE_URL:
+                import psycopg
+
+                url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+                with psycopg.connect(url) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT id, owner_id, message_template, enabled, notify_on_end
+                            FROM subscriptions
+                            """
+                        )
+                        cols = [d.name for d in cur.description]
+                        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+            else:
+                import sqlite3
+
+                conn = sqlite3.connect(DATABASE_PATH)
+                conn.row_factory = sqlite3.Row
+                rows = [
+                    dict(row)
+                    for row in conn.execute(
+                        """
+                        SELECT id, owner_id, message_template, enabled, notify_on_end
+                        FROM subscriptions
+                        """
+                    )
+                ]
+
+            typo_subs = []
+            typo_counter = Counter()
+            for row in rows:
+                template = str(row.get("message_template") or "")
+                typos = find_placeholder_typos(template)
+                if not typos:
+                    continue
+                typo_subs.append(row)
+                for found, suggested in typos:
+                    typo_counter[(found, suggested)] += 1
+
+            owners = {int(r["owner_id"]) for r in typo_subs}
+            end_owners = {int(r["owner_id"]) for r in typo_subs if r.get("notify_on_end")}
+            enabled_owners = {int(r["owner_id"]) for r in typo_subs if r.get("enabled")}
+
+            print(f"Total subscriptions scanned: {len(rows)}")
+            print(f"Subscriptions with typos: {len(typo_subs)}")
+            print(f"Unique owners with typos: {len(owners)}")
+            print(f"  of which enabled: {len(enabled_owners)}")
+            print(f"  of which end-alert: {len(end_owners)}")
+            if typo_counter:
+                print("Top patterns:")
+                for (found, suggested), count in typo_counter.most_common(20):
+                    print(f"  {found!r} -> {suggested!r}: {count}")
+            PY
