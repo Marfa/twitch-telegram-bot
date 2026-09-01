@@ -393,6 +393,7 @@ class PostgresDatabase:
                 "premium_features TEXT NOT NULL DEFAULT ''",
                 "advanced_mode INTEGER",
                 "notifications_paused_until BIGINT NOT NULL DEFAULT 0",
+                "template_typo_notice_sent BOOLEAN NOT NULL DEFAULT FALSE",
             ):
                 cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
             if not had_premium:
@@ -1776,6 +1777,24 @@ class PostgresDatabase:
                 """,
                 (user_id, int(until_ts)),
             )
+
+    def mark_template_typo_notice_sent(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+                (user_id,),
+            )
+            cur.execute(
+                """
+                UPDATE users
+                SET template_typo_notice_sent = TRUE
+                WHERE user_id = %s
+                  AND COALESCE(template_typo_notice_sent, FALSE) = FALSE
+                """,
+                (user_id,),
+            )
+            return bool(cur.rowcount)
 
     def get_global_ignore_keywords(self, user_id: int) -> str:
         with self._conn() as conn:

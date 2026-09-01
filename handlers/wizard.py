@@ -62,6 +62,7 @@ from twitch import (
     GAME_COVER_IMAGE_ID,
     TwitchClient,
     find_placeholder_typos,
+    fix_placeholder_typos,
     is_game_cover_image,
     merge_ignore_keywords,
     normalize_ignore_keywords,
@@ -1127,47 +1128,17 @@ async def receive_template_typo_confirm(
     is_edit = bool(context.user_data.get("edit_sub_id"))
 
     if fix:
+        template = fix_placeholder_typos(template)
         await query.edit_message_text("✓")
-        if is_edit:
-            db: Database = context.application.bot_data["db"]
-            sub = db.get_subscription(context.user_data["edit_sub_id"], query.from_user.id)
-            if not sub:
-                await context.bot.send_message(
-                    reply_chat_id(update), t("sub_not_found", lang)
-                )
-                context.user_data.clear()
-                return ConversationHandler.END
-            sub_num = _owner_sub_number(db, query.from_user.id, sub.id)
-            await _prompt_edit_template(
-                bot=context.bot,
-                user_id=query.from_user.id,
-                lang=lang,
-                sub=sub,
-                sub_num=sub_num,
-            )
-            return _wz()["EDIT_TEMPLATE"]
-        await _send_prompt_with_wizard_inline(
-            context.bot,
-            query.from_user.id,
-            t(
-                "template_typo_resend",
-                lang,
-                placeholders_link=placeholders_link_html(lang),
-            ),
-            lang,
-            inline_markup=template_strip_keyboard(
-                lang,
-                enabled=bool(context.user_data.get("strip_name_mentions")),
-                show_lucky=True,
-                show_back=True,
-                show_cancel=True,
-            ),
-            update=update,
-            back=True,
-            disable_web_page_preview=True,
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("template_typo_fixed", lang),
         )
-        _set_wizard_back(context, _wz()["TEMPLATE"])
-        return _wz()["TEMPLATE"]
+        if is_edit:
+            return await _save_edit_template(update, context, lang, template)
+        context.user_data["message_template"] = template
+        context.user_data.pop("lucky_quick", None)
+        return await _go_image_ask_prompt(update, context, lang)
 
     await query.edit_message_text("✓")
     if is_edit:

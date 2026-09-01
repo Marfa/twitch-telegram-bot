@@ -290,6 +290,7 @@ class SqliteDatabase:
             ("premium_features", "TEXT NOT NULL DEFAULT ''"),
             ("advanced_mode", "INTEGER"),
             ("notifications_paused_until", "INTEGER NOT NULL DEFAULT 0"),
+            ("template_typo_notice_sent", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if col not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
@@ -1607,6 +1608,24 @@ class SqliteDatabase:
                 """,
                 (user_id, int(until_ts)),
             )
+
+    def mark_template_typo_notice_sent(self, user_id: int) -> bool:
+        """Return True when this call newly marks the owner (first notice)."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+                (user_id,),
+            )
+            cur = conn.execute(
+                """
+                UPDATE users
+                SET template_typo_notice_sent = 1
+                WHERE user_id = ?
+                  AND COALESCE(template_typo_notice_sent, 0) = 0
+                """,
+                (user_id,),
+            )
+            return bool(cur.rowcount)
 
     def get_global_ignore_keywords(self, user_id: int) -> str:
         with self._conn() as conn:

@@ -14,6 +14,7 @@ from twitch import (
     TwitchClient,
     filter_streams_for_watch,
     find_placeholder_typos,
+    fix_placeholder_typos,
     normalize_ignore_keywords,
     merge_ignore_keywords,
     normalize_watch_tags,
@@ -21,6 +22,8 @@ from twitch import (
     preview_stream_title,
     render_template,
     should_ignore_stream,
+    stream_duration_minutes,
+    stream_end_snapshot,
     twitch_status_fingerprint,
 )
 from translate import build_translations, markdown_to_telegram_html, translate_text
@@ -28,7 +31,6 @@ from bot import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
     _build_alert_history_chunks,
-    _edit_present_types,
     _format_alert_history_block,
     _format_twitch_status_message,
     _format_posthog_status_message,
@@ -58,6 +60,7 @@ from bot import (
     _format_pause_until,
     _user_notifications_paused,
 )
+from handlers.notifications import _end_alert_template_args, _offline_end_stream
 from db import (
     AlertHistoryEntry,
     SqliteDatabase,
@@ -745,7 +748,59 @@ def check_core() -> None:
     assert find_placeholder_typos("Play (game) tonight") == []
     assert find_placeholder_typos("{username} is live, {game)") == [("{game)", "{game}")]
     assert find_placeholder_typos("{ game }") == [("{ game }", "{game}")]
+    assert find_placeholder_typos("{title}") == [("{title}", "{name}")]
+    assert find_placeholder_typos("{game_name)") == [("{game_name)", "{game}")]
+    assert fix_placeholder_typos("{game)") == "{game}"
+    assert (
+        fix_placeholder_typos("gold_apple в эфире! Категория: {game)")
+        == "gold_apple в эфире! Категория: {game}"
+    )
+    assert fix_placeholder_typos("{username} {Game} {title}") == "{username} {game} {name}"
 
+    snap = stream_end_snapshot(
+        {
+            "user_login": "foo",
+            "game_id": "509658",
+            "game_name": "Just Chatting",
+            "title": "Test stream",
+            "viewer_count": 42,
+            "started_at": "2026-01-01T12:00:00Z",
+            "tags": ["en", "fps"],
+        }
+    )
+    assert snap and snap["title"] == "Test stream" and snap["viewer_count"] == 42
+    assert stream_end_snapshot({}) is None
+    last_streams = {
+        "1": snap,
+    }
+    offline = _offline_end_stream(
+        "1",
+        last_streams=last_streams,
+        last_games={},
+        last_game_names={},
+    )
+    assert offline and offline["title"] == "Test stream"
+    fallback = _offline_end_stream(
+        "2",
+        last_streams={},
+        last_games={"2": "111"},
+        last_game_names={"2": "VALORANT"},
+    )
+    assert fallback == {"game_id": "111", "game_name": "VALORANT"}
+    class _Sub:
+        twitch_username = "fallback_user"
+    user, game, title, extra = _end_alert_template_args(
+        _Sub(),
+        {
+            "user_login": "foo",
+            "game_name": "Just Chatting",
+            "title": "My title",
+            "started_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    assert user == "foo" and game == "Just Chatting" and title == "My title"
+    assert extra and "minutes" in extra
+    assert stream_duration_minutes(None) == "—"
     assert normalize_ignore_keywords("foo, bar , baz") == "foo, bar, baz"
     assert normalize_ignore_keywords("") == ""
     assert merge_ignore_keywords("foo", "bar, baz") == "foo, bar, baz"

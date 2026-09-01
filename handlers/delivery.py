@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, WebAppInfo
+from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
 from bot_helpers import _user_notifications_paused
 from db import Database, Subscription
 from handlers.alert_history import _vod_offset_seconds
-from i18n import DEFAULT_LOCALE, delivery_fail_notice_keyboard, t
-from twitch import TwitchClient, is_game_cover_image, resolve_sub_image_photo
+from i18n import DEFAULT_LOCALE, delivery_fail_notice_keyboard, stored_typo_fix_keyboard, t
+from twitch import (
+    TwitchClient,
+    find_placeholder_typos,
+    fix_placeholder_typos,
+    is_game_cover_image,
+    resolve_sub_image_photo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +227,108 @@ def _delivery_fail_chat_label(display_name: str, chat_id: int) -> str:
     return f"{display_name} ({chat_id})"
 
 
+def _owner_typo_report(
+    db: Database, owner_id: int
+) -> tuple[list[tuple[str, str]], list[Subscription]]:
+    seen_typos: set[tuple[str, str]] = set()
+    typo_lines: list[tuple[str, str]] = []
+    affected: list[Subscription] = []
+    for sub in db.get_subscriptions_by_owner(owner_id):
+        typos = find_placeholder_typos(sub.message_template)
+        if not typos:
+            continue
+        affected.append(sub)
+        for pair in typos:
+            if pair in seen_typos:
+                continue
+            seen_typos.add(pair)
+            typo_lines.append(pair)
+    return typo_lines, affected
+
+
+def _format_stored_typo_notice(
+    db: Database,
+    owner_id: int,
+    lang: str,
+    typo_lines: list[tuple[str, str]],
+    affected: list[Subscription],
+) -> str:
+    from handlers.subscriptions import _alert_type_from_sub, _alert_type_label, _owner_sub_number
+
+    typos = "\n".join(
+        t(
+            "template_typo_item",
+            lang,
+            found=html.escape(found),
+            suggested=html.escape(suggested),
+        )
+        for found, suggested in typo_lines
+    )
+    subs = "\n".join(
+        t(
+            "stored_typo_notice_sub",
+            lang,
+            sub_id=_owner_sub_number(db, owner_id, sub.id),
+            username=html.escape(sub.twitch_username),
+            alert_type=html.escape(
+                _alert_type_label(_alert_type_from_sub(sub), lang)
+            ),
+        )
+        for sub in affected
+    )
+    return t("stored_typo_notice_prompt", lang, typos=typos, subs=subs)
+
+
+async def _maybe_notify_stored_template_typos(
+    bot,
+    db: Database,
+    sub: Subscription,
+) -> None:
+    if not find_placeholder_typos(sub.message_template):
+        return
+    if not db.mark_template_typo_notice_sent(sub.owner_id):
+        return
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    typo_lines, affected = _owner_typo_report(db, sub.owner_id)
+    if not typo_lines:
+        return
+    try:
+        await bot.send_message(
+            sub.owner_id,
+            _format_stored_typo_notice(db, sub.owner_id, lang, typo_lines, affected),
+            parse_mode=ParseMode.HTML,
+            reply_markup=stored_typo_fix_keyboard(lang),
+        )
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot notify owner %s about template typos: %s",
+            sub.owner_id,
+            exc,
+        )
+
+
+async def on_stored_template_typo_fix(update, context) -> None:
+    query = update.callback_query
+    await query.answer()
+    owner_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    if not query.data.endswith(":1"):
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+
+    fixed = 0
+    for sub in db.get_subscriptions_by_owner(owner_id):
+        if not find_placeholder_typos(sub.message_template):
+            continue
+        template = fix_placeholder_typos(sub.message_template)
+        if db.update_subscription(sub.id, owner_id, message_template=template):
+            fixed += 1
+    await query.edit_message_reply_markup(reply_markup=None)
+    if fixed:
+        await context.bot.send_message(owner_id, t("stored_typo_fixed", lang))
+
+
 async def _maybe_notify_delivery_failure(
     bot,
     db: Database,
@@ -271,6 +381,7 @@ async def _send_notification(
 ) -> bool:
     if _user_notifications_paused(db, sub.owner_id):
         return True
+    await _maybe_notify_stored_template_typos(bot, db, sub)
     if sub.delete_previous and sub.dest_type != "dm":
         to_delete: list[tuple[int, int]] = []
         seen_msg: set[int] = set()

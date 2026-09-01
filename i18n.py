@@ -1348,6 +1348,15 @@ def template_typo_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def stored_typo_fix_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("delay_yes", lang), callback_data="stored_typo_fix:1")],
+            [InlineKeyboardButton(t("delay_no", lang), callback_data="stored_typo_fix:0")],
+        ]
+    )
+
+
 def lucky_start_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(t("lucky_btn", lang), callback_data="lucky:go")]]

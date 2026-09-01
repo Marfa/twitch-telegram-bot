@@ -19,7 +19,14 @@ from db import (
 from handlers.alert_history import _vod_offset_seconds
 from handlers.delivery import _send_notification
 from i18n import DEFAULT_LOCALE, t
-from twitch import TwitchClient, filter_streams_for_watch, render_template, should_ignore_stream
+from twitch import (
+    TwitchClient,
+    filter_streams_for_watch,
+    render_template,
+    should_ignore_stream,
+    stream_duration_minutes,
+    stream_end_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,18 +128,16 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
         return
     if is_on_notify_cooldown(sub):
         return
-    end_stream = end_cover_stream(
-        game_id=str(job_data.get("game_id") or ""),
-        game_name=str(job_data.get("game_name") or ""),
-    )
-    end_game = str((end_stream or {}).get("game_name") or "").strip() or "—"
+    end_stream = _end_stream_from_job(job_data)
+    username, game, title, extra = _end_alert_template_args(sub, end_stream)
     text = _render_sub_template(
         sub,
-        sub.twitch_username,
-        end_game,
-        "—",
+        username,
+        game,
+        title,
         twitch=twitch,
         stream=end_stream,
+        extra=extra,
     )
     await _send_notification(
         context.bot,
@@ -241,6 +246,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     last_stream_ids: dict[str, str] = context.application.bot_data.setdefault(
         "last_stream_ids", {}
     )
+    last_streams: dict[str, dict] = context.application.bot_data.setdefault(
+        "last_streams", {}
+    )
     # After restart memory is empty; first successful poll only seeds state so
     # already-live streams are not treated as fresh starts.
     primed = bool(context.application.bot_data.get("last_live_primed"))
@@ -261,11 +269,17 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             went_live, went_offline = live_transitions(
                 last_live, user_ids, live_streams, primed=primed
             )
+            for uid, stream in live_streams.items():
+                snap = stream_end_snapshot(stream)
+                if snap:
+                    last_streams[uid] = snap
             # Snapshot before category_change_events clears offline uids from last_*.
             offline_end_streams = {
-                uid: end_cover_stream(
-                    game_id=last_games.get(uid, ""),
-                    game_name=last_game_names.get(uid, ""),
+                uid: _offline_end_stream(
+                    uid,
+                    last_streams=last_streams,
+                    last_games=last_games,
+                    last_game_names=last_game_names,
                 )
                 for uid in went_offline
             }
@@ -339,9 +353,6 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             for uid in went_offline:
                 stream_id = offline_stream_ids.get(uid, "")
                 end_stream = offline_end_streams.get(uid)
-                end_game = (
-                    str((end_stream or {}).get("game_name") or "").strip() or "—"
-                )
                 for sub in db.get_enabled_by_twitch_user_id(uid):
                     if is_category_watch_sub(sub):
                         continue
@@ -349,14 +360,14 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         continue
                     if is_on_notify_cooldown(sub):
                         continue
+                    username, game, title, extra = _end_alert_template_args(sub, end_stream)
                     if sub.delay_minutes > 0:
                         delay_data: dict = {
                             "sub_id": sub.id,
                             "stream_id": stream_id,
                         }
                         if end_stream:
-                            delay_data["game_id"] = end_stream.get("game_id", "")
-                            delay_data["game_name"] = end_stream.get("game_name", "")
+                            delay_data["stream_snapshot"] = dict(end_stream)
                         context.job_queue.run_once(
                             _send_delayed_end_notification,
                             when=sub.delay_minutes * 60,
@@ -366,11 +377,12 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         continue
                     text = _render_sub_template(
                         sub,
-                        sub.twitch_username,
-                        end_game,
-                        "—",
+                        username,
+                        game,
+                        title,
                         twitch=twitch,
                         stream=end_stream,
+                        extra=extra,
                     )
                     await _send_notification(
                         context.bot,
@@ -382,6 +394,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         stream_id=stream_id,
                         twitch=twitch,
                     )
+            for uid in went_offline:
+                last_streams.pop(uid, None)
 
             for uid in category_changed:
                 stream = live_streams[uid]
@@ -650,6 +664,46 @@ def end_cover_stream(
     if not gid and (not gname or gname == "—"):
         return None
     return {"game_id": gid, "game_name": gname}
+
+
+def _offline_end_stream(
+    uid: str,
+    *,
+    last_streams: dict[str, dict],
+    last_games: dict[str, str],
+    last_game_names: dict[str, str],
+) -> dict | None:
+    snap = last_streams.get(uid)
+    if snap:
+        return dict(snap)
+    return end_cover_stream(
+        game_id=last_games.get(uid, ""),
+        game_name=last_game_names.get(uid, ""),
+    )
+
+
+def _end_stream_from_job(job_data: dict) -> dict | None:
+    raw = job_data.get("stream_snapshot")
+    if isinstance(raw, dict) and raw:
+        return dict(raw)
+    return end_cover_stream(
+        game_id=str(job_data.get("game_id") or ""),
+        game_name=str(job_data.get("game_name") or ""),
+    )
+
+
+def _end_alert_template_args(
+    sub: Subscription,
+    end_stream: dict | None,
+) -> tuple[str, str, str, dict[str, str] | None]:
+    username = str((end_stream or {}).get("user_login") or sub.twitch_username)
+    game = str((end_stream or {}).get("game_name") or "").strip() or "—"
+    title = str((end_stream or {}).get("title") or "").strip() or "—"
+    extra: dict[str, str] = {}
+    mins = stream_duration_minutes(end_stream)
+    if mins != "—":
+        extra["minutes"] = mins
+    return username, game, title, extra or None
 
 
 def category_change_events(

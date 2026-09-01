@@ -624,6 +624,8 @@ def check_db_premium() -> None:
         assert db.get_global_ignore_keywords(1) == "irl, chatting"
         db.set_global_ignore_keywords(1, "")
         assert db.get_global_ignore_keywords(1) == ""
+        assert db.mark_template_typo_notice_sent(1) is True
+        assert db.mark_template_typo_notice_sent(1) is False
         assert sub.image_file_id is None
         assert sub.image_position == ""
         assert db.update_subscription(

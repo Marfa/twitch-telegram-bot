@@ -515,6 +515,7 @@ from handlers.delivery import (
     _resolve_chat_display_name,
     _send_notification,
     _send_test,
+    on_stored_template_typo_fix,
 )
 
 from handlers.subscriptions import (
@@ -2071,6 +2072,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_delivery_fail_delete, pattern=r"^delivery_fail_del:\d+$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_stored_template_typo_fix, pattern=r"^stored_typo_fix:[01]$"),
         group=0,
     )
     app.add_handler(

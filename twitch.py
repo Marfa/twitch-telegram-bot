@@ -1641,6 +1641,52 @@ _TEMPLATE_PLACEHOLDERS = (
     "type",
     "minutes",
 )
+_STREAM_SNAPSHOT_KEYS = (
+    "user_login",
+    "user_name",
+    "game_id",
+    "game_name",
+    "title",
+    "viewer_count",
+    "started_at",
+    "thumbnail_url",
+    "tags",
+    "language",
+    "is_mature",
+    "id",
+    "type",
+)
+# Common wrong placeholder names → canonical token (without braces).
+_PLACEHOLDER_ALIASES: dict[str, str] = {
+    "title": "name",
+    "streamtitle": "name",
+    "stream_title": "name",
+    "streamname": "name",
+    "stream_name": "name",
+    "streamer": "username",
+    "channel": "username",
+    "login": "username",
+    "user": "username",
+    "viewers": "viewer_count",
+    "viewercount": "viewer_count",
+    "viewer": "viewer_count",
+    "gamename": "game",
+    "game_name": "game",
+    "category": "game",
+    "started": "started_at",
+    "start": "started_at",
+    "starttime": "started_at",
+    "start_time": "started_at",
+    "thumb": "thumbnail_url",
+    "thumbnail": "thumbnail_url",
+    "preview": "thumbnail_url",
+    "mature": "is_mature",
+    "lang": "language",
+    "duration": "minutes",
+    "length": "minutes",
+    "streamid": "id",
+    "stream_id": "id",
+}
 # Telegram may linkify these even without a scheme; used to decide link-preview UI.
 _TEMPLATE_LINK_RE = re.compile(
     r"(https?://|www\.|t\.me/|telegram\.me/|twitch\.tv/)", re.IGNORECASE
@@ -1657,6 +1703,21 @@ _PLACEHOLDER_CANDIDATE_RE = re.compile(
 )
 
 
+def _placeholder_typo_suggestion(inner: str) -> str | None:
+    raw = inner.lower()
+    compact = raw.replace("-", "").replace("_", "")
+    if raw in _PLACEHOLDER_ALIASES:
+        return f"{{{_PLACEHOLDER_ALIASES[raw]}}}"
+    if compact in _PLACEHOLDER_ALIASES:
+        return f"{{{_PLACEHOLDER_ALIASES[compact]}}}"
+    if compact in _TEMPLATE_PLACEHOLDERS:
+        return f"{{{compact}}}"
+    close = get_close_matches(compact, list(_TEMPLATE_PLACEHOLDERS), n=1, cutoff=0.7)
+    if close:
+        return f"{{{close[0]}}}"
+    return None
+
+
 def find_placeholder_typos(template: str) -> list[tuple[str, str]]:
     """Return [(found_token, suggested_placeholder), ...] for likely typos."""
     results: list[tuple[str, str]] = []
@@ -1669,17 +1730,68 @@ def find_placeholder_typos(template: str) -> list[tuple[str, str]]:
             continue
         if token in seen:
             continue
-        inner = match.group(1).lower().replace("-", "").replace("_", "")
-        if inner in _TEMPLATE_PLACEHOLDERS:
-            suggested = f"{{{inner}}}"
-        else:
-            close = get_close_matches(inner, list(_TEMPLATE_PLACEHOLDERS), n=1, cutoff=0.7)
-            if not close:
-                continue
-            suggested = f"{{{close[0]}}}"
+        suggested = _placeholder_typo_suggestion(match.group(1))
+        if not suggested:
+            continue
         seen.add(token)
         results.append((token, suggested))
     return results
+
+
+def fix_placeholder_typos(template: str) -> str:
+    """Replace likely placeholder typos with canonical {key} tokens."""
+    typos = find_placeholder_typos(template)
+    if not typos:
+        return template
+    out = template
+    for found, suggested in sorted(typos, key=lambda item: len(item[0]), reverse=True):
+        out = out.replace(found, suggested)
+    return out
+
+
+def stream_end_snapshot(stream: dict[str, Any]) -> dict[str, Any] | None:
+    """Helix stream fields to reuse when the channel goes offline."""
+    if not stream:
+        return None
+    out: dict[str, Any] = {}
+    for key in _STREAM_SNAPSHOT_KEYS:
+        if key not in stream:
+            continue
+        val = stream[key]
+        if val is None:
+            continue
+        if key == "tags" and isinstance(val, list):
+            tags = [str(tag) for tag in val if tag]
+            if tags:
+                out[key] = tags
+            continue
+        out[key] = val
+    if not out:
+        return None
+    gid = str(out.get("game_id") or "").strip()
+    gname = str(out.get("game_name") or "").strip()
+    if (
+        not gid
+        and not gname
+        and not out.get("title")
+        and not out.get("user_login")
+    ):
+        return None
+    return out
+
+
+def stream_duration_minutes(stream: dict[str, Any] | None) -> str:
+    started = (stream or {}).get("started_at")
+    if not started:
+        return "—"
+    try:
+        start = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - start
+        return str(max(1, int(delta.total_seconds() // 60)))
+    except (TypeError, ValueError):
+        return "—"
 
 
 def normalize_ignore_keywords(text: str) -> str:

@@ -27,6 +27,8 @@ from i18n import (
     stream_schedule_confirm_keyboard,
     stream_schedule_duration_keyboard,
     stream_schedule_mode_keyboard,
+    stored_typo_fix_keyboard,
+    template_typo_keyboard,
     subscriptions_menu,
     watch_cats_nav_keyboard,
     watch_lang_keyboard,
@@ -190,6 +192,8 @@ def _check_inline_wizard_keyboards() -> None:
             ("ignored_words_clear", ignored_words_keyboard(loc, has_words=True)),
             ("language_settings", language_keyboard(loc)),
             ("delete_all_confirm", delete_all_confirm_keyboard(loc)),
+            ("template_typo", template_typo_keyboard(loc)),
+            ("stored_typo_fix", stored_typo_fix_keyboard(loc)),
             ("watch_cats_nav", watch_cats_nav_keyboard(loc, has_cats=False)),
             ("watch_viewers", watch_viewers_keyboard(loc)),
             ("watch_lang", watch_lang_keyboard(loc)),
@@ -667,6 +671,105 @@ async def _scenario_schedule_publish_chain(db) -> None:
     cap.assert_turn("stream_schedule_publish_auth_unavailable")
 
 
+async def _wizard_to_template_step(cap: _BotCapture, application, ctx):
+    from handlers.wizard import receive_alert_type, receive_channel
+
+    twitch = application.bot_data["twitch"]
+    update, _query = _cb_update(_FREE_UID, "alert_type:live", cap)
+    cap.wrap(application.bot)
+    with patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)):
+        await receive_alert_type(update, ctx)
+    update = _msg_update(_FREE_UID, "streamer", cap)
+    cap.wrap(application.bot)
+    with patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)):
+        await receive_channel(update, ctx)
+
+
+async def _scenario_wizard_template_typo(db) -> None:
+    """§2 wizard — template typo prompt; Yes auto-fixes, No keeps original."""
+    from handlers.wizard import (
+        receive_image_ask,
+        receive_template,
+        receive_template_typo_confirm,
+    )
+
+    twitch = MagicMock()
+    twitch.parse_username.return_value = "streamer"
+    twitch.get_user.return_value = {"id": "100", "login": "streamer", "display_name": "S"}
+    twitch.is_twitch_url.return_value = False
+
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    await _wizard_to_template_step(cap, application, ctx)
+
+    typo_template = "{username} в эфире!\n{name}\nКатегория: {game)"
+    update = _msg_update(_FREE_UID, typo_template, cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
+    ), patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)):
+        await receive_template(update, ctx)
+    assert ctx.user_data.get("pending_template") == typo_template
+    assert "message_template" not in ctx.user_data
+    cap.assert_turn("wizard_template_typo_prompt")
+
+    fixed_template = "{username} в эфире!\n{name}\nКатегория: {game}"
+    update, _query = _cb_update(_FREE_UID, "template_typo:1", cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
+    ):
+        await receive_template_typo_confirm(update, ctx)
+    assert ctx.user_data.get("message_template") == fixed_template
+    assert ctx.user_data.get("pending_template") is None
+    bot.send_message.assert_awaited()
+    fixed_calls = [
+        c
+        for c in bot.send_message.call_args_list
+        if c.args and c.args[0] == _FREE_UID and "исправлен" in str(c.args[1]).lower()
+    ]
+    assert fixed_calls, "expected template_typo_fixed message after Yes"
+
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    await _wizard_to_template_step(cap, application, ctx)
+    update = _msg_update(_FREE_UID, typo_template, cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
+    ), patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)):
+        await receive_template(update, ctx)
+    cap.assert_turn("wizard_template_typo_prompt_no")
+    update, _query = _cb_update(_FREE_UID, "template_typo:0", cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
+    ):
+        await receive_template_typo_confirm(update, ctx)
+    assert ctx.user_data.get("message_template") == typo_template
+    update, _query = _cb_update(_FREE_UID, "image_ask:skip", cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
+    ):
+        await receive_image_ask(update, ctx)
+    update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
+    ), patch(
+        "handlers.wizard.prem.can_enable_more_async", new=AsyncMock(return_value=True)
+    ):
+        from handlers.wizard import receive_dest_type
+
+        await receive_dest_type(update, ctx)
+    cap.assert_turn("wizard_template_typo_no_dest")
+
+
 async def _scenario_wizard_finish(db) -> None:
     from handlers.wizard import (
         receive_alert_type,
@@ -964,6 +1067,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_admin_broadcast(db)
         await _scenario_feedback(db)
         await _scenario_wizard_deep(db)
+        await _scenario_wizard_template_typo(db)
         await _scenario_wizard_finish(db)
         await _scenario_import(db)
         await _scenario_alert_history(db)
