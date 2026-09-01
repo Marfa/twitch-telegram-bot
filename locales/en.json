@@ -715,7 +715,7 @@
   "scheduled_delete_btn": "🗑 #{id}",
   "sent_list_title": "Sent messages:",
   "sent_empty": "No messages sent in the last 30 days.",
-  "sent_line": "#{id} — {when}\n{type}\n{preview}",
+  "sent_line": "#{id} — {when}\n{type}",
   "schedule_title": "Choose send time (MSK, UTC+3):",
   "schedule_pick_hour": "——— Select hour ———",
   "schedule_pick_minutes": "Select minutes ↘",

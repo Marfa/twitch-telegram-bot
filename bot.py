@@ -262,6 +262,7 @@ from handlers.broadcast import (
     open_broadcast_menu,
     process_scheduled_broadcasts,
     purge_old_broadcasts,
+    refresh_broadcast_feedback_keyboards,
     receive_sb_edit_text,
 )
 from handlers.notifications import (
@@ -2697,6 +2698,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(purge_old_broadcasts, interval=24 * 3600, first=300)
+    app.job_queue.run_repeating(
+        refresh_broadcast_feedback_keyboards, interval=3600, first=180
+    )
     app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
     app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)
     app.job_queue.run_repeating(poll_posthog_inbox_reports, interval=300, first=60)

@@ -715,7 +715,7 @@
   "scheduled_delete_btn": "🗑 #{id}",
   "sent_list_title": "Отправленные сообщения:",
   "sent_empty": "Отправленных сообщений за последние 30 дней нет.",
-  "sent_line": "#{id} — {when}\n{type}\n{preview}",
+  "sent_line": "#{id} — {when}\n{type}",
   "schedule_title": "Выберите время отправки (МСК, UTC+3):",
   "schedule_pick_hour": "——— Выберите час ———",
   "schedule_pick_minutes": "Выберите минуты ↘",

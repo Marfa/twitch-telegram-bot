@@ -5,7 +5,7 @@ import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from telegram import Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import Application, ContextTypes, ConversationHandler
@@ -20,7 +20,7 @@ from bot_helpers import (
     _user_lang,
 )
 from db import Database
-from db.models import BROADCAST_RETENTION_DAYS
+from db.models import BROADCAST_RETENTION_DAYS, ScheduledBroadcast
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
@@ -111,6 +111,33 @@ def _scheduled_text_preview(text: str, limit: int = 120) -> str:
     if len(plain) <= limit:
         return plain
     return plain[: limit - 1] + "…"
+
+
+def _admin_sent_broadcast_message(
+    db: Database, item: ScheduledBroadcast, lang: str
+) -> tuple[str, InlineKeyboardMarkup]:
+    when = _format_sent_at_label(item.sent_at or item.scheduled_at)
+    type_label = _broadcast_type_label(item.msg_type, lang)
+    header = t("sent_line", lang, id=item.id, when=when, type=type_label)
+    footer = t("broadcast_footer", lang, type=type_label)
+    message = f"{header}\n\n{item.text}\n\n{footer}"
+    up_count, down_count = db.get_broadcast_feedback_counts(item.id)
+    markup = broadcast_feedback_keyboard(item.id, up_count, down_count)
+    return message, markup
+
+
+async def _send_admin_preview_message(
+    bot, chat_id: int, message: str, *, reply_markup
+) -> None:
+    try:
+        await bot.send_message(
+            chat_id,
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
+    except BadRequest:
+        await bot.send_message(chat_id, message, reply_markup=reply_markup)
 
 
 async def open_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -639,7 +666,8 @@ async def _send_admin_broadcast(
 
 
 async def _refresh_broadcast_feedback_keyboards(
-    context: ContextTypes.DEFAULT_TYPE, broadcast_id: int
+    context: ContextTypes.DEFAULT_TYPE,
+    broadcast_id: int,
 ) -> None:
     db: Database = context.application.bot_data["db"]
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
@@ -656,13 +684,28 @@ async def _refresh_broadcast_feedback_keyboards(
         await asyncio.sleep(0.05)
 
 
+async def refresh_broadcast_feedback_keyboards(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    for item in db.get_sent_broadcasts(retention_days=BROADCAST_RETENTION_DAYS):
+        if not db.get_broadcast_deliveries(item.id):
+            continue
+        await _refresh_broadcast_feedback_keyboards(context, item.id)
+
+
 async def on_broadcast_feedback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     query = update.callback_query
-    if not query or not query.data:
+    if not query:
         return
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest:
+        pass
+    if not query.data:
+        return
     parts = query.data.split(":")
     if len(parts) != 3 or parts[0] != "bcf":
         return
@@ -678,7 +721,13 @@ async def on_broadcast_feedback(
         db.clear_broadcast_feedback(broadcast_id, user_id)
     else:
         db.set_broadcast_feedback(broadcast_id, user_id, vote)
-    await _refresh_broadcast_feedback_keyboards(context, broadcast_id)
+    up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
+    markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
+    if query.message:
+        try:
+            await query.edit_message_reply_markup(reply_markup=markup)
+        except (BadRequest, Forbidden):
+            pass
 
 
 async def _report_broadcast_done(
@@ -922,23 +971,18 @@ async def admin_sent_list(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
-    lines = [t("sent_list_title", lang)]
-    for item in items:
-        when = _format_sent_at_label(item.sent_at or item.scheduled_at)
-        lines.append(
-            t(
-                "sent_line",
-                lang,
-                id=item.id,
-                when=when,
-                type=_broadcast_type_label(item.msg_type, lang),
-                preview=_scheduled_text_preview(item.text),
-            )
-        )
     await update.effective_message.reply_text(
-        "\n\n".join(lines),
+        t("sent_list_title", lang),
         reply_markup=broadcast_menu(lang),
     )
+    for item in items:
+        message, markup = _admin_sent_broadcast_message(db, item, lang)
+        await _send_admin_preview_message(
+            context.bot,
+            user_id,
+            message,
+            reply_markup=markup,
+        )
 
 
 async def purge_old_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:

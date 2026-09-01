@@ -524,13 +524,11 @@ def broadcast_feedback_keyboard(
                 InlineKeyboardButton(
                     f"👍 {up_count}",
                     callback_data=f"bcf:up:{broadcast_id}",
-                )
-            ],
-            [
+                ),
                 InlineKeyboardButton(
                     f"👎 {down_count}",
                     callback_data=f"bcf:down:{broadcast_id}",
-                )
+                ),
             ],
         ]
     )
