@@ -16,6 +16,7 @@ from bot_helpers import (
     _can_use_admin_tools,
     _is_admin,
     _menu,
+    _pulse_reply_keyboard,
     _send_dm_html,
     _user_lang,
 )
@@ -652,12 +653,8 @@ async def _send_admin_broadcast(
             if message_id is not None:
                 db.add_broadcast_delivery(broadcast_id, uid, message_id)
             if attach_menu:
-                await _send_dm_html(
-                    context.bot,
-                    db,
-                    uid,
-                    "\u2800",
-                    reply_markup=_menu(locale, uid),
+                await _pulse_reply_keyboard(
+                    context.bot, uid, _menu(locale, uid)
                 )
         else:
             failed += 1

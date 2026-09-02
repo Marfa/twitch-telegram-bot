@@ -161,15 +161,18 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
     return wizard_menu(lang, back=back)
 
 
-async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = True) -> None:
-    """Refresh Cancel/Back reply keyboard; carrier message is deleted immediately."""
+async def _pulse_reply_keyboard(bot, chat_id: int, reply_markup: ReplyKeyboardMarkup) -> None:
+    """Set reply keyboard without leaving a visible chat message."""
     try:
-        msg = await bot.send_message(
-            chat_id, "·", reply_markup=_wizard(lang, back=back)
-        )
+        msg = await bot.send_message(chat_id, "·", reply_markup=reply_markup)
         await bot.delete_message(chat_id, msg.message_id)
     except (BadRequest, Forbidden):
         pass
+
+
+async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = True) -> None:
+    """Refresh Cancel/Back reply keyboard; carrier message is deleted immediately."""
+    await _pulse_reply_keyboard(bot, chat_id, _wizard(lang, back=back))
 
 
 def _btn_filter(key: str) -> filters.Regex:
