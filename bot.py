@@ -605,6 +605,8 @@ from handlers.subscriptions import (
     on_delete_page_noop,
     on_share_accept,
     on_share_decline,
+    on_share_dup_continue,
+    on_share_dup_edit,
     on_share_show,
     offer_shared_alert,
     on_sync_change_period,
@@ -2030,6 +2032,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_share_accept, pattern=r"^share_accept:[A-Za-z0-9_-]+$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_share_dup_edit, pattern=r"^share_dup:edit:\d+$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_share_dup_continue,
+            pattern=r"^share_dup:continue:[A-Za-z0-9_-]+$",
+        ),
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_share_decline, pattern=r"^share_decline$"), group=0)

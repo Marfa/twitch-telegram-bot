@@ -909,9 +909,15 @@ async def _scenario_subscriptions_edit_type_copy(db) -> None:
 
 
 async def _scenario_share_alert_offer(db) -> None:
-    """§1 deep link share confirm — decline is the escape hatch."""
+    """§1 deep link share — decline; accept once; dup prompt on same streamer."""
     from db.models import _subscription_cart_snapshot
-    from handlers.subscriptions import offer_shared_alert, on_share_decline
+    from handlers.subscriptions import (
+        offer_shared_alert,
+        on_share_accept,
+        on_share_decline,
+        on_share_dup_continue,
+    )
+    from i18n import t as tr
 
     sub_id = _seed_live_sub(db, _FREE_UID)
     sub = db.get_subscription(sub_id, _FREE_UID)
@@ -930,6 +936,55 @@ async def _scenario_share_alert_offer(db) -> None:
     ctx = _ctx(application)
     await on_share_decline(update, ctx)
     _query.edit_message_text.assert_awaited()
+
+    # Fresh recipient: first accept creates exactly one sub.
+    stranger = _FREE_UID + 9
+    db.upsert_user(stranger)
+    db.set_user_locale(stranger, "ru")
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(stranger, f"share_accept:{token}", cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions.prem.may_enable_subscription_async",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_share_accept(update, ctx)
+    assert len(db.get_subscriptions_by_owner(stranger)) == 1
+    created_text = query.edit_message_text.await_args.args[0]
+    assert "создано" in created_text
+
+    # Same link again → channel_dup_prompt, no second row.
+    update, query = _cb_update(stranger, f"share_accept:{token}", cap)
+    with patch(
+        "handlers.subscriptions.prem.may_enable_subscription_async",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_share_accept(update, ctx)
+    assert len(db.get_subscriptions_by_owner(stranger)) == 1
+    assert query.edit_message_text.await_args.args[0] == tr(
+        "channel_dup_prompt", "ru"
+    )
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert f"share_dup:edit:{db.get_subscriptions_by_owner(stranger)[0].id}" in cbs
+    assert f"share_dup:continue:{token}" in cbs
+
+    # Continue still allowed (same as wizard) — creates one more.
+    update, query = _cb_update(stranger, f"share_dup:continue:{token}", cap)
+    with patch(
+        "handlers.subscriptions.prem.may_enable_subscription_async",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_share_dup_continue(update, ctx)
+    assert len(db.get_subscriptions_by_owner(stranger)) == 2
 
 
 async def _scenario_subscriptions_list_pages(db) -> None:

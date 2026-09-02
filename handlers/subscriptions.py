@@ -3352,6 +3352,86 @@ def _share_offer_keyboard(lang: str, token: str) -> InlineKeyboardMarkup:
     )
 
 
+def _share_dup_keyboard(lang: str, sub_id: int, token: str) -> InlineKeyboardMarkup:
+    """Same labels as channel_dup_keyboard; callbacks stay in the share flow."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("channel_dup_edit", lang),
+                    callback_data=f"share_dup:edit:{sub_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("channel_dup_continue", lang),
+                    callback_data=f"share_dup:continue:{token}",
+                )
+            ],
+        ]
+    )
+
+
+def _existing_sub_for_twitch(
+    db: Database, owner_id: int, twitch_user_id: str
+) -> Subscription | None:
+    uid = (twitch_user_id or "").strip()
+    if not uid:
+        return None
+    return next(
+        (s for s in _subs_for_owner(db, owner_id) if s.twitch_user_id == uid),
+        None,
+    )
+
+
+def _share_clone_snapshot(snapshot: dict, user_id: int) -> dict:
+    out = dict(snapshot)
+    out["dest_type"] = "dm"
+    out["chat_id"] = user_id
+    out["thread_id"] = None
+    out["from_twitch_sync"] = False
+    out["from_watch_suggest"] = False
+    out["is_demo"] = False
+    return out
+
+
+async def _create_shared_subscription(
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    user_id: int,
+    lang: str,
+    snapshot: dict,
+) -> tuple[int, str]:
+    """Create DM clone from share snapshot. Returns (sub_id, confirmation text)."""
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    if len(_subs_for_owner(db, user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        raise ValueError("sub_limit")
+
+    login = str(snapshot.get("twitch_username") or "").strip().lower()
+    enabled = await prem.may_enable_subscription_async(
+        context.bot, db, user_id, twitch_username=login
+    )
+    clone = _share_clone_snapshot(snapshot, user_id)
+    clone["twitch_username"] = login
+    clone["enabled"] = enabled
+    sub_id = _add_subscription_from_snapshot(db, user_id, clone, enabled=enabled)
+    analytics.capture(
+        user_id,
+        "alert_share_accepted",
+        {"sub_id": sub_id, "enabled": enabled, "channel": login},
+    )
+    sub_num = _owner_sub_number(db, user_id, sub_id)
+    text = t("share_created", lang, sub_id=sub_num, username=login or "—")
+    if not enabled:
+        text += "\n" + t(
+            "share_created_paused",
+            lang,
+            limit=prem.free_active_limit(),
+        )
+    return sub_id, text
+
+
 async def on_share_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = query.from_user.id
@@ -3419,64 +3499,96 @@ async def on_share_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text(t("share_invalid", lang))
         return
 
+    twitch_uid = str(snapshot.get("twitch_user_id") or "")
+    existing = _existing_sub_for_twitch(db, user_id, twitch_uid)
+    if existing:
+        await query.edit_message_text(
+            t("channel_dup_prompt", lang),
+            reply_markup=_share_dup_keyboard(lang, existing.id, token),
+        )
+        return
+
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
-    if len(_subs_for_owner(db, user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+    try:
+        _sub_id, text = await _create_shared_subscription(
+            context, db, user_id, lang, snapshot
+        )
+    except ValueError:
         await query.edit_message_text(
             t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
         )
         return
 
-    login = str(snapshot.get("twitch_username") or "").strip().lower()
-    enabled = await prem.may_enable_subscription_async(
-        context.bot, db, user_id, twitch_username=login
-    )
-    sub_id = db.add_subscription(
-        owner_id=user_id,
-        twitch_username=login,
-        twitch_user_id=str(snapshot.get("twitch_user_id") or ""),
-        message_template=str(snapshot.get("message_template") or ""),
-        dest_type="dm",
-        chat_id=user_id,
-        thread_id=None,
-        delete_previous=bool(snapshot.get("delete_previous")),
-        notify_delete_fail=bool(snapshot.get("notify_delete_fail")),
-        disable_link_preview=bool(snapshot.get("disable_link_preview")),
-        strip_name_mentions=bool(snapshot.get("strip_name_mentions")),
-        attach_chat_button=bool(snapshot.get("attach_chat_button")),
-        delay_minutes=int(snapshot.get("delay_minutes") or 0),
-        suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),
-        schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
-        schedule_reminder_configured=bool(
-            snapshot.get("schedule_reminder_configured")
-        ),
-        ignore_keywords=str(snapshot.get("ignore_keywords") or ""),
-        use_global_ignore=bool(snapshot.get("use_global_ignore")),
-        image_file_id=snapshot.get("image_file_id") or None,
-        image_position=str(snapshot.get("image_position") or ""),
-        enabled=enabled,
-        from_twitch_sync=False,
-        from_watch_suggest=False,
-        category_watch_prefs=str(snapshot.get("category_watch_prefs") or ""),
-        notify_on_live=bool(snapshot.get("notify_on_live", True)),
-        notify_on_end=bool(snapshot.get("notify_on_end")),
-        notify_on_category_change=bool(snapshot.get("notify_on_category_change")),
-        delete_other_alerts=bool(snapshot.get("delete_other_alerts")),
-        is_demo=False,
-    )
-    analytics.capture(
+    await query.edit_message_text(text)
+    await context.bot.send_message(
         user_id,
-        "alert_share_accepted",
-        {"sub_id": sub_id, "enabled": enabled, "channel": login},
+        t("menu_subs", lang),
+        reply_markup=_subs_kb(lang, db, user_id),
     )
+
+
+async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    try:
+        sub_id = int(query.data.split(":")[2])
+    except (IndexError, ValueError):
+        return
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, user_id)
+    if not sub or not _sub_in_current_mode(sub, user_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
     sub_num = _owner_sub_number(db, user_id, sub_id)
-    text = t("share_created", lang, sub_id=sub_num, username=login or "—")
-    if not enabled:
-        text += "\n" + t(
-            "share_created_paused",
+    show_adv = await prem.advanced_mode_on(
+        context.bot, db, user_id, channel=sub.twitch_username
+    )
+    await query.edit_message_text(
+        _edit_menu_text(
             lang,
-            limit=prem.free_active_limit(),
+            sub_id=sub_num,
+            username=sub.twitch_username,
+            show_advanced=show_adv,
+        ),
+        reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
+        parse_mode=ParseMode.HTML,
+    )
+    await context.bot.send_message(
+        user_id,
+        t("menu_subs", lang),
+        reply_markup=_subs_kb(lang, db, user_id),
+    )
+
+
+async def on_share_dup_continue(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    token = query.data.split(":", 2)[2]
+    db: Database = context.application.bot_data["db"]
+    snapshot = db.get_alert_share_snapshot(token)
+    if not snapshot:
+        await query.edit_message_text(t("share_invalid", lang))
+        return
+
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    try:
+        _sub_id, text = await _create_shared_subscription(
+            context, db, user_id, lang, snapshot
         )
+    except ValueError:
+        await query.edit_message_text(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
+        )
+        return
+
     await query.edit_message_text(text)
     await context.bot.send_message(
         user_id,
