@@ -1,0 +1,41 @@
+---
+description: Confirm before removing a wizard step when no alternative is offered
+globs: bot.py,i18n.py,handlers/**/*.py,locales/**/*.json,docs/user-flow-map.ru.md
+alwaysApply: false
+---
+
+# Wizard step removal — confirm first
+
+## When this rule applies
+
+Any change that **removes or hides** a user-facing wizard step, type picker option, or ConversationHandler branch **without** offering a replacement path that covers the same capability.
+
+Examples:
+
+- Dropping an alert type from `alert_type_keyboard` / type pickers
+- Skipping or deleting a wizard screen (template, dest, delay, …)
+- Removing a create/edit entry that previously started that flow
+
+Skip when:
+
+- the step is **moved/renamed** and the same capability stays reachable;
+- an **explicit alternative** is in the same change (new screen, deep link, settings toggle, etc.);
+- the user already confirmed this exact removal in the current conversation.
+
+## Required — ask before implementing
+
+Do **not** remove the step yet. Ask for explicit confirmation. Name the step and what it does for the user.
+
+Template (adapt language to the chat):
+
+> Удалить шаг мастера **«{название}»** ({кратко: что делает для пользователя}) без альтернативы?  
+> Существующие данные/подписки с этим поведением: {сохранятся / тоже затронуты}.  
+> Подтвердите удаление или предложите, чем заменить.
+
+Use AskQuestion when available; otherwise plain text. Wait for yes / a replacement plan.
+
+## After confirmation
+
+1. Implement the removal (or the agreed alternative).
+2. Update [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) and README if product surface changes ([`user-flow-map.mdc`](user-flow-map.mdc), [`readme.mdc`](readme.mdc)).
+3. Ask about `checks_flow_nav` if navigable UX changed ([`flow-nav-scenarios.mdc`](flow-nav-scenarios.mdc)).
