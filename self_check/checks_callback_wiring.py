@@ -146,7 +146,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("edit_change_type", f"edit_f:{_SAMPLE_SUB}:change_type"),
     ("edit_copy", f"edit_f:{_SAMPLE_SUB}:copy"),
     ("edit_copy_change", f"edit_f:{_SAMPLE_SUB}:copy_change"),
-    ("edit_type_pick", f"edit_type_pick:change:{_SAMPLE_SUB}:upcoming"),
+    ("edit_type_pick", f"edit_type_pick:change:{_SAMPLE_SUB}:category"),
     ("edit_type_pick_cancel", f"edit_type_pick_cancel:change:{_SAMPLE_SUB}"),
     ("stream_sched_mode", "stream_sched:mode:week"),
     ("stream_sched_more", "stream_sched:more:0"),

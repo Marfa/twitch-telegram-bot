@@ -936,7 +936,7 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    types = _present_types_for_picker(subs)
+    types = _edit_present_types(subs)
     if len(types) > 1:
         await update.effective_message.reply_text(
             t("list_type_pick", lang),
@@ -986,17 +986,11 @@ async def on_list_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 _EDIT_ALERT_TYPE_ORDER = ("live", "category", "upcoming", "end")
-_ALERT_TYPE_PICK_ORDER = ("live", "upcoming", "end")
 
 
 def _edit_present_types(subs: list[Subscription]) -> list[str]:
     present = {_alert_type_from_sub(s) for s in subs}
     return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind in present]
-
-
-def _present_types_for_picker(subs: list[Subscription]) -> list[str]:
-    present = {_alert_type_from_sub(s) for s in subs}
-    return [kind for kind in _ALERT_TYPE_PICK_ORDER if kind in present]
 
 
 def _alert_type_pick_keyboard(
@@ -1071,7 +1065,7 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    types = _present_types_for_picker(subs)
+    types = _edit_present_types(subs)
     if len(types) == 1:
         text = t("edit_pick", lang)
         _store_edit_pick_subs(context, subs)
@@ -2249,7 +2243,7 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     context.user_data["delete_selected"] = set()
     context.user_data["delete_page"] = 0
-    types = _present_types_for_picker(subs)
+    types = _edit_present_types(subs)
     if len(types) > 1:
         extra_rows: list[list[InlineKeyboardButton]] = []
         if _deleted_subscriptions_cart_enabled(db, user_id):
@@ -2424,7 +2418,7 @@ async def on_delete_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 def _cart_present_types(items: list) -> list[str]:
     present = {getattr(item, "alert_type", None) or "live" for item in items}
-    return [kind for kind in _ALERT_TYPE_PICK_ORDER if kind in present]
+    return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind in present]
 
 
 def _cart_items_of_type(items: list, kind: str | None) -> list:
@@ -3009,7 +3003,7 @@ def _alert_type_label(kind: str, lang: str) -> str:
 
 
 def _other_alert_types(current: str) -> list[str]:
-    return [kind for kind in _ALERT_TYPE_PICK_ORDER if kind != current]
+    return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind != current]
 
 
 def _edit_alert_type_pick_keyboard(
@@ -3234,7 +3228,7 @@ async def on_edit_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if len(parts) != 4:
         return
     mode, sub_id_raw, new_type = parts[1], parts[2], parts[3]
-    if mode not in ("change", "copy") or new_type not in _ALERT_TYPE_PICK_ORDER:
+    if mode not in ("change", "copy") or new_type not in _EDIT_ALERT_TYPE_ORDER:
         return
     try:
         sub_id = int(sub_id_raw)

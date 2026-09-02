@@ -19,7 +19,7 @@
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
-| Alert types | Stream start · upcoming (Twitch schedule) · stream end |
+| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
 | Destinations | DM, channel, group or community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **Clean title** (checkbox) strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
@@ -77,10 +77,11 @@ On first `/start` the bot asks for a language (Russian or English), then shows t
 | Type | What it does |
 |---|---|
 | Stream start | Notify when the channel goes live |
+| Category change | Watches the stream start silently; notifies on every category change until the stream ends (no repeat-suppression step; **Premium**) |
 | Upcoming stream | Remind N minutes ahead if the streamer has a Twitch schedule (error if none) |
 | Stream end | Notify when the stream ends (same wizard, no repeat-suppression step) |
 
-Then the wizard (for stream start / stream end):
+Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)

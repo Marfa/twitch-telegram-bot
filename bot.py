@@ -2069,7 +2069,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_type_pick,
-            pattern=r"^edit_type_pick:(change|copy):\d+:(live|upcoming|end)$",
+            pattern=r"^edit_type_pick:(change|copy):\d+:(live|category|upcoming|end)$",
         ),
         group=0,
     )
@@ -2180,7 +2180,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
                 CallbackQueryHandler(
-                    receive_alert_type, pattern=r"^alert_type:(live|upcoming|end)$"
+                    receive_alert_type, pattern=r"^alert_type:(live|category|upcoming|end)$"
                 ),
             ],
             PREMIUM_GATE: [
