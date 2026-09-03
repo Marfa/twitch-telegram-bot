@@ -2,6 +2,13 @@
 """One-shot: pause enabled alerts to blocked users / unreachable chats."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 from config import DATABASE_PATH, DATABASE_URL
 from db import open_database
 

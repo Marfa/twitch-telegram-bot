@@ -16,9 +16,9 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
-          script_stop: true
           command_timeout: 5m
           script: |
             set -euo pipefail
             cd /opt/twitch-telegram-bot
-            docker compose -f compose.vps.yml exec -T bot python scripts/pause-blocked-unreachable-delivery.py
+            docker compose -f compose.vps.yml exec -T bot \
+              sh -c 'cd /app && python scripts/pause-blocked-unreachable-delivery.py'
