@@ -444,11 +444,8 @@ async def advanced_mode_on(
     """Like is_advanced_mode_enabled, but includes free-chat Premium via has_feature.
 
     Promo channel (marfapr) always gets the full advanced alert wizard.
+    Demo is force-free, but promo still unlocks like a real free user.
     """
-    from demo_mode import is_active
-
-    if is_active(user_id):
-        return False
     if is_promo_channel(channel, db):
         return True
     entitled = await has_feature(bot, db, user_id, "advanced_mode")
@@ -504,7 +501,8 @@ async def has_feature(
         return True
     ensure_trial_expired(db, user_id)
     if is_active(user_id):
-        return False
+        # Force-free UX, but promo channels still unlock like a real free user.
+        return is_promo_channel(channel, db)
     if has_feature_sync(db, user_id, feature_id, channel=channel):
         return True
     return await is_free_chat_member(bot, user_id)
@@ -1039,13 +1037,9 @@ async def alert_type_entitled(
     sub: Any,
 ) -> bool:
     """Like alert_type_entitled_sync, plus free-chat Premium via has_feature."""
-    from demo_mode import is_active
-
     ensure_trial_expired(db, user_id)
     if is_live_only_alert(sub):
         return True
-    if is_active(user_id):
-        return False
     channel = getattr(sub, "twitch_username", None)
     return await has_feature(bot, db, user_id, "alert_types", channel=channel)
 

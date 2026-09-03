@@ -2027,6 +2027,25 @@ class SqliteDatabase:
 
     def delete_demo_subscriptions(self, owner_id: int) -> int:
         with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id FROM subscriptions WHERE owner_id = ? AND is_demo = 1",
+                (owner_id,),
+            ).fetchall()
+            ids = [int(r["id"]) for r in rows]
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                conn.execute(
+                    f"DELETE FROM alert_share_tokens WHERE source_sub_id IN ({placeholders})",
+                    ids,
+                )
+                conn.execute(
+                    f"DELETE FROM alert_history WHERE subscription_id IN ({placeholders})",
+                    ids,
+                )
+            conn.execute(
+                "DELETE FROM deleted_subscriptions_cart WHERE owner_id = ? AND is_demo = 1",
+                (owner_id,),
+            )
             cur = conn.execute(
                 "DELETE FROM subscriptions WHERE owner_id = ? AND is_demo = 1",
                 (owner_id,),
@@ -2980,6 +2999,14 @@ class SqliteDatabase:
         auth.refresh_token = decrypt_secret(auth.refresh_token)
         return auth
 
+    def delete_whisper_alert(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM whisper_alerts WHERE owner_id = ?", (owner_id,))
+
+    def delete_chat_auth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM chat_auth WHERE owner_id = ?", (owner_id,))
+
     def upsert_chat_auth(
         self,
         owner_id: int,
@@ -3193,6 +3220,13 @@ class SqliteDatabase:
                     """,
                     (user_id, feature_id, now, now),
                 )
+
+    def clear_beta_enrollment(self, user_id: int, feature_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM user_beta_enrollments WHERE user_id = ? AND feature_id = ?",
+                (user_id, feature_id),
+            )
 
     def list_beta_enrolled_user_ids(self, feature_ids: list[str]) -> list[int]:
         unique = list(dict.fromkeys(str(fid) for fid in feature_ids if str(fid)))

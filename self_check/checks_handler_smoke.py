@@ -518,6 +518,58 @@ async def _smoke_wizard(db) -> None:
         state = await start_new_subscription(update, ctx)
     assert state == _wz()["ALERT_TYPE"]
 
+    import demo_mode as dm
+
+    dm.activate(_ADMIN_UID)
+    try:
+        application, bot = _app(db)
+        update = _msg_update(_ADMIN_UID)
+        ctx = _ctx(application)
+        with patch(
+            "handlers.wizard._go_alert_type_prompt",
+            new=AsyncMock(return_value=_wz()["ALERT_TYPE"]),
+        ):
+            state = await start_new_subscription(update, ctx)
+        assert state == _wz()["ALERT_TYPE"]
+
+        twitch = MagicMock()
+        twitch.parse_username.return_value = "otherchan"
+        twitch.get_user.return_value = {
+            "id": "9",
+            "login": "otherchan",
+            "display_name": "O",
+        }
+        application, bot = _app(db, twitch=twitch)
+        update = _msg_update(_ADMIN_UID, "otherchan")
+        ctx = _ctx(application, {"alert_type": "end"})
+        with patch(
+            "handlers.wizard._show_premium_gate",
+            new=AsyncMock(return_value=_wz()["PREMIUM_GATE"]),
+        ) as gate:
+            state = await receive_channel(update, ctx)
+        assert state == _wz()["PREMIUM_GATE"]
+        gate.assert_awaited()
+
+        twitch.parse_username.return_value = "marfapr"
+        twitch.get_user.return_value = {
+            "id": "1",
+            "login": "marfapr",
+            "display_name": "M",
+        }
+        twitch.has_channel_schedule.return_value = True
+        application, bot = _app(db, twitch=twitch)
+        update = _msg_update(_ADMIN_UID, "marfapr")
+        ctx = _ctx(application, {"alert_type": "upcoming"})
+        with patch(
+            "handlers.wizard._go_template_prompt",
+            new=AsyncMock(return_value=_wz()["TEMPLATE"]),
+        ) as tpl:
+            state = await receive_channel(update, ctx)
+        assert state == _wz()["TEMPLATE"]
+        tpl.assert_awaited()
+    finally:
+        dm.deactivate(_ADMIN_UID)
+
     update, _query = _cb_update(_FREE_UID, "alert:live")
     ctx = _ctx(application)
     with patch(

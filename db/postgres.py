@@ -2237,6 +2237,24 @@ class PostgresDatabase:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
+                "SELECT id FROM subscriptions WHERE owner_id = %s AND is_demo = TRUE",
+                (owner_id,),
+            )
+            ids = [int(r["id"]) for r in cur.fetchall()]
+            if ids:
+                cur.execute(
+                    "DELETE FROM alert_share_tokens WHERE source_sub_id = ANY(%s)",
+                    (ids,),
+                )
+                cur.execute(
+                    "DELETE FROM alert_history WHERE subscription_id = ANY(%s)",
+                    (ids,),
+                )
+            cur.execute(
+                "DELETE FROM deleted_subscriptions_cart WHERE owner_id = %s AND is_demo = TRUE",
+                (owner_id,),
+            )
+            cur.execute(
                 "DELETE FROM subscriptions WHERE owner_id = %s AND is_demo = TRUE",
                 (owner_id,),
             )
@@ -3263,6 +3281,16 @@ class PostgresDatabase:
         auth.refresh_token = decrypt_secret(auth.refresh_token)
         return auth
 
+    def delete_whisper_alert(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("DELETE FROM whisper_alerts WHERE owner_id = %s", (owner_id,))
+
+    def delete_chat_auth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("DELETE FROM chat_auth WHERE owner_id = %s", (owner_id,))
+
     def upsert_chat_auth(
         self,
         owner_id: int,
@@ -3487,6 +3515,14 @@ class PostgresDatabase:
                     """,
                     (user_id, feature_id),
                 )
+
+    def clear_beta_enrollment(self, user_id: int, feature_id: str) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM user_beta_enrollments WHERE user_id = %s AND feature_id = %s",
+                (user_id, feature_id),
+            )
 
     def list_beta_enrolled_user_ids(self, feature_ids: list[str]) -> list[int]:
         unique = list(dict.fromkeys(str(fid) for fid in feature_ids if str(fid)))

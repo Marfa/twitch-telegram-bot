@@ -1517,6 +1517,7 @@ async def toggle_demo_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.clear()
     if demo_mode.is_active(user_id):
         db.delete_demo_subscriptions(user_id)
+        demo_mode.restore_user_state(db, user_id)
         demo_mode.deactivate(user_id)
         await update.effective_message.reply_text(
             t("demo_off", lang),
@@ -1533,6 +1534,7 @@ async def _enter_demo_mode(
     lang: str,
     db: Database,
 ) -> None:
+    demo_mode.capture_user_state(db, user_id)
     db.delete_demo_subscriptions(user_id)
     twitch: TwitchClient = context.application.bot_data["twitch"]
     login = prem.twitch_channel_login() or "marfapr"

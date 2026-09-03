@@ -593,13 +593,56 @@ def check_db_premium() -> None:
         assert db.count_enabled_subscriptions(1, demo=True) >= 1
         assert db.delete_demo_subscriptions(1) >= 1
         assert db.get_subscription(demo_id, 1) is None
+        demo_id2 = db.add_subscription(
+            owner_id=1,
+            twitch_username="demochan2",
+            twitch_user_id="demo-uid-2",
+            message_template="demo2",
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            notify_on_live=True,
+            is_demo=True,
+        )
+        cart_demo = db.add_subscription(
+            owner_id=1,
+            twitch_username="demochan-cart",
+            twitch_user_id="demo-uid-cart",
+            message_template="democart",
+            dest_type="dm",
+            chat_id=1,
+            thread_id=None,
+            notify_on_live=True,
+            is_demo=True,
+        )
+        db.add_alert_history(
+            1,
+            subscription_id=demo_id2,
+            twitch_username="demochan2",
+            alert_type="live",
+        )
+        db.delete_subscription(cart_demo, 1, to_cart=True)
+        assert db.list_deleted_subscriptions(1, days=30, is_demo=True, limit=10)
+        db.set_global_ignore_keywords(1, "keep-me")
         import demo_mode as dm
 
+        dm.capture_user_state(db, 1)
         dm.activate(1)
+        db.set_global_ignore_keywords(1, "demo-only")
+        db.delete_demo_subscriptions(1)
+        dm.restore_user_state(db, 1)
+        dm.deactivate(1)
+        assert db.get_global_ignore_keywords(1) == "keep-me"
+        assert db.get_subscription(demo_id2, 1) is None
+        assert not db.list_deleted_subscriptions(1, days=30, is_demo=True, limit=10)
+        hist = db.list_alert_history(1, limit=50)
+        assert all(h.subscription_id != demo_id2 for h in hist)
         from premium import can_enable_more
 
+        dm.activate(1)
         assert can_enable_more(db, 1) is True
         dm.deactivate(1)
+        db.set_global_ignore_keywords(1, "")
         assert sub.notify_delete_fail is False
         assert db.update_subscription(sub_id, 1, notify_delete_fail=True)
         sub = db.get_subscription(sub_id, 1)

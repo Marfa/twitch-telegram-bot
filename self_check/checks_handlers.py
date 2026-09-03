@@ -307,6 +307,38 @@ def check_handlers() -> None:
         assert prem.can_enable_more(db, 249097744, twitch_username="marfapr") is True
         assert prem.has_feature_sync(db, 249097744, "alert_types", channel="marfapr")
         assert prem.has_feature_sync(db, 249097744, "delay", channel="MarfaPR")
+        import asyncio as _asyncio
+        import demo_mode as _demo
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        _demo.activate(249097744)
+        try:
+            _bot = _AsyncMock()
+            assert _asyncio.run(
+                prem.has_feature(
+                    _bot, db, 249097744, "alert_types", channel="marfapr"
+                )
+            )
+            assert _asyncio.run(
+                prem.has_feature(
+                    _bot, db, 249097744, "alert_types", channel="paidstreamer"
+                )
+            )
+            assert not _asyncio.run(
+                prem.has_feature(
+                    _bot, db, 249097744, "alert_types", channel="other"
+                )
+            )
+            assert not _asyncio.run(prem.has_premium(_bot, db, 249097744))
+            db.upsert_user(56)
+            assert _asyncio.run(
+                prem.has_feature(_bot, db, 56, "alert_types", channel="marfapr")
+            )
+            assert not _asyncio.run(
+                prem.has_feature(_bot, db, 56, "alert_types", channel="other")
+            )
+        finally:
+            _demo.deactivate(249097744)
         assert not prem.has_feature_sync(db, 249097744, "delay", channel="other")
         assert prem.chat_send_unlimited(db, 249097744, broadcaster_login="marfapr")
         assert not prem.chat_send_unlimited(db, 249097744, broadcaster_login="other")
@@ -697,7 +729,22 @@ def check_handlers() -> None:
         assert prem.has_feature_sync(db, 89, "delay")
         assert db.get_advanced_mode_setting(89) is True
         assert prem.is_advanced_mode_enabled(db, 89) is True
-        # Auto-on only when entitled + alert already uses advanced options.
+        # Demo mode forces off even if setting/premium would enable it.
+        import asyncio as _aio
+        import demo_mode as _dm
+        from unittest.mock import AsyncMock as _AM
+
+        _dm.activate(89)
+        assert prem.is_advanced_mode_enabled(db, 89) is False
+        _bot = _AM()
+        assert (
+            _aio.run(prem.advanced_mode_on(_bot, db, 89, channel="other")) is False
+        )
+        assert (
+            _aio.run(prem.advanced_mode_on(_bot, db, 89, channel="marfapr")) is True
+        )
+        _dm.deactivate(89)
+        assert prem.is_advanced_mode_enabled(db, 89) is True
         db.upsert_user(90)
         sid90 = db.add_subscription(
             owner_id=90,
@@ -715,13 +762,6 @@ def check_handlers() -> None:
         assert prem.is_advanced_mode_enabled(db, 90) is True  # auto-on
         db.set_advanced_mode_setting(90, False)
         assert prem.is_advanced_mode_enabled(db, 90) is False
-        # Demo mode forces off even if setting/premium would enable it.
-        import demo_mode as _dm
-
-        _dm.activate(89)
-        assert prem.is_advanced_mode_enabled(db, 89) is False
-        _dm.deactivate(89)
-        assert prem.is_advanced_mode_enabled(db, 89) is True
         # migrate_advanced_mode_defaults: ON only if entitled + alert options.
         db.upsert_user(91)
         db.set_premium_permanent(91, True)
