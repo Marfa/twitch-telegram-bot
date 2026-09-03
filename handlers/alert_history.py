@@ -341,6 +341,16 @@ def _remember_alert_history_ui(
     }
 
 
+def _resolve_message_chat_id(message: object, fallback: int) -> int:
+    cid = getattr(message, "chat_id", None)
+    if cid is not None:
+        return int(cid)
+    chat = getattr(message, "chat", None)
+    if chat is not None and getattr(chat, "id", None) is not None:
+        return int(chat.id)
+    return int(fallback)
+
+
 def _alert_history_bot_username(context: ContextTypes.DEFAULT_TYPE) -> str:
     bot = context.bot
     return str(getattr(bot, "username", None) or "").strip()
@@ -407,13 +417,15 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
-    _remember_alert_history_ui(
-        context,
-        user_id,
-        chat_id=msg.chat_id,
-        message_id=msg.message_id,
-        page=0,
-    )
+    mid = getattr(msg, "message_id", None)
+    if mid is not None:
+        _remember_alert_history_ui(
+            context,
+            user_id,
+            chat_id=_resolve_message_chat_id(msg, reply_chat_id(update)),
+            message_id=int(mid),
+            page=0,
+        )
 
 
 async def on_alert_history_page(
@@ -450,13 +462,17 @@ async def on_alert_history_page(
         if "not modified" not in str(exc).lower():
             raise
     if query.message is not None:
-        _remember_alert_history_ui(
-            context,
-            user_id,
-            chat_id=query.message.chat_id,
-            message_id=query.message.message_id,
-            page=page,
-        )
+        mid = getattr(query.message, "message_id", None)
+        if mid is not None:
+            _remember_alert_history_ui(
+                context,
+                user_id,
+                chat_id=_resolve_message_chat_id(
+                    query.message, reply_chat_id(update)
+                ),
+                message_id=int(mid),
+                page=page,
+            )
 
 
 async def on_alert_history_noop(
@@ -580,13 +596,15 @@ async def _refresh_alert_history_message(
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
-    _remember_alert_history_ui(
-        context,
-        user_id,
-        chat_id=msg.chat_id,
-        message_id=msg.message_id,
-        page=page,
-    )
+    mid = getattr(msg, "message_id", None)
+    if mid is not None:
+        _remember_alert_history_ui(
+            context,
+            user_id,
+            chat_id=_resolve_message_chat_id(msg, user_id),
+            message_id=int(mid),
+            page=page,
+        )
 
 
 async def handle_alert_history_start_arg(

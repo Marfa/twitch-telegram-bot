@@ -56,7 +56,7 @@ class _BotCapture:
     def wrap(self, bot: AsyncMock) -> AsyncMock:
         async def _send_message(*args, **kwargs):
             self.markups.extend(markups_from_call(kwargs))
-            return SimpleNamespace(message_id=len(self.markups) + 1)
+            return SimpleNamespace(message_id=len(self.markups) + 1, chat_id=0)
 
         async def _delete_message(*args, **kwargs):
             return None
@@ -68,7 +68,7 @@ class _BotCapture:
     def wrap_message(self, msg: MagicMock) -> MagicMock:
         async def _reply_text(*args, **kwargs):
             self.markups.extend(markups_from_call(kwargs))
-            return SimpleNamespace(message_id=len(self.markups) + 1)
+            return SimpleNamespace(message_id=len(self.markups) + 1, chat_id=0)
 
         msg.reply_text = AsyncMock(side_effect=_reply_text)
         return msg
