@@ -237,6 +237,12 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     "Failed to send trial expiry notice to %s", user_id
                 )
 
+    paused_unentitled = await prem.expire_unentitled_alerts(context.bot, db)
+    if paused_unentitled:
+        logger.info(
+            "Paused %s alert(s) after Premium/feature expiry", paused_unentitled
+        )
+
     twitch: TwitchClient = context.application.bot_data["twitch"]
     last_live: dict[str, bool] = context.application.bot_data.setdefault("last_live", {})
     last_games: dict[str, str] = context.application.bot_data.setdefault("last_games", {})

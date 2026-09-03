@@ -907,6 +907,108 @@ def refresh_twitch_premium(
         return status.twitch_active
 
 
+def prune_expired_premium_clocks(db: Database, user_id: int) -> bool:
+    """Clear expired Stars until and prune expired à-la-carte feature rows."""
+    st = get_status(db, user_id)
+    now = int(time.time())
+    changed = False
+    if st.stars_until > 0 and st.stars_until <= now:
+        db.set_premium_stars(
+            user_id, charge_id="", until_unix=0, canceled=True
+        )
+        changed = True
+        st = get_status(db, user_id)
+    for fid, until in list(st.features.items()):
+        if int(until or 0) <= now:
+            db.clear_premium_feature(user_id, fid)
+            changed = True
+    return changed
+
+
+def pause_unentitled_subscriptions(db: Database, user_id: int) -> int:
+    """Disable enabled alerts the user may no longer keep (DB-only, no free-chat).
+
+    - Non-live types without alert_types / full plan / promo → paused
+    - Over free active cap without extra_alerts → oldest kept, excess paused
+    Returns number of subscriptions just paused.
+    """
+    from demo_mode import is_active
+
+    ensure_trial_expired(db, user_id)
+    if paid_features_free() or is_active(user_id):
+        return 0
+    prune_expired_premium_clocks(db, user_id)
+    paused = 0
+    for sub in db.get_subscriptions_by_owner(user_id):
+        if not sub.enabled or bool(getattr(sub, "is_demo", False)):
+            continue
+        if alert_type_entitled_sync(db, user_id, sub):
+            continue
+        if db.toggle_subscription(sub.id, user_id) is False:
+            paused += 1
+    if has_feature_sync(db, user_id, "extra_alerts"):
+        return paused
+    enabled = [
+        s
+        for s in db.get_subscriptions_by_owner(user_id)
+        if s.enabled
+        and not bool(getattr(s, "is_demo", False))
+        and not is_promo_channel(s.twitch_username, db)
+    ]
+    enabled.sort(key=lambda s: int(s.id))
+    for sub in enabled[PREMIUM_FREE_ACTIVE_LIMIT:]:
+        if db.toggle_subscription(sub.id, user_id) is False:
+            paused += 1
+    return paused
+
+
+async def expire_unentitled_alerts(bot: Bot, db: Database) -> int:
+    """Pause alerts that lost entitlement after Stars / feature expiry.
+
+    Skips free-chat members (they still get full Premium via has_feature).
+    Returns total paused subscription rows.
+    """
+    if paid_features_free():
+        return 0
+    total = 0
+    now = int(time.time())
+    for user_id in db.get_notify_user_ids():
+        enabled = [
+            s
+            for s in db.get_subscriptions_by_owner(user_id)
+            if s.enabled and not bool(getattr(s, "is_demo", False))
+        ]
+        if not enabled:
+            continue
+        st = get_status(db, user_id)
+        clocks_expired = (st.stars_until > 0 and st.stars_until <= now) or any(
+            int(u or 0) <= now for u in st.features.values()
+        )
+        type_blocked = any(
+            not alert_type_entitled_sync(db, user_id, s) for s in enabled
+        )
+        over_cap = (
+            not has_feature_sync(db, user_id, "extra_alerts")
+            and sum(
+                1
+                for s in enabled
+                if not is_promo_channel(s.twitch_username, db)
+            )
+            > PREMIUM_FREE_ACTIVE_LIMIT
+        )
+        if not (clocks_expired or type_blocked or over_cap):
+            continue
+        if await is_free_chat_member(bot, user_id):
+            continue
+        n = pause_unentitled_subscriptions(db, user_id)
+        if n:
+            total += n
+            logger.info(
+                "Paused %s unentitled alert(s) for user %s", n, user_id
+            )
+    return total
+
+
 def is_live_only_alert(sub: Any) -> bool:
     """True if alert is live-start only (free-tier type)."""
     return bool(
@@ -915,3 +1017,34 @@ def is_live_only_alert(sub: Any) -> bool:
         and not getattr(sub, "notify_on_category_change", False)
         and not getattr(sub, "schedule_reminder_configured", False)
     )
+
+
+def alert_type_entitled_sync(
+    db: Database,
+    user_id: int,
+    sub: Any,
+) -> bool:
+    """DB-only: free tier may only enable live-start alerts (promo channel exempt)."""
+    ensure_trial_expired(db, user_id)
+    if is_live_only_alert(sub):
+        return True
+    channel = getattr(sub, "twitch_username", None)
+    return has_feature_sync(db, user_id, "alert_types", channel=channel)
+
+
+async def alert_type_entitled(
+    bot: Bot,
+    db: Database,
+    user_id: int,
+    sub: Any,
+) -> bool:
+    """Like alert_type_entitled_sync, plus free-chat Premium via has_feature."""
+    from demo_mode import is_active
+
+    ensure_trial_expired(db, user_id)
+    if is_live_only_alert(sub):
+        return True
+    if is_active(user_id):
+        return False
+    channel = getattr(sub, "twitch_username", None)
+    return await has_feature(bot, db, user_id, "alert_types", channel=channel)

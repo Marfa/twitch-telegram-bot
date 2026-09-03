@@ -1793,36 +1793,54 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     lang = _user_lang(context, owner_id)
     db: Database = context.application.bot_data["db"]
     demo = demo_mode.is_active(owner_id)
-    # Promo channel alerts never consume free slots — enable them first.
-    promo_enabled = 0
-    for s in _subs_for_owner(db, owner_id):
-        if (
-            s.enabled
-            or getattr(s, "trial_paused", False)
-            or not prem.is_promo_channel(s.twitch_username, db)
-        ):
-            continue
-        if db.toggle_subscription(s.id, owner_id):
-            promo_enabled += 1
     slots = prem.active_subscription_slots(db, owner_id, demo=demo)
-    if not slots.unlimited and slots.remaining <= 0:
-        if promo_enabled:
-            await query.edit_message_text(
-                t("enable_all_done", lang, count=promo_enabled)
-            )
-            return
-        from premium_handlers import send_premium_screen
-
-        await query.edit_message_text(
-            t("premium_active_limit", lang, limit=prem.free_active_limit())
-        )
-        await send_premium_screen(context.bot, owner_id, lang, db, update=update)
-        return
-    max_count = None if slots.unlimited else slots.remaining
-    count = db.enable_all_subscriptions(
-        owner_id, demo=demo, max_count=max_count
-    ) + promo_enabled
+    remaining = None if slots.unlimited else slots.remaining
+    count = 0
+    for s in _subs_for_owner(db, owner_id):
+        if s.enabled or getattr(s, "trial_paused", False):
+            continue
+        if not await prem.alert_type_entitled(context.bot, db, owner_id, s):
+            continue
+        promo = prem.is_promo_channel(s.twitch_username, db)
+        if not promo and remaining is not None:
+            if remaining <= 0:
+                continue
+        if not db.toggle_subscription(s.id, owner_id):
+            continue
+        count += 1
+        if not promo and remaining is not None:
+            remaining -= 1
     if not count:
+        paused = [
+            s
+            for s in _subs_for_owner(db, owner_id)
+            if not s.enabled and not getattr(s, "trial_paused", False)
+        ]
+        entitled_paused = False
+        for s in paused:
+            if await prem.alert_type_entitled(context.bot, db, owner_id, s):
+                entitled_paused = True
+                break
+        if paused and not entitled_paused:
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(
+                t(
+                    "premium_enable_need_feature",
+                    lang,
+                    feature=t(prem.feature_label_key("alert_types"), lang),
+                )
+            )
+            await send_premium_screen(context.bot, owner_id, lang, db, update=update)
+            return
+        if paused and remaining is not None and remaining <= 0:
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(
+                t("premium_active_limit", lang, limit=prem.free_active_limit())
+            )
+            await send_premium_screen(context.bot, owner_id, lang, db, update=update)
+            return
         await query.edit_message_text(t("enable_all_none", lang))
         return
     if not slots.unlimited:
@@ -2967,6 +2985,23 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 context.bot, query.from_user.id, lang, db, update=update
             )
             return
+    if not sub.enabled and not await prem.alert_type_entitled(
+        context.bot, db, query.from_user.id, sub
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.answer()
+        await query.edit_message_text(
+            t(
+                "premium_enable_need_feature",
+                lang,
+                feature=t(prem.feature_label_key("alert_types"), lang),
+            )
+        )
+        await send_premium_screen(
+            context.bot, query.from_user.id, lang, db, update=update
+        )
+        return
     if not sub.enabled and not await prem.can_enable_more_async(
         context.bot, db, query.from_user.id, twitch_username=sub.twitch_username
     ):
@@ -3169,6 +3204,10 @@ async def on_edit_copy_click(update: Update, context: ContextTypes.DEFAULT_TYPE)
     enabled = await prem.may_enable_subscription_async(
         context.bot, db, owner_id, twitch_username=sub.twitch_username
     )
+    if enabled and not await prem.alert_type_entitled(
+        context.bot, db, owner_id, sub
+    ):
+        enabled = False
     snapshot = _subscription_cart_snapshot(sub)
     snapshot["enabled"] = enabled
     snapshot["is_demo"] = demo_mode.is_active(owner_id)
@@ -3398,16 +3437,31 @@ async def _create_shared_subscription(
 ) -> tuple[int, str]:
     """Create DM clone from share snapshot. Returns (sub_id, confirmation text)."""
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
+    from types import SimpleNamespace
 
     if len(_subs_for_owner(db, user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
         raise ValueError("sub_limit")
 
     login = str(snapshot.get("twitch_username") or "").strip().lower()
-    enabled = await prem.may_enable_subscription_async(
-        context.bot, db, user_id, twitch_username=login
-    )
     clone = _share_clone_snapshot(snapshot, user_id)
     clone["twitch_username"] = login
+    type_ok = await prem.alert_type_entitled(
+        context.bot,
+        db,
+        user_id,
+        SimpleNamespace(
+            notify_on_live=bool(clone.get("notify_on_live", True)),
+            notify_on_end=bool(clone.get("notify_on_end")),
+            notify_on_category_change=bool(clone.get("notify_on_category_change")),
+            schedule_reminder_configured=bool(
+                clone.get("schedule_reminder_configured")
+            ),
+            twitch_username=login,
+        ),
+    )
+    enabled = type_ok and await prem.may_enable_subscription_async(
+        context.bot, db, user_id, twitch_username=login
+    )
     clone["enabled"] = enabled
     sub_id = _add_subscription_from_snapshot(db, user_id, clone, enabled=enabled)
     analytics.capture(
@@ -3418,11 +3472,18 @@ async def _create_shared_subscription(
     sub_num = _owner_sub_number(db, user_id, sub_id)
     text = t("share_created", lang, sub_id=sub_num, username=login or "—")
     if not enabled:
-        text += "\n" + t(
-            "share_created_paused",
-            lang,
-            limit=prem.free_active_limit(),
-        )
+        if not type_ok:
+            text += "\n" + t(
+                "premium_enable_need_feature",
+                lang,
+                feature=t(prem.feature_label_key("alert_types"), lang),
+            )
+        else:
+            text += "\n" + t(
+                "share_created_paused",
+                lang,
+                limit=prem.free_active_limit(),
+            )
     return sub_id, text
 
 

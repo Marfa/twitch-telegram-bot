@@ -2100,6 +2100,20 @@ async def _finish_subscription(
                 twitch_username=str(data.get("twitch_username") or ""),
             ):
                 create_enabled = False
+            provisional = SimpleNamespace(
+                notify_on_live=notify_on_live,
+                notify_on_end=notify_on_end,
+                notify_on_category_change=notify_on_category_change,
+                schedule_reminder_configured=bool(
+                    data.get("schedule_reminder_configured")
+                )
+                or int(data.get("schedule_reminder_minutes", 0)) > 0,
+                twitch_username=str(data.get("twitch_username") or ""),
+            )
+            if create_enabled and not await prem.alert_type_entitled(
+                context.bot, db, owner_id, provisional
+            ):
+                create_enabled = False
             sub_id = db.add_subscription(
                 owner_id=owner_id,
                 twitch_username=data["twitch_username"],

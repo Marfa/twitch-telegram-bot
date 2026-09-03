@@ -978,22 +978,40 @@ class PostgresDatabase:
                 payload = json.loads(r.get("subscription_json") or "{}")
             except Exception:
                 continue
-            from premium import is_promo_channel
+                from premium import alert_type_entitled_sync, is_promo_channel
+                from types import SimpleNamespace
 
-            login = str(payload.get("twitch_username") or "")
-            promo = is_promo_channel(login, self)
-            if promo:
-                sub_enabled = True
-            elif max_enabled is not None:
-                sub_enabled = slots_used < max(0, int(max_enabled))
-            else:
-                sub_enabled = True
-            payload["enabled"] = sub_enabled
-            if sub_enabled:
-                enabled_restored += 1
-                if not promo:
-                    slots_used += 1
-            self.add_subscription(owner_id=owner_id, **payload)
+                login = str(payload.get("twitch_username") or "")
+                promo = is_promo_channel(login, self)
+                type_ok = alert_type_entitled_sync(
+                    self,
+                    owner_id,
+                    SimpleNamespace(
+                        notify_on_live=bool(payload.get("notify_on_live", True)),
+                        notify_on_end=bool(payload.get("notify_on_end")),
+                        notify_on_category_change=bool(
+                            payload.get("notify_on_category_change")
+                        ),
+                        schedule_reminder_configured=bool(
+                            payload.get("schedule_reminder_configured")
+                        ),
+                        twitch_username=login,
+                    ),
+                )
+                if not type_ok:
+                    sub_enabled = False
+                elif promo:
+                    sub_enabled = True
+                elif max_enabled is not None:
+                    sub_enabled = slots_used < max(0, int(max_enabled))
+                else:
+                    sub_enabled = True
+                payload["enabled"] = sub_enabled
+                if sub_enabled:
+                    enabled_restored += 1
+                    if not promo:
+                        slots_used += 1
+                self.add_subscription(owner_id=owner_id, **payload)
             restored_ids.append(int(r["id"]))
 
         if not restored_ids:

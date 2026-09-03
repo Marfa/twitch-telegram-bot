@@ -988,6 +988,11 @@ def check_core() -> None:
         assert tr("share_decline", loc)
         assert tr("share_created", loc, sub_id=1, username="x")
         assert tr("share_created_paused", loc, limit=5)
+        assert tr(
+            "premium_enable_need_feature",
+            loc,
+            feature=tr("premium_feat_alert_types", loc),
+        )
         assert tr("share_declined", loc)
         assert tr("share_invalid", loc)
         assert tr("beta_feat_share_alerts", loc)

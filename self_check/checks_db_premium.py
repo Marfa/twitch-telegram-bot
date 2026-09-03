@@ -1170,17 +1170,20 @@ def check_db_premium() -> None:
         assert "• Оповещение: начало стрима" in line
         assert "<a href" not in line
         kb_rows = _subs_toggle_keyboard(share_db, 9001, "ru", [src])
-        assert len(kb_rows) == 2
+        assert len(kb_rows) >= 2
         assert [b.callback_data for b in kb_rows[0]] == [
             f"toggle:{src.id}",
             f"edit:{src.id}",
         ]
-        assert [b.callback_data for b in kb_rows[1]] == [f"list_del:{src.id}"]
-        assert all(
-            not (b.callback_data or "").startswith("share_show:")
+        delete_cbs = [b.callback_data for b in kb_rows[1]]
+        assert f"list_del:{src.id}" in delete_cbs
+        share_cbs = [
+            b.callback_data
             for row in kb_rows
             for b in row
-        )
+            if (b.callback_data or "").startswith("share_show:")
+        ]
+        assert share_cbs == [f"share_show:{src.id}"]
         assert all(
             (src.twitch_username or "") in (b.text or "")
             for row in kb_rows

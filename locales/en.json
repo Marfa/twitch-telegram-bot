@@ -238,6 +238,7 @@
   "premium_marfapr_ok_exists": "Twitch subscription verified. Premium unlocked.\nYou already have an alert for {channel}.",
   "premium_marfapr_oauth": "Link Twitch to verify your subscription to {channel}:",
   "premium_active_limit": "Free plan allows up to {limit} active alerts.\nDisable one or get Premium.",
+  "premium_enable_need_feature": "⭐ {feature} requires Premium.\nGet Premium to enable this alert.",
   "premium_created_disabled": "Alert created as paused: free plan allows {limit} active alerts. Enable it after upgrading or pausing another.",
   "premium_trial_paused_enable": "This alert was paused after the trial. Get Premium to enable it again.",
   "menu_admin": "Admin panel:",

@@ -478,6 +478,73 @@ def check_handlers() -> None:
         assert prem.get_status(db, 50).trial_until == 0
         assert prem.active_subscription_slots(db, 50).unlimited is False
         assert prem.is_live_only_alert(sub)
+        end_sid = db.add_subscription(
+            50,
+            "endchan",
+            "99",
+            "hi",
+            "dm",
+            50,
+            None,
+            enabled=False,
+            notify_on_live=False,
+            notify_on_end=True,
+        )
+        end_sub = db.get_subscription(end_sid, 50)
+        assert end_sub is not None
+        assert not prem.is_live_only_alert(end_sub)
+        assert prem.alert_type_entitled_sync(db, 50, end_sub) is False
+        assert prem.alert_type_entitled_sync(db, 50, sub) is True
+        apply_features_payment(
+            db,
+            50,
+            feature_ids=["alert_types"],
+            charge_id="stx_end_types",
+            until_unix=10**12,
+            stars_paid=1,
+        )
+        assert prem.alert_type_entitled_sync(db, 50, end_sub) is True
+        db.clear_premium_feature(50, "alert_types")
+        assert prem.alert_type_entitled_sync(db, 50, end_sub) is False
+        # Expiry sweep: expired alert_types pauses enabled non-live alerts.
+        apply_features_payment(
+            db,
+            50,
+            feature_ids=["alert_types"],
+            charge_id="stx_end_exp",
+            until_unix=1,
+            stars_paid=1,
+        )
+        db.toggle_subscription(end_sid, 50)
+        assert db.get_subscription(end_sid, 50).enabled is True
+        assert prem.pause_unentitled_subscriptions(db, 50) >= 1
+        assert db.get_subscription(end_sid, 50).enabled is False
+        assert not prem.get_status(db, 50).feature_active("alert_types")
+        # Over free active cap without extra_alerts → excess paused.
+        cap_owner = 55
+        db.upsert_user(cap_owner)
+        live_ids = []
+        for i in range(prem.free_active_limit() + 1):
+            live_ids.append(
+                db.add_subscription(
+                    cap_owner,
+                    f"cap{i}",
+                    str(5000 + i),
+                    "hi",
+                    "dm",
+                    cap_owner,
+                    None,
+                    enabled=True,
+                    notify_on_live=True,
+                )
+            )
+        assert prem.pause_unentitled_subscriptions(db, cap_owner) >= 1
+        still_on = sum(
+            1
+            for sid in live_ids
+            if db.get_subscription(sid, cap_owner).enabled
+        )
+        assert still_on == prem.free_active_limit()
         ok3, reason3 = start_trial(db, 50)
         assert not ok3 and reason3 == "used"
 
@@ -1301,3 +1368,48 @@ def check_handlers() -> None:
         with patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", fake):
             assert cw._other_promo_streams(779, sub_logins=set()) == []
 
+    # Free user cannot enable a non-live alert without alert_types.
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from handlers.subscriptions import on_toggle
+
+    with tempfile.TemporaryDirectory() as toggle_tmp:
+        tdb = SqliteDatabase(Path(toggle_tmp) / "toggle.db")
+        tdb.upsert_user(4242)
+        end_id = tdb.add_subscription(
+            4242,
+            "x",
+            "1",
+            "hi",
+            "dm",
+            4242,
+            None,
+            enabled=False,
+            notify_on_live=False,
+            notify_on_end=True,
+        )
+        query = AsyncMock()
+        query.data = f"toggle:{end_id}"
+        query.from_user = SimpleNamespace(id=4242)
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        update = SimpleNamespace(callback_query=query)
+        context = MagicMock()
+        context.application.bot_data = {"db": tdb}
+        context.bot = AsyncMock()
+        context.user_data = {}
+        with patch(
+            "premium_handlers.send_premium_screen", new=AsyncMock()
+        ), patch(
+            "handlers.subscriptions.prem.has_feature",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "handlers.subscriptions._refresh_current_subs_list",
+            new=AsyncMock(),
+        ):
+            asyncio.run(on_toggle(update, context))
+        assert tdb.get_subscription(end_id, 4242).enabled is False
+        edited = query.edit_message_text.await_args.args[0]
+        assert "Premium" in edited or "премиум" in edited.lower()
