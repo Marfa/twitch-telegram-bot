@@ -44,7 +44,7 @@
       "title_key": "beta_feat_share_alerts",
       "description_key": "beta_feat_share_alerts_desc",
       "issue_label": "beta/share-alerts",
-      "stage": "beta",
+      "stage": "ga",
       "created_at": "2026-08-27"
     }
   ]
