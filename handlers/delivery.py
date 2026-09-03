@@ -247,13 +247,52 @@ def _is_chat_unreachable_error(exc: BaseException) -> bool:
 def _mark_destination_unreachable(db: Database, sub: Subscription, exc: BaseException) -> None:
     if sub.dest_type == "dm":
         if _is_user_blocked_error(exc) or _is_chat_unreachable_error(exc):
-            db.set_bot_blocked(sub.chat_id, True)
+            apply_user_blocked(db, sub.chat_id)
         return
     if _is_chat_unreachable_error(exc):
-        db.set_chat_unreachable(sub.chat_id, True)
+        apply_chat_unreachable(db, sub.chat_id)
         return
     if _is_user_blocked_error(exc):
-        db.set_bot_blocked(sub.owner_id, True)
+        apply_user_blocked(db, sub.owner_id)
+
+
+def resume_delivery_for_chat(db: Database, chat_id: int) -> int:
+    """Clear delivery_paused for chat; re-enable via active-subscription gate."""
+    import premium as prem
+
+    resumed = 0
+    for sub in db.list_delivery_paused_for_chat(chat_id):
+        can = prem.may_enable_subscription(
+            db,
+            sub.owner_id,
+            demo=bool(sub.is_demo),
+            twitch_username=sub.twitch_username,
+        )
+        db.clear_delivery_paused(sub.id, enabled=can)
+        if can:
+            resumed += 1
+    return resumed
+
+
+def apply_user_blocked(db: Database, user_id: int) -> int:
+    db.set_bot_blocked(user_id, True)
+    return db.pause_delivery_for_chat(user_id)
+
+
+def clear_user_blocked(db: Database, user_id: int) -> int:
+    db.set_bot_blocked(user_id, False)
+    db.set_chat_unreachable(user_id, False)
+    return resume_delivery_for_chat(db, user_id)
+
+
+def apply_chat_unreachable(db: Database, chat_id: int) -> int:
+    db.set_chat_unreachable(chat_id, True)
+    return db.pause_delivery_for_chat(chat_id)
+
+
+def clear_chat_unreachable(db: Database, chat_id: int) -> int:
+    db.set_chat_unreachable(chat_id, False)
+    return resume_delivery_for_chat(db, chat_id)
 
 
 def _delivery_fail_notice_due(sub_id: int, *, now: datetime | None = None) -> bool:
@@ -407,7 +446,7 @@ async def _maybe_notify_delivery_failure(
         _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
     except (BadRequest, Forbidden) as notify_exc:
         if _is_user_blocked_error(notify_exc):
-            db.set_bot_blocked(sub.owner_id, True)
+            apply_user_blocked(db, sub.owner_id)
         logger.warning(
             "Cannot notify owner %s about delivery failure: %s",
             sub.owner_id,
@@ -537,9 +576,9 @@ async def _send_notification(
         return False
 
     if db.is_chat_unreachable(sub.chat_id):
-        db.set_chat_unreachable(sub.chat_id, False)
+        clear_chat_unreachable(db, sub.chat_id)
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
-        db.set_bot_blocked(sub.chat_id, False)
+        clear_user_blocked(db, sub.chat_id)
     if msg and sub.delete_previous and sub.dest_type != "dm":
         db.set_last_message_id(sub.id, msg.message_id)
     if sub.suppress_repeat_minutes > 0:
@@ -582,13 +621,13 @@ async def _send_test(
     try:
         await bot.send_message(**kwargs)
         if db is not None:
-            db.set_chat_unreachable(chat_id, False)
+            clear_chat_unreachable(db, chat_id)
         return True
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", chat_id, exc)
         if db is not None and _is_chat_unreachable_error(exc):
-            db.set_chat_unreachable(chat_id, True)
+            apply_chat_unreachable(db, chat_id)
         elif db is not None and _is_user_blocked_error(exc):
-            db.set_bot_blocked(chat_id, True)
+            apply_user_blocked(db, chat_id)
         return False
 

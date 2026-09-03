@@ -772,7 +772,9 @@ async def notify_whisper_received(application: Application, event: Any) -> None:
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
         except Forbidden:
-            db.set_bot_blocked(alert.owner_id, True)
+            from handlers.delivery import apply_user_blocked
+
+            apply_user_blocked(db, alert.owner_id)
         except BadRequest as exc:
             logger.warning(
                 "Cannot send whisper alert to %s: %s", alert.owner_id, exc
@@ -794,7 +796,9 @@ async def on_whisper_eventsub_revoked(
                 owner_id, t("whisper_alerts_revoked", lang)
             )
         except Forbidden:
-            db.set_bot_blocked(owner_id, True)
+            from handlers.delivery import apply_user_blocked
+
+            apply_user_blocked(db, owner_id)
         except BadRequest as exc:
             logger.warning("Cannot send whisper revoke notice to %s: %s", owner_id, exc)
 

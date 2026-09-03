@@ -231,7 +231,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     user_id, t("premium_trial_expired", lang)
                 )
             except Forbidden:
-                db.set_bot_blocked(user_id, True)
+                from handlers.delivery import apply_user_blocked
+
+                apply_user_blocked(db, user_id)
             except BadRequest:
                 logger.exception(
                     "Failed to send trial expiry notice to %s", user_id

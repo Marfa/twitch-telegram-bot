@@ -328,7 +328,9 @@ async def _send_dm_html(
             return _result("sent", msg)
         except Forbidden as retry_exc:
             if "blocked" in str(retry_exc).lower():
-                db.set_bot_blocked(uid, True)
+                from handlers.delivery import apply_user_blocked
+
+                apply_user_blocked(db, uid)
                 return _result("blocked")
             logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
             return _result("failed")
@@ -337,7 +339,9 @@ async def _send_dm_html(
             return _result("failed")
     except Forbidden as exc:
         if "blocked" in str(exc).lower():
-            db.set_bot_blocked(uid, True)
+            from handlers.delivery import apply_user_blocked
+
+            apply_user_blocked(db, uid)
             return _result("blocked")
         logger.warning("Broadcast to %s failed: %s", uid, exc)
         return _result("failed")

@@ -517,7 +517,7 @@
   "delete_fail_yes": "✅ Да",
   "delete_fail_no": "❌ Нет",
   "delete_fail_notice": "Не удалось удалить предыдущее оповещение:\n{link}",
-  "delivery_fail_notice": "Не удалось отправить оповещение по подписке #{sub_id} ({twitch_username}) в чат {chat_name}.\n\nПричина: {reason}\n\nУбедитесь, что бот всё ещё в чате и может отправлять сообщения.",
+  "delivery_fail_notice": "Не удалось отправить оповещение по подписке #{sub_id} ({twitch_username}) в чат {chat_name}.\n\nПричина: {reason}\n\nОповещения в этот чат поставлены на паузу. Добавьте бота обратно (или выдайте права) — тогда они включатся снова.",
   "delivery_fail_edit_btn": "✏️ Редактировать оповещение",
   "delivery_fail_delete_btn": "🗑 Удалить оповещение",
   "delete_fail_yes_note": "Сообщать о проблемах удаления: да",

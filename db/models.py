@@ -377,6 +377,7 @@ class Subscription:
     delete_other_alerts: bool
     is_demo: bool
     trial_paused: bool
+    delivery_paused: bool
 
 
 @dataclass(frozen=True)
@@ -767,6 +768,9 @@ def _row_to_sub(row: Any) -> Subscription:
         else False,
         is_demo=bool(row["is_demo"]) if "is_demo" in keys else False,
         trial_paused=bool(row["trial_paused"]) if "trial_paused" in keys else False,
+        delivery_paused=bool(row["delivery_paused"])
+        if "delivery_paused" in keys
+        else False,
     )
 
 

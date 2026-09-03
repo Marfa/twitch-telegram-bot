@@ -902,25 +902,43 @@ async def _smoke_delivery_and_helpers(db) -> None:
     ok = await _send_notification(bot, db, channel_sub, "hi")
     assert ok is False
     assert db.is_chat_unreachable(channel_id) is True
+    channel_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == sub_id)
+    assert channel_sub.enabled is False
+    assert channel_sub.delivery_paused is True
     bot.send_message.reset_mock()
     bot.send_photo.reset_mock()
+    # Paused sub is no longer returned by get_enabled; direct send also skips.
     skipped = await _send_notification(bot, db, channel_sub, "hi again")
     assert skipped is True
     bot.send_message.assert_not_awaited()
     bot.send_photo.assert_not_awaited()
 
-    db.set_bot_blocked(_FREE_UID, True)
+    from handlers.delivery import clear_chat_unreachable, apply_user_blocked
+
+    clear_chat_unreachable(db, channel_id)
+    channel_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == sub_id)
+    assert channel_sub.delivery_paused is False
+    assert channel_sub.enabled is True
+
+    apply_user_blocked(db, _FREE_UID)
+    dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
+    assert dm_sub.enabled is False and dm_sub.delivery_paused is True
     bot.send_message.reset_mock()
     skipped_dm = await _send_notification(bot, db, dm_sub, "dm hi")
     assert skipped_dm is True
     bot.send_message.assert_not_awaited()
-    db.set_bot_blocked(_FREE_UID, False)
+    from handlers.delivery import clear_user_blocked
+
+    clear_user_blocked(db, _FREE_UID)
+    dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
+    assert dm_sub.delivery_paused is False
+    assert dm_sub.enabled is True
 
     _mark_destination_unreachable(
         db, dm_sub, Forbidden("Forbidden: bot was blocked by the user")
     )
     assert db.is_bot_blocked(_FREE_UID) is True
-    db.set_bot_blocked(_FREE_UID, False)
+    clear_user_blocked(db, _FREE_UID)
     db.set_chat_unreachable(channel_id, False)
 
     application, bot = _app(db)

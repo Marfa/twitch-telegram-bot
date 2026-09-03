@@ -517,7 +517,7 @@
   "delete_fail_yes": "✅ Yes",
   "delete_fail_no": "❌ No",
   "delete_fail_notice": "Could not delete the previous notification:\n{link}",
-  "delivery_fail_notice": "Could not send notification for subscription #{sub_id} ({twitch_username}) to chat {chat_name}.\n\nReason: {reason}\n\nMake sure the bot is still in the chat and can send messages.",
+  "delivery_fail_notice": "Could not send notification for subscription #{sub_id} ({twitch_username}) to chat {chat_name}.\n\nReason: {reason}\n\nAlerts to this chat are paused. Re-add the bot (or restore send rights) and they will turn back on.",
   "delivery_fail_edit_btn": "✏️ Edit notification",
   "delivery_fail_delete_btn": "🗑 Delete notification",
   "delete_fail_yes_note": "Notify on delete failure: yes",

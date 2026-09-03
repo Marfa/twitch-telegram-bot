@@ -1566,6 +1566,8 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from handlers.delivery import apply_chat_unreachable, clear_chat_unreachable, clear_user_blocked
+
     result = update.my_chat_member
     if result is None:
         return
@@ -1576,30 +1578,34 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if chat.type == ChatType.PRIVATE:
         user_id = result.from_user.id
         if status == ChatMemberStatus.BANNED:
-            db.set_bot_blocked(user_id, True)
+            from handlers.delivery import apply_user_blocked
+
+            apply_user_blocked(db, user_id)
             analytics.capture(user_id, "bot_blocked")
         elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
-            db.set_bot_blocked(user_id, False)
-            db.set_chat_unreachable(user_id, False)
+            clear_user_blocked(db, user_id)
             analytics.capture(user_id, "bot_unblocked")
         return
 
-    # Groups / channels: stop alerts until bot is a member again (or test send works).
+    # Groups / channels: pause alerts until bot is a member again (or test send works).
     chat_id = chat.id
     if status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
-        db.set_chat_unreachable(chat_id, True)
+        apply_chat_unreachable(db, chat_id)
         return
     if status in (
         ChatMemberStatus.MEMBER,
         ChatMemberStatus.ADMINISTRATOR,
         ChatMemberStatus.OWNER,
     ):
-        db.set_chat_unreachable(chat_id, False)
+        clear_chat_unreachable(db, chat_id)
         return
     if status == ChatMemberStatus.RESTRICTED:
         member = result.new_chat_member
         can_send = bool(getattr(member, "can_send_messages", True))
-        db.set_chat_unreachable(chat_id, not can_send)
+        if can_send:
+            clear_chat_unreachable(db, chat_id)
+        else:
+            apply_chat_unreachable(db, chat_id)
 
 async def open_premium_from_settings(
     update: Update, context: ContextTypes.DEFAULT_TYPE

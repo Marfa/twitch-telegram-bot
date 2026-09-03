@@ -215,6 +215,10 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN trial_paused INTEGER NOT NULL DEFAULT 0"
             )
+        if "delivery_paused" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN delivery_paused INTEGER NOT NULL DEFAULT 0"
+            )
         if "strip_name_mentions" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN strip_name_mentions "
@@ -699,10 +703,20 @@ class SqliteDatabase:
             return None
         new_state = 0 if sub.enabled else 1
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE subscriptions SET enabled = ? WHERE id = ? AND owner_id = ?",
-                (new_state, sub_id, owner_id),
-            )
+            if new_state:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET enabled = 1, delivery_paused = 0
+                    WHERE id = ? AND owner_id = ?
+                    """,
+                    (sub_id, owner_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE subscriptions SET enabled = 0 WHERE id = ? AND owner_id = ?",
+                    (sub_id, owner_id),
+                )
         return bool(new_state)
 
     def enable_all_subscriptions(
@@ -711,6 +725,7 @@ class SqliteDatabase:
         sub = """
             SELECT id FROM subscriptions
             WHERE owner_id = ? AND enabled = 0 AND is_demo = ? AND trial_paused = 0
+              AND COALESCE(delivery_paused, 0) = 0
             ORDER BY id
         """
         params: list[object] = [owner_id, int(bool(demo))]
@@ -1546,6 +1561,41 @@ class SqliteDatabase:
                 (chat_id,),
             ).fetchone()
         return row is not None
+
+    def pause_delivery_for_chat(self, chat_id: int) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE subscriptions
+                SET enabled = 0, delivery_paused = 1
+                WHERE chat_id = ? AND enabled = 1
+                """,
+                (chat_id,),
+            )
+            return int(cur.rowcount)
+
+    def list_delivery_paused_for_chat(self, chat_id: int) -> list[Subscription]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE chat_id = ? AND COALESCE(delivery_paused, 0) = 1
+                ORDER BY id
+                """,
+                (chat_id,),
+            ).fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def clear_delivery_paused(self, sub_id: int, *, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET delivery_paused = 0, enabled = ?
+                WHERE id = ?
+                """,
+                (int(bool(enabled)), sub_id),
+            )
 
     def get_notify_user_ids(self) -> list[int]:
         with self._conn() as conn:

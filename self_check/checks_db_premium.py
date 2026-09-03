@@ -697,11 +697,28 @@ def check_db_premium() -> None:
         assert db.is_chat_unreachable(-1001980871389) is True
         db.set_chat_unreachable(-1001980871389, False)
         assert db.is_chat_unreachable(-1001980871389) is False
+        ch = -100555
+        sid_a = db.add_subscription(
+            1, "a", "a", "t", "channel", ch, None, enabled=True
+        )
+        sid_b = db.add_subscription(
+            1, "b", "b", "t", "channel", ch, None, enabled=True
+        )
+        assert db.pause_delivery_for_chat(ch) == 2
+        assert db.get_subscription(sid_a, 1).enabled is False
+        assert db.get_subscription(sid_a, 1).delivery_paused is True
+        assert db.get_subscription(sid_b, 1).delivery_paused is True
+        db.clear_delivery_paused(sid_a, enabled=True)
+        assert db.get_subscription(sid_a, 1).enabled is True
+        assert db.get_subscription(sid_a, 1).delivery_paused is False
+        db.clear_delivery_paused(sid_b, enabled=False)
+        assert db.get_subscription(sid_b, 1).enabled is False
+        assert db.get_subscription(sid_b, 1).delivery_paused is False
         db.upsert_user(1)
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()
         assert restored.users == 1
-        assert restored.subscriptions_total == 6
+        assert restored.subscriptions_total == 8
         assert restored.blocked_users == 0
         bid = db.add_scheduled_broadcast(
             "bot_update", "hello", "2099-01-01T00:00:00+00:00", 1
@@ -817,6 +834,65 @@ def check_db_premium() -> None:
             enabled=True,
         )
         assert len(capped_subs) == 1 and capped_subs[0].enabled is False
+
+        # Delivery pause frees active slots; resume respects free active cap.
+        from handlers.delivery import apply_chat_unreachable, clear_chat_unreachable
+
+        pause_owner = 88016
+        pause_chat = -10088016
+        gate_db.upsert_user(pause_owner)
+        prem.ensure_trial_expired(gate_db, pause_owner)
+        pause_ids: list[int] = []
+        for i in range(plimit):
+            pause_ids.append(
+                gate_db.add_subscription(
+                    owner_id=pause_owner,
+                    twitch_username=f"dp{i}",
+                    twitch_user_id=f"dp{i}",
+                    message_template="t",
+                    dest_type="channel",
+                    chat_id=pause_chat,
+                    thread_id=None,
+                    enabled=True,
+                )
+            )
+        assert apply_chat_unreachable(gate_db, pause_chat) == plimit
+        assert gate_db.count_enabled_subscriptions(pause_owner) == 0
+        # Fill free slots while delivery-paused.
+        filler = gate_db.add_subscription(
+            owner_id=pause_owner,
+            twitch_username="filler",
+            twitch_user_id="filler",
+            message_template="t",
+            dest_type="dm",
+            chat_id=pause_owner,
+            thread_id=None,
+            enabled=True,
+        )
+        assert gate_db.get_subscription(filler, pause_owner).enabled is True
+        clear_chat_unreachable(gate_db, pause_chat)
+        # One slot taken by filler → only plimit-1 of delivery-paused can re-enable.
+        reenabled = sum(
+            1
+            for sid in pause_ids
+            if gate_db.get_subscription(sid, pause_owner).enabled
+        )
+        assert reenabled == plimit - 1
+        still_paused_flag = sum(
+            1
+            for sid in pause_ids
+            if gate_db.get_subscription(sid, pause_owner).delivery_paused
+        )
+        assert still_paused_flag == 0
+        assert (
+            sum(
+                1
+                for sid in pause_ids
+                if not gate_db.get_subscription(sid, pause_owner).enabled
+            )
+            == 1
+        )
+
         restore_owner = 88007
         gate_db.upsert_user(restore_owner)
         restore_ids: list[int] = []
