@@ -18,6 +18,14 @@ from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
+ALERT_HISTORY_VIEWED_EMOJI = "🫣"
+ALERT_HISTORY_UNVIEWED_EMOJI = "🙄"
+
+# /start payloads for in-text action links (Telegram has no text callbacks).
+_START_VIEWED = "ah_v_"
+_START_UNVIEWED = "ah_u_"
+_START_VIEWED_BELOW = "ah_vb_"
+
 
 def _alert_history_type_label(alert_type: str, lang: str) -> str:
     key = {
@@ -92,6 +100,14 @@ def _alert_history_item_url(item: AlertHistoryEntry) -> str:
     return ""
 
 
+def _alert_history_start_url(bot_username: str, prefix: str, history_id: int) -> str:
+    return f"https://t.me/{bot_username}?start={prefix}{int(history_id)}"
+
+
+def _html_action_link(url: str, label: str) -> str:
+    return f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>'
+
+
 def _format_alert_history_block(
     *,
     time_str: str,
@@ -99,13 +115,18 @@ def _format_alert_history_block(
     body: str,
     lang: str,
     stream_url: str | None = None,
+    viewed: bool = False,
+    history_id: int | None = None,
+    bot_username: str = "",
 ) -> str:
+    status = ALERT_HISTORY_VIEWED_EMOJI if viewed else ALERT_HISTORY_UNVIEWED_EMOJI
     parts = [
         t(
             "alert_history_line",
             lang,
             time=time_str,
             username=html.escape(username),
+            status=status,
         )
     ]
     parts.append(t("alert_history_body", lang, text=html.escape(body)))
@@ -113,9 +134,42 @@ def _format_alert_history_block(
     url = stream_url
     if url is None:
         url = _alert_history_stream_url(login) if login and login != "—" else ""
+    action_bits: list[str] = []
     if url:
-        label = html.escape(t("alert_history_go_stream", lang))
-        parts.append(f'<a href="{html.escape(url, quote=True)}">{label}</a>')
+        action_bits.append(
+            _html_action_link(url, t("alert_history_go_stream", lang))
+        )
+    bot = (bot_username or "").strip().lstrip("@")
+    if bot and history_id is not None:
+        if viewed:
+            action_bits.append(
+                _html_action_link(
+                    _alert_history_start_url(bot, _START_UNVIEWED, history_id),
+                    t("alert_history_mark_unviewed", lang),
+                )
+            )
+        else:
+            action_bits.append(
+                _html_action_link(
+                    _alert_history_start_url(bot, _START_VIEWED, history_id),
+                    t("alert_history_mark_viewed", lang),
+                )
+            )
+        action_bits.append(
+            _html_action_link(
+                _alert_history_start_url(bot, _START_VIEWED_BELOW, history_id),
+                t("alert_history_mark_viewed_below", lang),
+            )
+        )
+    elif history_id is not None:
+        # No bot username (tests / offline) — still show labels for layout checks.
+        if viewed:
+            action_bits.append(html.escape(t("alert_history_mark_unviewed", lang)))
+        else:
+            action_bits.append(html.escape(t("alert_history_mark_viewed", lang)))
+        action_bits.append(html.escape(t("alert_history_mark_viewed_below", lang)))
+    if action_bits:
+        parts.append(" | ".join(action_bits))
     return "\n".join(parts)
 
 
@@ -176,6 +230,8 @@ def _build_alert_history_chunks(
     items: list,
     lang: str,
     days: int,
+    *,
+    bot_username: str = "",
 ) -> list[str]:
     title = t("alert_history_title", lang, days=days, n=len(items))
     blocks: list[str] = []
@@ -202,6 +258,9 @@ def _build_alert_history_chunks(
                 body=body,
                 lang=lang,
                 stream_url=_alert_history_item_url(item),
+                viewed=bool(getattr(item, "viewed", False)),
+                history_id=int(item.id),
+                bot_username=bot_username,
             )
         )
         blocks.append("\n".join(parts))
@@ -266,11 +325,31 @@ def _alert_history_nav_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    lang = _user_lang(context, user_id)
+def _remember_alert_history_ui(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    *,
+    chat_id: int,
+    message_id: int,
+    page: int,
+) -> None:
+    store = context.application.bot_data.setdefault("alert_history_ui", {})
+    store[int(user_id)] = {
+        "chat_id": int(chat_id),
+        "message_id": int(message_id),
+        "page": int(page),
+    }
+
+
+def _alert_history_bot_username(context: ContextTypes.DEFAULT_TYPE) -> str:
+    bot = context.bot
+    return str(getattr(bot, "username", None) or "").strip()
+
+
+async def _load_alert_history_pages(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int, lang: str
+) -> tuple[list[str], bool]:
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     deep = await prem.has_feature(context.bot, db, user_id, "alert_history")
     days = (
         prem.ALERT_HISTORY_PREMIUM_DAYS if deep else prem.ALERT_HISTORY_FREE_DAYS
@@ -280,8 +359,27 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
     twitch = context.application.bot_data.get("twitch")
     if twitch is not None and items:
         await _fill_alert_history_vods(twitch, db, items)
-
     if not items:
+        context.user_data["alert_history_pages"] = []
+        context.user_data["alert_history_deep"] = deep
+        return [], deep
+    bot_username = _alert_history_bot_username(context)
+    pages = _build_alert_history_chunks(
+        items, lang, days, bot_username=bot_username
+    )
+    context.user_data["alert_history_pages"] = pages
+    context.user_data["alert_history_deep"] = deep
+    return pages, deep
+
+
+async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    pages, deep = await _load_alert_history_pages(context, user_id, lang)
+
+    if not pages:
         empty_rows: list[list[InlineKeyboardButton]] = []
         if not deep:
             empty_rows.append(
@@ -300,17 +398,21 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    chunks = _build_alert_history_chunks(items, lang, days)
-    context.user_data["alert_history_pages"] = chunks
-    context.user_data["alert_history_deep"] = deep
     kb = _alert_history_nav_keyboard(
-        lang, 0, len(chunks), show_more=not deep
+        lang, 0, len(pages), show_more=not deep
     )
-    await update.effective_message.reply_text(
-        chunks[0],
+    msg = await update.effective_message.reply_text(
+        pages[0],
         reply_markup=kb,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+    )
+    _remember_alert_history_ui(
+        context,
+        user_id,
+        chat_id=msg.chat_id,
+        message_id=msg.message_id,
+        page=0,
     )
 
 
@@ -328,19 +430,10 @@ async def on_alert_history_page(
     pages = context.user_data.get("alert_history_pages")
     deep = bool(context.user_data.get("alert_history_deep"))
     if not isinstance(pages, list) or not pages:
-        db: Database = context.application.bot_data["db"]
-        deep = await prem.has_feature(context.bot, db, user_id, "alert_history")
-        days = (
-            prem.ALERT_HISTORY_PREMIUM_DAYS if deep else prem.ALERT_HISTORY_FREE_DAYS
-        )
-        since = datetime.now(timezone.utc) - timedelta(days=days)
-        items = db.list_alert_history(user_id, since=since)
-        if not items:
+        pages, deep = await _load_alert_history_pages(context, user_id, lang)
+        if not pages:
             await query.edit_message_text(t("alert_history_empty", lang))
             return
-        pages = _build_alert_history_chunks(items, lang, days)
-        context.user_data["alert_history_pages"] = pages
-        context.user_data["alert_history_deep"] = deep
     page = max(0, min(page, len(pages) - 1))
     kb = _alert_history_nav_keyboard(
         lang, page, len(pages), show_more=not deep
@@ -356,6 +449,14 @@ async def on_alert_history_page(
         # Same text/markup (e.g. double tap) — ignore "message is not modified".
         if "not modified" not in str(exc).lower():
             raise
+    if query.message is not None:
+        _remember_alert_history_ui(
+            context,
+            user_id,
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            page=page,
+        )
 
 
 async def on_alert_history_noop(
@@ -386,6 +487,9 @@ async def on_alert_history_menu(
     lang = _user_lang(context, user_id)
     context.user_data.pop("alert_history_pages", None)
     context.user_data.pop("alert_history_deep", None)
+    store = context.application.bot_data.get("alert_history_ui")
+    if isinstance(store, dict):
+        store.pop(int(user_id), None)
     try:
         await query.edit_message_reply_markup(reply_markup=None)
     except BadRequest:
@@ -394,3 +498,139 @@ async def on_alert_history_menu(
         reply_chat_id(update), t("menu_main", lang), reply_markup=_menu(lang, user_id)
     )
 
+
+def _parse_alert_history_start_arg(raw: str) -> tuple[str, int] | None:
+    text = (raw or "").strip()
+    for prefix, action in (
+        (_START_VIEWED_BELOW, "vb"),
+        (_START_VIEWED, "v"),
+        (_START_UNVIEWED, "u"),
+    ):
+        if text.startswith(prefix):
+            rest = text[len(prefix) :]
+            try:
+                return action, int(rest)
+            except ValueError:
+                return None
+    return None
+
+
+async def _refresh_alert_history_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    lang: str,
+    *,
+    preferred_page: int | None = None,
+) -> None:
+    pages, deep = await _load_alert_history_pages(context, user_id, lang)
+    store = context.application.bot_data.get("alert_history_ui") or {}
+    ui = store.get(int(user_id)) if isinstance(store, dict) else None
+    page = 0
+    if preferred_page is not None:
+        page = preferred_page
+    elif isinstance(ui, dict):
+        try:
+            page = int(ui.get("page") or 0)
+        except (TypeError, ValueError):
+            page = 0
+    if not pages:
+        if isinstance(ui, dict) and ui.get("chat_id") and ui.get("message_id"):
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=int(ui["chat_id"]),
+                    message_id=int(ui["message_id"]),
+                    text=t("alert_history_empty", lang),
+                    reply_markup=InlineKeyboardMarkup(
+                        [_alert_history_menu_row(lang)]
+                    ),
+                    disable_web_page_preview=True,
+                )
+            except BadRequest:
+                pass
+        return
+    page = max(0, min(page, len(pages) - 1))
+    kb = _alert_history_nav_keyboard(
+        lang, page, len(pages), show_more=not deep
+    )
+    if isinstance(ui, dict) and ui.get("chat_id") and ui.get("message_id"):
+        try:
+            await context.bot.edit_message_text(
+                chat_id=int(ui["chat_id"]),
+                message_id=int(ui["message_id"]),
+                text=pages[page],
+                reply_markup=kb,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            _remember_alert_history_ui(
+                context,
+                user_id,
+                chat_id=int(ui["chat_id"]),
+                message_id=int(ui["message_id"]),
+                page=page,
+            )
+            return
+        except BadRequest as exc:
+            if "not modified" in str(exc).lower():
+                return
+    msg = await context.bot.send_message(
+        chat_id=user_id,
+        text=pages[page],
+        reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    _remember_alert_history_ui(
+        context,
+        user_id,
+        chat_id=msg.chat_id,
+        message_id=msg.message_id,
+        page=page,
+    )
+
+
+async def handle_alert_history_start_arg(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> bool:
+    """Handle /start ah_v_* / ah_u_* / ah_vb_* from in-text history action links.
+
+    Returns True when the start payload was consumed (caller should skip welcome).
+    """
+    args = context.args
+    if not args:
+        return False
+    parsed = _parse_alert_history_start_arg(args[0])
+    if parsed is None:
+        return False
+    action, history_id = parsed
+    user = update.effective_user
+    if user is None:
+        return True
+    user_id = user.id
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    if action == "v":
+        db.set_alert_history_viewed(user_id, history_id, viewed=True)
+    elif action == "u":
+        db.set_alert_history_viewed(user_id, history_id, viewed=False)
+    else:
+        db.set_alert_history_viewed_below(user_id, history_id, viewed=True)
+    lang = db.get_user_locale(user_id) or "ru"
+    store = context.application.bot_data.get("alert_history_ui") or {}
+    ui = store.get(int(user_id)) if isinstance(store, dict) else None
+    preferred_page = None
+    if isinstance(ui, dict):
+        try:
+            preferred_page = int(ui.get("page") or 0)
+        except (TypeError, ValueError):
+            preferred_page = 0
+    # Drop the visible /start ah_* message when possible.
+    if update.effective_message is not None:
+        try:
+            await update.effective_message.delete()
+        except BadRequest:
+            pass
+    await _refresh_alert_history_message(
+        context, user_id, lang, preferred_page=preferred_page
+    )
+    return True

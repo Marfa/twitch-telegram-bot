@@ -454,6 +454,7 @@ class SqliteDatabase:
                 stream_id TEXT NOT NULL DEFAULT '',
                 vod_id TEXT NOT NULL DEFAULT '',
                 vod_offset_seconds INTEGER,
+                viewed INTEGER NOT NULL DEFAULT 0,
                 sent_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
@@ -477,6 +478,10 @@ class SqliteDatabase:
             )
         if "vod_offset_seconds" not in ah_cols:
             conn.execute("ALTER TABLE alert_history ADD COLUMN vod_offset_seconds INTEGER")
+        if "viewed" not in ah_cols:
+            conn.execute(
+                "ALTER TABLE alert_history ADD COLUMN viewed INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
@@ -1385,6 +1390,35 @@ class SqliteDatabase:
                 (vid, int(history_id)),
             )
 
+    def set_alert_history_viewed(
+        self, owner_id: int, history_id: int, *, viewed: bool
+    ) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE alert_history
+                SET viewed = ?
+                WHERE id = ? AND owner_id = ?
+                """,
+                (1 if viewed else 0, int(history_id), int(owner_id)),
+            )
+            return cur.rowcount > 0
+
+    def set_alert_history_viewed_below(
+        self, owner_id: int, history_id: int, *, viewed: bool = True
+    ) -> int:
+        # History UI is newest-first (id DESC); "below" = this row and older (id <=).
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE alert_history
+                SET viewed = ?
+                WHERE owner_id = ? AND id <= ?
+                """,
+                (1 if viewed else 0, int(owner_id), int(history_id)),
+            )
+            return int(cur.rowcount)
+
     def list_alert_history(
         self,
         owner_id: int,
@@ -1401,7 +1435,8 @@ class SqliteDatabase:
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
                            alert_type, message_text, sent_at,
-                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds,
+                           viewed
                     FROM alert_history
                     WHERE owner_id = ? AND sent_at >= ?
                     ORDER BY id DESC
@@ -1414,7 +1449,8 @@ class SqliteDatabase:
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
                            alert_type, message_text, sent_at,
-                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds,
+                           viewed
                     FROM alert_history
                     WHERE owner_id = ?
                     ORDER BY id DESC

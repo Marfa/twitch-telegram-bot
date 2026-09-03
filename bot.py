@@ -189,6 +189,7 @@ from handlers.alert_history import (
     _twitch_vod_url,
     _vod_id_from_videos,
     _vod_offset_seconds,
+    handle_alert_history_start_arg,
     on_alert_history_menu,
     on_alert_history_more,
     on_alert_history_noop,
@@ -885,6 +886,8 @@ async def _maybe_offer_pending_share(
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await handle_alert_history_start_arg(update, context):
+        return ConversationHandler.END
     context.user_data.clear()
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id

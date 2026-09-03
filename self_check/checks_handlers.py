@@ -765,9 +765,34 @@ def check_handlers() -> None:
             body="Hello <b>x</b>",
             lang="ru",
         )
-        assert "• 17:00 — <b>frank_sg</b>" in hist_block
+        assert "• 17:00 — <b>frank_sg</b> 🙄" in hist_block
         assert "Hello &lt;b&gt;x&lt;/b&gt;" in hist_block
         assert '<a href="https://twitch.tv/frank_sg">Перейти к стриму</a>' in hist_block
+        viewed_block = _format_alert_history_block(
+            time_str="17:00",
+            username="frank_sg",
+            body="Hi",
+            lang="ru",
+            viewed=True,
+            history_id=42,
+            bot_username="test_bot",
+        )
+        assert "🫣" in viewed_block
+        assert "Не просмотрено" in viewed_block
+        assert "start=ah_u_42" in viewed_block
+        assert "start=ah_vb_42" in viewed_block
+        unseen_block = _format_alert_history_block(
+            time_str="17:00",
+            username="frank_sg",
+            body="Hi",
+            lang="ru",
+            viewed=False,
+            history_id=7,
+            bot_username="test_bot",
+        )
+        assert "🙄" in unseen_block
+        assert "Просмотрено" in unseen_block
+        assert "start=ah_v_7" in unseen_block
         assert "videos/99?t=2m5s" in _format_alert_history_block(
             time_str="17:00",
             username="frank_sg",
@@ -775,6 +800,43 @@ def check_handlers() -> None:
             lang="ru",
             stream_url="https://www.twitch.tv/videos/99?t=2m5s",
         )
+        db.add_alert_history(
+            11,
+            subscription_id=1,
+            twitch_username="a",
+            alert_type="live",
+            message_text="1",
+        )
+        db.add_alert_history(
+            11,
+            subscription_id=1,
+            twitch_username="b",
+            alert_type="live",
+            message_text="2",
+        )
+        db.add_alert_history(
+            11,
+            subscription_id=1,
+            twitch_username="c",
+            alert_type="live",
+            message_text="3",
+        )
+        rows11 = db.list_alert_history(11)
+        assert all(not r.viewed for r in rows11)
+        mid_id = rows11[1].id
+        assert db.set_alert_history_viewed(11, mid_id, viewed=True)
+        assert db.list_alert_history(11)[1].viewed is True
+        n_below = db.set_alert_history_viewed_below(11, mid_id, viewed=True)
+        assert n_below >= 2
+        after_below = {r.id: r.viewed for r in db.list_alert_history(11)}
+        assert after_below[mid_id] is True
+        assert after_below[rows11[2].id] is True
+        assert after_below[rows11[0].id] is False
+        assert db.set_alert_history_viewed(11, mid_id, viewed=False)
+        assert db.list_alert_history(11)[1].viewed is False
+        assert tr("alert_history_mark_viewed", "ru") == "Просмотрено"
+        assert tr("alert_history_mark_unviewed", "ru") == "Не просмотрено"
+        assert tr("alert_history_mark_viewed_below", "ru") == "Просмотрено всё ниже"
         nav_mid = _alert_history_nav_keyboard("ru", 0, 3, show_more=True)
         assert nav_mid is not None
         mid_data = [b.callback_data for row in nav_mid.inline_keyboard for b in row]

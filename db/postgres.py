@@ -569,6 +569,7 @@ class PostgresDatabase:
                     stream_id TEXT NOT NULL DEFAULT '',
                     vod_id TEXT NOT NULL DEFAULT '',
                     vod_offset_seconds INTEGER,
+                    viewed BOOLEAN NOT NULL DEFAULT FALSE,
                     sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
@@ -601,6 +602,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE alert_history
                 ADD COLUMN IF NOT EXISTS vod_offset_seconds INTEGER
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE alert_history
+                ADD COLUMN IF NOT EXISTS viewed BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             cur.execute(
@@ -1537,6 +1544,37 @@ class PostgresDatabase:
                 (vid, int(history_id)),
             )
 
+    def set_alert_history_viewed(
+        self, owner_id: int, history_id: int, *, viewed: bool
+    ) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE alert_history
+                SET viewed = %s
+                WHERE id = %s AND owner_id = %s
+                """,
+                (bool(viewed), int(history_id), int(owner_id)),
+            )
+            return cur.rowcount > 0
+
+    def set_alert_history_viewed_below(
+        self, owner_id: int, history_id: int, *, viewed: bool = True
+    ) -> int:
+        # History UI is newest-first (id DESC); "below" = this row and older (id <=).
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE alert_history
+                SET viewed = %s
+                WHERE owner_id = %s AND id <= %s
+                """,
+                (bool(viewed), int(owner_id), int(history_id)),
+            )
+            return int(cur.rowcount)
+
     def list_alert_history(
         self,
         owner_id: int,
@@ -1553,7 +1591,8 @@ class PostgresDatabase:
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
                            alert_type, message_text, sent_at,
-                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds,
+                           viewed
                     FROM alert_history
                     WHERE owner_id = %s AND sent_at >= %s
                     ORDER BY id DESC
@@ -1566,7 +1605,8 @@ class PostgresDatabase:
                     """
                     SELECT id, owner_id, subscription_id, twitch_username,
                            alert_type, message_text, sent_at,
-                           twitch_user_id, stream_id, vod_id, vod_offset_seconds
+                           twitch_user_id, stream_id, vod_id, vod_offset_seconds,
+                           viewed
                     FROM alert_history
                     WHERE owner_id = %s
                     ORDER BY id DESC

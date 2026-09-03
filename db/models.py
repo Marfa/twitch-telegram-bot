@@ -181,6 +181,7 @@ class AlertHistoryEntry:
     stream_id: str = ""
     vod_id: str = ""
     vod_offset_seconds: int | None = None
+    viewed: bool = False
 
 
 @dataclass
@@ -665,6 +666,9 @@ def _row_to_alert_history(row: Any) -> AlertHistoryEntry:
     offset = None
     if "vod_offset_seconds" in keys and row["vod_offset_seconds"] is not None:
         offset = int(row["vod_offset_seconds"])
+    viewed = False
+    if "viewed" in keys and row["viewed"] is not None:
+        viewed = bool(int(row["viewed"]))
     return AlertHistoryEntry(
         id=int(row["id"]),
         owner_id=int(row["owner_id"]),
@@ -677,6 +681,7 @@ def _row_to_alert_history(row: Any) -> AlertHistoryEntry:
         stream_id=str(row["stream_id"] or "") if "stream_id" in keys else "",
         vod_id=str(row["vod_id"] or "") if "vod_id" in keys else "",
         vod_offset_seconds=offset,
+        viewed=viewed,
     )
 
 

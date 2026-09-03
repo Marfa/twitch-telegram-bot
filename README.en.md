@@ -29,7 +29,7 @@
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); wizard step in **advanced mode** |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; wizard step in **advanced mode** |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
-| Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature) |
+| Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
@@ -221,7 +221,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ➕ New subscription | Alert type → wizard |
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
-| 📜 Alert history | DM: 7 days free / 60 days Premium |
+| 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below” |
 | 📦 Other | Whisper alerts, schedule, what to watch, chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Weekly text, time zone; Twitch sync — Premium |

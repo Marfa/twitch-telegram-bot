@@ -170,6 +170,14 @@ class Database(Protocol):
 
     def set_alert_history_vod_id(self, history_id: int, vod_id: str) -> None: ...
 
+    def set_alert_history_viewed(
+        self, owner_id: int, history_id: int, *, viewed: bool
+    ) -> bool: ...
+
+    def set_alert_history_viewed_below(
+        self, owner_id: int, history_id: int, *, viewed: bool = True
+    ) -> int: ...
+
     def list_alert_history(
         self,
         owner_id: int,
