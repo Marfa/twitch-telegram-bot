@@ -9,6 +9,7 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     PremiumChannel,
+    ReferralCreditRef,
     ReferralStats,
     ReferralWithdrawal,
     ScheduledBroadcast,
@@ -503,6 +504,18 @@ class Database(Protocol):
         owner_telegram_id: int,
         charge_id: str,
     ) -> None: ...
+
+    def get_premium_channel_by_charge(self, charge_id: str) -> PremiumChannel | None: ...
+
+    def delete_premium_channel_by_charge(self, charge_id: str) -> bool: ...
+
+    def find_user_id_by_premium_charge(self, charge_id: str) -> int | None: ...
+
+    def get_referral_credit_by_charge(
+        self, charge_id: str
+    ) -> ReferralCreditRef | None: ...
+
+    def delete_referral_credit_by_charge(self, charge_id: str) -> bool: ...
 
     def ensure_alert_share_token(
         self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]

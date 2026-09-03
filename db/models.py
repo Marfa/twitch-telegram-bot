@@ -399,6 +399,15 @@ class PremiumChannel:
     paid_at: str
 
 
+@dataclass(frozen=True)
+class ReferralCreditRef:
+    referrer_id: int
+    invitee_id: int
+    charge_id: str
+    stars_paid: int
+    commission_stars: int
+
+
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
     if payload.get("notify_on_category_change"):
         return "category"

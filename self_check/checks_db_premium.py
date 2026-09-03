@@ -1300,3 +1300,52 @@ def check_db_premium() -> None:
             for row in kb1.inline_keyboard
             for b in row
         )
+
+    # Admin refund by charge_id: revoke features / stars immediately + find owner.
+    with tempfile.TemporaryDirectory() as refund_tmp:
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        from premium import (
+            admin_refund_charge,
+            apply_features_payment,
+            apply_stars_payment,
+            get_status,
+            revoke_premium_for_charge,
+        )
+
+        rdb = SqliteDatabase(Path(refund_tmp) / "refund.db")
+        uid = 424242
+        feat_charge = "stx" + ("A" * 40)
+        stars_charge = "stx" + ("B" * 40)
+        until = int(datetime.now(timezone.utc).timestamp()) + 86400 * 30
+        apply_features_payment(
+            rdb,
+            uid,
+            feature_ids=["advanced_mode", "twitch_sync"],
+            charge_id=feat_charge,
+            until_unix=until,
+            stars_paid=100,
+        )
+        rdb.set_advanced_mode_setting(uid, True)
+        assert rdb.find_user_id_by_premium_charge(feat_charge) == uid
+        revoked = revoke_premium_for_charge(rdb, uid, feat_charge)
+        assert "advanced_mode" in revoked and "twitch_sync" in revoked
+        st = get_status(rdb, uid)
+        assert not st.feature_active("advanced_mode")
+        assert not st.feature_active("twitch_sync")
+        assert rdb.get_advanced_mode_setting(uid) is False
+        assert rdb.find_user_id_by_premium_charge(feat_charge) is None
+
+        apply_stars_payment(
+            rdb, uid, charge_id=stars_charge, until_unix=until, stars_paid=50
+        )
+        assert get_status(rdb, uid).stars_active
+        bot = MagicMock()
+        bot.refund_star_payment = AsyncMock(return_value=True)
+        bot.edit_user_star_subscription = AsyncMock(return_value=True)
+        result = asyncio.run(admin_refund_charge(bot, rdb, stars_charge))
+        assert result.ok and result.user_id == uid
+        assert "stars" in result.revoked
+        assert not get_status(rdb, uid).stars_active
+        bot.refund_star_payment.assert_awaited_once()

@@ -631,6 +631,7 @@ def check_core() -> None:
         assert [[b.text for b in row] for row in admin_kb] == [
             [btn("broadcast", loc), btn("stats", loc)],
             [btn("admin_withdrawals", loc), btn("demo", loc)],
+            [btn("admin_refund", loc)],
             [btn("back", loc)],
         ]
         admin_btns = [b.text for row in admin_kb for b in row]

@@ -141,6 +141,7 @@ def all_menu_buttons() -> set[str]:
         "partner_withdrawals",
         "back_settings",
         "admin_withdrawals",
+        "admin_refund",
         "watch",
         "chat",
     )
@@ -484,6 +485,7 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
         )
     else:
         rows.append([KeyboardButton(btn("demo", lang))])
+    rows.append([KeyboardButton(btn("admin_refund", lang))])
     rows.append([KeyboardButton(btn("back", lang))])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 

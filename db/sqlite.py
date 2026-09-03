@@ -18,6 +18,7 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     PremiumChannel,
+    ReferralCreditRef,
     ReferralStats,
     ReferralWithdrawal,
     ScheduledBroadcast,
@@ -3307,6 +3308,119 @@ class SqliteDatabase:
                     str(charge_id or ""),
                 ),
             )
+
+    def get_premium_channel_by_charge(self, charge_id: str) -> PremiumChannel | None:
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT twitch_user_id, twitch_login, display_name,
+                       owner_telegram_id, charge_id, paid_at
+                FROM premium_channels
+                WHERE charge_id = ?
+                """,
+                (cid,),
+            ).fetchone()
+        if not row:
+            return None
+        return PremiumChannel(
+            twitch_user_id=str(row["twitch_user_id"]),
+            twitch_login=str(row["twitch_login"]).lower(),
+            display_name=str(row["display_name"] or row["twitch_login"]),
+            owner_telegram_id=int(row["owner_telegram_id"]),
+            charge_id=str(row["charge_id"] or ""),
+            paid_at=str(row["paid_at"] or ""),
+        )
+
+    def delete_premium_channel_by_charge(self, charge_id: str) -> bool:
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return False
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM premium_channels WHERE charge_id = ?",
+                (cid,),
+            )
+            return int(cur.rowcount) > 0
+
+    def find_user_id_by_premium_charge(self, charge_id: str) -> int | None:
+        from premium import parse_premium_features_blob
+
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM users WHERE premium_stars_charge_id = ?",
+                (cid,),
+            ).fetchone()
+            if row:
+                return int(row["user_id"])
+            row = conn.execute(
+                """
+                SELECT owner_telegram_id AS user_id
+                FROM premium_channels WHERE charge_id = ?
+                """,
+                (cid,),
+            ).fetchone()
+            if row:
+                return int(row["user_id"])
+            row = conn.execute(
+                "SELECT invitee_id AS user_id FROM referral_credits WHERE charge_id = ?",
+                (cid,),
+            ).fetchone()
+            if row:
+                return int(row["user_id"])
+            for r in conn.execute(
+                """
+                SELECT user_id, premium_features FROM users
+                WHERE instr(premium_features, ?) > 0
+                """,
+                (cid,),
+            ).fetchall():
+                _features, charges, _canceled = parse_premium_features_blob(
+                    r["premium_features"] or ""
+                )
+                if cid in charges.values():
+                    return int(r["user_id"])
+        return None
+
+    def get_referral_credit_by_charge(
+        self, charge_id: str
+    ) -> ReferralCreditRef | None:
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT referrer_id, invitee_id, charge_id, stars_paid, commission_stars
+                FROM referral_credits WHERE charge_id = ?
+                """,
+                (cid,),
+            ).fetchone()
+        if not row:
+            return None
+        return ReferralCreditRef(
+            referrer_id=int(row["referrer_id"]),
+            invitee_id=int(row["invitee_id"]),
+            charge_id=str(row["charge_id"] or ""),
+            stars_paid=int(row["stars_paid"] or 0),
+            commission_stars=int(row["commission_stars"] or 0),
+        )
+
+    def delete_referral_credit_by_charge(self, charge_id: str) -> bool:
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return False
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM referral_credits WHERE charge_id = ?",
+                (cid,),
+            )
+            return int(cur.rowcount) > 0
 
     def ensure_alert_share_token(
         self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]
