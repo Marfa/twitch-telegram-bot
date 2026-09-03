@@ -1555,18 +1555,39 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = update.my_chat_member
-    if result is None or result.chat.type != ChatType.PRIVATE:
+    if result is None:
         return
     db: Database = context.application.bot_data["db"]
-    user_id = result.from_user.id
+    chat = result.chat
     status = result.new_chat_member.status
-    if status == ChatMemberStatus.BANNED:
-        db.set_bot_blocked(user_id, True)
-        analytics.capture(user_id, "bot_blocked")
-    elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
-        db.set_bot_blocked(user_id, False)
-        analytics.capture(user_id, "bot_unblocked")
 
+    if chat.type == ChatType.PRIVATE:
+        user_id = result.from_user.id
+        if status == ChatMemberStatus.BANNED:
+            db.set_bot_blocked(user_id, True)
+            analytics.capture(user_id, "bot_blocked")
+        elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
+            db.set_bot_blocked(user_id, False)
+            db.set_chat_unreachable(user_id, False)
+            analytics.capture(user_id, "bot_unblocked")
+        return
+
+    # Groups / channels: stop alerts until bot is a member again (or test send works).
+    chat_id = chat.id
+    if status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
+        db.set_chat_unreachable(chat_id, True)
+        return
+    if status in (
+        ChatMemberStatus.MEMBER,
+        ChatMemberStatus.ADMINISTRATOR,
+        ChatMemberStatus.OWNER,
+    ):
+        db.set_chat_unreachable(chat_id, False)
+        return
+    if status == ChatMemberStatus.RESTRICTED:
+        member = result.new_chat_member
+        can_send = bool(getattr(member, "can_send_messages", True))
+        db.set_chat_unreachable(chat_id, not can_send)
 
 async def open_premium_from_settings(
     update: Update, context: ContextTypes.DEFAULT_TYPE

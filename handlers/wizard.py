@@ -1793,7 +1793,10 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await message.reply_text(t("dest_not_admin", lang))
         return _wz()["DEST_CHAT"]
 
-    ok = await _send_test(context.bot, chat_id, thread_id, t("test_ok", lang))
+    db: Database = context.application.bot_data["db"]
+    ok = await _send_test(
+        context.bot, chat_id, thread_id, t("test_ok", lang), db=db
+    )
     if not ok:
         await message.reply_text(t("test_failed", lang))
         return _wz()["DEST_CHAT"]

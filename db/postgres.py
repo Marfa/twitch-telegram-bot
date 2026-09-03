@@ -673,6 +673,14 @@ class PostgresDatabase:
                 ON alert_share_tokens(source_sub_id)
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS unreachable_chats (
+                    chat_id BIGINT PRIMARY KEY,
+                    marked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
             _seed_lucky_templates_pg(cur)
 
     def add_subscription(
@@ -1610,6 +1618,33 @@ class PostgresDatabase:
         if not row:
             return False
         return bool(row["bot_blocked"])
+
+    def set_chat_unreachable(self, chat_id: int, unreachable: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if unreachable:
+                cur.execute(
+                    """
+                    INSERT INTO unreachable_chats (chat_id) VALUES (%s)
+                    ON CONFLICT (chat_id) DO NOTHING
+                    """,
+                    (chat_id,),
+                )
+            else:
+                cur.execute(
+                    "DELETE FROM unreachable_chats WHERE chat_id = %s",
+                    (chat_id,),
+                )
+
+    def is_chat_unreachable(self, chat_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT 1 FROM unreachable_chats WHERE chat_id = %s",
+                (chat_id,),
+            )
+            row = cur.fetchone()
+        return row is not None
 
     def get_notify_user_ids(self) -> list[int]:
         with self._conn() as conn:

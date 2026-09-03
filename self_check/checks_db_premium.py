@@ -692,6 +692,11 @@ def check_db_premium() -> None:
         assert blocked_stats.sys_updates == 0
         assert blocked_stats.sys_availability == 0
         assert blocked_stats.sys_other == 0
+        assert db.is_chat_unreachable(-1001980871389) is False
+        db.set_chat_unreachable(-1001980871389, True)
+        assert db.is_chat_unreachable(-1001980871389) is True
+        db.set_chat_unreachable(-1001980871389, False)
+        assert db.is_chat_unreachable(-1001980871389) is False
         db.upsert_user(1)
         assert db.is_bot_blocked(1) is False
         restored = db.get_bot_stats()

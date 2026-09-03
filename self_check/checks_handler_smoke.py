@@ -844,8 +844,21 @@ async def _smoke_premium_and_menus(db) -> None:
 
 async def _smoke_delivery_and_helpers(db) -> None:
     from bot_helpers import _pulse_wizard_keyboard
-    from handlers.delivery import _resolve_chat_display_name
+    from handlers.delivery import (
+        _is_chat_unreachable_error,
+        _is_user_blocked_error,
+        _mark_destination_unreachable,
+        _resolve_chat_display_name,
+        _send_notification,
+    )
     from handlers.notifications import check_schedule_reminders
+    from telegram.error import BadRequest, Forbidden
+
+    assert _is_user_blocked_error(Forbidden("Forbidden: bot was blocked by the user"))
+    assert _is_chat_unreachable_error(BadRequest("Chat not found"))
+    assert _is_chat_unreachable_error(
+        Forbidden("Forbidden: bot is not a member of the channel chat")
+    )
 
     bot = AsyncMock()
     bot.send_message = AsyncMock(side_effect=Forbidden("blocked"))
@@ -856,6 +869,59 @@ async def _smoke_delivery_and_helpers(db) -> None:
     sub = SimpleNamespace(chat_id=-1001, dest_type="channel")
     name = await _resolve_chat_display_name(bot, sub)
     assert name == "-1001"
+
+    channel_id = -1001936914060
+    sub_id = db.add_subscription(
+        _FREE_UID,
+        "streamer",
+        "tw1",
+        "{username} live",
+        "channel",
+        channel_id,
+        None,
+    )
+    dm_sub_id = db.add_subscription(
+        _FREE_UID,
+        "streamer",
+        "tw1",
+        "{username} live",
+        "dm",
+        _FREE_UID,
+        None,
+    )
+    channel_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == sub_id)
+    dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(
+        side_effect=Forbidden("Forbidden: bot is not a member of the channel chat")
+    )
+    bot.send_photo = AsyncMock(
+        side_effect=Forbidden("Forbidden: bot is not a member of the channel chat")
+    )
+    ok = await _send_notification(bot, db, channel_sub, "hi")
+    assert ok is False
+    assert db.is_chat_unreachable(channel_id) is True
+    bot.send_message.reset_mock()
+    bot.send_photo.reset_mock()
+    skipped = await _send_notification(bot, db, channel_sub, "hi again")
+    assert skipped is True
+    bot.send_message.assert_not_awaited()
+    bot.send_photo.assert_not_awaited()
+
+    db.set_bot_blocked(_FREE_UID, True)
+    bot.send_message.reset_mock()
+    skipped_dm = await _send_notification(bot, db, dm_sub, "dm hi")
+    assert skipped_dm is True
+    bot.send_message.assert_not_awaited()
+    db.set_bot_blocked(_FREE_UID, False)
+
+    _mark_destination_unreachable(
+        db, dm_sub, Forbidden("Forbidden: bot was blocked by the user")
+    )
+    assert db.is_bot_blocked(_FREE_UID) is True
+    db.set_bot_blocked(_FREE_UID, False)
+    db.set_chat_unreachable(channel_id, False)
 
     application, bot = _app(db)
     ctx = _ctx(application)

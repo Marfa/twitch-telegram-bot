@@ -211,6 +211,50 @@ def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMar
 _DELIVERY_FAIL_NOTICE_COOLDOWN = timedelta(hours=24)
 _delivery_fail_notified: dict[int, datetime] = {}
 
+_USER_BLOCKED_NEEDLES = (
+    "blocked by the user",
+    "user is deactivated",
+    "user is deleted",
+)
+_CHAT_UNREACHABLE_NEEDLES = (
+    "chat not found",
+    "bot is not a member",
+    "bot was kicked",
+    "have no rights to send",
+    "not enough rights",
+    "need administrator rights",
+    "group chat was deleted",
+    "channel chat was deleted",
+    "peer_id_invalid",
+    "chat_id is empty",
+)
+
+
+def _exc_text(exc: BaseException) -> str:
+    return str(exc).lower()
+
+
+def _is_user_blocked_error(exc: BaseException) -> bool:
+    msg = _exc_text(exc)
+    return any(n in msg for n in _USER_BLOCKED_NEEDLES)
+
+
+def _is_chat_unreachable_error(exc: BaseException) -> bool:
+    msg = _exc_text(exc)
+    return any(n in msg for n in _CHAT_UNREACHABLE_NEEDLES)
+
+
+def _mark_destination_unreachable(db: Database, sub: Subscription, exc: BaseException) -> None:
+    if sub.dest_type == "dm":
+        if _is_user_blocked_error(exc) or _is_chat_unreachable_error(exc):
+            db.set_bot_blocked(sub.chat_id, True)
+        return
+    if _is_chat_unreachable_error(exc):
+        db.set_chat_unreachable(sub.chat_id, True)
+        return
+    if _is_user_blocked_error(exc):
+        db.set_bot_blocked(sub.owner_id, True)
+
 
 def _delivery_fail_notice_due(sub_id: int, *, now: datetime | None = None) -> bool:
     last = _delivery_fail_notified.get(sub_id)
@@ -339,6 +383,8 @@ async def _maybe_notify_delivery_failure(
 
     if sub.dest_type == "dm":
         return
+    if db.is_bot_blocked(sub.owner_id):
+        return
     if not _delivery_fail_notice_due(sub.id):
         return
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
@@ -360,6 +406,8 @@ async def _maybe_notify_delivery_failure(
         )
         _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
     except (BadRequest, Forbidden) as notify_exc:
+        if _is_user_blocked_error(notify_exc):
+            db.set_bot_blocked(sub.owner_id, True)
         logger.warning(
             "Cannot notify owner %s about delivery failure: %s",
             sub.owner_id,
@@ -380,6 +428,10 @@ async def _send_notification(
     twitch: TwitchClient | None = None,
 ) -> bool:
     if _user_notifications_paused(db, sub.owner_id):
+        return True
+    if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
+        return True
+    if db.is_chat_unreachable(sub.chat_id):
         return True
     await _maybe_notify_stored_template_typos(bot, db, sub)
     if sub.delete_previous and sub.dest_type != "dm":
@@ -475,13 +527,19 @@ async def _send_notification(
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
+            _mark_destination_unreachable(db, sub, retry_exc)
             await _maybe_notify_delivery_failure(bot, db, sub, retry_exc)
             return False
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
+        _mark_destination_unreachable(db, sub, exc)
         await _maybe_notify_delivery_failure(bot, db, sub, exc)
         return False
 
+    if db.is_chat_unreachable(sub.chat_id):
+        db.set_chat_unreachable(sub.chat_id, False)
+    if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
+        db.set_bot_blocked(sub.chat_id, False)
     if msg and sub.delete_previous and sub.dest_type != "dm":
         db.set_last_message_id(sub.id, msg.message_id)
     if sub.suppress_repeat_minutes > 0:
@@ -515,14 +573,22 @@ async def _send_notification(
     return True
 
 
-async def _send_test(bot, chat_id: int, thread_id: int | None, text: str) -> bool:
+async def _send_test(
+    bot, chat_id: int, thread_id: int | None, text: str, *, db: Database | None = None
+) -> bool:
     kwargs: dict = {"chat_id": chat_id, "text": text}
     if thread_id:
         kwargs["message_thread_id"] = thread_id
     try:
         await bot.send_message(**kwargs)
+        if db is not None:
+            db.set_chat_unreachable(chat_id, False)
         return True
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", chat_id, exc)
+        if db is not None and _is_chat_unreachable_error(exc):
+            db.set_chat_unreachable(chat_id, True)
+        elif db is not None and _is_user_blocked_error(exc):
+            db.set_bot_blocked(chat_id, True)
         return False
 
