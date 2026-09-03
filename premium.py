@@ -265,6 +265,11 @@ def feature_label_key(feature_id: str) -> str:
     return _FEATURE_LABEL_KEYS.get(feature_id, feature_id)
 
 
+def feature_desc_key(feature_id: str) -> str:
+    """i18n key for à la carte feature description (1–2 sentences)."""
+    return f"{feature_label_key(feature_id)}_desc"
+
+
 def premium_feature_in_unreleased_beta(premium_feature_id: str) -> bool:
     """True while a beta manifest entry still gates this Premium id (alpha/beta)."""
     import beta as beta_features

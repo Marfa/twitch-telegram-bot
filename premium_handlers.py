@@ -56,13 +56,14 @@ def _premium_feat_pick_text(lang: str, user_id: int) -> str:
     free_limit = prem.free_active_limit()
     for fid in prem.purchasable_feature_ids():
         name = t(prem.feature_label_key(fid), lang, free_limit=free_limit)
-        lines.append(f"• {name}")
+        desc = t(prem.feature_desc_key(fid), lang, free_limit=free_limit)
+        lines.append(f"• <b>{name}</b>\n{desc}")
     return (
         t("premium_feat_pick", lang, price=price)
-        + "\n"
+        + "\n\n"
         + t("premium_feat_pick_available", lang)
-        + "\n"
-        + "\n".join(lines)
+        + "\n\n"
+        + "\n\n".join(lines)
     )
 
 
@@ -400,6 +401,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=premium_features_keyboard(
                 lang, selected, user_id=user_id, owned=owned if not _demo_force_free(user_id) else set()
             ),
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -493,6 +495,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=premium_features_keyboard(
                 lang, set(), user_id=user_id, owned=owned
             ),
+            parse_mode=ParseMode.HTML,
         )
         return
 
