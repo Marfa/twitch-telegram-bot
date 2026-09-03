@@ -282,7 +282,10 @@ async def send_premium_screen(
 
 async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _user_lang
+    from config import show_premium_ui
 
+    if not show_premium_ui():
+        return
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -344,8 +347,12 @@ def _blocks_feature_purchase(db: Database, user_id: int) -> bool:
 
 async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _user_lang
+    from config import show_premium_ui
 
     query = update.callback_query
+    if not show_premium_ui():
+        await query.answer()
+        return
     data = query.data or ""
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
@@ -836,7 +843,12 @@ async def complete_premium_oauth(
 
 
 async def precheckout_premium(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from config import show_premium_ui
+
     query = update.pre_checkout_query
+    if not show_premium_ui():
+        await query.answer(ok=False, error_message="Premium disabled")
+        return
     if prem.parse_invoice_payload(query.invoice_payload) is None:
         await query.answer(ok=False, error_message="Unknown invoice")
         return
@@ -847,7 +859,10 @@ async def successful_premium_payment(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     from bot import _user_lang
+    from config import show_premium_ui
 
+    if not show_premium_ui():
+        return
     msg = update.message
     if not msg or not msg.successful_payment:
         return

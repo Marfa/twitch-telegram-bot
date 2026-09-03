@@ -913,6 +913,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 def _apply_referral_start_arg(db: Database, user_id: int, args: list[str] | None) -> None:
+    from config import ENABLE_PARTNER
+
+    if not ENABLE_PARTNER:
+        return
     if not args:
         return
     raw = (args[0] or "").strip()
@@ -1447,6 +1451,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from config import show_help_button
+
+    if not show_help_button():
+        return
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     db.upsert_user(user_id)
@@ -1595,8 +1603,11 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def open_premium_from_settings(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    from config import show_premium_ui
     from premium_handlers import open_premium_menu
 
+    if not show_premium_ui():
+        return
     await open_premium_menu(update, context)
 
 

@@ -35,6 +35,20 @@ if grep -q '^POSHTOG_API_KEY_PERSONAL=' .env; then
   echo "env: POSHTOG_API_KEY_PERSONAL → POSTHOG_API_KEY_PERSONAL"
 fi
 
+# Production product flags (source defaults are off / OSS-free).
+_ensure_env_flag() {
+  local key="$1" val="$2"
+  if grep -q "^${key}=" .env; then
+    sed -i "s/^${key}=.*/${key}=${val}/" .env
+  else
+    printf '\n%s=%s\n' "$key" "$val" >> .env
+  fi
+  echo "env: ${key}=${val}"
+}
+_ensure_env_flag ENABLE_PREMIUM 1
+_ensure_env_flag ENABLE_HELP 1
+_ensure_env_flag ENABLE_PARTNER 1
+
 # Dump 17 and restore into 18 before compose up (no-op once db is already 18).
 if [[ -f scripts/pg-upgrade-to-18.sh ]]; then
   bash scripts/pg-upgrade-to-18.sh

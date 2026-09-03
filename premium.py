@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from config import (
+    ENABLE_PARTNER,
     FREE_CHAT_ID,
     PREMIUM_CHANNEL_STARS,
     PREMIUM_FREE_ACTIVE_LIMIT,
@@ -20,6 +21,7 @@ from config import (
     PREMIUM_TRIAL_DAYS,
     PREMIUM_TWITCH_LOGIN,
     PREMIUM_YEAR_SECONDS,
+    paid_features_free,
 )
 
 if TYPE_CHECKING:
@@ -389,6 +391,8 @@ def has_feature_sync(
 
     Promo channel (marfapr) unlocks every feature for that channel's alerts/chat.
     """
+    if paid_features_free():
+        return True
     if is_promo_channel(channel, db):
         return True
     st = get_status(db, user_id)
@@ -491,6 +495,8 @@ async def has_feature(
 ) -> bool:
     from demo_mode import is_active
 
+    if paid_features_free():
+        return True
     ensure_trial_expired(db, user_id)
     if is_active(user_id):
         return False
@@ -503,6 +509,8 @@ async def has_premium(bot: Bot, db: Database, user_id: int) -> bool:
     """Full Premium (all features). Demo always False."""
     from demo_mode import is_active
 
+    if paid_features_free():
+        return True
     ensure_trial_expired(db, user_id)
     if is_active(user_id):
         return False
@@ -832,6 +840,8 @@ def credit_referral_commission(
 ) -> bool:
     from config import REFERRAL_COMMISSION_PERCENT
 
+    if not ENABLE_PARTNER:
+        return False
     referrer_id = db.get_referred_by(invitee_id)
     if not referrer_id:
         return False

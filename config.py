@@ -27,6 +27,13 @@ def _require(name: str) -> str:
     return value
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "")
@@ -34,6 +41,11 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 # Schedule reminders need one Helix call per channel; poll slower than live checks.
 SCHEDULE_CHECK_INTERVAL = int(os.getenv("SCHEDULE_CHECK_INTERVAL", "180"))
 MAX_SUBSCRIPTIONS_PER_OWNER = int(os.getenv("MAX_SUBSCRIPTIONS_PER_OWNER", "25"))
+# Product kill switches. Default off in source (OSS / local): Premium + Help unlock
+# all paid features; Partner is fully unavailable. Set to 1 on VPS for production.
+ENABLE_PREMIUM = _env_bool("ENABLE_PREMIUM", False)
+ENABLE_HELP = _env_bool("ENABLE_HELP", False)
+ENABLE_PARTNER = _env_bool("ENABLE_PARTNER", False)
 PREMIUM_FREE_ACTIVE_LIMIT = int(os.getenv("PREMIUM_FREE_ACTIVE_LIMIT", "5"))
 PREMIUM_STARS_AMOUNT = int(os.getenv("PREMIUM_STARS_AMOUNT", "100"))
 PREMIUM_STARS_YEAR = int(os.getenv("PREMIUM_STARS_YEAR", "1000"))
@@ -51,6 +63,24 @@ REFERRAL_WITHDRAW_MIN_STARS = int(os.getenv("REFERRAL_WITHDRAW_MIN_STARS", "500"
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "data/bot.db"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or None
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+
+def paid_features_free() -> bool:
+    """True when Premium and/or Help is off — all paid capabilities unlocked."""
+    return not ENABLE_PREMIUM or not ENABLE_HELP
+
+
+def show_premium_ui() -> bool:
+    """Premium shop/button only when monetization is fully on."""
+    return ENABLE_PREMIUM and ENABLE_HELP
+
+
+def show_help_button() -> bool:
+    return ENABLE_HELP
+
+
+def show_partner_ui() -> bool:
+    return ENABLE_PARTNER
 
 
 def twitch_oauth_redirect_uri() -> str:

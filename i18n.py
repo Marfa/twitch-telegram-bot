@@ -154,6 +154,8 @@ def all_wizard_nav_buttons() -> set[str]:
 def main_menu(
     lang: str, *, is_admin: bool = False, demo_active: bool = False
 ) -> ReplyKeyboardMarkup:
+    from config import show_help_button
+
     rows = [
         [
             KeyboardButton(btn("new", lang)),
@@ -167,10 +169,9 @@ def main_menu(
             KeyboardButton(btn("other", lang)),
             KeyboardButton(btn("settings", lang)),
         ],
-        [
-            KeyboardButton(btn("feedback", lang)),
-        ],
     ]
+    if show_help_button():
+        rows.append([KeyboardButton(btn("feedback", lang))])
     if demo_active:
         rows.append([KeyboardButton(btn("demo", lang))])
     elif is_admin:
@@ -215,30 +216,26 @@ def other_menu(lang: str) -> ReplyKeyboardMarkup:
 def settings_menu(
     lang: str, *, beta_enrolled: int = 0, beta_total: int = 0
 ) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
+    from config import show_partner_ui, show_premium_ui
+
+    buttons: list[KeyboardButton] = []
+    if show_premium_ui():
+        buttons.append(KeyboardButton(btn("premium", lang)))
+    buttons.extend(
         [
-            [
-                KeyboardButton(btn("premium", lang)),
-                KeyboardButton(btn("sync_subs", lang)),
-            ],
-            [
-                KeyboardButton(btn("ignored_words", lang)),
-                KeyboardButton(btn("advanced_mode", lang)),
-            ],
-            [
-                KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
-                KeyboardButton(btn("sys_notifications", lang)),
-            ],
-            [
-                KeyboardButton(btn("language", lang)),
-                KeyboardButton(btn("partner", lang)),
-            ],
-            [
-                KeyboardButton(btn("back", lang)),
-            ],
-        ],
-        resize_keyboard=True,
+            KeyboardButton(btn("sync_subs", lang)),
+            KeyboardButton(btn("ignored_words", lang)),
+            KeyboardButton(btn("advanced_mode", lang)),
+            KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
+            KeyboardButton(btn("sys_notifications", lang)),
+            KeyboardButton(btn("language", lang)),
+        ]
     )
+    if show_partner_ui():
+        buttons.append(KeyboardButton(btn("partner", lang)))
+    rows = _pair_reply_rows(buttons)
+    rows.append([KeyboardButton(btn("back", lang))])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def partner_menu(lang: str) -> ReplyKeyboardMarkup:
@@ -470,20 +467,25 @@ def sync_settings_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 
 def admin_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
+    from config import show_partner_ui
+
+    rows: list[list[KeyboardButton]] = [
         [
-            [
-                KeyboardButton(btn("broadcast", lang)),
-                KeyboardButton(btn("stats", lang)),
-            ],
+            KeyboardButton(btn("broadcast", lang)),
+            KeyboardButton(btn("stats", lang)),
+        ],
+    ]
+    if show_partner_ui():
+        rows.append(
             [
                 KeyboardButton(btn("admin_withdrawals", lang)),
                 KeyboardButton(btn("demo", lang)),
-            ],
-            [KeyboardButton(btn("back", lang))],
-        ],
-        resize_keyboard=True,
-    )
+            ]
+        )
+    else:
+        rows.append([KeyboardButton(btn("demo", lang))])
+    rows.append([KeyboardButton(btn("back", lang))])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def withdrawal_actions_keyboard(withdrawal_id: int, lang: str) -> InlineKeyboardMarkup:

@@ -1,0 +1,49 @@
+name: Ensure VPS product flags
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set ENABLE_PREMIUM/HELP/PARTNER=1 in VPS .env
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            test -f .env
+            _ensure() {
+              local key="$1" val="$2"
+              if grep -q "^${key}=" .env; then
+                sed -i "s/^${key}=.*/${key}=${val}/" .env
+              else
+                printf '\n%s=%s\n' "$key" "$val" >> .env
+              fi
+              echo "${key}=${val}"
+            }
+            _ensure ENABLE_PREMIUM 1
+            _ensure ENABLE_HELP 1
+            _ensure ENABLE_PARTNER 1
+            echo "=== flags in .env ==="
+            grep -E '^ENABLE_(PREMIUM|HELP|PARTNER)=' .env
+            docker compose -f compose.vps.yml up -d --no-deps --force-recreate bot
+            for i in $(seq 1 30); do
+              if curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                echo "health ok"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "WARNING: health not ready" >&2
+            docker compose -f compose.vps.yml logs --tail=40 bot || true
+            exit 1

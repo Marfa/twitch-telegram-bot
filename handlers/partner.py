@@ -14,9 +14,17 @@ from i18n import DEFAULT_LOCALE, admin_menu, partner_menu, t, withdrawal_actions
 logger = logging.getLogger(__name__)
 
 
+def _partner_enabled() -> bool:
+    from config import ENABLE_PARTNER
+
+    return ENABLE_PARTNER
+
+
 async def open_partner_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import REFERRAL_COMMISSION_PERCENT, REFERRAL_WITHDRAW_MIN_STARS
 
+    if not _partner_enabled():
+        return
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -33,6 +41,8 @@ async def open_partner_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def partner_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _partner_enabled():
+        return
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -50,6 +60,8 @@ async def partner_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def partner_show_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _partner_enabled():
+        return
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     username = context.bot.username or ""
@@ -68,6 +80,8 @@ async def partner_request_withdraw(
 ) -> None:
     from config import ADMIN_USER_IDS, REFERRAL_WITHDRAW_MIN_STARS
 
+    if not _partner_enabled():
+        return
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -132,6 +146,8 @@ def _partner_wd_status_label(status: str, lang: str) -> str:
 async def partner_show_withdrawals(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    if not _partner_enabled():
+        return
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -162,6 +178,8 @@ async def partner_show_withdrawals(
 async def admin_show_withdrawals(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    if not _partner_enabled():
+        return
     user_id = update.effective_user.id
     if not _can_use_admin_tools(user_id):
         return
@@ -195,6 +213,8 @@ async def admin_show_withdrawals(
 async def on_referral_withdrawal_action(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    if not _partner_enabled():
+        return
     query = update.callback_query
     await query.answer()
     admin_id = query.from_user.id

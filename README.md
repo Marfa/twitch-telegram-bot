@@ -275,7 +275,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 
-В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`) и `PUBLIC_BASE_URL` для OAuth (например `https://bot.themarfa.name`).
+В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`), `PUBLIC_BASE_URL` для OAuth (например `https://bot.themarfa.name`), и флаги `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (в исходниках по умолчанию выключены).
 
 ### Локально / Docker
 
@@ -295,6 +295,9 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `DATABASE_URL` | PostgreSQL. Если не задан — SQLite (`compose.vps.yml` задаёт сам) |
 | `DATABASE_PATH` | SQLite: локально `data/bot.db`, в Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Лимит подписок на пользователя (по умолчанию 25) |
+| `ENABLE_PREMIUM` | Premium-магазин и гейты (`0` по умолчанию — всё платное бесплатно; на VPS `1`) |
+| `ENABLE_HELP` | Кнопка «Помощь» (`0` по умолчанию — кнопки нет, платное бесплатно; на VPS `1`) |
+| `ENABLE_PARTNER` | Партнёрка (`0` по умолчанию — выкл; на VPS `1`) |
 | `PREMIUM_FREE_ACTIVE_LIMIT` | Сколько активных алертов без Premium (по умолчанию 5) |
 | `PREMIUM_STARS_AMOUNT` | Месячная Stars-подписка (по умолчанию 100) |
 | `PREMIUM_STARS_YEAR` | Год Stars разово (по умолчанию 1000) |

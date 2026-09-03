@@ -275,7 +275,7 @@ On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard orig
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
-VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`) and `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`).
+VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`), `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`), and `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (off by default in source).
 
 ### Local / Docker
 
@@ -295,6 +295,9 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `DATABASE_URL` | PostgreSQL. If unset — SQLite (`compose.vps.yml` sets it) |
 | `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
+| `ENABLE_PREMIUM` | Premium shop and gates (`0` default — all paid features free; set `1` on VPS) |
+| `ENABLE_HELP` | Help button (`0` default — hidden, paid features free; set `1` on VPS) |
+| `ENABLE_PARTNER` | Partner program (`0` default — off; set `1` on VPS) |
 | `PREMIUM_FREE_ACTIVE_LIMIT` | Active alerts without Premium (default 5) |
 | `PREMIUM_STARS_AMOUNT` | Monthly Stars subscription (default 100) |
 | `PREMIUM_STARS_YEAR` | Yearly Stars one-shot (default 1000) |
