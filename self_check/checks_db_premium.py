@@ -721,6 +721,10 @@ def check_db_premium() -> None:
         assert db.get_notifications_paused_until(1) == 0
         db.set_bot_blocked(1, True)
         assert db.is_bot_blocked(1) is True
+        blocked_at = db.get_bot_blocked_at(1)
+        assert blocked_at is not None
+        db.set_bot_blocked(1, True)
+        assert db.get_bot_blocked_at(1) == blocked_at
         assert 1 not in db.get_bot_update_recipients()
         assert 1 not in db.get_availability_recipients()
         assert 1 not in db.get_other_recipients()
@@ -1392,3 +1396,34 @@ def check_db_premium() -> None:
         assert "stars" in result.revoked
         assert not get_status(rdb, uid).stars_active
         bot.refund_star_payment.assert_awaited_once()
+
+    with tempfile.TemporaryDirectory() as purge_tmp:
+        pdb = SqliteDatabase(Path(purge_tmp) / "purge_blocked.db")
+        gone = 77001
+        stay = 77002
+        fresh = 77003
+        pdb.upsert_user(gone)
+        pdb.upsert_user(stay)
+        pdb.upsert_user(fresh)
+        pdb.add_subscription(
+            gone, "x", "x", "t", "dm", gone, None, enabled=True
+        )
+        pdb.set_bot_blocked(gone, True)
+        pdb.set_bot_blocked(stay, True)
+        pdb.set_bot_blocked(fresh, True)
+        now = int(datetime.now(timezone.utc).timestamp())
+        pdb.set_bot_blocked_at(gone, now - 400 * 86400)
+        pdb.set_bot_blocked_at(stay, now - 10 * 86400)
+        first_fresh = pdb.get_bot_blocked_at(fresh)
+        pdb.set_bot_blocked(fresh, False)
+        assert pdb.get_bot_blocked_at(fresh) is None
+        pdb.set_bot_blocked(fresh, True)
+        again = pdb.get_bot_blocked_at(fresh)
+        assert again is not None and again >= first_fresh
+        removed = pdb.purge_expired_blocked_users(now_unix=now, retention_days=365)
+        assert removed == 1
+        assert pdb.user_exists(gone) is False
+        assert pdb.get_subscriptions_by_owner(gone) == []
+        assert pdb.user_exists(stay) is True
+        assert pdb.is_bot_blocked(stay) is True
+        assert pdb.user_exists(fresh) is True

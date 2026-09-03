@@ -11,6 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, WebA
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
+import analytics
 from bot_helpers import _user_notifications_paused
 from db import Database, Subscription
 from handlers.alert_history import _vod_offset_seconds
@@ -275,13 +276,19 @@ def resume_delivery_for_chat(db: Database, chat_id: int) -> int:
 
 
 def apply_user_blocked(db: Database, user_id: int) -> int:
+    already = db.is_bot_blocked(user_id)
     db.set_bot_blocked(user_id, True)
+    if not already:
+        analytics.capture(user_id, "bot_blocked")
     return db.pause_delivery_for_chat(user_id)
 
 
 def clear_user_blocked(db: Database, user_id: int) -> int:
+    was_blocked = db.is_bot_blocked(user_id)
     db.set_bot_blocked(user_id, False)
     db.set_chat_unreachable(user_id, False)
+    if was_blocked:
+        analytics.capture(user_id, "bot_unblocked")
     return resume_delivery_for_chat(db, user_id)
 
 
@@ -630,4 +637,11 @@ async def _send_test(
         elif db is not None and _is_user_blocked_error(exc):
             apply_user_blocked(db, chat_id)
         return False
+
+
+async def purge_expired_blocked_users(context) -> None:
+    db: Database = context.application.bot_data["db"]
+    removed = db.purge_expired_blocked_users()
+    if removed:
+        logger.info("Purged %s user(s) blocked for 365+ days", removed)
 

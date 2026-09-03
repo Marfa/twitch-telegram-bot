@@ -107,6 +107,8 @@ def parse_admin_user_ids(raw: str | None = None) -> frozenset[int]:
 
 
 ADMIN_USER_IDS = parse_admin_user_ids()
+# Delete all rows for a user this many days after they block the bot (clock resets on re-block).
+BLOCKED_USER_RETENTION_DAYS = int(os.getenv("BLOCKED_USER_RETENTION_DAYS", "365"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
 HF_TOKEN = (
     os.getenv("HF_TOKEN", "").strip()

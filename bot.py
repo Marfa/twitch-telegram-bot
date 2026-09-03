@@ -523,6 +523,7 @@ from handlers.delivery import (
     _send_notification,
     _send_test,
     on_stored_template_typo_fix,
+    purge_expired_blocked_users,
 )
 
 from handlers.subscriptions import (
@@ -1589,10 +1590,8 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             from handlers.delivery import apply_user_blocked
 
             apply_user_blocked(db, user_id)
-            analytics.capture(user_id, "bot_blocked")
         elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
             clear_user_blocked(db, user_id)
-            analytics.capture(user_id, "bot_unblocked")
         return
 
     # Groups / channels: pause alerts until bot is a member again (or test send works).
@@ -2779,6 +2778,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(purge_old_broadcasts, interval=24 * 3600, first=300)
+    app.job_queue.run_repeating(
+        purge_expired_blocked_users, interval=24 * 3600, first=400
+    )
     app.job_queue.run_repeating(
         refresh_broadcast_feedback_keyboards, interval=3600, first=180
     )

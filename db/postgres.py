@@ -341,6 +341,18 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS bot_blocked_at BIGINT
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_users_bot_blocked_at
+                ON users(bot_blocked_at)
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS saved_schedule_hour INTEGER
                 """
             )
@@ -1257,8 +1269,11 @@ class PostgresDatabase:
             cur = self._cursor(conn)
             cur.execute(
                 """
-                INSERT INTO users (user_id, bot_blocked) VALUES (%s, FALSE)
-                ON CONFLICT (user_id) DO UPDATE SET bot_blocked = FALSE
+                INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
+                VALUES (%s, FALSE, NULL)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    bot_blocked = FALSE,
+                    bot_blocked_at = NULL
                 """,
                 (user_id,),
             )
@@ -1673,15 +1688,36 @@ class PostgresDatabase:
         return _row_to_referral_withdrawal(row) if row else None
 
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
+        now = int(datetime.now(timezone.utc).timestamp())
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute(
-                """
-                INSERT INTO users (user_id, bot_blocked) VALUES (%s, %s)
-                ON CONFLICT (user_id) DO UPDATE SET bot_blocked = EXCLUDED.bot_blocked
-                """,
-                (user_id, bool(blocked)),
-            )
+            if blocked:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
+                    VALUES (%s, TRUE, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        bot_blocked = TRUE,
+                        bot_blocked_at = CASE
+                            WHEN COALESCE(users.bot_blocked, FALSE) = TRUE
+                             AND users.bot_blocked_at IS NOT NULL
+                            THEN users.bot_blocked_at
+                            ELSE EXCLUDED.bot_blocked_at
+                        END
+                    """,
+                    (user_id, now),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
+                    VALUES (%s, FALSE, NULL)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        bot_blocked = FALSE,
+                        bot_blocked_at = NULL
+                    """,
+                    (user_id,),
+                )
 
     def is_bot_blocked(self, user_id: int) -> bool:
         with self._conn() as conn:
@@ -1694,6 +1730,128 @@ class PostgresDatabase:
         if not row:
             return False
         return bool(row["bot_blocked"])
+
+    def get_bot_blocked_at(self, user_id: int) -> int | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT bot_blocked_at FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row or row["bot_blocked_at"] is None:
+            return None
+        return int(row["bot_blocked_at"])
+
+    def set_bot_blocked_at(self, user_id: int, blocked_at_unix: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users SET bot_blocked_at = %s
+                WHERE user_id = %s AND COALESCE(bot_blocked, FALSE) = TRUE
+                """,
+                (int(blocked_at_unix), user_id),
+            )
+
+    def list_blocked_user_ids(self) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT user_id FROM users WHERE COALESCE(bot_blocked, FALSE) = TRUE"
+            )
+            rows = cur.fetchall()
+        return [int(r["user_id"]) for r in rows]
+
+    def delete_user_data(self, user_id: int) -> bool:
+        uid = int(user_id)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("SELECT 1 FROM users WHERE user_id = %s", (uid,))
+            if not cur.fetchone():
+                return False
+            cur.execute(
+                "SELECT id FROM subscriptions WHERE owner_id = %s", (uid,)
+            )
+            sub_ids = [int(r["id"]) for r in cur.fetchall()]
+            if sub_ids:
+                cur.execute(
+                    "DELETE FROM alert_share_tokens WHERE source_sub_id = ANY(%s)",
+                    (sub_ids,),
+                )
+                cur.execute(
+                    "DELETE FROM alert_history WHERE subscription_id = ANY(%s)",
+                    (sub_ids,),
+                )
+            cur.execute("DELETE FROM alert_history WHERE owner_id = %s", (uid,))
+            cur.execute(
+                "DELETE FROM deleted_subscriptions_cart WHERE owner_id = %s", (uid,)
+            )
+            cur.execute("DELETE FROM subscriptions WHERE owner_id = %s", (uid,))
+            cur.execute("DELETE FROM twitch_sync WHERE owner_id = %s", (uid,))
+            cur.execute("DELETE FROM whisper_alerts WHERE owner_id = %s", (uid,))
+            cur.execute("DELETE FROM chat_auth WHERE owner_id = %s", (uid,))
+            cur.execute("DELETE FROM chat_send_daily WHERE owner_id = %s", (uid,))
+            cur.execute(
+                "DELETE FROM user_beta_enrollments WHERE user_id = %s", (uid,)
+            )
+            cur.execute(
+                """
+                DELETE FROM referral_credits
+                WHERE referrer_id = %s OR invitee_id = %s
+                """,
+                (uid, uid),
+            )
+            cur.execute(
+                "DELETE FROM referral_withdrawals WHERE user_id = %s", (uid,)
+            )
+            cur.execute(
+                "DELETE FROM broadcast_feedback WHERE user_id = %s", (uid,)
+            )
+            cur.execute(
+                "DELETE FROM broadcast_deliveries WHERE user_id = %s", (uid,)
+            )
+            cur.execute(
+                "DELETE FROM premium_channels WHERE owner_telegram_id = %s", (uid,)
+            )
+            cur.execute("DELETE FROM unreachable_chats WHERE chat_id = %s", (uid,))
+            cur.execute(
+                "UPDATE users SET referred_by = NULL WHERE referred_by = %s", (uid,)
+            )
+            cur.execute("DELETE FROM users WHERE user_id = %s", (uid,))
+        return True
+
+    def purge_expired_blocked_users(
+        self, *, now_unix: int | None = None, retention_days: int | None = None
+    ) -> int:
+        from config import BLOCKED_USER_RETENTION_DAYS
+
+        now = int(
+            now_unix
+            if now_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        days = int(
+            BLOCKED_USER_RETENTION_DAYS if retention_days is None else retention_days
+        )
+        cutoff = now - max(0, days) * 86400
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id FROM users
+                WHERE COALESCE(bot_blocked, FALSE) = TRUE
+                  AND bot_blocked_at IS NOT NULL
+                  AND bot_blocked_at <= %s
+                """,
+                (cutoff,),
+            )
+            ids = [int(r["user_id"]) for r in cur.fetchall()]
+        removed = 0
+        for uid in ids:
+            if self.delete_user_data(uid):
+                removed += 1
+        return removed
 
     def set_chat_unreachable(self, chat_id: int, unreachable: bool) -> None:
         with self._conn() as conn:

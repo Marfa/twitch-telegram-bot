@@ -253,6 +253,15 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN bot_blocked INTEGER NOT NULL DEFAULT 0"
             )
+        user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "bot_blocked_at" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN bot_blocked_at INTEGER")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_users_bot_blocked_at
+            ON users(bot_blocked_at)
+            """
+        )
         if "saved_schedule_hour" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_hour INTEGER")
         if "saved_schedule_minute" not in user_cols:
@@ -1131,8 +1140,11 @@ class SqliteDatabase:
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, bot_blocked) VALUES (?, 0)
-                ON CONFLICT(user_id) DO UPDATE SET bot_blocked = 0
+                INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
+                VALUES (?, 0, NULL)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    bot_blocked = 0,
+                    bot_blocked_at = NULL
                 """,
                 (user_id,),
             )
@@ -1520,14 +1532,35 @@ class SqliteDatabase:
         return _row_to_referral_withdrawal(row) if row else None
 
     def set_bot_blocked(self, user_id: int, blocked: bool) -> None:
+        now = int(datetime.now(timezone.utc).timestamp())
         with self._conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO users (user_id, bot_blocked) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET bot_blocked = excluded.bot_blocked
-                """,
-                (user_id, int(blocked)),
-            )
+            if blocked:
+                conn.execute(
+                    """
+                    INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
+                    VALUES (?, 1, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        bot_blocked = 1,
+                        bot_blocked_at = CASE
+                            WHEN COALESCE(users.bot_blocked, 0) = 1
+                             AND users.bot_blocked_at IS NOT NULL
+                            THEN users.bot_blocked_at
+                            ELSE excluded.bot_blocked_at
+                        END
+                    """,
+                    (user_id, now),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
+                    VALUES (?, 0, NULL)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        bot_blocked = 0,
+                        bot_blocked_at = NULL
+                    """,
+                    (user_id,),
+                )
 
     def is_bot_blocked(self, user_id: int) -> bool:
         with self._conn() as conn:
@@ -1538,6 +1571,126 @@ class SqliteDatabase:
         if not row:
             return False
         return bool(row["bot_blocked"])
+
+    def get_bot_blocked_at(self, user_id: int) -> int | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT bot_blocked_at FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row or row["bot_blocked_at"] is None:
+            return None
+        return int(row["bot_blocked_at"])
+
+    def set_bot_blocked_at(self, user_id: int, blocked_at_unix: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET bot_blocked_at = ?
+                WHERE user_id = ? AND COALESCE(bot_blocked, 0) = 1
+                """,
+                (int(blocked_at_unix), user_id),
+            )
+
+    def list_blocked_user_ids(self) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM users WHERE COALESCE(bot_blocked, 0) = 1"
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]
+
+    def delete_user_data(self, user_id: int) -> bool:
+        uid = int(user_id)
+        with self._conn() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM users WHERE user_id = ?", (uid,)
+            ).fetchone():
+                return False
+            sub_ids = [
+                int(r["id"])
+                for r in conn.execute(
+                    "SELECT id FROM subscriptions WHERE owner_id = ?", (uid,)
+                ).fetchall()
+            ]
+            if sub_ids:
+                ph = ",".join("?" for _ in sub_ids)
+                conn.execute(
+                    f"DELETE FROM alert_share_tokens WHERE source_sub_id IN ({ph})",
+                    sub_ids,
+                )
+                conn.execute(
+                    f"DELETE FROM alert_history WHERE subscription_id IN ({ph})",
+                    sub_ids,
+                )
+            conn.execute(
+                "DELETE FROM alert_history WHERE owner_id = ?", (uid,)
+            )
+            conn.execute(
+                "DELETE FROM deleted_subscriptions_cart WHERE owner_id = ?", (uid,)
+            )
+            conn.execute("DELETE FROM subscriptions WHERE owner_id = ?", (uid,))
+            conn.execute("DELETE FROM twitch_sync WHERE owner_id = ?", (uid,))
+            conn.execute("DELETE FROM whisper_alerts WHERE owner_id = ?", (uid,))
+            conn.execute("DELETE FROM chat_auth WHERE owner_id = ?", (uid,))
+            conn.execute("DELETE FROM chat_send_daily WHERE owner_id = ?", (uid,))
+            conn.execute(
+                "DELETE FROM user_beta_enrollments WHERE user_id = ?", (uid,)
+            )
+            conn.execute(
+                "DELETE FROM referral_credits WHERE referrer_id = ? OR invitee_id = ?",
+                (uid, uid),
+            )
+            conn.execute(
+                "DELETE FROM referral_withdrawals WHERE user_id = ?", (uid,)
+            )
+            conn.execute(
+                "DELETE FROM broadcast_feedback WHERE user_id = ?", (uid,)
+            )
+            conn.execute(
+                "DELETE FROM broadcast_deliveries WHERE user_id = ?", (uid,)
+            )
+            conn.execute(
+                "DELETE FROM premium_channels WHERE owner_telegram_id = ?", (uid,)
+            )
+            conn.execute("DELETE FROM unreachable_chats WHERE chat_id = ?", (uid,))
+            conn.execute(
+                "UPDATE users SET referred_by = NULL WHERE referred_by = ?", (uid,)
+            )
+            conn.execute("DELETE FROM users WHERE user_id = ?", (uid,))
+        return True
+
+    def purge_expired_blocked_users(
+        self, *, now_unix: int | None = None, retention_days: int | None = None
+    ) -> int:
+        from config import BLOCKED_USER_RETENTION_DAYS
+
+        now = int(
+            now_unix
+            if now_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        days = int(
+            BLOCKED_USER_RETENTION_DAYS if retention_days is None else retention_days
+        )
+        cutoff = now - max(0, days) * 86400
+        with self._conn() as conn:
+            ids = [
+                int(r["user_id"])
+                for r in conn.execute(
+                    """
+                    SELECT user_id FROM users
+                    WHERE COALESCE(bot_blocked, 0) = 1
+                      AND bot_blocked_at IS NOT NULL
+                      AND bot_blocked_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
+            ]
+        removed = 0
+        for uid in ids:
+            if self.delete_user_data(uid):
+                removed += 1
+        return removed
 
     def set_chat_unreachable(self, chat_id: int, unreachable: bool) -> None:
         with self._conn() as conn:
