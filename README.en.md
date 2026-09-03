@@ -34,7 +34,7 @@
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
-| System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com |
+| System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
 | Premium | 7-day trial (alerts pause + DM notice when it ends); Stars month/year/lifetime; à la carte (advanced mode, 60-day history, 30-day cart, unlimited stream chat); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast with type footer; scheduled sends use MSK (UTC+3) by default, users with a saved UTC offset get local wall-clock time; stats after all UTC waves; “bot update” refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Demo mode** |
@@ -361,7 +361,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
-Twitch Helix poll ~60 s, Statuspage ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
+Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 
 ## License
 

@@ -209,6 +209,7 @@ from handlers.monitoring import (
     _seconds_until_next_weekly_report,
     check_posthog_status,
     check_twitch_status,
+    check_cursor_status,
     daily_bot_stats_snapshot,
     notify_admins_posthog_issue,
     poll_posthog_inbox_reports,
@@ -2758,6 +2759,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
     app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)
+    app.job_queue.run_repeating(check_cursor_status, interval=120, first=55)
     app.job_queue.run_repeating(poll_posthog_inbox_reports, interval=300, first=60)
     app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
     app.job_queue.run_repeating(refresh_premium_twitch_job, interval=3600, first=120)

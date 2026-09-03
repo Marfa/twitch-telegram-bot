@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 TWITCH_STATUS_HOST = "status.twitch.com"
 TWITCH_STATUS_PAGE_URL = f"https://{TWITCH_STATUS_HOST}/"
+CURSOR_STATUS_API_URL = "https://status.cursor.com/api/v2/status.json"
+CURSOR_STATUS_PAGE_URL = "https://status.cursor.com/"
 
 _TWITCH_INDICATOR_KEYS = {
     "none": "twitch_indicator_none",
@@ -200,6 +202,98 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
     snapshot = analytics.posthog_us_snapshot(summary)
     messages = {
         locale: _format_posthog_status_message(locale, snapshot)
+        for locale in SUPPORTED_LOCALES
+    }
+    locale_rows = db.get_user_locales(list(user_ids))
+    for uid in user_ids:
+        locale = locale_rows.get(uid) or DEFAULT_LOCALE
+        message = messages.get(locale) or messages[DEFAULT_LOCALE]
+        await _send_dm_html(
+            context.bot, db, uid, message, disable_web_page_preview=True
+        )
+        await asyncio.sleep(_BROADCAST_SEND_PAUSE)
+
+
+def _cursor_status_fingerprint(snapshot: dict) -> tuple[str, str]:
+    status = snapshot.get("status") or {}
+    indicator = str(status.get("indicator") or "none")
+    description = str(status.get("description") or "").strip()
+    return indicator, description
+
+
+def _cursor_indicator_label(lang: str, indicator: str) -> str:
+    key = _TWITCH_INDICATOR_KEYS.get(indicator)
+    if key:
+        return t(key, lang)
+    return indicator
+
+
+def _format_cursor_status_message(lang: str, snapshot: dict) -> str:
+    status = snapshot.get("status") or {}
+    indicator = str(status.get("indicator") or "none")
+    description = str(status.get("description") or "").strip()
+    headline = _cursor_indicator_label(lang, indicator)
+
+    lines = [
+        t("cursor_status_title", lang),
+        "",
+        headline,
+    ]
+    if description:
+        lines.extend(["", html.escape(description)])
+    lines.append("")
+    lines.append(
+        f'<a href="{CURSOR_STATUS_PAGE_URL}">{CURSOR_STATUS_PAGE_URL}</a>'
+    )
+    return "\n".join(lines)
+
+
+async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll status.cursor.com; notify admins on rollup changes."""
+    from config import ADMIN_USER_IDS
+
+    if not ADMIN_USER_IDS:
+        return
+
+    import urllib.request
+
+    async def _fetch() -> dict[str, object]:
+        req = urllib.request.Request(
+            CURSOR_STATUS_API_URL,
+            headers={"User-Agent": "twitch-telegram-bot/status-poll"},
+        )
+
+        def _read() -> dict[str, object]:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read()
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError("Cursor status payload is not an object")
+            return data
+
+        return await asyncio.to_thread(_read)
+
+    try:
+        snapshot = await _fetch()
+        fingerprint = _cursor_status_fingerprint(snapshot)
+    except Exception as exc:
+        logger.warning("Cursor status poll failed: %s", exc)
+        return
+
+    bot_data = context.application.bot_data
+    previous = bot_data.get("cursor_status_fingerprint")
+    bot_data["cursor_status_fingerprint"] = fingerprint
+    if previous is None or fingerprint == previous:
+        # First poll after start — baseline only, no spam.
+        return
+
+    db: Database = bot_data["db"]
+    user_ids = set(ADMIN_USER_IDS)
+    if not user_ids:
+        return
+
+    messages = {
+        locale: _format_cursor_status_message(locale, snapshot)
         for locale in SUPPORTED_LOCALES
     }
     locale_rows = db.get_user_locales(list(user_ids))

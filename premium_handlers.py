@@ -49,6 +49,23 @@ def _has_premium_without_autorenew(
     return False
 
 
+def _premium_feat_pick_text(lang: str, user_id: int) -> str:
+    """Premium à la carte: feature select prompt with short explanations."""
+    price = prem.stars_feature_price(user_id)
+    lines: list[str] = []
+    free_limit = prem.free_active_limit()
+    for fid in prem.purchasable_feature_ids():
+        name = t(prem.feature_label_key(fid), lang, free_limit=free_limit)
+        lines.append(f"• {name}")
+    return (
+        t("premium_feat_pick", lang, price=price)
+        + "\n"
+        + t("premium_feat_pick_available", lang)
+        + "\n"
+        + "\n".join(lines)
+    )
+
+
 def _status_text(
     db: Database,
     user_id: int,
@@ -379,7 +396,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 selected.add(fid)
         context.user_data["premium_feat_sel"] = sorted(selected)
         await query.edit_message_text(
-            t("premium_feat_pick", lang, price=prem.stars_feature_price(user_id)),
+            _premium_feat_pick_text(lang, user_id),
             reply_markup=premium_features_keyboard(
                 lang, selected, user_id=user_id, owned=owned if not _demo_force_free(user_id) else set()
             ),
@@ -472,7 +489,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["premium_feat_sel"] = []
         owned = set() if _demo_force_free(user_id) else set(_owned_features(st))
         await query.edit_message_text(
-            t("premium_feat_pick", lang, price=prem.stars_feature_price(user_id)),
+            _premium_feat_pick_text(lang, user_id),
             reply_markup=premium_features_keyboard(
                 lang, set(), user_id=user_id, owned=owned
             ),
