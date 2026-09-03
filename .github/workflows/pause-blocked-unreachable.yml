@@ -20,5 +20,26 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/twitch-telegram-bot
-            docker compose -f compose.vps.yml exec -T bot \
-              sh -c 'cd /app && python scripts/pause-blocked-unreachable-delivery.py'
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 <<'SQL'
+            SELECT COUNT(*) AS blocked_users
+            FROM users WHERE COALESCE(bot_blocked, FALSE) = TRUE;
+            SELECT COUNT(*) AS unreachable_chats FROM unreachable_chats;
+            WITH paused AS (
+              UPDATE subscriptions s
+              SET enabled = FALSE, delivery_paused = TRUE
+              WHERE s.enabled = TRUE
+                AND (
+                  EXISTS (
+                    SELECT 1 FROM users u
+                    WHERE u.user_id = s.chat_id
+                      AND COALESCE(u.bot_blocked, FALSE) = TRUE
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM unreachable_chats u
+                    WHERE u.chat_id = s.chat_id
+                  )
+                )
+              RETURNING s.id
+            )
+            SELECT COUNT(*) AS paused_subscriptions FROM paused;
+            SQL
