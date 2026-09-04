@@ -81,7 +81,6 @@ from i18n import SUPPORTED_LOCALES, btn, t as tr
 from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
 from telegram.error import BadRequest
 from premium import FEATURE_IDS
-from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
 
 

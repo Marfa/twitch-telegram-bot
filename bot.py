@@ -91,7 +91,6 @@ from i18n import (
     language_keyboard,
     link_preview_keyboard,
     chat_button_keyboard,
-    lucky_preview_keyboard,
     main_menu,
     other_menu,
     placeholders_link_html,
@@ -152,7 +151,6 @@ from twitch import (
     twitch_status_fingerprint,
 )
 from translate import build_translations
-from hf_text import generate_alert_template
 from bot_helpers import (
     _BROADCAST_SEND_PAUSE,
     _btn_filter,
@@ -466,14 +464,10 @@ from handlers.wizard import (
     _render_sub_template,
     _send_prompt_with_wizard_inline,
     _set_wizard_back,
-    _show_lucky_preview,
     _show_premium_gate,
     _user_can_manage_chat,
     _wizard_back_before_dest,
     _wizard_channel,
-    lucky_continue,
-    lucky_full_wizard,
-    lucky_generate,
     on_premium_gate,
     receive_alert_type,
     receive_advanced_options_next,
@@ -655,7 +649,6 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     IMAGE_ASK,
     IMAGE_UPLOAD,
     IMAGE_POSITION,
-    LUCKY_PREVIEW,
     IGNORE_KEYWORDS,
     ADVANCED_OPTIONS,
     LINK_PREVIEW,
@@ -709,7 +702,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_MORE,
     PAUSE_ALERTS_DAYS,
     ADMIN_REFUND_CHARGE,
-) = range(63)
+) = range(62)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2265,7 +2258,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     receive_strip_name_toggle, pattern=r"^strip_name:(toggle|back|cancel)$"
                 ),
-                CallbackQueryHandler(lucky_generate, pattern=r"^lucky:go$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_template),
             ],
             TEMPLATE_TYPO_CONFIRM: [
@@ -2296,18 +2288,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|ignore|delay|repeat|delete|chat)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|chat)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"
                 ),
-            ],
-            LUCKY_PREVIEW: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(lucky_generate, pattern=r"^lucky:go$"),
-                CallbackQueryHandler(lucky_continue, pattern=r"^lucky:continue$"),
-                CallbackQueryHandler(lucky_full_wizard, pattern=r"^lucky:full$"),
             ],
             IGNORE_KEYWORDS: [
                 _wiz_cancel,

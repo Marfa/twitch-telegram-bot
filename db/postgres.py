@@ -11,7 +11,6 @@ from typing import Any, Iterator
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .models import (
-    LUCKY_TEMPLATE_LIMIT,
     WATCH_MAX_FILTERS,
     AlertHistoryEntry,
     BotStats,
@@ -35,7 +34,6 @@ from .models import (
     _row_to_twitch_sync,
     _row_to_whisper_alert,
     _scheduled_broadcast_from_row,
-    _seed_lucky_templates_pg,
     _subscription_cart_snapshot,
     dump_watch_filters,
     parse_watch_filters,
@@ -522,16 +520,7 @@ class PostgresDatabase:
                 )
                 """
             )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS lucky_templates (
-                    id SERIAL PRIMARY KEY,
-                    locale TEXT NOT NULL,
-                    text TEXT NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
+            cur.execute("DROP TABLE IF EXISTS lucky_templates")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS twitch_sync (
@@ -714,7 +703,6 @@ class PostgresDatabase:
                 )
                 """
             )
-            _seed_lucky_templates_pg(cur)
 
     def add_subscription(
         self,
@@ -3066,54 +3054,6 @@ class PostgresDatabase:
             elif int(row["vote"]) == -1:
                 down = int(row["c"])
         return up, down
-
-    @staticmethod
-    def _lucky_locale(locale: str) -> str:
-        return "ru" if str(locale).lower().startswith("ru") else "en"
-
-    def add_lucky_template(self, locale: str, text: str) -> None:
-        loc = self._lucky_locale(locale)
-        body = (text or "").strip()
-        if not body:
-            return
-        with self._conn() as conn:
-            cur = self._cursor(conn)
-            cur.execute(
-                """
-                INSERT INTO lucky_templates (locale, text, created_at)
-                VALUES (%s, %s, NOW())
-                """,
-                (loc, body),
-            )
-            cur.execute(
-                "SELECT id FROM lucky_templates WHERE locale = %s ORDER BY id DESC",
-                (loc,),
-            )
-            rows = cur.fetchall()
-            if len(rows) > LUCKY_TEMPLATE_LIMIT:
-                old_ids = [int(r["id"]) for r in rows[LUCKY_TEMPLATE_LIMIT:]]
-                cur.execute(
-                    "DELETE FROM lucky_templates WHERE id = ANY(%s)",
-                    (list(old_ids),),
-                )
-
-    def pick_lucky_template(self, locale: str) -> str | None:
-        loc = self._lucky_locale(locale)
-        with self._conn() as conn:
-            cur = self._cursor(conn)
-            cur.execute(
-                """
-                SELECT text FROM lucky_templates
-                WHERE locale = %s
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (loc, LUCKY_TEMPLATE_LIMIT),
-            )
-            rows = cur.fetchall()
-        if not rows:
-            return None
-        return str(random.choice(rows)["text"])
 
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:

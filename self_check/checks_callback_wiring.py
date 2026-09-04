@@ -25,7 +25,6 @@ from i18n import (
     import_mode_keyboard,
     language_keyboard,
     link_preview_keyboard,
-    lucky_preview_keyboard,
     premium_actions_keyboard,
     premium_gate_keyboard,
     premium_owned_keyboard,
@@ -195,6 +194,7 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             {
                 "lang": loc,
                 "want_image": True,
+                "want_strip": False,
                 "want_ignore": False,
                 "want_delay": True,
                 "want_repeat": False,
@@ -263,7 +263,6 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             template_strip_keyboard,
             {"lang": loc, "show_back": True, "show_cancel": True},
         ),
-        ("lucky_preview", lucky_preview_keyboard, {"lang": loc}),
         ("channel_dup", channel_dup_keyboard, {"lang": loc, "sub_id": _SAMPLE_SUB}),
         (
             "sys_notifications",

@@ -10,8 +10,8 @@
 | Main menu | Alert types |
 |---|---|
 | ![Main menu](assets/gallery/ph-gallery-01-main-menu.png) | ![Alert types](assets/gallery/ph-gallery-02-alert-types.png) |
-| Custom template + placeholders | 🎲 I'm feeling lucky |
-| ![Template](assets/gallery/ph-gallery-03-templates.png) | ![I'm feeling lucky](assets/gallery/ph-gallery-04-feeling-lucky.png) |
+| Custom template + placeholders |
+| ![Template](assets/gallery/ph-gallery-03-templates.png) |
 | Destination | Import from Twitch |
 | ![Destination](assets/gallery/ph-gallery-05-destinations.png) | ![Import from Twitch](assets/gallery/ph-gallery-06-import-twitch.png) |
 
@@ -22,15 +22,14 @@
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
-| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **Clean title** (checkbox) strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
-| 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
+| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create, and a checkbox in the template editor on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 What to watch? | In **📦 Other**: saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
-| Advanced options | Extras checklist for everyone: image, ignore / delay / repeat mute / delete previous (⭐ Premium), chat button (free) |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous (⭐ Premium), chat button (free) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
@@ -84,8 +83,8 @@ On first `/start` the bot asks for a language (Russian or English), then shows t
 Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
-2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
-3. **Extras** — checklist: image, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, chat button; free users see ⭐ options but cannot enable them; unchecked steps are skipped
+2. Message template — write your own with placeholders
+3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, chat button; free users see ⭐ options but cannot enable them; unchecked steps are skipped
 4. Image (if checked) — upload and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
@@ -94,15 +93,14 @@ Then the wizard (for stream start / category change / stream end):
 9. For channel or group — add the bot and confirm the chat
 10. Delete previous bot message? — if checked (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
 
-Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button and image are free.
+Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, clean title, and image are free.
 
 For **upcoming stream**, after the channel and schedule check — template and settings, then reminder minutes and destination (no “do you want reminders?” ask).
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
-**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title** checkbox in the template editor (create and edit) strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default; tapping does not close the editor.
+**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title**: on create — checkbox on **Extras**; on edit — in the template editor. Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
 
-**🎲 I'm feeling lucky** builds a template with placeholders. Chain: **Groq** (if keyed) → on failure **Hugging Face** → if both are down, a random template from the local DB pool (up to 100 recent successful generations per language). The Example block fills in a random [IGDB](https://api-docs.igdb.com/) game (same Twitch API credentials) and a stream title derived from it. After preview: continue, try again, or full wizard.
 
 **Group or community** — send:
 - group link: `https://t.me/name` (no topic — general chat)
@@ -316,16 +314,11 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
-| `GROQ_API_KEY` | Groq — primary LLM for **I'm feeling lucky** (aliases: `GROQ_API`, `GROK_API`) |
-| `GROQ_TEXT_MODEL` | Groq model (default `openai/gpt-oss-20b`) |
-| `HF_TOKEN` | Hugging Face — fallback LLM (alias: `HUGGING_FACE_API`) |
-| `HF_TEXT_MODEL` | HF model (default `Qwen/Qwen2.5-7B-Instruct`) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |
 | `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Bearer secret for `POST /hooks/posthog-issues` (Issue + Inbox Report → admins) |
 | `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) for Inbox reports polling. Empty = polling off |
 
-Without Groq/HF keys, **I'm feeling lucky** still works from the local template pool in the DB.
 
 ### PostHog
 
@@ -351,14 +344,13 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `bot.py` | App wiring (`build_application`), edit flow, handler re-exports |
 | `handlers/` | Domain handlers: wizard, subscriptions, watch, broadcast, schedule, settings, … |
 | `bot_helpers.py` | Shared UI helpers (menu, wizard, admin, DM) |
-| `db/` | SQLite or PostgreSQL, `lucky_templates` pool, watch filters, referrals |
+| `db/` | SQLite or PostgreSQL, watch filters, referrals |
 | `self_check/` | Characterization checks + handler smoke (`python -m self_check`; CI: ruff F821) |
 | `analytics.py` | PostHog: usage events, errors, WARNING+ Logs, daily `daily_bot_stats` |
 | `locales/` + `i18n.py` | Strings (ru/en) and keyboards |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `beta.py` | Beta catalog (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |
-| `hf_text.py` | AI templates: Groq → HF → local pool |
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |

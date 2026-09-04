@@ -25,7 +25,6 @@ from handlers.watch import (
     _go_watch_tags_prompt,
     _go_watch_viewers_prompt,
 )
-from hf_text import generate_alert_template
 from i18n import (
     admin_other_audience_keyboard,
     admin_type_keyboard,
@@ -48,7 +47,6 @@ from i18n import (
     image_position_keyboard,
     is_menu_button,
     link_preview_keyboard,
-    lucky_preview_keyboard,
     placeholders_link_html,
     premium_gate_keyboard,
     repeat_keyboard,
@@ -106,7 +104,6 @@ def _wz() -> dict[str, int]:
         IMAGE_POSITION,
         IMAGE_UPLOAD,
         LINK_PREVIEW,
-        LUCKY_PREVIEW,
         PREMIUM_GATE,
         REPEAT_ALLOW,
         REPEAT_MUTE_MINUTES,
@@ -149,7 +146,6 @@ def _wz() -> dict[str, int]:
         "IMAGE_POSITION": IMAGE_POSITION,
         "IMAGE_UPLOAD": IMAGE_UPLOAD,
         "LINK_PREVIEW": LINK_PREVIEW,
-        "LUCKY_PREVIEW": LUCKY_PREVIEW,
         "PREMIUM_GATE": PREMIUM_GATE,
         "REPEAT_ALLOW": REPEAT_ALLOW,
         "REPEAT_MUTE_MINUTES": REPEAT_MUTE_MINUTES,
@@ -496,8 +492,6 @@ async def _go_before_dest_step(
 async def _wizard_back_before_dest(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    if context.user_data.get("lucky_quick"):
-        return await _show_lucky_preview(update, context, lang)
     if context.user_data.get("alert_type") == "upcoming":
         return await _go_schedule_reminder_minutes(update, context, lang)
     if context.user_data.get("alert_type") in ("end", "category"):
@@ -545,7 +539,6 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     chat_id = reply_chat_id(update)
     context.user_data.setdefault("strip_name_mentions", False)
-    strip_on = bool(context.user_data.get("strip_name_mentions"))
     text = t(
         "channel_found",
         lang,
@@ -559,8 +552,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         lang,
         inline_markup=template_strip_keyboard(
             lang,
-            enabled=strip_on,
-            show_lucky=True,
+            show_strip=False,
             show_back=True,
             show_cancel=True,
         ),
@@ -669,6 +661,7 @@ async def _advanced_options_markup(
     return advanced_options_keyboard(
         lang,
         want_image=bool(context.user_data.get("adv_want_image")),
+        want_strip=bool(context.user_data.get("adv_want_strip")),
         want_ignore=bool(context.user_data.get("adv_want_ignore")),
         want_delay=bool(context.user_data.get("adv_want_delay")),
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
@@ -686,6 +679,7 @@ def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str)
         t("advanced_options_prompt", lang),
         "",
         t("advanced_options_hint_image", lang),
+        t("advanced_options_hint_strip", lang),
         t("advanced_options_hint_ignore", lang),
     ]
     if alert != "upcoming":
@@ -701,6 +695,9 @@ async def _go_advanced_options_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     context.user_data.setdefault("adv_want_image", False)
+    context.user_data.setdefault(
+        "adv_want_strip", bool(context.user_data.get("strip_name_mentions"))
+    )
     context.user_data.setdefault("adv_want_ignore", False)
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
@@ -727,6 +724,7 @@ async def receive_advanced_options_toggle(
     flag = query.data.split(":")[-1]
     key = {
         "image": "adv_want_image",
+        "strip": "adv_want_strip",
         "ignore": "adv_want_ignore",
         "delay": "adv_want_delay",
         "repeat": "adv_want_repeat",
@@ -793,6 +791,9 @@ async def receive_advanced_options_next(
     context.user_data["attach_chat_button"] = want_chat
     if want_chat:
         context.user_data["disable_link_preview"] = True
+    context.user_data["strip_name_mentions"] = bool(
+        context.user_data.get("adv_want_strip")
+    )
     await query.edit_message_text("✓")
     if context.user_data.get("adv_want_image"):
         return await _go_image_ask_prompt(update, context, lang)
@@ -916,6 +917,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "use_global_ignore",
             "advanced_options_done",
             "adv_want_image",
+            "adv_want_strip",
             "adv_want_ignore",
             "adv_want_delay",
             "adv_want_repeat",
@@ -937,7 +939,6 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "delete_sibling_asked",
             "pending_chat_id",
             "pending_thread_id",
-            "lucky_quick",
             "alert_type",
             "notify_on_live",
             "notify_on_end",
@@ -971,8 +972,6 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, _wz()["IMAGE_UPLOAD"])
         return _wz()["IMAGE_UPLOAD"]
-    if state == _wz()["LUCKY_PREVIEW"]:
-        return await _go_template_prompt(update, context, lang)
     if state == _wz()["IGNORE_KEYWORDS"]:
         if context.user_data.get("advanced_options_done"):
             if context.user_data.get("adv_want_image"):
@@ -1328,7 +1327,6 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return _wz()["TEMPLATE_TYPO_CONFIRM"]
 
     context.user_data["message_template"] = template
-    context.user_data.pop("lucky_quick", None)
     return await _go_advanced_options_prompt(update, context, lang)
 
 async def _offer_template_typo_fix(
@@ -1377,7 +1375,6 @@ async def receive_template_typo_confirm(
         if is_edit:
             return await _save_edit_template(update, context, lang, template)
         context.user_data["message_template"] = template
-        context.user_data.pop("lucky_quick", None)
         return await _go_advanced_options_prompt(update, context, lang)
 
     await query.edit_message_text("✓")
@@ -1385,105 +1382,7 @@ async def receive_template_typo_confirm(
         return await _save_edit_template(update, context, lang, template)
 
     context.user_data["message_template"] = template
-    context.user_data.pop("lucky_quick", None)
     return await _go_advanced_options_prompt(update, context, lang)
-
-async def _show_lucky_preview(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    template = context.user_data.get("message_template") or ""
-    username = context.user_data.get("twitch_username") or "username"
-    twitch: TwitchClient = context.application.bot_data["twitch"]
-    game = await asyncio.to_thread(twitch.random_igdb_game_name)
-    stream_title = preview_stream_title(lang, game)
-    preview = render_template(template, username, game, stream_title)
-    text = t(
-        "lucky_preview",
-        lang,
-        template=html.escape(template),
-        preview=html.escape(preview),
-    )
-    markup = lucky_preview_keyboard(lang)
-    if update.callback_query:
-        try:
-            await update.callback_query.edit_message_text(
-                text, parse_mode=ParseMode.HTML, reply_markup=markup
-            )
-        except BadRequest:
-            await context.bot.send_message(
-                reply_chat_id(update),
-                text,
-                parse_mode=ParseMode.HTML,
-                reply_markup=markup,
-            )
-    else:
-        await update.effective_message.reply_text(
-            text, parse_mode=ParseMode.HTML, reply_markup=markup
-        )
-    _set_wizard_back(context, _wz()["LUCKY_PREVIEW"])
-    return _wz()["LUCKY_PREVIEW"]
-
-async def lucky_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    await query.edit_message_text(t("lucky_generating", lang))
-    channel = str(context.user_data.get("twitch_username") or "")
-    db: Database = context.application.bot_data["db"]
-    try:
-        template = await asyncio.to_thread(
-            generate_alert_template, locale=lang, channel=channel, store=db
-        )
-    except Exception:
-        logger.exception("Lucky template generation failed")
-        await _send_prompt_with_wizard_inline(
-            context.bot,
-            query.from_user.id,
-            t("lucky_failed", lang),
-            lang,
-            inline_markup=template_strip_keyboard(
-                lang,
-                enabled=bool(context.user_data.get("strip_name_mentions")),
-                show_lucky=True,
-                show_back=True,
-                show_cancel=True,
-            ),
-            update=update,
-            back=True,
-            parse_mode=None,
-        )
-        _set_wizard_back(context, _wz()["TEMPLATE"])
-        return _wz()["TEMPLATE"]
-
-    context.user_data["message_template"] = template
-    return await _show_lucky_preview(update, context, lang)
-
-async def lucky_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    if not context.user_data.get("message_template"):
-        await query.edit_message_text(t("template_empty", lang))
-        return _wz()["TEMPLATE"]
-    context.user_data["lucky_quick"] = True
-    context.user_data.setdefault("ignore_keywords", "")
-    context.user_data.setdefault("use_global_ignore", False)
-    # Link preview on only when the channel was entered as a Twitch URL.
-    context.user_data["disable_link_preview"] = not bool(
-        context.user_data.get("channel_input_was_url")
-    )
-    context.user_data.setdefault("delay_minutes", 0)
-    context.user_data.setdefault("suppress_repeat_minutes", 0)
-    context.user_data.setdefault("schedule_reminder_minutes", 0)
-    context.user_data.setdefault("schedule_reminder_configured", False)
-    context.user_data.pop("image_file_id", None)
-    context.user_data["image_position"] = ""
-    await query.edit_message_text("✓")
-    if context.user_data.get("alert_type") == "upcoming":
-        context.user_data["notify_on_live"] = False
-        context.user_data["notify_on_end"] = False
-        return await _go_schedule_reminder_minutes(update, context, lang)
-    return await _go_before_dest_step(update, context, lang)
 
 async def receive_chat_button_ask(
     update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -1497,17 +1396,6 @@ async def receive_chat_button_ask(
         context.user_data["disable_link_preview"] = True
     await query.edit_message_text("✓")
     return await _prompt_dest_step(update, context, lang)
-
-async def lucky_full_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    context.user_data.pop("lucky_quick", None)
-    context.user_data.pop("message_template", None)
-    context.user_data.pop("image_file_id", None)
-    context.user_data["image_position"] = ""
-    await query.edit_message_text("✓")
-    return await _go_template_prompt(update, context, lang)
 
 async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -1611,7 +1499,6 @@ async def receive_strip_name_toggle(
             reply_markup=template_strip_keyboard(
                 lang,
                 enabled=enabled,
-                show_lucky=not editing,
                 show_back=not editing,
                 show_cancel=True,
             )
@@ -1848,7 +1735,6 @@ _LIVE_ADDON_CLEAR_KEYS = (
     "notify_delete_fail",
     "pending_chat_id",
     "pending_thread_id",
-    "lucky_quick",
     "channel_input_was_url",
 )
 
@@ -2079,12 +1965,6 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     context.user_data["pending_chat_id"] = chat_id
     context.user_data["pending_thread_id"] = thread_id
-    if context.user_data.get("lucky_quick"):
-        context.user_data["delete_previous"] = False
-        context.user_data["notify_delete_fail"] = False
-        return await _finish_subscription(
-            update, context, update.effective_user.id, chat_id, thread_id
-        )
     return await _prompt_delete_old(update, context, lang)
 
 async def _prompt_delete_old(

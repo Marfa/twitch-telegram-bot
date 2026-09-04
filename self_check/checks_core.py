@@ -82,7 +82,6 @@ from i18n import SUPPORTED_LOCALES, btn, t as tr
 from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
 from telegram.error import BadRequest
 from premium import FEATURE_IDS
-from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
 
 
@@ -982,8 +981,6 @@ def check_core() -> None:
         assert tr("sync_unfollow_ask", loc, list="@x")
         assert tr("sync_unfollow_yes", loc)
         assert tr("sync_unfollow_no", loc)
-        assert tr("lucky_btn", loc)
-        assert tr("lucky_hint", loc)
         assert tr("image_ask", loc)
         assert tr("image_game_cover", loc)
         assert tr("image_game_cover_note", loc)
@@ -1074,11 +1071,14 @@ def check_core() -> None:
         )
         assert "LINK" in found
         assert "{username}" in found or "{{username}}" not in found
-        assert "Изображение можно добавить" in found or loc != "ru"
-        assert "You can add an image" in found or loc != "en"
-        assert "Очистка названия" in found or "Clean title" in found
+        assert "Дополнительно" in found or loc != "ru"
+        assert "Extras" in found or loc != "en"
+        assert "очистка названия" in found.lower() or "clean title" in found.lower()
         assert "x в эфире с игрой Just Chatting. Тестовый стрим" in found or loc != "ru"
         assert "x is live with Just Chatting. Test stream" in found or loc != "en"
+        assert tr("advanced_options_strip", loc)
+        assert "Очистка названия" in tr("advanced_options_hint_strip", "ru")
+        assert "Clean title" in tr("advanced_options_hint_strip", "en")
         edit_tpl = tr(
             "edit_template_prompt",
             loc,
@@ -1099,38 +1099,6 @@ def check_core() -> None:
         assert "bot_version" not in feedback
         assert "Версия бота" not in feedback
         assert "Bot version" not in feedback
-
-    normalized = _normalize_template("Streamer online!")
-    assert "{username}" in normalized
-    assert "{game}" in normalized
-    assert "{name}" in normalized
-    assert _normalize_template("{username}\n{game}\n{name}") == "{username}\n{game}\n{name}"
-    assert "{name}" in _normalize_template("live!\nТестовый стрим")
-    assert "Тестовый" not in _normalize_template("live!\nТестовый стрим")
-    assert "Test stream" not in _normalize_template("hi\nTest stream")
-
-    from hf_text import _local_template, generate_alert_template
-    from config import GROQ_TEXT_MODEL
-    assert GROQ_TEXT_MODEL == "openai/gpt-oss-20b" or os.getenv("GROQ_TEXT_MODEL", "").strip()
-    local_ru = _local_template("ru")
-    assert "{username}" in local_ru and "{game}" in local_ru and "{name}" in local_ru
-    # With no cloud tokens, generation must still return a template via fallback.
-    import os as _os
-    _prev = {
-        k: _os.environ.get(k)
-        for k in ("HF_TOKEN", "HUGGING_FACE_API", "GROQ_API_KEY", "GROQ_API", "GROK_API")
-    }
-    for k in _prev:
-        _os.environ[k] = ""
-    try:
-        fallback = generate_alert_template(locale="ru", channel="marfapr")
-        assert "{username}" in fallback and "{name}" in fallback
-    finally:
-        for k, v in _prev.items():
-            if v is None:
-                _os.environ.pop(k, None)
-            else:
-                _os.environ[k] = v
 
     from i18n import welcome_demo_keyboard
 

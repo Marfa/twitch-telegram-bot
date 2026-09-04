@@ -77,20 +77,13 @@ from i18n import SUPPORTED_LOCALES, btn, t as tr
 from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
 from telegram.error import BadRequest
 from premium import FEATURE_IDS
-from hf_text import _normalize_template
 from telegram import LinkPreviewOptions, Message
 
 
 
 def check_db_premium() -> None:
     CHANNEL = "marfapr"
-    import os as _os
-    from hf_text import _local_template, generate_alert_template
 
-    _prev = {
-        k: _os.environ.get(k)
-        for k in ("HF_TOKEN", "HUGGING_FACE_API", "GROQ_API_KEY", "GROQ_API", "GROK_API")
-    }
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "test.db")
         assert not db.user_exists(1)
@@ -124,47 +117,6 @@ def check_db_premium() -> None:
         assert len(db.get_watch_filters(1)) == 1
         db.clear_watch_prefs(1)
         assert db.get_watch_filters(1) == []
-        sample = "{username} live!\n{name}\n{game}"
-        db.add_lucky_template("ru", sample)
-        with db._conn() as conn:
-            texts = {
-                str(r["text"])
-                for r in conn.execute(
-                    "SELECT text FROM lucky_templates WHERE locale = 'ru'"
-                ).fetchall()
-            }
-            ru_n = conn.execute(
-                "SELECT COUNT(*) AS c FROM lucky_templates WHERE locale = 'ru'"
-            ).fetchone()["c"]
-            en_n = conn.execute(
-                "SELECT COUNT(*) AS c FROM lucky_templates WHERE locale = 'en'"
-            ).fetchone()["c"]
-        assert sample in texts
-        assert db.pick_lucky_template("en") is not None  # seeded on migrate
-        assert en_n == 100
-        assert ru_n == 100  # seeded full; add_lucky_template trims to 100
-        # Extra inserts still capped at 100.
-        for i in range(105):
-            db.add_lucky_template("ru", f"{{username}}\n{{name}}\n{{game}}\n#{i}")
-        with db._conn() as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) AS c FROM lucky_templates WHERE locale = 'ru'"
-            ).fetchone()["c"]
-        assert count == 100
-        from_store = _local_template("ru", db)
-        assert "{username}" in from_store
-        # Empty cloud tokens → pick from store, not seed.
-        for k in _prev:
-            _os.environ[k] = ""
-        try:
-            via_store = generate_alert_template(locale="ru", channel="x", store=db)
-            assert "{username}" in via_store
-        finally:
-            for k, v in _prev.items():
-                if v is None:
-                    _os.environ.pop(k, None)
-                else:
-                    _os.environ[k] = v
         sub_id = db.add_subscription(
             owner_id=1,
             twitch_username=CHANNEL,

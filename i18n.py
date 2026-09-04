@@ -833,6 +833,7 @@ def advanced_options_keyboard(
     lang: str,
     *,
     want_image: bool,
+    want_strip: bool,
     want_ignore: bool,
     want_delay: bool,
     want_repeat: bool,
@@ -858,6 +859,7 @@ def advanced_options_keyboard(
 
     rows: list[list[InlineKeyboardButton]] = [
         _row(want_image, "advanced_options_image", "image"),
+        _row(want_strip, "advanced_options_strip", "strip"),
         _row(want_ignore, "advanced_options_ignore", "ignore"),
     ]
     if show_delay:
@@ -1417,32 +1419,25 @@ def stored_typo_fix_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def lucky_start_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(t("lucky_btn", lang), callback_data="lucky:go")]]
-    )
-
 
 def template_strip_keyboard(
     lang: str,
     *,
     enabled: bool = False,
-    show_lucky: bool = False,
+    show_strip: bool = True,
     show_back: bool = False,
     show_cancel: bool = False,
 ) -> InlineKeyboardMarkup:
-    mark = "✅ " if enabled else "❌ "
-    rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                mark + t("strip_name_label", lang),
-                callback_data="strip_name:toggle",
-            )
-        ],
-    ]
-    if show_lucky:
+    rows: list[list[InlineKeyboardButton]] = []
+    if show_strip:
+        mark = "✅ " if enabled else "❌ "
         rows.append(
-            [InlineKeyboardButton(t("lucky_btn", lang), callback_data="lucky:go")]
+            [
+                InlineKeyboardButton(
+                    mark + t("strip_name_label", lang),
+                    callback_data="strip_name:toggle",
+                )
+            ]
         )
     nav: list[InlineKeyboardButton] = []
     if show_back:
@@ -1458,16 +1453,6 @@ def template_strip_keyboard(
     if nav:
         rows.append(nav)
     return InlineKeyboardMarkup(rows)
-
-
-def lucky_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(t("lucky_continue", lang), callback_data="lucky:continue")],
-            [InlineKeyboardButton(t("lucky_again", lang), callback_data="lucky:go")],
-            [InlineKeyboardButton(t("lucky_full_wizard", lang), callback_data="lucky:full")],
-        ]
-    )
 
 
 def image_ask_keyboard(lang: str, *, show_game_cover: bool = False) -> InlineKeyboardMarkup:

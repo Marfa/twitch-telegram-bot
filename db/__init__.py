@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from .models import (
-    LUCKY_TEMPLATE_LIMIT,
     WATCH_MAX_FILTERS,
     AlertHistoryEntry,
     BotStats,
@@ -20,7 +19,6 @@ from .models import (
     WatchPrefs,
     WhisperAlert,
     alert_type_from_payload,
-    build_lucky_seed_templates,
     dump_category_watch_prefs,
     dump_watch_filters,
     dump_watch_prefs,
@@ -36,7 +34,6 @@ from .protocol import Database
 from .sqlite import SqliteDatabase
 
 __all__ = [
-    "LUCKY_TEMPLATE_LIMIT",
     "WATCH_MAX_FILTERS",
     "AlertHistoryEntry",
     "BotStats",
@@ -56,7 +53,6 @@ __all__ = [
     "WhisperAlert",
     "_normalize_pg_url",
     "alert_type_from_payload",
-    "build_lucky_seed_templates",
     "dump_category_watch_prefs",
     "dump_watch_filters",
     "dump_watch_prefs",

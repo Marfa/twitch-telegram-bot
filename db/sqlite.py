@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .models import (
-    LUCKY_TEMPLATE_LIMIT,
     WATCH_MAX_FILTERS,
     AlertHistoryEntry,
     BotStats,
@@ -35,7 +34,6 @@ from .models import (
     _row_to_twitch_sync,
     _row_to_whisper_alert,
     _scheduled_broadcast_from_row,
-    _seed_lucky_templates_sqlite,
     _subscription_cart_snapshot,
     dump_watch_filters,
     parse_watch_filters,
@@ -398,16 +396,7 @@ class SqliteDatabase:
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS lucky_templates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                locale TEXT NOT NULL,
-                text TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
+        conn.execute("DROP TABLE IF EXISTS lucky_templates")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS twitch_sync (
@@ -577,8 +566,6 @@ class SqliteDatabase:
             )
             """
         )
-        _seed_lucky_templates_sqlite(conn)
-
     def add_subscription(
         self,
         owner_id: int,
@@ -2817,45 +2804,6 @@ class SqliteDatabase:
             elif int(row["vote"]) == -1:
                 down = int(row["c"])
         return up, down
-
-    @staticmethod
-    def _lucky_locale(locale: str) -> str:
-        return "ru" if str(locale).lower().startswith("ru") else "en"
-
-    def add_lucky_template(self, locale: str, text: str) -> None:
-        loc = self._lucky_locale(locale)
-        body = (text or "").strip()
-        if not body:
-            return
-        now = datetime.now(timezone.utc).isoformat()
-        with self._conn() as conn:
-            conn.execute(
-                "INSERT INTO lucky_templates (locale, text, created_at) VALUES (?, ?, ?)",
-                (loc, body, now),
-            )
-            rows = conn.execute(
-                "SELECT id FROM lucky_templates WHERE locale = ? ORDER BY id DESC",
-                (loc,),
-            ).fetchall()
-            if len(rows) > LUCKY_TEMPLATE_LIMIT:
-                old_ids = [(int(r["id"]),) for r in rows[LUCKY_TEMPLATE_LIMIT:]]
-                conn.executemany("DELETE FROM lucky_templates WHERE id = ?", old_ids)
-
-    def pick_lucky_template(self, locale: str) -> str | None:
-        loc = self._lucky_locale(locale)
-        with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT text FROM lucky_templates
-                WHERE locale = ?
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (loc, LUCKY_TEMPLATE_LIMIT),
-            ).fetchall()
-        if not rows:
-            return None
-        return str(random.choice(rows)["text"])
 
     def get_bot_stats(self) -> BotStats:
         with self._conn() as conn:

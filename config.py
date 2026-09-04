@@ -110,21 +110,6 @@ ADMIN_USER_IDS = parse_admin_user_ids()
 # Delete all rows for a user this many days after they block the bot (clock resets on re-block).
 BLOCKED_USER_RETENTION_DAYS = int(os.getenv("BLOCKED_USER_RETENTION_DAYS", "365"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
-HF_TOKEN = (
-    os.getenv("HF_TOKEN", "").strip()
-    or os.getenv("HUGGING_FACE_API", "").strip()
-)
-HF_TEXT_MODEL = os.getenv("HF_TEXT_MODEL", "Qwen/Qwen2.5-7B-Instruct").strip() or (
-    "Qwen/Qwen2.5-7B-Instruct"
-)
-GROQ_API_KEY = (
-    os.getenv("GROQ_API_KEY", "").strip()
-    or os.getenv("GROQ_API", "").strip()
-    or os.getenv("GROK_API", "").strip()
-)
-GROQ_TEXT_MODEL = os.getenv("GROQ_TEXT_MODEL", "openai/gpt-oss-20b").strip() or (
-    "openai/gpt-oss-20b"
-)
 BOT_VERSION = (os.getenv("BOT_VERSION") or "dev").strip() or "dev"
 POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", "").strip()
 # US default; EU projects: https://eu.i.posthog.com
