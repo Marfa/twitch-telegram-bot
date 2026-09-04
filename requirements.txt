@@ -3,7 +3,7 @@ requests==2.34.2
 urllib3==2.7.0
 psycopg[binary]==3.3.5
 cryptography==50.0.1
-posthog==7.43.0
+posthog==7.45.1
 opentelemetry-api==1.44.0
 opentelemetry-sdk==1.44.0
 opentelemetry-exporter-otlp==1.44.0
