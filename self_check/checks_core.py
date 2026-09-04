@@ -1204,9 +1204,8 @@ def check_core() -> None:
     object.__setattr__(
         frozen, "send_message_draft", AsyncMock(side_effect=RuntimeError("no draft"))
     )
-    object.__setattr__(frozen, "_message_fx_installed", False)
+    # Must not raise — falls through to ExtBot class wrap.
     install_message_fx(frozen)
-    assert getattr(frozen, "_message_fx_installed") is True
 
     bot = MagicMock()
     original_send = AsyncMock(return_value="ok")

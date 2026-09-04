@@ -2,6 +2,9 @@
 
 Uses sendMessageDraft when available; falls back to a single classic send_message.
 Bulk paths (broadcast / alerts) opt out via message_fx_disabled().
+
+ExtBot freezes instance attribute writes (slots / TelegramObject), so the wrap is
+installed on the ExtBot class once; per-bot draft prefs live in a side map.
 """
 from __future__ import annotations
 
@@ -11,7 +14,8 @@ import html as html_lib
 import logging
 import random
 import re
-from collections.abc import Iterator
+import weakref
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from telegram.constants import ChatAction
@@ -27,6 +31,12 @@ _MIN_STREAM_CHARS = 40
 _MAX_STEPS = 10
 _STEP_DELAY_S = 0.035
 _TAG_RE = re.compile(r"<[^>]+>")
+
+# Per-bot draft preference. Prefer WeakKeyDictionary; fall back to id() map.
+_draft_enabled: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_draft_by_id: dict[int, Callable[[int], bool] | None] = {}
+_extbot_wrapped = False
+_extbot_original_send = None
 
 
 @contextmanager
@@ -145,6 +155,88 @@ def _extract_send_args(
     return chat_id, text if isinstance(text, str) else None, thread_id, parse_mode
 
 
+def _draft_on_for(bot, chat_id: object) -> bool:
+    draft_enabled = _draft_enabled.get(bot)
+    if draft_enabled is None and id(bot) in _draft_by_id:
+        draft_enabled = _draft_by_id.get(id(bot))
+    if draft_enabled is None:
+        return True
+    try:
+        return bool(draft_enabled(int(chat_id)))
+    except (TypeError, ValueError):
+        return True
+
+
+async def _fx_send(bot, original, args: tuple, kwargs: dict):
+    if _fx_disabled.get():
+        return await original(*args, **kwargs)
+
+    chat_id, text, thread_id, parse_mode = _extract_send_args(args, kwargs)
+    if text is None or not _private_chat_id(chat_id):
+        return await original(*args, **kwargs)
+
+    if not _draft_on_for(bot, chat_id):
+        return await original(*args, **kwargs)
+
+    # Entities-only formatting is too brittle to preview mid-string.
+    if kwargs.get("entities"):
+        await send_typing(bot, chat_id, thread_id)
+        return await original(*args, **kwargs)
+
+    await send_typing(bot, chat_id, thread_id)
+    await stream_draft_then(
+        bot,
+        chat_id,
+        text,
+        parse_mode=parse_mode,
+        message_thread_id=thread_id,
+    )
+    return await original(*args, **kwargs)
+
+
+def _remember_draft_pref(bot, draft_enabled: Callable[[int], bool] | None) -> None:
+    try:
+        _draft_enabled[bot] = draft_enabled
+    except TypeError:
+        _draft_by_id[id(bot)] = draft_enabled
+
+
+def _wrap_extbot_class() -> None:
+    global _extbot_wrapped, _extbot_original_send
+    if _extbot_wrapped:
+        return
+    from telegram.ext import ExtBot
+
+    _extbot_original_send = ExtBot.send_message
+
+    async def send_message(self, *args, **kwargs):
+        async def _orig(*a, **k):
+            return await _extbot_original_send(self, *a, **k)
+
+        return await _fx_send(self, _orig, args, kwargs)
+
+    ExtBot.send_message = send_message  # type: ignore[method-assign]
+    _extbot_wrapped = True
+
+
+def _wrap_instance(bot, draft_enabled) -> bool:
+    """Instance wrap for mocks / bots that allow attribute assignment."""
+    if getattr(bot, "_message_fx_installed", False):
+        return True
+    original = bot.send_message
+
+    async def send_message(*args, **kwargs):
+        return await _fx_send(bot, original, args, kwargs)
+
+    try:
+        bot.send_message = send_message  # type: ignore[method-assign]
+        bot._message_fx_installed = True  # type: ignore[attr-defined]
+        _remember_draft_pref(bot, draft_enabled)
+        return True
+    except (AttributeError, TypeError):
+        return False
+
+
 def install_message_fx(
     bot,
     *,
@@ -154,44 +246,7 @@ def install_message_fx(
 
     draft_enabled: optional ``(user_id: int) -> bool``; default treats draft as on.
     """
-    if getattr(bot, "_message_fx_installed", False):
+    if _wrap_instance(bot, draft_enabled):
         return
-    original = bot.send_message
-
-    def _draft_on(chat_id: object) -> bool:
-        if draft_enabled is None:
-            return True
-        try:
-            return bool(draft_enabled(int(chat_id)))
-        except (TypeError, ValueError):
-            return True
-
-    async def send_message(*args, **kwargs):
-        if _fx_disabled.get():
-            return await original(*args, **kwargs)
-
-        chat_id, text, thread_id, parse_mode = _extract_send_args(args, kwargs)
-        if text is None or not _private_chat_id(chat_id):
-            return await original(*args, **kwargs)
-
-        if not _draft_on(chat_id):
-            return await original(*args, **kwargs)
-
-        # Entities-only formatting is too brittle to preview mid-string.
-        if kwargs.get("entities"):
-            await send_typing(bot, chat_id, thread_id)
-            return await original(*args, **kwargs)
-
-        await send_typing(bot, chat_id, thread_id)
-        await stream_draft_then(
-            bot,
-            chat_id,
-            text,
-            parse_mode=parse_mode,
-            message_thread_id=thread_id,
-        )
-        return await original(*args, **kwargs)
-
-    # ExtBot freezes attribute assignment (TelegramObject.__setattr__).
-    object.__setattr__(bot, "send_message", send_message)
-    object.__setattr__(bot, "_message_fx_installed", True)
+    _remember_draft_pref(bot, draft_enabled)
+    _wrap_extbot_class()
