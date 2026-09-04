@@ -25,9 +25,13 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/twitch-telegram-bot
+            USER_ID='${{ inputs.user_id }}'
+            case "$USER_ID" in
+              ''|*[!0-9]*) echo "ERROR: user_id must be digits"; exit 1 ;;
+            esac
             echo "=== recent menu-button logs ==="
             docker compose -f compose.vps.yml logs --tail=300 bot 2>&1 \
               | grep -E 'stream-chat menu button|Failed to sync stream-chat' || true
-            echo "=== sync user ${{ inputs.user_id }} ==="
+            echo "=== sync user ${USER_ID} ==="
             docker compose -f compose.vps.yml exec -T bot \
-              python /app/scripts/sync-stream-chat-menu-button.py "${{ inputs.user_id }}"
+              python /app/scripts/sync-stream-chat-menu-button.py "$USER_ID"
