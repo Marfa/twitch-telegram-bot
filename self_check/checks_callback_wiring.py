@@ -202,6 +202,7 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
                 "want_delay": True,
                 "want_repeat": False,
                 "want_delete": True,
+                "want_chat": False,
             },
         ),
         ("delete_old", delete_old_keyboard, {"lang": loc}),

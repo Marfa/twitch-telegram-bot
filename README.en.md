@@ -87,15 +87,15 @@ Then the wizard (for stream start / category change / stream end):
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
 3. Image (add / skip; if added — position: start or end of caption)
-4. Ignore keywords — **advanced mode** only
+4. **Extras** (**advanced mode** only) — checklist with short descriptions: ignore keywords, delayed send, repeat mute (stream start), delete previous in channel/group, chat button; unchecked steps are skipped
 5. Link preview (skipped when an image is set)
-6. Delay send (yes/no, minutes) — **advanced mode** only; after go-live / category change / offline; Helix re-checked before send
-7. Allow repeat notifications — **advanced mode** and **stream start** only
+6. Delay send (minutes) — if checked under Extras; after go-live / category change / offline; Helix re-checked before send
+7. Repeat mute (minutes) — if checked; **stream start** only
 8. Destination: DM or channel/group (one button)
 9. For channel or group — add the bot and confirm the chat
-10. Delete previous bot message? — **advanced mode** only (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
+10. Delete previous bot message? — if checked (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
 
-With advanced mode off, steps 4 / 6 / 7 / 10 are skipped; the first wizard step notes simplified mode. Toggle: **⚙️ Settings → 🎛 Advanced mode** (Premium).
+With advanced mode off, steps 4 / 6 / 7 / 10 are skipped (chat button too); the first wizard step notes simplified mode. Toggle: **⚙️ Settings → 🎛 Advanced mode** (Premium).
 
 For **upcoming stream**, after the channel and schedule check — template and settings, then reminder minutes and destination (no “do you want reminders?” ask).
 

@@ -484,6 +484,13 @@ async def _go_before_dest_step(
     if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
         context.user_data.setdefault("attach_chat_button", False)
         return await _prompt_dest_step(update, context, lang)
+    # Advanced options checklist already collected chat-button preference.
+    if context.user_data.get("advanced_options_done"):
+        want = bool(context.user_data.get("adv_want_chat"))
+        context.user_data["attach_chat_button"] = want
+        if want:
+            context.user_data["disable_link_preview"] = True
+        return await _prompt_dest_step(update, context, lang)
     return await _go_chat_button_prompt(update, context, lang)
 
 async def _wizard_back_before_dest(
@@ -655,9 +662,22 @@ def _advanced_options_markup(context: ContextTypes.DEFAULT_TYPE, lang: str):
         want_delay=bool(context.user_data.get("adv_want_delay")),
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
         want_delete=bool(context.user_data.get("adv_want_delete")),
+        want_chat=bool(context.user_data.get("adv_want_chat")),
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
     )
+
+
+def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
+    alert = context.user_data.get("alert_type")
+    lines = [t("advanced_options_prompt", lang), "", t("advanced_options_hint_ignore", lang)]
+    if alert != "upcoming":
+        lines.append(t("advanced_options_hint_delay", lang))
+    if alert == "live" or not alert:
+        lines.append(t("advanced_options_hint_repeat", lang))
+    lines.append(t("advanced_options_hint_delete", lang))
+    lines.append(t("advanced_options_hint_chat", lang))
+    return "\n".join(lines)
 
 
 async def _go_advanced_options_prompt(
@@ -667,9 +687,10 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
     context.user_data.setdefault("adv_want_delete", False)
+    context.user_data.setdefault("adv_want_chat", False)
     context.user_data.pop("advanced_options_done", None)
     chat_id = reply_chat_id(update)
-    text = t("advanced_options_prompt", lang)
+    text = _advanced_options_prompt_text(context, lang)
     markup = _advanced_options_markup(context, lang)
     if update.callback_query:
         await context.bot.send_message(chat_id, text, reply_markup=markup)
@@ -691,6 +712,7 @@ async def receive_advanced_options_toggle(
         "delay": "adv_want_delay",
         "repeat": "adv_want_repeat",
         "delete": "adv_want_delete",
+        "chat": "adv_want_chat",
     }.get(flag)
     if not key:
         return _wz()["ADVANCED_OPTIONS"]
@@ -719,6 +741,10 @@ async def receive_advanced_options_next(
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
+    want_chat = bool(context.user_data.get("adv_want_chat"))
+    context.user_data["attach_chat_button"] = want_chat
+    if want_chat:
+        context.user_data["disable_link_preview"] = True
     await query.edit_message_text("✓")
     return await _go_ignore_keywords_prompt(update, context, lang)
 
@@ -841,6 +867,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_delay",
             "adv_want_repeat",
             "adv_want_delete",
+            "adv_want_chat",
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
@@ -901,6 +928,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 "adv_want_delay",
                 "adv_want_repeat",
                 "adv_want_delete",
+                "adv_want_chat",
             )
         ):
             return await _go_advanced_options_prompt(update, context, lang)
@@ -958,6 +986,9 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         if await prem.advanced_mode_on(
             context.bot, db, update.effective_user.id, channel=_wizard_channel(context)
         ):
+            # Chat button came from «Дополнительно» — skip separate prompt on back.
+            if context.user_data.get("advanced_options_done"):
+                return await _wizard_back_before_dest(update, context, lang)
             return await _go_chat_button_prompt(update, context, lang)
         return await _wizard_back_before_dest(update, context, lang)
     if state == _wz()["CHAT_BUTTON_ASK"]:

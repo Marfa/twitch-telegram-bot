@@ -530,7 +530,7 @@ async def open_cart_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             text = t("cart_empty", lang, days=days)
             markup = None
         else:
-            markup = _delete_cart_keyboard(lang, view)
+            markup = _delete_cart_keyboard(lang, view, set())
     await update.effective_message.reply_text(text, reply_markup=markup)
     await update.effective_message.reply_text(
         t("menu_subs", lang),
@@ -2546,28 +2546,40 @@ def _delete_cart_view(items: list, kind: str | None) -> tuple[list[str], str | N
 def _delete_cart_keyboard(
     lang: str,
     items: list,
-    selected: set[int] | None = None,
+    selected: set[int],
 ) -> InlineKeyboardMarkup:
-    _ = selected  # legacy multi-select unused; per-row actions only
     rows: list[list[InlineKeyboardButton]] = []
     for idx, item in enumerate(items, 1):
         cart_id = int(item.cart_id)
         display = str(getattr(item, "twitch_username", "") or "") or str(
             getattr(item, "twitch_user_id", "") or ""
         )
-        tag = f"#{idx} {display}".strip()
+        mark = "✅ " if cart_id in selected else ""
         rows.append(
             [
                 InlineKeyboardButton(
-                    _inline_btn_label(f"{t('cart_restore_one', lang)} {tag}"),
-                    callback_data=f"delete_cart_restore:{cart_id}",
-                ),
-                InlineKeyboardButton(
-                    _inline_btn_label(f"{t('cart_discard_one', lang)} {tag}"),
-                    callback_data=f"delete_cart_discard:{cart_id}",
-                ),
+                    f"{mark}♻️ #{idx} {display}".strip(),
+                    callback_data=f"delete_cart_sel:{cart_id}",
+                )
             ]
         )
+    if selected:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("cart_clear", lang),
+                    callback_data="delete_cart_clear",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("cart_restore_go", lang, count=len(selected)),
+                callback_data="delete_cart_restore_go",
+            )
+        ]
+    )
     return InlineKeyboardMarkup(rows)
 
 
@@ -2631,9 +2643,7 @@ async def _show_delete_cart(
         text = t("cart_prompt", lang, days=days)
         if not view:
             text = t("cart_empty", lang, days=days)
-            markup = None
-        else:
-            markup = _delete_cart_keyboard(lang, view)
+        markup = _delete_cart_keyboard(lang, view, selected)
     if prefix:
         text = prefix + text
     await query.edit_message_text(text, reply_markup=markup)
@@ -2660,103 +2670,37 @@ async def on_delete_cart_type(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
-async def on_delete_cart_restore_one(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    query = update.callback_query
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    if not _deleted_subscriptions_cart_enabled(db, user_id):
-        await query.answer()
-        return
-    cart_id = int((query.data or "").split(":", 1)[-1])
-    from config import MAX_SUBSCRIPTIONS_PER_OWNER
-
-    days = int(
-        context.user_data.get("delete_cart_days")
-        or prem.deleted_subscriptions_cart_days(db, user_id)
-    )
-    is_demo = demo_mode.is_active(user_id)
-    kind = context.user_data.get("delete_cart_type")
-    remaining = max(0, int(MAX_SUBSCRIPTIONS_PER_OWNER) - len(_subs_for_owner(db, user_id)))
-    if remaining <= 0:
-        await query.answer(
-            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
-            show_alert=True,
-        )
-        return
-    active_slots = prem.active_subscription_slots(db, user_id, demo=is_demo)
-    max_enabled = None if active_slots.unlimited else active_slots.remaining
-    restored, enabled_restored = db.restore_deleted_subscriptions(
-        user_id,
-        [cart_id],
-        days=days,
-        is_demo=is_demo,
-        max_enabled=max_enabled,
-    )
-    paused_due_active = max(0, restored - enabled_restored)
-    if restored:
-        restored_text = t("cart_restored", lang, count=restored)
-        if paused_due_active > 0:
-            restored_text += t(
-                "cart_restored_active_paused",
-                lang,
-                paused=paused_due_active,
-                limit=prem.free_active_limit(),
-            )
-        await query.answer(restored_text[:200])
-    else:
-        await query.answer(t("sub_not_found", lang), show_alert=True)
-    items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
-    await _show_delete_cart(
-        query,
-        context,
-        lang,
-        items,
-        days=days,
-        kind=kind,
-        selected=set(),
-    )
-
-
-async def on_delete_cart_discard_one(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    query = update.callback_query
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    if not _deleted_subscriptions_cart_enabled(db, user_id):
-        await query.answer()
-        return
-    cart_id = int((query.data or "").split(":", 1)[-1])
-    days = int(
-        context.user_data.get("delete_cart_days")
-        or prem.deleted_subscriptions_cart_days(db, user_id)
-    )
-    is_demo = demo_mode.is_active(user_id)
-    kind = context.user_data.get("delete_cart_type")
-    n = db.discard_deleted_subscriptions(user_id, [cart_id], is_demo=is_demo)
-    if n:
-        await query.answer(t("cart_discarded", lang))
-    else:
-        await query.answer(t("sub_not_found", lang), show_alert=True)
-    items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
-    await _show_delete_cart(
-        query,
-        context,
-        lang,
-        items,
-        days=days,
-        kind=kind,
-        selected=set(),
-    )
-
-
 async def on_delete_cart_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Legacy multi-select callback — restore that cart row."""
-    await on_delete_cart_restore_one(update, context)
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        return
+    cart_id = int((query.data or "").split(":", 1)[-1])
+
+    selected: set[int] = context.user_data.setdefault("delete_cart_selected", set())
+    if cart_id in selected:
+        selected.discard(cart_id)
+    else:
+        selected.add(cart_id)
+
+    items = context.user_data.get("delete_cart_items") or []
+    days = int(context.user_data.get("delete_cart_days") or 10)
+    if not items:
+        is_demo = demo_mode.is_active(user_id)
+        all_items = db.list_deleted_subscriptions(
+            user_id, days=days, is_demo=is_demo, limit=100
+        )
+        kind = context.user_data.get("delete_cart_type")
+        _, kind, items = _store_delete_cart_state(
+            context, all_items, days=days, kind=kind, selected=selected
+        )
+
+    await query.edit_message_reply_markup(
+        reply_markup=_delete_cart_keyboard(lang, items, selected)
+    )
 
 
 async def on_delete_cart_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2767,30 +2711,24 @@ async def on_delete_cart_clear(update: Update, context: ContextTypes.DEFAULT_TYP
     db: Database = context.application.bot_data["db"]
     if not _deleted_subscriptions_cart_enabled(db, user_id):
         return
-    days = int(context.user_data.get("delete_cart_days") or 10)
-    kind = context.user_data.get("delete_cart_type")
-    is_demo = demo_mode.is_active(user_id)
-    items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
-    await _show_delete_cart(
-        query, context, lang, items, days=days, kind=kind, selected=set()
+    context.user_data["delete_cart_selected"] = set()
+    items = context.user_data.get("delete_cart_items") or []
+    await query.edit_message_reply_markup(
+        reply_markup=_delete_cart_keyboard(lang, items, set())
     )
 
 
 async def on_delete_cart_restore_go(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Legacy bulk restore — restore all currently listed cart rows."""
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     if not _deleted_subscriptions_cart_enabled(db, user_id):
-        await query.answer()
         return
     selected: set[int] = set(context.user_data.get("delete_cart_selected") or ())
-    order: list[int] = context.user_data.get("delete_cart_order") or []
-    if not selected:
-        selected = set(order)
     if not selected:
         await query.answer(t("cart_restore_none", lang), show_alert=True)
         return
@@ -2809,7 +2747,8 @@ async def on_delete_cart_restore_go(
         )
         return
 
-    selected_in_order = [cid for cid in order if cid in selected] or list(selected)[:remaining]
+    order: list[int] = context.user_data.get("delete_cart_order") or []
+    selected_in_order = [cid for cid in order if cid in selected]
     restore_ids = selected_in_order[:remaining]
     active_slots = prem.active_subscription_slots(db, user_id, demo=is_demo)
     max_enabled = None if active_slots.unlimited else active_slots.remaining
@@ -2841,7 +2780,6 @@ async def on_delete_cart_restore_go(
             paused=paused_due_active,
             limit=prem.free_active_limit(),
         )
-    await query.answer(restored_text[:200])
     await _show_delete_cart(
         query,
         context,

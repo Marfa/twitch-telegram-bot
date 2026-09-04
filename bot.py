@@ -584,10 +584,8 @@ from handlers.subscriptions import (
     list_subscriptions,
     migrate_import_sync_subscriptions,
     on_delete_cart_clear,
-    on_delete_cart_discard_one,
     on_delete_cart_open,
     on_delete_cart_restore_go,
-    on_delete_cart_restore_one,
     on_delete_cart_sel,
     on_delete_cart_type,
     on_delete_clear,
@@ -2080,14 +2078,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
-        CallbackQueryHandler(on_delete_cart_restore_one, pattern=r"^delete_cart_restore:\d+$"),
-        group=0,
-    )
-    app.add_handler(
-        CallbackQueryHandler(on_delete_cart_discard_one, pattern=r"^delete_cart_discard:\d+$"),
-        group=0,
-    )
-    app.add_handler(
         CallbackQueryHandler(on_delete_cart_restore_go, pattern=r"^delete_cart_restore_go$"),
         group=0,
     )
@@ -2327,7 +2317,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(ignore|delay|repeat|delete)$",
+                    pattern=r"^advopt:toggle:(ignore|delay|repeat|delete|chat)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"
@@ -2750,7 +2740,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"welcome_del:\d+$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"
-                r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore:|delete_cart_discard:|delete_cart_restore_go$|delete_cart_clear$|"
+                r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|list_del:\d+$|list_del_ok:\d+$|list_del_no:\d+$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"

@@ -840,6 +840,7 @@ def advanced_options_keyboard(
     want_delay: bool,
     want_repeat: bool,
     want_delete: bool,
+    want_chat: bool,
     show_delay: bool = True,
     show_repeat: bool = True,
 ) -> InlineKeyboardMarkup:
@@ -860,6 +861,7 @@ def advanced_options_keyboard(
     if show_repeat:
         rows.append(_row(want_repeat, "advanced_options_repeat", "repeat"))
     rows.append(_row(want_delete, "advanced_options_delete", "delete"))
+    rows.append(_row(want_chat, "advanced_options_chat", "chat"))
     rows.append(
         [
             InlineKeyboardButton(
