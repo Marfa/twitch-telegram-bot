@@ -645,7 +645,7 @@
   "edit_repeat_mute_prompt": "Subscription #{sub_id}\nCurrent: {current}\n\nEnter suppression minutes (0 — allow repeats):",
   "edit_repeat_current_allow": "allowed",
   "edit_repeat_current_mute": "suppress {minutes} min",
-  "edit_template_prompt": "Subscription #{sub_id}\n\nCurrent format:\n<code>{current}</code>\n\nHow it will look:\n<code>{preview}</code>\n\nSend a new message template.\n\nExample placeholders:\n• <code>{{username}}</code> — channel name\n• <code>{{game}}</code> — stream category\n• <code>{{name}}</code> — stream title\n\n{placeholders_link}\n\n«Clean title» — strips streamer mentions and commands from the stream title.",
+  "edit_template_prompt": "Subscription #{sub_id}\n\nCurrent format:\n<code>{current}</code>\n\nHow it will look:\n<code>{preview}</code>\n\nSend a new message template.\n\nExample placeholders:\n• <code>{{username}}</code> — channel name\n• <code>{{game}}</code> — stream category\n• <code>{{name}}</code> — stream title\n\n{placeholders_link}",
   "edit_ignore_keywords_prompt": "Subscription #{sub_id}\nCurrent: {current}\n\nSend keywords separated by commas.\nRegexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\nTap «Use global list» to apply Settings → Ignored words and finish.\n{hint}",
   "edit_ignore_keywords_hint_skip": "Empty message or Skip — disable the filter.",
   "edit_ignore_keywords_hint_cancel": "Cancel — leave unchanged. Empty message — disable the filter.",
@@ -763,6 +763,7 @@
   "advanced_options_hint_repeat": "• Repeat mute ⭐ — don’t alert again if the stream restarts quickly",
   "advanced_options_hint_delete": "• Delete previous ⭐ — remove the bot’s last message in the channel/group",
   "advanced_options_hint_chat": "• Chat button — “Open stream chat” button under the alert",
+  "advanced_options_hint_preview": "• Link preview — show URL preview from the template (off with an image or chat button)",
   "advanced_options_premium_only": "⭐ This option requires Premium.",
   "advanced_options_image": "Image",
   "advanced_options_strip": "Clean title",
@@ -771,6 +772,7 @@
   "advanced_options_repeat": "Repeat mute ⭐",
   "advanced_options_delete": "Delete previous in channel/group ⭐",
   "advanced_options_chat": "Chat button",
+  "advanced_options_preview": "Link preview",
   "advanced_options_next": "Next",
   "btn_wizard_next": "Next"
 }

@@ -22,14 +22,14 @@
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
-| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create, and a checkbox in the template editor on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
+| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 What to watch? | In **📦 Other**: saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
-| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous (⭐ Premium), chat button (free) |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous (⭐ Premium), chat button, link preview (if URL in template; off with image/chat button) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
@@ -84,7 +84,7 @@ Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
-3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, chat button; free users see ⭐ options but cannot enable them; unchecked steps are skipped
+3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, chat button, link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
 4. Image (if checked) — upload and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
@@ -99,7 +99,7 @@ For **upcoming stream**, after the channel and schedule check — template and s
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
-**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title**: on create — checkbox on **Extras**; on edit — in the template editor. Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
+**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title**: on create — **Extras**; on edit — edit menu (same labels as Extras). Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
 
 
 **Group or community** — send:
@@ -255,7 +255,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit** — same order as creation: template (**Clean title** checkbox), image, ignore / delay / repeats / delete (edit-menu items only in **advanced mode**), link preview (hidden when an image is set), schedule reminders (if enabled at creation), destination. For **stream category change** alerts with delete enabled — a separate «delete other alerts too» option. At the bottom: **Change alert type**, **Copy**, **Copy and change type** (cancel on type pick does not create a copy).
+**Edit** — same shared options order as Extras: image, clean title, ignore / delay / repeat / delete / chat button (⭐ where needed), plus template, link preview, schedule reminders, destination, change type / copy. For **stream category change** alerts with delete enabled — a separate «delete other alerts too» option.
 
 Notification template example:
 

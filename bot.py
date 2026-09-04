@@ -1123,7 +1123,6 @@ async def _prompt_edit_template(
     sub: Subscription,
     sub_num: int,
     reply_markup=None,
-    strip_name_mentions: bool | None = None,
 ) -> None:
     preview = render_template(
         sub.message_template,
@@ -1131,16 +1130,11 @@ async def _prompt_edit_template(
         "Just Chatting",
         t("preview_stream", lang),
     )
-    strip_on = (
-        bool(strip_name_mentions)
-        if strip_name_mentions is not None
-        else bool(sub.strip_name_mentions)
-    )
     kb = (
         reply_markup
         if reply_markup is not None
         else template_strip_keyboard(
-            lang, enabled=strip_on, show_cancel=True
+            lang, show_strip=False, show_cancel=True
         )
     )
     await _send_prompt_with_wizard_inline(
@@ -1406,6 +1400,7 @@ def _edit_options_for_sub(
         dest_type=sub.dest_type,
         delete_previous=sub.delete_previous,
         has_image=bool(sub.image_file_id),
+        strip_name_mentions=bool(sub.strip_name_mentions),
         show_link_preview=not bool(sub.image_file_id)
         and template_has_link(sub.message_template or ""),
         schedule_reminder_configured=sub.schedule_reminder_configured,
@@ -2143,7 +2138,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|repeat)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|repeat|strip)$",
         ),
         group=0,
     )
@@ -2288,7 +2283,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|chat)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|chat|preview)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"

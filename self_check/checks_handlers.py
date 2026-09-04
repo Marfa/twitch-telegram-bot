@@ -710,6 +710,59 @@ def check_handlers() -> None:
         assert tr("premium_feat_alert_history", "ru")
         assert "⭐" in tr("advanced_options_hint_ignore", "ru")
         assert tr("advanced_options_premium_only", "ru")
+        # Editor shared labels match Extras (same i18n keys).
+        from i18n import edit_options_keyboard
+
+        edit_kb = edit_options_keyboard(
+            1,
+            "ru",
+            dest_type="channel",
+            delete_previous=False,
+            show_advanced=True,
+            is_upcoming=False,
+        )
+        edit_labels = [btn.text for row in edit_kb.inline_keyboard for btn in row]
+        for key in (
+            "advanced_options_image",
+            "advanced_options_strip",
+            "advanced_options_ignore",
+            "advanced_options_delay",
+            "advanced_options_repeat",
+            "advanced_options_delete",
+            "advanced_options_chat",
+        ):
+            label = tr(key, "ru")
+            assert any(label in text for text in edit_labels), key
+        # Shared block order: image → strip → ignore → delay → repeat → delete → chat
+        # (+ preview when template has a link — tested separately below)
+        idx = {tr(k, "ru"): None for k in (
+            "advanced_options_image",
+            "advanced_options_strip",
+            "advanced_options_ignore",
+            "advanced_options_delay",
+            "advanced_options_repeat",
+            "advanced_options_delete",
+            "advanced_options_chat",
+        )}
+        for i, text in enumerate(edit_labels):
+            for label in idx:
+                if label in text and idx[label] is None:
+                    idx[label] = i
+        order = list(idx.values())
+        assert all(v is not None for v in order)
+        assert order == sorted(order)
+        assert tr("advanced_options_preview", "ru")
+        assert tr("advanced_options_hint_preview", "ru")
+        from handlers.wizard import _sync_adv_preview_conflict
+        from unittest.mock import MagicMock
+
+        ctx = MagicMock()
+        ctx.user_data = {"adv_want_preview": True, "adv_want_image": True}
+        _sync_adv_preview_conflict(ctx)
+        assert ctx.user_data["adv_want_preview"] is False
+        ctx.user_data = {"adv_want_preview": True, "adv_want_chat": True}
+        _sync_adv_preview_conflict(ctx)
+        assert ctx.user_data["adv_want_preview"] is False
         assert tr("btn_advanced_mode", "ru")  # locale kept; button removed from Settings
         db.upsert_user(77)
         assert db.get_advanced_mode_setting(77) is None

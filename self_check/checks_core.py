@@ -1092,7 +1092,7 @@ def check_core() -> None:
         assert "marfapr live" in edit_tpl
         assert "Current format" in edit_tpl or "Текущий формат" in edit_tpl
         assert "How it will look" in edit_tpl or "Как будет выглядеть" in edit_tpl
-        assert "Очистка названия" in edit_tpl or "Clean title" in edit_tpl
+        assert "Очистка названия" not in edit_tpl and "Clean title" not in edit_tpl
         feedback = tr("feedback", loc, github="https://example.com", user_id=42)
         assert "42" in feedback
         assert "<code>42</code>" in feedback

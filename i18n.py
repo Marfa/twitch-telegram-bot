@@ -839,8 +839,10 @@ def advanced_options_keyboard(
     want_repeat: bool,
     want_delete: bool,
     want_chat: bool,
+    want_preview: bool = False,
     show_delay: bool = True,
     show_repeat: bool = True,
+    show_preview: bool = False,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     locked = frozenset(locked or ())
@@ -868,6 +870,8 @@ def advanced_options_keyboard(
         rows.append(_row(want_repeat, "advanced_options_repeat", "repeat"))
     rows.append(_row(want_delete, "advanced_options_delete", "delete"))
     rows.append(_row(want_chat, "advanced_options_chat", "chat"))
+    if show_preview:
+        rows.append(_row(want_preview, "advanced_options_preview", "preview"))
     rows.append(
         [
             InlineKeyboardButton(
@@ -1865,6 +1869,7 @@ def edit_options_keyboard(
     dest_type: str = "dm",
     delete_previous: bool = False,
     has_image: bool = False,
+    strip_name_mentions: bool = False,
     show_link_preview: bool = True,
     schedule_reminder_configured: bool = False,
     notify_on_category_change: bool = False,
@@ -1872,14 +1877,17 @@ def edit_options_keyboard(
     is_upcoming: bool = False,
     show_advanced: bool = True,
 ) -> InlineKeyboardMarkup:
-    # Same order as create wizard: template → image → ignore → preview → delay
-    # → repeat → schedule reminder → dest → delete.
-    # Schedule reminder only if configured at creation (unchanged policy).
-    # Delay/repeat skipped for upcoming; repeat also skipped for category/end.
-    image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
-    rows = [
+    # Shared Extras block order: image → strip → ignore → delay → repeat →
+    # delete → chat. Edit-only: template, image remove, preview, schedule, dest,
+    # delete sub-options, type/copy.
+    rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
-        [InlineKeyboardButton(image_label, callback_data=f"edit_f:{sub_id}:image")],
+        [
+            InlineKeyboardButton(
+                t("advanced_options_image", lang),
+                callback_data=f"edit_f:{sub_id}:image",
+            )
+        ],
     ]
     if has_image:
         rows.append(
@@ -1890,51 +1898,50 @@ def edit_options_keyboard(
                 )
             ]
         )
+    strip_mark = "✅ " if strip_name_mentions else "⬜️ "
+    rows.append(
+        [
+            InlineKeyboardButton(
+                strip_mark + t("advanced_options_strip", lang),
+                callback_data=f"edit_f:{sub_id}:strip",
+            )
+        ]
+    )
     if show_advanced:
         rows.append(
             [
                 InlineKeyboardButton(
-                    t("edit_ignore_keywords", lang),
+                    t("advanced_options_ignore", lang),
                     callback_data=f"edit_f:{sub_id}:ignore_keywords",
                 )
             ]
         )
-    if show_link_preview:
-        rows.append(
-            [InlineKeyboardButton(t("edit_link_preview", lang), callback_data=f"edit_f:{sub_id}:preview")]
-        )
     if show_advanced and not is_upcoming:
         rows.append(
-            [InlineKeyboardButton(t("edit_delay", lang), callback_data=f"edit_f:{sub_id}:delay")]
+            [
+                InlineKeyboardButton(
+                    t("advanced_options_delay", lang),
+                    callback_data=f"edit_f:{sub_id}:delay",
+                )
+            ]
         )
         if not notify_on_category_change and not notify_on_end:
             rows.append(
-                [InlineKeyboardButton(t("edit_repeat", lang), callback_data=f"edit_f:{sub_id}:repeat")]
+                [
+                    InlineKeyboardButton(
+                        t("advanced_options_repeat", lang),
+                        callback_data=f"edit_f:{sub_id}:repeat",
+                    )
+                ]
             )
-    if schedule_reminder_configured:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("edit_schedule_reminder", lang),
-                    callback_data=f"edit_f:{sub_id}:sched_remind",
-                )
-            ]
-        )
-    if show_advanced:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("edit_chat_button", lang),
-                    callback_data=f"edit_f:{sub_id}:chat_button",
-                )
-            ]
-        )
-    rows.append(
-        [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")]
-    )
     if show_advanced and dest_type != "dm":
         rows.append(
-            [InlineKeyboardButton(t("edit_delete_old", lang), callback_data=f"edit_f:{sub_id}:delete_old")]
+            [
+                InlineKeyboardButton(
+                    t("advanced_options_delete", lang),
+                    callback_data=f"edit_f:{sub_id}:delete_old",
+                )
+            ]
         )
         if delete_previous:
             rows.append(
@@ -1954,6 +1961,36 @@ def edit_options_keyboard(
                         )
                     ]
                 )
+    if show_advanced:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("advanced_options_chat", lang),
+                    callback_data=f"edit_f:{sub_id}:chat_button",
+                )
+            ]
+        )
+    if show_link_preview:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("advanced_options_preview", lang),
+                    callback_data=f"edit_f:{sub_id}:preview",
+                )
+            ]
+        )
+    if schedule_reminder_configured:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("edit_schedule_reminder", lang),
+                    callback_data=f"edit_f:{sub_id}:sched_remind",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")]
+    )
     rows.extend(
         [
             [

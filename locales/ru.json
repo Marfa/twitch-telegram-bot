@@ -645,7 +645,7 @@
   "edit_repeat_mute_prompt": "Подписка #{sub_id}\nСейчас: {current}\n\nУкажите минуты заглушки (0 — разрешить повторы):",
   "edit_repeat_current_allow": "разрешены",
   "edit_repeat_current_mute": "заглушка {minutes} мин.",
-  "edit_template_prompt": "Подписка #{sub_id}\n\nТекущий формат:\n<code>{current}</code>\n\nКак будет выглядеть:\n<code>{preview}</code>\n\nОтправьте новый шаблон сообщения.\n\nПример ключевых слов:\n• <code>{{username}}</code> — имя канала\n• <code>{{game}}</code> — категория стрима\n• <code>{{name}}</code> — название стрима\n\n{placeholders_link}\n\n«Очистка названия» — убирает из названия стрима упоминания стримеров и команды.",
+  "edit_template_prompt": "Подписка #{sub_id}\n\nТекущий формат:\n<code>{current}</code>\n\nКак будет выглядеть:\n<code>{preview}</code>\n\nОтправьте новый шаблон сообщения.\n\nПример ключевых слов:\n• <code>{{username}}</code> — имя канала\n• <code>{{game}}</code> — категория стрима\n• <code>{{name}}</code> — название стрима\n\n{placeholders_link}",
   "edit_ignore_keywords_prompt": "Подписка #{sub_id}\nСейчас: {current}\n\nОтправьте ключевые слова через запятую.\nПоддерживается regexp (без учёта регистра), например <code>just.?chatting|irl</code>.\nНажмите «Использовать глобальный список», чтобы применить Настройки → Игнорируемые слова и завершить.\n{hint}",
   "edit_ignore_keywords_hint_skip": "Пустое сообщение или «Пропустить» — отключить фильтр.",
   "edit_ignore_keywords_hint_cancel": "«Отменить» — без изменений. Пустое сообщение — отключить фильтр.",
@@ -763,6 +763,7 @@
   "advanced_options_hint_repeat": "• Заглушка повторов ⭐ — не слать снова, если стрим быстро перезапустился",
   "advanced_options_hint_delete": "• Удалять предыдущие ⭐ — убирать прошлое сообщение бота в канале/группе",
   "advanced_options_hint_chat": "• Кнопка чата — кнопка «Перейти в чат стрима» под оповещением",
+  "advanced_options_hint_preview": "• Превью ссылок — показывать превью URL из шаблона (выкл при изображении или кнопке чата)",
   "advanced_options_premium_only": "⭐ Эта опция доступна в Premium.",
   "advanced_options_image": "Изображение",
   "advanced_options_strip": "Очистка названия",
@@ -771,6 +772,7 @@
   "advanced_options_repeat": "Заглушка повторов ⭐",
   "advanced_options_delete": "Удалять предыдущие в канале/группе ⭐",
   "advanced_options_chat": "Кнопка чата",
+  "advanced_options_preview": "Превью ссылок",
   "advanced_options_next": "Далее",
   "btn_wizard_next": "Далее"
 }

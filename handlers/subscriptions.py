@@ -2027,7 +2027,6 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
         lang=lang,
         sub=sub,
         sub_num=sub_num,
-        strip_name_mentions=bool(sub.strip_name_mentions),
     )
     return _sub_states()["EDIT_TEMPLATE"]
 
@@ -2220,37 +2219,35 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
+
+    async def _reshow_edit_menu(current: Subscription) -> None:
         show_adv = await prem.advanced_mode_on(
-            context.bot, db, query.from_user.id, channel=sub.twitch_username
+            context.bot, db, query.from_user.id, channel=current.twitch_username
         )
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
                 sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
-                username=sub.twitch_username,
+                username=current.twitch_username,
                 show_advanced=show_adv,
             ),
-            reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
+            reply_markup=_edit_options_for_sub(current, lang, show_advanced=show_adv),
             parse_mode=ParseMode.HTML,
         )
+
+    if field == "strip":
+        enabled = not bool(sub.strip_name_mentions)
+        db.update_subscription(sub_id, query.from_user.id, strip_name_mentions=enabled)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
+        await _reshow_edit_menu(sub)
         return
     if field == "delete_other" and (
         not sub.notify_on_category_change or not sub.delete_previous
     ):
-        show_adv = await prem.advanced_mode_on(
-            context.bot, db, query.from_user.id, channel=sub.twitch_username
-        )
-        await query.edit_message_text(
-            _edit_menu_text(
-                lang,
-                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
-                username=sub.twitch_username,
-                show_advanced=show_adv,
-            ),
-            reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
-            parse_mode=ParseMode.HTML,
-        )
+        await _reshow_edit_menu(sub)
         return
     if field in ("delete_old", "delete_fail", "delete_other", "repeat"):
         feat = "repeat" if field == "repeat" else "delete_prev"
@@ -2314,10 +2311,12 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         kwargs = {"delete_other_alerts": value}
     elif field == "preview":
-        if not value and sub.attach_chat_button:
-            await query.edit_message_text(t("preview_blocked_chat_button", lang))
-            return
-        kwargs = {"disable_link_preview": value}
+        # value True = disable preview; False = show preview.
+        # Image / chat conflict: quietly keep preview off.
+        if not value and (sub.attach_chat_button or sub.image_file_id):
+            kwargs = {"disable_link_preview": True}
+        else:
+            kwargs = {"disable_link_preview": value}
     elif field == "chat_button":
         kwargs = {"attach_chat_button": value}
         if value:

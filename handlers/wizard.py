@@ -658,6 +658,10 @@ async def _advanced_options_markup(
     context: ContextTypes.DEFAULT_TYPE, lang: str, user_id: int
 ):
     alert = context.user_data.get("alert_type")
+    show_preview = template_has_link(
+        str(context.user_data.get("message_template") or "")
+    )
+    _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
         want_image=bool(context.user_data.get("adv_want_image")),
@@ -667,10 +671,18 @@ async def _advanced_options_markup(
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
         want_delete=bool(context.user_data.get("adv_want_delete")),
         want_chat=bool(context.user_data.get("adv_want_chat")),
+        want_preview=bool(context.user_data.get("adv_want_preview")),
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
+        show_preview=show_preview,
         locked=await _advopt_locked(context, user_id),
     )
+
+
+def _sync_adv_preview_conflict(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Image or chat button forces link preview off — no user-facing error."""
+    if context.user_data.get("adv_want_image") or context.user_data.get("adv_want_chat"):
+        context.user_data["adv_want_preview"] = False
 
 
 def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
@@ -688,6 +700,8 @@ def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str)
         lines.append(t("advanced_options_hint_repeat", lang))
     lines.append(t("advanced_options_hint_delete", lang))
     lines.append(t("advanced_options_hint_chat", lang))
+    if template_has_link(str(context.user_data.get("message_template") or "")):
+        lines.append(t("advanced_options_hint_preview", lang))
     return "\n".join(lines)
 
 
@@ -703,6 +717,15 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_repeat", False)
     context.user_data.setdefault("adv_want_delete", False)
     context.user_data.setdefault("adv_want_chat", False)
+    has_link = template_has_link(
+        str(context.user_data.get("message_template") or "")
+    )
+    if has_link:
+        # Default: show preview (matches DB default disable_link_preview=False).
+        context.user_data.setdefault("adv_want_preview", True)
+    else:
+        context.user_data.pop("adv_want_preview", None)
+    _sync_adv_preview_conflict(context)
     context.user_data.pop("advanced_options_done", None)
     chat_id = reply_chat_id(update)
     user_id = update.effective_user.id
@@ -730,8 +753,14 @@ async def receive_advanced_options_toggle(
         "repeat": "adv_want_repeat",
         "delete": "adv_want_delete",
         "chat": "adv_want_chat",
+        "preview": "adv_want_preview",
     }.get(flag)
     if not key:
+        await query.answer()
+        return _wz()["ADVANCED_OPTIONS"]
+    if flag == "preview" and not template_has_link(
+        str(context.user_data.get("message_template") or "")
+    ):
         await query.answer()
         return _wz()["ADVANCED_OPTIONS"]
     turning_on = not bool(context.user_data.get(key))
@@ -754,6 +783,7 @@ async def receive_advanced_options_toggle(
             return _wz()["ADVANCED_OPTIONS"]
     await query.answer()
     context.user_data[key] = turning_on
+    _sync_adv_preview_conflict(context)
     await query.edit_message_reply_markup(
         reply_markup=await _advanced_options_markup(context, lang, query.from_user.id)
     )
@@ -789,8 +819,16 @@ async def receive_advanced_options_next(
         context.user_data["delete_other_alerts"] = False
     want_chat = bool(context.user_data.get("adv_want_chat"))
     context.user_data["attach_chat_button"] = want_chat
-    if want_chat:
-        context.user_data["disable_link_preview"] = True
+    _sync_adv_preview_conflict(context)
+    has_link = template_has_link(
+        str(context.user_data.get("message_template") or "")
+    )
+    want_preview = bool(context.user_data.get("adv_want_preview")) if has_link else False
+    # Image / chat always force preview off (already synced above).
+    if context.user_data.get("adv_want_image") or want_chat or not has_link:
+        want_preview = False
+        context.user_data["adv_want_preview"] = False
+    context.user_data["disable_link_preview"] = not want_preview
     context.user_data["strip_name_mentions"] = bool(
         context.user_data.get("adv_want_strip")
     )
@@ -923,6 +961,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_repeat",
             "adv_want_delete",
             "adv_want_chat",
+            "adv_want_preview",
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
@@ -987,8 +1026,12 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return await _go_advanced_options_prompt(update, context, lang)
         return await _go_ignore_keywords_prompt(update, context, lang)
     if state == _wz()["DELAY_SEND"]:
-        if context.user_data.get("image_file_id") or not template_has_link(
-            str(context.user_data.get("message_template") or "")
+        if (
+            context.user_data.get("advanced_options_done")
+            or context.user_data.get("image_file_id")
+            or not template_has_link(
+                str(context.user_data.get("message_template") or "")
+            )
         ):
             if context.user_data.get("advanced_options_done") and not context.user_data.get(
                 "adv_want_ignore"
@@ -1003,13 +1046,9 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         if context.user_data.get("advanced_options_done") and not context.user_data.get(
             "adv_want_delay"
         ):
-            if context.user_data.get("image_file_id") or not template_has_link(
-                str(context.user_data.get("message_template") or "")
-            ):
-                if not context.user_data.get("adv_want_ignore"):
-                    return await _go_advanced_options_prompt(update, context, lang)
-                return await _go_ignore_keywords_prompt(update, context, lang)
-            return await _go_link_preview_prompt(update, context, lang)
+            if not context.user_data.get("adv_want_ignore"):
+                return await _go_advanced_options_prompt(update, context, lang)
+            return await _go_ignore_keywords_prompt(update, context, lang)
         if after == _wz()["DELAY_MINUTES"]:
             return await _go_delay_minutes_prompt(update, context, lang)
         return await _go_delay_prompt(update, context, lang)
@@ -1020,8 +1059,12 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == _wz()["SCHEDULE_REMINDER_MINUTES"]:
         if context.user_data.get("alert_type") == "upcoming":
             # Upcoming skips delay/repeat; back to preview or ignore.
-            if context.user_data.get("image_file_id") or not template_has_link(
-                str(context.user_data.get("message_template") or "")
+            if (
+                context.user_data.get("advanced_options_done")
+                or context.user_data.get("image_file_id")
+                or not template_has_link(
+                    str(context.user_data.get("message_template") or "")
+                )
             ):
                 return await _go_ignore_keywords_prompt(update, context, lang)
             return await _go_link_preview_prompt(update, context, lang)
@@ -1522,6 +1565,17 @@ async def _go_after_link_preview_step(
 async def _go_after_ignore_keywords(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    if context.user_data.get("advanced_options_done"):
+        # Preview was chosen on Extras; re-force off if image/chat won later.
+        if (
+            context.user_data.get("image_file_id")
+            or context.user_data.get("adv_want_image")
+            or context.user_data.get("attach_chat_button")
+            or context.user_data.get("adv_want_chat")
+        ):
+            context.user_data["disable_link_preview"] = True
+            context.user_data["adv_want_preview"] = False
+        return await _go_after_link_preview_step(update, context, lang)
     if context.user_data.get("image_file_id"):
         context.user_data["disable_link_preview"] = True
         return await _go_after_link_preview_step(update, context, lang)
