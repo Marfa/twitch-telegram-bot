@@ -130,6 +130,17 @@ def _status_text(
     return body
 
 
+def premium_benefits_text(lang: str) -> str:
+    """Shared Premium benefit list (full plan screen + à la carte feature names)."""
+    free_limit = prem.free_active_limit()
+    lines = [
+        f"• {t(prem.feature_label_key(fid), lang, free_limit=free_limit)}"
+        for fid in prem.purchasable_feature_ids()
+    ]
+    lines.append(f"• {t('premium_channel_benefit', lang)}")
+    return "\n".join(lines)
+
+
 def premium_screen_text(
     db: Database,
     user_id: int,
@@ -141,8 +152,7 @@ def premium_screen_text(
     return t(
         "premium_title",
         lang,
-        free_limit=prem.free_active_limit(),
-        stars=prem.stars_price(user_id),
+        benefits=premium_benefits_text(lang),
         channel=prem.twitch_channel_login(),
         status=_status_text(
             db, user_id, lang, free_chat=free_chat, force_free=force_free
@@ -225,9 +235,9 @@ async def _show_owned_subscriptions(
             free_limit=prem.free_active_limit(),
         )
         key = (
-            "premium_owned_feat_canceled"
+            "premium_feat_line_canceled"
             if st.is_feature_canceled(fid)
-            else "premium_owned_feat"
+            else "premium_feat_line"
         )
         lines.append(
             t(
@@ -425,7 +435,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if st.is_feature_canceled(fid):
             await query.answer(
                 t(
-                    "premium_cancel_feat_done",
+                    "premium_cancel_done",
                     lang,
                     until=_fmt_until(st.feature_until(fid)),
                 ),
@@ -451,7 +461,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         until = _fmt_until(st.feature_until(fid))
         await query.answer()
         await query.edit_message_text(
-            t("premium_cancel_feat_done", lang, until=until)
+            t("premium_cancel_done", lang, until=until)
         )
         return
 

@@ -46,6 +46,8 @@
       disconnected: "Chat disconnected. Reconnecting…",
       loading: "Loading…",
       otherStreamers: "Other streamers",
+      homeAdd: "Add to Home Screen",
+      homeAdded: "On Home Screen",
     },
     ru: {
       live: "Сейчас в эфире",
@@ -82,6 +84,8 @@
       disconnected: "Чат отключён. Переподключение…",
       loading: "Загрузка…",
       otherStreamers: "Другие стримеры",
+      homeAdd: "На экран «Домой»",
+      homeAdded: "Уже на «Домой»",
     },
   };
 
@@ -96,6 +100,8 @@
   let appToken = "";
   let urlLang = "";
   let infoCache = null;
+  const SECURE_TOKEN_KEY = "chat_t";
+  const DEVICE_MODE_KEY = "chat_mode"; // "simple" | "embed"
 
   function setLang(code) {
     lang = String(code || "").toLowerCase().startsWith("ru") ? "ru" : "en";
@@ -113,9 +119,120 @@
     const sendBtn = el("btn-send");
     if (sendInput) sendInput.placeholder = t.sendPh;
     if (sendBtn) sendBtn.textContent = t.send;
+    const homeBtn = el("btn-home");
+    if (homeBtn && !homeBtn.classList.contains("hidden")) {
+      homeBtn.textContent = homeBtn.dataset.state === "added" ? t.homeAdded : t.homeAdd;
+    }
   }
 
-  function takeTokenFromUrl() {
+  function secureStorage() {
+    return (tg && tg.SecureStorage) || null;
+  }
+
+  function deviceStorage() {
+    return (tg && tg.DeviceStorage) || null;
+  }
+
+  function storageGet(store, key) {
+    return new Promise((resolve) => {
+      if (!store || typeof store.getItem !== "function") {
+        resolve(null);
+        return;
+      }
+      try {
+        store.getItem(key, (err, value, canRestore) => {
+          if (!err && value != null && value !== "") {
+            resolve(String(value));
+            return;
+          }
+          if (
+            !err &&
+            canRestore &&
+            typeof store.restoreItem === "function"
+          ) {
+            try {
+              store.restoreItem(key, (e2, v2) => {
+                resolve(!e2 && v2 ? String(v2) : null);
+              });
+            } catch (_) {
+              resolve(null);
+            }
+            return;
+          }
+          resolve(null);
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  }
+
+  function storageSet(store, key, value) {
+    return new Promise((resolve) => {
+      if (!store || typeof store.setItem !== "function") {
+        resolve(false);
+        return;
+      }
+      try {
+        store.setItem(key, String(value), (err) => resolve(!err));
+      } catch (_) {
+        resolve(false);
+      }
+    });
+  }
+
+  async function persistToken(token) {
+    if (!token) return;
+    appToken = token;
+    const ok = await storageSet(secureStorage(), SECURE_TOKEN_KEY, token);
+    if (!ok) {
+      try {
+        sessionStorage.setItem(SECURE_TOKEN_KEY, token);
+      } catch (_) {}
+    }
+    try {
+      localStorage.removeItem(SECURE_TOKEN_KEY);
+      localStorage.removeItem("chat_t");
+    } catch (_) {}
+  }
+
+  async function loadPersistedToken() {
+    let token = await storageGet(secureStorage(), SECURE_TOKEN_KEY);
+    if (!token) {
+      try {
+        token = sessionStorage.getItem(SECURE_TOKEN_KEY) || "";
+      } catch (_) {
+        token = "";
+      }
+    }
+    if (token) appToken = token;
+    return appToken;
+  }
+
+  async function persistChatMode(simple) {
+    const mode = simple ? "simple" : "embed";
+    const ok = await storageSet(deviceStorage(), DEVICE_MODE_KEY, mode);
+    if (!ok) {
+      try {
+        sessionStorage.setItem(DEVICE_MODE_KEY, mode);
+      } catch (_) {}
+    }
+  }
+
+  async function loadChatMode() {
+    let mode = await storageGet(deviceStorage(), DEVICE_MODE_KEY);
+    if (!mode) {
+      try {
+        mode = sessionStorage.getItem(DEVICE_MODE_KEY) || "";
+      } catch (_) {
+        mode = "";
+      }
+    }
+    if (mode === "simple") useFallback = true;
+    else if (mode === "embed") useFallback = false;
+  }
+
+  async function takeTokenFromUrl() {
     const params = new URLSearchParams(location.search);
     let token = params.get("t") || params.get("token") || "";
     const langParam = params.get("lang") || "";
@@ -125,22 +242,8 @@
       token = hp.get("t") || hp.get("token") || "";
       if (!urlLang) urlLang = hp.get("lang") || "";
     }
-    if (!token) {
-      try {
-        token = sessionStorage.getItem("chat_t") || localStorage.getItem("chat_t") || "";
-      } catch (_) {}
-    }
-    if (!urlLang) {
-      try {
-        urlLang = sessionStorage.getItem("chat_lang") || "";
-      } catch (_) {}
-    }
     if (token) {
-      appToken = token;
-      try {
-        sessionStorage.setItem("chat_t", token);
-        localStorage.setItem("chat_t", token);
-      } catch (_) {}
+      await persistToken(token);
       params.delete("t");
       params.delete("token");
       const q = params.toString();
@@ -148,6 +251,8 @@
       try {
         history.replaceState(null, "", clean);
       } catch (_) {}
+    } else {
+      await loadPersistedToken();
     }
     if (urlLang) {
       try {
@@ -186,10 +291,7 @@
       headers["X-Chat-Token"] = appToken;
       if (!headers.Authorization) headers.Authorization = "Bearer " + appToken;
     }
-    let url = path;
-    if (appToken && url.indexOf("t=") === -1) {
-      url += (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + encodeURIComponent(appToken);
-    }
+    const url = path;
     const res = await fetch(url, Object.assign({}, options, { headers }));
     let body = {};
     try {
@@ -577,7 +679,8 @@
 
   async function boot() {
     try {
-      takeTokenFromUrl();
+      await takeTokenFromUrl();
+      await loadChatMode();
       setLang(detectLang() || "en");
       el("online-empty").classList.remove("hidden");
       el("online-empty").textContent = t.loading;
@@ -672,6 +775,7 @@
   });
   el("btn-fallback").addEventListener("click", () => {
     useFallback = !useFallback;
+    persistChatMode(useFallback);
     setLang(lang);
     applyChatMode();
   });
@@ -729,5 +833,63 @@
     if (!document.hidden) boot();
   });
 
+  function setupHomeScreenShortcut() {
+    const btnHome = el("btn-home");
+    if (!btnHome || !tg) return;
+    const canCheck = typeof tg.checkHomeScreenStatus === "function";
+    const canAdd = typeof tg.addToHomeScreen === "function";
+    if (!canCheck && !canAdd) return;
+
+    function showHome(status) {
+      if (status === "unsupported") {
+        btnHome.classList.add("hidden");
+        return;
+      }
+      btnHome.classList.remove("hidden");
+      if (status === "added") {
+        btnHome.dataset.state = "added";
+        btnHome.textContent = t.homeAdded;
+        btnHome.disabled = true;
+      } else {
+        btnHome.dataset.state = "missed";
+        btnHome.textContent = t.homeAdd;
+        btnHome.disabled = !canAdd;
+      }
+    }
+
+    if (typeof tg.onEvent === "function") {
+      try {
+        tg.onEvent("homeScreenChecked", (payload) => {
+          const status =
+            typeof payload === "string"
+              ? payload
+              : payload && payload.status
+                ? payload.status
+                : "unknown";
+          showHome(status);
+        });
+        tg.onEvent("homeScreenAdded", () => showHome("added"));
+      } catch (_) {}
+    }
+
+    btnHome.addEventListener("click", () => {
+      if (btnHome.dataset.state === "added" || !canAdd) return;
+      try {
+        tg.addToHomeScreen();
+      } catch (_) {}
+    });
+
+    if (canCheck) {
+      try {
+        tg.checkHomeScreenStatus((status) => showHome(status || "unknown"));
+      } catch (_) {
+        showHome("unknown");
+      }
+    } else {
+      showHome("unknown");
+    }
+  }
+
+  setupHomeScreenShortcut();
   boot();
 })();

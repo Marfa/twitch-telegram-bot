@@ -30,6 +30,7 @@ from bot import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
     _build_alert_history_chunks,
+    _build_alert_history_rich_pages,
     _edit_present_types,
     _format_alert_history_block,
     _format_twitch_status_message,
@@ -171,23 +172,19 @@ def check_handlers() -> None:
         'if action == "marfapr":', 1
     )[0]
     assert 't("import_failed"' not in cancel_block
-    assert "premium_cancel_feat_done" in ph_src
+    assert "premium_cancel_done" in ph_src
     assert "set_premium_feature_canceled" in ph_src
     assert "clear_premium_feature" not in ph_src.split(
         'if data.startswith("premium:cancel_feat:")', 1
     )[1].split("if data == \"premium:feat_pay\":", 1)[0]
-    assert "{until}" in tr("premium_cancel_feat_done", "ru")
-    assert "{until}" in tr("premium_cancel_feat_done", "en")
     assert "{until}" in tr("premium_cancel_done", "ru")
     assert "{until}" in tr("premium_cancel_done", "en")
     assert tr("premium_cancel_failed", "ru")
     assert tr("premium_pay_failed", "ru")
-    assert "Twitch" not in tr("premium_cancel_feat_done", "ru")
+    assert "Twitch" not in tr("premium_cancel_done", "ru")
     assert "Twitch" not in tr("premium_pay_failed", "ru")
-    assert "снята" not in tr("premium_cancel_feat_done", "ru").lower()
+    assert "снята" not in tr("premium_cancel_done", "ru").lower()
     assert "Автопродление подписки отключено" in tr("premium_cancel_done", "ru")
-    assert "Автопродление подписки отключено" in tr("premium_cancel_feat_done", "ru")
-    assert tr("premium_owned_feat_canceled", "ru")
     assert "автопродление выкл" in tr("premium_feat_line_canceled", "ru")
     assert "Stars" not in tr("premium_status_stars", "ru")
     assert "Stars" not in tr("premium_status_stars_canceled", "ru")
@@ -396,11 +393,26 @@ def check_handlers() -> None:
         assert "deleted_subscriptions_cart" in toggle_ids
         db.upsert_user(2)
         assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
-    _pt = tr("premium_title", "ru", free_limit=5, stars=100, channel="marfapr", status="s")
+    from premium_handlers import premium_benefits_text
+
+    _pt = tr(
+        "premium_title",
+        "ru",
+        benefits=premium_benefits_text("ru"),
+        channel="marfapr",
+        status="s",
+    )
     assert "Продвинутый режим" in _pt
     assert "мини-приложении" in _pt
     assert "Премиум-канал" in _pt
     assert "рекомендация" in _pt
+    # Full plan + à la carte share the same feature labels.
+    for fid in FEATURE_IDS:
+        if prem.premium_feature_in_unreleased_beta(fid):
+            continue
+        label = tr(prem.feature_label_key(fid), "ru", free_limit=5)
+        assert f"• {label}" in _pt
+        assert tr(prem.feature_desc_key(fid), "ru", free_limit=5)
     assert tr("btn_premium", "en")
     assert "Пробный" in tr("btn_premium_trial", "ru") or "триал" in tr(
         "btn_premium_trial", "ru"
@@ -780,6 +792,11 @@ def check_handlers() -> None:
         assert examined >= 1
         assert db.get_advanced_mode_setting(91) is True
         assert db.get_advanced_mode_setting(77) is False  # not entitled
+        assert db.is_message_draft_enabled(77) is True  # default on
+        db.set_message_draft_enabled(77, False)
+        assert db.is_message_draft_enabled(77) is False
+        db.set_message_draft_enabled(77, True)
+        assert db.is_message_draft_enabled(77) is True
         assert on_n >= 1 and off_n >= 1
         assert tr("btn_alert_history_more", "ru") == "Ещё"
         assert tr("alert_history_go_stream", "ru") == "Перейти к стриму"
@@ -900,6 +917,34 @@ def check_handlers() -> None:
         assert "🙄" in unseen_block
         assert "Просмотрено" in unseen_block
         assert "start=ah_v_7" in unseen_block
+        from types import SimpleNamespace
+
+        rich_pages = _build_alert_history_rich_pages(
+            [
+                SimpleNamespace(
+                    id=7,
+                    sent_at="2026-08-14 14:00:00",
+                    twitch_username="frank_sg",
+                    alert_type="live",
+                    message_text="Hi",
+                    viewed=False,
+                    vod_id="",
+                    vod_offset_seconds=0,
+                    stream_id="",
+                    twitch_user_id="",
+                )
+            ],
+            "ru",
+            7,
+        )
+        assert rich_pages and rich_pages[0]["blocks"]
+        btn_blocks = [
+            b for b in rich_pages[0]["blocks"] if b.get("type") == "buttons"
+        ]
+        assert btn_blocks
+        cb_data = [b.get("callback_data") for b in btn_blocks[0]["buttons"]]
+        assert "ah:v:7" in cb_data
+        assert "ah:vb:7" in cb_data
         assert "videos/99?t=2m5s" in _format_alert_history_block(
             time_str="17:00",
             username="frank_sg",
@@ -1224,7 +1269,16 @@ def check_handlers() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=10' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+    assert '/app/chat/app.js?v=12' in (WEBAPP_DIR / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "SecureStorage" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
+    assert "DeviceStorage" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
+    assert "addToHomeScreen" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
+    assert "checkHomeScreenStatus" in (WEBAPP_DIR / "app.js").read_text(
+        encoding="utf-8"
+    )
+    assert 'id="btn-home"' in (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
     import asyncio

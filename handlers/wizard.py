@@ -42,12 +42,14 @@ from i18n import (
     delete_sibling_keyboard,
     dest_keyboard,
     dest_label,
+    advanced_options_keyboard,
     ignore_keywords_keyboard,
     image_edit_keyboard,
     image_position_keyboard,
     is_menu_button,
     link_preview_keyboard,
     lucky_preview_keyboard,
+    placeholders_expandable_html,
     placeholders_link_html,
     premium_gate_keyboard,
     repeat_keyboard,
@@ -120,6 +122,7 @@ def _wz() -> dict[str, int]:
         WATCH_SAVE,
         WATCH_TAGS,
         WATCH_VIEWERS,
+        ADVANCED_OPTIONS,
     )
 
     return {
@@ -142,6 +145,7 @@ def _wz() -> dict[str, int]:
         "EDIT_IGNORE_KEYWORDS": EDIT_IGNORE_KEYWORDS,
         "EDIT_TEMPLATE": EDIT_TEMPLATE,
         "IGNORE_KEYWORDS": IGNORE_KEYWORDS,
+        "ADVANCED_OPTIONS": ADVANCED_OPTIONS,
         "IMAGE_ASK": IMAGE_ASK,
         "IMAGE_POSITION": IMAGE_POSITION,
         "IMAGE_UPLOAD": IMAGE_UPLOAD,
@@ -253,8 +257,34 @@ async def _send_prompt_with_wizard_inline(
     parse_mode: str | None = ParseMode.HTML,
     disable_web_page_preview: bool = False,
 ) -> None:
-    """Send prompt with inline actions (incl. Back/Cancel). No extra carrier message."""
+    """Send prompt with inline actions (incl. Back/Cancel). No extra carrier message.
+
+    If text contains a rich <details> block, try sendRichMessage first; on failure
+    replace details with the classic placeholders link and send a normal message.
+    """
     _ = (lang, back)
+    target_chat = update.effective_chat.id if update and update.effective_chat else chat_id
+    if "<details>" in text:
+        from rich_message import send_rich_message
+
+        msg = await send_rich_message(
+            bot,
+            int(target_chat),
+            {"html": text},
+            reply_markup=inline_markup,
+        )
+        mid = getattr(msg, "message_id", None) if msg is not None else None
+        if mid is None and isinstance(msg, dict):
+            mid = msg.get("message_id")
+        if type(mid) is int:
+            return
+        text = re.sub(
+            r"<details>.*?</details>",
+            placeholders_link_html(lang),
+            text,
+            count=1,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
     kwargs: dict = {
         "text": text,
         "reply_markup": inline_markup,
@@ -266,7 +296,6 @@ async def _send_prompt_with_wizard_inline(
     if update and update.effective_message:
         await update.effective_message.reply_text(**kwargs)
         return
-    target_chat = update.effective_chat.id if update and update.effective_chat else chat_id
     await bot.send_message(chat_id=target_chat, **kwargs)
 
 def _render_sub_template(
@@ -279,6 +308,8 @@ def _render_sub_template(
     stream: dict | None = None,
     extra: dict[str, str] | None = None,
 ) -> str:
+    from twitch import template_uses_html
+
     return render_template(
         sub.message_template,
         username,
@@ -288,6 +319,7 @@ def _render_sub_template(
         extra=extra,
         strip_name_mentions=bool(sub.strip_name_mentions),
         twitch=twitch,
+        escape_html=template_uses_html(sub.message_template or ""),
     )
 
 async def _prompt_repeat_step(
@@ -296,6 +328,13 @@ async def _prompt_repeat_step(
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
+        context.user_data["suppress_repeat_minutes"] = 0
+        return await _go_after_repeat(update, context, lang)
+    if (
+        not edit
+        and context.user_data.get("advanced_options_done")
+        and not context.user_data.get("adv_want_repeat")
+    ):
         context.user_data["suppress_repeat_minutes"] = 0
         return await _go_after_repeat(update, context, lang)
     if not await prem.has_feature(
@@ -533,7 +572,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         "channel_found",
         lang,
         display_name=html.escape(display),
-        placeholders_link=placeholders_link_html(lang),
+        placeholders_link=placeholders_expandable_html(lang),
     )
     await _send_prompt_with_wizard_inline(
         context.bot,
@@ -587,6 +626,12 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
         context.user_data["ignore_keywords"] = ""
         context.user_data["use_global_ignore"] = False
         return await _go_after_ignore_keywords(update, context, lang)
+    if context.user_data.get("advanced_options_done") and not context.user_data.get(
+        "adv_want_ignore"
+    ):
+        context.user_data["ignore_keywords"] = ""
+        context.user_data["use_global_ignore"] = False
+        return await _go_after_ignore_keywords(update, context, lang)
     if not await prem.has_feature(
         context.bot, db, user_id, "ignore_keywords", channel=_wizard_channel(context)
     ):
@@ -609,6 +654,100 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
     _set_wizard_back(context, _wz()["IGNORE_KEYWORDS"])
     return _wz()["IGNORE_KEYWORDS"]
 
+
+async def _go_after_image_step(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """After image: advanced options screen (if on) or continue with defaults."""
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if await prem.advanced_mode_on(
+        context.bot, db, user_id, channel=_wizard_channel(context)
+    ):
+        return await _go_advanced_options_prompt(update, context, lang)
+    context.user_data["ignore_keywords"] = ""
+    context.user_data["use_global_ignore"] = False
+    context.user_data["delay_minutes"] = 0
+    context.user_data["suppress_repeat_minutes"] = 0
+    context.user_data.pop("advanced_options_done", None)
+    return await _go_after_ignore_keywords(update, context, lang)
+
+
+def _advanced_options_markup(context: ContextTypes.DEFAULT_TYPE, lang: str):
+    alert = context.user_data.get("alert_type")
+    return advanced_options_keyboard(
+        lang,
+        want_ignore=bool(context.user_data.get("adv_want_ignore")),
+        want_delay=bool(context.user_data.get("adv_want_delay")),
+        want_repeat=bool(context.user_data.get("adv_want_repeat")),
+        want_delete=bool(context.user_data.get("adv_want_delete")),
+        show_delay=alert != "upcoming",
+        show_repeat=alert == "live" or not alert,
+    )
+
+
+async def _go_advanced_options_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    context.user_data.setdefault("adv_want_ignore", False)
+    context.user_data.setdefault("adv_want_delay", False)
+    context.user_data.setdefault("adv_want_repeat", False)
+    context.user_data.setdefault("adv_want_delete", False)
+    context.user_data.pop("advanced_options_done", None)
+    chat_id = reply_chat_id(update)
+    text = t("advanced_options_prompt", lang)
+    markup = _advanced_options_markup(context, lang)
+    if update.callback_query:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    _set_wizard_back(context, _wz()["ADVANCED_OPTIONS"])
+    return _wz()["ADVANCED_OPTIONS"]
+
+
+async def receive_advanced_options_toggle(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    flag = query.data.split(":")[-1]
+    key = {
+        "ignore": "adv_want_ignore",
+        "delay": "adv_want_delay",
+        "repeat": "adv_want_repeat",
+        "delete": "adv_want_delete",
+    }.get(flag)
+    if not key:
+        return _wz()["ADVANCED_OPTIONS"]
+    context.user_data[key] = not bool(context.user_data.get(key))
+    await query.edit_message_reply_markup(
+        reply_markup=_advanced_options_markup(context, lang)
+    )
+    return _wz()["ADVANCED_OPTIONS"]
+
+
+async def receive_advanced_options_next(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    context.user_data["advanced_options_done"] = True
+    if not context.user_data.get("adv_want_ignore"):
+        context.user_data["ignore_keywords"] = ""
+        context.user_data["use_global_ignore"] = False
+    if not context.user_data.get("adv_want_delay"):
+        context.user_data["delay_minutes"] = 0
+    if not context.user_data.get("adv_want_repeat"):
+        context.user_data["suppress_repeat_minutes"] = 0
+    if not context.user_data.get("adv_want_delete"):
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        context.user_data["delete_other_alerts"] = False
+    await query.edit_message_text("✓")
+    return await _go_ignore_keywords_prompt(update, context, lang)
+
 async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     chat_id = reply_chat_id(update)
     text = t("link_preview_prompt", lang)
@@ -624,6 +763,11 @@ async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, l
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
+        context.user_data["delay_minutes"] = 0
+        return await _continue_after_delay(update, context, lang)
+    if context.user_data.get("advanced_options_done") and not context.user_data.get(
+        "adv_want_delay"
+    ):
         context.user_data["delay_minutes"] = 0
         return await _continue_after_delay(update, context, lang)
     if not await prem.has_feature(
@@ -718,6 +862,11 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "image_position",
             "ignore_keywords",
             "use_global_ignore",
+            "advanced_options_done",
+            "adv_want_ignore",
+            "adv_want_delay",
+            "adv_want_repeat",
+            "adv_want_delete",
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
@@ -771,19 +920,49 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == _wz()["LUCKY_PREVIEW"]:
         return await _go_template_prompt(update, context, lang)
     if state == _wz()["IGNORE_KEYWORDS"]:
+        if context.user_data.get("advanced_options_done") is not None or any(
+            k in context.user_data
+            for k in (
+                "adv_want_ignore",
+                "adv_want_delay",
+                "adv_want_repeat",
+                "adv_want_delete",
+            )
+        ):
+            return await _go_advanced_options_prompt(update, context, lang)
+        return await _go_image_ask_prompt(update, context, lang)
+    if state == _wz()["ADVANCED_OPTIONS"]:
         return await _go_image_ask_prompt(update, context, lang)
     if state == _wz()["LINK_PREVIEW"]:
+        if context.user_data.get("advanced_options_done") and not context.user_data.get(
+            "adv_want_ignore"
+        ):
+            return await _go_advanced_options_prompt(update, context, lang)
         return await _go_ignore_keywords_prompt(update, context, lang)
     if state == _wz()["DELAY_SEND"]:
         if context.user_data.get("image_file_id") or not template_has_link(
             str(context.user_data.get("message_template") or "")
         ):
+            if context.user_data.get("advanced_options_done") and not context.user_data.get(
+                "adv_want_ignore"
+            ):
+                return await _go_advanced_options_prompt(update, context, lang)
             return await _go_ignore_keywords_prompt(update, context, lang)
         return await _go_link_preview_prompt(update, context, lang)
     if state == _wz()["DELAY_MINUTES"]:
         return await _go_delay_prompt(update, context, lang)
     if state == _wz()["REPEAT_ALLOW"]:
         after = context.user_data.get("after_delay_state", _wz()["DELAY_SEND"])
+        if context.user_data.get("advanced_options_done") and not context.user_data.get(
+            "adv_want_delay"
+        ):
+            if context.user_data.get("image_file_id") or not template_has_link(
+                str(context.user_data.get("message_template") or "")
+            ):
+                if not context.user_data.get("adv_want_ignore"):
+                    return await _go_advanced_options_prompt(update, context, lang)
+                return await _go_ignore_keywords_prompt(update, context, lang)
+            return await _go_link_preview_prompt(update, context, lang)
         if after == _wz()["DELAY_MINUTES"]:
             return await _go_delay_minutes_prompt(update, context, lang)
         return await _go_delay_prompt(update, context, lang)
@@ -815,9 +994,9 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         dest_type = context.user_data.get("dest_type")
         if dest_type == "dm":
             return await _go_dest_prompt(update, context, lang)
-        setup_key = "channel_setup" if dest_type == "channel" else "group_setup"
+        context.user_data["dest_type"] = "chat"
         await update.effective_message.reply_text(
-            t(setup_key, lang),
+            t("chat_setup", lang),
             reply_markup=_wizard(lang),
         )
         _set_wizard_back(context, _wz()["DEST_CHAT"])
@@ -1297,7 +1476,7 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("✓")
         if is_edit:
             return await _save_edit_image(update, context, lang)
-        return await _go_ignore_keywords_prompt(update, context, lang)
+        return await _go_after_image_step(update, context, lang)
 
     if action == "skip":
         context.user_data["image_file_id"] = None
@@ -1305,7 +1484,7 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("✓")
         if is_edit:
             return await _save_edit_image(update, context, lang)
-        return await _go_ignore_keywords_prompt(update, context, lang)
+        return await _go_after_image_step(update, context, lang)
 
     if action == "game_cover":
         context.user_data["image_file_id"] = GAME_COVER_IMAGE_ID
@@ -1313,7 +1492,7 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("✓")
         if is_edit:
             return await _save_edit_image(update, context, lang)
-        return await _go_ignore_keywords_prompt(update, context, lang)
+        return await _go_after_image_step(update, context, lang)
 
     await query.edit_message_text("✓")
     await context.bot.send_message(
@@ -1350,7 +1529,7 @@ async def receive_image_position(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text("✓")
     if context.user_data.get("edit_sub_id"):
         return await _save_edit_image(update, context, lang)
-    return await _go_ignore_keywords_prompt(update, context, lang)
+    return await _go_after_image_step(update, context, lang)
 
 async def receive_strip_name_toggle(
     update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -1522,7 +1701,7 @@ async def receive_delay_minutes(update: Update, context: ContextTypes.DEFAULT_TY
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return _wz()["DELAY_MINUTES"]
     if not raw.isdigit() or int(raw) < 1:
-        await update.effective_message.reply_text(t("delay_minutes_invalid", lang))
+        await update.effective_message.reply_text(t("minutes_positive_invalid", lang))
         return _wz()["DELAY_MINUTES"]
     context.user_data["delay_minutes"] = int(raw)
     context.user_data["after_delay_state"] = _wz()["DELAY_MINUTES"]
@@ -1551,7 +1730,7 @@ async def receive_repeat_mute_minutes(update: Update, context: ContextTypes.DEFA
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return _wz()["REPEAT_MUTE_MINUTES"]
     if not raw.isdigit() or int(raw) < 1:
-        await update.effective_message.reply_text(t("repeat_mute_invalid", lang))
+        await update.effective_message.reply_text(t("minutes_positive_invalid", lang))
         return _wz()["REPEAT_MUTE_MINUTES"]
     context.user_data["suppress_repeat_minutes"] = int(raw)
     return await _go_after_repeat(update, context, lang)
@@ -1587,7 +1766,7 @@ async def receive_schedule_reminder_minutes(
         return _wz()["SCHEDULE_REMINDER_MINUTES"]
     if not raw.isdigit() or int(raw) < 1:
         await update.effective_message.reply_text(
-            t("schedule_reminder_minutes_invalid", lang)
+            t("minutes_positive_invalid", lang)
         )
         return _wz()["SCHEDULE_REMINDER_MINUTES"]
     context.user_data["schedule_reminder_minutes"] = int(raw)
@@ -1705,7 +1884,9 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             None,
         )
 
-    setup_key = "channel_setup" if dest_type == "channel" else "group_setup"
+    setup_key = "chat_setup" if dest_type == "chat" else (
+        "channel_setup" if dest_type == "channel" else "group_setup"
+    )
     await query.edit_message_text("✓")
     await context.bot.send_message(
         reply_chat_id(update),
@@ -1747,7 +1928,12 @@ async def _parse_dest_input(
             chat = await bot.get_chat(public_username)
             return chat.id, None, None
         except (BadRequest, Forbidden):
-            key = "dest_not_found_channel" if dest_type == "channel" else "dest_not_found_group"
+            if dest_type == "chat":
+                key = "dest_not_found_chat"
+            elif dest_type == "channel":
+                key = "dest_not_found_channel"
+            else:
+                key = "dest_not_found_group"
             return None, None, t(key, lang)
 
     if text and re.fullmatch(r"-?\d+", text):
@@ -1756,7 +1942,12 @@ async def _parse_dest_input(
     if message.forward_origin:
         return None, None, t("fwd_from_dm", lang)
 
-    hint_key = "dest_hint_group" if dest_type == "group" else "dest_hint_channel"
+    if dest_type == "chat":
+        hint_key = "dest_hint_chat"
+    elif dest_type == "group":
+        hint_key = "dest_hint_group"
+    else:
+        hint_key = "dest_hint_channel"
     return None, None, t(hint_key, lang)
 
 async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1794,6 +1985,20 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await message.reply_text(t("bot_no_group", lang))
             return _wz()["DEST_CHAT"]
 
+    if dest_type == "chat":
+        try:
+            chat = await context.bot.get_chat(chat_id)
+            if chat.type == ChatType.CHANNEL:
+                context.user_data["dest_type"] = "channel"
+            elif chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+                context.user_data["dest_type"] = "group"
+            else:
+                await message.reply_text(t("not_a_chat", lang))
+                return _wz()["DEST_CHAT"]
+        except (BadRequest, Forbidden):
+            await message.reply_text(t("bot_no_chat", lang))
+            return _wz()["DEST_CHAT"]
+
     can_manage = await _user_can_manage_chat(
         context.bot, chat_id, update.effective_user.id
     )
@@ -1828,6 +2033,17 @@ async def _prompt_delete_old(
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        context.user_data["delete_other_alerts"] = False
+        chat_id = context.user_data.get("pending_chat_id", user_id)
+        thread_id = context.user_data.get("pending_thread_id")
+        return await _finish_subscription(
+            update, context, user_id, chat_id, thread_id
+        )
+    if context.user_data.get("advanced_options_done") and not context.user_data.get(
+        "adv_want_delete"
+    ):
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False

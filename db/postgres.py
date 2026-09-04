@@ -417,6 +417,7 @@ class PostgresDatabase:
                 "premium_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
                 "premium_features TEXT NOT NULL DEFAULT ''",
                 "advanced_mode INTEGER",
+                "message_draft INTEGER",
                 "notifications_paused_until BIGINT NOT NULL DEFAULT 0",
                 "template_typo_notice_sent BOOLEAN NOT NULL DEFAULT FALSE",
             ):
@@ -1103,6 +1104,30 @@ class PostgresDatabase:
             )
 
         return len(restored_ids), enabled_restored
+
+    def discard_deleted_subscriptions(
+        self,
+        owner_id: int,
+        cart_ids: list[int],
+        *,
+        is_demo: bool,
+    ) -> int:
+        cart_ids = [int(i) for i in cart_ids if str(i)]
+        if not cart_ids:
+            return 0
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            placeholders = ",".join(["%s" for _ in cart_ids])
+            cur.execute(
+                f"""
+                DELETE FROM deleted_subscriptions_cart
+                WHERE owner_id = %s
+                  AND is_demo = %s
+                  AND id IN ({placeholders})
+                """,
+                (owner_id, bool(is_demo), *cart_ids),
+            )
+            return int(cur.rowcount or 0)
 
     def update_subscription(self, sub_id: int, owner_id: int, **fields: object) -> bool:
         mark_sync_edited = bool(fields.pop("mark_sync_edited", True))
@@ -2191,6 +2216,31 @@ class PostgresDatabase:
                 INSERT INTO users (user_id, advanced_mode) VALUES (%s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET
                     advanced_mode = EXCLUDED.advanced_mode
+                """,
+                (user_id, 1 if enabled else 0),
+            )
+
+    def is_message_draft_enabled(self, user_id: int) -> bool:
+        """Progressive sendMessageDraft; default on when unset."""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT message_draft FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if row is None or row["message_draft"] is None:
+            return True
+        return bool(row["message_draft"])
+
+    def set_message_draft_enabled(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, message_draft) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    message_draft = EXCLUDED.message_draft
                 """,
                 (user_id, 1 if enabled else 0),
             )

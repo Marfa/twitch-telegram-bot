@@ -24,6 +24,7 @@ from twitch import (
     should_ignore_stream,
     stream_duration_minutes,
     stream_end_snapshot,
+    template_uses_html,
     twitch_status_fingerprint,
 )
 from translate import build_translations, markdown_to_telegram_html, translate_text
@@ -273,6 +274,24 @@ def check_core() -> None:
         )
         == "in 15 min: Soon"
     )
+    assert template_uses_html("<b>{username}</b> live")
+    assert template_uses_html('<a href="https://x">{name}</a>')
+    assert not template_uses_html("{username} is live")
+    assert (
+        render_template(
+            "<b>{username}</b>",
+            "a<b>c",
+            escape_html=True,
+        )
+        == "<b>a&lt;b&gt;c</b>"
+    )
+    from i18n import placeholders_expandable_html, placeholders_link_html
+
+    details = placeholders_expandable_html("en")
+    assert "<details>" in details and "<summary>" in details
+    assert "{username}" in details
+    link = placeholders_link_html("en")
+    assert "<a href=" in link or "not available" in link.lower() or "недоступен" in link.lower()
     from twitch import template_has_link
 
     assert template_has_link("https://twitch.tv/{username}")
@@ -597,25 +616,32 @@ def check_core() -> None:
             btn("ignored_words", loc),
             btn("advanced_mode", loc),
         ]
+        draft_row = next(
+            row
+            for row in settings_kb
+            if btn("message_draft", loc) in [b.text for b in row]
+        )
+        from i18n import beta_mode_btn
+
+        assert [b.text for b in draft_row] == [
+            btn("message_draft", loc),
+            beta_mode_btn(loc, 0, 0),
+        ]
         partner_row = next(
             row
             for row in settings_kb
             if btn("partner", loc) in [b.text for b in row]
         )
-        assert [b.text for b in partner_row] == [
-            btn("language", loc),
-            btn("partner", loc),
-        ]
-        from i18n import beta_mode_btn
-
-        beta_row = next(
+        assert [b.text for b in partner_row] == [btn("partner", loc)]
+        lang_row = next(
             row
             for row in settings_kb
-            if any(
-                (b.text or "").startswith(btn("beta_mode", loc)) for b in row
-            )
+            if btn("language", loc) in [b.text for b in row]
         )
-        assert [b.text for b in beta_row][0] == beta_mode_btn(loc, 0, 0)
+        assert [b.text for b in lang_row] == [
+            btn("sys_notifications", loc),
+            btn("language", loc),
+        ]
         suggest_kb = watch_suggest_keyboard(loc, offer_create_alerts=True)
         cbs = [
             (btn.callback_data or "")
@@ -1146,4 +1172,76 @@ def check_core() -> None:
     upcoming = migrate_sub_fields_for_alert_type(base, "upcoming")
     assert upcoming["delay_minutes"] == 0
     assert upcoming["suppress_repeat_minutes"] == 0
+
+    # message_fx: typing + draft stream with classic fallback
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from message_fx import (
+        growing_prefixes,
+        install_message_fx,
+        message_fx_disabled,
+        stream_draft_then,
+        _plain_for_draft,
+    )
+
+    assert growing_prefixes("short") == []
+    prefs = growing_prefixes("alpha bravo charlie delta echo foxtrot golf hotel")
+    assert prefs and all(prefs[i] in prefs[i + 1] for i in range(len(prefs) - 1))
+    assert _plain_for_draft("<b>Hi</b> &amp; you", parse_mode="HTML") == "Hi & you"
+
+    bot = MagicMock()
+    original_send = AsyncMock(return_value="ok")
+    bot.send_message = original_send
+    bot.send_chat_action = AsyncMock(return_value=True)
+    bot.send_message_draft = AsyncMock(side_effect=RuntimeError("no draft"))
+    bot._message_fx_installed = False
+    install_message_fx(bot)
+
+    async def _fx_roundtrip() -> None:
+        # Draft fails → still classic send after typing.
+        assert await bot.send_message(42, "x" * 80) == "ok"
+        bot.send_chat_action.assert_awaited()
+        bot.send_message_draft.assert_awaited()
+        assert original_send.await_count == 1
+
+        bot.send_chat_action.reset_mock()
+        bot.send_message_draft.reset_mock()
+        original_send.reset_mock()
+        with message_fx_disabled():
+            await bot.send_message(42, "x" * 80)
+        bot.send_chat_action.assert_not_awaited()
+        bot.send_message_draft.assert_not_awaited()
+        assert original_send.await_count == 1
+
+        # Preference off: classic only (no typing/draft).
+        bot.send_chat_action.reset_mock()
+        bot.send_message_draft.reset_mock()
+        original_send.reset_mock()
+        bot2 = MagicMock()
+        orig2 = AsyncMock(return_value="ok")
+        bot2.send_message = orig2
+        bot2.send_chat_action = AsyncMock()
+        bot2.send_message_draft = AsyncMock()
+        bot2._message_fx_installed = False
+        install_message_fx(bot2, draft_enabled=lambda _uid: False)
+        await bot2.send_message(42, "x" * 80)
+        bot2.send_chat_action.assert_not_awaited()
+        bot2.send_message_draft.assert_not_awaited()
+        assert orig2.await_count == 1
+
+        # Group chats: classic only.
+        bot.send_chat_action.reset_mock()
+        await bot.send_message(-1001, "x" * 80)
+        bot.send_chat_action.assert_not_awaited()
+
+        ok = await stream_draft_then(bot, 42, "plain " * 20)
+        assert ok is False  # mock still raises
+
+        bot2 = MagicMock()
+        bot2.send_message_draft = AsyncMock(return_value=True)
+        assert await stream_draft_then(bot2, 42, "plain " * 20) is True
+        assert bot2.send_message_draft.await_count >= 1
+
+    asyncio.run(_fx_roundtrip())
 

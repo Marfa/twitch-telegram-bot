@@ -6,6 +6,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from telegram import (
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -43,6 +44,11 @@ def t(key: str, lang: str, **kwargs: object) -> str:
     return text.format(**kwargs) if kwargs else text
 
 
+def t_bullet(key: str, lang: str, **kwargs: object) -> str:
+    """Subscription list line: same copy as wizard notes, with a leading bullet."""
+    return f"• {t(key, lang, **kwargs)}"
+
+
 def placeholders_list_url(lang: str) -> str:
     from config import PUBLIC_BASE_URL
 
@@ -58,6 +64,19 @@ def placeholders_link_html(lang: str) -> str:
         return html.escape(t("placeholders_link_unavailable", lang))
     label = html.escape(t("placeholders_link_label", lang))
     return f'<a href="{html.escape(url)}">{label}</a>'
+
+
+def placeholders_expandable_html(lang: str) -> str:
+    """Rich-message <details> block: tap summary to expand the full placeholder list."""
+    label = html.escape(t("placeholders_link_label", lang))
+    intro = html.escape(t("placeholders_page_intro", lang))
+    body = t("placeholders_page_body", lang)
+    return (
+        f"<details><summary>{label}</summary>\n"
+        f"<p>{intro}</p>\n"
+        f"{body}\n"
+        f"</details>"
+    )
 
 
 def channel_dup_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
@@ -131,6 +150,7 @@ def all_menu_buttons() -> set[str]:
         "ignored_words",
         "whisper_alerts",
         "advanced_mode",
+        "message_draft",
         "beta_mode",
         "sync_subs",
         "premium",
@@ -227,6 +247,7 @@ def settings_menu(
             KeyboardButton(btn("sync_subs", lang)),
             KeyboardButton(btn("ignored_words", lang)),
             KeyboardButton(btn("advanced_mode", lang)),
+            KeyboardButton(btn("message_draft", lang)),
             KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
             KeyboardButton(btn("sys_notifications", lang)),
             KeyboardButton(btn("language", lang)),
@@ -821,10 +842,47 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("dest_dm", lang), callback_data="dest:dm")],
-            [InlineKeyboardButton(t("dest_channel", lang), callback_data="dest:channel")],
-            [InlineKeyboardButton(t("dest_group", lang), callback_data="dest:group")],
+            [InlineKeyboardButton(t("dest_chat", lang), callback_data="dest:chat")],
         ]
     )
+
+
+def advanced_options_keyboard(
+    lang: str,
+    *,
+    want_ignore: bool,
+    want_delay: bool,
+    want_repeat: bool,
+    want_delete: bool,
+    show_delay: bool = True,
+    show_repeat: bool = True,
+) -> InlineKeyboardMarkup:
+    def _row(flag: bool, label_key: str, toggle: str) -> list[InlineKeyboardButton]:
+        mark = "✅ " if flag else "⬜️ "
+        return [
+            InlineKeyboardButton(
+                mark + t(label_key, lang),
+                callback_data=f"advopt:toggle:{toggle}",
+            )
+        ]
+
+    rows: list[list[InlineKeyboardButton]] = [
+        _row(want_ignore, "advanced_options_ignore", "ignore"),
+    ]
+    if show_delay:
+        rows.append(_row(want_delay, "advanced_options_delay", "delay"))
+    if show_repeat:
+        rows.append(_row(want_repeat, "advanced_options_repeat", "repeat"))
+    rows.append(_row(want_delete, "advanced_options_delete", "delete"))
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("advanced_options_next", lang),
+                callback_data="advopt:next",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def delete_old_keyboard(lang: str) -> InlineKeyboardMarkup:
@@ -979,6 +1037,20 @@ def advanced_mode_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     mark + t("advanced_mode_activate", lang),
                     callback_data="advanced_mode:toggle",
+                )
+            ]
+        ]
+    )
+
+
+def message_draft_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
+    mark = "✅ " if enabled else "⬜️ "
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    mark + t("message_draft_activate", lang),
+                    callback_data="message_draft:toggle",
                 )
             ]
         ]
@@ -1836,16 +1908,45 @@ def edit_options_keyboard(
     notify_on_end: bool = False,
     is_upcoming: bool = False,
     show_advanced: bool = True,
+    twitch_login: str = "",
+    message_template: str = "",
 ) -> InlineKeyboardMarkup:
     # Same order as create wizard: template → image → ignore → preview → delay
     # → repeat → schedule reminder → dest → delete.
     # Schedule reminder only if configured at creation (unchanged policy).
     # Delay/repeat skipped for upcoming; repeat also skipped for category/end.
     image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
-    rows = [
-        [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
-        [InlineKeyboardButton(image_label, callback_data=f"edit_f:{sub_id}:image")],
-    ]
+    rows: list[list[InlineKeyboardButton]] = []
+    login = (twitch_login or "").strip().lstrip("@")
+    if login:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("edit_copy_login", lang),
+                    copy_text=CopyTextButton(text=login[:256]),
+                )
+            ]
+        )
+    tpl = (message_template or "").strip()
+    if tpl:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("edit_copy_template", lang),
+                    copy_text=CopyTextButton(text=tpl[:256]),
+                )
+            ]
+        )
+    rows.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template"
+                )
+            ],
+            [InlineKeyboardButton(image_label, callback_data=f"edit_f:{sub_id}:image")],
+        ]
+    )
     if has_image:
         rows.append(
             [

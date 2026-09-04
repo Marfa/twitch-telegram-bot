@@ -1,0 +1,33 @@
+---
+description: Keep Premium feature copy in sync when FEATURE_IDS or feature UX changes
+globs: premium.py,premium_handlers.py,locales/**,i18n.py,README.md,README.en.md
+alwaysApply: false
+---
+
+# Premium feature copy sync
+
+When Premium capabilities change (add/remove/rename a feature, change free vs paid limits, or change what full plan / «Оплатить только нужные функции» unlocks), update **all** user-facing copy in the same change.
+
+## Single source of truth
+
+| What | Where |
+|------|--------|
+| Feature ids (order) | `FEATURE_IDS` / `purchasable_feature_ids()` in [`premium.py`](premium.py) |
+| Short name (buttons, lists, full-plan bullets) | `premium_feat_<id>` in `locales/ru.json` + `locales/en.json` |
+| Longer explanation (à la carte pick screen) | `premium_feat_<id>_desc` (same locales) |
+| Full-plan screen assembly | `premium_benefits_text()` + `premium_title` (`{benefits}`) in [`premium_handlers.py`](premium_handlers.py) |
+| Streamer channel line (not in FEATURE_IDS) | `premium_channel_benefit` |
+
+Do **not** hardcode a parallel feature list inside `premium_title` or README that can drift from `premium_feat_*`.
+
+## Checklist
+
+1. **Code** — `FEATURE_IDS` / gates / `feature_label_key` mapping updated.
+2. **Locales** — for each id: `premium_feat_<id>` + `premium_feat_<id>_desc` in **ru and en**. Remove obsolete keys.
+3. **Screens** — full Premium (`premium_benefits_text`) and «Оплатить только нужные функции» (`_premium_feat_pick_text`) both resolve names via `feature_label_key` / `feature_desc_key`.
+4. **README** — if the product surface table mentions Premium capabilities, update [`README.md`](README.md) + [`README.en.md`](README.en.md) ([`readme.mdc`](readme.mdc)).
+5. **self_check** — extend assertions that every purchasable id has label+desc and appears in `premium_benefits_text` (see `checks_handlers.py`).
+
+## Skip
+
+Internal refactors with no user-visible Premium wording change.

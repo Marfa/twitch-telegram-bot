@@ -41,6 +41,7 @@ from i18n import (
     ignored_words_keyboard,
     is_menu_button,
     language_keyboard,
+    message_draft_keyboard,
     other_menu,
     sys_notifications_keyboard,
     t,
@@ -191,6 +192,37 @@ async def on_advanced_mode_toggle(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_reply_markup(
         reply_markup=advanced_mode_keyboard(lang, enabled=enabled)
     )
+
+
+async def open_message_draft_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    enabled = db.is_message_draft_enabled(user_id)
+    await update.effective_message.reply_text(
+        t("message_draft_screen", lang),
+        reply_markup=message_draft_keyboard(lang, enabled=enabled),
+    )
+
+
+async def on_message_draft_toggle(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    enabled = not db.is_message_draft_enabled(user_id)
+    db.set_message_draft_enabled(user_id, enabled)
+    await query.edit_message_reply_markup(
+        reply_markup=message_draft_keyboard(lang, enabled=enabled)
+    )
+
 
 def _beta_mode_features_block(
     db: Database, user_id: int, lang: str
@@ -702,7 +734,7 @@ async def complete_whisper_oauth(
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
         key = (
-            "whisper_alerts_denied"
+            "oauth_denied"
             if error == "access_denied"
             else "whisper_alerts_failed"
         )

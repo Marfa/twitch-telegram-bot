@@ -215,6 +215,7 @@ def group_setup_menu_filter():
             | _btn_filter("ignored_words")
             | _btn_filter("whisper_alerts")
             | _btn_filter("advanced_mode")
+            | _btn_filter("message_draft")
             | _btn_filter("sync_subs")
             | _btn_filter("beta_mode")
             | _btn_filter("admin")
@@ -232,6 +233,7 @@ GROUP_SETUP_CALLBACK_PATTERN = (
     r"dup:|dest:|strip_name:|lucky:|image_ask:|image_pos:|ignore_keywords:|"
     r"template_typo:|stored_typo_fix:|list_type:|delete_|enable_all|toggle:|sub_toggle:|"
     r"sys_updates:|sys_availability:|sys_other:|sys_sync:|advanced_mode:|"
+    r"message_draft:|"
     r"whisper_alerts:|beta_mode:|premium:|alert_history:|lang:(?!cancel)|"
     r"sb_edit:|sb_sched:|import_oauth:)"
 )
@@ -306,12 +308,16 @@ async def _send_dm_html(
         kwargs["disable_web_page_preview"] = True
 
     async def _deliver() -> object | None:
-        try:
-            return await bot.send_message(
-                uid, message, parse_mode=ParseMode.HTML, **kwargs
-            )
-        except BadRequest:
-            return await bot.send_message(uid, message, **kwargs)
+        from message_fx import message_fx_disabled
+
+        # Mass/system DMs: no typing/draft (flood + latency).
+        with message_fx_disabled():
+            try:
+                return await bot.send_message(
+                    uid, message, parse_mode=ParseMode.HTML, **kwargs
+                )
+            except BadRequest:
+                return await bot.send_message(uid, message, **kwargs)
 
     def _result(status: str, msg: object | None = None) -> str | tuple[str, int | None]:
         if return_message_id:

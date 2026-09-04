@@ -1019,11 +1019,11 @@ async def on_watch_create_alerts(
     db.upsert_user(user_id)
     paused_note = ""
     if not enabled:
-        paused_note = t(
-            "watch_create_alerts_paused_note",
+        paused_note = "\n\n" + t(
+            "created_paused_note",
             lang,
-            paused=1,
-            free_limit=prem.free_active_limit(),
+            kind=t("paused_kind_alert", lang),
+            limit=prem.free_active_limit(),
         )
     text = t(
         "watch_create_alerts_ok",

@@ -10,6 +10,7 @@ from i18n import (
     admin_other_audience_keyboard,
     admin_type_keyboard,
     alert_type_keyboard,
+    advanced_options_keyboard,
     channel_dup_keyboard,
     chat_button_keyboard,
     delay_keyboard,
@@ -44,6 +45,7 @@ from i18n import (
     watch_cats_nav_keyboard,
     whisper_alerts_keyboard,
     advanced_mode_keyboard,
+    message_draft_keyboard,
 )
 from telegram import InlineKeyboardMarkup
 
@@ -79,6 +81,7 @@ _MENU_BTN_KEYS = (
     "ignored_words",
     "whisper_alerts",
     "advanced_mode",
+    "message_draft",
     "beta_mode",
     "sync_subs",
     "premium",
@@ -127,7 +130,10 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("watch_nav", "watch_nav:back"),
     ("alert_history_page", "alert_history:page:1"),
     ("alert_history_more", "alert_history:more"),
-    ("alert_history_menu", "alert_history:menu"),
+        ("alert_history_menu", "alert_history:menu"),
+        ("alert_history_viewed", "ah:v:1"),
+        ("alert_history_unviewed", "ah:u:1"),
+        ("alert_history_viewed_below", "ah:vb:1"),
     ("sched_apply", "sched:date:0"),
     ("sched_calendar", "sched:calendar"),
     ("sched_month", "sched:month:2026-09"),
@@ -190,6 +196,17 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
         ("premium_gate_first", premium_gate_keyboard, {"lang": loc, "first_step": True}),
         ("premium_gate_later", premium_gate_keyboard, {"lang": loc, "first_step": False}),
         ("dest", dest_keyboard, {"lang": loc}),
+        (
+            "advanced_options",
+            advanced_options_keyboard,
+            {
+                "lang": loc,
+                "want_ignore": False,
+                "want_delay": True,
+                "want_repeat": False,
+                "want_delete": True,
+            },
+        ),
         ("delete_old", delete_old_keyboard, {"lang": loc}),
         ("delete_fail", delete_fail_notify_keyboard, {"lang": loc}),
         ("delete_sibling", delete_sibling_keyboard, {"lang": loc}),
@@ -241,6 +258,7 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
         ("watch_cats_nav", watch_cats_nav_keyboard, {"lang": loc, "has_cats": False}),
         ("whisper_alerts", whisper_alerts_keyboard, {"lang": loc, "enabled": False}),
         ("advanced_mode", advanced_mode_keyboard, {"lang": loc, "enabled": False}),
+        ("message_draft", message_draft_keyboard, {"lang": loc, "enabled": True}),
         ("ignored_words", ignored_words_keyboard, {"lang": loc, "has_words": False}),
         (
             "ignore_keywords",

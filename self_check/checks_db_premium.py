@@ -1311,6 +1311,7 @@ def check_db_premium() -> None:
             (src.twitch_username or "") in (b.text or "")
             for row in kb_rows
             for b in row
+            if b.callback_data
         )
 
         long_blocks = [

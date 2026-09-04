@@ -95,6 +95,11 @@ def _message_link(chat_id: int, message_id: int, thread_id: int | None = None) -
     return f"https://t.me/c/{internal}/{message_id}"
 
 
+# Free message effect for live alerts in private chats (🎉).
+# Private chats only; ignored / retried without on INVALID_EFFECT_ID.
+LIVE_DM_MESSAGE_EFFECT_ID = "5046509860389126442"
+
+
 async def _deliver_alert_content(
     bot,
     *,
@@ -105,6 +110,40 @@ async def _deliver_alert_content(
     image_position: str = "",
     disable_link_preview: bool = False,
     reply_markup=None,
+    message_effect_id: str | None = None,
+    parse_mode: str | None = None,
+):
+    """Send alert text, optionally with image above/below. Returns the primary message."""
+    from message_fx import message_fx_disabled
+
+    # Live alerts: deliver immediately (no typing/draft delay).
+    with message_fx_disabled():
+        return await _deliver_alert_content_plain(
+            bot,
+            chat_id=chat_id,
+            text=text,
+            thread_id=thread_id,
+            image_file_id=image_file_id,
+            image_position=image_position,
+            disable_link_preview=disable_link_preview,
+            reply_markup=reply_markup,
+            message_effect_id=message_effect_id,
+            parse_mode=parse_mode,
+        )
+
+
+async def _deliver_alert_content_plain(
+    bot,
+    *,
+    chat_id: int,
+    text: str,
+    thread_id: int | None = None,
+    image_file_id: str | None = None,
+    image_position: str = "",
+    disable_link_preview: bool = False,
+    reply_markup=None,
+    message_effect_id: str | None = None,
+    parse_mode: str | None = None,
 ):
     """Send alert text, optionally with image above/below. Returns the primary message."""
     thread_kwargs: dict = {}
@@ -113,6 +152,12 @@ async def _deliver_alert_content(
     markup_kwargs: dict = {}
     if reply_markup is not None:
         markup_kwargs["reply_markup"] = reply_markup
+    effect_kwargs: dict = {}
+    if message_effect_id:
+        effect_kwargs["message_effect_id"] = message_effect_id
+    parse_kwargs: dict = {}
+    if parse_mode:
+        parse_kwargs["parse_mode"] = parse_mode
 
     file_id = image_file_id
     position = (image_position or "").strip()
@@ -120,10 +165,41 @@ async def _deliver_alert_content(
     if file_id and position in ("before", "after"):
         disable_link_preview = True
 
+    def _plain_fallback(body: str) -> str:
+        import html as _html
+        import re as _re
+
+        return _html.unescape(_re.sub(r"<[^>]+>", "", body or ""))
+
     async def _photo(**photo_kwargs):
         return await _send_photo_with_url_fallback(
             bot, chat_id=chat_id, photo=file_id, **photo_kwargs
         )
+
+    async def _send_text(**extra):
+        text_kwargs: dict = {
+            "chat_id": chat_id,
+            "text": text,
+            **thread_kwargs,
+            **markup_kwargs,
+            **effect_kwargs,
+            **parse_kwargs,
+            **extra,
+        }
+        if disable_link_preview:
+            text_kwargs["disable_web_page_preview"] = True
+        try:
+            return await bot.send_message(**text_kwargs)
+        except BadRequest as exc:
+            err = str(exc).lower()
+            if parse_kwargs and ("parse" in err or "entity" in err or "tag" in err):
+                text_kwargs["text"] = _plain_fallback(text)
+                text_kwargs.pop("parse_mode", None)
+                return await bot.send_message(**text_kwargs)
+            if effect_kwargs and "effect" in err:
+                text_kwargs.pop("message_effect_id", None)
+                return await bot.send_message(**text_kwargs)
+            raise
 
     if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
         try:
@@ -132,13 +208,39 @@ async def _deliver_alert_content(
                 show_caption_above_media=(position == "after"),
                 **thread_kwargs,
                 **markup_kwargs,
+                **effect_kwargs,
+                **parse_kwargs,
             )
         except BadRequest as exc:
-            logger.warning(
-                "Photo send failed for %s (%s); falling back to text-only",
-                chat_id,
-                exc,
-            )
+            err = str(exc).lower()
+            if parse_kwargs and ("parse" in err or "entity" in err or "tag" in err):
+                try:
+                    return await _photo(
+                        caption=_plain_fallback(text),
+                        show_caption_above_media=(position == "after"),
+                        **thread_kwargs,
+                        **markup_kwargs,
+                        **effect_kwargs,
+                    )
+                except BadRequest:
+                    pass
+            if effect_kwargs and "effect" in err:
+                try:
+                    return await _photo(
+                        caption=text,
+                        show_caption_above_media=(position == "after"),
+                        **thread_kwargs,
+                        **markup_kwargs,
+                        **parse_kwargs,
+                    )
+                except BadRequest:
+                    pass
+            else:
+                logger.warning(
+                    "Photo send failed for %s (%s); falling back to text-only",
+                    chat_id,
+                    exc,
+                )
 
     elif file_id and position in ("before", "after"):
         if position == "before":
@@ -151,25 +253,9 @@ async def _deliver_alert_content(
                     exc,
                 )
             else:
-                text_kwargs: dict = {
-                    "chat_id": chat_id,
-                    "text": text,
-                    **thread_kwargs,
-                    **markup_kwargs,
-                }
-                if disable_link_preview:
-                    text_kwargs["disable_web_page_preview"] = True
-                return await bot.send_message(**text_kwargs)
+                return await _send_text()
         else:
-            text_kwargs = {
-                "chat_id": chat_id,
-                "text": text,
-                **thread_kwargs,
-                **markup_kwargs,
-            }
-            if disable_link_preview:
-                text_kwargs["disable_web_page_preview"] = True
-            msg = await bot.send_message(**text_kwargs)
+            msg = await _send_text()
             try:
                 await _photo(**thread_kwargs)
             except BadRequest as exc:
@@ -180,10 +266,7 @@ async def _deliver_alert_content(
                 )
             return msg
 
-    kwargs: dict = {"chat_id": chat_id, "text": text, **thread_kwargs, **markup_kwargs}
-    if disable_link_preview:
-        kwargs["disable_web_page_preview"] = True
-    return await bot.send_message(**kwargs)
+    return await _send_text()
 
 
 def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMarkup | None:
@@ -610,6 +693,11 @@ async def _send_notification(
     image_position = _effective_image_position(sub)
     preview_off = False
     chat_markup = None
+    from twitch import template_uses_html
+
+    alert_parse_mode = (
+        ParseMode.HTML if template_uses_html(sub.message_template or "") else None
+    )
     try:
         lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
         chat_markup = _alert_chat_button_markup(sub, lang)
@@ -636,6 +724,12 @@ async def _send_notification(
             image_position=image_position,
             disable_link_preview=preview_off,
             reply_markup=chat_markup,
+            message_effect_id=(
+                LIVE_DM_MESSAGE_EFFECT_ID
+                if alert_type == "live" and sub.dest_type == "dm"
+                else None
+            ),
+            parse_mode=alert_parse_mode,
         )
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
@@ -649,6 +743,12 @@ async def _send_notification(
                 image_position=image_position,
                 disable_link_preview=preview_off,
                 reply_markup=chat_markup,
+                message_effect_id=(
+                    LIVE_DM_MESSAGE_EFFECT_ID
+                    if alert_type == "live" and sub.dest_type == "dm"
+                    else None
+                ),
+                parse_mode=alert_parse_mode,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)

@@ -1101,7 +1101,7 @@ async def _prompt_stream_schedule_fix_time(
     STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
 
     await update.effective_message.reply_text(
-        t("stream_schedule_fix_time_prompt", lang),
+        t("stream_schedule_time_prompt", lang),
         reply_markup=_wizard(lang, back=False),
     )
     return STREAM_SCHEDULE_FIX_TIME

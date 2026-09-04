@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from telegram import (
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
@@ -38,6 +39,7 @@ from db.models import (
 from handlers.delivery import _resolve_chat_display_name
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
 from handlers.stream_schedule import _complete_schedule_publish
+from rich_message import edit_rich_message, send_rich_message
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
@@ -54,6 +56,7 @@ from i18n import (
     sync_unfollow_keyboard,
     delete_all_confirm_keyboard,
     t,
+    t_bullet,
 )
 from twitch import TwitchClient, is_game_cover_image, normalize_ignore_keywords, template_has_link
 
@@ -301,7 +304,7 @@ def migrate_import_sync_subscriptions(
 def _import_result_keyboard(
     lang: str, subs: list[Subscription]
 ) -> InlineKeyboardMarkup:
-    """Compact post-import keyboard: Enable all + unique channels, 2 per row."""
+    """Post-import: enable + edit per channel (no shared-only keyboard)."""
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t("enable_all", lang), callback_data="enable_all")]
     ]
@@ -312,20 +315,71 @@ def _import_result_keyboard(
             continue
         seen.add(sub.twitch_user_id)
         unique.append(sub)
-    row: list[InlineKeyboardButton] = []
     for i, sub in enumerate(unique, 1):
-        row.append(
-            InlineKeyboardButton(
-                f"✏️ #{i} {sub.twitch_username}",
-                callback_data=f"edit:{sub.id}",
-            )
+        tag = f"#{i} {sub.twitch_username}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    _inline_btn_label(f"{t('toggle_on', lang)} {tag}"),
+                    callback_data=f"imp_en:{sub.id}",
+                ),
+                InlineKeyboardButton(
+                    _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
+                    callback_data=f"edit:{sub.id}",
+                ),
+            ]
         )
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
     return InlineKeyboardMarkup(rows)
+
+
+def _build_import_result_rich(
+    header: str,
+    lang: str,
+    subs: list[Subscription],
+) -> dict:
+    blocks: list[dict] = [
+        {"type": "paragraph", "text": _strip_html_for_rich(header)},
+        {
+            "type": "buttons",
+            "align": "left",
+            "buttons": [
+                {
+                    "text": t("enable_all", lang),
+                    "callback_data": "enable_all",
+                    "style": "success",
+                }
+            ],
+        },
+    ]
+    seen: set[str] = set()
+    idx = 0
+    for sub in subs:
+        if sub.twitch_user_id in seen:
+            continue
+        seen.add(sub.twitch_user_id)
+        idx += 1
+        login = (sub.twitch_username or "").strip()
+        label = f"#{idx} {login}".strip()
+        blocks.append({"type": "paragraph", "text": label})
+        enable_label = t("toggle_off", lang) if sub.enabled else t("toggle_on", lang)
+        blocks.append(
+            {
+                "type": "buttons",
+                "align": "left",
+                "buttons": [
+                    {
+                        "text": enable_label,
+                        "callback_data": f"imp_en:{sub.id}",
+                        "style": "success" if not sub.enabled else "primary",
+                    },
+                    {
+                        "text": t("sub_list_edit", lang),
+                        "callback_data": f"edit:{sub.id}",
+                    },
+                ],
+            }
+        )
+    return {"blocks": blocks}
 
 
 
@@ -388,24 +442,26 @@ def _format_sub_line(
         else:
             pos = (sub.image_position or "").strip()
             if pos == "after":
-                settings.append(t("sub_list_image_after", lang))
+                settings.append(t_bullet("image_after_note", lang))
             else:
-                settings.append(t("sub_list_image_before", lang))
+                settings.append(t_bullet("image_before_note", lang))
     else:
         settings.append(t("sub_list_image_no", lang))
     if sub.ignore_keywords.strip() and sub.use_global_ignore:
-        settings.append(t("sub_list_ignore_yes_global", lang, keywords=keywords))
+        settings.append(
+            t_bullet("ignore_keywords_yes_global_note", lang, keywords=keywords)
+        )
     elif sub.ignore_keywords.strip():
-        settings.append(t("sub_list_ignore_yes", lang, keywords=keywords))
+        settings.append(t_bullet("ignore_keywords_yes_note", lang, keywords=keywords))
     elif sub.use_global_ignore:
-        settings.append(t("sub_list_ignore_global_only", lang))
+        settings.append(t_bullet("ignore_keywords_global_only_note", lang))
     else:
-        settings.append(t("sub_list_ignore_no", lang))
+        settings.append(t_bullet("ignore_keywords_no_note", lang))
     if sub.image_file_id or template_has_link(sub.message_template or ""):
         settings.append(
-            t("sub_list_preview_off", lang)
+            t_bullet("preview_off", lang)
             if sub.disable_link_preview or sub.image_file_id
-            else t("sub_list_preview_on", lang)
+            else t_bullet("preview_on", lang)
         )
     if sub.attach_chat_button:
         settings.append(t("sub_list_chat_button_yes", lang))
@@ -417,9 +473,9 @@ def _format_sub_line(
     )
     if not is_upcoming:
         settings.append(
-            t("sub_list_delay", lang, minutes=sub.delay_minutes)
+            t_bullet("delay_yes_note", lang, minutes=sub.delay_minutes)
             if sub.delay_minutes > 0
-            else t("sub_list_delay_none", lang)
+            else t_bullet("delay_no_note", lang)
         )
         if not sub.notify_on_category_change and not sub.notify_on_end:
             settings.append(
@@ -429,9 +485,13 @@ def _format_sub_line(
             )
     if sub.schedule_reminder_configured:
         settings.append(
-            t("sub_list_schedule_reminder", lang, minutes=sub.schedule_reminder_minutes)
+            t_bullet(
+                "schedule_reminder_yes_note",
+                lang,
+                minutes=sub.schedule_reminder_minutes,
+            )
             if sub.schedule_reminder_minutes > 0
-            else t("sub_list_schedule_reminder_none", lang)
+            else t_bullet("schedule_reminder_no_note", lang)
         )
     settings.append(
         t(
@@ -453,7 +513,7 @@ def _format_sub_line(
             else t("sub_list_delete_no", lang)
         )
         if sub.delete_previous and sub.notify_delete_fail:
-            settings.append(t("sub_list_delete_fail", lang))
+            settings.append(t_bullet("delete_fail_yes_note", lang))
         if sub.delete_previous and sub.notify_on_category_change:
             settings.append(
                 t("sub_list_delete_other_yes", lang)
@@ -550,15 +610,31 @@ async def open_cart_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not items:
         text = t("cart_empty", lang, days=days)
         markup = None
+        rich = None
     elif kind is None and len(types) > 1:
         text = t("cart_type_pick", lang)
         markup = _alert_type_pick_keyboard(lang, types, "delete_cart_type")
+        rich = None
     else:
         text = t("cart_prompt", lang, days=days)
         if not view:
             text = t("cart_empty", lang, days=days)
-        markup = _delete_cart_keyboard(lang, view, set())
-    await update.effective_message.reply_text(text, reply_markup=markup)
+            markup = None
+            rich = None
+        else:
+            markup = _delete_cart_keyboard(lang, view)
+            rich = _build_cart_rich_page(lang, days, view)
+    chat_id = update.effective_chat.id
+    if rich is not None:
+        msg = await send_rich_message(context.bot, int(chat_id), rich)
+        if _message_id_from_result(msg) is not None:
+            context.user_data["cart_is_rich"] = True
+        else:
+            context.user_data["cart_is_rich"] = False
+            await update.effective_message.reply_text(text, reply_markup=markup)
+    else:
+        context.user_data["cart_is_rich"] = False
+        await update.effective_message.reply_text(text, reply_markup=markup)
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
@@ -756,6 +832,107 @@ def _sub_action_tag(num: int, username: str) -> str:
     return f"#{num} {name}" if name else f"#{num}"
 
 
+def _strip_html_for_rich(text: str) -> str:
+    return (
+        (text or "")
+        .replace("<b>", "")
+        .replace("</b>", "")
+        .replace("<i>", "")
+        .replace("</i>", "")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+    )
+
+
+_COPY_TEXT_LIMIT = 256
+
+
+def _copy_text_payload(value: str) -> dict | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    if len(text) > _COPY_TEXT_LIMIT:
+        text = text[:_COPY_TEXT_LIMIT]
+    return {"text": text}
+
+
+def _subs_rich_action_buttons(
+    db: Database,
+    owner_id: int,
+    lang: str,
+    sub: Subscription,
+) -> list[dict]:
+    login = (sub.twitch_username or "").strip().lstrip("@")
+    buttons: list[dict] = [
+        {
+            "text": t("toggle_off", lang) if sub.enabled else t("toggle_on", lang),
+            "callback_data": f"toggle:{sub.id}",
+            "style": "success" if not sub.enabled else "primary",
+        },
+        {
+            "text": t("sub_list_edit", lang),
+            "callback_data": f"edit:{sub.id}",
+        },
+        {
+            "text": t("sub_list_delete", lang),
+            "callback_data": f"list_del:{sub.id}",
+            "style": "danger",
+        },
+    ]
+    if _share_enabled(db, owner_id):
+        buttons.append(
+            {
+                "text": t("sub_list_share_short", lang),
+                "callback_data": f"share_show:{sub.id}",
+            }
+        )
+    login_copy = _copy_text_payload(login)
+    if login_copy:
+        buttons.append(
+            {
+                "text": t("sub_list_copy_login", lang),
+                "copy_text": login_copy,
+                "style": "link",
+            }
+        )
+    tpl_copy = _copy_text_payload(sub.message_template or "")
+    if tpl_copy:
+        buttons.append(
+            {
+                "text": t("sub_list_copy_template", lang),
+                "copy_text": tpl_copy,
+                "style": "link",
+            }
+        )
+    # Rich button rows allow 1–8 buttons.
+    return buttons[:8]
+
+
+def _build_subs_list_rich_page(
+    title: str,
+    page_subs: list[Subscription],
+    lines_by_id: dict[int, str],
+    db: Database,
+    owner_id: int,
+    lang: str,
+) -> dict:
+    blocks: list[dict] = [
+        {"type": "heading", "size": 3, "text": _strip_html_for_rich(title)}
+    ]
+    for sub in page_subs:
+        line = lines_by_id.get(sub.id) or f"#{sub.id}"
+        blocks.append({"type": "paragraph", "text": _strip_html_for_rich(line)})
+        blocks.append(
+            {
+                "type": "buttons",
+                "align": "left",
+                "buttons": _subs_rich_action_buttons(db, owner_id, lang, sub),
+            }
+        )
+    return {"blocks": blocks}
+
+
 def _subs_toggle_keyboard(
     db: Database, owner_id: int, lang: str, subs: list[Subscription]
 ) -> list[list[InlineKeyboardButton]]:
@@ -768,6 +945,7 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
+        login = (s.twitch_username or "").strip().lstrip("@")
         rows.append(
             [
                 InlineKeyboardButton(
@@ -793,7 +971,24 @@ def _subs_toggle_keyboard(
                     callback_data=f"share_show:{s.id}",
                 )
             )
+        if login:
+            row2.append(
+                InlineKeyboardButton(
+                    t("sub_list_copy_login", lang),
+                    copy_text=CopyTextButton(text=login[:_COPY_TEXT_LIMIT]),
+                )
+            )
         rows.append(row2)
+        tpl = (s.message_template or "").strip()
+        if tpl:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        t("sub_list_copy_template", lang),
+                        copy_text=CopyTextButton(text=tpl[:_COPY_TEXT_LIMIT]),
+                    )
+                ]
+            )
     return rows
 
 
@@ -831,11 +1026,28 @@ def _subs_list_keyboard(
     page_subs: list[Subscription],
     page: int,
     total: int,
-) -> InlineKeyboardMarkup:
-    rows = _subs_toggle_keyboard(db, owner_id, lang, page_subs)
+    *,
+    actions: bool = True,
+) -> InlineKeyboardMarkup | None:
+    rows: list[list[InlineKeyboardButton]] = []
+    if actions:
+        rows.extend(_subs_toggle_keyboard(db, owner_id, lang, page_subs))
     if total > 1:
         rows.append(_subs_page_nav_row("list_page", page, total))
+    if not rows:
+        return None
     return InlineKeyboardMarkup(rows)
+
+
+def _message_id_from_result(result: object) -> int | None:
+    if result is None:
+        return None
+    mid = getattr(result, "message_id", None)
+    if mid is not None and type(mid) is int:
+        return mid
+    if isinstance(result, dict) and type(result.get("message_id")) is int:
+        return int(result["message_id"])
+    return None
 
 
 async def _deliver_subs_list(
@@ -857,19 +1069,64 @@ async def _deliver_subs_list(
     title = t("subs_list", lang)
     blocks = list(zip(lines, ordered))
     pages = _build_subs_list_pages(title, blocks)
+    lines_by_id = {sub.id: line for line, sub in zip(lines, ordered)}
+    rich_pages = [
+        _build_subs_list_rich_page(title, page_subs, lines_by_id, db, owner_id, lang)
+        for _text, page_subs in pages
+    ]
     if context is not None:
         context.user_data["list_pages"] = pages
+        context.user_data["list_rich_pages"] = rich_pages
         context.user_data["list_page"] = 0
+        context.user_data["list_is_rich"] = False
     text, page_subs = pages[0]
+    rich_page = rich_pages[0] if rich_pages else None
+    chat_id = getattr(reply_message, "chat_id", None) or owner_id
+    is_rich = False
+    if query is None and rich_page is not None:
+        nav_kb = _subs_list_keyboard(
+            db, owner_id, lang, page_subs, 0, len(pages), actions=False
+        )
+        msg = await send_rich_message(
+            bot, int(chat_id), rich_page, reply_markup=nav_kb
+        )
+        mid = _message_id_from_result(msg)
+        if mid is not None:
+            is_rich = True
+            if context is not None:
+                context.user_data["list_is_rich"] = True
+            return
     markup = _subs_list_keyboard(db, owner_id, lang, page_subs, 0, len(pages))
     try:
         if query is not None:
+            prefer_rich = bool(
+                context is not None and context.user_data.get("list_is_rich")
+            )
+            if prefer_rich and rich_page is not None and query.message is not None:
+                mid = getattr(query.message, "message_id", None)
+                cid = getattr(query.message, "chat_id", None) or chat_id
+                if mid is not None:
+                    ok = await edit_rich_message(
+                        bot,
+                        chat_id=int(cid),
+                        message_id=int(mid),
+                        rich_message=rich_page,
+                        reply_markup=_subs_list_keyboard(
+                            db, owner_id, lang, page_subs, 0, len(pages), actions=False
+                        ),
+                    )
+                    if ok:
+                        if context is not None:
+                            context.user_data["list_is_rich"] = True
+                        return
             await query.edit_message_text(
                 text,
                 reply_markup=markup,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
+            if context is not None:
+                context.user_data["list_is_rich"] = False
         else:
             await reply_message.reply_text(
                 text,
@@ -877,6 +1134,8 @@ async def _deliver_subs_list(
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
+            if context is not None:
+                context.user_data["list_is_rich"] = False
     except (BadRequest, Forbidden):
         logger.exception("Failed to send subscriptions list to %s", owner_id)
         try:
@@ -900,12 +1159,31 @@ async def on_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except (TypeError, ValueError, IndexError):
         return
     pages = context.user_data.get("list_pages")
+    rich_pages = context.user_data.get("list_rich_pages") or []
     if not isinstance(pages, list) or not pages:
         return
     page = max(0, min(page, len(pages) - 1))
     context.user_data["list_page"] = page
     text, page_subs = pages[page]
     db: Database = context.application.bot_data["db"]
+    rich_page = rich_pages[page] if page < len(rich_pages) else None
+    prefer_rich = bool(context.user_data.get("list_is_rich"))
+    if prefer_rich and rich_page is not None and query.message is not None:
+        mid = getattr(query.message, "message_id", None)
+        chat_id = getattr(query.message, "chat_id", None) or user_id
+        if mid is not None:
+            ok = await edit_rich_message(
+                context.bot,
+                chat_id=int(chat_id),
+                message_id=int(mid),
+                rich_message=rich_page,
+                reply_markup=_subs_list_keyboard(
+                    db, user_id, lang, page_subs, page, len(pages), actions=False
+                ),
+            )
+            if ok:
+                context.user_data["list_is_rich"] = True
+                return
     markup = _subs_list_keyboard(db, user_id, lang, page_subs, page, len(pages))
     try:
         await query.edit_message_text(
@@ -914,6 +1192,7 @@ async def on_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
+        context.user_data["list_is_rich"] = False
     except BadRequest as exc:
         if "not modified" not in str(exc).lower():
             raise
@@ -1196,12 +1475,33 @@ async def _deliver_import_result(
             "empty": False,
         },
     )
-    await application.bot.send_message(
-        owner_id,
-        header,
-        reply_markup=markup,
-        disable_web_page_preview=True,
-    )
+    sent = False
+    if new_subs:
+        rich = _build_import_result_rich(header, lang, new_subs)
+        msg = await send_rich_message(application.bot, owner_id, rich)
+        mid = _message_id_from_result(msg)
+        if mid is not None:
+            application.bot_data.setdefault("import_result_state", {})[owner_id] = {
+                "header": header,
+                "sub_ids": [s.id for s in new_subs],
+                "message_id": mid,
+                "is_rich": True,
+            }
+            sent = True
+    if not sent:
+        await application.bot.send_message(
+            owner_id,
+            header,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+        if new_subs:
+            application.bot_data.setdefault("import_result_state", {})[owner_id] = {
+                "header": header,
+                "sub_ids": [s.id for s in new_subs],
+                "message_id": None,
+                "is_rich": False,
+            }
     await application.bot.send_message(
         owner_id,
         t("menu_main", lang),
@@ -1388,7 +1688,7 @@ async def complete_twitch_import(
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
-        key = "import_denied" if error == "access_denied" else "import_failed"
+        key = "oauth_denied" if error == "access_denied" else "import_failed"
         analytics.capture(
             owner_id,
             "twitch_import_failed",
@@ -1786,6 +2086,113 @@ async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+async def _refresh_import_result_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    owner_id: int,
+    lang: str,
+) -> None:
+    query = update.callback_query
+    db: Database = context.application.bot_data["db"]
+    state = (context.application.bot_data.get("import_result_state") or {}).get(owner_id)
+    if not state:
+        return
+    header = str(state.get("header") or "")
+    sub_ids = [int(i) for i in (state.get("sub_ids") or [])]
+    subs = [
+        s
+        for sid in sub_ids
+        if (s := db.get_subscription(sid, owner_id)) is not None
+        and _sub_in_current_mode(s, owner_id)
+    ]
+    if not subs:
+        return
+    rich = _build_import_result_rich(header, lang, subs)
+    markup = _import_result_keyboard(lang, subs)
+    mid = getattr(query.message, "message_id", None) if query and query.message else None
+    cid = getattr(query.message, "chat_id", None) if query and query.message else owner_id
+    if state.get("is_rich") and mid is not None:
+        ok = await edit_rich_message(
+            context.bot,
+            chat_id=int(cid),
+            message_id=int(mid),
+            rich_message=rich,
+        )
+        if ok:
+            return
+    try:
+        await query.edit_message_text(
+            header,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+async def on_import_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Enable one imported (paused) subscription from the import-result screen."""
+    query = update.callback_query
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":", 1)[1])
+    db: Database = context.application.bot_data["db"]
+    owner_id = query.from_user.id
+    sub = db.get_subscription_by_id(sub_id)
+    if (
+        sub is None
+        or sub.owner_id != owner_id
+        or not _sub_in_current_mode(sub, owner_id)
+    ):
+        await query.answer()
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if sub.enabled:
+        await query.answer(t("sub_enabled", lang, sub_id=_owner_sub_number(db, owner_id, sub_id)))
+        await _refresh_import_result_message(update, context, owner_id, lang)
+        return
+    if getattr(sub, "trial_paused", False):
+        if not await prem.has_premium(context.bot, db, owner_id):
+            from premium_handlers import send_premium_screen
+
+            await query.answer()
+            await query.edit_message_text(t("premium_trial_paused_enable", lang))
+            await send_premium_screen(context.bot, owner_id, lang, db, update=update)
+            return
+    if not await prem.alert_type_entitled(context.bot, db, owner_id, sub):
+        from premium_handlers import send_premium_screen
+
+        await query.answer()
+        await query.edit_message_text(
+            t(
+                "premium_enable_need_feature",
+                lang,
+                feature=t(prem.feature_label_key("alert_types"), lang),
+            )
+        )
+        await send_premium_screen(context.bot, owner_id, lang, db, update=update)
+        return
+    if not await prem.can_enable_more_async(
+        context.bot, db, owner_id, twitch_username=sub.twitch_username
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.answer()
+        await query.edit_message_text(
+            t("premium_active_limit", lang, limit=prem.free_active_limit())
+        )
+        await send_premium_screen(context.bot, owner_id, lang, db, update=update)
+        return
+    new_state = db.toggle_subscription(sub_id, owner_id)
+    if new_state is None:
+        await query.answer()
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    await query.answer(t("sub_enabled" if new_state else "sub_disabled", lang, sub_id=sub_num))
+    await _refresh_import_result_message(update, context, owner_id, lang)
+
+
 async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -2181,11 +2588,11 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         menu_keys = {
             "delete_old": "edit_delete_old_menu",
-            "delete_fail": "edit_delete_fail_menu",
+            "delete_fail": "delete_fail_notify_text",
             "delete_other": "edit_delete_other_menu",
-            "preview": "edit_preview_menu",
+            "preview": "link_preview_prompt",
             "chat_button": "edit_chat_button_menu",
-            "repeat": "edit_repeat_menu",
+            "repeat": "repeat_prompt",
         }
         menu_key = menu_keys[field]
     await query.edit_message_text(
@@ -2462,41 +2869,69 @@ def _delete_cart_view(items: list, kind: str | None) -> tuple[list[str], str | N
 def _delete_cart_keyboard(
     lang: str,
     items: list,
-    selected: set[int],
+    selected: set[int] | None = None,
 ) -> InlineKeyboardMarkup:
+    _ = selected  # legacy multi-select unused; per-row actions only
     rows: list[list[InlineKeyboardButton]] = []
     for idx, item in enumerate(items, 1):
         cart_id = int(item.cart_id)
         display = str(getattr(item, "twitch_username", "") or "") or str(
             getattr(item, "twitch_user_id", "") or ""
         )
-        mark = "✅ " if cart_id in selected else ""
+        tag = f"#{idx} {display}".strip()
         rows.append(
             [
                 InlineKeyboardButton(
-                    f"{mark}♻️ #{idx} {display}".strip(),
-                    callback_data=f"delete_cart_sel:{cart_id}",
-                )
-            ]
-        )
-    if selected:
-        rows.append(
-            [
+                    _inline_btn_label(f"{t('cart_restore_one', lang)} {tag}"),
+                    callback_data=f"delete_cart_restore:{cart_id}",
+                ),
                 InlineKeyboardButton(
-                    t("cart_clear", lang),
-                    callback_data="delete_cart_clear",
-                )
+                    _inline_btn_label(f"{t('cart_discard_one', lang)} {tag}"),
+                    callback_data=f"delete_cart_discard:{cart_id}",
+                ),
             ]
         )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("cart_restore_go", lang, count=len(selected)),
-                callback_data="delete_cart_restore_go",
-            )
-        ]
-    )
     return InlineKeyboardMarkup(rows)
+
+
+def _build_cart_rich_page(
+    lang: str,
+    days: int,
+    items: list,
+    *,
+    prefix: str = "",
+) -> dict:
+    title = (prefix + t("cart_prompt", lang, days=days)).strip()
+    blocks: list[dict] = [
+        {"type": "paragraph", "text": _strip_html_for_rich(title)},
+    ]
+    for idx, item in enumerate(items, 1):
+        cart_id = int(item.cart_id)
+        display = str(getattr(item, "twitch_username", "") or "") or str(
+            getattr(item, "twitch_user_id", "") or ""
+        )
+        blocks.append(
+            {"type": "paragraph", "text": f"#{idx} {display}".strip()}
+        )
+        blocks.append(
+            {
+                "type": "buttons",
+                "align": "left",
+                "buttons": [
+                    {
+                        "text": t("cart_restore_one", lang),
+                        "callback_data": f"delete_cart_restore:{cart_id}",
+                        "style": "success",
+                    },
+                    {
+                        "text": t("cart_discard_one", lang),
+                        "callback_data": f"delete_cart_discard:{cart_id}",
+                        "style": "danger",
+                    },
+                ],
+            }
+        )
+    return {"blocks": blocks}
 
 
 def _store_delete_cart_state(
@@ -2552,16 +2987,45 @@ async def _show_delete_cart(
     if not items:
         text = t("cart_empty", lang, days=days)
         markup = None
+        rich = None
     elif kind is None and len(types) > 1:
         text = t("cart_type_pick", lang)
         markup = _alert_type_pick_keyboard(lang, types, "delete_cart_type")
+        rich = None
     else:
         text = t("cart_prompt", lang, days=days)
         if not view:
             text = t("cart_empty", lang, days=days)
-        markup = _delete_cart_keyboard(lang, view, selected)
-    if prefix:
+            markup = None
+            rich = None
+        else:
+            markup = _delete_cart_keyboard(lang, view)
+            rich = _build_cart_rich_page(lang, days, view, prefix=prefix)
+    if prefix and rich is None:
         text = prefix + text
+    bot = context.bot
+    mid = getattr(query.message, "message_id", None) if query.message else None
+    cid = getattr(query.message, "chat_id", None) if query.message else None
+    if rich is not None and mid is not None and cid is not None:
+        ok = await edit_rich_message(
+            bot,
+            chat_id=int(cid),
+            message_id=int(mid),
+            rich_message=rich,
+        )
+        if ok:
+            context.user_data["cart_is_rich"] = True
+            return
+        if not context.user_data.get("cart_is_rich"):
+            msg = await send_rich_message(bot, int(cid), rich)
+            if _message_id_from_result(msg) is not None:
+                context.user_data["cart_is_rich"] = True
+                try:
+                    await query.message.delete()
+                except BadRequest:
+                    pass
+                return
+    context.user_data["cart_is_rich"] = False
     await query.edit_message_text(text, reply_markup=markup)
 
 
@@ -2586,37 +3050,103 @@ async def on_delete_cart_type(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
-async def on_delete_cart_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def on_delete_cart_restore_one(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     if not _deleted_subscriptions_cart_enabled(db, user_id):
+        await query.answer()
         return
     cart_id = int((query.data or "").split(":", 1)[-1])
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
-    selected: set[int] = context.user_data.setdefault("delete_cart_selected", set())
-    if cart_id in selected:
-        selected.discard(cart_id)
-    else:
-        selected.add(cart_id)
-
-    items = context.user_data.get("delete_cart_items") or []
-    days = int(context.user_data.get("delete_cart_days") or 10)
-    if not items:
-        is_demo = demo_mode.is_active(user_id)
-        all_items = db.list_deleted_subscriptions(
-            user_id, days=days, is_demo=is_demo, limit=100
-        )
-        kind = context.user_data.get("delete_cart_type")
-        _, kind, items = _store_delete_cart_state(
-            context, all_items, days=days, kind=kind, selected=selected
-        )
-
-    await query.edit_message_reply_markup(
-        reply_markup=_delete_cart_keyboard(lang, items, selected)
+    days = int(
+        context.user_data.get("delete_cart_days")
+        or prem.deleted_subscriptions_cart_days(db, user_id)
     )
+    is_demo = demo_mode.is_active(user_id)
+    kind = context.user_data.get("delete_cart_type")
+    remaining = max(0, int(MAX_SUBSCRIPTIONS_PER_OWNER) - len(_subs_for_owner(db, user_id)))
+    if remaining <= 0:
+        await query.answer(
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+            show_alert=True,
+        )
+        return
+    active_slots = prem.active_subscription_slots(db, user_id, demo=is_demo)
+    max_enabled = None if active_slots.unlimited else active_slots.remaining
+    restored, enabled_restored = db.restore_deleted_subscriptions(
+        user_id,
+        [cart_id],
+        days=days,
+        is_demo=is_demo,
+        max_enabled=max_enabled,
+    )
+    paused_due_active = max(0, restored - enabled_restored)
+    if restored:
+        restored_text = t("cart_restored", lang, count=restored)
+        if paused_due_active > 0:
+            restored_text += t(
+                "cart_restored_active_paused",
+                lang,
+                paused=paused_due_active,
+                limit=prem.free_active_limit(),
+            )
+        await query.answer(restored_text[:200])
+    else:
+        await query.answer(t("sub_not_found", lang), show_alert=True)
+    items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
+    await _show_delete_cart(
+        query,
+        context,
+        lang,
+        items,
+        days=days,
+        kind=kind,
+        selected=set(),
+    )
+
+
+async def on_delete_cart_discard_one(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not _deleted_subscriptions_cart_enabled(db, user_id):
+        await query.answer()
+        return
+    cart_id = int((query.data or "").split(":", 1)[-1])
+    days = int(
+        context.user_data.get("delete_cart_days")
+        or prem.deleted_subscriptions_cart_days(db, user_id)
+    )
+    is_demo = demo_mode.is_active(user_id)
+    kind = context.user_data.get("delete_cart_type")
+    n = db.discard_deleted_subscriptions(user_id, [cart_id], is_demo=is_demo)
+    if n:
+        await query.answer(t("cart_discarded", lang))
+    else:
+        await query.answer(t("sub_not_found", lang), show_alert=True)
+    items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
+    await _show_delete_cart(
+        query,
+        context,
+        lang,
+        items,
+        days=days,
+        kind=kind,
+        selected=set(),
+    )
+
+
+async def on_delete_cart_sel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Legacy multi-select callback — restore that cart row."""
+    await on_delete_cart_restore_one(update, context)
 
 
 async def on_delete_cart_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2627,24 +3157,30 @@ async def on_delete_cart_clear(update: Update, context: ContextTypes.DEFAULT_TYP
     db: Database = context.application.bot_data["db"]
     if not _deleted_subscriptions_cart_enabled(db, user_id):
         return
-    context.user_data["delete_cart_selected"] = set()
-    items = context.user_data.get("delete_cart_items") or []
-    await query.edit_message_reply_markup(
-        reply_markup=_delete_cart_keyboard(lang, items, set())
+    days = int(context.user_data.get("delete_cart_days") or 10)
+    kind = context.user_data.get("delete_cart_type")
+    is_demo = demo_mode.is_active(user_id)
+    items = db.list_deleted_subscriptions(user_id, days=days, is_demo=is_demo, limit=100)
+    await _show_delete_cart(
+        query, context, lang, items, days=days, kind=kind, selected=set()
     )
 
 
 async def on_delete_cart_restore_go(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    """Legacy bulk restore — restore all currently listed cart rows."""
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     if not _deleted_subscriptions_cart_enabled(db, user_id):
+        await query.answer()
         return
     selected: set[int] = set(context.user_data.get("delete_cart_selected") or ())
+    order: list[int] = context.user_data.get("delete_cart_order") or []
+    if not selected:
+        selected = set(order)
     if not selected:
         await query.answer(t("cart_restore_none", lang), show_alert=True)
         return
@@ -2663,8 +3199,7 @@ async def on_delete_cart_restore_go(
         )
         return
 
-    order: list[int] = context.user_data.get("delete_cart_order") or []
-    selected_in_order = [cid for cid in order if cid in selected]
+    selected_in_order = [cid for cid in order if cid in selected] or list(selected)[:remaining]
     restore_ids = selected_in_order[:remaining]
     active_slots = prem.active_subscription_slots(db, user_id, demo=is_demo)
     max_enabled = None if active_slots.unlimited else active_slots.remaining
@@ -2696,6 +3231,7 @@ async def on_delete_cart_restore_go(
             paused=paused_due_active,
             limit=prem.free_active_limit(),
         )
+    await query.answer(restored_text[:200])
     await _show_delete_cart(
         query,
         context,
@@ -3221,7 +3757,10 @@ async def on_edit_copy_click(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     if not enabled:
         text += "\n" + t(
-            "edit_copied_paused", lang, limit=prem.free_active_limit()
+            "created_paused_note",
+            lang,
+            kind=t("paused_kind_copy", lang),
+            limit=prem.free_active_limit(),
         )
     await query.edit_message_text(text)
 
@@ -3336,7 +3875,10 @@ async def on_edit_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
     if not enabled:
         text += "\n" + t(
-            "edit_copied_paused", lang, limit=prem.free_active_limit()
+            "created_paused_note",
+            lang,
+            kind=t("paused_kind_copy", lang),
+            limit=prem.free_active_limit(),
         )
     await query.edit_message_text(text)
 

@@ -605,7 +605,7 @@ async def _smoke_wizard(db) -> None:
         chat_id = call.kwargs.get("chat_id", call.args[0] if call.args else None)
         assert chat_id != _FREE_UID, "wizard must not DM user id in group chat"
 
-    update, _query = _cb_update(_FREE_UID, "dest:channel")
+    update, _query = _cb_update(_FREE_UID, "dest:chat")
     ctx = _ctx(application, {"alert_type": "live", "twitch_username": "streamer"})
     state = await receive_dest_type(update, ctx)
     assert state == _wz()["DEST_CHAT"]

@@ -95,7 +95,7 @@ from i18n import (
     lucky_preview_keyboard,
     main_menu,
     other_menu,
-    placeholders_link_html,
+    placeholders_expandable_html,
     partner_menu,
     premium_gate_keyboard,
     repeat_keyboard,
@@ -189,12 +189,14 @@ from handlers.alert_history import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
     _build_alert_history_chunks,
+    _build_alert_history_rich_pages,
     _format_alert_history_block,
     _format_vod_timestamp,
     _twitch_vod_url,
     _vod_id_from_videos,
     _vod_offset_seconds,
     handle_alert_history_start_arg,
+    on_alert_history_action,
     on_alert_history_menu,
     on_alert_history_more,
     on_alert_history_noop,
@@ -348,6 +350,7 @@ from handlers.settings import (
     notify_whisper_received,
     on_advanced_mode_toggle,
     on_beta_toggle,
+    on_message_draft_toggle,
     on_sys_availability_toggle,
     on_sys_other_toggle,
     on_sys_sync_toggle,
@@ -356,6 +359,7 @@ from handlers.settings import (
     on_whisper_eventsub_revoked,
     open_advanced_mode_menu,
     open_beta_mode_menu,
+    open_message_draft_menu,
     open_other_menu,
     open_settings_menu,
     open_stream_chat,
@@ -479,6 +483,8 @@ from handlers.wizard import (
     lucky_generate,
     on_premium_gate,
     receive_alert_type,
+    receive_advanced_options_next,
+    receive_advanced_options_toggle,
     receive_channel,
     receive_channel_dup,
     receive_chat_button_ask,
@@ -580,8 +586,10 @@ from handlers.subscriptions import (
     list_subscriptions,
     migrate_import_sync_subscriptions,
     on_delete_cart_clear,
+    on_delete_cart_discard_one,
     on_delete_cart_open,
     on_delete_cart_restore_go,
+    on_delete_cart_restore_one,
     on_delete_cart_sel,
     on_delete_cart_type,
     on_delete_clear,
@@ -601,6 +609,7 @@ from handlers.subscriptions import (
     on_edit_type_pick,
     on_edit_type_pick_cancel,
     on_enable_all,
+    on_import_enable,
     on_import_mode_once,
     on_import_mode_sync,
     on_list_type,
@@ -657,6 +666,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     IMAGE_POSITION,
     LUCKY_PREVIEW,
     IGNORE_KEYWORDS,
+    ADVANCED_OPTIONS,
     LINK_PREVIEW,
     DELAY_SEND,
     DELAY_MINUTES,
@@ -708,7 +718,7 @@ GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
     STREAM_SCHEDULE_MORE,
     PAUSE_ALERTS_DAYS,
     ADMIN_REFUND_CHARGE,
-) = range(62)
+) = range(63)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -1156,7 +1166,7 @@ async def _prompt_edit_template(
             "edit_template_prompt",
             lang,
             sub_id=sub_num,
-            placeholders_link=placeholders_link_html(lang),
+            placeholders_link=placeholders_expandable_html(lang),
             current=html.escape(sub.message_template or ""),
             preview=html.escape(preview),
         ),
@@ -1211,7 +1221,9 @@ async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_DELAY
     if not raw.isdigit():
-        await update.effective_message.reply_text(t("edit_delay_invalid", lang))
+        await update.effective_message.reply_text(
+            t("minutes_zero_or_positive_invalid", lang)
+        )
         return EDIT_DELAY
 
     delay_minutes = int(raw)
@@ -1301,7 +1313,7 @@ async def receive_edit_schedule_reminder(
         return EDIT_SCHEDULE_REMINDER
     if not raw.isdigit():
         await update.effective_message.reply_text(
-            t("edit_schedule_reminder_invalid", lang)
+            t("minutes_zero_or_positive_invalid", lang)
         )
         return EDIT_SCHEDULE_REMINDER
 
@@ -1356,7 +1368,9 @@ async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_REPEAT
     if not raw.isdigit():
-        await update.effective_message.reply_text(t("edit_repeat_invalid", lang))
+        await update.effective_message.reply_text(
+            t("minutes_zero_or_positive_invalid", lang)
+        )
         return EDIT_REPEAT
 
     minutes = int(raw)
@@ -1415,6 +1429,8 @@ def _edit_options_for_sub(
         notify_on_end=sub.notify_on_end,
         is_upcoming=alert_type == "upcoming",
         show_advanced=show_advanced,
+        twitch_login=sub.twitch_username or "",
+        message_template=sub.message_template or "",
     )
 
 
@@ -1749,6 +1765,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         .post_init(post_init)
         .build()
     )
+    from message_fx import install_message_fx
+
+    install_message_fx(
+        app.bot,
+        draft_enabled=lambda uid: db.is_message_draft_enabled(uid),
+    )
     app.bot_data["db"] = db
     app.bot_data["twitch"] = twitch
     app.bot_data["last_live"] = {}
@@ -1891,6 +1913,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_alert_history_menu, pattern=r"^alert_history:menu$"),
+        CallbackQueryHandler(
+            on_alert_history_action, pattern=r"^ah:(v|u|vb):\d+$"
+        ),
         group=0,
     )
     app.add_handler(
@@ -1973,6 +1998,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("message_draft"), open_message_draft_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("whisper_alerts"), open_whisper_alerts_menu),
         group=0,
     )
@@ -1982,6 +2011,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_advanced_mode_toggle, pattern=r"^advanced_mode:toggle$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_message_draft_toggle, pattern=r"^message_draft:toggle$"),
         group=0,
     )
     app.add_handler(
@@ -2022,6 +2055,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_enable_all, pattern=r"^enable_all$"), group=0)
+    app.add_handler(CallbackQueryHandler(on_import_enable, pattern=r"^imp_en:\d+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_all, pattern=r"^delete_all$"), group=0)
     app.add_handler(
@@ -2050,6 +2084,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_delete_cart_sel, pattern=r"^delete_cart_sel:\d+$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_delete_cart_restore_one, pattern=r"^delete_cart_restore:\d+$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_delete_cart_discard_one, pattern=r"^delete_cart_discard:\d+$"),
         group=0,
     )
     app.add_handler(
@@ -2286,6 +2328,17 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(receive_image_position, pattern=r"^image_pos:(before|after)$"),
+            ],
+            ADVANCED_OPTIONS: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_advanced_options_toggle,
+                    pattern=r"^advopt:toggle:(ignore|delay|repeat|delete)$",
+                ),
+                CallbackQueryHandler(
+                    receive_advanced_options_next, pattern=r"^advopt:next$"
+                ),
             ],
             LUCKY_PREVIEW: [
                 _wiz_cancel,
@@ -2700,16 +2753,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(
             wake_stuck_on_menu_callback,
             pattern=(
-                r"^(edit:\d+$|edit_f:|edit_set:|edit_type_pick:|edit_type_pick_cancel:|toggle:|enable_all$|delete:\d+$|"
+                r"^(edit:\d+$|edit_f:|edit_set:|edit_type_pick:|edit_type_pick_cancel:|toggle:|imp_en:|enable_all$|delete:\d+$|"
                 r"welcome_del:\d+$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"
-                r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
+                r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore:|delete_cart_discard:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|list_del:\d+$|list_del_ok:\d+$|list_del_no:\d+$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
                 r"advanced_mode:|whisper_alerts:|"
-                r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
+                r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:|ah:)"
             ),
         ),
         group=-1,

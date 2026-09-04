@@ -20,7 +20,7 @@
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
-| Destinations | DM, channel, group or community (with topics) |
+| Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). In the editor: **Clean title** (checkbox) strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
@@ -31,6 +31,7 @@
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
 | Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
+| Message drafting | **⚙️ Settings**: progressive bubble text (sendMessageDraft) + typing indicator. On by default |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
@@ -90,7 +91,7 @@ Then the wizard (for stream start / category change / stream end):
 5. Link preview (skipped when an image is set)
 6. Delay send (yes/no, minutes) — **advanced mode** only; after go-live / category change / offline; Helix re-checked before send
 7. Allow repeat notifications — **advanced mode** and **stream start** only
-8. Destination: DM / channel / group or community
+8. Destination: DM or channel/group (one button)
 9. For channel or group — add the bot and confirm the chat
 10. Delete previous bot message? — **advanced mode** only (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
 
@@ -230,10 +231,11 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 📅 Manage schedule | Weekly text, time zone; Twitch sync — Premium |
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
-| ⚙️ Settings | Premium, sync, ignored words, advanced mode, system alerts, language, partner program |
+| ⚙️ Settings | Premium, sync, ignored words, advanced mode, message drafting, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
 | ↳ 🎛 Advanced mode | Ignore / delay / repeats / delete in the wizard; Premium; off by default |
+| ↳ ✍️ Message drafting | Progressive bubble text; on by default |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
 | ↳ 🌐 Language | Russian / English |

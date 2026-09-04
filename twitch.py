@@ -1546,6 +1546,19 @@ def _tidy_stream_title(text: str) -> str:
     return text.strip()
 
 
+# Allowed Telegram HTML tags users may put in alert templates (not full rich blocks).
+_TEMPLATE_HTML_RE = re.compile(
+    r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|tg-spoiler)\b"
+    r"|<a\s+href\s*=",
+    re.IGNORECASE,
+)
+
+
+def template_uses_html(template: str) -> bool:
+    """True when the template includes Telegram HTML formatting tags."""
+    return bool(_TEMPLATE_HTML_RE.search(template or ""))
+
+
 def render_template(
     template: str,
     username: str,
@@ -1556,13 +1569,22 @@ def render_template(
     *,
     strip_name_mentions: bool = False,
     twitch: "TwitchClient | None" = None,
+    escape_html: bool = False,
 ) -> str:
-    """Fill template placeholders from channel + optional Helix stream payload."""
+    """Fill template placeholders from channel + optional Helix stream payload.
+
+    When escape_html=True, placeholder values are HTML-escaped so user HTML tags
+    in the template skeleton stay intact under ParseMode.HTML.
+    """
     if strip_name_mentions and "{name}" in template:
         name = strip_name_mentions_and_commands(name, twitch)
     values = _template_values(username, game, name, stream)
     if extra:
         values.update(extra)
+    if escape_html:
+        import html as _html
+
+        values = {k: _html.escape(v) for k, v in values.items()}
     out = template
     # Longer keys first so {game_id} is not partially eaten by {game}.
     for key in sorted(values, key=len, reverse=True):
