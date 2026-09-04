@@ -271,11 +271,11 @@ Category: {game}
 
 Server checkout: `/opt/twitch-telegram-bot` (with `.env` beside it).
 
-On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, `/health` check, nightly pg-backup cron. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, `/health` check, nightly pg-backup cron, and (if `AIVEN_DATABASE_URL` is set) DR sync of that dump into Aiven at 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
-VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`), `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`), and `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (off by default in source).
+VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`), `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`), and `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (off by default in source). Optional `AIVEN_DATABASE_URL` — cold Postgres mirror on Aiven (the bot does not use it).
 
 ### Local / Docker
 
@@ -293,6 +293,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `SCHEDULE_CHECK_INTERVAL` | Twitch schedule reminder poll, seconds (default 180) |
 | `POSTGRES_PASSWORD` | Postgres password on VPS (`compose.vps.yml`) |
 | `DATABASE_URL` | PostgreSQL. If unset — SQLite (`compose.vps.yml` sets it) |
+| `AIVEN_DATABASE_URL` | VPS: nightly DR restore of the dump into Aiven (not used by the bot; usually `sslmode=require`) |
 | `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
 | `ENABLE_PREMIUM` | Premium shop and gates (`0` default — all paid features free; set `1` on VPS) |

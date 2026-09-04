@@ -14,7 +14,7 @@ mkdir -p "$BACKUP_DIR"
 cd "$APP_DIR"
 
 docker compose -f "$COMPOSE_FILE" exec -T db \
-  pg_dump -U bot -d bot --clean --if-exists \
+  pg_dump -U bot -d bot --clean --if-exists --no-owner --no-acl \
   | gzip -c >"$OUT.tmp"
 
 mv -f "$OUT.tmp" "$OUT"

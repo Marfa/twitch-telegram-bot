@@ -85,6 +85,18 @@ EOF
   chmod 644 /etc/cron.d/twitch-telegram-bot-pg-backup
 fi
 
+# Nightly restore of newest dump into Aiven (cold DR; needs AIVEN_DATABASE_URL in .env)
+if [[ -f scripts/pg-sync-aiven.sh ]]; then
+  install -m 755 scripts/pg-sync-aiven.sh /usr/local/sbin/twitch-telegram-bot-pg-sync-aiven
+  cat >/etc/cron.d/twitch-telegram-bot-pg-sync-aiven <<EOF
+# Nightly DR sync: VPS dump → Aiven (after pg-backup)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+15 3 * * * root APP_DIR=$APP_DIR /usr/local/sbin/twitch-telegram-bot-pg-sync-aiven >>/var/log/twitch-telegram-bot-pg-sync-aiven.log 2>&1
+EOF
+  chmod 644 /etc/cron.d/twitch-telegram-bot-pg-sync-aiven
+fi
+
 # Wait briefly for health
 for _ in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then

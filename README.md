@@ -271,11 +271,11 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 
 Репозиторий на сервере: `/opt/twitch-telegram-bot` (рядом лежит `.env`).
 
-При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, проверка `/health`, cron ночного pg-backup. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, проверка `/health`, cron ночного pg-backup и (при `AIVEN_DATABASE_URL`) DR-sync дампа в Aiven в 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 
-В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`), `PUBLIC_BASE_URL` для OAuth (например `https://bot.themarfa.name`), и флаги `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (в исходниках по умолчанию выключены).
+В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`), `PUBLIC_BASE_URL` для OAuth (например `https://bot.themarfa.name`), и флаги `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (в исходниках по умолчанию выключены). Опционально `AIVEN_DATABASE_URL` — холодное зеркало Postgres на Aiven (бот на него не переключается).
 
 ### Локально / Docker
 
@@ -293,6 +293,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `SCHEDULE_CHECK_INTERVAL` | Опрос Twitch schedule reminders, сек (по умолчанию 180) |
 | `POSTGRES_PASSWORD` | Пароль Postgres на VPS (`compose.vps.yml`) |
 | `DATABASE_URL` | PostgreSQL. Если не задан — SQLite (`compose.vps.yml` задаёт сам) |
+| `AIVEN_DATABASE_URL` | VPS: ночной DR-restore дампа в Aiven (не для бота; обычно `sslmode=require`) |
 | `DATABASE_PATH` | SQLite: локально `data/bot.db`, в Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Лимит подписок на пользователя (по умолчанию 25) |
 | `ENABLE_PREMIUM` | Premium-магазин и гейты (`0` по умолчанию — всё платное бесплатно; на VPS `1`) |
