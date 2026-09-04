@@ -6,7 +6,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from telegram import (
-    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
@@ -39,7 +38,6 @@ from db.models import (
 from handlers.delivery import _resolve_chat_display_name
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
 from handlers.stream_schedule import _complete_schedule_publish
-from rich_message import edit_rich_message, send_rich_message
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
@@ -132,7 +130,6 @@ _PENDING_IMPORT_TTL_SEC = 1800
 _SYNC_PERIOD_MIN = 1
 _SYNC_PERIOD_MAX = 365
 _PAUSE_DAYS_MAX = 365
-
 
 
 def _owner_sub_number(db: Database, owner_id: int, sub_id: int) -> int:
@@ -332,86 +329,6 @@ def _import_result_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def _build_import_result_rich(
-    header: str,
-    lang: str,
-    subs: list[Subscription],
-) -> dict:
-    blocks: list[dict] = [
-        {"type": "paragraph", "text": _strip_html_for_rich(header)},
-        {
-            "type": "buttons",
-            "align": "left",
-            "buttons": [
-                {
-                    "text": t("enable_all", lang),
-                    "callback_data": "enable_all",
-                    "style": "success",
-                }
-            ],
-        },
-    ]
-    seen: set[str] = set()
-    idx = 0
-    for sub in subs:
-        if sub.twitch_user_id in seen:
-            continue
-        seen.add(sub.twitch_user_id)
-        idx += 1
-        login = (sub.twitch_username or "").strip()
-        label = f"#{idx} {login}".strip()
-        blocks.append({"type": "paragraph", "text": label})
-        enable_label = t("toggle_off", lang) if sub.enabled else t("toggle_on", lang)
-        blocks.append(
-            {
-                "type": "buttons",
-                "align": "left",
-                "buttons": [
-                    {
-                        "text": enable_label,
-                        "callback_data": f"imp_en:{sub.id}",
-                        "style": "success" if not sub.enabled else "primary",
-                    },
-                    {
-                        "text": t("sub_list_edit", lang),
-                        "callback_data": f"edit:{sub.id}",
-                    },
-                ],
-            }
-        )
-    return {"blocks": blocks}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _format_sub_line(
     sub: Subscription,
     lang: str,
@@ -578,12 +495,6 @@ def _alert_type_from_sub(sub: Subscription) -> str:
     return "live"
 
 
-
-
-
-
-
-
 async def open_subscriptions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Legacy entry (old «Manage subscriptions» keyboard) → my subscriptions list."""
     await list_subscriptions(update, context)
@@ -610,31 +521,17 @@ async def open_cart_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not items:
         text = t("cart_empty", lang, days=days)
         markup = None
-        rich = None
     elif kind is None and len(types) > 1:
         text = t("cart_type_pick", lang)
         markup = _alert_type_pick_keyboard(lang, types, "delete_cart_type")
-        rich = None
     else:
         text = t("cart_prompt", lang, days=days)
         if not view:
             text = t("cart_empty", lang, days=days)
             markup = None
-            rich = None
         else:
             markup = _delete_cart_keyboard(lang, view)
-            rich = _build_cart_rich_page(lang, days, view)
-    chat_id = update.effective_chat.id
-    if rich is not None:
-        msg = await send_rich_message(context.bot, int(chat_id), rich)
-        if _message_id_from_result(msg) is not None:
-            context.user_data["cart_is_rich"] = True
-        else:
-            context.user_data["cart_is_rich"] = False
-            await update.effective_message.reply_text(text, reply_markup=markup)
-    else:
-        context.user_data["cart_is_rich"] = False
-        await update.effective_message.reply_text(text, reply_markup=markup)
+    await update.effective_message.reply_text(text, reply_markup=markup)
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
@@ -728,7 +625,6 @@ async def cancel_pause_notifications(
         reply_markup=_subs_kb(lang, db, user_id),
     )
     return ConversationHandler.END
-
 
 
 async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -832,107 +728,6 @@ def _sub_action_tag(num: int, username: str) -> str:
     return f"#{num} {name}" if name else f"#{num}"
 
 
-def _strip_html_for_rich(text: str) -> str:
-    return (
-        (text or "")
-        .replace("<b>", "")
-        .replace("</b>", "")
-        .replace("<i>", "")
-        .replace("</i>", "")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-    )
-
-
-_COPY_TEXT_LIMIT = 256
-
-
-def _copy_text_payload(value: str) -> dict | None:
-    text = (value or "").strip()
-    if not text:
-        return None
-    if len(text) > _COPY_TEXT_LIMIT:
-        text = text[:_COPY_TEXT_LIMIT]
-    return {"text": text}
-
-
-def _subs_rich_action_buttons(
-    db: Database,
-    owner_id: int,
-    lang: str,
-    sub: Subscription,
-) -> list[dict]:
-    login = (sub.twitch_username or "").strip().lstrip("@")
-    buttons: list[dict] = [
-        {
-            "text": t("toggle_off", lang) if sub.enabled else t("toggle_on", lang),
-            "callback_data": f"toggle:{sub.id}",
-            "style": "success" if not sub.enabled else "primary",
-        },
-        {
-            "text": t("sub_list_edit", lang),
-            "callback_data": f"edit:{sub.id}",
-        },
-        {
-            "text": t("sub_list_delete", lang),
-            "callback_data": f"list_del:{sub.id}",
-            "style": "danger",
-        },
-    ]
-    if _share_enabled(db, owner_id):
-        buttons.append(
-            {
-                "text": t("sub_list_share_short", lang),
-                "callback_data": f"share_show:{sub.id}",
-            }
-        )
-    login_copy = _copy_text_payload(login)
-    if login_copy:
-        buttons.append(
-            {
-                "text": t("sub_list_copy_login", lang),
-                "copy_text": login_copy,
-                "style": "link",
-            }
-        )
-    tpl_copy = _copy_text_payload(sub.message_template or "")
-    if tpl_copy:
-        buttons.append(
-            {
-                "text": t("sub_list_copy_template", lang),
-                "copy_text": tpl_copy,
-                "style": "link",
-            }
-        )
-    # Rich button rows allow 1–8 buttons.
-    return buttons[:8]
-
-
-def _build_subs_list_rich_page(
-    title: str,
-    page_subs: list[Subscription],
-    lines_by_id: dict[int, str],
-    db: Database,
-    owner_id: int,
-    lang: str,
-) -> dict:
-    blocks: list[dict] = [
-        {"type": "heading", "size": 3, "text": _strip_html_for_rich(title)}
-    ]
-    for sub in page_subs:
-        line = lines_by_id.get(sub.id) or f"#{sub.id}"
-        blocks.append({"type": "paragraph", "text": _strip_html_for_rich(line)})
-        blocks.append(
-            {
-                "type": "buttons",
-                "align": "left",
-                "buttons": _subs_rich_action_buttons(db, owner_id, lang, sub),
-            }
-        )
-    return {"blocks": blocks}
-
-
 def _subs_toggle_keyboard(
     db: Database, owner_id: int, lang: str, subs: list[Subscription]
 ) -> list[list[InlineKeyboardButton]]:
@@ -945,7 +740,6 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        login = (s.twitch_username or "").strip().lstrip("@")
         rows.append(
             [
                 InlineKeyboardButton(
@@ -971,24 +765,7 @@ def _subs_toggle_keyboard(
                     callback_data=f"share_show:{s.id}",
                 )
             )
-        if login:
-            row2.append(
-                InlineKeyboardButton(
-                    t("sub_list_copy_login", lang),
-                    copy_text=CopyTextButton(text=login[:_COPY_TEXT_LIMIT]),
-                )
-            )
         rows.append(row2)
-        tpl = (s.message_template or "").strip()
-        if tpl:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        t("sub_list_copy_template", lang),
-                        copy_text=CopyTextButton(text=tpl[:_COPY_TEXT_LIMIT]),
-                    )
-                ]
-            )
     return rows
 
 
@@ -1039,17 +816,6 @@ def _subs_list_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def _message_id_from_result(result: object) -> int | None:
-    if result is None:
-        return None
-    mid = getattr(result, "message_id", None)
-    if mid is not None and type(mid) is int:
-        return mid
-    if isinstance(result, dict) and type(result.get("message_id")) is int:
-        return int(result["message_id"])
-    return None
-
-
 async def _deliver_subs_list(
     *,
     bot,
@@ -1069,64 +835,21 @@ async def _deliver_subs_list(
     title = t("subs_list", lang)
     blocks = list(zip(lines, ordered))
     pages = _build_subs_list_pages(title, blocks)
-    lines_by_id = {sub.id: line for line, sub in zip(lines, ordered)}
-    rich_pages = [
-        _build_subs_list_rich_page(title, page_subs, lines_by_id, db, owner_id, lang)
-        for _text, page_subs in pages
-    ]
     if context is not None:
         context.user_data["list_pages"] = pages
-        context.user_data["list_rich_pages"] = rich_pages
         context.user_data["list_page"] = 0
-        context.user_data["list_is_rich"] = False
     text, page_subs = pages[0]
-    rich_page = rich_pages[0] if rich_pages else None
-    chat_id = getattr(reply_message, "chat_id", None) or owner_id
-    is_rich = False
-    if query is None and rich_page is not None:
-        nav_kb = _subs_list_keyboard(
-            db, owner_id, lang, page_subs, 0, len(pages), actions=False
-        )
-        msg = await send_rich_message(
-            bot, int(chat_id), rich_page, reply_markup=nav_kb
-        )
-        mid = _message_id_from_result(msg)
-        if mid is not None:
-            is_rich = True
-            if context is not None:
-                context.user_data["list_is_rich"] = True
-            return
-    markup = _subs_list_keyboard(db, owner_id, lang, page_subs, 0, len(pages))
+    markup = _subs_list_keyboard(
+        db, owner_id, lang, page_subs, 0, len(pages), actions=True
+    )
     try:
         if query is not None:
-            prefer_rich = bool(
-                context is not None and context.user_data.get("list_is_rich")
-            )
-            if prefer_rich and rich_page is not None and query.message is not None:
-                mid = getattr(query.message, "message_id", None)
-                cid = getattr(query.message, "chat_id", None) or chat_id
-                if mid is not None:
-                    ok = await edit_rich_message(
-                        bot,
-                        chat_id=int(cid),
-                        message_id=int(mid),
-                        rich_message=rich_page,
-                        reply_markup=_subs_list_keyboard(
-                            db, owner_id, lang, page_subs, 0, len(pages), actions=False
-                        ),
-                    )
-                    if ok:
-                        if context is not None:
-                            context.user_data["list_is_rich"] = True
-                        return
             await query.edit_message_text(
                 text,
                 reply_markup=markup,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
-            if context is not None:
-                context.user_data["list_is_rich"] = False
         else:
             await reply_message.reply_text(
                 text,
@@ -1134,8 +857,6 @@ async def _deliver_subs_list(
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
-            if context is not None:
-                context.user_data["list_is_rich"] = False
     except (BadRequest, Forbidden):
         logger.exception("Failed to send subscriptions list to %s", owner_id)
         try:
@@ -1159,32 +880,15 @@ async def on_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except (TypeError, ValueError, IndexError):
         return
     pages = context.user_data.get("list_pages")
-    rich_pages = context.user_data.get("list_rich_pages") or []
     if not isinstance(pages, list) or not pages:
         return
     page = max(0, min(page, len(pages) - 1))
     context.user_data["list_page"] = page
     text, page_subs = pages[page]
     db: Database = context.application.bot_data["db"]
-    rich_page = rich_pages[page] if page < len(rich_pages) else None
-    prefer_rich = bool(context.user_data.get("list_is_rich"))
-    if prefer_rich and rich_page is not None and query.message is not None:
-        mid = getattr(query.message, "message_id", None)
-        chat_id = getattr(query.message, "chat_id", None) or user_id
-        if mid is not None:
-            ok = await edit_rich_message(
-                context.bot,
-                chat_id=int(chat_id),
-                message_id=int(mid),
-                rich_message=rich_page,
-                reply_markup=_subs_list_keyboard(
-                    db, user_id, lang, page_subs, page, len(pages), actions=False
-                ),
-            )
-            if ok:
-                context.user_data["list_is_rich"] = True
-                return
-    markup = _subs_list_keyboard(db, user_id, lang, page_subs, page, len(pages))
+    markup = _subs_list_keyboard(
+        db, user_id, lang, page_subs, page, len(pages), actions=True
+    )
     try:
         await query.edit_message_text(
             text,
@@ -1192,7 +896,6 @@ async def on_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
-        context.user_data["list_is_rich"] = False
     except BadRequest as exc:
         if "not modified" not in str(exc).lower():
             raise
@@ -1475,33 +1178,19 @@ async def _deliver_import_result(
             "empty": False,
         },
     )
-    sent = False
+    msg = await application.bot.send_message(
+        owner_id,
+        header,
+        reply_markup=markup,
+        disable_web_page_preview=True,
+    )
     if new_subs:
-        rich = _build_import_result_rich(header, lang, new_subs)
-        msg = await send_rich_message(application.bot, owner_id, rich)
-        mid = _message_id_from_result(msg)
-        if mid is not None:
-            application.bot_data.setdefault("import_result_state", {})[owner_id] = {
-                "header": header,
-                "sub_ids": [s.id for s in new_subs],
-                "message_id": mid,
-                "is_rich": True,
-            }
-            sent = True
-    if not sent:
-        await application.bot.send_message(
-            owner_id,
-            header,
-            reply_markup=markup,
-            disable_web_page_preview=True,
-        )
-        if new_subs:
-            application.bot_data.setdefault("import_result_state", {})[owner_id] = {
-                "header": header,
-                "sub_ids": [s.id for s in new_subs],
-                "message_id": None,
-                "is_rich": False,
-            }
+        mid = getattr(msg, "message_id", None)
+        application.bot_data.setdefault("import_result_state", {})[owner_id] = {
+            "header": header,
+            "sub_ids": [s.id for s in new_subs],
+            "message_id": int(mid) if mid is not None else None,
+        }
     await application.bot.send_message(
         owner_id,
         t("menu_main", lang),
@@ -2107,19 +1796,7 @@ async def _refresh_import_result_message(
     ]
     if not subs:
         return
-    rich = _build_import_result_rich(header, lang, subs)
     markup = _import_result_keyboard(lang, subs)
-    mid = getattr(query.message, "message_id", None) if query and query.message else None
-    cid = getattr(query.message, "chat_id", None) if query and query.message else owner_id
-    if state.get("is_rich") and mid is not None:
-        ok = await edit_rich_message(
-            context.bot,
-            chat_id=int(cid),
-            message_id=int(mid),
-            rich_message=rich,
-        )
-        if ok:
-            return
     try:
         await query.edit_message_text(
             header,
@@ -2894,46 +2571,6 @@ def _delete_cart_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def _build_cart_rich_page(
-    lang: str,
-    days: int,
-    items: list,
-    *,
-    prefix: str = "",
-) -> dict:
-    title = (prefix + t("cart_prompt", lang, days=days)).strip()
-    blocks: list[dict] = [
-        {"type": "paragraph", "text": _strip_html_for_rich(title)},
-    ]
-    for idx, item in enumerate(items, 1):
-        cart_id = int(item.cart_id)
-        display = str(getattr(item, "twitch_username", "") or "") or str(
-            getattr(item, "twitch_user_id", "") or ""
-        )
-        blocks.append(
-            {"type": "paragraph", "text": f"#{idx} {display}".strip()}
-        )
-        blocks.append(
-            {
-                "type": "buttons",
-                "align": "left",
-                "buttons": [
-                    {
-                        "text": t("cart_restore_one", lang),
-                        "callback_data": f"delete_cart_restore:{cart_id}",
-                        "style": "success",
-                    },
-                    {
-                        "text": t("cart_discard_one", lang),
-                        "callback_data": f"delete_cart_discard:{cart_id}",
-                        "style": "danger",
-                    },
-                ],
-            }
-        )
-    return {"blocks": blocks}
-
-
 def _store_delete_cart_state(
     context: ContextTypes.DEFAULT_TYPE,
     items: list,
@@ -2987,45 +2624,18 @@ async def _show_delete_cart(
     if not items:
         text = t("cart_empty", lang, days=days)
         markup = None
-        rich = None
     elif kind is None and len(types) > 1:
         text = t("cart_type_pick", lang)
         markup = _alert_type_pick_keyboard(lang, types, "delete_cart_type")
-        rich = None
     else:
         text = t("cart_prompt", lang, days=days)
         if not view:
             text = t("cart_empty", lang, days=days)
             markup = None
-            rich = None
         else:
             markup = _delete_cart_keyboard(lang, view)
-            rich = _build_cart_rich_page(lang, days, view, prefix=prefix)
-    if prefix and rich is None:
+    if prefix:
         text = prefix + text
-    bot = context.bot
-    mid = getattr(query.message, "message_id", None) if query.message else None
-    cid = getattr(query.message, "chat_id", None) if query.message else None
-    if rich is not None and mid is not None and cid is not None:
-        ok = await edit_rich_message(
-            bot,
-            chat_id=int(cid),
-            message_id=int(mid),
-            rich_message=rich,
-        )
-        if ok:
-            context.user_data["cart_is_rich"] = True
-            return
-        if not context.user_data.get("cart_is_rich"):
-            msg = await send_rich_message(bot, int(cid), rich)
-            if _message_id_from_result(msg) is not None:
-                context.user_data["cart_is_rich"] = True
-                try:
-                    await query.message.delete()
-                except BadRequest:
-                    pass
-                return
-    context.user_data["cart_is_rich"] = False
     await query.edit_message_text(text, reply_markup=markup)
 
 

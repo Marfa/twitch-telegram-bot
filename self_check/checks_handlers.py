@@ -30,7 +30,6 @@ from bot import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
     _build_alert_history_chunks,
-    _build_alert_history_rich_pages,
     _edit_present_types,
     _format_alert_history_block,
     _format_twitch_status_message,
@@ -917,34 +916,6 @@ def check_handlers() -> None:
         assert "🙄" in unseen_block
         assert "Просмотрено" in unseen_block
         assert "start=ah_v_7" in unseen_block
-        from types import SimpleNamespace
-
-        rich_pages = _build_alert_history_rich_pages(
-            [
-                SimpleNamespace(
-                    id=7,
-                    sent_at="2026-08-14 14:00:00",
-                    twitch_username="frank_sg",
-                    alert_type="live",
-                    message_text="Hi",
-                    viewed=False,
-                    vod_id="",
-                    vod_offset_seconds=0,
-                    stream_id="",
-                    twitch_user_id="",
-                )
-            ],
-            "ru",
-            7,
-        )
-        assert rich_pages and rich_pages[0]["blocks"]
-        btn_blocks = [
-            b for b in rich_pages[0]["blocks"] if b.get("type") == "buttons"
-        ]
-        assert btn_blocks
-        cb_data = [b.get("callback_data") for b in btn_blocks[0]["buttons"]]
-        assert "ah:v:7" in cb_data
-        assert "ah:vb:7" in cb_data
         assert "videos/99?t=2m5s" in _format_alert_history_block(
             time_str="17:00",
             username="frank_sg",

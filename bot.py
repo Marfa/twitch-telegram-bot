@@ -95,7 +95,7 @@ from i18n import (
     lucky_preview_keyboard,
     main_menu,
     other_menu,
-    placeholders_expandable_html,
+    placeholders_link_html,
     partner_menu,
     premium_gate_keyboard,
     repeat_keyboard,
@@ -189,14 +189,12 @@ from handlers.alert_history import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
     _build_alert_history_chunks,
-    _build_alert_history_rich_pages,
     _format_alert_history_block,
     _format_vod_timestamp,
     _twitch_vod_url,
     _vod_id_from_videos,
     _vod_offset_seconds,
     handle_alert_history_start_arg,
-    on_alert_history_action,
     on_alert_history_menu,
     on_alert_history_more,
     on_alert_history_noop,
@@ -1166,7 +1164,7 @@ async def _prompt_edit_template(
             "edit_template_prompt",
             lang,
             sub_id=sub_num,
-            placeholders_link=placeholders_expandable_html(lang),
+            placeholders_link=placeholders_link_html(lang),
             current=html.escape(sub.message_template or ""),
             preview=html.escape(preview),
         ),
@@ -1429,8 +1427,6 @@ def _edit_options_for_sub(
         notify_on_end=sub.notify_on_end,
         is_upcoming=alert_type == "upcoming",
         show_advanced=show_advanced,
-        twitch_login=sub.twitch_username or "",
-        message_template=sub.message_template or "",
     )
 
 
@@ -1913,12 +1909,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_alert_history_menu, pattern=r"^alert_history:menu$"),
-        group=0,
-    )
-    app.add_handler(
-        CallbackQueryHandler(
-            on_alert_history_action, pattern=r"^ah:(v|u|vb):\d+$"
-        ),
         group=0,
     )
     app.add_handler(
@@ -2765,7 +2755,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
                 r"advanced_mode:|whisper_alerts:|"
-                r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:|ah:)"
+                r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
             ),
         ),
         group=-1,

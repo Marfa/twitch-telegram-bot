@@ -49,7 +49,6 @@ from i18n import (
     is_menu_button,
     link_preview_keyboard,
     lucky_preview_keyboard,
-    placeholders_expandable_html,
     placeholders_link_html,
     premium_gate_keyboard,
     repeat_keyboard,
@@ -257,34 +256,8 @@ async def _send_prompt_with_wizard_inline(
     parse_mode: str | None = ParseMode.HTML,
     disable_web_page_preview: bool = False,
 ) -> None:
-    """Send prompt with inline actions (incl. Back/Cancel). No extra carrier message.
-
-    If text contains a rich <details> block, try sendRichMessage first; on failure
-    replace details with the classic placeholders link and send a normal message.
-    """
+    """Send prompt with inline actions (incl. Back/Cancel). No extra carrier message."""
     _ = (lang, back)
-    target_chat = update.effective_chat.id if update and update.effective_chat else chat_id
-    if "<details>" in text:
-        from rich_message import send_rich_message
-
-        msg = await send_rich_message(
-            bot,
-            int(target_chat),
-            {"html": text},
-            reply_markup=inline_markup,
-        )
-        mid = getattr(msg, "message_id", None) if msg is not None else None
-        if mid is None and isinstance(msg, dict):
-            mid = msg.get("message_id")
-        if type(mid) is int:
-            return
-        text = re.sub(
-            r"<details>.*?</details>",
-            placeholders_link_html(lang),
-            text,
-            count=1,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
     kwargs: dict = {
         "text": text,
         "reply_markup": inline_markup,
@@ -296,6 +269,7 @@ async def _send_prompt_with_wizard_inline(
     if update and update.effective_message:
         await update.effective_message.reply_text(**kwargs)
         return
+    target_chat = update.effective_chat.id if update and update.effective_chat else chat_id
     await bot.send_message(chat_id=target_chat, **kwargs)
 
 def _render_sub_template(
@@ -572,7 +546,7 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
         "channel_found",
         lang,
         display_name=html.escape(display),
-        placeholders_link=placeholders_expandable_html(lang),
+        placeholders_link=placeholders_link_html(lang),
     )
     await _send_prompt_with_wizard_inline(
         context.bot,

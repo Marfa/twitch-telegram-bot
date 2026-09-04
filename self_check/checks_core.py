@@ -285,13 +285,6 @@ def check_core() -> None:
         )
         == "<b>a&lt;b&gt;c</b>"
     )
-    from i18n import placeholders_expandable_html, placeholders_link_html
-
-    details = placeholders_expandable_html("en")
-    assert "<details>" in details and "<summary>" in details
-    assert "{username}" in details
-    link = placeholders_link_html("en")
-    assert "<a href=" in link or "not available" in link.lower() or "недоступен" in link.lower()
     from twitch import template_has_link
 
     assert template_has_link("https://twitch.tv/{username}")

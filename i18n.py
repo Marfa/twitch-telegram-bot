@@ -6,7 +6,6 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from telegram import (
-    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -64,19 +63,6 @@ def placeholders_link_html(lang: str) -> str:
         return html.escape(t("placeholders_link_unavailable", lang))
     label = html.escape(t("placeholders_link_label", lang))
     return f'<a href="{html.escape(url)}">{label}</a>'
-
-
-def placeholders_expandable_html(lang: str) -> str:
-    """Rich-message <details> block: tap summary to expand the full placeholder list."""
-    label = html.escape(t("placeholders_link_label", lang))
-    intro = html.escape(t("placeholders_page_intro", lang))
-    body = t("placeholders_page_body", lang)
-    return (
-        f"<details><summary>{label}</summary>\n"
-        f"<p>{intro}</p>\n"
-        f"{body}\n"
-        f"</details>"
-    )
 
 
 def channel_dup_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
@@ -1908,45 +1894,16 @@ def edit_options_keyboard(
     notify_on_end: bool = False,
     is_upcoming: bool = False,
     show_advanced: bool = True,
-    twitch_login: str = "",
-    message_template: str = "",
 ) -> InlineKeyboardMarkup:
     # Same order as create wizard: template → image → ignore → preview → delay
     # → repeat → schedule reminder → dest → delete.
     # Schedule reminder only if configured at creation (unchanged policy).
     # Delay/repeat skipped for upcoming; repeat also skipped for category/end.
     image_label = t("edit_image_update", lang) if has_image else t("edit_image_add", lang)
-    rows: list[list[InlineKeyboardButton]] = []
-    login = (twitch_login or "").strip().lstrip("@")
-    if login:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("edit_copy_login", lang),
-                    copy_text=CopyTextButton(text=login[:256]),
-                )
-            ]
-        )
-    tpl = (message_template or "").strip()
-    if tpl:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("edit_copy_template", lang),
-                    copy_text=CopyTextButton(text=tpl[:256]),
-                )
-            ]
-        )
-    rows.extend(
-        [
-            [
-                InlineKeyboardButton(
-                    t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template"
-                )
-            ],
-            [InlineKeyboardButton(image_label, callback_data=f"edit_f:{sub_id}:image")],
-        ]
-    )
+    rows = [
+        [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
+        [InlineKeyboardButton(image_label, callback_data=f"edit_f:{sub_id}:image")],
+    ]
     if has_image:
         rows.append(
             [
