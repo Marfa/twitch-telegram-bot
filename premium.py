@@ -418,38 +418,21 @@ def has_feature_sync(
 def is_advanced_mode_enabled(
     db: Database, user_id: int, *, entitled: bool | None = None
 ) -> bool:
-    """Wizard shows ignore/delay/repeat/delete steps when True.
+    """Extras checklist (ignore/delay/repeat/delete/chat) is always shown.
 
-    Default off. Demo always off. Non‑Premium always off.
-    Explicit setting wins when entitled; if unset, auto-on only for entitled
-    users who already configured advanced options on an alert.
+    Individual Premium toggles are gated on the Extras screen / wizard steps.
+    ``entitled`` is ignored (kept for call-site compatibility).
     """
-    from demo_mode import is_active
-
-    if is_active(user_id):
-        return False
-    if entitled is None:
-        entitled = has_feature_sync(db, user_id, "advanced_mode")
-    if not entitled:
-        return False
-    setting = db.get_advanced_mode_setting(user_id)
-    if setting is not None:
-        return setting
-    return db.owner_has_advanced_subscription_options(user_id)
+    _ = (db, user_id, entitled)
+    return True
 
 
 async def advanced_mode_on(
     bot: Bot, db: Database, user_id: int, *, channel: str | None = None
 ) -> bool:
-    """Like is_advanced_mode_enabled, but includes free-chat Premium via has_feature.
-
-    Promo channel (marfapr) always gets the full advanced alert wizard.
-    Demo is force-free, but promo still unlocks like a real free user.
-    """
-    if is_promo_channel(channel, db):
-        return True
-    entitled = await has_feature(bot, db, user_id, "advanced_mode")
-    return is_advanced_mode_enabled(db, user_id, entitled=entitled)
+    """Always on — Extras screen for everyone; Premium gates individual options."""
+    _ = (bot, db, user_id, channel)
+    return True
 
 
 def migrate_advanced_mode_defaults(

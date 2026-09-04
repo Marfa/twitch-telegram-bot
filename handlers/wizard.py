@@ -524,10 +524,7 @@ async def _go_alert_type_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     chat_id = reply_chat_id(update)
-    db: Database = context.application.bot_data["db"]
     text = t("alert_type_prompt", lang)
-    if not await prem.advanced_mode_on(context.bot, db, chat_id):
-        text = f"{text}\n\n{t('wizard_simple_mode_note', lang)}"
     markup = alert_type_keyboard(lang)
     parse_mode = ParseMode.HTML if "<b>" in text else None
     if update.callback_query:
@@ -639,25 +636,39 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
 async def _go_after_image_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    """After image: advanced options screen (if on) or continue with defaults."""
+    """After image upload/skip: continue wizard (Extras already done)."""
+    return await _go_ignore_keywords_prompt(update, context, lang)
+
+
+_ADVOPT_FEATURE = {
+    "ignore": "ignore_keywords",
+    "delay": "delay",
+    "repeat": "repeat",
+    "delete": "delete_prev",
+}
+
+
+async def _advopt_locked(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> frozenset[str]:
     db: Database = context.application.bot_data["db"]
-    user_id = update.effective_user.id
-    if await prem.advanced_mode_on(
-        context.bot, db, user_id, channel=_wizard_channel(context)
-    ):
-        return await _go_advanced_options_prompt(update, context, lang)
-    context.user_data["ignore_keywords"] = ""
-    context.user_data["use_global_ignore"] = False
-    context.user_data["delay_minutes"] = 0
-    context.user_data["suppress_repeat_minutes"] = 0
-    context.user_data.pop("advanced_options_done", None)
-    return await _go_after_ignore_keywords(update, context, lang)
+    channel = _wizard_channel(context)
+    locked: set[str] = set()
+    for toggle, feature in _ADVOPT_FEATURE.items():
+        if not await prem.has_feature(
+            context.bot, db, user_id, feature, channel=channel
+        ):
+            locked.add(toggle)
+    return frozenset(locked)
 
 
-def _advanced_options_markup(context: ContextTypes.DEFAULT_TYPE, lang: str):
+async def _advanced_options_markup(
+    context: ContextTypes.DEFAULT_TYPE, lang: str, user_id: int
+):
     alert = context.user_data.get("alert_type")
     return advanced_options_keyboard(
         lang,
+        want_image=bool(context.user_data.get("adv_want_image")),
         want_ignore=bool(context.user_data.get("adv_want_ignore")),
         want_delay=bool(context.user_data.get("adv_want_delay")),
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
@@ -665,12 +676,18 @@ def _advanced_options_markup(context: ContextTypes.DEFAULT_TYPE, lang: str):
         want_chat=bool(context.user_data.get("adv_want_chat")),
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
+        locked=await _advopt_locked(context, user_id),
     )
 
 
 def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
     alert = context.user_data.get("alert_type")
-    lines = [t("advanced_options_prompt", lang), "", t("advanced_options_hint_ignore", lang)]
+    lines = [
+        t("advanced_options_prompt", lang),
+        "",
+        t("advanced_options_hint_image", lang),
+        t("advanced_options_hint_ignore", lang),
+    ]
     if alert != "upcoming":
         lines.append(t("advanced_options_hint_delay", lang))
     if alert == "live" or not alert:
@@ -683,6 +700,7 @@ def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str)
 async def _go_advanced_options_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    context.user_data.setdefault("adv_want_image", False)
     context.user_data.setdefault("adv_want_ignore", False)
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
@@ -690,8 +708,9 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_chat", False)
     context.user_data.pop("advanced_options_done", None)
     chat_id = reply_chat_id(update)
+    user_id = update.effective_user.id
     text = _advanced_options_prompt_text(context, lang)
-    markup = _advanced_options_markup(context, lang)
+    markup = await _advanced_options_markup(context, lang, user_id)
     if update.callback_query:
         await context.bot.send_message(chat_id, text, reply_markup=markup)
     else:
@@ -704,10 +723,10 @@ async def receive_advanced_options_toggle(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     query = update.callback_query
-    await query.answer()
     lang = _user_lang(context, query.from_user.id)
     flag = query.data.split(":")[-1]
     key = {
+        "image": "adv_want_image",
         "ignore": "adv_want_ignore",
         "delay": "adv_want_delay",
         "repeat": "adv_want_repeat",
@@ -715,10 +734,30 @@ async def receive_advanced_options_toggle(
         "chat": "adv_want_chat",
     }.get(flag)
     if not key:
+        await query.answer()
         return _wz()["ADVANCED_OPTIONS"]
-    context.user_data[key] = not bool(context.user_data.get(key))
+    turning_on = not bool(context.user_data.get(key))
+    feature = _ADVOPT_FEATURE.get(flag)
+    if turning_on and feature:
+        db: Database = context.application.bot_data["db"]
+        if not await prem.has_feature(
+            context.bot,
+            db,
+            query.from_user.id,
+            feature,
+            channel=_wizard_channel(context),
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.answer(t("advanced_options_premium_only", lang), show_alert=True)
+            await send_premium_screen(
+                context.bot, query.from_user.id, lang, db, update=update
+            )
+            return _wz()["ADVANCED_OPTIONS"]
+    await query.answer()
+    context.user_data[key] = turning_on
     await query.edit_message_reply_markup(
-        reply_markup=_advanced_options_markup(context, lang)
+        reply_markup=await _advanced_options_markup(context, lang, query.from_user.id)
     )
     return _wz()["ADVANCED_OPTIONS"]
 
@@ -729,6 +768,15 @@ async def receive_advanced_options_next(
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
+    locked = await _advopt_locked(context, query.from_user.id)
+    for toggle, ud_key in (
+        ("ignore", "adv_want_ignore"),
+        ("delay", "adv_want_delay"),
+        ("repeat", "adv_want_repeat"),
+        ("delete", "adv_want_delete"),
+    ):
+        if toggle in locked:
+            context.user_data[ud_key] = False
     context.user_data["advanced_options_done"] = True
     if not context.user_data.get("adv_want_ignore"):
         context.user_data["ignore_keywords"] = ""
@@ -746,6 +794,10 @@ async def receive_advanced_options_next(
     if want_chat:
         context.user_data["disable_link_preview"] = True
     await query.edit_message_text("✓")
+    if context.user_data.get("adv_want_image"):
+        return await _go_image_ask_prompt(update, context, lang)
+    context.user_data.pop("image_file_id", None)
+    context.user_data["image_position"] = ""
     return await _go_ignore_keywords_prompt(update, context, lang)
 
 async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
@@ -863,6 +915,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "ignore_keywords",
             "use_global_ignore",
             "advanced_options_done",
+            "adv_want_image",
             "adv_want_ignore",
             "adv_want_delay",
             "adv_want_repeat",
@@ -908,7 +961,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 reply_markup=_menu(lang, owner_id),
             )
             return ConversationHandler.END
-        return await _go_template_prompt(update, context, lang)
+        return await _go_advanced_options_prompt(update, context, lang)
     if state == _wz()["IMAGE_UPLOAD"]:
         return await _go_image_ask_prompt(update, context, lang)
     if state == _wz()["IMAGE_POSITION"]:
@@ -921,20 +974,13 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == _wz()["LUCKY_PREVIEW"]:
         return await _go_template_prompt(update, context, lang)
     if state == _wz()["IGNORE_KEYWORDS"]:
-        if context.user_data.get("advanced_options_done") is not None or any(
-            k in context.user_data
-            for k in (
-                "adv_want_ignore",
-                "adv_want_delay",
-                "adv_want_repeat",
-                "adv_want_delete",
-                "adv_want_chat",
-            )
-        ):
+        if context.user_data.get("advanced_options_done"):
+            if context.user_data.get("adv_want_image"):
+                return await _go_image_ask_prompt(update, context, lang)
             return await _go_advanced_options_prompt(update, context, lang)
-        return await _go_image_ask_prompt(update, context, lang)
+        return await _go_advanced_options_prompt(update, context, lang)
     if state == _wz()["ADVANCED_OPTIONS"]:
-        return await _go_image_ask_prompt(update, context, lang)
+        return await _go_template_prompt(update, context, lang)
     if state == _wz()["LINK_PREVIEW"]:
         if context.user_data.get("advanced_options_done") and not context.user_data.get(
             "adv_want_ignore"
@@ -1277,7 +1323,7 @@ async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     context.user_data["message_template"] = template
     context.user_data.pop("lucky_quick", None)
-    return await _go_image_ask_prompt(update, context, lang)
+    return await _go_advanced_options_prompt(update, context, lang)
 
 async def _offer_template_typo_fix(
     update: Update,
@@ -1326,7 +1372,7 @@ async def receive_template_typo_confirm(
             return await _save_edit_template(update, context, lang, template)
         context.user_data["message_template"] = template
         context.user_data.pop("lucky_quick", None)
-        return await _go_image_ask_prompt(update, context, lang)
+        return await _go_advanced_options_prompt(update, context, lang)
 
     await query.edit_message_text("✓")
     if is_edit:
@@ -1334,7 +1380,7 @@ async def receive_template_typo_confirm(
 
     context.user_data["message_template"] = template
     context.user_data.pop("lucky_quick", None)
-    return await _go_image_ask_prompt(update, context, lang)
+    return await _go_advanced_options_prompt(update, context, lang)
 
 async def _show_lucky_preview(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str

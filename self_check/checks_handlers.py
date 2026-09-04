@@ -401,7 +401,7 @@ def check_handlers() -> None:
         channel="marfapr",
         status="s",
     )
-    assert "Продвинутый режим" in _pt
+    assert "Продвинутые опции оповещений" in _pt
     assert "мини-приложении" in _pt
     assert "Премиум-канал" in _pt
     assert "рекомендация" in _pt
@@ -707,21 +707,18 @@ def check_handlers() -> None:
         assert "delay" not in FEATURE_IDS
         assert "repeat" not in FEATURE_IDS
         assert "delete_prev" not in FEATURE_IDS
-        assert tr("premium_feat_advanced_mode", "ru") == "Продвинутый режим"
+        assert tr("premium_feat_advanced_mode", "ru") == "Продвинутые опции оповещений"
         assert tr("premium_feat_alert_history", "ru")
-        assert "упрощённом режиме" in tr("wizard_simple_mode_note", "ru")
-        assert tr("btn_advanced_mode", "ru")
-        assert "стоп-слова" in tr("advanced_mode_screen", "ru")
-        assert "Premium-каналов" in tr("advanced_mode_premium_only", "ru")
+        assert "⭐" in tr("advanced_options_hint_ignore", "ru")
+        assert tr("advanced_options_premium_only", "ru")
+        assert tr("btn_advanced_mode", "ru")  # locale kept; button removed from Settings
         db.upsert_user(77)
         assert db.get_advanced_mode_setting(77) is None
-        assert not prem.is_advanced_mode_enabled(db, 77)
-        # Explicit on without Premium entitlement → still off.
-        db.set_advanced_mode_setting(77, True)
-        assert prem.is_advanced_mode_enabled(db, 77) is False
-        assert prem.is_advanced_mode_enabled(db, 77, entitled=True) is True
+        # Extras checklist is always shown (individual options still Premium-gated).
+        assert prem.is_advanced_mode_enabled(db, 77) is True
         db.set_advanced_mode_setting(77, False)
-        assert prem.is_advanced_mode_enabled(db, 77, entitled=True) is False
+        assert prem.is_advanced_mode_enabled(db, 77) is True
+        assert prem.is_advanced_mode_enabled(db, 77, entitled=False) is True
         # Legacy à la carte unlocks still count as advanced_mode entitlement.
         import time as _time
 
@@ -740,16 +737,16 @@ def check_handlers() -> None:
         assert prem.has_feature_sync(db, 89, "delay")
         assert db.get_advanced_mode_setting(89) is True
         assert prem.is_advanced_mode_enabled(db, 89) is True
-        # Demo mode forces off even if setting/premium would enable it.
+        # Demo: Extras still shown; Premium options gated separately.
         import asyncio as _aio
         import demo_mode as _dm
         from unittest.mock import AsyncMock as _AM
 
         _dm.activate(89)
-        assert prem.is_advanced_mode_enabled(db, 89) is False
+        assert prem.is_advanced_mode_enabled(db, 89) is True
         _bot = _AM()
         assert (
-            _aio.run(prem.advanced_mode_on(_bot, db, 89, channel="other")) is False
+            _aio.run(prem.advanced_mode_on(_bot, db, 89, channel="other")) is True
         )
         assert (
             _aio.run(prem.advanced_mode_on(_bot, db, 89, channel="marfapr")) is True
@@ -768,11 +765,11 @@ def check_handlers() -> None:
             delay_minutes=5,
         )
         assert sid90
-        assert prem.is_advanced_mode_enabled(db, 90) is False  # not premium
+        assert prem.is_advanced_mode_enabled(db, 90) is True  # always on
         db.set_premium_permanent(90, True)
-        assert prem.is_advanced_mode_enabled(db, 90) is True  # auto-on
+        assert prem.is_advanced_mode_enabled(db, 90) is True
         db.set_advanced_mode_setting(90, False)
-        assert prem.is_advanced_mode_enabled(db, 90) is False
+        assert prem.is_advanced_mode_enabled(db, 90) is True  # setting ignored
         # migrate_advanced_mode_defaults: ON only if entitled + alert options.
         db.upsert_user(91)
         db.set_premium_permanent(91, True)

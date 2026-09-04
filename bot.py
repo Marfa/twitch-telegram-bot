@@ -84,7 +84,6 @@ from i18n import (
     ignored_words_keyboard,
     is_menu_button,
     whisper_alerts_keyboard,
-    advanced_mode_keyboard,
     beta_mode_keyboard,
     image_edit_keyboard,
     image_position_keyboard,
@@ -346,7 +345,6 @@ from handlers.settings import (
     complete_chat_oauth,
     complete_whisper_oauth,
     notify_whisper_received,
-    on_advanced_mode_toggle,
     on_beta_toggle,
     on_message_draft_toggle,
     on_sys_availability_toggle,
@@ -355,7 +353,6 @@ from handlers.settings import (
     on_sys_updates_toggle,
     on_whisper_alerts_toggle,
     on_whisper_eventsub_revoked,
-    open_advanced_mode_menu,
     open_beta_mode_menu,
     open_message_draft_menu,
     open_other_menu,
@@ -1985,10 +1982,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
-        MessageHandler(_btn_filter("advanced_mode"), open_advanced_mode_menu),
-        group=0,
-    )
-    app.add_handler(
         MessageHandler(_btn_filter("message_draft"), open_message_draft_menu),
         group=0,
     )
@@ -1998,10 +1991,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("beta_mode"), open_beta_mode_menu),
-        group=0,
-    )
-    app.add_handler(
-        CallbackQueryHandler(on_advanced_mode_toggle, pattern=r"^advanced_mode:toggle$"),
         group=0,
     )
     app.add_handler(
@@ -2317,7 +2306,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(ignore|delay|repeat|delete|chat)$",
+                    pattern=r"^advopt:toggle:(image|ignore|delay|repeat|delete|chat)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"
@@ -2744,7 +2733,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"list_type:|list_del:\d+$|list_del_ok:\d+$|list_del_no:\d+$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
-                r"advanced_mode:|whisper_alerts:|"
+                r"whisper_alerts:|"
                 r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
             ),
         ),
@@ -2782,7 +2771,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("sys_notifications")
                 | _btn_filter("ignored_words")
                 | _btn_filter("whisper_alerts")
-                | _btn_filter("advanced_mode")
                 | _btn_filter("sync_subs")
                 | _btn_filter("admin")
                 | _btn_filter("broadcast")

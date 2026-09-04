@@ -35,7 +35,6 @@ from db import Database
 from i18n import (
     DEFAULT_LOCALE,
     SUPPORTED_LOCALES,
-    advanced_mode_keyboard,
     all_wizard_nav_buttons,
     beta_mode_keyboard,
     ignored_words_keyboard,
@@ -156,43 +155,6 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
             sync_enabled=db.get_receive_sync_updates(user_id),
         ),
     )
-
-async def open_advanced_mode_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
-    enabled = await prem.advanced_mode_on(context.bot, db, user_id)
-    await update.effective_message.reply_text(
-        t("advanced_mode_screen", lang),
-        reply_markup=advanced_mode_keyboard(lang, enabled=enabled),
-    )
-
-async def on_advanced_mode_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
-    currently_on = await prem.advanced_mode_on(context.bot, db, user_id)
-    if not currently_on:
-        if not await prem.has_feature(context.bot, db, user_id, "advanced_mode"):
-            from premium_handlers import send_premium_screen
-
-            await query.answer(t("advanced_mode_premium_only", lang), show_alert=True)
-            await send_premium_screen(context.bot, user_id, lang, db, update=update)
-            return
-        await query.answer()
-        db.set_advanced_mode_setting(user_id, True)
-        enabled = True
-    else:
-        await query.answer()
-        db.set_advanced_mode_setting(user_id, False)
-        enabled = False
-    await query.edit_message_reply_markup(
-        reply_markup=advanced_mode_keyboard(lang, enabled=enabled)
-    )
-
 
 async def open_message_draft_menu(
     update: Update, context: ContextTypes.DEFAULT_TYPE

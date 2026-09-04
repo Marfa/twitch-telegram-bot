@@ -44,7 +44,6 @@ from i18n import (
     template_strip_keyboard,
     watch_cats_nav_keyboard,
     whisper_alerts_keyboard,
-    advanced_mode_keyboard,
     message_draft_keyboard,
 )
 from telegram import InlineKeyboardMarkup
@@ -80,7 +79,6 @@ _MENU_BTN_KEYS = (
     "sys_notifications",
     "ignored_words",
     "whisper_alerts",
-    "advanced_mode",
     "message_draft",
     "beta_mode",
     "sync_subs",
@@ -198,6 +196,7 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             advanced_options_keyboard,
             {
                 "lang": loc,
+                "want_image": True,
                 "want_ignore": False,
                 "want_delay": True,
                 "want_repeat": False,
@@ -255,7 +254,6 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
         ),
         ("watch_cats_nav", watch_cats_nav_keyboard, {"lang": loc, "has_cats": False}),
         ("whisper_alerts", whisper_alerts_keyboard, {"lang": loc, "enabled": False}),
-        ("advanced_mode", advanced_mode_keyboard, {"lang": loc, "enabled": False}),
         ("message_draft", message_draft_keyboard, {"lang": loc, "enabled": True}),
         ("ignored_words", ignored_words_keyboard, {"lang": loc, "has_words": False}),
         (

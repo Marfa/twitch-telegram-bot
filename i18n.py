@@ -135,7 +135,6 @@ def all_menu_buttons() -> set[str]:
         "sys_notifications",
         "ignored_words",
         "whisper_alerts",
-        "advanced_mode",
         "message_draft",
         "beta_mode",
         "sync_subs",
@@ -232,7 +231,6 @@ def settings_menu(
         [
             KeyboardButton(btn("sync_subs", lang)),
             KeyboardButton(btn("ignored_words", lang)),
-            KeyboardButton(btn("advanced_mode", lang)),
             KeyboardButton(btn("message_draft", lang)),
             KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
             KeyboardButton(btn("sys_notifications", lang)),
@@ -836,6 +834,7 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
 def advanced_options_keyboard(
     lang: str,
     *,
+    want_image: bool,
     want_ignore: bool,
     want_delay: bool,
     want_repeat: bool,
@@ -843,17 +842,24 @@ def advanced_options_keyboard(
     want_chat: bool,
     show_delay: bool = True,
     show_repeat: bool = True,
+    locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
+    locked = frozenset(locked or ())
+
     def _row(flag: bool, label_key: str, toggle: str) -> list[InlineKeyboardButton]:
         mark = "✅ " if flag else "⬜️ "
+        label = t(label_key, lang)
+        if toggle in locked and not flag:
+            label = f"🔒 {label}"
         return [
             InlineKeyboardButton(
-                mark + t(label_key, lang),
+                mark + label,
                 callback_data=f"advopt:toggle:{toggle}",
             )
         ]
 
     rows: list[list[InlineKeyboardButton]] = [
+        _row(want_image, "advanced_options_image", "image"),
         _row(want_ignore, "advanced_options_ignore", "ignore"),
     ]
     if show_delay:
@@ -1011,20 +1017,6 @@ def whisper_alerts_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup
                 InlineKeyboardButton(
                     mark + t("whisper_alerts_enable", lang),
                     callback_data="whisper_alerts:toggle",
-                )
-            ]
-        ]
-    )
-
-
-def advanced_mode_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
-    mark = "✅ " if enabled else "⬜️ "
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    mark + t("advanced_mode_activate", lang),
-                    callback_data="advanced_mode:toggle",
                 )
             ]
         ]

@@ -605,9 +605,9 @@ def check_core() -> None:
             for row in settings_kb
             if btn("ignored_words", loc) in [b.text for b in row]
         )
-        assert [b.text for b in ignored_row] == [
-            btn("ignored_words", loc),
-            btn("advanced_mode", loc),
+        assert btn("ignored_words", loc) in [b.text for b in ignored_row]
+        assert btn("advanced_mode", loc) not in [
+            b.text for row in settings_kb for b in row
         ]
         draft_row = next(
             row
@@ -616,25 +616,27 @@ def check_core() -> None:
         )
         from i18n import beta_mode_btn
 
-        assert [b.text for b in draft_row] == [
-            btn("message_draft", loc),
-            beta_mode_btn(loc, 0, 0),
-        ]
+        # Paired with ignored_words or beta depending on Premium button presence.
+        assert btn("message_draft", loc) in [b.text for b in draft_row]
+        assert len(draft_row) == 2
+
         partner_row = next(
             row
             for row in settings_kb
             if btn("partner", loc) in [b.text for b in row]
         )
-        assert [b.text for b in partner_row] == [btn("partner", loc)]
+        assert btn("partner", loc) in [b.text for b in partner_row]
         lang_row = next(
             row
             for row in settings_kb
             if btn("language", loc) in [b.text for b in row]
         )
-        assert [b.text for b in lang_row] == [
-            btn("sys_notifications", loc),
+        assert btn("language", loc) in [b.text for b in lang_row]
+        # Removing advanced_mode shifts pairing: language sits with partner.
+        assert {b.text for b in lang_row} == {
             btn("language", loc),
-        ]
+            btn("partner", loc),
+        }
         suggest_kb = watch_suggest_keyboard(loc, offer_create_alerts=True)
         cbs = [
             (btn.callback_data or "")

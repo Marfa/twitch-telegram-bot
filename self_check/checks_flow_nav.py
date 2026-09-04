@@ -751,17 +751,17 @@ async def _scenario_wizard_template_typo(db) -> None:
     ):
         await receive_template_typo_confirm(update, ctx)
     assert ctx.user_data.get("message_template") == typo_template
-    update, _query = _cb_update(_FREE_UID, "image_ask:skip", cap)
+    from handlers.wizard import receive_advanced_options_next
+
+    update, _query = _cb_update(_FREE_UID, "advopt:next", cap)
     cap.wrap(bot)
     with patch(
-        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)
     ):
-        await receive_image_ask(update, ctx)
+        await receive_advanced_options_next(update, ctx)
     update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
     cap.wrap(bot)
     with patch(
-        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
-    ), patch(
         "handlers.wizard.prem.can_enable_more_async", new=AsyncMock(return_value=True)
     ):
         from handlers.wizard import receive_dest_type
@@ -775,8 +775,8 @@ async def _scenario_wizard_finish(db) -> None:
         receive_alert_type,
         receive_channel,
         receive_dest_type,
-        receive_image_ask,
         receive_template,
+        receive_advanced_options_next,
     )
 
     twitch = MagicMock()
@@ -798,21 +798,15 @@ async def _scenario_wizard_finish(db) -> None:
         await receive_channel(update, ctx)
     update = _msg_update(_FREE_UID, "Live {streamer}", cap)
     cap.wrap(bot)
-    with patch(
-        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
-    ), patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)):
+    with patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)):
         await receive_template(update, ctx)
-    update, _query = _cb_update(_FREE_UID, "image_ask:skip", cap)
+    update, _query = _cb_update(_FREE_UID, "advopt:next", cap)
     cap.wrap(bot)
-    with patch(
-        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
-    ):
-        await receive_image_ask(update, ctx)
+    with patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)):
+        await receive_advanced_options_next(update, ctx)
     update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
     cap.wrap(bot)
     with patch(
-        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=False)
-    ), patch(
         "handlers.wizard.prem.can_enable_more_async", new=AsyncMock(return_value=True)
     ):
         await receive_dest_type(update, ctx)
@@ -1044,7 +1038,6 @@ async def _scenario_schedule_deep(db) -> None:
 async def _scenario_settings_extended(db) -> None:
     from bot import open_premium_from_settings
     from handlers.settings import (
-        open_advanced_mode_menu,
         open_settings_menu,
         open_sys_notifications_menu,
         open_whisper_alerts_menu,
@@ -1060,16 +1053,6 @@ async def _scenario_settings_extended(db) -> None:
     await open_settings_menu(update, ctx)
     await open_sys_notifications_menu(update, ctx)
     cap.assert_turn("settings_sys_notifications")
-
-    application, bot = _app(db)
-    cap = _BotCapture()
-    cap.wrap(bot)
-    update = _msg_update(_FREE_UID, btn("settings", "ru"), cap)
-    ctx = _ctx(application)
-    await open_settings_menu(update, ctx)
-    with patch("handlers.settings.prem.advanced_mode_on", new=AsyncMock(return_value=False)):
-        await open_advanced_mode_menu(update, ctx)
-    cap.assert_turn("settings_advanced_mode")
 
     application, bot = _app(db)
     cap = _BotCapture()

@@ -26,11 +26,11 @@
 | 🎲 I'm feeling lucky | One-tap AI template: **Groq → Hugging Face → local pool** (last 100) |
 | 🎲 What to watch? | In **📦 Other**: saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
-| Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); wizard step in **advanced mode** |
-| Repeat suppression | For stream start: skip repeats for X minutes after the first alert; wizard step in **advanced mode** |
+| Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
+| Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
-| Advanced mode | **⚙️ Settings**: ignore keywords, delayed send, repeat mute, delete previous. Off by default; auto-on for Premium if those options already exist on alerts; demo always off |
+| Advanced options | Extras checklist for everyone: image, ignore / delay / repeat mute / delete previous (⭐ Premium), chat button (free) |
 | Message drafting | **⚙️ Settings**: progressive bubble text (sendMessageDraft) + typing indicator. On by default |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
@@ -86,16 +86,16 @@ Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own or tap **🎲 I'm feeling lucky** (AI)
-3. Image (add / skip; if added — position: start or end of caption)
-4. **Extras** (**advanced mode** only) — checklist with short descriptions: ignore keywords, delayed send, repeat mute (stream start), delete previous in channel/group, chat button; unchecked steps are skipped
+3. **Extras** — checklist: image, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, chat button; free users see ⭐ options but cannot enable them; unchecked steps are skipped
+4. Image (if checked) — upload and position: start or end of caption
 5. Link preview (skipped when an image is set)
-6. Delay send (minutes) — if checked under Extras; after go-live / category change / offline; Helix re-checked before send
+6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
 7. Repeat mute (minutes) — if checked; **stream start** only
 8. Destination: DM or channel/group (one button)
 9. For channel or group — add the bot and confirm the chat
 10. Delete previous bot message? — if checked (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
 
-With advanced mode off, steps 4 / 6 / 7 / 10 are skipped (chat button too); the first wizard step notes simplified mode. Toggle: **⚙️ Settings → 🎛 Advanced mode** (Premium).
+Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button and image are free.
 
 For **upcoming stream**, after the channel and schedule check — template and settings, then reminder minutes and destination (no “do you want reminders?” ask).
 
@@ -231,10 +231,9 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 📅 Manage schedule | Weekly text, time zone; Twitch sync — Premium |
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
-| ⚙️ Settings | Premium, sync, ignored words, advanced mode, message drafting, system alerts, language, partner program |
+| ⚙️ Settings | Premium, sync, ignored words, message drafting, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
-| ↳ 🎛 Advanced mode | Ignore / delay / repeats / delete in the wizard; Premium; off by default |
 | ↳ ✍️ Message drafting | Progressive bubble text; on by default |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
