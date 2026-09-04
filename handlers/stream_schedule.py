@@ -508,12 +508,11 @@ async def _queue_schedule_publish_and_auth(
         text = t("stream_schedule_publish_fail", lang, error="no data")
         query = update.callback_query
         if query:
-            await query.edit_message_text(text)
-        else:
-            await context.bot.send_message(chat_id, text)
+            await query.edit_message_text("✓")
         await context.bot.send_message(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
+        await context.bot.send_message(chat_id, text)
         return ConversationHandler.END
 
     db: Database = context.application.bot_data["db"]
@@ -585,15 +584,17 @@ async def _finish_stream_schedule(
     chat_id = reply_chat_id(update)
     if update.callback_query:
         await update.callback_query.edit_message_text("✓")
-        await context.bot.send_message(chat_id, text)
-    else:
-        await update.effective_message.reply_text(text)
     if not _has_pending_schedule_changes(context):
         context.user_data.clear()
         await context.bot.send_message(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
+        await context.bot.send_message(chat_id, text)
         return ConversationHandler.END
+    if update.callback_query:
+        await context.bot.send_message(chat_id, text)
+    else:
+        await update.effective_message.reply_text(text)
     return await _prompt_publish_on_twitch(update, context, lang)
 
 
@@ -978,10 +979,10 @@ async def stream_schedule_confirm_callback(
     confirmed = query.data.split(":")[-1] == "1"
     if not confirmed:
         context.user_data.clear()
-        await query.edit_message_text(t("cancelled", lang))
+        await query.edit_message_text("✓")
         await context.bot.send_message(
             reply_chat_id(update),
-            t("menu_main", lang),
+            t("cancelled", lang),
             reply_markup=_menu(lang, query.from_user.id),
         )
         return ConversationHandler.END
@@ -1211,9 +1212,11 @@ async def stream_schedule_publish_callback(
     deletes = context.user_data.get("stream_schedule_deletes", [])
     if not publish or (not entries and not updates and not deletes):
         context.user_data.clear()
-        await query.edit_message_text(t("cancelled", lang) if not publish else "—")
+        await query.edit_message_text("✓")
         await context.bot.send_message(
-            reply_chat_id(update), t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            reply_chat_id(update),
+            t("cancelled", lang) if not publish else "—",
+            reply_markup=_menu(lang, user_id),
         )
         return ConversationHandler.END
 
@@ -1319,12 +1322,11 @@ async def _start_schedule_publish_auth(
     if not redirect_uri:
         text = t("stream_schedule_publish_auth_unavailable", lang)
         if query:
-            await query.edit_message_text(text)
-        else:
-            await context.bot.send_message(chat_id, text)
+            await query.edit_message_text("✓")
         await context.bot.send_message(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
+        await context.bot.send_message(chat_id, text)
         return ConversationHandler.END
 
     state = create_oauth_state(user_id, lang, purpose="schedule")
@@ -1556,9 +1558,12 @@ async def schedule_save_token_callback(
             period_days=0,
             next_sync_at="9999-12-31T00:00:00+00:00",
         )
-    await query.edit_message_text(
-        query.message.text + "\n\n" + t("stream_schedule_token_saved", lang)
-    )
     await context.bot.send_message(
-        reply_chat_id(update), t("menu_main", lang), reply_markup=_menu(lang, user_id)
+        reply_chat_id(update),
+        t("stream_schedule_token_saved", lang),
+        reply_markup=_menu(lang, user_id),
     )
+    try:
+        await query.edit_message_text((query.message.text or "") + "\n\n✓")
+    except BadRequest:
+        pass

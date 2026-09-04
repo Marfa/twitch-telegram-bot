@@ -31,7 +31,6 @@
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
 | Advanced options | Extras checklist for everyone: image, ignore / delay / repeat mute / delete previous (⭐ Premium), chat button (free) |
-| Message drafting | **⚙️ Settings**: progressive bubble text (sendMessageDraft) + typing indicator. On by default |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
@@ -231,10 +230,9 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 📅 Manage schedule | Weekly text, time zone; Twitch sync — Premium |
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
-| ⚙️ Settings | Premium, sync, ignored words, message drafting, system alerts, language, partner program |
+| ⚙️ Settings | Premium, sync, ignored words, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
-| ↳ ✍️ Message drafting | Progressive bubble text; on by default |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), and sync alerts |
 | ↳ 🌐 Language | Russian / English |

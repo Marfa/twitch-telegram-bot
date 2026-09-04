@@ -531,11 +531,12 @@ async def open_cart_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             markup = None
         else:
             markup = _delete_cart_keyboard(lang, view, set())
-    await update.effective_message.reply_text(text, reply_markup=markup)
+    # Keyboard switch first — same mobile gap as list_subscriptions if reversed.
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
     )
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def start_pause_notifications(
@@ -918,25 +919,28 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
+    # Reply keyboard must be a separate message (can't mix with inline).
+    # Send it first so the last bubble near the input is the type picker / list —
+    # otherwise mobile shows a huge empty gap under a trailing "Мои подписки:".
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=_subs_kb(lang, db, user_id),
+    )
     types = _edit_present_types(subs)
     if len(types) > 1:
         await update.effective_message.reply_text(
             t("list_type_pick", lang),
             reply_markup=_alert_type_pick_keyboard(lang, types, "list_type"),
         )
-    else:
-        await _deliver_subs_list(
-            bot=context.bot,
-            db=db,
-            owner_id=user_id,
-            lang=lang,
-            subs=subs,
-            reply_message=update.effective_message,
-            context=context,
-        )
-    await update.effective_message.reply_text(
-        t("menu_subs", lang),
-        reply_markup=_subs_kb(lang, db, user_id),
+        return
+    await _deliver_subs_list(
+        bot=context.bot,
+        db=db,
+        owner_id=user_id,
+        lang=lang,
+        subs=subs,
+        reply_message=update.effective_message,
+        context=context,
     )
 
 
@@ -1055,11 +1059,11 @@ async def edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         text = t("edit_type_pick", lang)
         markup = _edit_type_keyboard(lang, types)
-    await update.effective_message.reply_text(text, reply_markup=markup)
     await update.effective_message.reply_text(
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
     )
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def on_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1178,6 +1182,11 @@ async def _deliver_import_result(
             "empty": False,
         },
     )
+    await application.bot.send_message(
+        owner_id,
+        t("menu_main", lang),
+        reply_markup=_menu(lang, owner_id),
+    )
     msg = await application.bot.send_message(
         owner_id,
         header,
@@ -1191,11 +1200,6 @@ async def _deliver_import_result(
             "sub_ids": [s.id for s in new_subs],
             "message_id": int(mid) if mid is not None else None,
         }
-    await application.bot.send_message(
-        owner_id,
-        t("menu_main", lang),
-        reply_markup=_menu(lang, owner_id),
-    )
     await _ask_sync_unfollow_if_needed(application, owner_id, lang, ask_streamers or [])
 
 
@@ -2346,6 +2350,11 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     context.user_data["delete_selected"] = set()
     context.user_data["delete_page"] = 0
     types = _edit_present_types(subs)
+    # Reply keyboard first — same mobile gap fix as list_subscriptions.
+    await update.effective_message.reply_text(
+        t("menu_subs", lang),
+        reply_markup=_subs_kb(lang, db, user_id),
+    )
     if len(types) > 1:
         extra_rows: list[list[InlineKeyboardButton]] = []
         if _deleted_subscriptions_cart_enabled(db, user_id):
@@ -2359,14 +2368,10 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             t("delete_type_pick", lang),
             reply_markup=markup,
         )
-    else:
-        await update.effective_message.reply_text(
-            t("delete_pick", lang),
-            reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, set()),
-        )
+        return
     await update.effective_message.reply_text(
-        t("menu_subs", lang),
-        reply_markup=_subs_kb(lang, db, user_id),
+        t("delete_pick", lang),
+        reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, set()),
     )
 
 
@@ -3665,12 +3670,16 @@ async def on_share_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
-    await query.edit_message_text(text)
     await context.bot.send_message(
         user_id,
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
     )
+    await context.bot.send_message(user_id, text)
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
 
 
 async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3691,21 +3700,28 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     show_adv = await prem.advanced_mode_on(
         context.bot, db, user_id, channel=sub.twitch_username
     )
-    await query.edit_message_text(
-        _edit_menu_text(
-            lang,
-            sub_id=sub_num,
-            username=sub.twitch_username,
-            show_advanced=show_adv,
-        ),
-        reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
-        parse_mode=ParseMode.HTML,
+    edit_text = _edit_menu_text(
+        lang,
+        sub_id=sub_num,
+        username=sub.twitch_username,
+        show_advanced=show_adv,
     )
+    edit_markup = _edit_options_for_sub(sub, lang, show_advanced=show_adv)
     await context.bot.send_message(
         user_id,
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
     )
+    await context.bot.send_message(
+        user_id,
+        edit_text,
+        reply_markup=edit_markup,
+        parse_mode=ParseMode.HTML,
+    )
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
 
 
 async def on_share_dup_continue(
@@ -3734,12 +3750,16 @@ async def on_share_dup_continue(
         )
         return
 
-    await query.edit_message_text(text)
     await context.bot.send_message(
         user_id,
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
     )
+    await context.bot.send_message(user_id, text)
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
 
 
 async def on_share_decline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

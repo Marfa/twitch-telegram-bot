@@ -346,7 +346,6 @@ from handlers.settings import (
     complete_whisper_oauth,
     notify_whisper_received,
     on_beta_toggle,
-    on_message_draft_toggle,
     on_sys_availability_toggle,
     on_sys_other_toggle,
     on_sys_sync_toggle,
@@ -354,7 +353,6 @@ from handlers.settings import (
     on_whisper_alerts_toggle,
     on_whisper_eventsub_revoked,
     open_beta_mode_menu,
-    open_message_draft_menu,
     open_other_menu,
     open_settings_menu,
     open_stream_chat,
@@ -1450,12 +1448,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.callback_query:
         await update.callback_query.answer()
         try:
-            await update.callback_query.edit_message_text(t("cancelled", lang))
+            await update.callback_query.edit_message_text("✓")
         except BadRequest:
             pass
         await context.bot.send_message(
             reply_chat_id(update),
-            t("menu_main", lang),
+            t("cancelled", lang),
             reply_markup=_menu(lang, user_id),
         )
     else:
@@ -1982,19 +1980,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
-        MessageHandler(_btn_filter("message_draft"), open_message_draft_menu),
-        group=0,
-    )
-    app.add_handler(
         MessageHandler(_btn_filter("whisper_alerts"), open_whisper_alerts_menu),
         group=0,
     )
     app.add_handler(
         MessageHandler(_btn_filter("beta_mode"), open_beta_mode_menu),
-        group=0,
-    )
-    app.add_handler(
-        CallbackQueryHandler(on_message_draft_toggle, pattern=r"^message_draft:toggle$"),
         group=0,
     )
     app.add_handler(

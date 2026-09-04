@@ -946,8 +946,12 @@ async def _scenario_share_alert_offer(db) -> None:
     ):
         await on_share_accept(update, ctx)
     assert len(db.get_subscriptions_by_owner(stranger)) == 1
-    created_text = query.edit_message_text.await_args.args[0]
-    assert "создано" in created_text
+    sent = [
+        (c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or "")
+        for c in bot.send_message.await_args_list
+    ]
+    assert any("создано" in str(t) for t in sent)
+    assert query.edit_message_text.await_args.args[0] == "✓"
 
     # Same link again → channel_dup_prompt, no second row.
     update, query = _cb_update(stranger, f"share_accept:{token}", cap)

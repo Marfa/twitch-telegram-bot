@@ -1288,7 +1288,14 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
         show_adv = await prem.advanced_mode_on(
             context.bot, db, query.from_user.id, channel=sub.twitch_username
         )
-        await query.edit_message_text(
+        chat_id = reply_chat_id(update)
+        await context.bot.send_message(
+            chat_id,
+            t("menu_subs", lang),
+            reply_markup=_menu(lang, query.from_user.id),
+        )
+        await context.bot.send_message(
+            chat_id,
             _edit_menu_text(
                 lang,
                 sub_id=sub_num,
@@ -1298,11 +1305,10 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
             parse_mode=ParseMode.HTML,
         )
-        await context.bot.send_message(
-            reply_chat_id(update),
-            t("menu_subs", lang),
-            reply_markup=_menu(lang, query.from_user.id),
-        )
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
         return ConversationHandler.END
 
     await query.edit_message_text("✓")
@@ -1915,12 +1921,15 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 query.from_user.id,
                 sorted(context.user_data.keys()),
             )
-            await query.edit_message_text(t("save_failed", lang))
             await context.bot.send_message(
                 reply_chat_id(update),
-                t("menu_main", lang),
+                t("save_failed", lang),
                 reply_markup=_menu(lang, query.from_user.id),
             )
+            try:
+                await query.edit_message_text("✓")
+            except BadRequest:
+                pass
             context.user_data.clear()
             return ConversationHandler.END
         context.user_data["pending_chat_id"] = query.from_user.id

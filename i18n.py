@@ -135,7 +135,6 @@ def all_menu_buttons() -> set[str]:
         "sys_notifications",
         "ignored_words",
         "whisper_alerts",
-        "message_draft",
         "beta_mode",
         "sync_subs",
         "premium",
@@ -231,7 +230,6 @@ def settings_menu(
         [
             KeyboardButton(btn("sync_subs", lang)),
             KeyboardButton(btn("ignored_words", lang)),
-            KeyboardButton(btn("message_draft", lang)),
             KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
             KeyboardButton(btn("sys_notifications", lang)),
             KeyboardButton(btn("language", lang)),

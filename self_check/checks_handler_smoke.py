@@ -687,6 +687,40 @@ async def _smoke_subscriptions(db) -> None:
     await list_subscriptions(update, ctx)
     update.effective_message.reply_text.assert_awaited()
 
+    # Multi-type: reply keyboard header first, type picker last (avoids mobile gap).
+    uid_mt = _FREE_UID + 31
+    db.upsert_user(uid_mt)
+    db.set_user_locale(uid_mt, "ru")
+    db.add_subscription(
+        owner_id=uid_mt,
+        twitch_username="livechan",
+        twitch_user_id="mt1",
+        message_template="live",
+        dest_type="dm",
+        chat_id=uid_mt,
+        thread_id=None,
+        notify_on_live=True,
+    )
+    db.add_subscription(
+        owner_id=uid_mt,
+        twitch_username="catchan",
+        twitch_user_id="mt2",
+        message_template="cat",
+        dest_type="dm",
+        chat_id=uid_mt,
+        thread_id=None,
+        notify_on_live=False,
+        notify_on_category_change=True,
+    )
+    update = _msg_update(uid_mt)
+    ctx = _ctx(application)
+    await list_subscriptions(update, ctx)
+    texts = [c.args[0] for c in update.effective_message.reply_text.await_args_list]
+    from i18n import t as _t
+
+    assert texts[0] == _t("menu_subs", "ru")
+    assert texts[-1] == _t("list_type_pick", "ru")
+
     reply = MagicMock()
     reply.reply_text = AsyncMock()
     fake_sub = MagicMock()

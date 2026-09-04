@@ -40,7 +40,6 @@ from i18n import (
     ignored_words_keyboard,
     is_menu_button,
     language_keyboard,
-    message_draft_keyboard,
     other_menu,
     sys_notifications_keyboard,
     t,
@@ -120,14 +119,14 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     await sync_stream_chat_menu_button(context.bot, db, user_id)
     await update.effective_message.reply_text(
+        t("menu_other", lang),
+        reply_markup=other_menu(lang),
+    )
+    await update.effective_message.reply_text(
         t("chat_open_hint", lang),
         reply_markup=stream_chat_open_markup(
             lang, open_url, private=is_private_chat(update)
         ),
-    )
-    await update.effective_message.reply_text(
-        t("menu_other", lang),
-        reply_markup=other_menu(lang),
     )
 
 async def start_language_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -155,36 +154,6 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
             sync_enabled=db.get_receive_sync_updates(user_id),
         ),
     )
-
-async def open_message_draft_menu(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    user_id = update.effective_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
-    enabled = db.is_message_draft_enabled(user_id)
-    await update.effective_message.reply_text(
-        t("message_draft_screen", lang),
-        reply_markup=message_draft_keyboard(lang, enabled=enabled),
-    )
-
-
-async def on_message_draft_toggle(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
-    enabled = not db.is_message_draft_enabled(user_id)
-    db.set_message_draft_enabled(user_id, enabled)
-    await query.edit_message_reply_markup(
-        reply_markup=message_draft_keyboard(lang, enabled=enabled)
-    )
-
 
 def _beta_mode_features_block(
     db: Database, user_id: int, lang: str
@@ -255,6 +224,12 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     if feature_id == "stream-chat":
         await sync_stream_chat_menu_button(context.bot, db, user_id)
+        chat_id = reply_chat_id(update)
+        await context.bot.send_message(
+            chat_id,
+            t("menu_main", lang),
+            reply_markup=_menu(lang, user_id),
+        )
         if new_state:
             from chat_webapp import chat_webapp_url, stream_chat_open_markup
 
@@ -263,7 +238,6 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 user_id=user_id,
             )
             if open_url:
-                chat_id = reply_chat_id(update)
                 await context.bot.send_message(
                     chat_id,
                     t("chat_open_hint", lang),
@@ -271,11 +245,6 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         lang, open_url, private=is_private_chat(update)
                     ),
                 )
-        await context.bot.send_message(
-            reply_chat_id(update),
-            t("menu_main", lang),
-            reply_markup=_menu(lang, user_id),
-        )
     toast = t(
         "beta_mode_opt_in" if new_state else "beta_mode_opt_out",
         lang,
