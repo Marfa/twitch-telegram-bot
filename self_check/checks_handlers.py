@@ -1233,9 +1233,12 @@ def check_handlers() -> None:
     with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"), patch(
         "chat_webapp.TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
     ):
+        from telegram.error import NetworkError
+
         from handlers.settings import (
             set_default_stream_chat_menu_button,
             sync_all_stream_chat_menu_buttons,
+            sync_stream_chat_menu_button,
         )
 
         mock_bot = AsyncMock()
@@ -1244,6 +1247,20 @@ def check_handlers() -> None:
         default_kwargs = mock_bot.set_chat_menu_button.await_args.kwargs
         assert "chat_id" not in default_kwargs
         assert default_kwargs["menu_button"].web_app is not None
+
+        retry_bot = AsyncMock()
+        retry_bot.set_chat_menu_button.side_effect = [
+            NetworkError("blip"),
+            None,
+        ]
+
+        class _RetryDb:
+            def get_user_locale(self, uid):
+                return "ru"
+
+        with patch("handlers.settings.asyncio.sleep", new_callable=AsyncMock):
+            asyncio.run(sync_stream_chat_menu_button(retry_bot, _RetryDb(), 99))
+        assert retry_bot.set_chat_menu_button.await_count == 2
 
         class _FakeDb:
             def get_notify_user_ids(self):

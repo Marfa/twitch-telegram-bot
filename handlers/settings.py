@@ -15,7 +15,7 @@ from telegram import (
     WebAppInfo,
 )
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import analytics
@@ -561,24 +561,32 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
         user_id=user_id,
     )
     enabled = bool(url) and beta_features.is_enabled(db, user_id, BETA_FEATURE_ID)
-    try:
-        if enabled:
-            await bot.set_chat_menu_button(
-                chat_id=user_id,
-                menu_button=MenuButtonWebApp(
-                    text=t("menu_btn_chat", lang),
-                    web_app=WebAppInfo(url=url),
-                ),
-            )
-        else:
-            await bot.set_chat_menu_button(
-                chat_id=user_id,
-                menu_button=MenuButtonCommands(),
-            )
-    except RetryAfter:
-        raise
-    except Exception:
-        logger.exception("Failed to sync stream-chat menu button for %s", user_id)
+    menu_button = (
+        MenuButtonWebApp(
+            text=t("menu_btn_chat", lang),
+            web_app=WebAppInfo(url=url),
+        )
+        if enabled
+        else MenuButtonCommands()
+    )
+    # Transient Telegram blips (ReadError etc.); RetryAfter still bubbles for bulk.
+    attempts = 3
+    for attempt in range(attempts):
+        try:
+            await bot.set_chat_menu_button(chat_id=user_id, menu_button=menu_button)
+            return
+        except RetryAfter:
+            raise
+        except NetworkError:
+            if attempt + 1 >= attempts:
+                logger.exception(
+                    "Failed to sync stream-chat menu button for %s", user_id
+                )
+                return
+            await asyncio.sleep(0.5 * (attempt + 1))
+        except Exception:
+            logger.exception("Failed to sync stream-chat menu button for %s", user_id)
+            return
 
 
 def _stream_chat_is_ga() -> bool:
