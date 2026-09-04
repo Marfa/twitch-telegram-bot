@@ -1190,6 +1190,24 @@ def check_core() -> None:
     assert prefs and all(prefs[i] in prefs[i + 1] for i in range(len(prefs) - 1))
     assert _plain_for_draft("<b>Hi</b> &amp; you", parse_mode="HTML") == "Hi & you"
 
+    class _FrozenBot:
+        """Mimic PTB ExtBot: instance attrs cannot be assigned normally."""
+
+        def __setattr__(self, key, value):
+            raise AttributeError(
+                f"Attribute `{key}` of class `{type(self).__name__}` can't be set!"
+            )
+
+    frozen = _FrozenBot()
+    object.__setattr__(frozen, "send_message", AsyncMock(return_value="ok"))
+    object.__setattr__(frozen, "send_chat_action", AsyncMock(return_value=True))
+    object.__setattr__(
+        frozen, "send_message_draft", AsyncMock(side_effect=RuntimeError("no draft"))
+    )
+    object.__setattr__(frozen, "_message_fx_installed", False)
+    install_message_fx(frozen)
+    assert getattr(frozen, "_message_fx_installed") is True
+
     bot = MagicMock()
     original_send = AsyncMock(return_value="ok")
     bot.send_message = original_send

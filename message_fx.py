@@ -192,5 +192,6 @@ def install_message_fx(
         )
         return await original(*args, **kwargs)
 
-    bot.send_message = send_message  # type: ignore[method-assign]
-    bot._message_fx_installed = True  # type: ignore[attr-defined]
+    # ExtBot freezes attribute assignment (TelegramObject.__setattr__).
+    object.__setattr__(bot, "send_message", send_message)
+    object.__setattr__(bot, "_message_fx_installed", True)
