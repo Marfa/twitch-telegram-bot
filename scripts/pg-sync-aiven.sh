@@ -34,8 +34,9 @@ if ((${#dumps[@]} == 0)); then
 fi
 LATEST="${dumps[0]}"
 
+# --network host: bridge DNS on some VPSes cannot resolve Aiven hostnames
 gunzip -c "$LATEST" \
-  | docker run --rm -i "$PG_IMAGE" \
+  | docker run --rm -i --network host "$PG_IMAGE" \
     psql "$AIVEN_DATABASE_URL" -v ON_ERROR_STOP=1 >/dev/null
 
 echo "sync ok: $LATEST ($(du -h "$LATEST" | awk '{print $1}')) → aiven"
