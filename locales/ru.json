@@ -292,6 +292,7 @@
   "twitch_link_start": "✅ Создать оповещение",
   "twitch_link_decline": "Нет, спасибо",
   "twitch_link_declined": "Ок, мастер не запускаю.",
+  "twitch_link_using_channel": "Канал из ссылки: {username}",
   "share_invalid": "Ссылка на оповещение недействительна или устарела.",
   "beta_feat_share_alerts": "Поделиться оповещением",
   "beta_feat_share_alerts_desc": "Ссылка в списке подписок, чтобы другой пользователь мог создать такое же оповещение у себя.",

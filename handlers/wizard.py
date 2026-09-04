@@ -17,7 +17,6 @@ import demo_mode
 import premium as prem
 from bot_helpers import (
     _menu,
-    _pulse_wizard_keyboard,
     _settings_kb,
     _user_lang,
     _wizard,
@@ -519,8 +518,10 @@ async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if pending:
         context.user_data["_channel_text_override"] = f"https://twitch.tv/{pending}"
         _set_wizard_back(context, _wz()["CHANNEL"])
-        await _pulse_wizard_keyboard(
-            context.bot, reply_chat_id(update), lang, back=has_alert_type
+        # Lasting Reply Cancel/Back — pulse+delete drops it before Extras (inline-only).
+        await update.effective_message.reply_text(
+            t("twitch_link_using_channel", lang, username=pending),
+            reply_markup=_wizard(lang, back=has_alert_type),
         )
         state = await receive_channel(update, context)
         if state == _wz()["CHANNEL"]:

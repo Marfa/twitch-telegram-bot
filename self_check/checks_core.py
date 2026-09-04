@@ -1017,6 +1017,7 @@ def check_core() -> None:
         assert tr("twitch_link_start", loc)
         assert tr("twitch_link_decline", loc)
         assert tr("twitch_link_declined", loc)
+        assert tr("twitch_link_using_channel", loc, username="x")
         assert tr("share_invalid", loc)
         assert tr("beta_feat_share_alerts", loc)
         assert tr("beta_feat_share_alerts_desc", loc)

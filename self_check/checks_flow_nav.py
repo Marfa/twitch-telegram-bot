@@ -1037,11 +1037,38 @@ async def _scenario_twitch_link_wizard_offer(db) -> None:
     update, query = _cb_update(_FREE_UID, "twitch_link:start:shroud", cap)
     update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
     ctx = _ctx(application)
-    with patch("handlers.wizard._pulse_wizard_keyboard", new=AsyncMock()):
-        state = await on_twitch_link_start(update, ctx)
+    state = await on_twitch_link_start(update, ctx)
     assert state != ConversationHandler.END
     assert ctx.user_data.get("pending_twitch_channel") == "shroud"
     cap.assert_turn("twitch_link_wizard_started")
+
+    # Prefill channel leaves a lasting Reply Cancel (Extras is inline-only).
+    from handlers.wizard import _go_channel_prompt
+
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "x", cap)
+    update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
+    ctx = _ctx(application)
+    ctx.user_data["alert_type"] = "live"
+    ctx.user_data["pending_twitch_channel"] = "shroud"
+    with patch(
+        "handlers.wizard.receive_channel",
+        new=AsyncMock(return_value=42),
+    ):
+        await _go_channel_prompt(update, ctx, "ru")
+    assert update.effective_message.reply_text.await_count >= 1
+    first = update.effective_message.reply_text.await_args_list[0]
+    markup = first.kwargs.get("reply_markup")
+    assert markup is not None
+    labels = {
+        (b.text if hasattr(b, "text") else b)
+        for row in markup.keyboard
+        for b in row
+    }
+    assert btn("wizard_cancel", "ru") in labels
+    assert "shroud" in str(first.args[0] if first.args else first.kwargs.get("text"))
 
 
 async def _scenario_subscriptions_list_pages(db) -> None:

@@ -292,6 +292,7 @@
   "twitch_link_start": "✅ Create alert",
   "twitch_link_decline": "No thanks",
   "twitch_link_declined": "OK, not starting the wizard.",
+  "twitch_link_using_channel": "Channel from link: {username}",
   "share_invalid": "This alert share link is invalid or expired.",
   "beta_feat_share_alerts": "Share alert",
   "beta_feat_share_alerts_desc": "A link in the subscriptions list so another user can create the same alert.",
