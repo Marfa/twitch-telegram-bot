@@ -1913,6 +1913,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_alert_history_menu, pattern=r"^alert_history:menu$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_alert_history_action, pattern=r"^ah:(v|u|vb):\d+$"
         ),
