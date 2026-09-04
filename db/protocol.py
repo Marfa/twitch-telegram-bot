@@ -56,6 +56,10 @@ class Database(Protocol):
 
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None: ...
 
+    def get_subs_due_previous_message_purge(
+        self, older_than: datetime
+    ) -> list[Subscription]: ...
+
     def set_notify_cooldown(self, sub_id: int, minutes: int) -> None: ...
 
     def set_last_schedule_reminder_segment(

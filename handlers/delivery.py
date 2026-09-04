@@ -27,6 +27,8 @@ from twitch import (
 logger = logging.getLogger(__name__)
 
 _TELEGRAM_CAPTION_LIMIT = 1024
+# Telegram refuses delete_message after ~48h; purge slightly earlier so it still works.
+_DELETE_PREVIOUS_PURGE_AFTER = timedelta(hours=47)
 
 
 def _effective_image_position(sub: Subscription) -> str:
@@ -461,6 +463,127 @@ async def _maybe_notify_delivery_failure(
         )
 
 
+async def _maybe_notify_delete_fail(
+    bot,
+    db: Database,
+    *,
+    owner_id: int,
+    chat_id: int,
+    message_id: int,
+    thread_id: int | None,
+    notify: bool,
+) -> None:
+    if not notify:
+        return
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    link = _message_link(chat_id, message_id, thread_id)
+    try:
+        await bot.send_message(
+            owner_id,
+            t("delete_fail_notice", lang, link=link),
+        )
+    except (BadRequest, Forbidden) as notify_exc:
+        logger.warning(
+            "Cannot notify owner %s about delete failure: %s",
+            owner_id,
+            notify_exc,
+        )
+
+
+async def _delete_one_previous_message(
+    bot,
+    db: Database,
+    *,
+    chat_id: int,
+    message_id: int,
+    thread_id: int | None,
+    owner_id: int,
+    notify_delete_fail: bool,
+) -> bool:
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        return True
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot delete message %s in %s: %s",
+            message_id,
+            chat_id,
+            exc,
+        )
+        await _maybe_notify_delete_fail(
+            bot,
+            db,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            message_id=message_id,
+            thread_id=thread_id,
+            notify=notify_delete_fail,
+        )
+        return False
+
+
+async def _delete_previous_before_send(bot, db: Database, sub: Subscription) -> None:
+    to_delete: list[tuple[int, int]] = []
+    seen_msg: set[int] = set()
+    if sub.last_message_id and sub.last_message_id not in seen_msg:
+        to_delete.append((sub.id, sub.last_message_id))
+        seen_msg.add(sub.last_message_id)
+    if sub.delete_other_alerts:
+        for sibling in db.get_enabled_by_twitch_user_id(sub.twitch_user_id):
+            if sibling.id == sub.id:
+                continue
+            if sibling.owner_id != sub.owner_id:
+                continue
+            if sibling.chat_id != sub.chat_id:
+                continue
+            if (sibling.thread_id or None) != (sub.thread_id or None):
+                continue
+            if not sibling.last_message_id or sibling.last_message_id in seen_msg:
+                continue
+            to_delete.append((sibling.id, sibling.last_message_id))
+            seen_msg.add(sibling.last_message_id)
+    for owner_sub_id, message_id in to_delete:
+        ok = await _delete_one_previous_message(
+            bot,
+            db,
+            chat_id=sub.chat_id,
+            message_id=message_id,
+            thread_id=sub.thread_id,
+            owner_id=sub.owner_id,
+            notify_delete_fail=sub.notify_delete_fail,
+        )
+        if ok and owner_sub_id != sub.id:
+            db.set_last_message_id(owner_sub_id, None)
+
+
+async def purge_stale_previous_messages(context) -> None:
+    """Delete tracked alert messages before Telegram's ~48h delete window closes."""
+    db: Database = context.application.bot_data["db"]
+    bot = context.bot
+    cutoff = datetime.now(timezone.utc) - _DELETE_PREVIOUS_PURGE_AFTER
+    due = db.get_subs_due_previous_message_purge(cutoff)
+    if not due:
+        return
+    purged = 0
+    for sub in due:
+        if not sub.last_message_id:
+            continue
+        await _delete_one_previous_message(
+            bot,
+            db,
+            chat_id=sub.chat_id,
+            message_id=sub.last_message_id,
+            thread_id=sub.thread_id,
+            owner_id=sub.owner_id,
+            notify_delete_fail=sub.notify_delete_fail,
+        )
+        # Clear either way — undeletable/gone messages must not be retried forever.
+        db.set_last_message_id(sub.id, None)
+        purged += 1
+    if purged:
+        logger.info("Purged %s stale previous alert message(s)", purged)
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -481,51 +604,7 @@ async def _send_notification(
         return True
     await _maybe_notify_stored_template_typos(bot, db, sub)
     if sub.delete_previous and sub.dest_type != "dm":
-        to_delete: list[tuple[int, int]] = []
-        seen_msg: set[int] = set()
-        if sub.last_message_id and sub.last_message_id not in seen_msg:
-            to_delete.append((sub.id, sub.last_message_id))
-            seen_msg.add(sub.last_message_id)
-        if sub.delete_other_alerts:
-            for sibling in db.get_enabled_by_twitch_user_id(sub.twitch_user_id):
-                if sibling.id == sub.id:
-                    continue
-                if sibling.owner_id != sub.owner_id:
-                    continue
-                if sibling.chat_id != sub.chat_id:
-                    continue
-                if (sibling.thread_id or None) != (sub.thread_id or None):
-                    continue
-                if not sibling.last_message_id or sibling.last_message_id in seen_msg:
-                    continue
-                to_delete.append((sibling.id, sibling.last_message_id))
-                seen_msg.add(sibling.last_message_id)
-        for owner_sub_id, message_id in to_delete:
-            try:
-                await bot.delete_message(chat_id=sub.chat_id, message_id=message_id)
-                if owner_sub_id != sub.id:
-                    db.set_last_message_id(owner_sub_id, None)
-            except (BadRequest, Forbidden) as exc:
-                logger.warning(
-                    "Cannot delete message %s in %s: %s",
-                    message_id,
-                    sub.chat_id,
-                    exc,
-                )
-                if sub.notify_delete_fail:
-                    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-                    link = _message_link(sub.chat_id, message_id, sub.thread_id)
-                    try:
-                        await bot.send_message(
-                            sub.owner_id,
-                            t("delete_fail_notice", lang, link=link),
-                        )
-                    except (BadRequest, Forbidden) as notify_exc:
-                        logger.warning(
-                            "Cannot notify owner %s about delete failure: %s",
-                            sub.owner_id,
-                            notify_exc,
-                        )
+        await _delete_previous_before_send(bot, db, sub)
 
     image_photo = None
     image_position = _effective_image_position(sub)

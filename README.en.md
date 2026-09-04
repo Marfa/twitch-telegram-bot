@@ -105,12 +105,15 @@ Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscripti
 **🎲 I'm feeling lucky** builds a template with placeholders. Chain: **Groq** (if keyed) → on failure **Hugging Face** → if both are down, a random template from the local DB pool (up to 100 recent successful generations per language). The Example block fills in a random [IGDB](https://api-docs.igdb.com/) game (same Twitch API credentials) and a stream title derived from it. After preview: continue, try again, or full wizard.
 
 **Group or community** — send:
+- group link: `https://t.me/name` (no topic — general chat)
 - topic link: `https://t.me/c/name/30`
 - group `@username`
 - group ID (`-100…`)
 - forwarded message from the group (“Forwarded from: …”)
 
 Bot permissions in a group: **send messages** (admin is not required for alerts). Also needs permission to **delete its own messages**. During setup the bot must be an **administrator** so Telegram allows checking that you are an admin too; after binding, admin is optional if send/delete rights remain.
+
+With “delete old” enabled, the bot removes the previous alert before a new one and also auto-deletes it after about 47 hours (Telegram’s ~48-hour limit), without waiting for the next stream.
 
 After setup the bot sends **“✅ Setup complete!”** to DM and a test message to the chosen chat.
 

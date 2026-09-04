@@ -888,6 +888,13 @@ def check_core() -> None:
     assert link is not None
     assert link.chat_ref == "themarfa_gaming"
     assert link.thread_id == 30
+    from links import parse_telegram_public_chat_link
+
+    assert parse_telegram_public_chat_link("https://t.me/aipchat") == "aipchat"
+    assert parse_telegram_public_chat_link("https://t.me/aipchat/") == "aipchat"
+    assert parse_telegram_public_chat_link("t.me/aipchat") == "aipchat"
+    assert parse_telegram_public_chat_link("https://t.me/aipchat/30") is None
+    assert parse_telegram_public_chat_link("@aipchat") is None
     assert chat_ref_to_id("1234567890") == -1001234567890
     assert _message_link(-1001234567890, 42) == "https://t.me/c/1234567890/42"
     assert _message_link(-1001234567890, 42, 7) == "https://t.me/c/1234567890/7/42"

@@ -279,6 +279,12 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
@@ -807,10 +813,47 @@ class PostgresDatabase:
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
+            if message_id is None:
+                cur.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_message_id = NULL, last_message_at = NULL
+                    WHERE id = %s
+                    """,
+                    (sub_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_message_id = %s, last_message_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (message_id, sub_id),
+                )
+
+    def get_subs_due_previous_message_purge(
+        self, older_than: datetime
+    ) -> list[Subscription]:
+        cutoff = older_than.astimezone(timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
             cur.execute(
-                "UPDATE subscriptions SET last_message_id = %s WHERE id = %s",
-                (message_id, sub_id),
+                """
+                SELECT * FROM subscriptions
+                WHERE COALESCE(delete_previous, FALSE)
+                  AND last_message_id IS NOT NULL
+                  AND dest_type != 'dm'
+                  AND (
+                    last_message_at IS NULL
+                    OR last_message_at <= %s
+                  )
+                ORDER BY id
+                """,
+                (cutoff,),
             )
+            rows = cur.fetchall()
+        return [_row_to_sub(r) for r in rows]
 
     def set_notify_cooldown(self, sub_id: int, minutes: int) -> None:
         if minutes <= 0:

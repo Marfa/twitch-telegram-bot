@@ -1427,3 +1427,34 @@ def check_db_premium() -> None:
         assert pdb.user_exists(stay) is True
         assert pdb.is_bot_blocked(stay) is True
         assert pdb.user_exists(fresh) is True
+
+    with tempfile.TemporaryDirectory() as msg_tmp:
+        mdb = SqliteDatabase(Path(msg_tmp) / "purge_prev.db")
+        mdb.upsert_user(88001)
+        sid = mdb.add_subscription(
+            88001,
+            "streamer",
+            "tid",
+            "hi",
+            "group",
+            -1001,
+            None,
+            enabled=True,
+            delete_previous=True,
+        )
+        assert mdb.get_subs_due_previous_message_purge(
+            datetime.now(timezone.utc)
+        ) == []
+        mdb.set_last_message_id(sid, 42)
+        # Fresh timestamp — not due yet when cutoff is "now - 47h" equivalent
+        fresh_due = mdb.get_subs_due_previous_message_purge(
+            datetime.now(timezone.utc) - timedelta(hours=47)
+        )
+        assert fresh_due == []
+        # Force due by treating "now" as the age cutoff
+        due = mdb.get_subs_due_previous_message_purge(datetime.now(timezone.utc))
+        assert len(due) == 1 and due[0].id == sid and due[0].last_message_id == 42
+        mdb.set_last_message_id(sid, None)
+        assert mdb.get_subs_due_previous_message_purge(
+            datetime.now(timezone.utc)
+        ) == []

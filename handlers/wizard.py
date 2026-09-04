@@ -57,7 +57,11 @@ from i18n import (
     template_strip_keyboard,
     template_typo_keyboard,
 )
-from links import TelegramTopicLink, parse_telegram_topic_link
+from links import (
+    TelegramTopicLink,
+    parse_telegram_public_chat_link,
+    parse_telegram_topic_link,
+)
 from twitch import (
     GAME_COVER_IMAGE_ID,
     TwitchClient,
@@ -1731,9 +1735,16 @@ async def _parse_dest_input(
     if fwd_chat is not None:
         return fwd_chat, fwd_thread, None
 
+    public_username = None
     if text.startswith("@"):
+        public_username = text
+    else:
+        bare = parse_telegram_public_chat_link(text)
+        if bare:
+            public_username = f"@{bare}"
+    if public_username:
         try:
-            chat = await bot.get_chat(text)
+            chat = await bot.get_chat(public_username)
             return chat.id, None, None
         except (BadRequest, Forbidden):
             key = "dest_not_found_channel" if dest_type == "channel" else "dest_not_found_group"

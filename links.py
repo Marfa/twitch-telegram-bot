@@ -13,6 +13,11 @@ TG_PUBLIC_TOPIC_RE = re.compile(
     r"(?:https?://)?(?:www\.)?t\.me/(?!c/)([A-Za-z][A-Za-z0-9_]{3,})/(\d+)(?:/\d+)?",
     re.IGNORECASE,
 )
+# t.me/groupname — публичная группа/канал без темы (общий чат)
+TG_PUBLIC_CHAT_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?t\.me/(?!c/)([A-Za-z][A-Za-z0-9_]{3,})/?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,15 @@ def parse_telegram_topic_link(text: str) -> TelegramTopicLink | None:
     if not match:
         return None
     return TelegramTopicLink(chat_ref=match.group(1), thread_id=int(match.group(2)))
+
+
+def parse_telegram_public_chat_link(text: str) -> str | None:
+    """Username from https://t.me/name (no topic). None if not a bare public chat link."""
+    text = text.strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    match = TG_PUBLIC_CHAT_RE.fullmatch(text)
+    if not match:
+        return None
+    return match.group(1)
 
 
 def chat_ref_to_id(ref: str) -> int | None:

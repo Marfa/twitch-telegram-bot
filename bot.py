@@ -524,6 +524,7 @@ from handlers.delivery import (
     _send_test,
     on_stored_template_typo_fix,
     purge_expired_blocked_users,
+    purge_stale_previous_messages,
 )
 
 from handlers.subscriptions import (
@@ -2778,6 +2779,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(purge_old_broadcasts, interval=24 * 3600, first=300)
+    app.job_queue.run_repeating(
+        purge_stale_previous_messages, interval=3600, first=210
+    )
     app.job_queue.run_repeating(
         purge_expired_blocked_users, interval=24 * 3600, first=400
     )

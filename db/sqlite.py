@@ -112,6 +112,8 @@ class SqliteDatabase:
             )
         if "last_message_id" not in cols:
             conn.execute("ALTER TABLE subscriptions ADD COLUMN last_message_id INTEGER")
+        if "last_message_at" not in cols:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN last_message_at TEXT")
         if "disable_link_preview" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN disable_link_preview INTEGER NOT NULL DEFAULT 0"
@@ -668,10 +670,46 @@ class SqliteDatabase:
 
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None:
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE subscriptions SET last_message_id = ? WHERE id = ?",
-                (message_id, sub_id),
-            )
+            if message_id is None:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_message_id = NULL, last_message_at = NULL
+                    WHERE id = ?
+                    """,
+                    (sub_id,),
+                )
+            else:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_message_id = ?, last_message_at = ?
+                    WHERE id = ?
+                    """,
+                    (message_id, now_iso, sub_id),
+                )
+
+    def get_subs_due_previous_message_purge(
+        self, older_than: datetime
+    ) -> list[Subscription]:
+        cutoff = older_than.astimezone(timezone.utc).isoformat()
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE COALESCE(delete_previous, 0) != 0
+                  AND last_message_id IS NOT NULL
+                  AND dest_type != 'dm'
+                  AND (
+                    last_message_at IS NULL
+                    OR last_message_at <= ?
+                  )
+                ORDER BY id
+                """,
+                (cutoff,),
+            ).fetchall()
+        return [_row_to_sub(r) for r in rows]
 
     def set_notify_cooldown(self, sub_id: int, minutes: int) -> None:
         if minutes <= 0:
