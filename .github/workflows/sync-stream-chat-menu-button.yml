@@ -1,0 +1,33 @@
+name: Sync stream-chat menu button
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_id:
+        description: Telegram user_id to sync Chat Menu Button for
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync menu button on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            echo "=== recent menu-button logs ==="
+            docker compose -f compose.vps.yml logs --tail=300 bot 2>&1 \
+              | grep -E 'stream-chat menu button|Failed to sync stream-chat' || true
+            echo "=== sync user ${{ inputs.user_id }} ==="
+            docker compose -f compose.vps.yml exec -T bot \
+              python /app/scripts/sync-stream-chat-menu-button.py "${{ inputs.user_id }}"
