@@ -109,6 +109,8 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("share_dup_edit", f"share_dup:edit:{_SAMPLE_SUB}"),
     ("share_dup_continue", "share_dup:continue:abc123XYZ_-"),
     ("share_decline", "share_decline"),
+    ("twitch_link_start", "twitch_link:start:shroud"),
+    ("twitch_link_decline", "twitch_link:decline"),
     ("list_del", f"list_del:{_SAMPLE_SUB}"),
     ("list_del_ok", f"list_del_ok:{_SAMPLE_SUB}"),
     ("list_del_no", f"list_del_no:{_SAMPLE_SUB}"),

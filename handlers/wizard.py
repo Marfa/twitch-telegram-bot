@@ -7,7 +7,7 @@ import re
 from types import SimpleNamespace
 from typing import Any
 
-from telegram import InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes, ConversationHandler
@@ -15,7 +15,15 @@ from telegram.ext import ContextTypes, ConversationHandler
 import analytics
 import demo_mode
 import premium as prem
-from bot_helpers import _menu, _settings_kb, _user_lang, _wizard, reply_chat_id
+from bot_helpers import (
+    _menu,
+    _pulse_wizard_keyboard,
+    _settings_kb,
+    _user_lang,
+    _wizard,
+    is_private_chat,
+    reply_chat_id,
+)
 from db import Database, Subscription
 from handlers.watch import (
     _go_watch_categories_prompt,
@@ -507,6 +515,20 @@ async def _wizard_back_before_dest(
 
 async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     has_alert_type = bool(context.user_data.get("alert_type"))
+    pending = context.user_data.pop("pending_twitch_channel", None)
+    if pending:
+        context.user_data["_channel_text_override"] = f"https://twitch.tv/{pending}"
+        _set_wizard_back(context, _wz()["CHANNEL"])
+        await _pulse_wizard_keyboard(
+            context.bot, reply_chat_id(update), lang, back=has_alert_type
+        )
+        state = await receive_channel(update, context)
+        if state == _wz()["CHANNEL"]:
+            await update.effective_message.reply_text(
+                t("new_sub_prompt", lang),
+                reply_markup=_wizard(lang, back=has_alert_type),
+            )
+        return state
     await update.effective_message.reply_text(
         t("new_sub_prompt", lang),
         reply_markup=_wizard(lang, back=has_alert_type),
@@ -1219,6 +1241,103 @@ async def start_new_subscription(update: Update, context: ContextTypes.DEFAULT_T
     # Active-limit gate is at finish (promo channel marfapr is always enableable).
     return await _go_alert_type_prompt(update, context, lang)
 
+
+def _in_main_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    conv = context.application.bot_data.get("main_conv")
+    if conv is None:
+        return False
+    try:
+        key = conv._get_key(update)
+    except Exception:
+        return False
+    return key is not None and key in conv._conversations
+
+
+def _twitch_link_offer_keyboard(lang: str, username: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("twitch_link_start", lang),
+                    callback_data=f"twitch_link:start:{username}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("twitch_link_decline", lang),
+                    callback_data="twitch_link:decline",
+                )
+            ],
+        ]
+    )
+
+
+async def offer_twitch_link_wizard(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Outside create/edit (and other) wizards: offer to start alert creation."""
+    if not is_private_chat(update):
+        return
+    text = (update.effective_message.text or "").strip()
+    if not text or is_menu_button(text) or text in all_wizard_nav_buttons():
+        return
+    if context.user_data.get("sb_edit_mode"):
+        return
+    if not TwitchClient.is_twitch_url(text):
+        return
+    if _in_main_conversation(update, context):
+        return
+
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    username = twitch.parse_username(text)
+    if not username:
+        return
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    analytics.capture(
+        user_id, "twitch_link_wizard_offered", {"twitch_username": username}
+    )
+    await update.effective_message.reply_text(
+        t("twitch_link_offer", lang, username=username),
+        reply_markup=_twitch_link_offer_keyboard(lang, username),
+    )
+
+
+async def on_twitch_link_start(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    parts = (query.data or "").split(":")
+    username = parts[2].lower() if len(parts) >= 3 else ""
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    if not username or not twitch.parse_username(username):
+        await query.edit_message_text(t("channel_not_parsed", lang))
+        return ConversationHandler.END
+
+    await query.edit_message_text("✓")
+    analytics.capture(
+        query.from_user.id,
+        "twitch_link_wizard_started",
+        {"twitch_username": username},
+    )
+    state = await start_new_subscription(update, context)
+    if state != ConversationHandler.END:
+        context.user_data["pending_twitch_channel"] = username
+    return state
+
+
+async def on_twitch_link_decline(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    await query.edit_message_text(t("twitch_link_declined", lang))
+
+
 async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -1245,7 +1364,9 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
-    text = update.effective_message.text or ""
+    text = context.user_data.pop("_channel_text_override", None) or (
+        update.effective_message.text or ""
+    )
     if is_menu_button(text):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return _wz()["CHANNEL"]

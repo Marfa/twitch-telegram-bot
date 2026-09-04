@@ -21,7 +21,7 @@
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
 | Destinations | DM or channel/group/community (with topics) |
-| Twitch channel | Link, `m.twitch.tv`, or username |
+| Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 What to watch? | In **📦 Other**: saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
 | Image | Optional alert image — caption above or below; link preview then off |
@@ -71,7 +71,7 @@ On first `/start` the bot asks for a language (Russian or English), then shows t
 
 ### New subscription
 
-**➕ New subscription** — pick an alert type first:
+**➕ New subscription** — pick an alert type first (same wizard starts if you paste a `twitch.tv` link in DM outside a wizard):
 
 | Type | What it does |
 |---|---|

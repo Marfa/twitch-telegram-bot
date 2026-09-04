@@ -498,6 +498,9 @@ from handlers.wizard import (
     receive_strip_name_toggle,
     receive_template,
     receive_template_typo_confirm,
+    offer_twitch_link_wizard,
+    on_twitch_link_decline,
+    on_twitch_link_start,
     start_new_subscription,
     wizard_back,
 )
@@ -2091,6 +2094,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CallbackQueryHandler(on_share_decline, pattern=r"^share_decline$"), group=0)
     app.add_handler(
+        CallbackQueryHandler(on_twitch_link_decline, pattern=r"^twitch_link:decline$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_edit_change_type_click,
             pattern=r"^edit_f:\d+:change_type$",
@@ -2159,6 +2166,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("help", help_command),
             CommandHandler("schedule", dm_only_conv_entry(start_stream_schedule)),
             MessageHandler(_btn_filter("new"), dm_only_conv_entry(start_new_subscription)),
+            CallbackQueryHandler(
+                dm_only_conv_entry(on_twitch_link_start),
+                pattern=r"^twitch_link:start:[a-zA-Z0-9_]{4,25}$",
+            ),
             MessageHandler(_btn_filter("watch"), dm_only_conv_entry(start_what_to_watch)),
             MessageHandler(
                 _btn_filter("create_schedule"), dm_only_conv_entry(start_stream_schedule)
@@ -2762,6 +2773,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             block=False,
         ),
         group=0,
+    )
+    # After ConversationHandler: Twitch URL outside create/edit → offer wizard.
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+            offer_twitch_link_wizard,
+        ),
+        group=2,
     )
 
     from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL

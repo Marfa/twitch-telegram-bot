@@ -232,7 +232,7 @@ GROUP_SETUP_CALLBACK_PATTERN = (
     r"template_typo:|stored_typo_fix:|list_type:|delete_|enable_all|toggle:|sub_toggle:|"
     r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
     r"whisper_alerts:|beta_mode:|premium:|alert_history:|lang:(?!cancel)|"
-    r"sb_edit:|sb_sched:|import_oauth:)"
+    r"sb_edit:|sb_sched:|import_oauth:|twitch_link:)"
 )
 
 

@@ -178,6 +178,8 @@ def _check_submenu_reply_keyboards() -> None:
 
 
 def _check_inline_wizard_keyboards() -> None:
+    from handlers.wizard import _twitch_link_offer_keyboard
+
     for loc in SUPPORTED_LOCALES:
         cases = [
             ("alert_type_keyboard", alert_type_keyboard(loc)),
@@ -200,6 +202,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("watch_mature", watch_mature_keyboard(loc)),
             ("watch_tags", watch_tags_keyboard(loc)),
             ("watch_save", watch_save_keyboard(loc)),
+            ("twitch_link_offer", _twitch_link_offer_keyboard(loc, "shroud")),
         ]
         for name, markup in cases:
             assert markup_has_escape_hatch(markup), (
@@ -985,6 +988,62 @@ async def _scenario_share_alert_offer(db) -> None:
     assert len(db.get_subscriptions_by_owner(stranger)) == 2
 
 
+async def _scenario_twitch_link_wizard_offer(db) -> None:
+    """§12 Twitch URL in DM outside wizard — offer create; decline; accept starts wizard."""
+    from telegram.constants import ChatType
+    from telegram.ext import ConversationHandler
+
+    from handlers.wizard import (
+        offer_twitch_link_wizard,
+        on_twitch_link_decline,
+        on_twitch_link_start,
+    )
+
+    twitch = MagicMock()
+    twitch.parse_username = MagicMock(return_value="shroud")
+
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "https://www.twitch.tv/shroud", cap)
+    update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
+    ctx = _ctx(application)
+    await offer_twitch_link_wizard(update, ctx)
+    cap.assert_turn("twitch_link_offer")
+
+    update, query = _cb_update(_FREE_UID, "twitch_link:decline", cap)
+    await on_twitch_link_decline(update, ctx)
+    query.edit_message_text.assert_awaited()
+
+    # Mid-wizard: same URL must not offer again.
+    application, bot = _app(db, twitch=twitch)
+    conv = MagicMock()
+    key = (_FREE_UID, _FREE_UID)
+    conv._get_key = MagicMock(return_value=key)
+    conv._conversations = {key: 0}
+    application.bot_data["main_conv"] = conv
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "https://twitch.tv/shroud", cap)
+    update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
+    ctx = _ctx(application)
+    await offer_twitch_link_wizard(update, ctx)
+    update.effective_message.reply_text.assert_not_awaited()
+
+    # Accept → alert-type step + pending channel for prefill.
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "twitch_link:start:shroud", cap)
+    update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
+    ctx = _ctx(application)
+    with patch("handlers.wizard._pulse_wizard_keyboard", new=AsyncMock()):
+        state = await on_twitch_link_start(update, ctx)
+    assert state != ConversationHandler.END
+    assert ctx.user_data.get("pending_twitch_channel") == "shroud"
+    cap.assert_turn("twitch_link_wizard_started")
+
+
 async def _scenario_subscriptions_list_pages(db) -> None:
     """§4 list pagination — long list yields pages; flip keeps working."""
     from handlers.subscriptions import list_subscriptions, on_list_page
@@ -1117,6 +1176,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_subscriptions_edit_type_copy(db)
         await _scenario_subscriptions_delete(db)
         await _scenario_share_alert_offer(db)
+        await _scenario_twitch_link_wizard_offer(db)
         await _scenario_subscriptions_list_pages(db)
         await _scenario_schedule_deep(db)
         await _scenario_schedule_publish_chain(db)

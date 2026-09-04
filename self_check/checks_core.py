@@ -1013,6 +1013,10 @@ def check_core() -> None:
             feature=tr("premium_feat_alert_types", loc),
         )
         assert tr("share_declined", loc)
+        assert tr("twitch_link_offer", loc, username="x")
+        assert tr("twitch_link_start", loc)
+        assert tr("twitch_link_decline", loc)
+        assert tr("twitch_link_declined", loc)
         assert tr("share_invalid", loc)
         assert tr("beta_feat_share_alerts", loc)
         assert tr("beta_feat_share_alerts_desc", loc)
