@@ -276,7 +276,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 
 Репозиторий на сервере: `/opt/twitch-telegram-bot` (рядом лежит `.env`).
 
-При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, проверка `/health`, cron ночного pg-backup и (при `AIVEN_DATABASE_URL`) DR-sync дампа в Aiven в 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: build образа при ещё работающем боте, recreate, проверка `/health`. Если health не поднялся — откат на предыдущий image id (workflow всё равно red, но старый бот снова отвечает). Также cron ночного pg-backup и (при `AIVEN_DATABASE_URL`) DR-sync дампа в Aiven в 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 

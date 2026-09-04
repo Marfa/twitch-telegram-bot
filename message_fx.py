@@ -14,7 +14,6 @@ import html as html_lib
 import logging
 import random
 import re
-import weakref
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
@@ -32,8 +31,7 @@ _MAX_STEPS = 10
 _STEP_DELAY_S = 0.035
 _TAG_RE = re.compile(r"<[^>]+>")
 
-# Per-bot draft preference. Prefer WeakKeyDictionary; fall back to id() map.
-_draft_enabled: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+# ExtBot is not weak-referenceable — key prefs by id(bot) only (one bot per process).
 _draft_by_id: dict[int, Callable[[int], bool] | None] = {}
 _extbot_wrapped = False
 _extbot_original_send = None
@@ -156,9 +154,7 @@ def _extract_send_args(
 
 
 def _draft_on_for(bot, chat_id: object) -> bool:
-    draft_enabled = _draft_enabled.get(bot)
-    if draft_enabled is None and id(bot) in _draft_by_id:
-        draft_enabled = _draft_by_id.get(id(bot))
+    draft_enabled = _draft_by_id.get(id(bot))
     if draft_enabled is None:
         return True
     try:
@@ -195,10 +191,7 @@ async def _fx_send(bot, original, args: tuple, kwargs: dict):
 
 
 def _remember_draft_pref(bot, draft_enabled: Callable[[int], bool] | None) -> None:
-    try:
-        _draft_enabled[bot] = draft_enabled
-    except TypeError:
-        _draft_by_id[id(bot)] = draft_enabled
+    _draft_by_id[id(bot)] = draft_enabled
 
 
 def _wrap_extbot_class() -> None:

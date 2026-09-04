@@ -70,6 +70,20 @@ wait_db() {
 
 docker compose -f "$COMPOSE_FILE" up -d db
 wait_db
+
+# Snapshot the running bot image so a bad release can roll back.
+BOT_CTR="$(docker compose -f "$COMPOSE_FILE" ps -q bot 2>/dev/null || true)"
+PREV_IMAGE_ID=""
+BOT_IMAGE_REF="twitch-telegram-bot-bot:latest"
+if [[ -n "${BOT_CTR}" ]]; then
+  PREV_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$BOT_CTR" 2>/dev/null || true)"
+  BOT_IMAGE_REF="$(docker inspect -f '{{.Config.Image}}' "$BOT_CTR" 2>/dev/null || echo "$BOT_IMAGE_REF")"
+  case "$BOT_IMAGE_REF" in
+    *:*) ;;
+    *) BOT_IMAGE_REF="${BOT_IMAGE_REF}:latest" ;;
+  esac
+fi
+
 docker compose -f "$COMPOSE_FILE" build bot
 docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate --remove-orphans bot
 
@@ -97,21 +111,46 @@ EOF
   chmod 644 /etc/cron.d/twitch-telegram-bot-pg-sync-aiven
 fi
 
-# Wait briefly for health
-for _ in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
-    echo "health: ok"
-    if [[ -f scripts/migrate-import-template.py ]]; then
-      echo "migration: running import/sync template update..."
-      docker compose -f "$COMPOSE_FILE" exec -T bot python scripts/migrate-import-template.py
+wait_bot_health() {
+  local i
+  for i in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
+      return 0
     fi
-    docker compose -f "$COMPOSE_FILE" ps
-    exit 0
+    sleep 2
+  done
+  return 1
+}
+
+post_health_ok() {
+  echo "health: ok"
+  if [[ -f scripts/migrate-import-template.py ]]; then
+    echo "migration: running import/sync template update..."
+    docker compose -f "$COMPOSE_FILE" exec -T bot python scripts/migrate-import-template.py
   fi
-  sleep 2
-done
+  docker compose -f "$COMPOSE_FILE" ps
+}
+
+if wait_bot_health; then
+  post_health_ok
+  exit 0
+fi
 
 echo "WARNING: /health did not become ready in time" >&2
 docker compose -f "$COMPOSE_FILE" ps
 docker compose -f "$COMPOSE_FILE" logs --tail=80 bot || true
+
+if [[ -n "$PREV_IMAGE_ID" ]]; then
+  echo "ROLLBACK: restoring previous image $PREV_IMAGE_ID as $BOT_IMAGE_REF" >&2
+  docker tag "$PREV_IMAGE_ID" "$BOT_IMAGE_REF"
+  docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate bot
+  if wait_bot_health; then
+    echo "ROLLBACK: previous image is healthy again" >&2
+    docker compose -f "$COMPOSE_FILE" ps
+    exit 1
+  fi
+  echo "ROLLBACK: previous image also failed health" >&2
+  docker compose -f "$COMPOSE_FILE" logs --tail=40 bot || true
+fi
+
 exit 1

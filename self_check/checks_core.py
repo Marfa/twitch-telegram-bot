@@ -1204,8 +1204,17 @@ def check_core() -> None:
     object.__setattr__(
         frozen, "send_message_draft", AsyncMock(side_effect=RuntimeError("no draft"))
     )
-    # Must not raise — falls through to ExtBot class wrap.
-    install_message_fx(frozen)
+    # ExtBot is not weak-referenceable; prefs must use id(bot), not WeakKeyDictionary.
+    class _NoWeak:
+        __slots__ = ()
+
+    no_weak = _NoWeak()
+    from message_fx import _draft_on_for, _remember_draft_pref
+
+    _remember_draft_pref(no_weak, lambda _uid: False)
+    assert _draft_on_for(no_weak, 42) is False
+    _remember_draft_pref(no_weak, lambda _uid: True)
+    assert _draft_on_for(no_weak, 42) is True
 
     bot = MagicMock()
     original_send = AsyncMock(return_value="ok")

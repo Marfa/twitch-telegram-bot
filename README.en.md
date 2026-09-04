@@ -276,7 +276,7 @@ Category: {game}
 
 Server checkout: `/opt/twitch-telegram-bot` (with `.env` beside it).
 
-On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: `docker compose -f compose.vps.yml up -d --build`, `/health` check, nightly pg-backup cron, and (if `AIVEN_DATABASE_URL` is set) DR sync of that dump into Aiven at 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: build while the old bot still runs, recreate, `/health` check. If health fails, roll back to the previous image id (the workflow stays red, but the old bot answers again). Also nightly pg-backup cron, and (if `AIVEN_DATABASE_URL` is set) DR sync of that dump into Aiven at 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
