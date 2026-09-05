@@ -865,7 +865,26 @@ def advanced_options_keyboard(
     show_buttons: bool = False,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
+    from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER
+
     locked = frozenset(locked or ())
+    want = {
+        "image": want_image,
+        "strip": want_strip,
+        "ignore": want_ignore,
+        "delay": want_delay,
+        "repeat": want_repeat,
+        "delete": want_delete,
+        "buttons": want_buttons,
+        "chat": want_chat,
+        "preview": want_preview,
+    }
+    show = {
+        "delay": show_delay,
+        "repeat": show_repeat,
+        "buttons": show_buttons,
+        "preview": show_preview,
+    }
 
     def _row(flag: bool, label_key: str, toggle: str) -> list[InlineKeyboardButton]:
         mark = "✅ " if flag else "⬜️ "
@@ -879,21 +898,11 @@ def advanced_options_keyboard(
             )
         ]
 
-    rows: list[list[InlineKeyboardButton]] = [
-        _row(want_image, "advanced_options_image", "image"),
-        _row(want_strip, "advanced_options_strip", "strip"),
-        _row(want_ignore, "advanced_options_ignore", "ignore"),
-    ]
-    if show_delay:
-        rows.append(_row(want_delay, "advanced_options_delay", "delay"))
-    if show_repeat:
-        rows.append(_row(want_repeat, "advanced_options_repeat", "repeat"))
-    rows.append(_row(want_delete, "advanced_options_delete", "delete"))
-    if show_buttons:
-        rows.append(_row(want_buttons, "advanced_options_buttons", "buttons"))
-    rows.append(_row(want_chat, "advanced_options_chat", "chat"))
-    if show_preview:
-        rows.append(_row(want_preview, "advanced_options_preview", "preview"))
+    rows: list[list[InlineKeyboardButton]] = []
+    for sid in ALERT_SETTING_ORDER:
+        if sid in show and not show[sid]:
+            continue
+        rows.append(_row(want[sid], ADVOPT_LABEL_KEY[sid], sid))
     rows.append(
         [
             InlineKeyboardButton(
@@ -1974,117 +1983,145 @@ def edit_options_keyboard(
     show_advanced: bool = True,
     show_custom_buttons: bool = False,
 ) -> InlineKeyboardMarkup:
-    # Shared Extras block order: image → strip → ignore → delay → repeat →
-    # delete → custom buttons → chat. Edit-only: template, image remove, preview,
-    # schedule, dest, delete sub-options, type/copy.
+    # Shared block order: alert_settings.ALERT_SETTING_ORDER. Edit-only around it:
+    # template, image_del, delete_fail/other, schedule, dest, type/copy.
+    from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER, EDIT_FIELD
+
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
-        [
-            InlineKeyboardButton(
-                t("advanced_options_image", lang),
-                callback_data=f"edit_f:{sub_id}:image",
-            )
-        ],
     ]
-    if has_image:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("edit_image_delete", lang),
-                    callback_data=f"edit_f:{sub_id}:image_del",
-                )
-            ]
-        )
-    strip_mark = "✅ " if strip_name_mentions else "⬜️ "
-    rows.append(
-        [
-            InlineKeyboardButton(
-                strip_mark + t("advanced_options_strip", lang),
-                callback_data=f"edit_f:{sub_id}:strip",
-            )
-        ]
-    )
-    if show_advanced:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("advanced_options_ignore", lang),
-                    callback_data=f"edit_f:{sub_id}:ignore_keywords",
-                )
-            ]
-        )
-    if show_advanced and not is_upcoming:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("advanced_options_delay", lang),
-                    callback_data=f"edit_f:{sub_id}:delay",
-                )
-            ]
-        )
-        if not notify_on_category_change and not notify_on_end:
+    for sid in ALERT_SETTING_ORDER:
+        field = EDIT_FIELD[sid]
+        if sid == "image":
             rows.append(
                 [
                     InlineKeyboardButton(
-                        t("advanced_options_repeat", lang),
-                        callback_data=f"edit_f:{sub_id}:repeat",
+                        t(ADVOPT_LABEL_KEY[sid], lang),
+                        callback_data=f"edit_f:{sub_id}:{field}",
                     )
                 ]
             )
-    if show_advanced and dest_type != "dm":
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("advanced_options_delete", lang),
-                    callback_data=f"edit_f:{sub_id}:delete_old",
-                )
-            ]
-        )
-        if delete_previous:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        t("edit_delete_fail_notify", lang),
-                        callback_data=f"edit_f:{sub_id}:delete_fail",
-                    )
-                ]
-            )
-            if notify_on_category_change:
+            if has_image:
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            t("edit_delete_other", lang),
-                            callback_data=f"edit_f:{sub_id}:delete_other",
+                            t("edit_image_delete", lang),
+                            callback_data=f"edit_f:{sub_id}:image_del",
                         )
                     ]
                 )
-    if show_advanced and show_custom_buttons:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("advanced_options_buttons", lang),
-                    callback_data=f"edit_f:{sub_id}:custom_buttons",
+            continue
+        if sid == "strip":
+            strip_mark = "✅ " if strip_name_mentions else "⬜️ "
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        strip_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                        callback_data=f"edit_f:{sub_id}:{field}",
+                    )
+                ]
+            )
+            continue
+        if sid == "ignore":
+            if show_advanced:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
                 )
-            ]
-        )
-    if show_advanced:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("advanced_options_chat", lang),
-                    callback_data=f"edit_f:{sub_id}:chat_button",
+            continue
+        if sid == "delay":
+            if show_advanced and not is_upcoming:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
                 )
-            ]
-        )
-    if show_link_preview:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("advanced_options_preview", lang),
-                    callback_data=f"edit_f:{sub_id}:preview",
+            continue
+        if sid == "repeat":
+            if (
+                show_advanced
+                and not is_upcoming
+                and not notify_on_category_change
+                and not notify_on_end
+            ):
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
                 )
-            ]
-        )
+            continue
+        if sid == "delete":
+            if show_advanced and dest_type != "dm":
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+                if delete_previous:
+                    rows.append(
+                        [
+                            InlineKeyboardButton(
+                                t("edit_delete_fail_notify", lang),
+                                callback_data=f"edit_f:{sub_id}:delete_fail",
+                            )
+                        ]
+                    )
+                    if notify_on_category_change:
+                        rows.append(
+                            [
+                                InlineKeyboardButton(
+                                    t("edit_delete_other", lang),
+                                    callback_data=f"edit_f:{sub_id}:delete_other",
+                                )
+                            ]
+                        )
+            continue
+        if sid == "buttons":
+            if show_advanced and show_custom_buttons:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
+        if sid == "chat":
+            if show_advanced:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
+        if sid == "preview":
+            if show_link_preview:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
     if schedule_reminder_configured:
         rows.append(
             [
