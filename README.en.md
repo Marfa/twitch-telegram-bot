@@ -339,7 +339,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `PREMIUM_TWITCH_LOGIN` | Twitch login for free Premium via sub (default `marfapr`) |
 | `REFERRAL_COMMISSION_PERCENT` | Partner commission on Stars Premium, % (default 10) |
 | `REFERRAL_WITHDRAW_MIN_STARS` | Minimum withdrawal request, Stars (default 500) |
-| `PUBLIC_BASE_URL` | Public HTTPS origin: OAuth (`…/oauth/twitch/callback`) and placeholder docs (`…/placeholders`). Prod: `https://bot.themarfa.name` |
+| `PUBLIC_BASE_URL` | Public HTTPS origin: OAuth (`…/oauth/twitch/callback`), placeholders (`…/placeholders`), [user guide](https://bot.themarfa.name/guide?lang=en) (`…/guide`). Prod: `https://bot.themarfa.name` |
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
@@ -383,7 +383,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health`, `/placeholders`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 

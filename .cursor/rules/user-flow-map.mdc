@@ -21,9 +21,10 @@ alwaysApply: false
 
 1. Обновить `docs/user-flow-map.ru.md`: тексты, кнопки, переходы, mermaid при необходимости. Указать дату изменения карты.
 2. Обновить **`README.md` и `README.en.md`** — feature table и затронутые разделы ([`readme.mdc`](readme.mdc)).
-3. **Спросить пользователя** — добавить сценарий в `checks_flow_nav.py` для §N? ([`flow-nav-scenarios.mdc`](flow-nav-scenarios.mdc)).
-4. Опционально: если у maintainer настроен `OBSIDIAN_USER_FLOW_MAP` (абсолютный путь к vault-копии), скопировать туда ту же версию с заменой файла. Без переменной — шаг пропустить.
-5. Включить обновление карты и README в тот же коммит, что и UX-изменения (если пользователь просит коммит).
+3. Обновить **`webapp/guide/ru.html` и `webapp/guide/en.html`**, если менялись пользовательские фичи ([`user-guide.mdc`](user-guide.mdc)).
+4. **Спросить пользователя** — добавить сценарий в `checks_flow_nav.py` для §N? ([`flow-nav-scenarios.mdc`](flow-nav-scenarios.mdc)).
+5. Опционально: если у maintainer настроен `OBSIDIAN_USER_FLOW_MAP` (абсолютный путь к vault-копии), скопировать туда ту же версию с заменой файла. Без переменной — шаг пропустить.
+6. Включить обновление карты и README в тот же коммит, что и UX-изменения (если пользователь просит коммит).
 
 Authority: `i18n.py` + `bot.py` — канон; карта — derived view ([`docs/authority-map.md`](docs/authority-map.md)).
 

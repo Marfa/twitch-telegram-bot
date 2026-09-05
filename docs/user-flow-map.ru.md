@@ -433,7 +433,11 @@ flowchart TD
 
 ## 10. ❓ Помощь (`/feedback`)
 
-Текст: контакты / GitHub Issues / донаты / ваш user id. Reply: главное меню. END.
+Текст: трудности / оплата / идеи → @immarfa + ваш user id; ссылки Twitch / Telegram / сайт; предложение сначала открыть инструкцию.
+
+Inline под сообщением: **`Справка`** → `PUBLIC_BASE_URL/guide?lang=ru` (прод: https://bot.themarfa.name/guide). Если `PUBLIC_BASE_URL` пуст — Reply главное меню (без URL-кнопки).
+
+Reply-клавиатура главного меню не сбрасывается (сообщение с Inline). END.
 
 ---
 

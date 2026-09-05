@@ -15,6 +15,7 @@ Canonical sources of truth for humans and AI agents. When docs or rules conflict
 | Env contract | `.env.example` | README Quick Start | |
 | Deploy topology | `compose.yml`, `compose.vps.yml` | VPS scripts in `scripts/` | |
 | Onboarding | `README.md`, `README.en.md` | — | Update both when product surface changes |
+| End-user guide (public HTML) | `webapp/guide/ru.html`, `webapp/guide/en.html` | served as `/guide` | Update when user-facing features change (`.cursor/rules/user-guide.mdc`) |
 | Agent execution hints | `.cursor/rules/*.mdc` | — | Cursor adapter; not runtime authority |
 | Characterization checks | `self_check/` (`python -m self_check`) | — | CI: `.github/workflows/self-check.yml` |
 | Locale strings | `locales/en.json`, `locales/ru.json` | `i18n.py` loader + keyboards | |
@@ -39,7 +40,7 @@ Add a GA feature registry only if you introduce gradual rollout or automated dep
 | From | Must align with |
 |---|---|
 | `beta/manifest.json` → `premium_feature_id` | `premium.FEATURE_IDS` (+ hidden from à la carte via `purchasable_feature_ids()` until GA) |
-| User-facing feature / menu change | `README.md` + `README.en.md` feature tables; `.cursor/rules/readme.mdc` |
+| User-facing feature / menu change | `README.md` + `README.en.md` feature tables; `.cursor/rules/readme.mdc`; `webapp/guide/*.html` (`.cursor/rules/user-guide.mdc`) |
 | `docs/user-flow-map.ru.md` | `i18n.py` (ru) + `bot.py` handlers |
 | `.cursor/rules/active-subscription-gate.mdc` | `premium.may_enable_subscription()` callers |
 | `.env.example` | `config.py` env reads |

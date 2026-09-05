@@ -1,0 +1,32 @@
+---
+description: Keep the public user guide in sync when user-facing features change
+globs: bot.py,i18n.py,premium_handlers.py,handlers/**,locales/**,webapp/guide/**,health.py,README.md,README.en.md
+alwaysApply: false
+---
+
+# User guide (`/guide`)
+
+Files: [`webapp/guide/ru.html`](webapp/guide/ru.html), [`webapp/guide/en.html`](webapp/guide/en.html)  
+Served at `PUBLIC_BASE_URL/guide?lang=ru|en` (prod: https://bot.themarfa.name/guide).  
+Entry from bot: **❓ Помощь** / `/feedback` → inline **Справка** / **Guide**.
+
+## When to update
+
+If **user-facing capabilities** change — anything a regular user sees or can do (not admin-only):
+
+- new / removed / renamed menu buttons or commands;
+- wizard steps, alert types, destinations, Premium gates or free limits;
+- import / sync / schedule / watch / chat / history / cart behavior that users rely on;
+- Help / feedback copy that points at the guide.
+
+## What to do
+
+1. Update **both** `webapp/guide/ru.html` and `webapp/guide/en.html` (TOC + matching sections). Keep beginner-friendly wording.
+2. If menu paths changed — also [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) and README ([`user-flow-map.mdc`](user-flow-map.mdc), [`readme.mdc`](readme.mdc)).
+3. Include guide HTML in the **same commit** as the feature change (when the user asks to commit).
+
+## Skip
+
+Internal refactors, admin/backoffice-only screens, analytics, deploy, bugfixes with no UX/copy change.
+
+Authority: code + `locales/` — runtime; guide — onboarding for end users (derived, must not drift).

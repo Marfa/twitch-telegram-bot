@@ -1098,12 +1098,36 @@ def check_core() -> None:
         assert "Current format" in edit_tpl or "Текущий формат" in edit_tpl
         assert "How it will look" in edit_tpl or "Как будет выглядеть" in edit_tpl
         assert "Очистка названия" not in edit_tpl and "Clean title" not in edit_tpl
-        feedback = tr("feedback", loc, github="https://example.com", user_id=42)
+        feedback = tr("feedback", loc, user_id=42)
         assert "42" in feedback
         assert "<code>42</code>" in feedback
+        assert "@immarfa" in feedback
         assert "bot_version" not in feedback
         assert "Версия бота" not in feedback
         assert "Bot version" not in feedback
+        assert "GitHub Issues" not in feedback
+        from unittest.mock import patch
+
+        from i18n import guide_keyboard, guide_url
+
+        assert btn("guide", loc)
+        with patch("config.PUBLIC_BASE_URL", "https://example.com"):
+            assert "guide?lang=" in guide_url(loc)
+            gkb = guide_keyboard(loc)
+            assert gkb is not None
+            assert gkb.inline_keyboard[0][0].url.endswith(f"guide?lang={loc}")
+        with patch("config.PUBLIC_BASE_URL", ""):
+            assert guide_url(loc) == ""
+            assert guide_keyboard(loc) is None
+
+    from health import _guide_page
+
+    for guide_loc in ("ru", "en"):
+        guide_html = _guide_page(guide_loc)
+        assert guide_html is not None
+        assert b"<nav" in guide_html
+        assert b"twitch2telegram_bot" in guide_html
+    assert _guide_page("xx") is not None  # falls back to default locale
 
     from i18n import welcome_demo_keyboard
 

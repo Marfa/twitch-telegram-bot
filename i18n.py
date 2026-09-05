@@ -88,6 +88,24 @@ def btn(key: str, lang: str) -> str:
     return t(f"btn_{key}", lang)
 
 
+def guide_url(lang: str) -> str:
+    from config import PUBLIC_BASE_URL
+
+    if not PUBLIC_BASE_URL:
+        return ""
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    return f"{PUBLIC_BASE_URL}/guide?lang={loc}"
+
+
+def guide_keyboard(lang: str) -> InlineKeyboardMarkup | None:
+    url = guide_url(lang)
+    if not url:
+        return None
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(btn("guide", lang), url=url)]]
+    )
+
+
 def all_btn_texts(key: str) -> set[str]:
     return {btn(key, loc) for loc in SUPPORTED_LOCALES}
 

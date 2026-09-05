@@ -21,7 +21,7 @@ alwaysApply: false
 
 1. Обновить `README.md` (ru): feature table и затронутые разделы.
 2. Зеркально обновить `README.en.md` — те же секции и смысл, не дословный машинный перевод.
-3. Если менялись пользовательские пути — параллельно [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) ([`user-flow-map.mdc`](user-flow-map.mdc)).
+3. Если менялись пользовательские пути — параллельно [`docs/user-flow-map.ru.md`](docs/user-flow-map.ru.md) ([`user-flow-map.mdc`](user-flow-map.mdc)) и [`webapp/guide/*.html`](webapp/guide/) ([`user-guide.mdc`](user-guide.mdc)).
 4. Включить README в **тот же коммит**, что и код/locales (если пользователь просит коммит).
 5. Блок Cursor + донаты — только по [`commit.mdc`](commit.mdc) (Marfa-репо).
 

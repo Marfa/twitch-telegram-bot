@@ -1094,7 +1094,13 @@ async def successful_premium_payment(
             },
         )
         await msg.reply_text(
-            t("premium_channel_pay_done", lang, channel=display or parsed.twitch_login)
+            t(
+                "premium_channel_pay_done",
+                lang,
+                channel=display or parsed.twitch_login,
+                user_id=parsed.user_id,
+            ),
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -1119,7 +1125,10 @@ async def successful_premium_payment(
             **attr,
         },
     )
-    await msg.reply_text(t("premium_pay_done", lang))
+    await msg.reply_text(
+        t("premium_pay_done", lang, user_id=parsed.user_id),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None:

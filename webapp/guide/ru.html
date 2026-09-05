@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Инструкция — Twitch → Telegram бот</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem 3rem; line-height: 1.55; color: #1a1a1a; }
+    h1 { font-size: 1.6rem; line-height: 1.25; }
+    h2 { font-size: 1.25rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.25rem; }
+    nav { background: #f6f6f6; padding: 1rem 1.1rem; border-radius: 8px; margin: 1.25rem 0; }
+    nav ol { margin: 0.4rem 0 0; padding-left: 1.25rem; }
+    nav a { color: #0b57d0; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    table { border-collapse: collapse; width: 100%; margin: 0.75rem 0 1rem; font-size: 0.95rem; }
+    th, td { border: 1px solid #ddd; padding: 0.45rem 0.55rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+    code { background: #f0f0f0; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+    ul, ol { padding-left: 1.3rem; }
+    .note { background: #fff8e6; border-left: 3px solid #e6a800; padding: 0.65rem 0.85rem; margin: 1rem 0; }
+    .star { color: #b8860b; }
+    footer { margin-top: 2.5rem; font-size: 0.9rem; color: #555; }
+    a { color: #0b57d0; }
+  </style>
+</head>
+<body>
+  <h1>Инструкция по боту Twitch → Telegram</h1>
+  <p>Бот присылает уведомления о стримах на Twitch туда, куда вы укажете: в личку, канал или группу. Ниже — как пользоваться всеми обычными функциями. Настройка делается <strong>только в личном чате</strong> с ботом.</p>
+  <p>Готовый бот: <a href="https://t.me/twitch2telegram_bot">@twitch2telegram_bot</a></p>
+
+  <nav aria-label="Содержание">
+    <strong>Содержание</strong>
+    <ol>
+      <li><a href="#start">Первый запуск</a></li>
+      <li><a href="#menu">Главное меню</a></li>
+      <li><a href="#new">Новая подписка</a></li>
+      <li><a href="#import">Импорт из Twitch</a></li>
+      <li><a href="#subs">Мои подписки</a></li>
+      <li><a href="#history">История оповещений</a></li>
+      <li><a href="#other">Прочее</a></li>
+      <li><a href="#settings">Настройки и Премиум</a></li>
+      <li><a href="#commands">Команды</a></li>
+      <li><a href="#limits">Лимиты бесплатного плана</a></li>
+      <li><a href="#help">Помощь</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="start">1. Первый запуск</h2>
+  <ol>
+    <li>Откройте бота и нажмите <strong>Start</strong> или отправьте <code>/start</code>.</li>
+    <li>Выберите язык: русский или English (потом можно сменить в настройках).</li>
+    <li>Появится приветствие и главное меню с кнопками.</li>
+  </ol>
+  <p>При первом запуске бот может создать демо-оповещение на случайный премиум-канал — чтобы сразу увидеть, как выглядят уведомления. Его можно открыть или удалить кнопками под сообщением.</p>
+  <div class="note">Если прислать боту ссылку на канал Twitch в личку (когда мастер не открыт), он предложит создать оповещение на этот канал.</div>
+
+  <h2 id="menu">2. Главное меню</h2>
+  <table>
+    <thead><tr><th>Кнопка</th><th>Зачем</th></tr></thead>
+    <tbody>
+      <tr><td>➕ Новая подписка</td><td>Создать оповещение на стримера</td></tr>
+      <tr><td>⬇️ Импорт подписок</td><td>Подтянуть фолловы с Twitch</td></tr>
+      <tr><td>📋 Мои подписки</td><td>Список, вкл/выкл, правка, удаление</td></tr>
+      <tr><td>📜 История оповещений</td><td>Что уже отправил бот</td></tr>
+      <tr><td>📦 Прочее</td><td>ЛС Twitch, расписание, «Что посмотреть?», чат</td></tr>
+      <tr><td>⚙️ Настройки</td><td>Премиум, sync, язык, партнёрка и др.</td></tr>
+      <tr><td>❓ Помощь</td><td>Контакты и эта инструкция</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="new">3. Новая подписка</h2>
+  <p>Нажмите <strong>➕ Новая подписка</strong>. Сначала выберите тип оповещения:</p>
+  <table>
+    <thead><tr><th>Тип</th><th>Когда придёт сообщение</th></tr></thead>
+    <tbody>
+      <tr><td>Начало стрима</td><td>Канал вышел в эфир (доступно всем)</td></tr>
+      <tr><td>Смена категории</td><td>Стример сменил игру/категорию <span class="star">⭐ Premium</span></td></tr>
+      <tr><td>Предстоящий стрим</td><td>Напоминание за N минут по официальному расписанию Twitch <span class="star">⭐</span></td></tr>
+      <tr><td>Окончание стрима</td><td>Эфир закончился <span class="star">⭐</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Шаги мастера (кратко)</h3>
+  <ol>
+    <li><strong>Канал</strong> — логин, ссылка twitch.tv или m.twitch.tv. Если оповещение на этот канал уже есть — можно перейти к редактированию или создать ещё одно.</li>
+    <li><strong>Текст</strong> — шаблон сообщения. В фигурных скобках подставляются данные стрима, например <code>{username}</code>, <code>{game}</code>, <code>{name}</code>. Полный список: <a href="/placeholders?lang=ru">плейсхолдеры</a>.</li>
+    <li><strong>Дополнительно</strong> — отметьте нужное: картинка, очистка названия (убирает @стримеров и !команды из заголовка), игнор слов ⭐, отложенная отправка ⭐, заглушка повторов ⭐, удаление старых сообщений ⭐, кнопка чата, превью ссылок.</li>
+    <li>Дальше бот задаст только отмеченные шаги (картинка, минуты задержки и т.д.).</li>
+    <li><strong>Куда слать</strong> — личка или канал/группа. Для канала/группы добавьте бота и подтвердите чат.</li>
+  </ol>
+  <p>На каждом шаге есть <strong>« Назад</strong>, <strong>Отменить</strong> и возврат в меню. В конце — «Настройка завершена» и тестовое сообщение в выбранный чат.</p>
+  <div class="note">Бесплатно можно держать включёнными не больше <strong>5</strong> оповещений. Шестое создастся на паузе — включите после апгрейда или выключите другое. Канал marfapr и оплаченные «премиум-каналы» стримеров в этот лимит не входят.</div>
+
+  <h2 id="import">4. Импорт из Twitch</h2>
+  <p><strong>⬇️ Импорт подписок</strong> → авторизация на Twitch → выберите режим:</p>
+  <ul>
+    <li><strong>Одноразовый импорт</strong> — добавить фолловы сейчас, токен не сохраняется.</li>
+    <li><strong>Синхронизация</strong> <span class="star">⭐</span> — раз в N дней бот добавит новые фолловы и уберёт отфолловленные импорты. Ручные и отредактированные подписки не трогает без спроса. Управление периодом — в настройках.</li>
+  </ul>
+
+  <h2 id="subs">5. Мои подписки</h2>
+  <p><strong>📋 Мои подписки</strong> — список с страницами. У каждой подписки:</p>
+  <ul>
+    <li>включить / выключить;</li>
+    <li>редактировать (канал, текст, опции, куда слать);</li>
+    <li>удалить;</li>
+    <li>поделиться ссылкой на оповещение (если доступно в бета-режиме).</li>
+  </ul>
+  <p>Внизу меню: <strong>корзина</strong> (восстановление удалённых: 10 дней бесплатно, 30 — Premium) и <strong>приостановить все оповещения</strong>.</p>
+
+  <h2 id="history">6. История оповещений</h2>
+  <p><strong>📜 История оповещений</strong> — что бот уже отправил вам. Бесплатно хранится 7 дней, с Premium — 60. Можно отметить просмотренным.</p>
+
+  <h2 id="other">7. Прочее</h2>
+  <h3>💬 Оповещения об ЛС</h3>
+  <p>Уведомления о входящих whisper (личных сообщениях) на Twitch. При первом включении нужна авторизация Twitch.</p>
+
+  <h3>📅 Управление расписанием</h3>
+  <p>Собрать недельное расписание стримов или поправить слоты на один день, указать часовой пояс. Публикация слотов на страницу Twitch — <span class="star">⭐ Premium</span>.</p>
+
+  <h3>🎲 Что посмотреть?</h3>
+  <p>Подбор случайных live-стримов по вашим фильтрам (категории, теги, зрители, язык, 18+). Если live нет — недавние VOD. Можно сохранить фильтр и «ловить» новые стримы по нему. Есть режим «Мне повезёт».</p>
+
+  <h3>💬 Чат</h3>
+  <p>Мини-приложение: смотреть и писать в чат стрима Twitch. Бесплатно — чтение и до 20 сообщений в день; безлимит — Premium.</p>
+
+  <h2 id="settings">8. Настройки и Премиум</h2>
+  <p><strong>⚙️ Настройки</strong> обычно включают:</p>
+  <ul>
+    <li><strong>⭐ Премиум</strong> — триал 7 дней (один раз), подписка Stars (месяц / год / навсегда), оплата отдельных функций, проверка саба Twitch на канале разработчика, премиум-канал для стримеров.</li>
+    <li><strong>Синхронизация</strong> — период auto-sync фолловов или отключение.</li>
+    <li><strong>Системные уведомления</strong> — обновления бота, доступность, прочие рассылки; статус Twitch.</li>
+    <li><strong>Язык</strong>, <strong>продвинутый режим</strong>, <strong>бета-режим</strong> (ранний доступ к новым фичам).</li>
+    <li><strong>Партнёрка</strong> — реферальная ссылка и процент от Stars Premium приглашённых.</li>
+    <li><strong>Игнорируемые слова</strong> — глобальный список для оповещений.</li>
+  </ul>
+  <p>После успешной оплаты Stars бот пишет: «Премиум активирован. Спасибо!» и ниже — как связаться с разработчиком @immarfa, указав свой ID.</p>
+
+  <h2 id="commands">9. Команды</h2>
+  <table>
+    <thead><tr><th>Команда</th><th>Действие</th></tr></thead>
+    <tbody>
+      <tr><td><code>/start</code></td><td>Главное меню</td></tr>
+      <tr><td><code>/help</code></td><td>Краткая справка по меню</td></tr>
+      <tr><td><code>/cancel</code></td><td>Отменить текущий мастер</td></tr>
+      <tr><td><code>/schedule</code></td><td>Расписание стримов</td></tr>
+      <tr><td><code>/feedback</code></td><td>Помощь и контакты</td></tr>
+      <tr><td><code>/settings</code></td><td>Настройки</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="limits">10. Лимиты бесплатного плана</h2>
+  <ul>
+    <li>До <strong>5 активных</strong> оповещений (остальные можно хранить на паузе).</li>
+    <li>Типы кроме «начало стрима» — Premium.</li>
+    <li>Продвинутые опции (игнор, задержка, повторы, удаление старых) — Premium.</li>
+    <li>История 7 дней, корзина 10 дней, чат с дневным лимитом сообщений.</li>
+  </ul>
+
+  <h2 id="help">11. Помощь</h2>
+  <p>В боте: кнопка <strong>❓ Помощь</strong> или <code>/feedback</code>. Если что-то не работает, вопросы по оплате или идея новой фичи — напишите разработчику <a href="https://t.me/immarfa">@immarfa</a> и укажите свой Telegram ID (бот показывает его в сообщении помощи).</p>
+  <p>Ссылки: <a href="https://www.twitch.tv/marfapr">Twitch</a> · <a href="https://t.me/themarfa">Telegram</a> · <a href="https://blog.themarfa.name/">Сайт</a></p>
+
+  <footer>
+    Бот: <a href="https://t.me/twitch2telegram_bot">@twitch2telegram_bot</a>
+  </footer>
+</body>
+</html>

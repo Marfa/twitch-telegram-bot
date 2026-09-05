@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guide — Twitch → Telegram bot</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem 3rem; line-height: 1.55; color: #1a1a1a; }
+    h1 { font-size: 1.6rem; line-height: 1.25; }
+    h2 { font-size: 1.25rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.25rem; }
+    nav { background: #f6f6f6; padding: 1rem 1.1rem; border-radius: 8px; margin: 1.25rem 0; }
+    nav ol { margin: 0.4rem 0 0; padding-left: 1.25rem; }
+    nav a { color: #0b57d0; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    table { border-collapse: collapse; width: 100%; margin: 0.75rem 0 1rem; font-size: 0.95rem; }
+    th, td { border: 1px solid #ddd; padding: 0.45rem 0.55rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+    code { background: #f0f0f0; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+    ul, ol { padding-left: 1.3rem; }
+    .note { background: #fff8e6; border-left: 3px solid #e6a800; padding: 0.65rem 0.85rem; margin: 1rem 0; }
+    .star { color: #b8860b; }
+    footer { margin-top: 2.5rem; font-size: 0.9rem; color: #555; }
+    a { color: #0b57d0; }
+  </style>
+</head>
+<body>
+  <h1>Twitch → Telegram bot guide</h1>
+  <p>The bot sends Twitch stream alerts where you choose: DM, channel, or group. This page covers every everyday feature. Configure everything in a <strong>private chat</strong> with the bot.</p>
+  <p>Live bot: <a href="https://t.me/twitch2telegram_bot">@twitch2telegram_bot</a></p>
+
+  <nav aria-label="Table of contents">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#start">First launch</a></li>
+      <li><a href="#menu">Main menu</a></li>
+      <li><a href="#new">New subscription</a></li>
+      <li><a href="#import">Import from Twitch</a></li>
+      <li><a href="#subs">My subscriptions</a></li>
+      <li><a href="#history">Alert history</a></li>
+      <li><a href="#other">Other</a></li>
+      <li><a href="#settings">Settings &amp; Premium</a></li>
+      <li><a href="#commands">Commands</a></li>
+      <li><a href="#limits">Free-plan limits</a></li>
+      <li><a href="#help">Help</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="start">1. First launch</h2>
+  <ol>
+    <li>Open the bot and tap <strong>Start</strong> or send <code>/start</code>.</li>
+    <li>Pick a language: English or Russian (you can change it later in Settings).</li>
+    <li>You get a welcome message and the main menu buttons.</li>
+  </ol>
+  <p>On first launch the bot may create a demo alert for a random Premium channel so you can see how notifications look. You can open or delete it with the buttons under that message.</p>
+  <div class="note">If you send a Twitch channel link in DM while no wizard is open, the bot offers to create an alert for that channel.</div>
+
+  <h2 id="menu">2. Main menu</h2>
+  <table>
+    <thead><tr><th>Button</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>➕ New subscription</td><td>Create an alert for a streamer</td></tr>
+      <tr><td>⬇️ Import subscriptions</td><td>Pull follows from Twitch</td></tr>
+      <tr><td>📋 My subscriptions</td><td>List, toggle, edit, delete</td></tr>
+      <tr><td>📜 Alert history</td><td>What the bot already sent</td></tr>
+      <tr><td>📦 Other</td><td>Whispers, schedule, Watch, chat</td></tr>
+      <tr><td>⚙️ Settings</td><td>Premium, sync, language, partner, …</td></tr>
+      <tr><td>❓ Help</td><td>Contacts and this guide</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="new">3. New subscription</h2>
+  <p>Tap <strong>➕ New subscription</strong>. First choose an alert type:</p>
+  <table>
+    <thead><tr><th>Type</th><th>When you get a message</th></tr></thead>
+    <tbody>
+      <tr><td>Stream start</td><td>Channel goes live (everyone)</td></tr>
+      <tr><td>Category change</td><td>Streamer switches game/category <span class="star">⭐ Premium</span></td></tr>
+      <tr><td>Upcoming stream</td><td>Reminder N minutes before official Twitch schedule <span class="star">⭐</span></td></tr>
+      <tr><td>Stream end</td><td>Stream went offline <span class="star">⭐</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Wizard steps (short)</h3>
+  <ol>
+    <li><strong>Channel</strong> — login or twitch.tv / m.twitch.tv link. If you already have an alert for that channel, you can edit it or create another.</li>
+    <li><strong>Message</strong> — template with placeholders like <code>{username}</code>, <code>{game}</code>, <code>{name}</code>. Full list: <a href="/placeholders?lang=en">placeholders</a>.</li>
+    <li><strong>Extras</strong> — tick what you need: image, clean title (strips @streamers and !commands), ignore words ⭐, delayed send ⭐, repeat mute ⭐, delete previous messages ⭐, chat button, link preview.</li>
+    <li>The bot then asks only for the steps you ticked.</li>
+    <li><strong>Destination</strong> — DM or channel/group. For a channel/group, add the bot and confirm the chat.</li>
+  </ol>
+  <p>Every step has <strong>« Back</strong>, <strong>Cancel</strong>, and a way back to the menu. At the end you get “Setup complete” and a test message in the chosen chat.</p>
+  <div class="note">Free plan: at most <strong>5 active</strong> alerts. A 6th is created paused — enable after upgrade or pause another. marfapr and paid streamer Premium channels do not count toward that cap.</div>
+
+  <h2 id="import">4. Import from Twitch</h2>
+  <p><strong>⬇️ Import subscriptions</strong> → Twitch OAuth → pick a mode:</p>
+  <ul>
+    <li><strong>One-time import</strong> — add follows now; token is not stored.</li>
+    <li><strong>Sync</strong> <span class="star">⭐</span> — every N days add new follows and remove unfollowed imports. Manual/edited alerts are left alone unless you confirm. Period is managed in Settings.</li>
+  </ul>
+
+  <h2 id="subs">5. My subscriptions</h2>
+  <p><strong>📋 My subscriptions</strong> — paginated list. Per subscription:</p>
+  <ul>
+    <li>enable / disable;</li>
+    <li>edit (channel, text, options, destination);</li>
+    <li>delete;</li>
+    <li>share an alert link (when available in beta mode).</li>
+  </ul>
+  <p>Lower menu: <strong>cart</strong> (restore deleted: 10 days free, 30 Premium) and <strong>pause all alerts</strong>.</p>
+
+  <h2 id="history">6. Alert history</h2>
+  <p><strong>📜 Alert history</strong> — what the bot already sent. Kept 7 days free, 60 with Premium. You can mark items as viewed.</p>
+
+  <h2 id="other">7. Other</h2>
+  <h3>💬 Whisper alerts</h3>
+  <p>Notify you about incoming Twitch whispers. First enable requires Twitch OAuth.</p>
+
+  <h3>📅 Stream schedule</h3>
+  <p>Build a weekly schedule or fix slots for one day, set timezone. Publishing slots to the Twitch schedule page is <span class="star">⭐ Premium</span>.</p>
+
+  <h3>🎲 What to watch?</h3>
+  <p>Random live streams by your filters (categories, tags, viewers, language, mature). If nothing is live — recent VODs. Save a filter and catch new streams matching it. Includes a “Feeling lucky” mode.</p>
+
+  <h3>💬 Chat</h3>
+  <p>Mini App to read and send Twitch stream chat. Free: read + up to 20 messages/day; unlimited with Premium.</p>
+
+  <h2 id="settings">8. Settings &amp; Premium</h2>
+  <p><strong>⚙️ Settings</strong> typically includes:</p>
+  <ul>
+    <li><strong>⭐ Premium</strong> — 7-day trial (once), Stars plans (month / year / lifetime), à la carte features, Twitch sub check on the developer channel, Premium channel for streamers.</li>
+    <li><strong>Sync</strong> — follow auto-sync period or turn off.</li>
+    <li><strong>System notifications</strong> — bot updates, availability, other broadcasts; Twitch status.</li>
+    <li><strong>Language</strong>, <strong>advanced mode</strong>, <strong>beta mode</strong> (early access).</li>
+    <li><strong>Partner program</strong> — referral link and a cut of invitees’ Stars Premium.</li>
+    <li><strong>Ignored words</strong> — global list for alerts.</li>
+  </ul>
+  <p>After a successful Stars payment the bot says: “Premium activated. Thank you!” and below that — how to contact @immarfa with your user ID if something goes wrong.</p>
+
+  <h2 id="commands">9. Commands</h2>
+  <table>
+    <thead><tr><th>Command</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>/start</code></td><td>Main menu</td></tr>
+      <tr><td><code>/help</code></td><td>Short menu help</td></tr>
+      <tr><td><code>/cancel</code></td><td>Cancel the current wizard</td></tr>
+      <tr><td><code>/schedule</code></td><td>Stream schedule</td></tr>
+      <tr><td><code>/feedback</code></td><td>Help &amp; contacts</td></tr>
+      <tr><td><code>/settings</code></td><td>Settings</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="limits">10. Free-plan limits</h2>
+  <ul>
+    <li>Up to <strong>5 active</strong> alerts (more can stay paused).</li>
+    <li>Alert types other than stream start — Premium.</li>
+    <li>Advanced options (ignore, delay, repeats, delete previous) — Premium.</li>
+    <li>History 7 days, cart 10 days, chat with a daily send cap.</li>
+  </ul>
+
+  <h2 id="help">11. Help</h2>
+  <p>In the bot: <strong>❓ Help</strong> or <code>/feedback</code>. If something breaks, you have a billing question, or you want a new feature — message <a href="https://t.me/immarfa">@immarfa</a> and include your Telegram user ID (the Help message shows it).</p>
+  <p>Links: <a href="https://www.twitch.tv/marfapr">Twitch</a> · <a href="https://t.me/themarfa">Telegram</a> · <a href="https://blog.themarfa.name/">Website</a></p>
+
+  <footer>
+    Bot: <a href="https://t.me/twitch2telegram_bot">@twitch2telegram_bot</a>
+  </footer>
+</body>
+</html>

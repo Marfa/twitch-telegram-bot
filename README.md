@@ -339,7 +339,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `PREMIUM_TWITCH_LOGIN` | Twitch-логин для бесплатного Premium за саб (по умолчанию `marfapr`) |
 | `REFERRAL_COMMISSION_PERCENT` | Комиссия партнёра с Stars Premium, % (по умолчанию 10) |
 | `REFERRAL_WITHDRAW_MIN_STARS` | Минимум для заявки на вывод, Stars (по умолчанию 500) |
-| `PUBLIC_BASE_URL` | Публичный HTTPS origin: OAuth (`…/oauth/twitch/callback`) и список плейсхолдеров (`…/placeholders`). Прод: `https://bot.themarfa.name` |
+| `PUBLIC_BASE_URL` | Публичный HTTPS origin: OAuth (`…/oauth/twitch/callback`), плейсхолдеры (`…/placeholders`), [инструкция](https://bot.themarfa.name/guide?lang=ru) (`…/guide`). Прод: `https://bot.themarfa.name` |
 | `TOKEN_ENCRYPTION_KEY` | Опционально: Fernet-ключ для refresh token (иначе из `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Порт health/OAuth (по умолчанию 8080) |
 | `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя |
@@ -383,7 +383,7 @@ Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subs
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
 | `translate.py` | DeepL для админ-рассылок |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/health`, `/placeholders`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health`, `/placeholders`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue+Report webhook.
 

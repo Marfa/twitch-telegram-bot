@@ -642,8 +642,6 @@ from handlers.subscriptions import (
 
 logger = logging.getLogger(__name__)
 
-GITHUB_ISSUES_URL = "https://github.com/Marfa/twitch-telegram-bot/issues"
-
 (
     LANG_SELECT,
     ALERT_TYPE,
@@ -1468,6 +1466,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import show_help_button
+    from i18n import guide_keyboard
 
     if not show_help_button():
         return
@@ -1476,9 +1475,10 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
     analytics.capture(user_id, "feedback_opened")
+    markup = guide_keyboard(lang) or _menu(lang, user_id)
     await update.effective_message.reply_text(
-        t("feedback", lang, github=GITHUB_ISSUES_URL, user_id=user_id),
-        reply_markup=_menu(lang, user_id),
+        t("feedback", lang, user_id=user_id),
+        reply_markup=markup,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
