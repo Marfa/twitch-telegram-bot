@@ -1,0 +1,61 @@
+---
+description: Prod DB queries — only via scripts/vps-psql.sh (live VPS Postgres)
+alwaysApply: true
+---
+
+# Production database queries
+
+## Canonical path
+
+**Only** use [`scripts/vps-psql.sh`](scripts/vps-psql.sh) for live prod data (payments, premium status, users, subscriptions).
+
+```bash
+./scripts/vps-psql.sh -c "SELECT …"
+./scripts/vps-psql.sh -At -c "SELECT …"
+echo "SELECT …" | ./scripts/vps-psql.sh
+```
+
+SSH target: `root@bot.themarfa.name` → `/opt/twitch-telegram-bot` →
+`docker compose -f compose.vps.yml exec -T db psql -U bot -d bot`.
+
+## Auth on any PC
+
+Do **not** assume `~/.ssh/artalk_vps` exists (that name is only a local convenience on one machine).
+
+Order used by the script:
+
+1. `VPS_SSH_KEY=/path/to/key` if set
+2. Otherwise plain `ssh` (agent / `~/.ssh/config` `IdentityFile`)
+3. Else `~/.ssh/artalk_vps` if that file happens to exist
+
+Example config on another PC:
+
+```
+Host bot.themarfa.name
+  User root
+  IdentityFile ~/.ssh/your_vps_key
+  IdentitiesOnly yes
+```
+
+If SSH fails, report the script error and **stop** — do not invent fallbacks.
+
+## Do not invent
+
+- Local `data/bot.db` / `DATABASE_PATH` — not prod
+- Local `.env` `DATABASE_URL` (`host=db`) — Docker-network only on VPS
+- `AIVEN_DATABASE_URL` — cold nightly DR mirror; may lag
+- Ad-hoc `ssh` / `gh workflow` / Bot API to “find” the DB
+- New one-off query scripts unless the user asks
+
+## Premium unlock check (example)
+
+```bash
+./scripts/vps-psql.sh -c "
+SELECT user_id, premium_permanent, premium_stars_until,
+       (premium_stars_until > extract(epoch from now())::bigint) AS stars_active,
+       premium_stars_canceled, premium_features
+FROM users WHERE premium_stars_charge_id = 'CHARGE_ID';
+"
+```
+
+`stars_active` / permanent / twitch / trial → `has_full_plan` → all `FEATURE_IDS` unlocked (empty `premium_features` is normal for a full plan).
