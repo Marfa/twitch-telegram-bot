@@ -563,6 +563,16 @@ def check_core() -> None:
             if btn("feedback", loc) in [b.text for b in row]
         )
         assert [b.text for b in feedback_row] == [btn("feedback", loc)]
+        admin_main = main_menu(loc, is_admin=True).keyboard
+        help_admin_row = next(
+            row
+            for row in admin_main
+            if btn("feedback", loc) in [b.text for b in row]
+        )
+        assert [b.text for b in help_admin_row] == [
+            btn("feedback", loc),
+            btn("admin", loc),
+        ]
         other_kb = other_menu(loc).keyboard
         assert [[b.text for b in row] for row in other_kb] == [
             [btn("whisper_alerts", loc), btn("create_schedule", loc)],
@@ -618,8 +628,10 @@ def check_core() -> None:
             for row in settings_kb
             if btn("partner", loc) in [b.text for b in row]
         )
-        assert btn("partner", loc) in [b.text for b in partner_row]
-        assert len(partner_row) == 1
+        assert [b.text for b in partner_row] == [
+            btn("partner", loc),
+            btn("back", loc),
+        ]
         lang_row = next(
             row
             for row in settings_kb
@@ -644,8 +656,14 @@ def check_core() -> None:
         assert [[b.text for b in row] for row in admin_kb] == [
             [btn("broadcast", loc), btn("stats", loc)],
             [btn("admin_withdrawals", loc), btn("demo", loc)],
-            [btn("admin_refund", loc)],
-            [btn("back", loc)],
+            [btn("admin_refund", loc), btn("back", loc)],
+        ]
+        from i18n import broadcast_menu
+
+        broadcast_kb = broadcast_menu(loc).keyboard
+        assert [[b.text for b in row] for row in broadcast_kb] == [
+            [btn("broadcast_new", loc), btn("scheduled_broadcasts", loc)],
+            [btn("sent_broadcasts", loc), btn("back", loc)],
         ]
         admin_btns = [b.text for row in admin_kb for b in row]
         assert btn("create_schedule", loc) not in admin_btns

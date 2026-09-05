@@ -193,12 +193,14 @@ def main_menu(
             KeyboardButton(btn("settings", lang)),
         ],
     ]
+    tail: list[KeyboardButton] = []
     if show_help_button():
-        rows.append([KeyboardButton(btn("feedback", lang))])
+        tail.append(KeyboardButton(btn("feedback", lang)))
     if demo_active:
-        rows.append([KeyboardButton(btn("demo", lang))])
+        tail.append(KeyboardButton(btn("demo", lang)))
     elif is_admin:
-        rows.append([KeyboardButton(btn("admin", lang))])
+        tail.append(KeyboardButton(btn("admin", lang)))
+    rows.extend(_pair_reply_rows(tail))
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
@@ -253,10 +255,16 @@ def settings_menu(
             KeyboardButton(btn("language", lang)),
         ]
     )
-    if show_partner_ui():
-        buttons.append(KeyboardButton(btn("partner", lang)))
     rows = _pair_reply_rows(buttons)
-    rows.append([KeyboardButton(btn("back", lang))])
+    if show_partner_ui():
+        rows.append(
+            [
+                KeyboardButton(btn("partner", lang)),
+                KeyboardButton(btn("back", lang)),
+            ]
+        )
+    else:
+        rows.append([KeyboardButton(btn("back", lang))])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
@@ -506,8 +514,12 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
         )
     else:
         rows.append([KeyboardButton(btn("demo", lang))])
-    rows.append([KeyboardButton(btn("admin_refund", lang))])
-    rows.append([KeyboardButton(btn("back", lang))])
+    rows.append(
+        [
+            KeyboardButton(btn("admin_refund", lang)),
+            KeyboardButton(btn("back", lang)),
+        ]
+    )
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
@@ -529,15 +541,13 @@ def withdrawal_actions_keyboard(withdrawal_id: int, lang: str) -> InlineKeyboard
 
 
 def broadcast_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [
-            [KeyboardButton(btn("broadcast_new", lang))],
-            [KeyboardButton(btn("scheduled_broadcasts", lang))],
-            [KeyboardButton(btn("sent_broadcasts", lang))],
-            [KeyboardButton(btn("back", lang))],
-        ],
-        resize_keyboard=True,
-    )
+    buttons = [
+        KeyboardButton(btn("broadcast_new", lang)),
+        KeyboardButton(btn("scheduled_broadcasts", lang)),
+        KeyboardButton(btn("sent_broadcasts", lang)),
+        KeyboardButton(btn("back", lang)),
+    ]
+    return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
 
 
 def broadcast_feedback_keyboard(
