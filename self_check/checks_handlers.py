@@ -101,6 +101,7 @@ def check_handlers() -> None:
 
     from telegram import Bot
 
+    import bot as bot_mod
     import main as main_mod
     from bot import _dump_broadcast_recipient_ids
     from i18n import admin_other_audience_keyboard, premium_owned_keyboard
@@ -152,6 +153,10 @@ def check_handlers() -> None:
     assert "_is_unchanged_message_edit(err)" in bot_src or (
         "_is_unchanged_message_edit(err)" in monitoring_src
     )
+    # Interactive reply while user blocked the bot → soft-fail, not PostHog noise.
+    eh_src = inspect.getsource(bot_mod.error_handler)
+    assert "_is_user_blocked_error" in eh_src
+    assert "apply_user_blocked" in eh_src
     assert "posthog_seen_reports.json" in monitoring_src
     ptb_edit = inspect.getsource(Bot.edit_user_star_subscription)
     # PTB internals naming may differ slightly across versions:

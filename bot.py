@@ -1656,10 +1656,21 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     if isinstance(err, BaseException) and _is_unchanged_message_edit(err):
         return
-    logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
     user_id = None
     if isinstance(update, Update) and update.effective_user is not None:
         user_id = update.effective_user.id
+    # User blocked the bot (or account gone) while a handler tried to reply —
+    # expected Telegram noise, not an app bug. Mark blocked; skip PostHog.
+    if isinstance(err, Forbidden):
+        from handlers.delivery import _is_user_blocked_error, apply_user_blocked
+
+        if _is_user_blocked_error(err):
+            db = context.application.bot_data.get("db")
+            if db is not None and user_id is not None:
+                apply_user_blocked(db, user_id)
+            logger.warning("User %s blocked the bot (or deactivated): %s", user_id, err)
+            return
+    logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
     analytics.capture_exception(
         err if isinstance(err, BaseException) else None,
         user_id=user_id,

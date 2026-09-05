@@ -69,10 +69,12 @@ def _cb_update(user_id: int, data: str):
 
 
 def _msg_update(user_id: int, text: str = "hi"):
-    update = MagicMock()
+    from telegram import Update
+
+    update = MagicMock(spec=Update)
     update.callback_query = None
     update.effective_user = SimpleNamespace(id=user_id)
-    update.effective_chat = SimpleNamespace(id=user_id)
+    update.effective_chat = SimpleNamespace(id=user_id, type=ChatType.PRIVATE)
     msg = MagicMock()
     msg.reply_text = AsyncMock()
     msg.text = text
@@ -1032,6 +1034,26 @@ async def _smoke_delivery_and_helpers(db) -> None:
     ctx.job = None
     # empty due set — should return without crash
     await check_schedule_reminders(ctx)
+
+    # error_handler: blocked-user Forbidden is expected noise (not PostHog).
+    from bot import error_handler
+
+    clear_user_blocked(db, _FREE_UID)
+    assert db.is_bot_blocked(_FREE_UID) is False
+    update = _msg_update(_FREE_UID)
+    ctx = _ctx(application)
+    ctx.error = Forbidden("Forbidden: bot was blocked by the user")
+    with patch("bot.analytics.capture_exception") as capture_exc:
+        await error_handler(update, ctx)
+    capture_exc.assert_not_called()
+    assert db.is_bot_blocked(_FREE_UID) is True
+    clear_user_blocked(db, _FREE_UID)
+
+    # Non-blocked Forbidden still goes to PostHog.
+    ctx.error = Forbidden("Forbidden: bot is not a member of the channel chat")
+    with patch("bot.analytics.capture_exception") as capture_exc:
+        await error_handler(update, ctx)
+    capture_exc.assert_called_once()
 
 
 async def _smoke_group_chat_replies(db) -> None:
