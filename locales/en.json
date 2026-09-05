@@ -450,6 +450,9 @@
   "alert_chat_button": "Go to stream chat",
   "preview_blocked_chat_button": "Link preview cannot be enabled while the chat button is on.",
   "sub_list_chat_button_yes": "• Chat button: on",
+  "sub_list_strip_yes": "• Clean title: on",
+  "sub_list_custom_buttons": "• Custom buttons: {count}",
+  "custom_buttons_beta_required": "Enable «Custom alert buttons» in Settings → 🧪 Beta mode first.",
   "delay_prompt": "Delay notification after stream start?",
   "delay_no": "❌ No",
   "delay_yes": "✅ Yes",
@@ -804,7 +807,6 @@
   "custom_buttons_full": "Limit reached ({max} buttons).",
   "custom_buttons_saved": "Buttons saved.",
   "custom_buttons_back_list": "« Back to list",
-  "sub_list_custom_buttons": "• Custom buttons: {count}",
   "beta_feat_custom_buttons": "Custom alert buttons",
   "beta_feat_custom_buttons_desc": "Up to 10 custom URL buttons under an alert (Label | link). Part of Premium Advanced alert options.",
   "btn_wizard_next": "Next"

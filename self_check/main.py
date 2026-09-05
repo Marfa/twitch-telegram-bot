@@ -78,9 +78,11 @@ def main() -> None:
     check_handler_smoke()
     from .checks_callback_wiring import check_callback_wiring
     from .checks_flow_nav import check_flow_nav
+    from .checks_alert_settings import check_alert_setting_order
 
     check_flow_nav()
     check_callback_wiring()
+    check_alert_setting_order()
     print("ok")
 
 
