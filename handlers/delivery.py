@@ -95,11 +95,6 @@ def _message_link(chat_id: int, message_id: int, thread_id: int | None = None) -
     return f"https://t.me/c/{internal}/{message_id}"
 
 
-# Free message effect for live alerts in private chats (🎉).
-# Private chats only; ignored / retried without on INVALID_EFFECT_ID.
-LIVE_DM_MESSAGE_EFFECT_ID = "5046509860389126442"
-
-
 async def _deliver_alert_content(
     bot,
     *,
@@ -110,7 +105,6 @@ async def _deliver_alert_content(
     image_position: str = "",
     disable_link_preview: bool = False,
     reply_markup=None,
-    message_effect_id: str | None = None,
     parse_mode: str | None = None,
 ):
     """Send alert text, optionally with image above/below. Returns the primary message."""
@@ -127,7 +121,6 @@ async def _deliver_alert_content(
             image_position=image_position,
             disable_link_preview=disable_link_preview,
             reply_markup=reply_markup,
-            message_effect_id=message_effect_id,
             parse_mode=parse_mode,
         )
 
@@ -142,7 +135,6 @@ async def _deliver_alert_content_plain(
     image_position: str = "",
     disable_link_preview: bool = False,
     reply_markup=None,
-    message_effect_id: str | None = None,
     parse_mode: str | None = None,
 ):
     """Send alert text, optionally with image above/below. Returns the primary message."""
@@ -152,9 +144,6 @@ async def _deliver_alert_content_plain(
     markup_kwargs: dict = {}
     if reply_markup is not None:
         markup_kwargs["reply_markup"] = reply_markup
-    effect_kwargs: dict = {}
-    if message_effect_id:
-        effect_kwargs["message_effect_id"] = message_effect_id
     parse_kwargs: dict = {}
     if parse_mode:
         parse_kwargs["parse_mode"] = parse_mode
@@ -182,7 +171,6 @@ async def _deliver_alert_content_plain(
             "text": text,
             **thread_kwargs,
             **markup_kwargs,
-            **effect_kwargs,
             **parse_kwargs,
             **extra,
         }
@@ -196,9 +184,6 @@ async def _deliver_alert_content_plain(
                 text_kwargs["text"] = _plain_fallback(text)
                 text_kwargs.pop("parse_mode", None)
                 return await bot.send_message(**text_kwargs)
-            if effect_kwargs and "effect" in err:
-                text_kwargs.pop("message_effect_id", None)
-                return await bot.send_message(**text_kwargs)
             raise
 
     if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
@@ -208,7 +193,6 @@ async def _deliver_alert_content_plain(
                 show_caption_above_media=(position == "after"),
                 **thread_kwargs,
                 **markup_kwargs,
-                **effect_kwargs,
                 **parse_kwargs,
             )
         except BadRequest as exc:
@@ -220,18 +204,6 @@ async def _deliver_alert_content_plain(
                         show_caption_above_media=(position == "after"),
                         **thread_kwargs,
                         **markup_kwargs,
-                        **effect_kwargs,
-                    )
-                except BadRequest:
-                    pass
-            if effect_kwargs and "effect" in err:
-                try:
-                    return await _photo(
-                        caption=text,
-                        show_caption_above_media=(position == "after"),
-                        **thread_kwargs,
-                        **markup_kwargs,
-                        **parse_kwargs,
                     )
                 except BadRequest:
                     pass
@@ -724,11 +696,6 @@ async def _send_notification(
             image_position=image_position,
             disable_link_preview=preview_off,
             reply_markup=chat_markup,
-            message_effect_id=(
-                LIVE_DM_MESSAGE_EFFECT_ID
-                if alert_type == "live" and sub.dest_type == "dm"
-                else None
-            ),
             parse_mode=alert_parse_mode,
         )
     except RetryAfter as exc:
@@ -743,11 +710,6 @@ async def _send_notification(
                 image_position=image_position,
                 disable_link_preview=preview_off,
                 reply_markup=chat_markup,
-                message_effect_id=(
-                    LIVE_DM_MESSAGE_EFFECT_ID
-                    if alert_type == "live" and sub.dest_type == "dm"
-                    else None
-                ),
                 parse_mode=alert_parse_mode,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
