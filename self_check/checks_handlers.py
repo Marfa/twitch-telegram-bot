@@ -500,7 +500,7 @@ def check_handlers() -> None:
         # Full plan unlocks every FEATURE_IDS entry (not only is_premium).
         for fid in prem.FEATURE_IDS:
             assert prem.has_feature_sync(db, 50, fid), fid
-        for fid in ("ignore_keywords", "delay", "repeat", "delete_prev"):
+        for fid in ("ignore_keywords", "delay", "repeat", "delete_prev", "custom_buttons"):
             assert prem.has_feature_sync(db, 50, fid), fid
         assert prem.active_subscription_slots(db, 50).unlimited is True
         ok2, reason2 = start_trial(db, 50)
@@ -706,7 +706,31 @@ def check_handlers() -> None:
         assert "delay" not in FEATURE_IDS
         assert "repeat" not in FEATURE_IDS
         assert "delete_prev" not in FEATURE_IDS
+        assert "custom_buttons" not in FEATURE_IDS
+        assert "custom_buttons" in prem.ADVANCED_MODE_FEATURE_IDS
         assert tr("premium_feat_advanced_mode", "ru") == "Продвинутые опции оповещений"
+        assert tr("premium_feat_custom_buttons", "ru")
+        assert tr("advanced_options_buttons", "ru")
+        assert "⭐" in tr("advanced_options_hint_buttons", "ru")
+        from custom_buttons import (
+            chunk_buttons,
+            parse_button_line,
+            dump_custom_buttons,
+            parse_custom_buttons,
+        )
+
+        assert parse_button_line("Go | https://example.com") == (
+            "Go",
+            "https://example.com",
+        )
+        assert parse_button_line("nope") is None
+        dumped = dump_custom_buttons(
+            [{"text": "Go", "url": "https://example.com"}, {"text": "x", "url": "bad"}]
+        )
+        assert len(parse_custom_buttons(dumped)) == 1
+        packed = chunk_buttons(list(range(5)), per_row=2)
+        assert packed == [[0, 1], [2, 3], [4]]
+        assert chunk_buttons([1], per_row=2) == [[1]]
         assert tr("premium_feat_alert_history", "ru")
         assert "⭐" in tr("advanced_options_hint_ignore", "ru")
         assert tr("advanced_options_premium_only", "ru")

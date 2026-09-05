@@ -29,7 +29,7 @@
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
-| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous (⭐ Premium), chat button, link preview (if URL in template; off with image/chat button) |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, link preview (if URL in template; off with image/chat button) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |

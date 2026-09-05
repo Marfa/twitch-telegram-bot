@@ -228,6 +228,7 @@ class Subscription:
     disable_link_preview: bool
     strip_name_mentions: bool
     attach_chat_button: bool
+    custom_buttons: str
     delay_minutes: int
     suppress_repeat_minutes: int
     schedule_reminder_minutes: int
@@ -384,6 +385,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "disable_link_preview": bool(sub.disable_link_preview),
         "strip_name_mentions": bool(sub.strip_name_mentions),
         "attach_chat_button": bool(sub.attach_chat_button),
+        "custom_buttons": sub.custom_buttons or "[]",
         "delay_minutes": int(sub.delay_minutes),
         "suppress_repeat_minutes": int(sub.suppress_repeat_minutes),
         "schedule_reminder_minutes": int(sub.schedule_reminder_minutes),
@@ -596,6 +598,9 @@ def _row_to_sub(row: Any) -> Subscription:
         attach_chat_button=bool(row["attach_chat_button"])
         if "attach_chat_button" in keys
         else False,
+        custom_buttons=str(row["custom_buttons"] or "[]")
+        if "custom_buttons" in keys
+        else "[]",
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
         schedule_reminder_minutes=int(row["schedule_reminder_minutes"] or 0)

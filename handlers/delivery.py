@@ -242,27 +242,42 @@ async def _deliver_alert_content_plain(
 
 
 def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMarkup | None:
-    if not sub.attach_chat_button:
-        return None
-    from chat_webapp import alert_chat_button_url
+    import custom_buttons as cbtn
 
-    url = alert_chat_button_url(
-        login=sub.twitch_username,
-        lang=lang,
-        user_id=sub.owner_id,
-    )
-    if not url:
-        return None
-    # Telegram accepts web_app inline buttons only in private chats with the bot.
-    # Groups/channels get a URL button (same Mini App page) — otherwise Button_type_invalid.
-    if sub.dest_type == "dm":
-        button = InlineKeyboardButton(
-            t("alert_chat_button", lang),
-            web_app=WebAppInfo(url=url),
+    buttons: list[InlineKeyboardButton] = []
+    for btn_def in cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None)):
+        buttons.append(
+            InlineKeyboardButton(
+                str(btn_def.get("text") or "")[:64],
+                url=str(btn_def.get("url") or ""),
+            )
         )
-    else:
-        button = InlineKeyboardButton(t("alert_chat_button", lang), url=url)
-    return InlineKeyboardMarkup([[button]])
+    if sub.attach_chat_button:
+        from chat_webapp import alert_chat_button_url
+
+        url = alert_chat_button_url(
+            login=sub.twitch_username,
+            lang=lang,
+            user_id=sub.owner_id,
+        )
+        if url:
+            # Telegram accepts web_app inline buttons only in private chats with the bot.
+            # Groups/channels get a URL button (same Mini App page) — otherwise Button_type_invalid.
+            if sub.dest_type == "dm":
+                buttons.append(
+                    InlineKeyboardButton(
+                        t("alert_chat_button", lang),
+                        web_app=WebAppInfo(url=url),
+                    )
+                )
+            else:
+                buttons.append(
+                    InlineKeyboardButton(t("alert_chat_button", lang), url=url)
+                )
+    if not buttons:
+        return None
+    # Always 2 per row (custom + chat share the same grid).
+    return InlineKeyboardMarkup(cbtn.chunk_buttons(buttons, per_row=2))
 
 
 # ponytail: in-memory dedupe; resets on restart (acceptable for owner DM notices).

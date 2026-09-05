@@ -53,6 +53,7 @@ ADVANCED_MODE_FEATURE_IDS: frozenset[str] = frozenset(
         "delay",
         "repeat",
         "delete_prev",
+        "custom_buttons",
     }
 )
 _LEGACY_ADVANCED_FEATURE_IDS: tuple[str, ...] = (
@@ -80,6 +81,7 @@ _FEATURE_LABEL_KEYS = {
     "delay": "premium_feat_delay",
     "repeat": "premium_feat_repeat",
     "delete_prev": "premium_feat_delete_prev",
+    "custom_buttons": "premium_feat_custom_buttons",
     "schedule_publish": "premium_feat_schedule_publish",
     "alert_history": "premium_feat_alert_history",
     "deleted_subscriptions_cart": "premium_feat_deleted_subscriptions_cart",
