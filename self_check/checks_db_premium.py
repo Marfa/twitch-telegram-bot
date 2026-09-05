@@ -1243,6 +1243,10 @@ def check_db_premium() -> None:
         line = _format_sub_line(src, "ru", 1)
         assert "Поделиться оповещением" not in line
         assert "• Оповещение: начало стрима" in line
+        assert "• Кнопка чата: да" in line
+        assert "Отложенная отправка" in line or "15" in line
+        assert "Изображение: нет" not in line
+        assert "Игнорировать ключевые слова: нет" not in line
         assert "<a href" not in line
         kb_rows = _subs_toggle_keyboard(share_db, 9001, "ru", [src])
         assert len(kb_rows) >= 2

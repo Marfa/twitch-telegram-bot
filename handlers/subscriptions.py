@@ -340,8 +340,10 @@ def _format_sub_line(
     chat_display: str | None = None,
     thread_display: str | None = None,
 ) -> str:
-    # Order matches create wizard: image → ignore → preview → delay → repeat
-    # → schedule reminder → dest → delete.
+    # Order: alert_settings.ALERT_SETTING_ORDER (when active); omit off/default.
+    # Enforced by self_check.check_alert_setting_order.
+    from custom_buttons import parse_custom_buttons
+
     status = "✅" if sub.enabled else "⏸"
     chat_label = html.escape(
         chat_display if chat_display is not None else str(sub.chat_id)
@@ -365,8 +367,8 @@ def _format_sub_line(
                 settings.append(t_bullet("image_after_note", lang))
             else:
                 settings.append(t_bullet("image_before_note", lang))
-    else:
-        settings.append(t("sub_list_image_no", lang))
+    if sub.strip_name_mentions:
+        settings.append(t("sub_list_strip_yes", lang))
     if sub.ignore_keywords.strip() and sub.use_global_ignore:
         settings.append(
             t_bullet("ignore_keywords_yes_global_note", lang, keywords=keywords)
@@ -375,21 +377,6 @@ def _format_sub_line(
         settings.append(t_bullet("ignore_keywords_yes_note", lang, keywords=keywords))
     elif sub.use_global_ignore:
         settings.append(t_bullet("ignore_keywords_global_only_note", lang))
-    else:
-        settings.append(t_bullet("ignore_keywords_no_note", lang))
-    if sub.image_file_id or template_has_link(sub.message_template or ""):
-        settings.append(
-            t_bullet("preview_off", lang)
-            if sub.disable_link_preview or sub.image_file_id
-            else t_bullet("preview_on", lang)
-        )
-    if sub.attach_chat_button:
-        settings.append(t("sub_list_chat_button_yes", lang))
-    from custom_buttons import parse_custom_buttons
-
-    custom_btns = parse_custom_buttons(getattr(sub, "custom_buttons", None))
-    if custom_btns:
-        settings.append(t("sub_list_custom_buttons", lang, count=len(custom_btns)))
     is_upcoming = (
         sub.schedule_reminder_minutes > 0
         and not sub.notify_on_live
@@ -397,26 +384,42 @@ def _format_sub_line(
         and not sub.notify_on_category_change
     )
     if not is_upcoming:
-        settings.append(
-            t_bullet("delay_yes_note", lang, minutes=sub.delay_minutes)
-            if sub.delay_minutes > 0
-            else t_bullet("delay_no_note", lang)
-        )
-        if not sub.notify_on_category_change and not sub.notify_on_end:
+        if sub.delay_minutes > 0:
+            settings.append(
+                t_bullet("delay_yes_note", lang, minutes=sub.delay_minutes)
+            )
+        if (
+            not sub.notify_on_category_change
+            and not sub.notify_on_end
+            and sub.suppress_repeat_minutes > 0
+        ):
             settings.append(
                 t("sub_list_repeat_mute", lang, minutes=sub.suppress_repeat_minutes)
-                if sub.suppress_repeat_minutes > 0
-                else t("sub_list_repeat_allow", lang)
             )
-    if sub.schedule_reminder_configured:
+    if sub.dest_type != "dm" and sub.delete_previous:
+        settings.append(t("sub_list_delete_yes", lang))
+        if sub.notify_delete_fail:
+            settings.append(t_bullet("delete_fail_yes_note", lang))
+        if sub.notify_on_category_change and sub.delete_other_alerts:
+            settings.append(t("sub_list_delete_other_yes", lang))
+    custom_btns = parse_custom_buttons(getattr(sub, "custom_buttons", None))
+    if custom_btns:
+        settings.append(t("sub_list_custom_buttons", lang, count=len(custom_btns)))
+    if sub.attach_chat_button:
+        settings.append(t("sub_list_chat_button_yes", lang))
+    if (
+        not sub.image_file_id
+        and sub.disable_link_preview
+        and template_has_link(sub.message_template or "")
+    ):
+        settings.append(t_bullet("preview_off", lang))
+    if sub.schedule_reminder_configured and sub.schedule_reminder_minutes > 0:
         settings.append(
             t_bullet(
                 "schedule_reminder_yes_note",
                 lang,
                 minutes=sub.schedule_reminder_minutes,
             )
-            if sub.schedule_reminder_minutes > 0
-            else t_bullet("schedule_reminder_no_note", lang)
         )
     settings.append(
         t(
@@ -431,20 +434,6 @@ def _format_sub_line(
             thread_display if thread_display is not None else str(sub.thread_id)
         )
         settings.append(t("sub_list_thread", lang, thread_id=thread_label))
-    if sub.dest_type != "dm":
-        settings.append(
-            t("sub_list_delete_yes", lang)
-            if sub.delete_previous
-            else t("sub_list_delete_no", lang)
-        )
-        if sub.delete_previous and sub.notify_delete_fail:
-            settings.append(t_bullet("delete_fail_yes_note", lang))
-        if sub.delete_previous and sub.notify_on_category_change:
-            settings.append(
-                t("sub_list_delete_other_yes", lang)
-                if sub.delete_other_alerts
-                else t("sub_list_delete_other_no", lang)
-            )
     uname = html.escape(sub.twitch_username or "")
     return (
         f"{status} #{sub_num} — {uname}\n"
@@ -2122,8 +2111,14 @@ async def start_edit_custom_buttons(
     if not await maybe_entitled_custom_buttons(
         context.bot, db, query.from_user.id, channel=sub.twitch_username
     ):
+        import beta as beta_features
         from premium_handlers import send_premium_screen
 
+        if not beta_features.is_enabled(
+            db, query.from_user.id, cbtn.BETA_FEATURE_ID
+        ):
+            await query.edit_message_text(t("custom_buttons_beta_required", lang))
+            return ConversationHandler.END
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )

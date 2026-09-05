@@ -449,6 +449,9 @@
   "alert_chat_button": "Перейти в чат стрима",
   "preview_blocked_chat_button": "Превью ссылок нельзя включить, пока включена кнопка чата.",
   "sub_list_chat_button_yes": "• Кнопка чата: да",
+  "sub_list_strip_yes": "• Очистка названия: да",
+  "sub_list_custom_buttons": "• Пользовательские кнопки: {count}",
+  "custom_buttons_beta_required": "Сначала включите «Пользовательские кнопки в оповещении» в Настройки → 🧪 Beta mode.",
   "delay_prompt": "Отложить отправку уведомления после начала стрима",
   "delay_no": "❌ Нет",
   "delay_yes": "✅ Да",
@@ -795,7 +798,6 @@
   "custom_buttons_full": "Лимит: {max} кнопок.",
   "custom_buttons_saved": "Кнопки сохранены.",
   "custom_buttons_back_list": "« К списку",
-  "sub_list_custom_buttons": "• Пользовательские кнопки: {count}",
   "beta_feat_custom_buttons": "Пользовательские кнопки в оповещении",
   "beta_feat_custom_buttons_desc": "До 10 пользовательских URL-кнопок под оповещением (Анкор | ссылка). Входит в Premium «Продвинутые опции оповещений».",
   "btn_wizard_next": "Далее"
