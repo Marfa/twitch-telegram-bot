@@ -1228,7 +1228,16 @@ async def stream_schedule_publish_callback(
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, user_id, lang, db, update=update)
+        await send_premium_screen(
+            context.bot,
+            user_id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="schedule_publish",
+            feature="schedule_publish",
+        )
         return ConversationHandler.END
 
     if _is_delete_only_schedule_publish(context):

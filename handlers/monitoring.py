@@ -326,9 +326,77 @@ def _seconds_until_next_daily_stats() -> float:
     return (target - now).total_seconds()
 
 
+def _seconds_until_next_premium_digest() -> float:
+    """03:15 UTC — after daily_bot_stats (03:00)."""
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=3, minute=15, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
 async def daily_bot_stats_snapshot(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     analytics.capture_bot_stats(db.get_bot_stats())
+
+
+def _format_premium_purchase_line(lang: str, row) -> str:
+    kind_key = f"premium_kind_{row.kind}"
+    kind_label = t(kind_key, lang)
+    if kind_label == kind_key:
+        kind_label = row.kind
+    if row.kind == "feat" and row.features:
+        kind_label = f"{kind_label}: {row.features}"
+    elif row.kind == "channel" and row.features:
+        kind_label = f"{kind_label}: {row.features}"
+    if row.until_unix > 0:
+        until = datetime.fromtimestamp(row.until_unix, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
+    else:
+        until = t("premium_until_lifetime", lang)
+    source = row.source or "—"
+    if row.source_feature:
+        source = f"{source}/{row.source_feature}"
+    return t(
+        "daily_premium_purchase_line",
+        lang,
+        user_id=row.user_id,
+        kind=kind_label,
+        stars=row.stars,
+        until=until,
+        source=source,
+    )
+
+
+async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """DM admins a list of new Stars Premium purchases since the last digest."""
+    from config import ADMIN_USER_IDS
+
+    if not ADMIN_USER_IDS:
+        return
+    db: Database = context.application.bot_data["db"]
+    rows = db.list_undigested_premium_purchases()
+    if not rows:
+        return
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        lines = "".join(_format_premium_purchase_line(lang, row) for row in rows)
+        try:
+            await context.bot.send_message(
+                admin_id,
+                t(
+                    "daily_premium_purchases",
+                    lang,
+                    count=len(rows),
+                    lines=lines,
+                ),
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning(
+                "Cannot send premium digest to admin %s: %s", admin_id, exc
+            )
+    db.mark_premium_purchases_digested([row.id for row in rows])
 
 
 async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:

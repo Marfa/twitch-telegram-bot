@@ -495,7 +495,16 @@ async def on_alert_history_more(
     db: Database = context.application.bot_data["db"]
     from premium_handlers import send_premium_screen
 
-    await send_premium_screen(context.bot, user_id, lang, db, update=update)
+    await send_premium_screen(
+        context.bot,
+        user_id,
+        lang,
+        db,
+        update=update,
+        context=context,
+        source="alert_history",
+        feature="alert_history",
+    )
 
 
 async def on_alert_history_menu(

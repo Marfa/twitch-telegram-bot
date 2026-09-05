@@ -34,12 +34,41 @@
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
-| Premium | 7-day trial (alerts pause + DM notice when it ends); Stars month/year/lifetime; à la carte (advanced mode, 60-day history, 30-day cart, unlimited stream chat); Twitch channel sub (`PREMIUM_TWITCH_LOGIN`); one-time **Premium channel** for streamers (`PREMIUM_CHANNEL_STARS`) |
+| Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
-| Admin | Background broadcast with type footer; scheduled sends use MSK (UTC+3) by default, users with a saved UTC offset get local wall-clock time; stats after all UTC waves; “bot update” refreshes the main menu keyboard; DeepL, statistics, withdrawal handling, **Cancel subscription** (Stars refund by charge_id), **Demo mode** |
+| Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; refund by charge_id; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
+
+## Premium
+
+Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the features table.
+
+| Plan | Stars | Duration |
+|---|---:|---|
+| Trial | 0 | 7 days (once) |
+| Month | 100 | 30 days, auto-renew |
+| Year | 1000 | 365 days |
+| Lifetime | 2000 | permanent |
+| Single feature | 20 | 30 days each |
+| Streamer premium channel | 1500 | one-time for that channel |
+
+Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars.
+
+| Feature | What it unlocks |
+|---|---|
+| More than 5 active alerts | Removes the free-plan cap of 5 active alerts |
+| Alert types beyond live start | Category change, upcoming (schedule), stream end |
+| Twitch follow auto-sync | Periodic import of new follows / removal of unfollows |
+| Advanced alert options | Ignore keywords, delayed send, repeat mute, delete previous |
+| Publish schedule to Twitch | Bot-built slots → Twitch channel schedule page |
+| Alert history for 60 days | Free plan keeps 7 days |
+| Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
+| Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
+| Premium channel for streamers | Free bot interactions for viewers, What-to-watch priority, welcome recommend |
+
+Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
 
 ## Quick Start
 

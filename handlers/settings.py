@@ -279,7 +279,16 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, user_id, lang, db, update=update)
+        await send_premium_screen(
+            context.bot,
+            user_id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="settings_ignore",
+            feature="ignore_keywords",
+        )
         return ConversationHandler.END
     from bot import _ignore_keywords_current_label
 

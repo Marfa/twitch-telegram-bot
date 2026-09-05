@@ -17,6 +17,7 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     PremiumChannel,
+    PremiumPurchase,
     ReferralCreditRef,
     ReferralStats,
     ReferralWithdrawal,
@@ -444,6 +445,29 @@ class PostgresDatabase:
                     commission_stars INTEGER NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS premium_purchases (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    charge_id TEXT NOT NULL UNIQUE,
+                    kind TEXT NOT NULL,
+                    stars INTEGER NOT NULL DEFAULT 0,
+                    features TEXT NOT NULL DEFAULT '',
+                    until_unix BIGINT NOT NULL DEFAULT 0,
+                    source TEXT NOT NULL DEFAULT '',
+                    source_feature TEXT NOT NULL DEFAULT '',
+                    paid_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    digest_sent_at TIMESTAMPTZ
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_premium_purchases_digest
+                ON premium_purchases(digest_sent_at)
                 """
             )
             cur.execute(
@@ -1369,6 +1393,97 @@ class PostgresDatabase:
             )
             row = cur.fetchone()
         return int(row["n"]) if row else 0
+
+    def record_premium_purchase(
+        self,
+        *,
+        user_id: int,
+        charge_id: str,
+        kind: str,
+        stars: int,
+        features: str = "",
+        until_unix: int = 0,
+        source: str = "",
+        source_feature: str = "",
+    ) -> bool:
+        cid = str(charge_id or "").strip()
+        if int(user_id) <= 0 or not cid:
+            return False
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO premium_purchases (
+                    user_id, charge_id, kind, stars, features, until_unix,
+                    source, source_feature
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (charge_id) DO NOTHING
+                """,
+                (
+                    int(user_id),
+                    cid,
+                    str(kind or "").strip() or "unknown",
+                    max(0, int(stars or 0)),
+                    str(features or "").strip(),
+                    max(0, int(until_unix or 0)),
+                    str(source or "").strip(),
+                    str(source_feature or "").strip(),
+                ),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def list_undigested_premium_purchases(self) -> list[PremiumPurchase]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, user_id, charge_id, kind, stars, features, until_unix,
+                       source, source_feature, paid_at
+                FROM premium_purchases
+                WHERE digest_sent_at IS NULL
+                ORDER BY paid_at, id
+                """
+            )
+            rows = cur.fetchall()
+        out: list[PremiumPurchase] = []
+        for r in rows:
+            paid = r["paid_at"]
+            paid_s = (
+                paid.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                if hasattr(paid, "astimezone")
+                else str(paid or "")
+            )
+            out.append(
+                PremiumPurchase(
+                    id=int(r["id"]),
+                    user_id=int(r["user_id"]),
+                    charge_id=str(r["charge_id"] or ""),
+                    kind=str(r["kind"] or ""),
+                    stars=int(r["stars"] or 0),
+                    features=str(r["features"] or ""),
+                    until_unix=int(r["until_unix"] or 0),
+                    source=str(r["source"] or ""),
+                    source_feature=str(r["source_feature"] or ""),
+                    paid_at=paid_s,
+                )
+            )
+        return out
+
+    def mark_premium_purchases_digested(self, purchase_ids: list[int]) -> int:
+        ids = [int(i) for i in purchase_ids if int(i) > 0]
+        if not ids:
+            return 0
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE premium_purchases
+                SET digest_sent_at = NOW()
+                WHERE digest_sent_at IS NULL AND id = ANY(%s)
+                """,
+                (ids,),
+            )
+            return int(cur.rowcount or 0)
 
     def list_active_trial_users(self, *, now_unix: int | None = None) -> list[tuple[int, int]]:
         now = int(now_unix if now_unix is not None else datetime.now(timezone.utc).timestamp())

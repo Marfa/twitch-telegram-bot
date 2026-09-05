@@ -340,10 +340,20 @@ async def _show_premium_gate(
     feature: str,
     first_step: bool,
 ) -> int:
+    from premium_handlers import remember_premium_attribution
+
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     context.user_data["premium_gate_feature"] = feature
     context.user_data["premium_gate_first"] = first_step
+    remember_premium_attribution(
+        context, user_id, source="premium_gate", feature=str(feature or "")
+    )
+    analytics.capture(
+        user_id,
+        "premium_gate_shown",
+        {"feature": str(feature or ""), "first_step": bool(first_step)},
+    )
     action = t(
         "premium_gate_action_cancel" if first_step else "premium_gate_action_skip",
         lang,
@@ -388,8 +398,22 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     db: Database = context.application.bot_data["db"]
 
     if action == "get":
+        analytics.capture(
+            user_id,
+            "premium_gate_get",
+            {"feature": str(feature or ""), "first_step": bool(first)},
+        )
         await query.edit_message_text("✓")
-        await send_premium_screen(context.bot, user_id, lang, db, update=update)
+        await send_premium_screen(
+            context.bot,
+            user_id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="premium_gate",
+            feature=str(feature or ""),
+        )
         await context.bot.send_message(
             reply_chat_id(update),
             t("menu_settings", lang),
@@ -801,7 +825,14 @@ async def receive_advanced_options_toggle(
 
             await query.answer(t("advanced_options_premium_only", lang), show_alert=True)
             await send_premium_screen(
-                context.bot, query.from_user.id, lang, db, update=update
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="advanced_options",
+                feature=str(feature or ""),
             )
             return _wz()["ADVANCED_OPTIONS"]
     await query.answer()

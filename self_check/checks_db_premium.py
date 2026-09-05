@@ -1411,3 +1411,74 @@ def check_db_premium() -> None:
         assert mdb.get_subs_due_previous_message_purge(
             datetime.now(timezone.utc)
         ) == []
+
+    # Premium purchase attribution (gate/menu → pay props).
+    from types import SimpleNamespace
+
+    from premium_handlers import (
+        peek_premium_attribution,
+        remember_premium_attribution,
+        take_premium_attribution,
+    )
+
+    app = SimpleNamespace(bot_data={})
+    ctx = SimpleNamespace(application=app)
+    remember_premium_attribution(
+        ctx, 42, source="premium_gate", feature="twitch_sync"
+    )
+    assert peek_premium_attribution(ctx, 42) == {
+        "source": "premium_gate",
+        "feature": "twitch_sync",
+    }
+    remember_premium_attribution(ctx, 42, source="menu")
+    assert peek_premium_attribution(ctx, 42) == {"source": "menu"}
+    assert take_premium_attribution(ctx, 42) == {"source": "menu"}
+    assert peek_premium_attribution(ctx, 42) == {}
+    assert take_premium_attribution(ctx, 42) == {}
+
+    with tempfile.TemporaryDirectory() as pay_tmp:
+        pdb = SqliteDatabase(Path(pay_tmp) / "purchases.db")
+        assert pdb.record_premium_purchase(
+            user_id=99,
+            charge_id="stx_digest_1",
+            kind="month",
+            stars=100,
+            until_unix=10**12,
+            source="premium_gate",
+            source_feature="twitch_sync",
+        )
+        assert not pdb.record_premium_purchase(
+            user_id=99,
+            charge_id="stx_digest_1",
+            kind="month",
+            stars=100,
+        )
+        rows = pdb.list_undigested_premium_purchases()
+        assert len(rows) == 1
+        assert rows[0].user_id == 99 and rows[0].source == "premium_gate"
+        assert rows[0].source_feature == "twitch_sync"
+        assert pdb.mark_premium_purchases_digested([rows[0].id]) == 1
+        assert pdb.list_undigested_premium_purchases() == []
+
+    from handlers.monitoring import _format_premium_purchase_line
+    from db.models import PremiumPurchase as PP
+
+    until_ok = int(datetime.now(timezone.utc).timestamp()) + 30 * 86400
+    line = _format_premium_purchase_line(
+        "ru",
+        PP(
+            id=1,
+            user_id=99,
+            charge_id="c",
+            kind="month",
+            stars=100,
+            features="",
+            until_unix=until_ok,
+            source="menu",
+            source_feature="",
+            paid_at="2026-01-01",
+        ),
+    )
+    assert "99" in line and "100" in line and "menu" in line
+    assert tr("daily_premium_purchases", "ru", count=1, lines=line)
+    assert tr("daily_premium_purchases", "en", count=1, lines=line)

@@ -137,6 +137,23 @@ class Database(Protocol):
 
     def count_stars_payers_since(self, since: datetime) -> int: ...
 
+    def record_premium_purchase(
+        self,
+        *,
+        user_id: int,
+        charge_id: str,
+        kind: str,
+        stars: int,
+        features: str = "",
+        until_unix: int = 0,
+        source: str = "",
+        source_feature: str = "",
+    ) -> bool: ...
+
+    def list_undigested_premium_purchases(self) -> list[Any]: ...
+
+    def mark_premium_purchases_digested(self, purchase_ids: list[int]) -> int: ...
+
     def list_active_trial_users(self, *, now_unix: int | None = None) -> list[tuple[int, int]]: ...
 
     def list_expired_trial_users(self, *, now_unix: int | None = None) -> list[tuple[int, int]]: ...

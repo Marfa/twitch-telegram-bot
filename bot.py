@@ -208,11 +208,13 @@ from handlers.monitoring import (
     _load_posthog_seen_report_ids,
     _save_posthog_seen_report_ids,
     _seconds_until_next_daily_stats,
+    _seconds_until_next_premium_digest,
     _seconds_until_next_weekly_report,
     check_posthog_status,
     check_twitch_status,
     check_cursor_status,
     daily_bot_stats_snapshot,
+    daily_premium_purchases_report,
     notify_admins_posthog_issue,
     poll_posthog_inbox_reports,
     weekly_new_users_report,
@@ -1176,7 +1178,16 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(
             t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
         )
-        await send_premium_screen(context.bot, query.from_user.id, lang, db, update=update)
+        await send_premium_screen(
+            context.bot,
+            query.from_user.id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="edit_delay",
+            feature="delay",
+        )
         return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
@@ -2827,5 +2838,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         daily_bot_stats_snapshot,
         interval=24 * 3600,
         first=_seconds_until_next_daily_stats(),
+    )
+    app.job_queue.run_repeating(
+        daily_premium_purchases_report,
+        interval=24 * 3600,
+        first=_seconds_until_next_premium_digest(),
     )
     return app

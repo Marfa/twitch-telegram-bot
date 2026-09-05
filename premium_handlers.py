@@ -29,6 +29,60 @@ from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
 
 logger = logging.getLogger(__name__)
 
+# Survives ConversationHandler user_data.clear() (gate → get Premium).
+_PREMIUM_ATTR_STORE = "premium_attribution"
+_PREMIUM_ATTR_TTL_SEC = 24 * 3600
+
+
+def remember_premium_attribution(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    *,
+    source: str,
+    feature: str = "",
+) -> None:
+    """Remember why the user opened Premium (for premium_purchased props)."""
+    src = str(source or "").strip()
+    if not src:
+        return
+    store = context.application.bot_data.setdefault(_PREMIUM_ATTR_STORE, {})
+    store[int(user_id)] = {
+        "source": src,
+        "feature": str(feature or "").strip(),
+        "at": time.time(),
+    }
+
+
+def peek_premium_attribution(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> dict[str, str]:
+    store = context.application.bot_data.get(_PREMIUM_ATTR_STORE) or {}
+    raw = store.get(int(user_id))
+    if not isinstance(raw, dict):
+        return {}
+    at = float(raw.get("at") or 0)
+    if at and (time.time() - at) > _PREMIUM_ATTR_TTL_SEC:
+        store.pop(int(user_id), None)
+        return {}
+    source = str(raw.get("source") or "").strip()
+    if not source:
+        return {}
+    feature = str(raw.get("feature") or "").strip()
+    out = {"source": source}
+    if feature:
+        out["feature"] = feature
+    return out
+
+
+def take_premium_attribution(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> dict[str, str]:
+    props = peek_premium_attribution(context, user_id)
+    store = context.application.bot_data.get(_PREMIUM_ATTR_STORE)
+    if isinstance(store, dict):
+        store.pop(int(user_id), None)
+    return props
+
 
 def _fmt_until(unix: int) -> str:
     return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -270,7 +324,22 @@ async def send_premium_screen(
     *,
     edit_message=None,
     update=None,
+    context: ContextTypes.DEFAULT_TYPE | None = None,
+    source: str = "",
+    feature: str = "",
 ) -> None:
+    if context is not None and source:
+        remember_premium_attribution(
+            context, user_id, source=source, feature=feature
+        )
+        analytics.capture(
+            user_id,
+            "premium_opened",
+            {
+                "source": source,
+                **({"feature": feature} if feature else {}),
+            },
+        )
     # Demo: show free-plan screen even if admin has permanent / free-chat Premium.
     force_free = demo_mode.is_active(user_id)
     prem.ensure_trial_expired(db, user_id)
@@ -317,7 +386,15 @@ async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    await send_premium_screen(context.bot, user_id, lang, db, update=update)
+    await send_premium_screen(
+        context.bot,
+        user_id,
+        lang,
+        db,
+        update=update,
+        context=context,
+        source="menu",
+    )
 
 
 async def _send_invoice_link(
@@ -329,6 +406,9 @@ async def _send_invoice_link(
     stars: int,
     lang: str,
     subscription_period: int | None = None,
+    context: ContextTypes.DEFAULT_TYPE | None = None,
+    user_id: int | None = None,
+    kind: str = "",
 ) -> None:
     prices = [LabeledPrice(title, stars)]
     kwargs: dict = {
@@ -347,6 +427,10 @@ async def _send_invoice_link(
         logger.exception("create_invoice_link failed payload=%s", payload)
         await query.edit_message_text(t("premium_pay_failed", lang))
         return
+    if context is not None and user_id is not None:
+        props: dict = {"kind": kind or "unknown", "stars": stars}
+        props.update(peek_premium_attribution(context, user_id))
+        analytics.capture(user_id, "premium_pay_started", props)
     await query.edit_message_text(
         t("premium_pay_link", lang),
         reply_markup=InlineKeyboardMarkup(
@@ -489,6 +573,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             stars=total,
             lang=lang,
             subscription_period=prem.stars_period(),
+            context=context,
+            user_id=user_id,
+            kind="feat",
         )
         return
 
@@ -574,6 +661,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             stars=month_stars,
             lang=lang,
             subscription_period=prem.stars_period(),
+            context=context,
+            user_id=user_id,
+            kind="month",
         )
         return
 
@@ -589,6 +679,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             stars=year_stars,
             lang=lang,
             subscription_period=None,
+            context=context,
+            user_id=user_id,
+            kind="year",
         )
         return
 
@@ -606,6 +699,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             stars=life_stars,
             lang=lang,
             subscription_period=None,
+            context=context,
+            user_id=user_id,
+            kind="life",
         )
         return
 
@@ -727,6 +823,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             stars=stars,
             lang=lang,
             subscription_period=None,
+            context=context,
+            user_id=user_id,
+            kind="channel",
         )
         return
 
@@ -908,49 +1007,63 @@ async def successful_premium_payment(
     # PTB 21.8+: subscription_expiration_date is datetime, not unix int
     exp = payment.subscription_expiration_date
     until_sub = int(exp.timestamp()) if exp is not None else 0
+    attr = take_premium_attribution(context, parsed.user_id)
+    until_unix = 0
+    features_s = ""
+    stars_eff = stars_paid
 
     if parsed.kind in ("month", "legacy"):
-        until = until_sub if until_sub > 0 else now + prem.stars_period()
+        until_unix = until_sub if until_sub > 0 else now + prem.stars_period()
+        stars_eff = stars_paid or prem.stars_price(parsed.user_id)
         prem.apply_stars_payment(
             db,
             parsed.user_id,
             charge_id=charge_id,
-            until_unix=until,
-            stars_paid=stars_paid or prem.stars_price(parsed.user_id),
+            until_unix=until_unix,
+            stars_paid=stars_eff,
         )
     elif parsed.kind == "year":
-        until = now + prem.year_seconds()
+        until_unix = now + prem.year_seconds()
+        stars_eff = stars_paid or prem.stars_year_price(parsed.user_id)
         prem.apply_stars_payment(
             db,
             parsed.user_id,
             charge_id=charge_id,
-            until_unix=until,
-            stars_paid=stars_paid or prem.stars_year_price(parsed.user_id),
+            until_unix=until_unix,
+            stars_paid=stars_eff,
         )
         # One-shot year: no Telegram auto-renew to cancel.
         db.set_premium_stars_canceled(parsed.user_id, True)
     elif parsed.kind == "life":
+        until_unix = 0
+        stars_eff = stars_paid or prem.stars_lifetime_price(parsed.user_id)
         prem.apply_lifetime_payment(
             db,
             parsed.user_id,
             charge_id=charge_id,
-            stars_paid=stars_paid or prem.stars_lifetime_price(parsed.user_id),
+            stars_paid=stars_eff,
         )
     elif parsed.kind == "feat":
-        until = until_sub if until_sub > 0 else now + prem.stars_period()
+        until_unix = until_sub if until_sub > 0 else now + prem.stars_period()
+        features_s = ",".join(parsed.features)
+        stars_eff = stars_paid or (
+            prem.stars_feature_price(parsed.user_id) * max(1, len(parsed.features))
+        )
         prem.apply_features_payment(
             db,
             parsed.user_id,
             feature_ids=parsed.features,
             charge_id=charge_id,
-            until_unix=until,
-            stars_paid=stars_paid
-            or prem.stars_feature_price(parsed.user_id) * max(1, len(parsed.features)),
+            until_unix=until_unix,
+            stars_paid=stars_eff,
         )
     elif parsed.kind == "channel":
         pending = context.application.bot_data.get("pending_premium_channel") or {}
         info = pending.pop(parsed.user_id, None) or {}
         display = str(info.get("display_name") or parsed.twitch_login)
+        until_unix = 0
+        features_s = str(parsed.twitch_login or "")
+        stars_eff = stars_paid or prem.stars_channel_price(parsed.user_id)
         prem.apply_premium_channel_payment(
             db,
             parsed.user_id,
@@ -958,28 +1071,52 @@ async def successful_premium_payment(
             twitch_login=parsed.twitch_login,
             display_name=display,
             charge_id=charge_id,
-            stars_paid=stars_paid or prem.stars_channel_price(parsed.user_id),
+            stars_paid=stars_eff,
+        )
+        db.record_premium_purchase(
+            user_id=parsed.user_id,
+            charge_id=charge_id,
+            kind="channel",
+            stars=stars_eff,
+            features=features_s,
+            until_unix=until_unix,
+            source=attr.get("source", ""),
+            source_feature=attr.get("feature", ""),
         )
         analytics.capture(
             parsed.user_id,
             "premium_channel_purchased",
             {
-                "stars": stars_paid,
+                "stars": stars_eff,
                 "twitch_login": parsed.twitch_login,
                 "twitch_user_id": parsed.twitch_user_id,
+                **attr,
             },
         )
         await msg.reply_text(
             t("premium_channel_pay_done", lang, channel=display or parsed.twitch_login)
         )
         return
+
+    kind = parsed.kind if parsed.kind != "legacy" else "month"
+    db.record_premium_purchase(
+        user_id=parsed.user_id,
+        charge_id=charge_id,
+        kind=kind,
+        stars=stars_eff,
+        features=features_s,
+        until_unix=until_unix,
+        source=attr.get("source", ""),
+        source_feature=attr.get("feature", ""),
+    )
     analytics.capture(
         parsed.user_id,
         "premium_purchased",
         {
             "kind": parsed.kind,
-            "stars": stars_paid,
+            "stars": stars_eff,
             "features": list(parsed.features) if parsed.kind == "feat" else [],
+            **attr,
         },
     )
     await msg.reply_text(t("premium_pay_done", lang))

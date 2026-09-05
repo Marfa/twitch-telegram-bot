@@ -282,6 +282,20 @@ class ReferralCreditRef:
     commission_stars: int
 
 
+@dataclass(frozen=True)
+class PremiumPurchase:
+    id: int
+    user_id: int
+    charge_id: str
+    kind: str
+    stars: int
+    features: str
+    until_unix: int
+    source: str
+    source_feature: str
+    paid_at: str
+
+
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
     if payload.get("notify_on_category_change"):
         return "category"
