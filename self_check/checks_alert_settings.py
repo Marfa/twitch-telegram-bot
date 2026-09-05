@@ -146,7 +146,6 @@ def check_alert_setting_order() -> None:
         strip_name_mentions=True,
         attach_chat_button=True,
         disable_link_preview=True,
-        suppress_repeat_minutes=10,
         show_link_preview=True,
         show_advanced=True,
         show_custom_buttons=True,
@@ -163,7 +162,7 @@ def check_alert_setting_order() -> None:
     assert labels["edit_f:1:preview"].startswith("⬜️ ")
     assert labels["edit_f:1:delete_old"].startswith("✅ ")
     assert labels["edit_f:1:delete_fail"].startswith("⬜️ ")
-    assert labels["edit_f:1:repeat"].startswith("✅ ")
+    assert not labels["edit_f:1:repeat"].startswith(("✅ ", "⬜️ "))
 
     off = edit_options_keyboard(
         1,
@@ -204,7 +203,6 @@ def check_alert_setting_order() -> None:
         notify_delete_fail=True,
         delete_other_alerts=True,
         notify_on_category_change=True,
-        suppress_repeat_minutes=0,
         schedule_reminder_configured=True,
         schedule_reminder_minutes=15,
         show_advanced=True,
@@ -223,7 +221,6 @@ def check_alert_setting_order() -> None:
         1,
         "en",
         dest_type="channel",
-        suppress_repeat_minutes=0,
         show_advanced=True,
     )
     live_labels = {
@@ -231,7 +228,8 @@ def check_alert_setting_order() -> None:
         for row in live_repeat.inline_keyboard
         for btn in row
     }
-    assert live_labels["edit_f:1:repeat"].startswith("⬜️ ")
+    assert "edit_f:1:repeat" in live_labels
+    assert not live_labels["edit_f:1:repeat"].startswith(("✅ ", "⬜️ "))
 
     from i18n import chat_button_keyboard, edit_bool_keyboard, t
 

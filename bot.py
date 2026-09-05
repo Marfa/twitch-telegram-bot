@@ -1458,7 +1458,6 @@ def _edit_options_for_sub(
         strip_name_mentions=bool(sub.strip_name_mentions),
         attach_chat_button=bool(sub.attach_chat_button),
         disable_link_preview=bool(sub.disable_link_preview),
-        suppress_repeat_minutes=int(sub.suppress_repeat_minutes or 0),
         schedule_reminder_minutes=int(sub.schedule_reminder_minutes or 0),
         show_link_preview=not bool(sub.image_file_id)
         and template_has_link(sub.message_template or ""),

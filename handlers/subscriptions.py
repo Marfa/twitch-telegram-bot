@@ -2368,30 +2368,6 @@ async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
 
-    async def _reshow() -> None:
-        show_adv = await prem.advanced_mode_on(
-            context.bot, db, query.from_user.id, channel=sub.twitch_username
-        )
-        current = db.get_subscription(sub_id, query.from_user.id) or sub
-        await query.edit_message_text(
-            _edit_menu_text(
-                lang,
-                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
-                username=current.twitch_username,
-                show_advanced=show_adv,
-            ),
-            reply_markup=_edit_options_for_sub(
-                current, lang, show_advanced=show_adv, db=db
-            ),
-            parse_mode=ParseMode.HTML,
-        )
-
-    # Checkbox on → ask minutes; checkbox off (already muted) → clear mute.
-    if int(sub.suppress_repeat_minutes or 0) > 0:
-        db.update_subscription(sub_id, query.from_user.id, suppress_repeat_minutes=0)
-        await _reshow()
-        return ConversationHandler.END
-
     if not await prem.has_feature(
         context.bot, db, query.from_user.id, "repeat", channel=sub.twitch_username
     ):

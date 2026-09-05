@@ -284,7 +284,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / repeat mute / delete previous (+ fail notify / delete other) / chat button / link preview / schedule reminders, ignore / delay (⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / chat button / link preview / schedule reminders, repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

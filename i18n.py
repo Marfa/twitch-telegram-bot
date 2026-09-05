@@ -1989,7 +1989,6 @@ def edit_options_keyboard(
     strip_name_mentions: bool = False,
     attach_chat_button: bool = False,
     disable_link_preview: bool = False,
-    suppress_repeat_minutes: int = 0,
     schedule_reminder_minutes: int = 0,
     show_link_preview: bool = True,
     schedule_reminder_configured: bool = False,
@@ -2067,11 +2066,11 @@ def edit_options_keyboard(
                 and not notify_on_category_change
                 and not notify_on_end
             ):
-                repeat_mark = "✅ " if suppress_repeat_minutes > 0 else "⬜️ "
+                # Plain label like delay — opens minutes step, not an in-place toggle.
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            repeat_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=f"edit_f:{sub_id}:{field}",
                         )
                     ]
