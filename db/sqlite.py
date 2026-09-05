@@ -231,6 +231,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN attach_chat_button "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "custom_buttons" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN custom_buttons "
+                "TEXT NOT NULL DEFAULT '[]'"
+            )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN locale TEXT")
@@ -604,6 +609,7 @@ class SqliteDatabase:
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
         attach_chat_button: bool = False,
+        custom_buttons: str = "[]",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -629,14 +635,14 @@ class SqliteDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    strip_name_mentions, attach_chat_button,
+                    strip_name_mentions, attach_chat_button, custom_buttons,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -651,6 +657,7 @@ class SqliteDatabase:
                     int(disable_link_preview),
                     int(bool(strip_name_mentions)),
                     int(bool(attach_chat_button)),
+                    custom_buttons if str(custom_buttons or "").strip() else "[]",
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -943,7 +950,7 @@ class SqliteDatabase:
                         owner_id, twitch_username, twitch_user_id,
                         message_template, dest_type, chat_id, thread_id,
                         delete_previous, notify_delete_fail, disable_link_preview,
-                        strip_name_mentions, attach_chat_button,
+                        strip_name_mentions, attach_chat_button, custom_buttons,
                         delay_minutes, suppress_repeat_minutes,
                         schedule_reminder_minutes, schedule_reminder_configured,
                         ignore_keywords, use_global_ignore,
@@ -953,7 +960,7 @@ class SqliteDatabase:
                         notify_on_live, notify_on_end, notify_on_category_change,
                         delete_other_alerts, is_demo
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -969,6 +976,7 @@ class SqliteDatabase:
                         int(bool(payload.get("disable_link_preview"))),
                         int(bool(payload.get("strip_name_mentions"))),
                         int(bool(payload.get("attach_chat_button"))),
+                        payload.get("custom_buttons") or "[]",
                         int(payload.get("delay_minutes") or 0),
                         int(payload.get("suppress_repeat_minutes") or 0),
                         int(payload.get("schedule_reminder_minutes") or 0),
@@ -1034,6 +1042,7 @@ class SqliteDatabase:
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
+            "custom_buttons",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",

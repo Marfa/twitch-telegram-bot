@@ -858,9 +858,11 @@ def advanced_options_keyboard(
     want_delete: bool,
     want_chat: bool,
     want_preview: bool = False,
+    want_buttons: bool = False,
     show_delay: bool = True,
     show_repeat: bool = True,
     show_preview: bool = False,
+    show_buttons: bool = False,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     locked = frozenset(locked or ())
@@ -887,6 +889,8 @@ def advanced_options_keyboard(
     if show_repeat:
         rows.append(_row(want_repeat, "advanced_options_repeat", "repeat"))
     rows.append(_row(want_delete, "advanced_options_delete", "delete"))
+    if show_buttons:
+        rows.append(_row(want_buttons, "advanced_options_buttons", "buttons"))
     rows.append(_row(want_chat, "advanced_options_chat", "chat"))
     if show_preview:
         rows.append(_row(want_preview, "advanced_options_preview", "preview"))
@@ -898,6 +902,80 @@ def advanced_options_keyboard(
             )
         ]
     )
+    return InlineKeyboardMarkup(rows)
+
+
+def custom_buttons_keyboard(
+    lang: str,
+    buttons: list[dict[str, str]],
+    *,
+    awaiting_input: bool = False,
+    show_skip: bool = False,
+    show_back: bool = True,
+    show_cancel: bool = True,
+) -> InlineKeyboardMarkup:
+    from custom_buttons import CUSTOM_BUTTONS_MAX
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if awaiting_input:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("custom_buttons_back_list", lang),
+                    callback_data="cbtn:list",
+                )
+            ]
+        )
+    else:
+        for i, item in enumerate(buttons):
+            label = str(item.get("text") or "")[:40]
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"{t('custom_buttons_edit', lang)} {i + 1}. {label}",
+                        callback_data=f"cbtn:edit:{i}",
+                    ),
+                    InlineKeyboardButton(
+                        t("custom_buttons_delete", lang),
+                        callback_data=f"cbtn:del:{i}",
+                    ),
+                ]
+            )
+        if len(buttons) < CUSTOM_BUTTONS_MAX:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        t("custom_buttons_add", lang),
+                        callback_data="cbtn:add",
+                    )
+                ]
+            )
+        done_label = (
+            t("custom_buttons_skip", lang)
+            if show_skip and not buttons
+            else t("custom_buttons_done", lang)
+        )
+        rows.append(
+            [InlineKeyboardButton(done_label, callback_data="cbtn:done")]
+        )
+    if show_back:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("wizard_back", lang),
+                    callback_data="cbtn:back",
+                )
+            ]
+        )
+    if show_cancel:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang),
+                    callback_data="cbtn:cancel",
+                )
+            ]
+        )
     return InlineKeyboardMarkup(rows)
 
 
@@ -1894,10 +1972,11 @@ def edit_options_keyboard(
     notify_on_end: bool = False,
     is_upcoming: bool = False,
     show_advanced: bool = True,
+    show_custom_buttons: bool = False,
 ) -> InlineKeyboardMarkup:
     # Shared Extras block order: image → strip → ignore → delay → repeat →
-    # delete → chat. Edit-only: template, image remove, preview, schedule, dest,
-    # delete sub-options, type/copy.
+    # delete → custom buttons → chat. Edit-only: template, image remove, preview,
+    # schedule, dest, delete sub-options, type/copy.
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
         [
@@ -1979,6 +2058,15 @@ def edit_options_keyboard(
                         )
                     ]
                 )
+    if show_advanced and show_custom_buttons:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("advanced_options_buttons", lang),
+                    callback_data=f"edit_f:{sub_id}:custom_buttons",
+                )
+            ]
+        )
     if show_advanced:
         rows.append(
             [

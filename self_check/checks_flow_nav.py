@@ -816,6 +816,36 @@ async def _scenario_wizard_finish(db) -> None:
     cap.assert_turn("wizard_finish")
 
 
+async def _scenario_wizard_custom_buttons(db) -> None:
+    """§2 custom URL buttons manager — Cancel/Back on the list screen."""
+    from handlers.wizard import _go_custom_buttons_step
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "advanced_options_done": True,
+            "adv_want_buttons": True,
+            "twitch_username": "streamer",
+            "custom_buttons_list": [
+                {"text": "A", "url": "https://example.com/a"},
+                {"text": "B", "url": "https://example.com/b"},
+            ],
+            "custom_buttons": '[{"text":"A","url":"https://example.com/a"},'
+            '{"text":"B","url":"https://example.com/b"}]',
+        }
+    )
+    with patch(
+        "handlers.custom_buttons_ui.maybe_entitled_custom_buttons",
+        new=AsyncMock(return_value=True),
+    ):
+        await _go_custom_buttons_step(update, ctx, "ru")
+    cap.assert_turn("wizard_custom_buttons")
+
+
 async def _scenario_subscriptions_delete(db) -> None:
     """§4 delete flow — pick, delete-all confirm, No returns to pick."""
     from handlers.subscriptions import (
@@ -1197,6 +1227,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_deep(db)
         await _scenario_wizard_template_typo(db)
         await _scenario_wizard_finish(db)
+        await _scenario_wizard_custom_buttons(db)
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)

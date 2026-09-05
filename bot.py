@@ -489,6 +489,8 @@ from handlers.wizard import (
     receive_ignore_keywords_global_toggle,
     receive_ignore_keywords_skip,
     receive_image_ask,
+    receive_wizard_custom_buttons_callback,
+    receive_wizard_custom_buttons_text,
     receive_image_position,
     receive_image_upload,
     receive_link_preview,
@@ -630,6 +632,7 @@ from handlers.subscriptions import (
     receive_sync_days,
     start_edit_dest,
     start_edit_ignore_keywords,
+    start_edit_custom_buttons,
     start_edit_repeat_mute,
     start_edit_template,
     start_pause_notifications,
@@ -638,6 +641,8 @@ from handlers.subscriptions import (
     sync_twitch_follows,
     receive_edit_ignore_keywords,
     receive_edit_ignore_keywords_skip,
+    receive_edit_custom_buttons_callback,
+    receive_edit_custom_buttons_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -661,6 +666,7 @@ logger = logging.getLogger(__name__)
     REPEAT_MUTE_MINUTES,
     SCHEDULE_REMINDER_ASK,
     SCHEDULE_REMINDER_MINUTES,
+    CUSTOM_BUTTONS,
     CHAT_BUTTON_ASK,
     DEST_TYPE,
     DEST_CHAT,
@@ -672,6 +678,7 @@ logger = logging.getLogger(__name__)
     EDIT_DELAY,
     EDIT_REPEAT,
     EDIT_SCHEDULE_REMINDER,
+    EDIT_CUSTOM_BUTTONS,
     ADMIN_MSG_TYPE,
     ADMIN_MSG_TEXT,
     ADMIN_MSG_SCHEDULE,
@@ -705,7 +712,7 @@ logger = logging.getLogger(__name__)
     STREAM_SCHEDULE_MORE,
     PAUSE_ALERTS_DAYS,
     ADMIN_REFUND_CHARGE,
-) = range(62)
+) = range(64)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -1403,9 +1410,16 @@ def _extract_forward_chat(message) -> tuple[int | None, int | None]:
 
 
 def _edit_options_for_sub(
-    sub: Subscription, lang: str, *, show_advanced: bool
+    sub: Subscription, lang: str, *, show_advanced: bool, db: Database | None = None
 ) -> InlineKeyboardMarkup:
+    import beta as beta_features
+    import custom_buttons as cbtn
+
     alert_type = _alert_type_from_sub(sub)
+    show_custom_buttons = bool(
+        db is not None
+        and beta_features.is_enabled(db, sub.owner_id, cbtn.BETA_FEATURE_ID)
+    )
     return edit_options_keyboard(
         sub.id,
         lang,
@@ -1420,6 +1434,7 @@ def _edit_options_for_sub(
         notify_on_end=sub.notify_on_end,
         is_upcoming=alert_type == "upcoming",
         show_advanced=show_advanced,
+        show_custom_buttons=show_custom_buttons,
     )
 
 
@@ -2233,6 +2248,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 pattern=r"^edit_f:\d+:ignore_keywords$",
             ),
             CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_custom_buttons),
+                pattern=r"^edit_f:\d+:custom_buttons$",
+            ),
+            CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_dest), pattern=r"^edit_f:\d+:dest$"
             ),
             CallbackQueryHandler(
@@ -2316,10 +2335,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|chat|preview)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|buttons|chat|preview)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"
+                ),
+            ],
+            CUSTOM_BUTTONS: [
+                CallbackQueryHandler(
+                    receive_wizard_custom_buttons_callback,
+                    pattern=r"^cbtn:",
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_wizard_custom_buttons_text
                 ),
             ],
             IGNORE_KEYWORDS: [
@@ -2417,6 +2445,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_edit_schedule_reminder
+                ),
+            ],
+            EDIT_CUSTOM_BUTTONS: [
+                CallbackQueryHandler(
+                    receive_edit_custom_buttons_callback,
+                    pattern=r"^cbtn:",
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_edit_custom_buttons_text
                 ),
             ],
             CHAT_BUTTON_ASK: [

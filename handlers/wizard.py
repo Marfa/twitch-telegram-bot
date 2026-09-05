@@ -97,6 +97,7 @@ def _wz() -> dict[str, int]:
         CHANNEL,
         CHANNEL_DUP,
         CHAT_BUTTON_ASK,
+        CUSTOM_BUTTONS,
         DELAY_MINUTES,
         DELAY_SEND,
         DELETE_FAIL_NOTIFY,
@@ -138,6 +139,7 @@ def _wz() -> dict[str, int]:
         "CHANNEL": CHANNEL,
         "CHANNEL_DUP": CHANNEL_DUP,
         "CHAT_BUTTON_ASK": CHAT_BUTTON_ASK,
+        "CUSTOM_BUTTONS": CUSTOM_BUTTONS,
         "DELAY_MINUTES": DELAY_MINUTES,
         "DELAY_SEND": DELAY_SEND,
         "DELETE_FAIL_NOTIFY": DELETE_FAIL_NOTIFY,
@@ -517,8 +519,102 @@ async def _go_before_dest_step(
         context.user_data["attach_chat_button"] = want
         if want:
             context.user_data["disable_link_preview"] = True
-        return await _prompt_dest_step(update, context, lang)
+        return await _go_custom_buttons_step(update, context, lang)
     return await _go_chat_button_prompt(update, context, lang)
+
+
+async def _go_custom_buttons_step(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """Optional custom-buttons manager before destination (after Extras)."""
+    from handlers.custom_buttons_ui import (
+        maybe_entitled_custom_buttons,
+        show_custom_buttons_screen,
+        _set_ud_buttons,
+    )
+    import custom_buttons as cbtn
+
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    want = bool(context.user_data.get("adv_want_buttons"))
+    entitled = await maybe_entitled_custom_buttons(
+        context.bot, db, user_id, channel=_wizard_channel(context)
+    )
+    if not want or not entitled:
+        context.user_data.setdefault("custom_buttons", "[]")
+        context.user_data.setdefault("custom_buttons_list", [])
+        return await _prompt_dest_step(update, context, lang)
+
+    if "custom_buttons_list" not in context.user_data:
+        _set_ud_buttons(
+            context, cbtn.parse_custom_buttons(context.user_data.get("custom_buttons"))
+        )
+    context.user_data.pop("cbtn_awaiting", None)
+    context.user_data.pop("cbtn_edit_index", None)
+    _set_wizard_back(context, _wz()["CUSTOM_BUTTONS"])
+    return await show_custom_buttons_screen(
+        update,
+        context,
+        lang,
+        state=_wz()["CUSTOM_BUTTONS"],
+        show_skip=True,
+        show_back=True,
+    )
+
+
+async def receive_wizard_custom_buttons_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from handlers.custom_buttons_ui import receive_custom_buttons_callback
+
+    async def _done(upd, ctx, lang):
+        return await _prompt_dest_step(upd, ctx, lang)
+
+    async def _back(upd, ctx, lang):
+        return await _wizard_back_before_dest(upd, ctx, lang)
+
+    return await receive_custom_buttons_callback(
+        update,
+        context,
+        state=_wz()["CUSTOM_BUTTONS"],
+        on_done=_done,
+        on_back=_back,
+        on_cancel=cancel,
+        show_skip=True,
+    )
+
+
+async def receive_wizard_custom_buttons_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from handlers.custom_buttons_ui import receive_custom_buttons_text
+    from i18n import all_btn_texts, all_wizard_nav_buttons
+
+    lang = _user_lang(context, update.effective_user.id)
+    text = (update.effective_message.text or "").strip()
+    if text in all_btn_texts("wizard_cancel"):
+        return await cancel(update, context)
+    if text in all_btn_texts("wizard_back") or text in all_wizard_nav_buttons():
+        if text in all_btn_texts("wizard_back"):
+            if context.user_data.get("cbtn_awaiting"):
+                context.user_data.pop("cbtn_awaiting", None)
+                context.user_data.pop("cbtn_edit_index", None)
+                from handlers.custom_buttons_ui import show_custom_buttons_screen
+
+                return await show_custom_buttons_screen(
+                    update,
+                    context,
+                    lang,
+                    state=_wz()["CUSTOM_BUTTONS"],
+                    show_skip=True,
+                )
+            return await _wizard_back_before_dest(update, context, lang)
+    return await receive_custom_buttons_text(
+        update,
+        context,
+        state=_wz()["CUSTOM_BUTTONS"],
+        show_skip=True,
+    )
 
 async def _wizard_back_before_dest(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
@@ -684,6 +780,7 @@ _ADVOPT_FEATURE = {
     "delay": "delay",
     "repeat": "repeat",
     "delete": "delete_prev",
+    "buttons": "custom_buttons",
 }
 
 
@@ -704,10 +801,15 @@ async def _advopt_locked(
 async def _advanced_options_markup(
     context: ContextTypes.DEFAULT_TYPE, lang: str, user_id: int
 ):
+    import beta as beta_features
+    import custom_buttons as cbtn
+
     alert = context.user_data.get("alert_type")
     show_preview = template_has_link(
         str(context.user_data.get("message_template") or "")
     )
+    db: Database = context.application.bot_data["db"]
+    show_buttons = beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID)
     _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
@@ -717,11 +819,13 @@ async def _advanced_options_markup(
         want_delay=bool(context.user_data.get("adv_want_delay")),
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
         want_delete=bool(context.user_data.get("adv_want_delete")),
+        want_buttons=bool(context.user_data.get("adv_want_buttons")),
         want_chat=bool(context.user_data.get("adv_want_chat")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
         show_preview=show_preview,
+        show_buttons=show_buttons,
         locked=await _advopt_locked(context, user_id),
     )
 
@@ -732,7 +836,12 @@ def _sync_adv_preview_conflict(context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data["adv_want_preview"] = False
 
 
-def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
+def _advanced_options_prompt_text(
+    context: ContextTypes.DEFAULT_TYPE, lang: str, user_id: int
+) -> str:
+    import beta as beta_features
+    import custom_buttons as cbtn
+
     alert = context.user_data.get("alert_type")
     lines = [
         t("advanced_options_prompt", lang),
@@ -746,6 +855,9 @@ def _advanced_options_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str)
     if alert == "live" or not alert:
         lines.append(t("advanced_options_hint_repeat", lang))
     lines.append(t("advanced_options_hint_delete", lang))
+    db: Database = context.application.bot_data["db"]
+    if beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID):
+        lines.append(t("advanced_options_hint_buttons", lang))
     lines.append(t("advanced_options_hint_chat", lang))
     if template_has_link(str(context.user_data.get("message_template") or "")):
         lines.append(t("advanced_options_hint_preview", lang))
@@ -763,6 +875,7 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
     context.user_data.setdefault("adv_want_delete", False)
+    context.user_data.setdefault("adv_want_buttons", False)
     context.user_data.setdefault("adv_want_chat", False)
     has_link = template_has_link(
         str(context.user_data.get("message_template") or "")
@@ -776,7 +889,7 @@ async def _go_advanced_options_prompt(
     context.user_data.pop("advanced_options_done", None)
     chat_id = reply_chat_id(update)
     user_id = update.effective_user.id
-    text = _advanced_options_prompt_text(context, lang)
+    text = _advanced_options_prompt_text(context, lang, user_id)
     markup = await _advanced_options_markup(context, lang, user_id)
     if update.callback_query:
         await context.bot.send_message(chat_id, text, reply_markup=markup)
@@ -799,6 +912,7 @@ async def receive_advanced_options_toggle(
         "delay": "adv_want_delay",
         "repeat": "adv_want_repeat",
         "delete": "adv_want_delete",
+        "buttons": "adv_want_buttons",
         "chat": "adv_want_chat",
         "preview": "adv_want_preview",
     }.get(flag)
@@ -856,6 +970,7 @@ async def receive_advanced_options_next(
         ("delay", "adv_want_delay"),
         ("repeat", "adv_want_repeat"),
         ("delete", "adv_want_delete"),
+        ("buttons", "adv_want_buttons"),
     ):
         if toggle in locked:
             context.user_data[ud_key] = False
@@ -871,6 +986,9 @@ async def receive_advanced_options_next(
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
+    if not context.user_data.get("adv_want_buttons"):
+        context.user_data["custom_buttons"] = "[]"
+        context.user_data["custom_buttons_list"] = []
     want_chat = bool(context.user_data.get("adv_want_chat"))
     context.user_data["attach_chat_button"] = want_chat
     _sync_adv_preview_conflict(context)
@@ -1014,11 +1132,16 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_delay",
             "adv_want_repeat",
             "adv_want_delete",
+            "adv_want_buttons",
             "adv_want_chat",
             "adv_want_preview",
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
+            "custom_buttons",
+            "custom_buttons_list",
+            "cbtn_awaiting",
+            "cbtn_edit_index",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -1123,6 +1246,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 return await _go_ignore_keywords_prompt(update, context, lang)
             return await _go_link_preview_prompt(update, context, lang)
         return await _go_schedule_reminder_ask(update, context, lang)
+    if state == _wz()["CUSTOM_BUTTONS"]:
+        return await _wizard_back_before_dest(update, context, lang)
     if state == _wz()["DEST_TYPE"]:
         db: Database = context.application.bot_data["db"]
         if await prem.advanced_mode_on(
@@ -1130,6 +1255,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         ):
             # Chat button came from «Дополнительно» — skip separate prompt on back.
             if context.user_data.get("advanced_options_done"):
+                if context.user_data.get("adv_want_buttons"):
+                    return await _go_custom_buttons_step(update, context, lang)
                 return await _wizard_back_before_dest(update, context, lang)
             return await _go_chat_button_prompt(update, context, lang)
         return await _wizard_back_before_dest(update, context, lang)
@@ -1497,7 +1624,7 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
                 username=sub.twitch_username,
                 show_advanced=show_adv,
             ),
-            reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
+            reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv, db=db),
             parse_mode=ParseMode.HTML,
         )
         try:
@@ -2418,6 +2545,7 @@ async def _finish_subscription(
                 or bool(data.get("attach_chat_button")),
                 strip_name_mentions=bool(data.get("strip_name_mentions")),
                 attach_chat_button=bool(data.get("attach_chat_button")),
+                custom_buttons=str(data.get("custom_buttons") or "[]"),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
@@ -2503,6 +2631,7 @@ async def _finish_subscription(
                 or bool(data.get("attach_chat_button")),
                 strip_name_mentions=bool(data.get("strip_name_mentions")),
                 attach_chat_button=bool(data.get("attach_chat_button")),
+                custom_buttons=str(data.get("custom_buttons") or "[]"),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=(
                     0

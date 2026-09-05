@@ -315,6 +315,13 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS custom_buttons
+                TEXT NOT NULL DEFAULT '[]'
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -742,6 +749,7 @@ class PostgresDatabase:
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
         attach_chat_button: bool = False,
+        custom_buttons: str = "[]",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -768,14 +776,14 @@ class PostgresDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    strip_name_mentions, attach_chat_button,
+                    strip_name_mentions, attach_chat_button, custom_buttons,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -791,6 +799,7 @@ class PostgresDatabase:
                     disable_link_preview,
                     bool(strip_name_mentions),
                     bool(attach_chat_button),
+                    custom_buttons if str(custom_buttons or "").strip() else "[]",
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -1153,6 +1162,7 @@ class PostgresDatabase:
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
+            "custom_buttons",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",

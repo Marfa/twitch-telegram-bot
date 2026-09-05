@@ -28,6 +28,7 @@ from bot_helpers import (
     _user_lang,
     _user_notifications_paused,
     _wizard,
+    reply_chat_id,
 )
 from db import Database, Subscription, TwitchSync, is_category_watch_sub
 from db.models import (
@@ -68,6 +69,7 @@ _SHARE_BETA_ID = "share-alerts"
 def _sub_states() -> dict[str, int]:
     from bot import (
         DEST_TYPE,
+        EDIT_CUSTOM_BUTTONS,
         EDIT_IGNORE_KEYWORDS,
         EDIT_REPEAT,
         EDIT_TEMPLATE,
@@ -77,6 +79,7 @@ def _sub_states() -> dict[str, int]:
 
     return {
         "DEST_TYPE": DEST_TYPE,
+        "EDIT_CUSTOM_BUTTONS": EDIT_CUSTOM_BUTTONS,
         "EDIT_IGNORE_KEYWORDS": EDIT_IGNORE_KEYWORDS,
         "EDIT_REPEAT": EDIT_REPEAT,
         "EDIT_TEMPLATE": EDIT_TEMPLATE,
@@ -382,6 +385,11 @@ def _format_sub_line(
         )
     if sub.attach_chat_button:
         settings.append(t("sub_list_chat_button_yes", lang))
+    from custom_buttons import parse_custom_buttons
+
+    custom_btns = parse_custom_buttons(getattr(sub, "custom_buttons", None))
+    if custom_btns:
+        settings.append(t("sub_list_custom_buttons", lang, count=len(custom_btns)))
     is_upcoming = (
         sub.schedule_reminder_minutes > 0
         and not sub.notify_on_live
@@ -2025,12 +2033,15 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.bot, db, query.from_user.id, channel=sub.twitch_username
     )
     if not show_adv:
+        from custom_buttons import parse_custom_buttons
+
         reset_fields = {
             "ignore_keywords": "",
             "use_global_ignore": False,
             "delay_minutes": 0,
             "suppress_repeat_minutes": 0,
             "attach_chat_button": False,
+            "custom_buttons": "[]",
             "delete_previous": False,
             "notify_delete_fail": False,
             "delete_other_alerts": False,
@@ -2041,6 +2052,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             or sub.delay_minutes > 0
             or sub.suppress_repeat_minutes > 0
             or sub.attach_chat_button
+            or bool(parse_custom_buttons(getattr(sub, "custom_buttons", None)))
             or sub.delete_previous
             or sub.notify_delete_fail
             or sub.delete_other_alerts
@@ -2055,7 +2067,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             username=sub.twitch_username,
             show_advanced=show_adv,
         ),
-        reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv),
+        reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv, db=db),
         parse_mode=ParseMode.HTML,
     )
 
@@ -2149,6 +2161,142 @@ async def start_edit_ignore_keywords(
         ),
     )
     return _sub_states()["EDIT_IGNORE_KEYWORDS"]
+
+
+async def start_edit_custom_buttons(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from handlers.custom_buttons_ui import (
+        maybe_entitled_custom_buttons,
+        show_custom_buttons_screen,
+        _set_ud_buttons,
+    )
+    import custom_buttons as cbtn
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if not await maybe_entitled_custom_buttons(
+        context.bot, db, query.from_user.id, channel=sub.twitch_username
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(
+            context.bot, query.from_user.id, lang, db, update=update
+        )
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data.pop("cbtn_awaiting", None)
+    context.user_data.pop("cbtn_edit_index", None)
+    _set_ud_buttons(context, cbtn.parse_custom_buttons(sub.custom_buttons))
+    await query.edit_message_text("✓")
+    return await show_custom_buttons_screen(
+        update,
+        context,
+        lang,
+        state=_sub_states()["EDIT_CUSTOM_BUTTONS"],
+        show_skip=False,
+        show_back=False,
+    )
+
+
+async def receive_edit_custom_buttons_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from handlers.custom_buttons_ui import (
+        receive_custom_buttons_callback,
+        _ud_buttons,
+        _set_ud_buttons,
+    )
+    from handlers.wizard import cancel
+    import custom_buttons as cbtn
+
+    query = update.callback_query
+    lang = _user_lang(context, query.from_user.id)
+    db: Database = context.application.bot_data["db"]
+    sub_id = int(context.user_data.get("edit_sub_id") or 0)
+    owner_id = query.from_user.id
+
+    def _persist(_ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        dump = cbtn.dump_custom_buttons(_ud_buttons(_ctx))
+        db.update_subscription(sub_id, owner_id, custom_buttons=dump)
+        _set_ud_buttons(_ctx, cbtn.parse_custom_buttons(dump))
+
+    async def _done(upd, ctx, lang_done):
+        _persist(ctx)
+        sub = db.get_subscription(sub_id, owner_id)
+        if not sub:
+            await context.bot.send_message(
+                reply_chat_id(upd), t("sub_not_found", lang_done)
+            )
+            return ConversationHandler.END
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, owner_id, channel=sub.twitch_username
+        )
+        await context.bot.send_message(
+            reply_chat_id(upd),
+            t("custom_buttons_saved", lang_done),
+        )
+        await context.bot.send_message(
+            reply_chat_id(upd),
+            _edit_menu_text(
+                lang_done,
+                sub_id=_owner_sub_number(db, owner_id, sub_id),
+                username=sub.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(sub, lang_done, show_advanced=show_adv, db=db),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+
+    return await receive_custom_buttons_callback(
+        update,
+        context,
+        state=_sub_states()["EDIT_CUSTOM_BUTTONS"],
+        on_done=_done,
+        on_back=None,
+        on_cancel=cancel,
+        show_skip=False,
+        persist=_persist,
+    )
+
+
+async def receive_edit_custom_buttons_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from handlers.custom_buttons_ui import (
+        receive_custom_buttons_text,
+        _ud_buttons,
+        _set_ud_buttons,
+    )
+    import custom_buttons as cbtn
+
+    db: Database = context.application.bot_data["db"]
+    sub_id = int(context.user_data.get("edit_sub_id") or 0)
+    owner_id = update.effective_user.id
+
+    def _persist(_ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        dump = cbtn.dump_custom_buttons(_ud_buttons(_ctx))
+        db.update_subscription(sub_id, owner_id, custom_buttons=dump)
+        _set_ud_buttons(_ctx, cbtn.parse_custom_buttons(dump))
+
+    return await receive_custom_buttons_text(
+        update,
+        context,
+        state=_sub_states()["EDIT_CUSTOM_BUTTONS"],
+        show_skip=False,
+        persist=_persist,
+    )
 
 
 async def receive_edit_ignore_keywords(
@@ -2294,7 +2442,7 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 username=current.twitch_username,
                 show_advanced=show_adv,
             ),
-            reply_markup=_edit_options_for_sub(current, lang, show_advanced=show_adv),
+            reply_markup=_edit_options_for_sub(current, lang, show_advanced=show_adv, db=db),
             parse_mode=ParseMode.HTML,
         )
 
@@ -3319,6 +3467,7 @@ def _add_subscription_from_snapshot(
         disable_link_preview=bool(snapshot.get("disable_link_preview")),
         strip_name_mentions=bool(snapshot.get("strip_name_mentions")),
         attach_chat_button=bool(snapshot.get("attach_chat_button")),
+        custom_buttons=str(snapshot.get("custom_buttons") or "[]"),
         delay_minutes=int(snapshot.get("delay_minutes") or 0),
         suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),
         schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
@@ -3807,7 +3956,7 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         username=sub.twitch_username,
         show_advanced=show_adv,
     )
-    edit_markup = _edit_options_for_sub(sub, lang, show_advanced=show_adv)
+    edit_markup = _edit_options_for_sub(sub, lang, show_advanced=show_adv, db=db)
     await context.bot.send_message(
         user_id,
         t("menu_subs", lang),
