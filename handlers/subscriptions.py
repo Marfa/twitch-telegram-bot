@@ -46,7 +46,6 @@ from i18n import (
     btn,
     dest_keyboard,
     dest_label,
-    edit_bool_keyboard,
     ignore_keywords_keyboard,
     import_mode_keyboard,
     is_menu_button,
@@ -2368,13 +2367,58 @@ async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_T
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
+
+    async def _reshow() -> None:
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=sub.twitch_username
+        )
+        current = db.get_subscription(sub_id, query.from_user.id) or sub
+        await query.edit_message_text(
+            _edit_menu_text(
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=current.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(
+                current, lang, show_advanced=show_adv, db=db
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+
+    # Checkbox on → ask minutes; checkbox off (already muted) → clear mute.
+    if int(sub.suppress_repeat_minutes or 0) > 0:
+        db.update_subscription(sub_id, query.from_user.id, suppress_repeat_minutes=0)
+        await _reshow()
+        return ConversationHandler.END
+
+    if not await prem.has_feature(
+        context.bot, db, query.from_user.id, "repeat", channel=sub.twitch_username
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(
+            context.bot,
+            query.from_user.id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="edit_field",
+            feature="repeat",
+        )
+        return ConversationHandler.END
+
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     current = _repeat_current_label(sub.suppress_repeat_minutes, lang)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text("✓")
     await context.bot.send_message(
-        query.from_user.id,
+        reply_chat_id(update),
         t("edit_repeat_mute_prompt", lang, sub_id=sub_num, current=current),
         reply_markup=_wizard(lang, back=False),
     )
@@ -2415,7 +2459,6 @@ async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     lang = _user_lang(context, query.from_user.id)
     parts = query.data.split(":")
     sub_id = int(parts[1])
@@ -2423,6 +2466,7 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     db: Database = context.application.bot_data["db"]
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub:
+        await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
         return
 
@@ -2442,26 +2486,33 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
     if field == "strip":
+        await query.answer()
         enabled = not bool(sub.strip_name_mentions)
         db.update_subscription(sub_id, query.from_user.id, strip_name_mentions=enabled)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
-    if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
+    if field == "chat_button":
+        await query.answer()
+        enabled = not bool(sub.attach_chat_button)
+        kwargs: dict = {"attach_chat_button": enabled}
+        if enabled:
+            kwargs["disable_link_preview"] = True
+        db.update_subscription(sub_id, query.from_user.id, **kwargs)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
-    if field == "delete_other" and (
-        not sub.notify_on_category_change or not sub.delete_previous
-    ):
-        await _reshow_edit_menu(sub)
-        return
-    if field in ("delete_old", "delete_fail", "delete_other", "repeat"):
-        feat = "repeat" if field == "repeat" else "delete_prev"
+    if field == "delete_old":
+        if sub.dest_type == "dm":
+            await query.answer()
+            await _reshow_edit_menu(sub)
+            return
         if not await prem.has_feature(
-            context.bot, db, query.from_user.id, feat, channel=sub.twitch_username
+            context.bot, db, query.from_user.id, "delete_prev", channel=sub.twitch_username
         ):
             from premium_handlers import send_premium_screen
 
+            await query.answer()
             await query.edit_message_text(
                 t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
             )
@@ -2473,25 +2524,112 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 update=update,
                 context=context,
                 source="edit_field",
-                feature=feat,
+                feature="delete_prev",
             )
             return
-    if field == "delete_old" and sub.notify_on_category_change:
-        menu_key = "edit_delete_old_menu_category"
-    else:
-        menu_keys = {
-            "delete_old": "edit_delete_old_menu",
-            "delete_fail": "delete_fail_notify_text",
-            "delete_other": "edit_delete_other_menu",
-            "preview": "link_preview_prompt",
-            "chat_button": "edit_chat_button_menu",
-            "repeat": "repeat_prompt",
-        }
-        menu_key = menu_keys[field]
-    await query.edit_message_text(
-        t(menu_key, lang),
-        reply_markup=edit_bool_keyboard(sub_id, field, lang),
-    )
+        await query.answer()
+        enabled = not bool(sub.delete_previous)
+        kwargs = {"delete_previous": enabled}
+        if not enabled:
+            kwargs["notify_delete_fail"] = False
+            kwargs["delete_other_alerts"] = False
+        db.update_subscription(sub_id, query.from_user.id, **kwargs)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    if field == "preview":
+        want_on = bool(sub.disable_link_preview)
+        if want_on and sub.attach_chat_button:
+            await query.answer(
+                t("preview_blocked_chat_button", lang), show_alert=True
+            )
+            return
+        await query.answer()
+        # Image hides the preview row; still refuse if present.
+        if want_on and sub.image_file_id:
+            sub = db.get_subscription(sub_id, query.from_user.id) or sub
+            await _reshow_edit_menu(sub)
+            return
+        db.update_subscription(
+            sub_id, query.from_user.id, disable_link_preview=not want_on
+        )
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    if field == "delete_fail":
+        if sub.dest_type == "dm" or not sub.delete_previous:
+            await query.answer()
+            await _reshow_edit_menu(sub)
+            return
+        if not await prem.has_feature(
+            context.bot, db, query.from_user.id, "delete_prev", channel=sub.twitch_username
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.answer()
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_field",
+                feature="delete_prev",
+            )
+            return
+        await query.answer()
+        db.update_subscription(
+            sub_id,
+            query.from_user.id,
+            notify_delete_fail=not bool(sub.notify_delete_fail),
+        )
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    if field == "delete_other":
+        if (
+            sub.dest_type == "dm"
+            or not sub.delete_previous
+            or not sub.notify_on_category_change
+        ):
+            await query.answer()
+            await _reshow_edit_menu(sub)
+            return
+        if not await prem.has_feature(
+            context.bot, db, query.from_user.id, "delete_prev", channel=sub.twitch_username
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.answer()
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_field",
+                feature="delete_prev",
+            )
+            return
+        await query.answer()
+        db.update_subscription(
+            sub_id,
+            query.from_user.id,
+            delete_other_alerts=not bool(sub.delete_other_alerts),
+        )
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    await query.answer()
+    await _reshow_edit_menu(sub)
 
 
 async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

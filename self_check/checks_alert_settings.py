@@ -143,12 +143,111 @@ def check_alert_setting_order() -> None:
         dest_type="channel",
         delete_previous=True,
         has_image=True,
+        strip_name_mentions=True,
+        attach_chat_button=True,
+        disable_link_preview=True,
+        suppress_repeat_minutes=10,
         show_link_preview=True,
         show_advanced=True,
         show_custom_buttons=True,
         is_upcoming=False,
     )
     assert _edit_setting_ids(edit) == list(ALERT_SETTING_ORDER)
+    labels = {
+        (btn.callback_data or ""): btn.text
+        for row in edit.inline_keyboard
+        for btn in row
+    }
+    assert labels["edit_f:1:strip"].startswith("✅ ")
+    assert labels["edit_f:1:chat_button"].startswith("✅ ")
+    assert labels["edit_f:1:preview"].startswith("⬜️ ")
+    assert labels["edit_f:1:delete_old"].startswith("✅ ")
+    assert labels["edit_f:1:delete_fail"].startswith("⬜️ ")
+    assert labels["edit_f:1:repeat"].startswith("✅ ")
+
+    off = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="dm",
+        attach_chat_button=False,
+        disable_link_preview=False,
+        show_link_preview=True,
+        show_advanced=True,
+    )
+    off_labels = {
+        (btn.callback_data or ""): btn.text
+        for row in off.inline_keyboard
+        for btn in row
+    }
+    assert off_labels["edit_f:1:chat_button"].startswith("⬜️ ")
+    assert off_labels["edit_f:1:preview"].startswith("✅ ")
+
+    delete_off = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="channel",
+        delete_previous=False,
+        show_advanced=True,
+    )
+    delete_labels = {
+        (btn.callback_data or ""): btn.text
+        for row in delete_off.inline_keyboard
+        for btn in row
+    }
+    assert delete_labels["edit_f:1:delete_old"].startswith("⬜️ ")
+
+    fail_on = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="channel",
+        delete_previous=True,
+        notify_delete_fail=True,
+        delete_other_alerts=True,
+        notify_on_category_change=True,
+        suppress_repeat_minutes=0,
+        schedule_reminder_configured=True,
+        schedule_reminder_minutes=15,
+        show_advanced=True,
+    )
+    fail_labels = {
+        (btn.callback_data or ""): btn.text
+        for row in fail_on.inline_keyboard
+        for btn in row
+    }
+    assert fail_labels["edit_f:1:delete_fail"].startswith("✅ ")
+    assert fail_labels["edit_f:1:delete_other"].startswith("✅ ")
+    assert fail_labels["edit_f:1:sched_remind"].startswith("✅ ")
+    assert "edit_f:1:repeat" not in fail_labels  # hidden for category alerts
+
+    live_repeat = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="channel",
+        suppress_repeat_minutes=0,
+        show_advanced=True,
+    )
+    live_labels = {
+        (btn.callback_data or ""): btn.text
+        for row in live_repeat.inline_keyboard
+        for btn in row
+    }
+    assert live_labels["edit_f:1:repeat"].startswith("⬜️ ")
+
+    from i18n import chat_button_keyboard, edit_bool_keyboard, t
+
+    for loc in ("en", "ru"):
+        chat_kb = chat_button_keyboard(loc)
+        assert [b.text for b in chat_kb.inline_keyboard[0]] == [
+            t("chat_button_yes", loc)
+        ]
+        assert [b.text for b in chat_kb.inline_keyboard[1]] == [
+            t("chat_button_no", loc)
+        ]
+        bool_chat = edit_bool_keyboard(1, "chat_button", loc)
+        assert [b.text for row in bool_chat.inline_keyboard for b in row] == [
+            t("chat_button_yes", loc),
+            t("chat_button_no", loc),
+        ]
 
     markers = _list_markers("en")
     with_image = _format_sub_line(_sample_sub(), "en", 1)

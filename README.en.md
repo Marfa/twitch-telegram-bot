@@ -284,7 +284,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit** — same shared options order as Extras: image, clean title, ignore / delay / repeat / delete / chat button (⭐ where needed), plus template, link preview, schedule reminders, destination, change type / copy. For **stream category change** alerts with delete enabled — a separate «delete other alerts too» option.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / repeat mute / delete previous (+ fail notify / delete other) / chat button / link preview / schedule reminders, ignore / delay (⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

@@ -1047,8 +1047,8 @@ def link_preview_keyboard(lang: str) -> InlineKeyboardMarkup:
 def chat_button_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t("chat_button_no", lang), callback_data="chat_button:0")],
             [InlineKeyboardButton(t("chat_button_yes", lang), callback_data="chat_button:1")],
+            [InlineKeyboardButton(t("chat_button_no", lang), callback_data="chat_button:0")],
         ]
     )
 
@@ -1983,8 +1983,14 @@ def edit_options_keyboard(
     *,
     dest_type: str = "dm",
     delete_previous: bool = False,
+    notify_delete_fail: bool = False,
+    delete_other_alerts: bool = False,
     has_image: bool = False,
     strip_name_mentions: bool = False,
+    attach_chat_button: bool = False,
+    disable_link_preview: bool = False,
+    suppress_repeat_minutes: int = 0,
+    schedule_reminder_minutes: int = 0,
     show_link_preview: bool = True,
     schedule_reminder_configured: bool = False,
     notify_on_category_change: bool = False,
@@ -2061,10 +2067,11 @@ def edit_options_keyboard(
                 and not notify_on_category_change
                 and not notify_on_end
             ):
+                repeat_mark = "✅ " if suppress_repeat_minutes > 0 else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            repeat_mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=f"edit_f:{sub_id}:{field}",
                         )
                     ]
@@ -2072,28 +2079,31 @@ def edit_options_keyboard(
             continue
         if sid == "delete":
             if show_advanced and dest_type != "dm":
+                delete_mark = "✅ " if delete_previous else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            delete_mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=f"edit_f:{sub_id}:{field}",
                         )
                     ]
                 )
                 if delete_previous:
+                    fail_mark = "✅ " if notify_delete_fail else "⬜️ "
                     rows.append(
                         [
                             InlineKeyboardButton(
-                                t("edit_delete_fail_notify", lang),
+                                fail_mark + t("edit_delete_fail_notify", lang),
                                 callback_data=f"edit_f:{sub_id}:delete_fail",
                             )
                         ]
                     )
                     if notify_on_category_change:
+                        other_mark = "✅ " if delete_other_alerts else "⬜️ "
                         rows.append(
                             [
                                 InlineKeyboardButton(
-                                    t("edit_delete_other", lang),
+                                    other_mark + t("edit_delete_other", lang),
                                     callback_data=f"edit_f:{sub_id}:delete_other",
                                 )
                             ]
@@ -2112,10 +2122,11 @@ def edit_options_keyboard(
             continue
         if sid == "chat":
             if show_advanced:
+                chat_mark = "✅ " if attach_chat_button else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            chat_mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=f"edit_f:{sub_id}:{field}",
                         )
                     ]
@@ -2123,20 +2134,23 @@ def edit_options_keyboard(
             continue
         if sid == "preview":
             if show_link_preview:
+                preview_on = not disable_link_preview
+                preview_mark = "✅ " if preview_on else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            preview_mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=f"edit_f:{sub_id}:{field}",
                         )
                     ]
                 )
             continue
     if schedule_reminder_configured:
+        remind_mark = "✅ " if schedule_reminder_minutes > 0 else "⬜️ "
         rows.append(
             [
                 InlineKeyboardButton(
-                    t("edit_schedule_reminder", lang),
+                    remind_mark + t("edit_schedule_reminder", lang),
                     callback_data=f"edit_f:{sub_id}:sched_remind",
                 )
             ]
@@ -2171,17 +2185,18 @@ def edit_options_keyboard(
 
 def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMarkup:
     if field == "preview":
+        # preview_no = show preview (positive); preview_yes = hide. Yes/On first.
         return InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton(t("preview_yes", lang), callback_data=f"edit_set:{sub_id}:preview:1")],
                 [InlineKeyboardButton(t("preview_no", lang), callback_data=f"edit_set:{sub_id}:preview:0")],
+                [InlineKeyboardButton(t("preview_yes", lang), callback_data=f"edit_set:{sub_id}:preview:1")],
             ]
         )
     if field == "chat_button":
         return InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton(t("chat_button_no", lang), callback_data=f"edit_set:{sub_id}:chat_button:0")],
                 [InlineKeyboardButton(t("chat_button_yes", lang), callback_data=f"edit_set:{sub_id}:chat_button:1")],
+                [InlineKeyboardButton(t("chat_button_no", lang), callback_data=f"edit_set:{sub_id}:chat_button:0")],
             ]
         )
     if field == "repeat":

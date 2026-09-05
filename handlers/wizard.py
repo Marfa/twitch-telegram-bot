@@ -322,6 +322,19 @@ async def _prompt_repeat_step(
         return await _show_premium_gate(
             update, context, feature="repeat", first_step=False
         )
+    # Extras checkbox = mute repeats — ask minutes, skip Yes/No.
+    if (
+        not edit
+        and context.user_data.get("advanced_options_done")
+        and context.user_data.get("adv_want_repeat")
+    ):
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("repeat_mute_prompt", lang),
+            reply_markup=_wizard(lang),
+        )
+        _set_wizard_back(context, _wz()["REPEAT_MUTE_MINUTES"])
+        return _wz()["REPEAT_MUTE_MINUTES"]
     if update.callback_query:
         await update.callback_query.edit_message_text(
             t("repeat_prompt", lang),
@@ -1039,6 +1052,18 @@ async def _go_delay_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, l
         return await _show_premium_gate(
             update, context, feature="delay", first_step=False
         )
+    # Extras checkbox already chose delay — ask minutes, skip Yes/No.
+    if context.user_data.get("advanced_options_done") and context.user_data.get(
+        "adv_want_delay"
+    ):
+        context.user_data["after_delay_state"] = _wz()["DELAY_MINUTES"]
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("delay_minutes_prompt", lang),
+            reply_markup=_wizard(lang),
+        )
+        _set_wizard_back(context, _wz()["DELAY_MINUTES"])
+        return _wz()["DELAY_MINUTES"]
     chat_id = reply_chat_id(update)
     text = t("delay_prompt", lang)
     markup = delay_keyboard(lang)
@@ -2332,6 +2357,13 @@ async def _prompt_delete_old(
         return await _show_premium_gate(
             update, context, feature="delete_old", first_step=False
         )
+    # Extras checkbox already enabled delete — skip Yes/No.
+    if context.user_data.get("advanced_options_done") and context.user_data.get(
+        "adv_want_delete"
+    ):
+        context.user_data["delete_previous"] = True
+        context.user_data.pop("delete_sibling_asked", None)
+        return await _continue_after_delete_old_yes(update, context, lang)
     text = _delete_old_prompt_text(context, lang)
     target = update.effective_message
     if target:
@@ -2347,6 +2379,41 @@ async def _prompt_delete_old(
         )
     _set_wizard_back(context, _wz()["DELETE_OLD"])
     return _wz()["DELETE_OLD"]
+
+
+async def _continue_after_delete_old_yes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """After delete_previous=True: optional sibling ask, then fail-notify."""
+    if context.user_data.get("alert_type") == "category":
+        db: Database = context.application.bot_data["db"]
+        chat_id = context.user_data["pending_chat_id"]
+        thread_id = context.user_data.get("pending_thread_id")
+        twitch_user_id = str(context.user_data.get("twitch_user_id") or "")
+        owner_id = update.effective_user.id
+        if twitch_user_id and _has_sibling_publication_subs(
+            db,
+            owner_id,
+            twitch_user_id,
+            chat_id,
+            thread_id,
+            exclude_sub_id=context.user_data.get("edit_sub_id"),
+        ):
+            context.user_data["delete_sibling_asked"] = True
+            text = t("delete_sibling_text", lang)
+            markup = delete_sibling_keyboard(lang)
+            if update.callback_query:
+                await update.callback_query.edit_message_text(text, reply_markup=markup)
+            else:
+                await context.bot.send_message(
+                    reply_chat_id(update), text, reply_markup=markup
+                )
+            _set_wizard_back(context, _wz()["DELETE_SIBLING_ALERTS"])
+            return _wz()["DELETE_SIBLING_ALERTS"]
+        context.user_data["delete_other_alerts"] = False
+    else:
+        context.user_data["delete_other_alerts"] = False
+    return await _prompt_delete_fail_notify(update, context, lang)
 
 def _delete_old_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
     if context.user_data.get("alert_type") == "category":
@@ -2409,30 +2476,7 @@ async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await _finish_subscription(
             update, context, query.from_user.id, chat_id, thread_id
         )
-    if context.user_data.get("alert_type") == "category":
-        db: Database = context.application.bot_data["db"]
-        chat_id = context.user_data["pending_chat_id"]
-        thread_id = context.user_data.get("pending_thread_id")
-        twitch_user_id = str(context.user_data.get("twitch_user_id") or "")
-        if twitch_user_id and _has_sibling_publication_subs(
-            db,
-            query.from_user.id,
-            twitch_user_id,
-            chat_id,
-            thread_id,
-            exclude_sub_id=context.user_data.get("edit_sub_id"),
-        ):
-            context.user_data["delete_sibling_asked"] = True
-            await query.edit_message_text(
-                t("delete_sibling_text", lang),
-                reply_markup=delete_sibling_keyboard(lang),
-            )
-            _set_wizard_back(context, _wz()["DELETE_SIBLING_ALERTS"])
-            return _wz()["DELETE_SIBLING_ALERTS"]
-        context.user_data["delete_other_alerts"] = False
-    else:
-        context.user_data["delete_other_alerts"] = False
-    return await _prompt_delete_fail_notify(update, context, lang)
+    return await _continue_after_delete_old_yes(update, context, lang)
 
 async def receive_delete_sibling(
     update: Update, context: ContextTypes.DEFAULT_TYPE

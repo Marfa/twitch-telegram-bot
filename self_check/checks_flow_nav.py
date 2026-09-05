@@ -846,6 +846,194 @@ async def _scenario_wizard_custom_buttons(db) -> None:
     cap.assert_turn("wizard_custom_buttons")
 
 
+async def _scenario_wizard_extras_checkboxes(db) -> None:
+    """§2 Extras checkbox values apply without a second Yes/No (delete/delay/repeat)."""
+    from handlers.wizard import (
+        _go_delay_prompt,
+        _prompt_delete_old,
+        _prompt_repeat_step,
+        _wz,
+    )
+    from telegram.ext import ConversationHandler
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    # Prior wizard Reply stays visible in real UX (dest step).
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "advanced_options_done": True,
+            "adv_want_delete": True,
+            "twitch_username": "streamer",
+            "twitch_user_id": "100",
+            "alert_type": "live",
+            "dest_type": "channel",
+            "pending_chat_id": -1001,
+            "pending_thread_id": None,
+            "message_template": "hi",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=True)
+    ), patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await _prompt_delete_old(update, ctx, "ru")
+    assert state == _wz()["DELETE_FAIL_NOTIFY"]
+    assert ctx.user_data.get("delete_previous") is True
+    inline_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert not any(cb.startswith("delete_old:") for cb in inline_cbs)
+    assert any(cb.startswith("delete_fail:") for cb in inline_cbs)
+    cap.assert_turn("wizard_delete_from_extras")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "advanced_options_done": True,
+            "adv_want_delay": True,
+            "twitch_username": "streamer",
+            "alert_type": "live",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=True)
+    ), patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await _go_delay_prompt(update, ctx, "ru")
+    assert state == _wz()["DELAY_MINUTES"]
+    assert not any(
+        (b.callback_data or "").startswith("delay_send:")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    )
+    cap.assert_turn("wizard_delay_from_extras")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "advanced_options_done": True,
+            "adv_want_repeat": True,
+            "twitch_username": "streamer",
+            "alert_type": "live",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=True)
+    ), patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await _prompt_repeat_step(update, ctx, "ru")
+    assert state == _wz()["REPEAT_MUTE_MINUTES"]
+    assert not any(
+        (b.callback_data or "").startswith("repeat:")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    )
+    cap.assert_turn("wizard_repeat_from_extras")
+    assert ConversationHandler.END != state
+
+
+async def _scenario_subscriptions_edit_checkboxes(db) -> None:
+    """§4 edit menu — boolean settings toggle via checkbox (no Yes/No)."""
+    from handlers.subscriptions import edit_menu, on_edit_bool_menu, on_edit_pick
+
+    sub_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="streamer",
+        twitch_user_id="100",
+        message_template="hi https://twitch.tv/streamer",
+        dest_type="channel",
+        chat_id=-1001,
+        thread_id=None,
+        disable_link_preview=True,
+        attach_chat_button=False,
+        delete_previous=False,
+        strip_name_mentions=False,
+    )
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("edit", "ru"), cap)
+    ctx = _ctx(application)
+    await edit_menu(update, ctx)
+    update, _query = _cb_update(_FREE_UID, f"edit:{sub_id}", cap)
+    with patch(
+        "handlers.subscriptions.prem.advanced_mode_on",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_edit_pick(update, ctx)
+
+    for field in ("strip", "chat_button", "preview", "delete_old"):
+        update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:{field}", cap)
+        with patch(
+            "handlers.subscriptions.prem.advanced_mode_on",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "handlers.subscriptions.prem.has_feature",
+            new=AsyncMock(return_value=True),
+        ):
+            await on_edit_bool_menu(update, ctx)
+        edit_cbs = [
+            b.callback_data or ""
+            for m in cap.markups
+            if getattr(m, "inline_keyboard", None)
+            for row in m.inline_keyboard
+            for b in row
+        ]
+        assert any(cb.startswith(f"edit_f:{sub_id}:") for cb in edit_cbs)
+        assert not any(cb.startswith(f"edit_set:{sub_id}:") for cb in edit_cbs)
+
+    update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:delete_fail", cap)
+    with patch(
+        "handlers.subscriptions.prem.advanced_mode_on",
+        new=AsyncMock(return_value=True),
+    ), patch(
+        "handlers.subscriptions.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_edit_bool_menu(update, ctx)
+    assert not any(
+        (b.callback_data or "").startswith(f"edit_set:{sub_id}:")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    )
+
+    sub = db.get_subscription(sub_id, _FREE_UID)
+    assert sub is not None
+    assert sub.strip_name_mentions is True
+    assert sub.attach_chat_button is True
+    assert sub.disable_link_preview is True
+    assert sub.delete_previous is True
+    assert sub.notify_delete_fail is True
+    cap.assert_turn("subscriptions_edit_checkboxes")
+
+
 async def _scenario_subscriptions_delete(db) -> None:
     """§4 delete flow — pick, delete-all confirm, No returns to pick."""
     from handlers.subscriptions import (
@@ -1228,10 +1416,12 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_template_typo(db)
         await _scenario_wizard_finish(db)
         await _scenario_wizard_custom_buttons(db)
+        await _scenario_wizard_extras_checkboxes(db)
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)
         await _scenario_subscriptions_edit_type_copy(db)
+        await _scenario_subscriptions_edit_checkboxes(db)
         await _scenario_subscriptions_delete(db)
         await _scenario_share_alert_offer(db)
         await _scenario_twitch_link_wizard_offer(db)

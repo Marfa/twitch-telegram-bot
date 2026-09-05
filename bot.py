@@ -1252,6 +1252,23 @@ async def start_edit_schedule_reminder(
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
 
+    async def _reshow(current: Subscription) -> None:
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=current.twitch_username
+        )
+        await query.edit_message_text(
+            _edit_menu_text(
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=current.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(
+                current, lang, show_advanced=show_adv, db=db
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+
     has_schedule = True
     try:
         has_schedule = await asyncio.to_thread(
@@ -1268,28 +1285,38 @@ async def start_edit_schedule_reminder(
         db.update_subscription(
             sub_id, query.from_user.id, schedule_reminder_minutes=0
         )
-        await query.edit_message_text(
-            t("edit_schedule_reminder_no_schedule", lang),
-        )
+        current = db.get_subscription(sub_id, query.from_user.id) or sub
+        await query.edit_message_text(t("edit_schedule_reminder_no_schedule", lang))
         await context.bot.send_message(
-            query.from_user.id,
-            t("edit_updated", lang, sub_id=_owner_sub_number(db, query.from_user.id, sub_id)),
+            reply_chat_id(update),
+            t(
+                "edit_updated",
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+            ),
             reply_markup=_menu(lang, query.from_user.id),
         )
         return ConversationHandler.END
 
+    # Checkbox on → ask minutes; already on → turn off.
+    if int(sub.schedule_reminder_minutes or 0) > 0:
+        db.update_subscription(sub_id, query.from_user.id, schedule_reminder_minutes=0)
+        current = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow(current)
+        return ConversationHandler.END
+
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
-    current = _schedule_reminder_current_label(sub.schedule_reminder_minutes, lang)
+    current_label = _schedule_reminder_current_label(sub.schedule_reminder_minutes, lang)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text("✓")
     await context.bot.send_message(
-        query.from_user.id,
+        reply_chat_id(update),
         t(
             "edit_schedule_reminder_prompt",
             lang,
             sub_id=sub_num,
-            current=current,
+            current=current_label,
         ),
         reply_markup=_wizard(lang, back=False),
     )
@@ -1425,8 +1452,14 @@ def _edit_options_for_sub(
         lang,
         dest_type=sub.dest_type,
         delete_previous=sub.delete_previous,
+        notify_delete_fail=bool(sub.notify_delete_fail),
+        delete_other_alerts=bool(sub.delete_other_alerts),
         has_image=bool(sub.image_file_id),
         strip_name_mentions=bool(sub.strip_name_mentions),
+        attach_chat_button=bool(sub.attach_chat_button),
+        disable_link_preview=bool(sub.disable_link_preview),
+        suppress_repeat_minutes=int(sub.suppress_repeat_minutes or 0),
+        schedule_reminder_minutes=int(sub.schedule_reminder_minutes or 0),
         show_link_preview=not bool(sub.image_file_id)
         and template_has_link(sub.message_template or ""),
         schedule_reminder_configured=sub.schedule_reminder_configured,
@@ -2182,14 +2215,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|repeat|strip)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|strip)$",
         ),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(
             on_edit_set,
-            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview|chat_button):[01]$|^edit_set:\d+:repeat:1$",
+            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview|chat_button):[01]$",
         ),
         group=0,
     )
@@ -2263,7 +2296,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_repeat_mute),
-                pattern=r"^edit_set:\d+:repeat:0$",
+                pattern=r"^edit_f:\d+:repeat$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_watch_change), pattern=r"^watch:change$"
