@@ -138,6 +138,7 @@ from twitch import (
     fetch_twitch_status_summary,
     filter_streams_for_watch,
     find_placeholder_typos,
+    is_game_cover_image,
     normalize_ignore_keywords,
     merge_ignore_keywords,
     normalize_watch_tags,
@@ -145,7 +146,6 @@ from twitch import (
     preview_stream_title,
     render_template,
     should_ignore_stream,
-    template_has_game_placeholder,
     template_has_link,
     twitch_status_fingerprint,
 )
@@ -214,6 +214,8 @@ from handlers.monitoring import (
     check_cursor_status,
     daily_bot_stats_snapshot,
     daily_premium_purchases_report,
+    grant_and_announce_lucky_nth,
+    monthly_lucky_premium,
     monthly_new_users_report,
     notify_admins_posthog_issue,
     poll_posthog_inbox_reports,
@@ -847,6 +849,7 @@ async def _send_welcome_bundle(
     lang: str,
     *,
     first_start: bool = False,
+    lucky_nth: int | None = None,
 ) -> None:
     db: Database = application.bot_data["db"]
     await sync_stream_chat_menu_button(bot, db, user_id)
@@ -855,6 +858,10 @@ async def _send_welcome_bundle(
         t("start_welcome", lang),
         reply_markup=_menu(lang, user_id),
     )
+    if lucky_nth:
+        await grant_and_announce_lucky_nth(
+            bot, db, user_id=user_id, lang=lang, user_count=int(lucky_nth)
+        )
     if not first_start:
         return
     seeded = await _ensure_welcome_premium_channel_subscription(
@@ -876,6 +883,7 @@ async def _send_welcome(
     lang: str,
     *,
     first_start: bool = False,
+    lucky_nth: int | None = None,
 ) -> int:
     user_id = update.effective_user.id
     # Share deep-link first start: skip welcome demo — user is here for the shared alert.
@@ -887,6 +895,7 @@ async def _send_welcome(
         user_id,
         lang,
         first_start=seed_demo,
+        lucky_nth=lucky_nth,
     )
     await _maybe_offer_pending_share(context, user_id, lang)
     return ConversationHandler.END
@@ -910,6 +919,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     is_first_start = not db.user_exists(user_id)
     db.upsert_user(user_id)
+    lucky_nth: int | None = None
+    if is_first_start:
+        from config import ENABLE_PREMIUM
+        import premium_lucky as lucky
+
+        n = db.count_users()
+        if ENABLE_PREMIUM and lucky.is_nth_milestone(n):
+            lucky_nth = n
     _apply_referral_start_arg(db, user_id, context.args)
     _apply_share_start_arg(db, context, context.args)
     lang = db.get_user_locale(user_id)
@@ -925,8 +942,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not lang:
         context.user_data["after_lang"] = "welcome"
         context.user_data["first_welcome"] = is_first_start
+        if lucky_nth is not None:
+            context.user_data["lucky_nth"] = lucky_nth
         return await _prompt_language(update)
-    return await _send_welcome(update, context, lang, first_start=is_first_start)
+    return await _send_welcome(
+        update, context, lang, first_start=is_first_start, lucky_nth=lucky_nth
+    )
 
 
 def _apply_referral_start_arg(db: Database, user_id: int, args: list[str] | None) -> None:
@@ -976,6 +997,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.edit_message_text(t("lang_set", lang))
     after = context.user_data.pop("after_lang", "welcome")
     first_start = context.user_data.pop("first_welcome", False)
+    lucky_nth = context.user_data.pop("lucky_nth", None)
     await sync_stream_chat_menu_button(context.bot, db, query.from_user.id)
     chat_id = reply_chat_id(update)
     if after == "help":
@@ -1000,6 +1022,7 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         lang,
         first_start=first_start
         and not context.user_data.get("pending_share_token"),
+        lucky_nth=int(lucky_nth) if lucky_nth else None,
     )
     await _maybe_offer_pending_share(context, query.from_user.id, lang)
     return ConversationHandler.END
@@ -1052,13 +1075,16 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if has_image:
         context.user_data["image_file_id"] = sub.image_file_id
         context.user_data["image_position"] = sub.image_position or ""
+        if not is_game_cover_image(sub.image_file_id):
+            context.user_data["image_backup_file_id"] = sub.image_file_id
+            context.user_data["image_backup_position"] = sub.image_position or ""
     await query.edit_message_text("✓")
-    show_game_cover = template_has_game_placeholder(sub.message_template or "")
+    game_cover_on = is_game_cover_image(sub.image_file_id)
     await context.bot.send_message(
         query.from_user.id,
         t("edit_image_prompt", lang) if has_image else t("image_ask", lang),
         reply_markup=image_edit_keyboard(
-            lang, has_image=has_image, show_game_cover=show_game_cover
+            lang, has_image=has_image, game_cover_on=game_cover_on
         ),
     )
     return IMAGE_ASK
@@ -2934,6 +2960,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.job_queue.run_monthly(
         monthly_new_users_report,
         when=time(10, 0, tzinfo=SCHEDULE_TZ),
+        day=1,
+    )
+    app.job_queue.run_monthly(
+        monthly_lucky_premium,
+        when=time(10, 15, tzinfo=SCHEDULE_TZ),
         day=1,
     )
     app.job_queue.run_repeating(

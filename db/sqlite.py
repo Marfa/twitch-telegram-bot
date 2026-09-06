@@ -1269,6 +1269,26 @@ class SqliteDatabase:
             ).fetchone()
         return row is not None
 
+    def count_users(self) -> int:
+        with self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
+        return int(row["n"]) if row else 0
+
+    def list_lucky_monthly_candidate_ids(self) -> list[int]:
+        """Non-blocked users without lifetime or active Stars (features filtered in app)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id FROM users
+                WHERE COALESCE(bot_blocked, 0) = 0
+                  AND COALESCE(premium_permanent, 0) = 0
+                  AND COALESCE(premium_stars_until, 0)
+                      <= CAST(strftime('%s', 'now') AS INTEGER)
+                ORDER BY user_id
+                """
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]
+
     def count_new_users_since(self, since: datetime) -> int:
         since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
         since_s = since_utc.strftime("%Y-%m-%d %H:%M:%S")
@@ -2569,23 +2589,40 @@ class SqliteDatabase:
         charge_id: str,
         until_unix: int,
         canceled: bool,
+        touch_paid_at: bool = True,
     ) -> None:
         with self._conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO users (
-                    user_id, premium_stars_charge_id, premium_stars_until,
-                    premium_stars_canceled, premium_stars_paid_at
+            if touch_paid_at:
+                conn.execute(
+                    """
+                    INSERT INTO users (
+                        user_id, premium_stars_charge_id, premium_stars_until,
+                        premium_stars_canceled, premium_stars_paid_at
+                    )
+                    VALUES (?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        premium_stars_charge_id = excluded.premium_stars_charge_id,
+                        premium_stars_until = excluded.premium_stars_until,
+                        premium_stars_canceled = excluded.premium_stars_canceled,
+                        premium_stars_paid_at = datetime('now')
+                    """,
+                    (user_id, charge_id, int(until_unix), int(bool(canceled))),
                 )
-                VALUES (?, ?, ?, ?, datetime('now'))
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_stars_charge_id = excluded.premium_stars_charge_id,
-                    premium_stars_until = excluded.premium_stars_until,
-                    premium_stars_canceled = excluded.premium_stars_canceled,
-                    premium_stars_paid_at = datetime('now')
-                """,
-                (user_id, charge_id, int(until_unix), int(bool(canceled))),
-            )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO users (
+                        user_id, premium_stars_charge_id, premium_stars_until,
+                        premium_stars_canceled
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        premium_stars_charge_id = excluded.premium_stars_charge_id,
+                        premium_stars_until = excluded.premium_stars_until,
+                        premium_stars_canceled = excluded.premium_stars_canceled
+                    """,
+                    (user_id, charge_id, int(until_unix), int(bool(canceled))),
+                )
 
     def set_premium_stars_canceled(self, user_id: int, canceled: bool) -> None:
         with self._conn() as conn:

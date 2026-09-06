@@ -617,6 +617,116 @@ async def monthly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def notify_admins_lucky_premium(
+    bot,
+    db: Database,
+    *,
+    user_id: int,
+    reason_key: str,
+    reason_kwargs: dict,
+    until_unix: int,
+) -> None:
+    from config import ADMIN_USER_IDS
+    import premium_lucky as lucky
+
+    if not ADMIN_USER_IDS:
+        return
+    until = lucky.fmt_until(until_unix)
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        reason = t(reason_key, lang, **reason_kwargs)
+        try:
+            await bot.send_message(
+                admin_id,
+                t(
+                    "lucky_premium_admin",
+                    lang,
+                    user_id=user_id,
+                    reason=reason,
+                    until=until,
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning(
+                "Cannot send lucky Premium notice to admin %s: %s", admin_id, exc
+            )
+
+
+async def grant_and_announce_lucky_nth(
+    bot,
+    db: Database,
+    *,
+    user_id: int,
+    lang: str,
+    user_count: int,
+) -> bool:
+    """Grant every-Nth free Premium and notify the user + admins. Returns True if granted."""
+    import premium_lucky as lucky
+    from premium import is_free_chat_member
+
+    # Skip grandfathered (permanent) and FREE_CHAT_ID / «404» members.
+    if lucky.is_grandfathered(db, user_id) or await is_free_chat_member(bot, user_id):
+        return False
+    until = lucky.grant_lucky_month(
+        db, user_id, charge_id=lucky.nth_charge_id(user_count)
+    )
+    if until is None:
+        return False
+    try:
+        await bot.send_message(
+            user_id,
+            t("lucky_premium_nth", lang, until=lucky.fmt_until(until)),
+        )
+    except (BadRequest, Forbidden) as exc:
+        logger.warning("Cannot send lucky nth Premium to %s: %s", user_id, exc)
+    await notify_admins_lucky_premium(
+        bot,
+        db,
+        user_id=user_id,
+        reason_key="lucky_premium_reason_nth",
+        reason_kwargs={"n": int(user_count)},
+        until_unix=until,
+    )
+    return True
+
+
+async def monthly_lucky_premium(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """1st of month — free Premium for one random user without active paid Premium."""
+    from config import ENABLE_PREMIUM
+    import premium_lucky as lucky
+
+    if not ENABLE_PREMIUM:
+        return
+    db: Database = context.application.bot_data["db"]
+    user_id = await lucky.pick_monthly_lucky_user(context.bot, db)
+    if user_id is None:
+        logger.info("Monthly lucky Premium: no eligible user")
+        return
+    until = lucky.grant_lucky_month(
+        db, user_id, charge_id=lucky.monthly_charge_id()
+    )
+    if until is None:
+        return
+    lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
+    try:
+        await context.bot.send_message(
+            user_id,
+            t("lucky_premium_monthly", lang, until=lucky.fmt_until(until)),
+        )
+    except (BadRequest, Forbidden) as exc:
+        logger.warning("Cannot send monthly lucky Premium to %s: %s", user_id, exc)
+    month = datetime.now(SCHEDULE_TZ).strftime("%Y-%m")
+    await notify_admins_lucky_premium(
+        context.bot,
+        db,
+        user_id=user_id,
+        reason_key="lucky_premium_reason_monthly",
+        reason_kwargs={"month": month},
+        until_unix=until,
+    )
+
+
 async def notify_admins_posthog_issue(
     application: Application, payload: dict[str, str]
 ) -> None:

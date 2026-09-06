@@ -78,7 +78,6 @@ from twitch import (
     preview_stream_title,
     render_template,
     resolve_sub_image_photo,
-    template_has_game_placeholder,
     template_has_link,
 )
 
@@ -213,6 +212,26 @@ async def _save_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE, l
     from bot import _save_edit_image as _impl
 
     return await _impl(update, context, lang)
+
+
+async def _persist_edit_image_fields(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Save image fields during edit without ending the conversation."""
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    file_id = context.user_data.get("image_file_id") or None
+    position = str(context.user_data.get("image_position") or "") if file_id else ""
+    fields: dict = {
+        "image_file_id": file_id,
+        "image_position": position,
+    }
+    if file_id:
+        fields["disable_link_preview"] = True
+    db.update_subscription(sub_id, owner_id, **fields)
 
 
 async def _save_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, template: str) -> int:
@@ -734,10 +753,9 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.get("edit_sub_id") and context.user_data.get("edit_has_image")
     )
     prompt = t("edit_image_prompt", lang) if has_image else t("image_ask", lang)
-    template = str(context.user_data.get("message_template") or "")
-    show_game_cover = template_has_game_placeholder(template)
+    game_cover_on = is_game_cover_image(context.user_data.get("image_file_id"))
     markup = image_edit_keyboard(
-        lang, has_image=has_image, show_game_cover=show_game_cover
+        lang, has_image=has_image, game_cover_on=game_cover_on
     )
     if update.callback_query:
         await context.bot.send_message(
@@ -1815,27 +1833,58 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if action == "delete":
         context.user_data["image_file_id"] = None
         context.user_data["image_position"] = ""
+        context.user_data["edit_has_image"] = False
         await query.edit_message_text("✓")
         if is_edit:
             return await _save_edit_image(update, context, lang)
         return await _go_after_image_step(update, context, lang)
 
     if action == "skip":
-        context.user_data["image_file_id"] = None
-        context.user_data["image_position"] = ""
+        # Game-cover checkbox stays selected until Skip/Next; only clear when unchecked.
+        if not is_game_cover_image(context.user_data.get("image_file_id")):
+            context.user_data["image_file_id"] = None
+            context.user_data["image_position"] = ""
         await query.edit_message_text("✓")
         if is_edit:
             return await _save_edit_image(update, context, lang)
         return await _go_after_image_step(update, context, lang)
 
     if action == "game_cover":
-        context.user_data["image_file_id"] = GAME_COVER_IMAGE_ID
-        context.user_data["image_position"] = "before"
-        await query.edit_message_text("✓")
+        if is_game_cover_image(context.user_data.get("image_file_id")):
+            backup = context.user_data.get("image_backup_file_id")
+            if backup and not is_game_cover_image(backup):
+                context.user_data["image_file_id"] = backup
+                context.user_data["image_position"] = str(
+                    context.user_data.get("image_backup_position") or ""
+                )
+                context.user_data["edit_has_image"] = True
+            else:
+                context.user_data["image_file_id"] = None
+                context.user_data["image_position"] = ""
+                context.user_data["edit_has_image"] = False
+        else:
+            if "image_backup_file_id" not in context.user_data:
+                prev = context.user_data.get("image_file_id")
+                if prev and not is_game_cover_image(prev):
+                    context.user_data["image_backup_file_id"] = prev
+                    context.user_data["image_backup_position"] = context.user_data.get(
+                        "image_position"
+                    )
+            context.user_data["image_file_id"] = GAME_COVER_IMAGE_ID
+            context.user_data["image_position"] = "before"
+            context.user_data["edit_has_image"] = True
         if is_edit:
-            return await _save_edit_image(update, context, lang)
-        return await _go_after_image_step(update, context, lang)
+            await _persist_edit_image_fields(update, context)
+        has_image = bool(is_edit and context.user_data.get("image_file_id"))
+        game_cover_on = is_game_cover_image(context.user_data.get("image_file_id"))
+        await query.edit_message_reply_markup(
+            reply_markup=image_edit_keyboard(
+                lang, has_image=has_image, game_cover_on=game_cover_on
+            )
+        )
+        return _wz()["IMAGE_ASK"]
 
+    # Add own image — leave game-cover checkbox; upload replaces it on success.
     await query.edit_message_text("✓")
     await context.bot.send_message(
         reply_chat_id(update),

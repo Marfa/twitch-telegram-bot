@@ -81,7 +81,14 @@ class _BotCapture:
             self.markups.extend(markups_from_call(kwargs))
             return None
 
+        async def _edit_message_reply_markup(*args, **kwargs):
+            self.markups.extend(markups_from_call(kwargs))
+            return None
+
         query.edit_message_text = AsyncMock(side_effect=_edit_message_text)
+        query.edit_message_reply_markup = AsyncMock(
+            side_effect=_edit_message_reply_markup
+        )
         return query
 
     def note_pulse(self) -> None:
@@ -969,6 +976,59 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
     assert ConversationHandler.END != state
 
 
+async def _scenario_wizard_image_ask(db) -> None:
+    """§2.6 Image step — game cover checkbox always shown; Skip / wizard nav escape."""
+    from handlers.wizard import _go_image_ask_prompt, receive_image_ask, _wz
+    from telegram.ext import ConversationHandler
+    from twitch import GAME_COVER_IMAGE_ID, is_game_cover_image
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    # No {game} in template — cover option must still appear.
+    ctx.user_data["message_template"] = "hi {username}"
+    state = await _go_image_ask_prompt(update, ctx, "ru")
+    assert state == _wz()["IMAGE_ASK"]
+    labels = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in labels)
+    assert any("своё" in lab.lower() for lab in labels)
+    cap.assert_turn("wizard_image_ask")
+
+    update, _query = _cb_update(_FREE_UID, "image_ask:game_cover", cap)
+    cap.wrap(bot)
+    state = await receive_image_ask(update, ctx)
+    assert state == _wz()["IMAGE_ASK"]
+    assert is_game_cover_image(ctx.user_data.get("image_file_id"))
+    assert ctx.user_data.get("image_file_id") == GAME_COVER_IMAGE_ID
+    toggled = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in toggled)
+
+    update, _query = _cb_update(_FREE_UID, "image_ask:skip", cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard._go_after_image_step",
+        new=AsyncMock(return_value=ConversationHandler.END),
+    ) as after:
+        state = await receive_image_ask(update, ctx)
+    after.assert_awaited()
+    assert is_game_cover_image(ctx.user_data.get("image_file_id"))
+
+
 async def _scenario_subscriptions_edit_checkboxes(db) -> None:
     """§4 edit menu — boolean settings toggle via checkbox (no Yes/No)."""
     from handlers.subscriptions import edit_menu, on_edit_bool_menu, on_edit_pick
@@ -1602,6 +1662,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_finish(db)
         await _scenario_wizard_custom_buttons(db)
         await _scenario_wizard_extras_checkboxes(db)
+        await _scenario_wizard_image_ask(db)
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)

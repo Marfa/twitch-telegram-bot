@@ -1416,6 +1416,30 @@ class PostgresDatabase:
             row = cur.fetchone()
         return row is not None
 
+    def count_users(self) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("SELECT COUNT(*) AS n FROM users")
+            row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
+    def list_lucky_monthly_candidate_ids(self) -> list[int]:
+        """Non-blocked users without lifetime or active Stars (features filtered in app)."""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id FROM users
+                WHERE COALESCE(bot_blocked, FALSE) = FALSE
+                  AND COALESCE(premium_permanent, FALSE) = FALSE
+                  AND COALESCE(premium_stars_until, 0)
+                      <= EXTRACT(EPOCH FROM NOW())::BIGINT
+                ORDER BY user_id
+                """
+            )
+            rows = cur.fetchall()
+        return [int(r["user_id"]) for r in rows]
+
     def count_new_users_since(self, since: datetime) -> int:
         since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
         with self._conn() as conn:
@@ -2826,24 +2850,41 @@ class PostgresDatabase:
         charge_id: str,
         until_unix: int,
         canceled: bool,
+        touch_paid_at: bool = True,
     ) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute(
-                """
-                INSERT INTO users (
-                    user_id, premium_stars_charge_id, premium_stars_until,
-                    premium_stars_canceled, premium_stars_paid_at
+            if touch_paid_at:
+                cur.execute(
+                    """
+                    INSERT INTO users (
+                        user_id, premium_stars_charge_id, premium_stars_until,
+                        premium_stars_canceled, premium_stars_paid_at
+                    )
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        premium_stars_charge_id = EXCLUDED.premium_stars_charge_id,
+                        premium_stars_until = EXCLUDED.premium_stars_until,
+                        premium_stars_canceled = EXCLUDED.premium_stars_canceled,
+                        premium_stars_paid_at = NOW()
+                    """,
+                    (user_id, charge_id, int(until_unix), bool(canceled)),
                 )
-                VALUES (%s, %s, %s, %s, NOW())
-                ON CONFLICT (user_id) DO UPDATE SET
-                    premium_stars_charge_id = EXCLUDED.premium_stars_charge_id,
-                    premium_stars_until = EXCLUDED.premium_stars_until,
-                    premium_stars_canceled = EXCLUDED.premium_stars_canceled,
-                    premium_stars_paid_at = NOW()
-                """,
-                (user_id, charge_id, int(until_unix), bool(canceled)),
-            )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO users (
+                        user_id, premium_stars_charge_id, premium_stars_until,
+                        premium_stars_canceled
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        premium_stars_charge_id = EXCLUDED.premium_stars_charge_id,
+                        premium_stars_until = EXCLUDED.premium_stars_until,
+                        premium_stars_canceled = EXCLUDED.premium_stars_canceled
+                    """,
+                    (user_id, charge_id, int(until_unix), bool(canceled)),
+                )
 
     def set_premium_stars_canceled(self, user_id: int, canceled: bool) -> None:
         with self._conn() as conn:

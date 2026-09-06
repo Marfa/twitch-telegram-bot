@@ -170,6 +170,21 @@ def check_core() -> None:
     assert not is_game_cover_image("AgAC_test")
     assert template_has_game_placeholder("{username} {game}")
     assert not template_has_game_placeholder("{username} only")
+    from i18n import image_ask_keyboard, image_edit_keyboard
+    from i18n import t as i18n_image_t
+
+    assert "своё" in i18n_image_t("image_add", "ru").lower()
+    assert "own" in i18n_image_t("image_add", "en").lower()
+    ask_kb = image_ask_keyboard("ru", game_cover_on=False)
+    ask_labels = [b.text for row in ask_kb.inline_keyboard for b in row]
+    assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in ask_labels)
+    assert any("своё" in lab.lower() for lab in ask_labels)
+    on_kb = image_ask_keyboard("ru", game_cover_on=True)
+    on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
+    assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)
+    edit_kb = image_edit_keyboard("ru", has_image=True, game_cover_on=True)
+    edit_labels = [b.text for row in edit_kb.inline_keyboard for b in row]
+    assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in edit_labels)
     assert format_box_art_url(
         "https://cdn.example/{width}x{height}.jpg", width=1920, height=2560
     ) == "https://cdn.example/1920x2560.jpg"
@@ -1030,6 +1045,7 @@ def check_core() -> None:
         assert tr("sync_unfollow_yes", loc)
         assert tr("sync_unfollow_no", loc)
         assert tr("image_ask", loc)
+        assert tr("image_add", loc)
         assert tr("image_game_cover", loc)
         assert tr("image_game_cover_note", loc)
         assert tr("sub_list_image_game_cover", loc)
@@ -1046,6 +1062,11 @@ def check_core() -> None:
         assert tr("alert_type_category", loc)
         assert tr("alert_type_upcoming", loc)
         assert tr("alert_type_end", loc)
+        assert "⭐" in tr("alert_type_category", loc)
+        assert "⭐" in tr("alert_type_upcoming", loc)
+        assert "⭐" in tr("alert_type_end", loc)
+        assert "⭐" in tr("stream_schedule_mode_day_btn", loc)
+        assert "⭐" in tr("stream_schedule_mode_vacation_btn", loc)
         assert tr("edit_type_pick", loc)
         assert tr("list_type_pick", loc)
         assert tr("sub_list_share", loc)

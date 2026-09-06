@@ -114,7 +114,7 @@ Then the wizard (for stream start / category change / stream end):
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
 3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Reminder button” (upcoming), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
-4. Image (if checked) — upload and position: start or end of caption
+4. Image (if checked) — `⬜️/✅ Use game cover` (always; category from Twitch) or your own image and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
 7. Repeat mute (minutes) — if checked; **stream start** only

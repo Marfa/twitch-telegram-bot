@@ -1675,47 +1675,42 @@ def template_strip_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def image_ask_keyboard(lang: str, *, show_game_cover: bool = False) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(t("image_add", lang), callback_data="image_ask:add")]
-    ]
-    if show_game_cover:
-        rows.append(
+def image_ask_keyboard(lang: str, *, game_cover_on: bool = False) -> InlineKeyboardMarkup:
+    mark = "✅ " if game_cover_on else "⬜️ "
+    return InlineKeyboardMarkup(
+        [
             [
                 InlineKeyboardButton(
-                    t("image_game_cover", lang), callback_data="image_ask:game_cover"
+                    mark + t("image_game_cover", lang),
+                    callback_data="image_ask:game_cover",
                 )
-            ]
-        )
-    rows.append(
-        [InlineKeyboardButton(t("image_skip", lang), callback_data="image_ask:skip")]
+            ],
+            [InlineKeyboardButton(t("image_add", lang), callback_data="image_ask:add")],
+            [InlineKeyboardButton(t("image_skip", lang), callback_data="image_ask:skip")],
+        ]
     )
-    return InlineKeyboardMarkup(rows)
 
 
 def image_edit_keyboard(
-    lang: str, *, has_image: bool, show_game_cover: bool = False
+    lang: str, *, has_image: bool, game_cover_on: bool = False
 ) -> InlineKeyboardMarkup:
+    mark = "✅ " if game_cover_on else "⬜️ "
+    cover_row = [
+        InlineKeyboardButton(
+            mark + t("image_game_cover", lang),
+            callback_data="image_ask:game_cover",
+        )
+    ]
     if has_image:
-        rows: list[list[InlineKeyboardButton]] = [
+        return InlineKeyboardMarkup(
             [
-                InlineKeyboardButton(
-                    t("edit_image_replace", lang),
-                    callback_data="image_ask:add",
-                )
-            ],
-        ]
-        if show_game_cover:
-            rows.append(
+                cover_row,
                 [
                     InlineKeyboardButton(
-                        t("image_game_cover", lang),
-                        callback_data="image_ask:game_cover",
+                        t("edit_image_replace", lang),
+                        callback_data="image_ask:add",
                     )
-                ]
-            )
-        rows.extend(
-            [
+                ],
                 [
                     InlineKeyboardButton(
                         t("edit_image_delete", lang),
@@ -1730,8 +1725,7 @@ def image_edit_keyboard(
                 ],
             ]
         )
-        return InlineKeyboardMarkup(rows)
-    return image_ask_keyboard(lang, show_game_cover=show_game_cover)
+    return image_ask_keyboard(lang, game_cover_on=game_cover_on)
 
 
 def image_position_keyboard(lang: str) -> InlineKeyboardMarkup:

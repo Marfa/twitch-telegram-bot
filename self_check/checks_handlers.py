@@ -1701,3 +1701,89 @@ def check_handlers() -> None:
         assert tdb.get_subscription(end_id, 4242).enabled is False
         edited = query.edit_message_text.await_args.args[0]
         assert "Premium" in edited or "премиум" in edited.lower()
+
+    # Lucky Premium: every 100th user + monthly candidate filter.
+    import premium_lucky as lucky
+    from premium import get_status
+
+    assert lucky.is_nth_milestone(200)
+    assert not lucky.is_nth_milestone(190)
+    assert lucky.nth_charge_id(200) == "lucky:nth:200"
+    with tempfile.TemporaryDirectory() as lucky_tmp:
+        ldb = SqliteDatabase(Path(lucky_tmp) / "lucky.db")
+        for i in range(1, 100):
+            ldb.upsert_user(10_000 + i)
+        assert ldb.count_users() == 99
+        winner = 10_200
+        ldb.upsert_user(winner)
+        assert ldb.count_users() == 100
+        until = lucky.grant_lucky_month(
+            ldb, winner, charge_id=lucky.nth_charge_id(100)
+        )
+        assert until is not None
+        st = get_status(ldb, winner)
+        assert st.stars_active
+        assert st.stars_canceled
+        assert st.stars_charge_id == "lucky:nth:100"
+        # Duplicate charge id is a no-op.
+        assert (
+            lucky.grant_lucky_month(ldb, winner, charge_id=lucky.nth_charge_id(100))
+            is None
+        )
+        paid = 10_300
+        ldb.upsert_user(paid)
+        ldb.set_premium_stars(
+            paid, charge_id="tg_paid", until_unix=until + 10, canceled=False
+        )
+        ldb.upsert_user(10_301)
+        ldb.set_bot_blocked(10_301, True)
+        # Clear other free users so the monthly pick is deterministic.
+        for i in range(1, 100):
+            ldb.set_bot_blocked(10_000 + i, True)
+        ldb.set_bot_blocked(winner, True)
+        free = 10_400
+        ldb.upsert_user(free)
+        assert ldb.list_lucky_monthly_candidate_ids() == [free]
+        bot = AsyncMock()
+        with patch(
+            "premium_lucky.is_free_chat_member",
+            new=AsyncMock(return_value=False),
+        ):
+            picked = asyncio.run(
+                lucky.pick_monthly_lucky_user(
+                    bot, ldb, rng=__import__("random").Random(0)
+                )
+            )
+        assert picked == free
+        # FREE_CHAT_ID / «404» members are skipped.
+        with patch(
+            "premium_lucky.is_free_chat_member",
+            new=AsyncMock(return_value=True),
+        ):
+            assert (
+                asyncio.run(
+                    lucky.pick_monthly_lucky_user(
+                        bot, ldb, rng=__import__("random").Random(0)
+                    )
+                )
+                is None
+            )
+        # Grandfathered (permanent) cannot receive a lucky grant.
+        ldb.set_premium_permanent(free, True)
+        assert lucky.is_grandfathered(ldb, free)
+        assert (
+            lucky.grant_lucky_month(ldb, free, charge_id="lucky:nth:999") is None
+        )
+        assert paid not in ldb.list_lucky_monthly_candidate_ids()
+        assert 10_301 not in ldb.list_lucky_monthly_candidate_ids()
+        assert tr("lucky_premium_nth", "ru", until="x")
+        assert tr("lucky_premium_monthly", "ru", until="x")
+        assert tr(
+            "lucky_premium_admin",
+            "ru",
+            user_id=1,
+            reason="r",
+            until="x",
+        )
+        assert tr("lucky_premium_reason_nth", "ru", n=200)
+        assert tr("lucky_premium_reason_monthly", "ru", month="2026-10")
