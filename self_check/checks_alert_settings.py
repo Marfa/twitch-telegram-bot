@@ -49,6 +49,7 @@ def _list_markers(lang: str) -> dict[str, str]:
         "delete": t("sub_list_delete_yes", lang),
         "buttons": t("sub_list_custom_buttons", lang, count=1),
         "chat": t("sub_list_chat_button_yes", lang),
+        "live_remind": t("sub_list_live_remind_yes", lang),
         "preview": t_bullet("preview_off", lang),
     }
 
@@ -75,6 +76,7 @@ def _sample_sub(**overrides: object) -> Subscription:
         "disable_link_preview": False,
         "strip_name_mentions": True,
         "attach_chat_button": True,
+        "attach_live_remind_button": False,
         "custom_buttons": '[{"text":"Go","url":"https://example.com"}]',
         "delay_minutes": 5,
         "suppress_repeat_minutes": 10,
@@ -115,6 +117,7 @@ def check_alert_setting_order() -> None:
         "delete",
         "buttons",
         "chat",
+        "live_remind",
         "preview",
     )
     assert set(EDIT_FIELD) == set(ALERT_SETTING_ORDER)
@@ -129,10 +132,12 @@ def check_alert_setting_order() -> None:
         want_delete=False,
         want_chat=False,
         want_buttons=False,
+        want_live_remind=False,
         want_preview=False,
         show_delay=True,
         show_repeat=True,
         show_buttons=True,
+        show_live_remind=True,
         show_preview=True,
     )
     assert _advopt_ids(adv) == list(ALERT_SETTING_ORDER)
@@ -151,7 +156,9 @@ def check_alert_setting_order() -> None:
         show_custom_buttons=True,
         is_upcoming=False,
     )
-    assert _edit_setting_ids(edit) == list(ALERT_SETTING_ORDER)
+    assert _edit_setting_ids(edit) == [
+        sid for sid in ALERT_SETTING_ORDER if sid != "live_remind"
+    ]
     labels = {
         (btn.callback_data or ""): btn.text
         for row in edit.inline_keyboard
@@ -163,6 +170,29 @@ def check_alert_setting_order() -> None:
     assert labels["edit_f:1:delete_old"].startswith("✅ ")
     assert labels["edit_f:1:delete_fail"].startswith("⬜️ ")
     assert not labels["edit_f:1:repeat"].startswith(("✅ ", "⬜️ "))
+
+    upcoming_edit = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="dm",
+        show_advanced=True,
+        is_upcoming=True,
+        show_live_remind=True,
+        attach_live_remind_button=True,
+    )
+    assert _edit_setting_ids(upcoming_edit) == [
+        sid
+        for sid in ALERT_SETTING_ORDER
+        if sid not in ("delay", "repeat", "delete", "buttons")
+    ]
+    upcoming_labels = {
+        (btn.callback_data or ""): btn.text
+        for row in upcoming_edit.inline_keyboard
+        for btn in row
+    }
+    assert upcoming_labels["edit_f:1:live_remind"].startswith("✅ ")
+    assert "edit_f:1:delay" not in upcoming_labels
+    assert "edit_f:1:repeat" not in upcoming_labels
 
     off = edit_options_keyboard(
         1,

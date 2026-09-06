@@ -316,6 +316,13 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS attach_live_remind_button
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS custom_buttons
                 TEXT NOT NULL DEFAULT '[]'
                 """
@@ -716,14 +723,22 @@ class PostgresDatabase:
                     owner_id BIGINT NOT NULL,
                     source_sub_id BIGINT NOT NULL,
                     snapshot_json TEXT NOT NULL,
+                    purpose TEXT NOT NULL DEFAULT 'share',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
             cur.execute(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_share_tokens_sub
-                ON alert_share_tokens(source_sub_id)
+                ALTER TABLE alert_share_tokens
+                ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'share'
+                """
+            )
+            cur.execute("DROP INDEX IF EXISTS idx_alert_share_tokens_sub")
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_share_tokens_sub_purpose
+                ON alert_share_tokens(source_sub_id, purpose)
                 """
             )
             cur.execute(
@@ -749,6 +764,7 @@ class PostgresDatabase:
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
         attach_chat_button: bool = False,
+        attach_live_remind_button: bool = False,
         custom_buttons: str = "[]",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
@@ -776,14 +792,15 @@ class PostgresDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    strip_name_mentions, attach_chat_button, custom_buttons,
+                    strip_name_mentions, attach_chat_button, attach_live_remind_button,
+                    custom_buttons,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -799,6 +816,7 @@ class PostgresDatabase:
                     disable_link_preview,
                     bool(strip_name_mentions),
                     bool(attach_chat_button),
+                    bool(attach_live_remind_button),
                     custom_buttons if str(custom_buttons or "").strip() else "[]",
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
@@ -1162,6 +1180,7 @@ class PostgresDatabase:
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
+            "attach_live_remind_button",
             "custom_buttons",
             "delay_minutes",
             "suppress_repeat_minutes",
@@ -1188,6 +1207,7 @@ class PostgresDatabase:
                 "disable_link_preview",
                 "strip_name_mentions",
                 "attach_chat_button",
+                "attach_live_remind_button",
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",
@@ -4098,17 +4118,23 @@ class PostgresDatabase:
             return int(cur.rowcount or 0) > 0
 
     def ensure_alert_share_token(
-        self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]
+        self,
+        owner_id: int,
+        source_sub_id: int,
+        snapshot: dict[str, Any],
+        *,
+        purpose: str = "share",
     ) -> str:
+        purpose = (purpose or "share").strip() or "share"
         payload = json.dumps(snapshot, ensure_ascii=False)
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
                 """
                 SELECT token FROM alert_share_tokens
-                WHERE source_sub_id = %s
+                WHERE source_sub_id = %s AND purpose = %s
                 """,
-                (int(source_sub_id),),
+                (int(source_sub_id), purpose),
             )
             row = cur.fetchone()
             if row:
@@ -4128,10 +4154,10 @@ class PostgresDatabase:
                     cur.execute(
                         """
                         INSERT INTO alert_share_tokens (
-                            token, owner_id, source_sub_id, snapshot_json
-                        ) VALUES (%s, %s, %s, %s)
+                            token, owner_id, source_sub_id, snapshot_json, purpose
+                        ) VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (token, int(owner_id), int(source_sub_id), payload),
+                        (token, int(owner_id), int(source_sub_id), payload, purpose),
                     )
                     return token
                 except Exception:

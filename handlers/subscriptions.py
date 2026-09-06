@@ -406,6 +406,8 @@ def _format_sub_line(
         settings.append(t("sub_list_custom_buttons", lang, count=len(custom_btns)))
     if sub.attach_chat_button:
         settings.append(t("sub_list_chat_button_yes", lang))
+    if getattr(sub, "attach_live_remind_button", False):
+        settings.append(t("sub_list_live_remind_yes", lang))
     if (
         not sub.image_file_id
         and sub.disable_link_preview
@@ -2029,6 +2031,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "delay_minutes": 0,
             "suppress_repeat_minutes": 0,
             "attach_chat_button": False,
+            "attach_live_remind_button": False,
             "custom_buttons": "[]",
             "delete_previous": False,
             "notify_delete_fail": False,
@@ -2040,6 +2043,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             or sub.delay_minutes > 0
             or sub.suppress_repeat_minutes > 0
             or sub.attach_chat_button
+            or bool(getattr(sub, "attach_live_remind_button", False))
             or bool(parse_custom_buttons(getattr(sub, "custom_buttons", None)))
             or sub.delete_previous
             or sub.notify_delete_fail
@@ -2475,6 +2479,20 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if enabled:
             kwargs["disable_link_preview"] = True
         db.update_subscription(sub_id, query.from_user.id, **kwargs)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    if field == "live_remind":
+        if _alert_type_from_sub(sub) != "upcoming" or not beta_features.is_enabled(
+            db, query.from_user.id, "live-remind-button"
+        ):
+            await query.answer()
+            return
+        await query.answer()
+        enabled = not bool(sub.attach_live_remind_button)
+        db.update_subscription(
+            sub_id, query.from_user.id, attach_live_remind_button=enabled
+        )
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
@@ -3513,6 +3531,7 @@ _TYPE_MIGRATION_KEYS = (
     "disable_link_preview",
     "strip_name_mentions",
     "attach_chat_button",
+    "attach_live_remind_button",
     "delay_minutes",
     "suppress_repeat_minutes",
     "schedule_reminder_minutes",
@@ -3576,6 +3595,7 @@ def _add_subscription_from_snapshot(
         disable_link_preview=bool(snapshot.get("disable_link_preview")),
         strip_name_mentions=bool(snapshot.get("strip_name_mentions")),
         attach_chat_button=bool(snapshot.get("attach_chat_button")),
+        attach_live_remind_button=bool(snapshot.get("attach_live_remind_button")),
         custom_buttons=str(snapshot.get("custom_buttons") or "[]"),
         delay_minutes=int(snapshot.get("delay_minutes") or 0),
         suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),

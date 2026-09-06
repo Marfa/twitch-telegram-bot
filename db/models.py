@@ -228,6 +228,7 @@ class Subscription:
     disable_link_preview: bool
     strip_name_mentions: bool
     attach_chat_button: bool
+    attach_live_remind_button: bool
     custom_buttons: str
     delay_minutes: int
     suppress_repeat_minutes: int
@@ -358,6 +359,8 @@ def migrate_sub_fields_for_alert_type(
         out["notify_delete_fail"] = False
     if not out.get("notify_on_category_change") or not out.get("delete_previous"):
         out["delete_other_alerts"] = False
+    if new_type != "upcoming":
+        out["attach_live_remind_button"] = False
     return out
 
 
@@ -399,6 +402,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "disable_link_preview": bool(sub.disable_link_preview),
         "strip_name_mentions": bool(sub.strip_name_mentions),
         "attach_chat_button": bool(sub.attach_chat_button),
+        "attach_live_remind_button": bool(sub.attach_live_remind_button),
         "custom_buttons": sub.custom_buttons or "[]",
         "delay_minutes": int(sub.delay_minutes),
         "suppress_repeat_minutes": int(sub.suppress_repeat_minutes),
@@ -611,6 +615,9 @@ def _row_to_sub(row: Any) -> Subscription:
         else False,
         attach_chat_button=bool(row["attach_chat_button"])
         if "attach_chat_button" in keys
+        else False,
+        attach_live_remind_button=bool(row["attach_live_remind_button"])
+        if "attach_live_remind_button" in keys
         else False,
         custom_buttons=str(row["custom_buttons"] or "[]")
         if "custom_buttons" in keys

@@ -780,8 +780,26 @@ def check_handlers() -> None:
         order = list(idx.values())
         assert all(v is not None for v in order)
         assert order == sorted(order)
+        upcoming_kb = edit_options_keyboard(
+            1,
+            "ru",
+            dest_type="dm",
+            show_advanced=True,
+            is_upcoming=True,
+            show_live_remind=True,
+            attach_live_remind_button=True,
+        )
+        upcoming_labels = [btn.text for row in upcoming_kb.inline_keyboard for btn in row]
+        assert any(
+            tr("advanced_options_live_remind", "ru") in text for text in upcoming_labels
+        )
+        assert not any(
+            tr("advanced_options_delay", "ru") in text for text in upcoming_labels
+        )
         assert tr("advanced_options_preview", "ru")
         assert tr("advanced_options_hint_preview", "ru")
+        assert tr("advanced_options_hint_live_remind", "ru")
+        assert tr("alert_live_remind_button", "ru")
         from handlers.wizard import _sync_adv_preview_conflict
         from unittest.mock import MagicMock
 
@@ -1426,6 +1444,58 @@ def check_handlers() -> None:
         assert group_markup is not None
         group_btn = group_markup.inline_keyboard[0][0]
         assert group_btn.url and group_btn.web_app is None
+
+        from handlers.delivery import (
+            _alert_chat_button_markup as _delivery_alert_markup,
+            _live_default_share_snapshot,
+        )
+
+        upcoming_sub = SimpleNamespace(
+            attach_chat_button=False,
+            attach_live_remind_button=True,
+            dest_type="dm",
+            twitch_username="SomeStreamer",
+            twitch_user_id="42",
+            owner_id=42,
+            schedule_reminder_minutes=60,
+            notify_on_live=False,
+            notify_on_end=False,
+            notify_on_category_change=False,
+            custom_buttons="[]",
+            id=7,
+        )
+        snap = _live_default_share_snapshot(upcoming_sub, "ru")
+        assert snap["notify_on_live"] is True
+        assert snap["schedule_reminder_minutes"] == 0
+        assert "twitch.tv" in snap["message_template"] or "{username}" in snap[
+            "message_template"
+        ]
+        # Without db/bot_username the remind row is omitted.
+        bare = _delivery_alert_markup(upcoming_sub, "ru")
+        assert bare is None
+        # With share token path: purpose must not clobber list-share token.
+        with tempfile.TemporaryDirectory() as tmp:
+            share_db = open_database(Path(tmp) / "live_remind.db")
+            share_db.upsert_user(42)
+            share_db.set_beta_enrollment(42, "live-remind-button", True)
+            # seed a list-share token first
+            list_token = share_db.ensure_alert_share_token(
+                42, 7, {"notify_on_live": False, "schedule_reminder_minutes": 30}
+            )
+            remind_markup = _delivery_alert_markup(
+                upcoming_sub, "ru", db=share_db, bot_username="TestBot"
+            )
+            assert remind_markup is not None
+            remind_btn = remind_markup.inline_keyboard[0][0]
+            assert "share_" in (remind_btn.url or "")
+            assert share_db.ensure_alert_share_token(
+                42, 7, {"notify_on_live": False, "schedule_reminder_minutes": 30}
+            ) == list_token
+            loaded_list = share_db.get_alert_share_snapshot(list_token)
+            assert loaded_list is not None
+            assert loaded_list.get("notify_on_live") is False
+
+        print("  chat / live-remind alert buttons OK")
         from chat_webapp import stream_chat_open_markup
 
         priv_chat_kb = stream_chat_open_markup(

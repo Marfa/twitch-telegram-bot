@@ -17,6 +17,7 @@ ALERT_SETTING_ORDER: tuple[str, ...] = (
     "delete",
     "buttons",
     "chat",
+    "live_remind",
     "preview",
 )
 
@@ -31,6 +32,7 @@ EDIT_FIELD: dict[str, str] = {
     "delete": "delete_old",
     "buttons": "custom_buttons",
     "chat": "chat_button",
+    "live_remind": "live_remind",
     "preview": "preview",
 }
 
@@ -43,5 +45,6 @@ ADVOPT_LABEL_KEY: dict[str, str] = {
     "delete": "advanced_options_delete",
     "buttons": "advanced_options_buttons",
     "chat": "advanced_options_chat",
+    "live_remind": "advanced_options_live_remind",
     "preview": "advanced_options_preview",
 }
