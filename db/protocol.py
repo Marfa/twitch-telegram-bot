@@ -35,6 +35,7 @@ class Database(Protocol):
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
         attach_chat_button: bool = False,
+        attach_live_remind_button: bool = False,
         custom_buttons: str = "[]",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
@@ -570,7 +571,12 @@ class Database(Protocol):
     def delete_referral_credit_by_charge(self, charge_id: str) -> bool: ...
 
     def ensure_alert_share_token(
-        self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]
+        self,
+        owner_id: int,
+        source_sub_id: int,
+        snapshot: dict[str, Any],
+        *,
+        purpose: str = "share",
     ) -> str: ...
 
     def get_alert_share_snapshot(self, token: str) -> dict[str, Any] | None: ...

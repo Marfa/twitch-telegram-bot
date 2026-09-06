@@ -1055,6 +1055,8 @@ def check_core() -> None:
         assert tr("share_invalid", loc)
         assert tr("beta_feat_share_alerts", loc)
         assert tr("beta_feat_share_alerts_desc", loc)
+        assert tr("beta_feat_live_remind_button", loc)
+        assert tr("beta_feat_live_remind_button_desc", loc)
         assert tr("delete_type_pick", loc)
         assert tr("delete_all", loc)
         assert tr("delete_all_confirm", loc)
@@ -1191,6 +1193,11 @@ def check_core() -> None:
     upcoming = migrate_sub_fields_for_alert_type(base, "upcoming")
     assert upcoming["delay_minutes"] == 0
     assert upcoming["suppress_repeat_minutes"] == 0
+    with_remind = dict(base)
+    with_remind["attach_live_remind_button"] = True
+    live_clears = migrate_sub_fields_for_alert_type(with_remind, "live")
+    assert live_clears["attach_live_remind_button"] is False
+
 
     # message_fx: typing + draft stream with classic fallback
     import asyncio

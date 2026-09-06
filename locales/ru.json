@@ -831,5 +831,11 @@
   "custom_buttons_back_list": "« К списку",
   "beta_feat_custom_buttons": "Пользовательские кнопки в оповещении",
   "beta_feat_custom_buttons_desc": "До 10 пользовательских URL-кнопок под оповещением (Анкор | ссылка). Входит в Premium «Продвинутые опции оповещений».",
-  "btn_wizard_next": "Далее"
+  "btn_wizard_next": "Далее",
+  "beta_feat_live_remind_button": "Кнопка напоминания",
+  "beta_feat_live_remind_button_desc": "В напоминании о предстоящем стриме — чекбокс «Кнопка напоминания» и кнопка «Напомнить о стриме» со ссылкой на оповещение о начале стрима.",
+  "advanced_options_hint_live_remind": "• Кнопка напоминания — кнопка «Напомнить о стриме» с ссылкой на оповещение о начале стрима",
+  "advanced_options_live_remind": "Кнопка напоминания",
+  "alert_live_remind_button": "Напомнить о стриме",
+  "sub_list_live_remind_yes": "• Кнопка напоминания: да"
 }

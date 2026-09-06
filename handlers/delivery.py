@@ -241,7 +241,13 @@ async def _deliver_alert_content_plain(
     return await _send_text()
 
 
-def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMarkup | None:
+def _alert_chat_button_markup(
+    sub: Subscription,
+    lang: str,
+    *,
+    db: Database | None = None,
+    bot_username: str = "",
+) -> InlineKeyboardMarkup | None:
     import custom_buttons as cbtn
 
     buttons: list[InlineKeyboardButton] = []
@@ -274,10 +280,86 @@ def _alert_chat_button_markup(sub: Subscription, lang: str) -> InlineKeyboardMar
                 buttons.append(
                     InlineKeyboardButton(t("alert_chat_button", lang), url=url)
                 )
+    remind_url = _live_remind_button_url(sub, lang, db=db, bot_username=bot_username)
+    if remind_url:
+        buttons.append(
+            InlineKeyboardButton(
+                t("alert_live_remind_button", lang),
+                url=remind_url,
+            )
+        )
     if not buttons:
         return None
-    # Always 2 per row (custom + chat share the same grid).
+    # Always 2 per row (custom + chat + live-remind share the same grid).
     return InlineKeyboardMarkup(cbtn.chunk_buttons(buttons, per_row=2))
+
+
+_SHARE_PURPOSE_LIVE_REMIND = "live_remind"
+
+
+def _live_default_share_snapshot(sub: Subscription, lang: str) -> dict:
+    """Share snapshot: stream-start alert for the same channel, other settings default."""
+    return {
+        "twitch_username": sub.twitch_username,
+        "twitch_user_id": sub.twitch_user_id,
+        "message_template": t("import_default_template", lang),
+        "dest_type": "dm",
+        "chat_id": sub.owner_id,
+        "thread_id": None,
+        "delete_previous": False,
+        "notify_delete_fail": False,
+        "disable_link_preview": False,
+        "strip_name_mentions": False,
+        "attach_chat_button": False,
+        "attach_live_remind_button": False,
+        "custom_buttons": "[]",
+        "delay_minutes": 0,
+        "suppress_repeat_minutes": 0,
+        "schedule_reminder_minutes": 0,
+        "schedule_reminder_configured": False,
+        "ignore_keywords": "",
+        "use_global_ignore": False,
+        "image_file_id": None,
+        "image_position": "",
+        "notify_on_live": True,
+        "notify_on_end": False,
+        "notify_on_category_change": False,
+        "delete_other_alerts": False,
+    }
+
+
+def _live_remind_button_url(
+    sub: Subscription,
+    lang: str,
+    *,
+    db: Database | None,
+    bot_username: str,
+) -> str | None:
+    if not db or not bot_username:
+        return None
+    if not getattr(sub, "attach_live_remind_button", False):
+        return None
+    is_upcoming = (
+        int(sub.schedule_reminder_minutes or 0) > 0
+        and not sub.notify_on_live
+        and not sub.notify_on_end
+        and not sub.notify_on_category_change
+    )
+    if not is_upcoming:
+        return None
+    import beta as beta_features
+
+    if not beta_features.is_enabled(db, sub.owner_id, "share-alerts"):
+        return None
+    if not beta_features.is_enabled(db, sub.owner_id, "live-remind-button"):
+        return None
+    token = db.ensure_alert_share_token(
+        sub.owner_id,
+        sub.id,
+        _live_default_share_snapshot(sub, lang),
+        purpose=_SHARE_PURPOSE_LIVE_REMIND,
+    )
+    return f"https://t.me/{bot_username}?start=share_{token}"
 
 
 # ponytail: in-memory dedupe; resets on restart (acceptable for owner DM notices).
@@ -687,7 +769,13 @@ async def _send_notification(
     )
     try:
         lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-        chat_markup = _alert_chat_button_markup(sub, lang)
+        bot_username = ""
+        if getattr(sub, "attach_live_remind_button", False):
+            me = await bot.get_me()
+            bot_username = (me.username or "").strip()
+        chat_markup = _alert_chat_button_markup(
+            sub, lang, db=db, bot_username=bot_username
+        )
         preview_off = (
             bool(sub.disable_link_preview)
             or bool(sub.image_file_id)

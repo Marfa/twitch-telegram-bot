@@ -526,11 +526,18 @@ async def _go_before_dest_step(
     user_id = update.effective_user.id
     if not await prem.advanced_mode_on(context.bot, db, user_id, channel=_wizard_channel(context)):
         context.user_data.setdefault("attach_chat_button", False)
+        context.user_data.setdefault("attach_live_remind_button", False)
         return await _prompt_dest_step(update, context, lang)
     # Advanced options checklist already collected chat-button preference.
     if context.user_data.get("advanced_options_done"):
         want = bool(context.user_data.get("adv_want_chat"))
         context.user_data["attach_chat_button"] = want
+        if context.user_data.get("alert_type") == "upcoming":
+            context.user_data["attach_live_remind_button"] = bool(
+                context.user_data.get("adv_want_live_remind")
+            )
+        else:
+            context.user_data["attach_live_remind_button"] = False
         if want:
             context.user_data["disable_link_preview"] = True
         return await _go_custom_buttons_step(update, context, lang)
@@ -824,6 +831,9 @@ async def _advanced_options_markup(
     )
     db: Database = context.application.bot_data["db"]
     show_buttons = beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID)
+    show_live_remind = alert == "upcoming" and beta_features.is_enabled(
+        db, user_id, "live-remind-button"
+    )
     _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
@@ -835,11 +845,13 @@ async def _advanced_options_markup(
         want_delete=bool(context.user_data.get("adv_want_delete")),
         want_buttons=bool(context.user_data.get("adv_want_buttons")),
         want_chat=bool(context.user_data.get("adv_want_chat")),
+        want_live_remind=bool(context.user_data.get("adv_want_live_remind")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
         show_preview=show_preview,
         show_buttons=show_buttons,
+        show_live_remind=show_live_remind,
         locked=await _advopt_locked(context, user_id),
     )
 
@@ -873,6 +885,10 @@ def _advanced_options_prompt_text(
     if beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID):
         lines.append(t("advanced_options_hint_buttons", lang))
     lines.append(t("advanced_options_hint_chat", lang))
+    if alert == "upcoming" and beta_features.is_enabled(
+        db, user_id, "live-remind-button"
+    ):
+        lines.append(t("advanced_options_hint_live_remind", lang))
     if template_has_link(str(context.user_data.get("message_template") or "")):
         lines.append(t("advanced_options_hint_preview", lang))
     return "\n".join(lines)
@@ -891,6 +907,10 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_delete", False)
     context.user_data.setdefault("adv_want_buttons", False)
     context.user_data.setdefault("adv_want_chat", False)
+    if context.user_data.get("alert_type") == "upcoming":
+        context.user_data.setdefault("adv_want_live_remind", False)
+    else:
+        context.user_data.pop("adv_want_live_remind", None)
     has_link = template_has_link(
         str(context.user_data.get("message_template") or "")
     )
@@ -928,11 +948,23 @@ async def receive_advanced_options_toggle(
         "delete": "adv_want_delete",
         "buttons": "adv_want_buttons",
         "chat": "adv_want_chat",
+        "live_remind": "adv_want_live_remind",
         "preview": "adv_want_preview",
     }.get(flag)
     if not key:
         await query.answer()
         return _wz()["ADVANCED_OPTIONS"]
+    if flag == "live_remind":
+        import beta as beta_features
+
+        db: Database = context.application.bot_data["db"]
+        if context.user_data.get("alert_type") != "upcoming" or not beta_features.is_enabled(
+            db,
+            query.from_user.id,
+            "live-remind-button",
+        ):
+            await query.answer()
+            return _wz()["ADVANCED_OPTIONS"]
     if flag == "preview" and not template_has_link(
         str(context.user_data.get("message_template") or "")
     ):
@@ -1005,6 +1037,12 @@ async def receive_advanced_options_next(
         context.user_data["custom_buttons_list"] = []
     want_chat = bool(context.user_data.get("adv_want_chat"))
     context.user_data["attach_chat_button"] = want_chat
+    if context.user_data.get("alert_type") == "upcoming":
+        context.user_data["attach_live_remind_button"] = bool(
+            context.user_data.get("adv_want_live_remind")
+        )
+    else:
+        context.user_data["attach_live_remind_button"] = False
     _sync_adv_preview_conflict(context)
     has_link = template_has_link(
         str(context.user_data.get("message_template") or "")
@@ -1160,10 +1198,12 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_delete",
             "adv_want_buttons",
             "adv_want_chat",
+            "adv_want_live_remind",
             "adv_want_preview",
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
+            "attach_live_remind_button",
             "custom_buttons",
             "custom_buttons_list",
             "cbtn_awaiting",
@@ -2096,6 +2136,7 @@ _LIVE_ADDON_CLEAR_KEYS = (
     "disable_link_preview",
     "strip_name_mentions",
     "attach_chat_button",
+    "attach_live_remind_button",
     "delay_minutes",
     "suppress_repeat_minutes",
     "dest_type",
@@ -2598,6 +2639,7 @@ async def _finish_subscription(
                 or bool(data.get("attach_chat_button")),
                 strip_name_mentions=bool(data.get("strip_name_mentions")),
                 attach_chat_button=bool(data.get("attach_chat_button")),
+                attach_live_remind_button=False,
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
@@ -2684,6 +2726,11 @@ async def _finish_subscription(
                 or bool(data.get("attach_chat_button")),
                 strip_name_mentions=bool(data.get("strip_name_mentions")),
                 attach_chat_button=bool(data.get("attach_chat_button")),
+                attach_live_remind_button=(
+                    bool(data.get("attach_live_remind_button"))
+                    if alert_type == "upcoming"
+                    else False
+                ),
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=(

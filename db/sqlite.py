@@ -231,6 +231,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN attach_chat_button "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "attach_live_remind_button" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN attach_live_remind_button "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         if "custom_buttons" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN custom_buttons "
@@ -579,14 +584,24 @@ class SqliteDatabase:
                 owner_id INTEGER NOT NULL,
                 source_sub_id INTEGER NOT NULL,
                 snapshot_json TEXT NOT NULL,
+                purpose TEXT NOT NULL DEFAULT 'share',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
         )
+        share_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(alert_share_tokens)")
+        }
+        if "purpose" not in share_cols:
+            conn.execute(
+                "ALTER TABLE alert_share_tokens ADD COLUMN purpose "
+                "TEXT NOT NULL DEFAULT 'share'"
+            )
+        conn.execute("DROP INDEX IF EXISTS idx_alert_share_tokens_sub")
         conn.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_share_tokens_sub
-            ON alert_share_tokens(source_sub_id)
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_share_tokens_sub_purpose
+            ON alert_share_tokens(source_sub_id, purpose)
             """
         )
         conn.execute(
@@ -611,6 +626,7 @@ class SqliteDatabase:
         disable_link_preview: bool = False,
         strip_name_mentions: bool = False,
         attach_chat_button: bool = False,
+        attach_live_remind_button: bool = False,
         custom_buttons: str = "[]",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
@@ -637,14 +653,15 @@ class SqliteDatabase:
                     owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
-                    strip_name_mentions, attach_chat_button, custom_buttons,
+                    strip_name_mentions, attach_chat_button, attach_live_remind_button,
+                    custom_buttons,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -659,6 +676,7 @@ class SqliteDatabase:
                     int(disable_link_preview),
                     int(bool(strip_name_mentions)),
                     int(bool(attach_chat_button)),
+                    int(bool(attach_live_remind_button)),
                     custom_buttons if str(custom_buttons or "").strip() else "[]",
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
@@ -952,7 +970,8 @@ class SqliteDatabase:
                         owner_id, twitch_username, twitch_user_id,
                         message_template, dest_type, chat_id, thread_id,
                         delete_previous, notify_delete_fail, disable_link_preview,
-                        strip_name_mentions, attach_chat_button, custom_buttons,
+                        strip_name_mentions, attach_chat_button, attach_live_remind_button,
+                        custom_buttons,
                         delay_minutes, suppress_repeat_minutes,
                         schedule_reminder_minutes, schedule_reminder_configured,
                         ignore_keywords, use_global_ignore,
@@ -962,7 +981,7 @@ class SqliteDatabase:
                         notify_on_live, notify_on_end, notify_on_category_change,
                         delete_other_alerts, is_demo
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -978,6 +997,7 @@ class SqliteDatabase:
                         int(bool(payload.get("disable_link_preview"))),
                         int(bool(payload.get("strip_name_mentions"))),
                         int(bool(payload.get("attach_chat_button"))),
+                        int(bool(payload.get("attach_live_remind_button"))),
                         payload.get("custom_buttons") or "[]",
                         int(payload.get("delay_minutes") or 0),
                         int(payload.get("suppress_repeat_minutes") or 0),
@@ -1044,6 +1064,7 @@ class SqliteDatabase:
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
+            "attach_live_remind_button",
             "custom_buttons",
             "delay_minutes",
             "suppress_repeat_minutes",
@@ -1070,6 +1091,7 @@ class SqliteDatabase:
                 "disable_link_preview",
                 "strip_name_mentions",
                 "attach_chat_button",
+                "attach_live_remind_button",
                 "schedule_reminder_configured",
                 "notify_on_live",
                 "notify_on_end",
@@ -3781,16 +3803,22 @@ class SqliteDatabase:
             return int(cur.rowcount) > 0
 
     def ensure_alert_share_token(
-        self, owner_id: int, source_sub_id: int, snapshot: dict[str, Any]
+        self,
+        owner_id: int,
+        source_sub_id: int,
+        snapshot: dict[str, Any],
+        *,
+        purpose: str = "share",
     ) -> str:
+        purpose = (purpose or "share").strip() or "share"
         payload = json.dumps(snapshot, ensure_ascii=False)
         with self._conn() as conn:
             row = conn.execute(
                 """
                 SELECT token FROM alert_share_tokens
-                WHERE source_sub_id = ?
+                WHERE source_sub_id = ? AND purpose = ?
                 """,
-                (int(source_sub_id),),
+                (int(source_sub_id), purpose),
             ).fetchone()
             if row:
                 token = str(row["token"])
@@ -3809,10 +3837,10 @@ class SqliteDatabase:
                     conn.execute(
                         """
                         INSERT INTO alert_share_tokens (
-                            token, owner_id, source_sub_id, snapshot_json
-                        ) VALUES (?, ?, ?, ?)
+                            token, owner_id, source_sub_id, snapshot_json, purpose
+                        ) VALUES (?, ?, ?, ?, ?)
                         """,
-                        (token, int(owner_id), int(source_sub_id), payload),
+                        (token, int(owner_id), int(source_sub_id), payload, purpose),
                     )
                     return token
                 except sqlite3.IntegrityError:

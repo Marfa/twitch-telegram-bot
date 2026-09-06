@@ -876,13 +876,15 @@ async def _send_welcome(
     first_start: bool = False,
 ) -> int:
     user_id = update.effective_user.id
+    # Share deep-link first start: skip welcome demo — user is here for the shared alert.
+    seed_demo = first_start and not context.user_data.get("pending_share_token")
     await _send_welcome_bundle(
         context.application,
         context.bot,
         update.effective_chat.id,
         user_id,
         lang,
-        first_start=first_start,
+        first_start=seed_demo,
     )
     await _maybe_offer_pending_share(context, user_id, lang)
     return ConversationHandler.END
@@ -994,7 +996,8 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         chat_id,
         query.from_user.id,
         lang,
-        first_start=first_start,
+        first_start=first_start
+        and not context.user_data.get("pending_share_token"),
     )
     await _maybe_offer_pending_share(context, query.from_user.id, lang)
     return ConversationHandler.END
@@ -1447,6 +1450,11 @@ def _edit_options_for_sub(
         db is not None
         and beta_features.is_enabled(db, sub.owner_id, cbtn.BETA_FEATURE_ID)
     )
+    show_live_remind = (
+        alert_type == "upcoming"
+        and db is not None
+        and beta_features.is_enabled(db, sub.owner_id, "live-remind-button")
+    )
     return edit_options_keyboard(
         sub.id,
         lang,
@@ -1457,6 +1465,7 @@ def _edit_options_for_sub(
         has_image=bool(sub.image_file_id),
         strip_name_mentions=bool(sub.strip_name_mentions),
         attach_chat_button=bool(sub.attach_chat_button),
+        attach_live_remind_button=bool(sub.attach_live_remind_button),
         disable_link_preview=bool(sub.disable_link_preview),
         schedule_reminder_minutes=int(sub.schedule_reminder_minutes or 0),
         show_link_preview=not bool(sub.image_file_id)
@@ -1467,6 +1476,7 @@ def _edit_options_for_sub(
         is_upcoming=alert_type == "upcoming",
         show_advanced=show_advanced,
         show_custom_buttons=show_custom_buttons,
+        show_live_remind=show_live_remind,
     )
 
 
@@ -1513,7 +1523,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import show_help_button
-    from i18n import guide_keyboard
+    from i18n import btn, guide_keyboard
 
     if not show_help_button():
         return
@@ -1522,13 +1532,19 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
     analytics.capture(user_id, "feedback_opened")
-    markup = guide_keyboard(lang) or _menu(lang, user_id)
+    # Reply menu is the escape hatch; guide is a separate inline URL row.
     await update.effective_message.reply_text(
         t("feedback", lang, user_id=user_id),
-        reply_markup=markup,
+        reply_markup=_menu(lang, user_id),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
+    guide = guide_keyboard(lang)
+    if guide:
+        await update.effective_message.reply_text(
+            btn("guide", lang),
+            reply_markup=guide,
+        )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2214,7 +2230,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|strip)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|strip|live_remind)$",
         ),
         group=0,
     )
@@ -2367,7 +2383,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|buttons|chat|preview)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|buttons|chat|live_remind|preview)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"

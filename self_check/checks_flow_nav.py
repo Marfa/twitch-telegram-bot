@@ -1134,7 +1134,8 @@ async def _scenario_subscriptions_edit_type_copy(db) -> None:
 
 
 async def _scenario_share_alert_offer(db) -> None:
-    """§1 deep link share — decline; accept once; dup prompt on same streamer."""
+    """§1 deep link share — first start skips demo; decline; accept; dup prompt."""
+    from bot import LANG_SELECT, receive_language, start as bot_start
     from db.models import _subscription_cart_snapshot
     from handlers.subscriptions import (
         offer_shared_alert,
@@ -1150,6 +1151,38 @@ async def _scenario_share_alert_offer(db) -> None:
     token = db.ensure_alert_share_token(
         _FREE_UID, sub_id, _subscription_cart_snapshot(sub)
     )
+
+    # First /start via share_* → language pick; after lang — no demo seed + share offer.
+    newbie = _FREE_UID + 11
+    assert not db.user_exists(newbie)
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(newbie, "/start", cap)
+    ctx = _ctx(application)
+    ctx.args = [f"share_{token}"]
+    with patch("bot.sync_stream_chat_menu_button", new=AsyncMock()):
+        state = await bot_start(update, ctx)
+    assert state == LANG_SELECT
+    assert ctx.user_data.get("pending_share_token") == token
+    assert ctx.user_data.get("first_welcome") is True
+    assert db.user_exists(newbie)
+    assert db.get_subscriptions_by_owner(newbie) == []
+
+    update, _query = _cb_update(newbie, "lang:ru", cap)
+    with patch(
+        "bot._ensure_welcome_premium_channel_subscription",
+        new=AsyncMock(
+            side_effect=AssertionError("demo seed must not run on share first start")
+        ),
+    ), patch("bot.sync_stream_chat_menu_button", new=AsyncMock()), patch(
+        "bot.offer_shared_alert", new=AsyncMock()
+    ) as offer_mock:
+        await receive_language(update, ctx)
+    offer_mock.assert_awaited_once()
+    assert offer_mock.await_args.args[-1] == token
+    assert db.get_subscriptions_by_owner(newbie) == []
+    assert "pending_share_token" not in ctx.user_data
 
     application, bot = _app(db)
     cap = _BotCapture()

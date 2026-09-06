@@ -56,6 +56,15 @@
       "issue_label": "beta/custom-buttons",
       "stage": "beta",
       "created_at": "2026-09-05"
+    },
+    {
+      "id": "live-remind-button",
+      "branch": "feat/live-remind-button",
+      "title_key": "beta_feat_live_remind_button",
+      "description_key": "beta_feat_live_remind_button_desc",
+      "issue_label": "beta/live-remind-button",
+      "stage": "beta",
+      "created_at": "2026-09-06"
     }
   ]
 }
