@@ -190,16 +190,16 @@ def _ignore_keywords_note(keywords: str, use_global: bool, lang: str) -> str:
     return _impl(keywords, use_global, lang)
 
 
-def _edit_menu_text(lang: str, sub, sub_num: int) -> str:
+def _edit_menu_text(*args, **kwargs):
     from bot import _edit_menu_text as _impl
 
-    return _impl(lang, sub, sub_num)
+    return _impl(*args, **kwargs)
 
 
-def _edit_options_for_sub(sub, lang: str):
+def _edit_options_for_sub(*args, **kwargs):
     from bot import _edit_options_for_sub as _impl
 
-    return _impl(sub, lang)
+    return _impl(*args, **kwargs)
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
