@@ -274,15 +274,15 @@ async def _smoke_schedule(db) -> None:
     assert state == st["STREAM_SCHEDULE_FIX_GAME"]
     bot.send_message.assert_awaited()
 
-    assert parse_stream_schedule_slots("15:30 Disponia\n18:40 Just Chatting") == [
-        ("15:30", "Disponia"),
+    assert parse_stream_schedule_slots("15:30 Deponia\n18:40 Just Chatting") == [
+        ("15:30", "Deponia"),
         ("18:40", "Just Chatting"),
     ]
     assert parse_stream_schedule_slots("bad") is None
 
     application, bot = _app(db)
     day = date.today()
-    update = _msg_update(_FREE_UID, "15:30 Just Chatting\n18:40 Disponia")
+    update = _msg_update(_FREE_UID, "15:30 Just Chatting\n18:40 Deponia")
     ctx = _ctx(
         application,
         {
@@ -299,7 +299,7 @@ async def _smoke_schedule(db) -> None:
     assert state == st["STREAM_SCHEDULE_FIX_SLOTS"]
     assert ctx.user_data["stream_schedule_entries"] == [
         {"date": day, "time": "15:30", "game": "Just Chatting"},
-        {"date": day, "time": "18:40", "game": "Disponia"},
+        {"date": day, "time": "18:40", "game": "Deponia"},
     ]
 
     application, bot = _app(db)
@@ -366,6 +366,36 @@ async def _smoke_schedule(db) -> None:
     application, bot = _app(db)
     await _complete_schedule_publish(application, _FREE_UID, "oauth_error", None)
     await _complete_schedule_publish(application, _FREE_UID, None, None)
+
+    from handlers.stream_schedule import process_vacation_auto_exits
+
+    application, bot = _app(db)
+    db.set_vacation_auto_exit_at(_FREE_UID, "2000-01-01T00:00:00Z")
+    ctx = _ctx(application)
+    await process_vacation_auto_exits(ctx)
+    bot.send_message.assert_awaited()
+    fail_text = bot.send_message.await_args.args[1]
+    assert "режима отпуска" in fail_text or "vacation" in fail_text.lower()
+    assert db.get_due_vacation_auto_exits("2099-01-01T00:00:00Z") == []
+
+    application, bot = _app(db)
+    db.set_vacation_auto_exit_at(_FREE_UID, "2000-01-01T00:00:00Z")
+    db.upsert_twitch_sync(
+        owner_id=_FREE_UID,
+        twitch_user_id="123",
+        refresh_token="rt",
+        period_days=0,
+        next_sync_at="9999-12-31T00:00:00+00:00",
+        last_sync_at=None,
+    )
+    twitch = application.bot_data["twitch"]
+    twitch.refresh_user_token = MagicMock(side_effect=RuntimeError("token dead"))
+    ctx = _ctx(application)
+    await process_vacation_auto_exits(ctx)
+    bot.send_message.assert_awaited()
+    fail_text2 = bot.send_message.await_args.args[1]
+    assert "token dead" not in fail_text2
+    assert "API" in fail_text2 or "api" in fail_text2.lower() or "Twitch" in fail_text2
 
 
 async def _smoke_settings_oauth(db) -> None:

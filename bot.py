@@ -329,6 +329,7 @@ from handlers.stream_schedule import (
     stream_schedule_tz_callback,
     stream_schedule_vacation_auto_callback,
     stream_schedule_vacation_callback,
+    stream_schedule_vacation_manage_callback,
     process_vacation_auto_exits,
 )
 
@@ -2573,6 +2574,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
                 CallbackQueryHandler(
                     stream_schedule_mode_callback, pattern=r"^stream_sched:mode:"
+                ),
+                CallbackQueryHandler(
+                    stream_schedule_vacation_manage_callback,
+                    pattern=r"^stream_sched:vac_manage:",
                 ),
                 CallbackQueryHandler(
                     stream_schedule_tz_callback, pattern=r"^stream_sched:tz:"

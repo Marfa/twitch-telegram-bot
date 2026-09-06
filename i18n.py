@@ -1538,6 +1538,30 @@ def stream_schedule_vacation_month_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def stream_schedule_vacation_active_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_vacation_exit_btn", lang),
+                    callback_data="stream_sched:vac_manage:exit",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_vacation_fix_btn", lang),
+                    callback_data="stream_sched:vac_manage:fix",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
+                )
+            ],
+        ]
+    )
+
+
 def stream_schedule_vacation_auto_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

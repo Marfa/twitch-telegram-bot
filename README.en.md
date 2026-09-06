@@ -191,12 +191,12 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 |---|---|
 | **Create schedule for the week** | Starts the wizard immediately: slots as `HH:MM title` (multiple lines = multiple slots) |
 | **Fix slots for a day** | Pick a day → add/edit slots with the same text format; only that day's segments are cleared on Twitch |
-| **Vacation mode** | Calendar start/end → exit automatically or not → Twitch Vacation Mode (**Premium**); “Upcoming stream” alerts are skipped while vacation is active |
+| **Vacation mode** | If already on vacation: exit or change dates; otherwise calendar start/end → auto-exit Yes/No → Twitch Vacation Mode (**Premium**); “Upcoming stream” alerts are skipped while vacation is active |
 | **Time zone** | Set UTC offset (`UTC+3`, `UTC-5`, …); saved for Twitch publishing |
 
 **Weekly wizard:**
 
-1. For each day: slots as text (`15:30 Disponia` — multiple lines at once)
+1. For each day: slots as text (`15:30 Deponia` — multiple lines at once)
 2. **No stream planned** — skip the day
 3. From day 2 — **Finish** (not shown on the last day)
 

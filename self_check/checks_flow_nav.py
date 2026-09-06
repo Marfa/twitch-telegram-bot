@@ -27,6 +27,7 @@ from i18n import (
     stream_schedule_confirm_keyboard,
     stream_schedule_duration_keyboard,
     stream_schedule_mode_keyboard,
+    stream_schedule_vacation_active_keyboard,
     stream_schedule_vacation_auto_keyboard,
     stored_typo_fix_keyboard,
     template_typo_keyboard,
@@ -190,6 +191,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("stream_schedule_confirm", stream_schedule_confirm_keyboard(loc)),
             ("stream_schedule_mode", stream_schedule_mode_keyboard(loc)),
             ("stream_schedule_vacation_auto", stream_schedule_vacation_auto_keyboard(loc)),
+            ("stream_schedule_vacation_active", stream_schedule_vacation_active_keyboard(loc)),
             ("stream_schedule_duration", stream_schedule_duration_keyboard(loc)),
             ("admin_type", admin_type_keyboard(loc)),
             ("admin_audience", admin_other_audience_keyboard(loc)),
@@ -1393,8 +1395,13 @@ async def _scenario_schedule_vacation(db) -> None:
         stream_schedule_mode_callback,
         stream_schedule_vacation_auto_callback,
         stream_schedule_vacation_callback,
+        stream_schedule_vacation_manage_callback,
     )
-    from i18n import stream_schedule_vacation_auto_keyboard
+    from i18n import (
+        stream_schedule_vacation_active_keyboard,
+        stream_schedule_vacation_auto_keyboard,
+    )
+    from telegram.ext import ConversationHandler
 
     async def _pulse(bot, chat_id, lang, *, back=True):
         cap.note_pulse()
@@ -1407,7 +1414,10 @@ async def _scenario_schedule_vacation(db) -> None:
     db.set_schedule_utc_offset_minutes(_FREE_UID, 180)
     with patch(
         "handlers.stream_schedule.beta_features.is_enabled", return_value=True
-    ), patch("handlers.stream_schedule._pulse_wizard_keyboard", new=_pulse):
+    ), patch("handlers.stream_schedule._pulse_wizard_keyboard", new=_pulse), patch(
+        "handlers.stream_schedule._owner_vacation_active",
+        new=AsyncMock(return_value=False),
+    ):
         await start_stream_schedule(update, ctx)
         cap.assert_turn("stream_schedule_mode")
         update, _query = _cb_update(_FREE_UID, "stream_sched:mode:vacation", cap)
@@ -1425,16 +1435,56 @@ async def _scenario_schedule_vacation(db) -> None:
         cap.assert_turn("stream_schedule_vacation_auto")
 
     assert markup_has_escape_hatch(stream_schedule_vacation_auto_keyboard("ru"))
+    assert markup_has_escape_hatch(stream_schedule_vacation_active_keyboard("ru"))
     update, _query = _cb_update(_FREE_UID, "stream_sched:vac_auto:0", cap)
-    # Premimum gate or auth path ends conversation — escape already on keyboard.
     with patch(
         "handlers.stream_schedule.prem.has_feature",
         new=AsyncMock(return_value=False),
     ), patch("premium_handlers.send_premium_screen", new=AsyncMock()):
-        from telegram.ext import ConversationHandler
-
         state = await stream_schedule_vacation_auto_callback(update, ctx)
     assert state == ConversationHandler.END
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("create_schedule", "ru"), cap)
+    ctx = _ctx(application)
+    db.set_schedule_utc_offset_minutes(_FREE_UID, 180)
+    with patch(
+        "handlers.stream_schedule.beta_features.is_enabled", return_value=True
+    ), patch("handlers.stream_schedule._pulse_wizard_keyboard", new=_pulse), patch(
+        "handlers.stream_schedule._owner_vacation_active",
+        new=AsyncMock(return_value=True),
+    ):
+        await start_stream_schedule(update, ctx)
+        update, _query = _cb_update(_FREE_UID, "stream_sched:mode:vacation", cap)
+        cap.wrap(bot)
+        state = await stream_schedule_mode_callback(update, ctx)
+        cap.assert_turn("stream_schedule_vacation_already")
+    from handlers.stream_schedule import _sched_states
+
+    assert state == _sched_states()["STREAM_SCHEDULE_MODE"]
+
+    update, _query = _cb_update(_FREE_UID, "stream_sched:vac_manage:fix", cap)
+    with patch(
+        "handlers.stream_schedule._prompt_vacation_start",
+        new=AsyncMock(return_value=_sched_states()["STREAM_SCHEDULE_VACATION"]),
+    ) as start_vac:
+        state = await stream_schedule_vacation_manage_callback(update, ctx)
+    start_vac.assert_awaited()
+    assert state == _sched_states()["STREAM_SCHEDULE_VACATION"]
+
+    update, _query = _cb_update(_FREE_UID, "stream_sched:vac_manage:exit", cap)
+    with patch(
+        "handlers.stream_schedule._start_schedule_publish_auth",
+        new=AsyncMock(return_value=ConversationHandler.END),
+    ) as auth:
+        state = await stream_schedule_vacation_manage_callback(update, ctx)
+    auth.assert_awaited()
+    assert state == ConversationHandler.END
+    assert ctx.application.bot_data["pending_schedule_vacations"][_FREE_UID] == {
+        "action": "disable"
+    }
 
 
 async def _scenario_settings_extended(db) -> None:

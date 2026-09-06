@@ -31,6 +31,7 @@ from i18n import (
     stream_schedule_mode_keyboard,
     stream_schedule_occupied_keyboard,
     stream_schedule_publish_keyboard,
+    stream_schedule_vacation_active_keyboard,
     stream_schedule_vacation_auto_keyboard,
     stream_schedule_vacation_month_keyboard,
     t,
@@ -168,7 +169,7 @@ def _parse_stream_time(raw: str) -> str | None:
 
 
 def parse_stream_schedule_slots(raw: str) -> list[tuple[str, str]] | None:
-    """Parse lines like '15:30 Disponia' → [(time, title), ...]. None if invalid."""
+    """Parse lines like '15:30 Deponia' → [(time, title), ...]. None if invalid."""
     lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
     if not lines:
         return None
@@ -208,6 +209,50 @@ def _owner_schedule_broadcaster_id(db: Database, user_id: int) -> str:
         return str(sync.twitch_user_id)
     status = db.get_premium_status(user_id)
     return str(getattr(status, "twitch_user_id", "") or "")
+
+
+async def _owner_vacation_active(
+    db: Database, twitch: TwitchClient, user_id: int
+) -> bool:
+    broadcaster_id = _owner_schedule_broadcaster_id(db, user_id)
+    if not broadcaster_id:
+        return False
+    try:
+        schedule = await asyncio.to_thread(twitch.get_channel_schedule, broadcaster_id)
+    except Exception:
+        logger.exception("Vacation status check failed for user=%s", user_id)
+        return False
+    return TwitchClient.vacation_active(schedule.get("vacation"))
+
+
+async def _prompt_vacation_already_active(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
+    text = t("stream_schedule_vacation_already", lang)
+    markup = stream_schedule_vacation_active_keyboard(lang)
+    chat_id = reply_chat_id(update)
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text, reply_markup=markup)
+        except BadRequest:
+            await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    return STREAM_SCHEDULE_MODE
+
+
+async def _enter_vacation_mode(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    user_id = update.effective_user.id
+    if await _owner_vacation_active(db, twitch, user_id):
+        return await _prompt_vacation_already_active(update, context, lang)
+    return await _prompt_vacation_start(update, context, lang)
 
 
 def _schedule_segment_game(seg: dict) -> str:
@@ -301,6 +346,20 @@ def _schedule_publish_error_text(exc: BaseException, date_raw: str, lang: str) -
     else:
         key = "stream_schedule_err_generic"
     return t(key, lang, date=pretty)
+
+
+def _vacation_user_error(exc: BaseException, lang: str) -> str:
+    """Safe user-facing vacation error (no raw exception / token text)."""
+    from twitch import TwitchClient
+
+    detail = (TwitchClient._schedule_error_detail(exc) or "").lower()
+    raw = str(exc).lower()
+    blob = f"{raw} {detail}"
+    if "401" in blob or "unauthorized" in blob or "scope" in blob:
+        return t("stream_schedule_vacation_auto_exit_no_scope", lang)
+    if "404" in blob or "not found" in blob:
+        return t("stream_schedule_vacation_not_found", lang)
+    return t("stream_schedule_vacation_api_error", lang)
 
 
 def _pending_schedule_preview(context: ContextTypes.DEFAULT_TYPE) -> list[dict]:
@@ -645,7 +704,7 @@ async def stream_schedule_tz(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         return await _prompt_duration_after_publish_yes(update, context, lang)
     if resume == "vacation":
-        return await _prompt_vacation_start(update, context, lang)
+        return await _enter_vacation_mode(update, context, lang)
     if resume == "confirm":
         await update.effective_message.reply_text(
             t("stream_schedule_confirm", lang),
@@ -676,7 +735,7 @@ async def stream_schedule_mode_callback(
         db: Database = context.application.bot_data["db"]
         if db.get_schedule_utc_offset_minutes(query.from_user.id) is None:
             return await _prompt_schedule_tz(update, context, lang, resume="vacation")
-        return await _prompt_vacation_start(update, context, lang)
+        return await _enter_vacation_mode(update, context, lang)
 
     # Day fix mode — remaining days of the current week (Mon–Sun), including today.
     db = context.application.bot_data["db"]
@@ -1207,6 +1266,24 @@ async def stream_schedule_vacation_callback(
     return STREAM_SCHEDULE_VACATION
 
 
+async def stream_schedule_vacation_manage_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    action = (query.data or "").rsplit(":", 1)[-1]
+    if action == "fix":
+        return await _prompt_vacation_start(update, context, lang)
+    if action != "exit":
+        return _sched_states()["STREAM_SCHEDULE_MODE"]
+
+    _pending_schedule_vacations(context.application)[user_id] = {"action": "disable"}
+    context.user_data.clear()
+    return await _start_schedule_publish_auth(update, context, user_id, lang)
+
+
 async def stream_schedule_vacation_auto_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -1630,14 +1707,16 @@ async def _complete_schedule_vacation(
 ) -> None:
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    disable = str(vacation.get("action") or "") == "disable"
+    fail_key = (
+        "stream_schedule_vacation_exit_fail"
+        if disable
+        else "stream_schedule_vacation_fail"
+    )
     if error or not token_info:
         await application.bot.send_message(
             owner_id,
-            t(
-                "stream_schedule_vacation_fail",
-                lang,
-                error=error or "no token",
-            ),
+            t(fail_key, lang, error=error or "no token"),
             reply_markup=_menu(lang, owner_id),
         )
         return
@@ -1647,22 +1726,55 @@ async def _complete_schedule_vacation(
     refresh = token_info.get("refresh_token", "")
     twitch: TwitchClient = application.bot_data["twitch"]
     try:
-        await asyncio.to_thread(
-            twitch.update_schedule_vacation,
-            access,
-            twitch_user_id,
-            enabled=True,
-            start_time=str(vacation.get("start_time") or ""),
-            end_time=str(vacation.get("end_time") or ""),
-            timezone=str(vacation.get("timezone") or "Etc/UTC"),
-        )
+        if disable:
+            await asyncio.to_thread(
+                twitch.update_schedule_vacation,
+                access,
+                twitch_user_id,
+                enabled=False,
+            )
+        else:
+            await asyncio.to_thread(
+                twitch.update_schedule_vacation,
+                access,
+                twitch_user_id,
+                enabled=True,
+                start_time=str(vacation.get("start_time") or ""),
+                end_time=str(vacation.get("end_time") or ""),
+                timezone=str(vacation.get("timezone") or "Etc/UTC"),
+            )
     except Exception as exc:
-        logger.exception("Failed to enable Twitch vacation for user=%s", owner_id)
+        logger.exception(
+            "Failed to %s Twitch vacation for user=%s",
+            "disable" if disable else "enable",
+            owner_id,
+        )
         await application.bot.send_message(
             owner_id,
-            t("stream_schedule_vacation_fail", lang, error=str(exc)),
+            t(fail_key, lang, error=_vacation_user_error(exc, lang)),
             reply_markup=_menu(lang, owner_id),
         )
+        return
+
+    if disable:
+        db.set_vacation_auto_exit_at(owner_id, None)
+        text = t("stream_schedule_vacation_manual_exit_ok", lang)
+        buttons = []
+        if refresh:
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        t("stream_schedule_save_token", lang),
+                        callback_data=f"sched_save_token:{owner_id}",
+                    )
+                ]
+            )
+            application.bot_data.setdefault("pending_schedule_tokens", {})[owner_id] = {
+                "refresh_token": refresh,
+                "twitch_user_id": twitch_user_id,
+            }
+        markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
+        await application.bot.send_message(owner_id, text, reply_markup=markup)
         return
 
     auto_exit = bool(vacation.get("auto_exit"))
@@ -1733,11 +1845,27 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    async def _fail(owner_id: int, lang: str, reason: str) -> None:
+        db.set_vacation_auto_exit_at(owner_id, None)
+        try:
+            await context.bot.send_message(
+                owner_id,
+                t("stream_schedule_vacation_auto_exit_fail", lang, error=reason),
+                reply_markup=_menu(lang, owner_id),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify user=%s about vacation auto-exit error", owner_id
+            )
+
     for owner_id in db.get_due_vacation_auto_exits(now_iso):
         sync = db.get_twitch_sync(owner_id)
         lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
         if not sync or not sync.refresh_token:
-            db.set_vacation_auto_exit_at(owner_id, None)
+            await _fail(
+                owner_id, lang, t("stream_schedule_vacation_auto_exit_no_token", lang)
+            )
             continue
         try:
             token_data = await asyncio.to_thread(
@@ -1748,7 +1876,11 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
             if not access or not await asyncio.to_thread(
                 twitch.token_has_scope, access, SCHEDULE_SCOPE
             ):
-                db.set_vacation_auto_exit_at(owner_id, None)
+                await _fail(
+                    owner_id,
+                    lang,
+                    t("stream_schedule_vacation_auto_exit_no_scope", lang),
+                )
                 continue
             if refresh != sync.refresh_token:
                 db.update_twitch_sync_tokens(
@@ -1770,9 +1902,9 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
                 t("stream_schedule_vacation_exit_ok", lang),
                 reply_markup=_menu(lang, owner_id),
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Vacation auto-exit failed for user=%s", owner_id)
-            db.set_vacation_auto_exit_at(owner_id, None)
+            await _fail(owner_id, lang, _vacation_user_error(exc, lang))
 
 
 async def schedule_save_token_callback(
