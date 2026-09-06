@@ -1742,9 +1742,8 @@ async def _complete_schedule_vacation(
             )
     except Exception as exc:
         logger.error(
-            "Failed to %s Twitch vacation for user=%s (%s)",
+            "Failed to %s Twitch vacation (%s)",
             "disable" if disable else "enable",
-            owner_id,
             type(exc).__name__,
         )
         await application.bot.send_message(
@@ -1902,8 +1901,7 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         except Exception as exc:
             logger.error(
-                "Vacation auto-exit failed for user=%s (%s)",
-                owner_id,
+                "Vacation auto-exit failed (%s)",
                 type(exc).__name__,
             )
             await _fail(owner_id, lang, _vacation_user_error(exc, lang))
