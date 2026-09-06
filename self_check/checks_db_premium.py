@@ -637,6 +637,20 @@ def check_db_premium() -> None:
         assert sub.image_position == ""
         assert db.count_new_users_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
         assert db.count_new_users_since(datetime.now(timezone.utc) + timedelta(days=1)) == 0
+        assert (
+            db.count_new_users_between(
+                datetime.now(timezone.utc) - timedelta(days=1),
+                datetime.now(timezone.utc) + timedelta(days=1),
+            )
+            == 1
+        )
+        assert (
+            db.count_new_users_between(
+                datetime.now(timezone.utc) + timedelta(days=1),
+                datetime.now(timezone.utc) + timedelta(days=2),
+            )
+            == 0
+        )
         db.set_notify_cooldown(sub_id, 5)
         sub = db.get_subscription(sub_id, 1)
         assert sub is not None

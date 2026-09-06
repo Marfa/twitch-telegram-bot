@@ -279,7 +279,7 @@ In **⚙️ Settings → 🤝 Partner program**:
 
 Commission applies only to Stars Premium (not Twitch-sub Premium or external donations). Telegram Bot API cannot transfer Stars to users — the admin pays out manually and marks the request in the bot.
 
-Weekly admin report: new users + Stars payers for the week.
+Weekly admin report (Mon 10:00 MSK): new users + Stars payers for the week + active trials; parentheses show change vs the previous mailing. On the 1st at 10:00 MSK — the same metrics for the previous calendar month.
 
 **Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / chat button / 🧪 remind about stream (upcoming) / link preview / schedule reminders, repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 

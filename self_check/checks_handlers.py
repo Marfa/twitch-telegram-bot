@@ -435,6 +435,20 @@ def check_handlers() -> None:
         assert prem.is_premium(db, 1)
         assert db.count_enabled_subscriptions(1) == 0
         assert db.count_stars_payers_since(datetime.now(timezone.utc) - timedelta(days=1)) == 1
+        assert (
+            db.count_stars_payers_between(
+                datetime.now(timezone.utc) - timedelta(days=1),
+                datetime.now(timezone.utc) + timedelta(days=1),
+            )
+            == 1
+        )
+        assert (
+            db.count_stars_payers_between(
+                datetime.now(timezone.utc) + timedelta(days=1),
+                datetime.now(timezone.utc) + timedelta(days=2),
+            )
+            == 0
+        )
         # Status helper: free-chat maps to permanent wording without naming the chat
         from premium_handlers import _status_text
 
@@ -1139,7 +1153,51 @@ def check_handlers() -> None:
             paid=2,
             trials=len(trials),
             trial_list=trial_list,
+            count_delta=" (+1)",
+            paid_delta=" (-1)",
+            trials_delta=" (0)",
         )
+        assert tr(
+            "monthly_new_users",
+            "en",
+            period="August 2026",
+            count=10,
+            paid=3,
+            trials=0,
+            trial_list="",
+            count_delta="",
+            paid_delta="",
+            trials_delta="",
+        ).startswith("📊 Stats for August 2026")
+        from handlers.monitoring import (
+            _delta_suffix,
+            _format_growth_report,
+            _previous_calendar_month_bounds,
+        )
+
+        assert _delta_suffix(5, None) == ""
+        assert _delta_suffix(5, 3) == " (+2)"
+        assert _delta_suffix(2, 5) == " (-3)"
+        assert _delta_suffix(4, 4) == " (0)"
+        start, end = _previous_calendar_month_bounds(
+            datetime(2026, 9, 1, 10, 0, tzinfo=timezone(timedelta(hours=3)))
+        )
+        assert start.year == 2026 and start.month == 8 and start.day == 1
+        assert end.year == 2026 and end.month == 9 and end.day == 1
+        growth = _format_growth_report(
+            "ru",
+            template_key="weekly_new_users",
+            count=5,
+            paid=1,
+            trials=[],
+            previous={"count": 3, "paid": 1, "trials": 0},
+        )
+        assert "Новых пользователей: 5 (+2)" in growth
+        assert "Платных (Stars): 1 (0)" in growth
+        assert db.count_new_users_between(
+            datetime.now(timezone.utc) - timedelta(days=1),
+            datetime.now(timezone.utc) + timedelta(days=1),
+        ) >= 0
         assert "настройках" in tr("broadcast_footer", "ru", type="x")
         assert "Settings" in tr("broadcast_footer", "en", type="x")
         assert tr("broadcast_type_other", "ru") == "📢 Прочие"

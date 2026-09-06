@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -335,6 +336,189 @@ def _seconds_until_next_premium_digest() -> float:
     return (target - now).total_seconds()
 
 
+_ADMIN_GROWTH_SNAPSHOT_KEYS = ("weekly", "monthly")
+_MONTH_NAMES_EN = (
+    "",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+_MONTH_NAMES_RU = (
+    "",
+    "январь",
+    "февраль",
+    "март",
+    "апрель",
+    "май",
+    "июнь",
+    "июль",
+    "август",
+    "сентябрь",
+    "октябрь",
+    "ноябрь",
+    "декабрь",
+)
+
+
+def _delta_suffix(current: int, previous: int | None) -> str:
+    """Parenthetical change vs previous mailing; empty when no prior snapshot."""
+    if previous is None:
+        return ""
+    delta = current - previous
+    if delta > 0:
+        return f" (+{delta})"
+    return f" ({delta})"
+
+
+def _admin_growth_snapshot_path() -> Path:
+    from config import DATABASE_PATH
+
+    return Path(DATABASE_PATH).expanduser().resolve().parent / "admin_growth_snapshots.json"
+
+
+def _load_admin_growth_snapshots(path: Path | None = None) -> dict[str, dict[str, int]]:
+    path = path or _admin_growth_snapshot_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for key in _ADMIN_GROWTH_SNAPSHOT_KEYS:
+        row = raw.get(key)
+        if not isinstance(row, dict):
+            continue
+        try:
+            out[key] = {
+                "count": int(row["count"]),
+                "paid": int(row["paid"]),
+                "trials": int(row["trials"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _save_admin_growth_snapshot(
+    kind: str, *, count: int, paid: int, trials: int, path: Path | None = None
+) -> None:
+    if kind not in _ADMIN_GROWTH_SNAPSHOT_KEYS:
+        raise ValueError(f"unknown growth snapshot kind: {kind}")
+    path = path or _admin_growth_snapshot_path()
+    data = _load_admin_growth_snapshots(path)
+    data[kind] = {"count": count, "paid": paid, "trials": trials}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def _previous_calendar_month_bounds(
+    now: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    """[start, end) of previous calendar month in SCHEDULE_TZ."""
+    now = now or datetime.now(SCHEDULE_TZ)
+    first_this = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if first_this.month == 1:
+        first_prev = first_this.replace(year=first_this.year - 1, month=12)
+    else:
+        first_prev = first_this.replace(month=first_this.month - 1)
+    return first_prev, first_this
+
+
+def _month_period_label(lang: str, year: int, month: int) -> str:
+    names = _MONTH_NAMES_RU if lang == "ru" else _MONTH_NAMES_EN
+    return f"{names[month]} {year}"
+
+
+def _format_growth_report(
+    lang: str,
+    *,
+    template_key: str,
+    count: int,
+    paid: int,
+    trials: list[tuple[int, int]],
+    previous: dict[str, int] | None,
+    period: str | None = None,
+) -> str:
+    trial_n = len(trials)
+    trial_list = "".join(
+        t(
+            "weekly_trial_line",
+            lang,
+            user_id=user_id,
+            until=datetime.fromtimestamp(until, tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M UTC"
+            ),
+        )
+        for user_id, until in trials
+    )
+    prev_count = previous.get("count") if previous else None
+    prev_paid = previous.get("paid") if previous else None
+    prev_trials = previous.get("trials") if previous else None
+    kwargs: dict[str, object] = {
+        "count": count,
+        "paid": paid,
+        "trials": trial_n,
+        "trial_list": trial_list,
+        "count_delta": _delta_suffix(count, prev_count),
+        "paid_delta": _delta_suffix(paid, prev_paid),
+        "trials_delta": _delta_suffix(trial_n, prev_trials),
+    }
+    if period is not None:
+        kwargs["period"] = period
+    return t(template_key, lang, **kwargs)
+
+
+async def _send_growth_report_to_admins(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    template_key: str,
+    count: int,
+    paid: int,
+    trials: list[tuple[int, int]],
+    snapshot_kind: str,
+    period_for_lang: Callable[[str], str] | None = None,
+) -> None:
+    from config import ADMIN_USER_IDS
+
+    if not ADMIN_USER_IDS:
+        return
+    if count <= 0 and paid <= 0:
+        return
+    db: Database = context.application.bot_data["db"]
+    previous = _load_admin_growth_snapshots().get(snapshot_kind)
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        period = period_for_lang(lang) if period_for_lang else None
+        text = _format_growth_report(
+            lang,
+            template_key=template_key,
+            count=count,
+            paid=paid,
+            trials=trials,
+            previous=previous,
+            period=period,
+        )
+        try:
+            await context.bot.send_message(admin_id, text)
+        except (BadRequest, Forbidden) as exc:
+            logger.warning(
+                "Cannot send %s report to admin %s: %s", snapshot_kind, admin_id, exc
+            )
+    _save_admin_growth_snapshot(
+        snapshot_kind, count=count, paid=paid, trials=len(trials)
+    )
+
+
 async def daily_bot_stats_snapshot(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     analytics.capture_bot_stats(db.get_bot_stats())
@@ -400,44 +584,37 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
-    from config import ADMIN_USER_IDS
-
-    if not ADMIN_USER_IDS:
-        return
     db: Database = context.application.bot_data["db"]
     since = datetime.now(timezone.utc) - timedelta(days=7)
     count = db.count_new_users_since(since)
     paid = db.count_stars_payers_since(since)
     trials = db.list_active_trial_users()
-    if count <= 0 and paid <= 0:
-        return
-    for admin_id in ADMIN_USER_IDS:
-        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
-        trial_list = "".join(
-            t(
-                "weekly_trial_line",
-                lang,
-                user_id=user_id,
-                until=datetime.fromtimestamp(until, tz=timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M UTC"
-                ),
-            )
-            for user_id, until in trials
-        )
-        try:
-            await context.bot.send_message(
-                admin_id,
-                t(
-                    "weekly_new_users",
-                    lang,
-                    count=count,
-                    paid=paid,
-                    trials=len(trials),
-                    trial_list=trial_list,
-                ),
-            )
-        except (BadRequest, Forbidden) as exc:
-            logger.warning("Cannot send weekly report to admin %s: %s", admin_id, exc)
+    await _send_growth_report_to_admins(
+        context,
+        template_key="weekly_new_users",
+        count=count,
+        paid=paid,
+        trials=trials,
+        snapshot_kind="weekly",
+    )
+
+
+async def monthly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """1st of month 10:00 MSK — growth stats for the previous calendar month."""
+    db: Database = context.application.bot_data["db"]
+    start, end = _previous_calendar_month_bounds()
+    count = db.count_new_users_between(start, end)
+    paid = db.count_stars_payers_between(start, end)
+    trials = db.list_active_trial_users()
+    await _send_growth_report_to_admins(
+        context,
+        template_key="monthly_new_users",
+        count=count,
+        paid=paid,
+        trials=trials,
+        snapshot_kind="monthly",
+        period_for_lang=lambda lang: _month_period_label(lang, start.year, start.month),
+    )
 
 
 async def notify_admins_posthog_issue(

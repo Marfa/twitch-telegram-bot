@@ -7,7 +7,7 @@ import logging
 import random
 import re
 import secrets
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -214,6 +214,7 @@ from handlers.monitoring import (
     check_cursor_status,
     daily_bot_stats_snapshot,
     daily_premium_purchases_report,
+    monthly_new_users_report,
     notify_admins_posthog_issue,
     poll_posthog_inbox_reports,
     weekly_new_users_report,
@@ -2929,6 +2930,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         weekly_new_users_report,
         interval=7 * 24 * 3600,
         first=_seconds_until_next_weekly_report(),
+    )
+    app.job_queue.run_monthly(
+        monthly_new_users_report,
+        when=time(10, 0, tzinfo=SCHEDULE_TZ),
+        day=1,
     )
     app.job_queue.run_repeating(
         daily_bot_stats_snapshot,

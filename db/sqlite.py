@@ -1279,6 +1279,18 @@ class SqliteDatabase:
             ).fetchone()
         return int(row["n"]) if row else 0
 
+    def count_new_users_between(self, since: datetime, until: datetime) -> int:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        until_utc = until.astimezone(timezone.utc) if until.tzinfo else until.replace(tzinfo=timezone.utc)
+        since_s = since_utc.strftime("%Y-%m-%d %H:%M:%S")
+        until_s = until_utc.strftime("%Y-%m-%d %H:%M:%S")
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE first_seen >= ? AND first_seen < ?",
+                (since_s, until_s),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
     def count_stars_payers_since(self, since: datetime) -> int:
         since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
         since_s = since_utc.strftime("%Y-%m-%d %H:%M:%S")
@@ -1290,6 +1302,23 @@ class SqliteDatabase:
                   AND premium_stars_paid_at >= ?
                 """,
                 (since_s,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def count_stars_payers_between(self, since: datetime, until: datetime) -> int:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        until_utc = until.astimezone(timezone.utc) if until.tzinfo else until.replace(tzinfo=timezone.utc)
+        since_s = since_utc.strftime("%Y-%m-%d %H:%M:%S")
+        until_s = until_utc.strftime("%Y-%m-%d %H:%M:%S")
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM users
+                WHERE premium_stars_paid_at IS NOT NULL
+                  AND premium_stars_paid_at >= ?
+                  AND premium_stars_paid_at < ?
+                """,
+                (since_s, until_s),
             ).fetchone()
         return int(row["n"]) if row else 0
 
