@@ -29,7 +29,7 @@
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
-| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, link preview (if URL in template; off with image/chat button) |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), link preview (if URL in template; off with image/chat button) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
@@ -113,7 +113,7 @@ Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
-3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, chat button, link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
+3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Remind about stream” (upcoming), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
 4. Image (if checked) — upload and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
@@ -122,9 +122,9 @@ Then the wizard (for stream start / category change / stream end):
 9. For channel or group — add the bot and confirm the chat
 10. Delete previous bot message? — if checked (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
 
-Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, clean title, and image are free.
+Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, 🧪 “Remind about stream”, clean title, and image are free.
 
-For **upcoming stream**, after the channel and schedule check — template and settings, then reminder minutes and destination (no “do you want reminders?” ask).
+For **upcoming stream**, after the channel and schedule check — template and settings (in beta, “Remind about stream” — a button with a share link for a stream-start alert), then reminder minutes and destination (no “do you want reminders?” ask).
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
@@ -284,7 +284,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report: new users + Stars payers for the week.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / chat button / link preview / schedule reminders, repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / chat button / 🧪 remind about stream (upcoming) / link preview / schedule reminders, repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

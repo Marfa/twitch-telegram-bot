@@ -809,5 +809,11 @@
   "custom_buttons_back_list": "« Back to list",
   "beta_feat_custom_buttons": "Custom alert buttons",
   "beta_feat_custom_buttons_desc": "Up to 10 custom URL buttons under an alert (Label | link). Part of Premium Advanced alert options.",
-  "btn_wizard_next": "Next"
+  "btn_wizard_next": "Next",
+  "beta_feat_live_remind_button": "Remind about stream",
+  "beta_feat_live_remind_button_desc": "On an upcoming-stream reminder — a checkbox and “Remind about stream” button with a share link for a stream-start alert.",
+  "advanced_options_hint_live_remind": "• Remind about stream — “Remind about stream” button with a share link for a stream-start alert",
+  "advanced_options_live_remind": "Remind about stream",
+  "alert_live_remind_button": "Remind about stream",
+  "sub_list_live_remind_yes": "• Remind about stream: on"
 }

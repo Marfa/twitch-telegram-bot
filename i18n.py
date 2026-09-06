@@ -869,10 +869,12 @@ def advanced_options_keyboard(
     want_chat: bool,
     want_preview: bool = False,
     want_buttons: bool = False,
+    want_live_remind: bool = False,
     show_delay: bool = True,
     show_repeat: bool = True,
     show_preview: bool = False,
     show_buttons: bool = False,
+    show_live_remind: bool = False,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER
@@ -887,12 +889,14 @@ def advanced_options_keyboard(
         "delete": want_delete,
         "buttons": want_buttons,
         "chat": want_chat,
+        "live_remind": want_live_remind,
         "preview": want_preview,
     }
     show = {
         "delay": show_delay,
         "repeat": show_repeat,
         "buttons": show_buttons,
+        "live_remind": show_live_remind,
         "preview": show_preview,
     }
 
@@ -1988,6 +1992,7 @@ def edit_options_keyboard(
     has_image: bool = False,
     strip_name_mentions: bool = False,
     attach_chat_button: bool = False,
+    attach_live_remind_button: bool = False,
     disable_link_preview: bool = False,
     schedule_reminder_minutes: int = 0,
     show_link_preview: bool = True,
@@ -1997,6 +2002,7 @@ def edit_options_keyboard(
     is_upcoming: bool = False,
     show_advanced: bool = True,
     show_custom_buttons: bool = False,
+    show_live_remind: bool = False,
 ) -> InlineKeyboardMarkup:
     # Shared block order: alert_settings.ALERT_SETTING_ORDER. Edit-only around it:
     # template, image_del, delete_fail/other, schedule, dest, type/copy.
@@ -2126,6 +2132,18 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             chat_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
+        if sid == "live_remind":
+            if show_advanced and show_live_remind:
+                remind_mark = "✅ " if attach_live_remind_button else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            remind_mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=f"edit_f:{sub_id}:{field}",
                         )
                     ]
