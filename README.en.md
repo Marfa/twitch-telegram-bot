@@ -113,7 +113,7 @@ Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
-3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Remind about stream” (upcoming), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
+3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Reminder button” (upcoming), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
 4. Image (if checked) — upload and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
@@ -122,9 +122,9 @@ Then the wizard (for stream start / category change / stream end):
 9. For channel or group — add the bot and confirm the chat
 10. Delete previous bot message? — if checked (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
 
-Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, 🧪 “Remind about stream”, clean title, and image are free.
+Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, 🧪 “Reminder button”, clean title, and image are free.
 
-For **upcoming stream**, after the channel and schedule check — template and settings (in beta, “Remind about stream” — a button with a share link for a stream-start alert), then reminder minutes and destination (no “do you want reminders?” ask).
+For **upcoming stream**, after the channel and schedule check — template and settings (in beta, “Reminder button” — a button with a share link for a stream-start alert), then reminder minutes and destination (no “do you want reminders?” ask).
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
