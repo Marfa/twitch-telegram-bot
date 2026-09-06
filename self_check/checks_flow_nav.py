@@ -1417,6 +1417,9 @@ async def _scenario_schedule_vacation(db) -> None:
     ), patch("handlers.stream_schedule._pulse_wizard_keyboard", new=_pulse), patch(
         "handlers.stream_schedule._owner_vacation_active",
         new=AsyncMock(return_value=False),
+    ), patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=True),
     ):
         await start_stream_schedule(update, ctx)
         cap.assert_turn("stream_schedule_mode")
@@ -1455,18 +1458,33 @@ async def _scenario_schedule_vacation(db) -> None:
     ), patch("handlers.stream_schedule._pulse_wizard_keyboard", new=_pulse), patch(
         "handlers.stream_schedule._owner_vacation_active",
         new=AsyncMock(return_value=True),
+    ), patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=True),
     ):
         await start_stream_schedule(update, ctx)
         update, _query = _cb_update(_FREE_UID, "stream_sched:mode:vacation", cap)
         cap.wrap(bot)
         state = await stream_schedule_mode_callback(update, ctx)
         cap.assert_turn("stream_schedule_vacation_already")
-    from handlers.stream_schedule import _sched_states
+    from handlers.stream_schedule import _owner_vacation_active, _sched_states
 
     assert state == _sched_states()["STREAM_SCHEDULE_MODE"]
 
+    # Local vacation marker is enough when Helix broadcaster id is unknown.
+    db.set_vacation_auto_exit_at(_FREE_UID, "2099-01-01T00:00:00Z")
+    application, bot = _app(db)
+    assert await _owner_vacation_active(db, application.bot_data["twitch"], _FREE_UID) is True
+    db.set_vacation_auto_exit_at(_FREE_UID, None)
+    db.set_vacation_ends_at(_FREE_UID, "2099-01-01T00:00:00Z")
+    assert await _owner_vacation_active(db, application.bot_data["twitch"], _FREE_UID) is True
+    db.set_vacation_ends_at(_FREE_UID, None)
+
     update, _query = _cb_update(_FREE_UID, "stream_sched:vac_manage:fix", cap)
     with patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ), patch(
         "handlers.stream_schedule._prompt_vacation_start",
         new=AsyncMock(return_value=_sched_states()["STREAM_SCHEDULE_VACATION"]),
     ) as start_vac:
@@ -1476,6 +1494,9 @@ async def _scenario_schedule_vacation(db) -> None:
 
     update, _query = _cb_update(_FREE_UID, "stream_sched:vac_manage:exit", cap)
     with patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ), patch(
         "handlers.stream_schedule._start_schedule_publish_auth",
         new=AsyncMock(return_value=ConversationHandler.END),
     ) as auth:
@@ -1485,6 +1506,26 @@ async def _scenario_schedule_vacation(db) -> None:
     assert ctx.application.bot_data["pending_schedule_vacations"][_FREE_UID] == {
         "action": "disable"
     }
+
+    # Free user: day / vacation modes are Premium-gated at entry.
+    application, bot = _app(db)
+    update, _query = _cb_update(_FREE_UID, "stream_sched:mode:day")
+    ctx = _ctx(application)
+    with patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=False),
+    ), patch("premium_handlers.send_premium_screen", new=AsyncMock()) as premium:
+        state = await stream_schedule_mode_callback(update, ctx)
+    assert state == ConversationHandler.END
+    premium.assert_awaited()
+    update, _query = _cb_update(_FREE_UID, "stream_sched:mode:vacation")
+    with patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=False),
+    ), patch("premium_handlers.send_premium_screen", new=AsyncMock()) as premium2:
+        state = await stream_schedule_mode_callback(update, ctx)
+    assert state == ConversationHandler.END
+    premium2.assert_awaited()
 
 
 async def _scenario_settings_extended(db) -> None:

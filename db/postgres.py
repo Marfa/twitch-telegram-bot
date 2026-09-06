@@ -396,6 +396,18 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS vacation_ends_at TEXT
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS schedule_twitch_user_id TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS watch_prefs TEXT NOT NULL DEFAULT ''
                 """
             )
@@ -2468,6 +2480,70 @@ class PostgresDatabase:
                 """,
                 (user_id, exit_at),
             )
+
+    def get_vacation_auto_exit_at(self, user_id: int) -> str | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT vacation_auto_exit_at FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        val = row["vacation_auto_exit_at"]
+        return str(val) if val else None
+
+    def set_vacation_ends_at(self, user_id: int, ends_at: str | None) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, vacation_ends_at)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    vacation_ends_at = EXCLUDED.vacation_ends_at
+                """,
+                (user_id, ends_at),
+            )
+
+    def get_vacation_ends_at(self, user_id: int) -> str | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT vacation_ends_at FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        val = row["vacation_ends_at"]
+        return str(val) if val else None
+
+    def set_schedule_twitch_user_id(self, user_id: int, twitch_user_id: str | None) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, schedule_twitch_user_id)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    schedule_twitch_user_id = EXCLUDED.schedule_twitch_user_id
+                """,
+                (user_id, (twitch_user_id or "").strip()),
+            )
+
+    def get_schedule_twitch_user_id(self, user_id: int) -> str:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT schedule_twitch_user_id FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return ""
+        return str(row["schedule_twitch_user_id"] or "").strip()
 
     def get_due_vacation_auto_exits(self, now_iso: str) -> list[int]:
         with self._conn() as conn:

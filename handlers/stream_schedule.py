@@ -207,22 +207,78 @@ def _owner_schedule_broadcaster_id(db: Database, user_id: int) -> str:
     sync = db.get_twitch_sync(user_id)
     if sync and sync.twitch_user_id:
         return str(sync.twitch_user_id)
+    stored = db.get_schedule_twitch_user_id(user_id)
+    if stored:
+        return stored
     status = db.get_premium_status(user_id)
-    return str(getattr(status, "twitch_user_id", "") or "")
+    prem_id = str(getattr(status, "twitch_user_id", "") or "")
+    if prem_id:
+        return prem_id
+    whisper = db.get_whisper_alert(user_id)
+    if whisper and whisper.twitch_user_id:
+        return str(whisper.twitch_user_id)
+    return ""
+
+
+def _local_vacation_marked(db: Database, user_id: int) -> bool:
+    """True when this bot previously enabled vacation (local markers)."""
+    if db.get_vacation_ends_at(user_id):
+        return True
+    if db.get_vacation_auto_exit_at(user_id):
+        return True
+    return False
 
 
 async def _owner_vacation_active(
     db: Database, twitch: TwitchClient, user_id: int
 ) -> bool:
+    local = _local_vacation_marked(db, user_id)
     broadcaster_id = _owner_schedule_broadcaster_id(db, user_id)
     if not broadcaster_id:
-        return False
+        return local
     try:
         schedule = await asyncio.to_thread(twitch.get_channel_schedule, broadcaster_id)
     except Exception:
         logger.exception("Vacation status check failed for user=%s", user_id)
-        return False
-    return TwitchClient.vacation_active(schedule.get("vacation"))
+        return local
+    return TwitchClient.vacation_active(schedule.get("vacation")) or local
+
+
+def _remember_schedule_broadcaster(
+    db: Database,
+    owner_id: int,
+    twitch_user_id: str,
+    refresh: str = "",
+) -> None:
+    """Keep Twitch id for later Helix schedule/vacation checks."""
+    uid = (twitch_user_id or "").strip()
+    if not uid:
+        return
+    db.set_schedule_twitch_user_id(owner_id, uid)
+    if not refresh:
+        return
+    existing = db.get_twitch_sync(owner_id)
+    if existing and existing.period_days > 0:
+        db.update_twitch_sync_tokens(
+            owner_id,
+            refresh,
+            last_sync_at=existing.last_sync_at
+            or datetime.now(timezone.utc).isoformat(),
+            next_sync_at=existing.next_sync_at,
+        )
+        return
+    db.upsert_twitch_sync(
+        owner_id=owner_id,
+        twitch_user_id=uid,
+        refresh_token=refresh,
+        period_days=int(existing.period_days) if existing else 0,
+        next_sync_at=(
+            existing.next_sync_at
+            if existing
+            else datetime.now(timezone.utc).isoformat()
+        ),
+        last_sync_at=existing.last_sync_at if existing else None,
+    )
 
 
 async def _prompt_vacation_already_active(
@@ -716,6 +772,42 @@ async def stream_schedule_tz(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return STREAM_SCHEDULE_MODE
 
 
+async def _require_schedule_publish(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int,
+    lang: str,
+    source: str,
+) -> bool:
+    """True if user may edit Twitch schedule. Otherwise shows Premium gate and ends."""
+    db: Database = context.application.bot_data["db"]
+    if await prem.has_feature(context.bot, db, user_id, "schedule_publish"):
+        return True
+    from premium_handlers import send_premium_screen
+
+    context.user_data.clear()
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+        except BadRequest:
+            pass
+    await send_premium_screen(
+        context.bot,
+        user_id,
+        lang,
+        db,
+        update=update,
+        context=context,
+        source=source,
+        feature="schedule_publish",
+    )
+    return False
+
+
 async def stream_schedule_mode_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -724,19 +816,29 @@ async def stream_schedule_mode_callback(
 
     query = update.callback_query
     await query.answer()
-    lang = _user_lang(context, query.from_user.id)
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
     mode = (query.data or "").split(":")[-1]
     if mode == "week":
         return await _begin_week_schedule(update, context, lang)
+    if mode in ("day", "vacation"):
+        if not await _require_schedule_publish(
+            update,
+            context,
+            user_id=user_id,
+            lang=lang,
+            source=f"schedule_mode_{mode}",
+        ):
+            return ConversationHandler.END
     if mode == "vacation":
         db: Database = context.application.bot_data["db"]
-        if db.get_schedule_utc_offset_minutes(query.from_user.id) is None:
+        if db.get_schedule_utc_offset_minutes(user_id) is None:
             return await _prompt_schedule_tz(update, context, lang, resume="vacation")
         return await _enter_vacation_mode(update, context, lang)
 
     # Day fix mode — remaining days of the current week (Mon–Sun), including today.
     db = context.application.bot_data["db"]
-    local_tz = _user_schedule_tz(db, query.from_user.id)
+    local_tz = _user_schedule_tz(db, user_id)
     today = datetime.now(local_tz).date()
     monday = today - timedelta(days=today.weekday())
     dates = [monday + timedelta(days=i) for i in range(7) if monday + timedelta(days=i) >= today]
@@ -1272,9 +1374,26 @@ async def stream_schedule_vacation_manage_callback(
     lang = _user_lang(context, user_id)
     action = (query.data or "").rsplit(":", 1)[-1]
     if action == "fix":
+        if not await _require_schedule_publish(
+            update,
+            context,
+            user_id=user_id,
+            lang=lang,
+            source="schedule_vacation_fix",
+        ):
+            return ConversationHandler.END
         return await _prompt_vacation_start(update, context, lang)
     if action != "exit":
         return _sched_states()["STREAM_SCHEDULE_MODE"]
+
+    if not await _require_schedule_publish(
+        update,
+        context,
+        user_id=user_id,
+        lang=lang,
+        source="schedule_vacation_exit",
+    ):
+        return ConversationHandler.END
 
     _pending_schedule_vacations(context.application)[user_id] = {"action": "disable"}
     context.user_data.clear()
@@ -1302,23 +1421,13 @@ async def stream_schedule_vacation_auto_callback(
         return ConversationHandler.END
 
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, user_id, "schedule_publish"):
-        from premium_handlers import send_premium_screen
-
-        context.user_data.clear()
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(
-            context.bot,
-            user_id,
-            lang,
-            db,
-            update=update,
-            context=context,
-            source="schedule_vacation",
-            feature="schedule_publish",
-        )
+    if not await _require_schedule_publish(
+        update,
+        context,
+        user_id=user_id,
+        lang=lang,
+        source="schedule_vacation",
+    ):
         return ConversationHandler.END
 
     offset_minutes = db.get_schedule_utc_offset_minutes(user_id)
@@ -1373,23 +1482,13 @@ async def stream_schedule_publish_callback(
         return ConversationHandler.END
 
     db: Database = context.application.bot_data["db"]
-    if not await prem.has_feature(context.bot, db, user_id, "schedule_publish"):
-        from premium_handlers import send_premium_screen
-
-        context.user_data.clear()
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(
-            context.bot,
-            user_id,
-            lang,
-            db,
-            update=update,
-            context=context,
-            source="schedule_publish",
-            feature="schedule_publish",
-        )
+    if not await _require_schedule_publish(
+        update,
+        context,
+        user_id=user_id,
+        lang=lang,
+        source="schedule_publish",
+    ):
         return ConversationHandler.END
 
     if _is_delete_only_schedule_publish(context):
@@ -1568,6 +1667,7 @@ async def _complete_schedule_publish(
     twitch_user_id = token_info.get("twitch_user_id", "")
     refresh = token_info.get("refresh_token", "")
     twitch: TwitchClient = application.bot_data["twitch"]
+    _remember_schedule_broadcaster(db, owner_id, twitch_user_id, refresh)
 
     if clear_mode not in ("overlap", "none"):
         try:
@@ -1755,6 +1855,7 @@ async def _complete_schedule_vacation(
 
     if disable:
         db.set_vacation_auto_exit_at(owner_id, None)
+        db.set_vacation_ends_at(owner_id, None)
         text = t("stream_schedule_vacation_manual_exit_ok", lang)
         buttons = []
         if refresh:
@@ -1776,34 +1877,15 @@ async def _complete_schedule_vacation(
 
     auto_exit = bool(vacation.get("auto_exit"))
     end_iso = str(vacation.get("end_time") or "")
+    db.set_vacation_ends_at(owner_id, end_iso or None)
+    _remember_schedule_broadcaster(db, owner_id, twitch_user_id, refresh)
     if auto_exit and end_iso:
         db.set_vacation_auto_exit_at(owner_id, end_iso)
     else:
         db.set_vacation_auto_exit_at(owner_id, None)
 
-    if auto_exit and refresh and twitch_user_id:
-        existing = db.get_twitch_sync(owner_id)
-        if existing and existing.period_days > 0:
-            db.update_twitch_sync_tokens(
-                owner_id,
-                refresh,
-                last_sync_at=existing.last_sync_at
-                or datetime.now(timezone.utc).isoformat(),
-                next_sync_at=existing.next_sync_at,
-            )
-        else:
-            db.upsert_twitch_sync(
-                owner_id=owner_id,
-                twitch_user_id=twitch_user_id,
-                refresh_token=refresh,
-                period_days=int(existing.period_days) if existing else 0,
-                next_sync_at=(
-                    existing.next_sync_at
-                    if existing
-                    else datetime.now(timezone.utc).isoformat()
-                ),
-                last_sync_at=existing.last_sync_at if existing else None,
-            )
+    # Refresh already stored above when present; don't re-offer save if kept.
+    if refresh:
         refresh = ""
 
     if auto_exit:
@@ -1894,6 +1976,7 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
                 enabled=False,
             )
             db.set_vacation_auto_exit_at(owner_id, None)
+            db.set_vacation_ends_at(owner_id, None)
             await context.bot.send_message(
                 owner_id,
                 t("stream_schedule_vacation_exit_ok", lang),

@@ -39,7 +39,12 @@ if (($# > 0)); then
   remote_psql_args=$(printf '%q ' "$@")
 fi
 
-if ! ssh "${ssh_identity_args[@]}" \
+ssh_cmd=(ssh)
+if ((${#ssh_identity_args[@]})); then
+  ssh_cmd+=("${ssh_identity_args[@]}")
+fi
+
+if ! "${ssh_cmd[@]}" \
   -o BatchMode=yes \
   -o ConnectTimeout=15 \
   "${VPS_SSH_USER}@${VPS_SSH_HOST}" \

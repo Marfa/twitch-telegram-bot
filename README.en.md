@@ -32,7 +32,7 @@
 | Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), link preview (if URL in template; off with image/chat button) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
-| Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard, **fix slots for a day**, **vacation mode**, **Time zone** (UTC); publish / vacation on Twitch is **Premium** |
+| Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
 | Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
@@ -62,7 +62,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Alert types beyond live start | Category change, upcoming (schedule), stream end |
 | Twitch follow auto-sync | Periodic import of new follows / removal of unfollows |
 | Advanced alert options | Ignore keywords, delayed send, repeat mute, delete previous |
-| Publish schedule to Twitch | Bot-built slots → Twitch channel schedule page |
+| Twitch schedule tools | Publish slots, fix a day, vacation mode on Twitch |
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
@@ -190,8 +190,8 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 | Mode | What it does |
 |---|---|
 | **Create schedule for the week** | Starts the wizard immediately: slots as `HH:MM title` (multiple lines = multiple slots) |
-| **Fix slots for a day** | Pick a day → add/edit slots with the same text format; only that day's segments are cleared on Twitch |
-| **Vacation mode** | If already on vacation: exit or change dates; otherwise calendar start/end → auto-exit Yes/No → Twitch Vacation Mode (**Premium**); “Upcoming stream” alerts are skipped while vacation is active |
+| **Fix slots for a day** | **Premium** (“Twitch schedule tools”): pick a day → text slots → sync to Twitch |
+| **Vacation mode** | **Premium**: if already on vacation — exit / change dates; otherwise calendar → auto-exit → Twitch Vacation; “Upcoming stream” alerts skipped while on vacation |
 | **Time zone** | Set UTC offset (`UTC+3`, `UTC-5`, …); saved for Twitch publishing |
 
 **Weekly wizard:**
@@ -251,7 +251,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below” |
 | 📦 Other | Whisper alerts, schedule, what to watch, chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
-| ↳ 📅 Manage schedule | Week, day, vacation, time zone; Twitch sync — Premium |
+| ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
 | ⚙️ Settings | Premium, sync, ignored words, system alerts, language, partner program |
