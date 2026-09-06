@@ -349,15 +349,12 @@ def _schedule_publish_error_text(exc: BaseException, date_raw: str, lang: str) -
 
 
 def _vacation_user_error(exc: BaseException, lang: str) -> str:
-    """Safe user-facing vacation error (no raw exception / token text)."""
-    from twitch import TwitchClient
-
-    detail = (TwitchClient._schedule_error_detail(exc) or "").lower()
-    raw = str(exc).lower()
-    blob = f"{raw} {detail}"
-    if "401" in blob or "unauthorized" in blob or "scope" in blob:
+    """Safe user-facing vacation error (HTTP status only — no exception text)."""
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None) if resp is not None else None
+    if status in (401, 403):
         return t("stream_schedule_vacation_auto_exit_no_scope", lang)
-    if "404" in blob or "not found" in blob:
+    if status == 404:
         return t("stream_schedule_vacation_not_found", lang)
     return t("stream_schedule_vacation_api_error", lang)
 
@@ -1744,10 +1741,11 @@ async def _complete_schedule_vacation(
                 timezone=str(vacation.get("timezone") or "Etc/UTC"),
             )
     except Exception as exc:
-        logger.exception(
-            "Failed to %s Twitch vacation for user=%s",
+        logger.error(
+            "Failed to %s Twitch vacation for user=%s (%s)",
             "disable" if disable else "enable",
             owner_id,
+            type(exc).__name__,
         )
         await application.bot.send_message(
             owner_id,
@@ -1903,7 +1901,11 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
                 reply_markup=_menu(lang, owner_id),
             )
         except Exception as exc:
-            logger.exception("Vacation auto-exit failed for user=%s", owner_id)
+            logger.error(
+                "Vacation auto-exit failed for user=%s (%s)",
+                owner_id,
+                type(exc).__name__,
+            )
             await _fail(owner_id, lang, _vacation_user_error(exc, lang))
 
 
