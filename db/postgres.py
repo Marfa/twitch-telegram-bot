@@ -383,6 +383,12 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS vacation_auto_exit_at TEXT
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS watch_prefs TEXT NOT NULL DEFAULT ''
                 """
             )
@@ -2429,6 +2435,34 @@ class PostgresDatabase:
                 """,
                 (user_id, int(offset_minutes)),
             )
+
+    def set_vacation_auto_exit_at(self, user_id: int, exit_at: str | None) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, vacation_auto_exit_at)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    vacation_auto_exit_at = EXCLUDED.vacation_auto_exit_at
+                """,
+                (user_id, exit_at),
+            )
+
+    def get_due_vacation_auto_exits(self, now_iso: str) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id FROM users
+                WHERE vacation_auto_exit_at IS NOT NULL
+                  AND vacation_auto_exit_at != ''
+                  AND vacation_auto_exit_at <= %s
+                """,
+                (now_iso,),
+            )
+            rows = cur.fetchall()
+        return [int(r["user_id"]) for r in rows]
 
     def get_schedule_utc_offsets_for_users(
         self, user_ids: list[int]

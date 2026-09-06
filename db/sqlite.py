@@ -276,6 +276,8 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN schedule_utc_offset_minutes INTEGER"
             )
+        if "vacation_auto_exit_at" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN vacation_auto_exit_at TEXT")
         if "watch_prefs" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN watch_prefs TEXT NOT NULL DEFAULT ''")
         if "global_ignore_keywords" not in user_cols:
@@ -2205,6 +2207,31 @@ class SqliteDatabase:
                 """,
                 (user_id, int(offset_minutes)),
             )
+
+    def set_vacation_auto_exit_at(self, user_id: int, exit_at: str | None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, vacation_auto_exit_at)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    vacation_auto_exit_at = excluded.vacation_auto_exit_at
+                """,
+                (user_id, exit_at),
+            )
+
+    def get_due_vacation_auto_exits(self, now_iso: str) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id FROM users
+                WHERE vacation_auto_exit_at IS NOT NULL
+                  AND vacation_auto_exit_at != ''
+                  AND vacation_auto_exit_at <= ?
+                """,
+                (now_iso,),
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]
 
     def get_schedule_utc_offsets_for_users(
         self, user_ids: list[int]

@@ -88,16 +88,15 @@ async def _smoke_schedule(db) -> None:
     from handlers.stream_schedule import (
         _complete_schedule_publish,
         _prompt_stream_schedule_fix_game,
-        _prompt_stream_schedule_fix_time,
         _sched_states,
         format_utc_offset,
+        parse_stream_schedule_slots,
         parse_utc_offset_text,
         start_stream_schedule,
         stream_schedule_duration_callback,
         stream_schedule_fix_edit_callback,
         stream_schedule_fix_delete_callback,
         stream_schedule_fix_game,
-        stream_schedule_fix_time,
         stream_schedule_mode_callback,
         stream_schedule_publish_callback,
         stream_schedule_tz,
@@ -150,7 +149,7 @@ async def _smoke_schedule(db) -> None:
     update, _query = _cb_update(_FREE_UID, "stream_sched:mode:week")
     ctx = _ctx(application)
     state = await stream_schedule_mode_callback(update, ctx)
-    assert state == st["STREAM_SCHEDULE_CONFIRM"]
+    assert state == st["STREAM_SCHEDULE_GAME"]
 
     application, bot = _app(db)
     update, _query = _cb_update(_FREE_UID, "ss:pub:1")
@@ -275,27 +274,40 @@ async def _smoke_schedule(db) -> None:
     assert state == st["STREAM_SCHEDULE_FIX_GAME"]
     bot.send_message.assert_awaited()
 
-    application, bot = _app(db)
-    update = _msg_update(_FREE_UID, "Just Chatting")
-    ctx = _ctx(application, {"stream_schedule_fix_date": date.today()})
-    state = await stream_schedule_fix_game(update, ctx)
-    assert state == st["STREAM_SCHEDULE_FIX_TIME"]
-    assert ctx.user_data["stream_schedule_fix_game"] == "Just Chatting"
+    assert parse_stream_schedule_slots("15:30 Disponia\n18:40 Just Chatting") == [
+        ("15:30", "Disponia"),
+        ("18:40", "Just Chatting"),
+    ]
+    assert parse_stream_schedule_slots("bad") is None
 
     application, bot = _app(db)
-    update = _msg_update(_FREE_UID)
-    ctx = _ctx(application)
-    state = await _prompt_stream_schedule_fix_time(update, ctx, "ru")
-    assert state == st["STREAM_SCHEDULE_FIX_TIME"]
-
-    application, bot = _app(db)
-    update = _msg_update(_FREE_UID, "19:30")
     day = date.today()
+    update = _msg_update(_FREE_UID, "15:30 Just Chatting\n18:40 Disponia")
     ctx = _ctx(
         application,
         {
             "stream_schedule_fix_date": day,
-            "stream_schedule_fix_game": "Game",
+            "stream_schedule_entries": [],
+            "stream_schedule_existing": [],
+        },
+    )
+    with patch(
+        "handlers.stream_schedule._show_day_slots",
+        new=AsyncMock(return_value=st["STREAM_SCHEDULE_FIX_SLOTS"]),
+    ):
+        state = await stream_schedule_fix_game(update, ctx)
+    assert state == st["STREAM_SCHEDULE_FIX_SLOTS"]
+    assert ctx.user_data["stream_schedule_entries"] == [
+        {"date": day, "time": "15:30", "game": "Just Chatting"},
+        {"date": day, "time": "18:40", "game": "Disponia"},
+    ]
+
+    application, bot = _app(db)
+    update = _msg_update(_FREE_UID, "19:30 Game")
+    ctx = _ctx(
+        application,
+        {
+            "stream_schedule_fix_date": day,
             "stream_schedule_edit_id": "seg1",
             "stream_schedule_updates": [],
             "stream_schedule_entries": [],
@@ -306,8 +318,28 @@ async def _smoke_schedule(db) -> None:
         "handlers.stream_schedule._show_day_slots",
         new=AsyncMock(return_value=st["STREAM_SCHEDULE_FIX_SLOTS"]),
     ):
-        state = await stream_schedule_fix_time(update, ctx)
+        state = await stream_schedule_fix_game(update, ctx)
     assert state == st["STREAM_SCHEDULE_FIX_SLOTS"]
+    assert ctx.user_data["stream_schedule_updates"] == [
+        {"id": "seg1", "date": day, "time": "19:30", "game": "Game"}
+    ]
+
+    application, bot = _app(db)
+    update = _msg_update(_FREE_UID, "19:30 Game\n20:00 Other")
+    ctx = _ctx(
+        application,
+        {
+            "stream_schedule_fix_date": day,
+            "stream_schedule_edit_id": "seg1",
+            "stream_schedule_updates": [],
+            "stream_schedule_entries": [],
+            "stream_schedule_existing": [{"id": "seg1", "time": "12:00"}],
+        },
+    )
+    state = await stream_schedule_fix_game(update, ctx)
+    assert state == st["STREAM_SCHEDULE_FIX_GAME"]
+    assert ctx.user_data.get("stream_schedule_edit_id") == "seg1"
+    assert ctx.user_data["stream_schedule_updates"] == []
 
     application, bot = _app(db)
     update, _query = _cb_update(_FREE_UID, "ss:dur:2")
@@ -419,7 +451,7 @@ async def _smoke_watch(db) -> None:
     from handlers.watch import (
         _ws,
         receive_watch_category_callback,
-        receive_watch_mature_callback,
+        receive_watch_filters_callback,
         receive_watch_nav_back,
         receive_watch_save_callback,
         receive_watch_tags_callback,
@@ -455,25 +487,40 @@ async def _smoke_watch(db) -> None:
         state = await receive_watch_category_callback(update, ctx)
     assert state == _ws()["WATCH_CATEGORIES"]
 
-    update, _query = _cb_update(_FREE_UID, "watch_tags:skip")
-    ctx = _ctx(application)
-    with patch(
-        "handlers.watch._go_watch_viewers_prompt",
-        new=AsyncMock(return_value=_ws()["WATCH_VIEWERS"]),
-    ):
-        state = await receive_watch_tags_callback(update, ctx)
-    assert state == _ws()["WATCH_VIEWERS"]
-    assert ctx.user_data["watch_tags"] == []
+    update, _query = _cb_update(_FREE_UID, "watch_filt:toggle:tags")
+    ctx = _ctx(application, {"watch_want_tags": False})
+    state = await receive_watch_filters_callback(update, ctx)
+    assert state == _ws()["WATCH_FILTERS"]
+    assert ctx.user_data["watch_want_tags"] is True
 
-    update, _query = _cb_update(_FREE_UID, "watch_mature:1")
-    ctx = _ctx(application)
+    update, _query = _cb_update(_FREE_UID, "watch_filt:next")
+    ctx = _ctx(
+        application,
+        {
+            "watch_want_tags": True,
+            "watch_want_viewers": False,
+            "watch_want_language": False,
+            "watch_want_mature": True,
+        },
+    )
+    with patch(
+        "handlers.watch._go_watch_tags_prompt",
+        new=AsyncMock(return_value=_ws()["WATCH_TAGS"]),
+    ):
+        state = await receive_watch_filters_callback(update, ctx)
+    assert state == _ws()["WATCH_TAGS"]
+    assert ctx.user_data["watch_exclude_mature"] is True
+    assert ctx.user_data["watch_detail_queue"] == []
+
+    update, _query = _cb_update(_FREE_UID, "watch_tags:skip")
+    ctx = _ctx(application, {"watch_detail_queue": []})
     with patch(
         "handlers.watch._go_watch_save_prompt",
         new=AsyncMock(return_value=_ws()["WATCH_SAVE"]),
     ):
-        state = await receive_watch_mature_callback(update, ctx)
+        state = await receive_watch_tags_callback(update, ctx)
     assert state == _ws()["WATCH_SAVE"]
-    assert ctx.user_data["watch_exclude_mature"] is True
+    assert ctx.user_data["watch_tags"] == []
 
     update, _query = _cb_update(_FREE_UID, "watch_save:0")
     ctx = _ctx(

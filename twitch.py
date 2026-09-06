@@ -419,10 +419,10 @@ class TwitchClient:
         resp.raise_for_status()
         return True
 
-    def get_schedule_segments(
+    def get_channel_schedule(
         self, broadcaster_id: str, *, first: int = 20, start_time: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Upcoming schedule segments; empty if no schedule."""
+    ) -> dict[str, Any]:
+        """Schedule payload: segments list + optional vacation window."""
         params: dict[str, str | int] = {
             "broadcaster_id": broadcaster_id,
             "first": max(1, min(25, first)),
@@ -436,11 +436,87 @@ class TwitchClient:
             timeout=15,
         )
         if resp.status_code == 404:
-            return []
+            return {"segments": [], "vacation": None}
         resp.raise_for_status()
         data = resp.json().get("data") or {}
-        segments = data.get("segments") or []
-        return [s for s in segments if isinstance(s, dict)]
+        segments = [s for s in (data.get("segments") or []) if isinstance(s, dict)]
+        vacation = data.get("vacation")
+        if not isinstance(vacation, dict):
+            vacation = None
+        return {"segments": segments, "vacation": vacation}
+
+    def get_schedule_segments(
+        self, broadcaster_id: str, *, first: int = 20, start_time: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Upcoming schedule segments; empty if no schedule."""
+        return list(
+            self.get_channel_schedule(
+                broadcaster_id, first=first, start_time=start_time
+            ).get("segments")
+            or []
+        )
+
+    @staticmethod
+    def vacation_active(
+        vacation: dict[str, Any] | None, *, now: datetime | None = None
+    ) -> bool:
+        """True when Twitch vacation window covers `now` (UTC)."""
+        if not vacation:
+            return False
+        start_raw = vacation.get("start_time")
+        end_raw = vacation.get("end_time")
+        if not start_raw or not end_raw:
+            return False
+        try:
+            start = TwitchClient._parse_schedule_time(str(start_raw))
+            end = TwitchClient._parse_schedule_time(str(end_raw))
+        except ValueError:
+            return False
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        return start <= current.astimezone(timezone.utc) <= end
+
+    def update_schedule_vacation(
+        self,
+        user_access_token: str,
+        broadcaster_id: str,
+        *,
+        enabled: bool,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        timezone: str | None = None,
+    ) -> None:
+        """Enable or disable Twitch schedule vacation mode."""
+        body: dict[str, Any] = {"is_vacation_enabled": bool(enabled)}
+        if enabled:
+            if not start_time or not end_time or not timezone:
+                raise ValueError("vacation requires start_time, end_time, timezone")
+            body["vacation_start_time"] = start_time
+            body["vacation_end_time"] = end_time
+            body["timezone"] = timezone
+        resp = self._session.patch(
+            "https://api.twitch.tv/helix/schedule/settings",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+                "Content-Type": "application/json",
+            },
+            params={"broadcaster_id": broadcaster_id},
+            json=body,
+            timeout=15,
+        )
+        if not resp.ok:
+            detail = resp.text
+            try:
+                err = resp.json()
+                detail = err.get("message") or err.get("error") or detail
+            except Exception:
+                pass
+            raise requests.HTTPError(
+                f"{resp.status_code} Client Error: {detail} for url: {resp.url}",
+                response=resp,
+            )
 
     def delete_schedule_segment(
         self,

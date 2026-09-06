@@ -27,10 +27,12 @@ from i18n import (
     stream_schedule_confirm_keyboard,
     stream_schedule_duration_keyboard,
     stream_schedule_mode_keyboard,
+    stream_schedule_vacation_auto_keyboard,
     stored_typo_fix_keyboard,
     template_typo_keyboard,
     subscriptions_menu,
     watch_cats_nav_keyboard,
+    watch_filters_keyboard,
     watch_lang_keyboard,
     watch_mature_keyboard,
     watch_save_keyboard,
@@ -187,6 +189,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("premium_gate_later", premium_gate_keyboard(loc, first_step=False)),
             ("stream_schedule_confirm", stream_schedule_confirm_keyboard(loc)),
             ("stream_schedule_mode", stream_schedule_mode_keyboard(loc)),
+            ("stream_schedule_vacation_auto", stream_schedule_vacation_auto_keyboard(loc)),
             ("stream_schedule_duration", stream_schedule_duration_keyboard(loc)),
             ("admin_type", admin_type_keyboard(loc)),
             ("admin_audience", admin_other_audience_keyboard(loc)),
@@ -197,6 +200,13 @@ def _check_inline_wizard_keyboards() -> None:
             ("template_typo", template_typo_keyboard(loc)),
             ("stored_typo_fix", stored_typo_fix_keyboard(loc)),
             ("watch_cats_nav", watch_cats_nav_keyboard(loc, has_cats=False)),
+            ("watch_filters", watch_filters_keyboard(
+                loc,
+                want_tags=False,
+                want_viewers=False,
+                want_language=False,
+                want_mature=False,
+            )),
             ("watch_viewers", watch_viewers_keyboard(loc)),
             ("watch_lang", watch_lang_keyboard(loc)),
             ("watch_mature", watch_mature_keyboard(loc)),
@@ -1343,6 +1353,57 @@ async def _scenario_schedule_deep(db) -> None:
     cap.assert_turn("stream_schedule_game")
 
 
+async def _scenario_schedule_vacation(db) -> None:
+    """§5 Режим отпуска — календарь начала и автовыход с Cancel."""
+    from handlers.stream_schedule import (
+        start_stream_schedule,
+        stream_schedule_mode_callback,
+        stream_schedule_vacation_auto_callback,
+        stream_schedule_vacation_callback,
+    )
+    from i18n import stream_schedule_vacation_auto_keyboard
+
+    async def _pulse(bot, chat_id, lang, *, back=True):
+        cap.note_pulse()
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("create_schedule", "ru"), cap)
+    ctx = _ctx(application)
+    db.set_schedule_utc_offset_minutes(_FREE_UID, 180)
+    with patch(
+        "handlers.stream_schedule.beta_features.is_enabled", return_value=True
+    ), patch("handlers.stream_schedule._pulse_wizard_keyboard", new=_pulse):
+        await start_stream_schedule(update, ctx)
+        cap.assert_turn("stream_schedule_mode")
+        update, _query = _cb_update(_FREE_UID, "stream_sched:mode:vacation", cap)
+        cap.wrap(bot)
+        await stream_schedule_mode_callback(update, ctx)
+        cap.assert_turn("stream_schedule_vacation_start")
+        update, _query = _cb_update(_FREE_UID, "vac:month:2026-09", cap)
+        await stream_schedule_vacation_callback(update, ctx)
+        cap.assert_turn("stream_schedule_vacation_days")
+        update, _query = _cb_update(_FREE_UID, "vac:date:0", cap)
+        await stream_schedule_vacation_callback(update, ctx)
+        cap.assert_turn("stream_schedule_vacation_end")
+        update, _query = _cb_update(_FREE_UID, "vac:date:1", cap)
+        await stream_schedule_vacation_callback(update, ctx)
+        cap.assert_turn("stream_schedule_vacation_auto")
+
+    assert markup_has_escape_hatch(stream_schedule_vacation_auto_keyboard("ru"))
+    update, _query = _cb_update(_FREE_UID, "stream_sched:vac_auto:0", cap)
+    # Premimum gate or auth path ends conversation — escape already on keyboard.
+    with patch(
+        "handlers.stream_schedule.prem.has_feature",
+        new=AsyncMock(return_value=False),
+    ), patch("premium_handlers.send_premium_screen", new=AsyncMock()):
+        from telegram.ext import ConversationHandler
+
+        state = await stream_schedule_vacation_auto_callback(update, ctx)
+    assert state == ConversationHandler.END
+
+
 async def _scenario_settings_extended(db) -> None:
     from bot import open_premium_from_settings
     from handlers.settings import (
@@ -1427,6 +1488,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_twitch_link_wizard_offer(db)
         await _scenario_subscriptions_list_pages(db)
         await _scenario_schedule_deep(db)
+        await _scenario_schedule_vacation(db)
         await _scenario_schedule_publish_chain(db)
         await _scenario_settings_extended(db)
 

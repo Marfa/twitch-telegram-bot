@@ -474,6 +474,14 @@ def check_core() -> None:
     assert TwitchClient.is_overlapping_schedule(
         Exception("400 Client Error: Segment cannot create overlapping segment for url: x")
     )
+    from datetime import datetime as _dt, timezone as _tz
+
+    _now = _dt(2026, 9, 10, 12, 0, tzinfo=_tz.utc)
+    assert TwitchClient.vacation_active(
+        {"start_time": "2026-09-01T00:00:00Z", "end_time": "2026-09-30T23:59:59Z"},
+        now=_now,
+    )
+    assert not TwitchClient.vacation_active(None, now=_now)
     overlap_ids = TwitchClient.overlapping_schedule_segment_ids(
         [
             {
@@ -506,9 +514,14 @@ def check_core() -> None:
     assert "New York" in tr("stream_schedule_tz_prompt", "en")
     assert tr("stream_schedule_mode_tz_btn", "ru")
     assert tr("stream_schedule_mode_tz_btn", "en")
+    assert tr("stream_schedule_mode_vacation_btn", "ru")
+    assert tr("stream_schedule_mode_vacation_btn", "en")
+    assert tr("stream_schedule_vacation_ok", "ru")
+    assert "{date}" in tr("stream_schedule_vacation_ok_auto", "ru")
+    assert "15:30" in tr("stream_schedule_slots_prompt", "ru", date="пн")
+    assert tr("stream_schedule_slots_invalid", "en")
     assert tr("stream_schedule_duration_prompt", "ru")
     assert tr("stream_schedule_duration_prompt_keep", "ru")
-    assert tr("stream_schedule_more_prompt", "ru")
     assert tr("stream_schedule_add_slot", "en")
     assert tr("stream_schedule_delete_slot", "en")
     assert tr("stream_schedule_deleted_slots", "en", count=2)
@@ -974,6 +987,9 @@ def check_core() -> None:
         assert tr("watch_lucky_searching", loc)
         assert tr("watch_lucky_empty", loc)
         assert tr("watch_tags_prompt", loc)
+        assert tr("watch_filt_prompt", loc)
+        assert tr("watch_filt_tags", loc)
+        assert tr("watch_filt_next", loc)
         assert tr("watch_pick_prompt", loc)
         assert tr("watch_pick_delete_btn", loc)
         assert tr("watch_delete_pick", loc)

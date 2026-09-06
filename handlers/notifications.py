@@ -569,10 +569,13 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     now = datetime.now(timezone.utc)
     for uid in user_ids:
         try:
-            segments = await asyncio.to_thread(twitch.get_schedule_segments, uid)
+            schedule = await asyncio.to_thread(twitch.get_channel_schedule, uid)
         except Exception:
             logger.exception("Twitch schedule poll failed for %s", uid)
             continue
+        if TwitchClient.vacation_active(schedule.get("vacation"), now=now):
+            continue
+        segments = schedule.get("segments") or []
         for sub in db.get_enabled_by_twitch_user_id(uid):
             remind_before = int(sub.schedule_reminder_minutes or 0)
             if remind_before <= 0:

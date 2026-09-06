@@ -18,18 +18,21 @@ from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
     all_wizard_nav_buttons,
+    format_schedule_month_label,
     format_stream_schedule_date,
     format_stream_schedule_prompt_date,
     format_stream_schedule_result,
     is_menu_button,
+    schedule_calendar_days_keyboard,
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
     stream_schedule_duration_keyboard,
     stream_schedule_fix_day_keyboard,
     stream_schedule_mode_keyboard,
-    stream_schedule_more_keyboard,
     stream_schedule_occupied_keyboard,
     stream_schedule_publish_keyboard,
+    stream_schedule_vacation_auto_keyboard,
+    stream_schedule_vacation_month_keyboard,
     t,
 )
 from twitch import TwitchClient
@@ -42,6 +45,7 @@ def _log_schedule_clear_failed(exc_type: str) -> None:
 
 
 _STREAM_TIME_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})$")
+_STREAM_SLOT_LINE_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})\s+(.+)$")
 _UTC_OFFSET_PATTERN = re.compile(
     r"^\s*(?:UTC|GMT)?\s*([+-])?\s*(\d{1,2})(?:\s*:\s*(\d{2}))?\s*$",
     re.IGNORECASE,
@@ -119,6 +123,8 @@ def _sched_states():
         STREAM_SCHEDULE_PUBLISH,
         STREAM_SCHEDULE_TIME,
         STREAM_SCHEDULE_TZ,
+        STREAM_SCHEDULE_VACATION,
+        STREAM_SCHEDULE_VACATION_AUTO,
     )
 
     return {
@@ -134,6 +140,8 @@ def _sched_states():
         "STREAM_SCHEDULE_PUBLISH": STREAM_SCHEDULE_PUBLISH,
         "STREAM_SCHEDULE_TIME": STREAM_SCHEDULE_TIME,
         "STREAM_SCHEDULE_TZ": STREAM_SCHEDULE_TZ,
+        "STREAM_SCHEDULE_VACATION": STREAM_SCHEDULE_VACATION,
+        "STREAM_SCHEDULE_VACATION_AUTO": STREAM_SCHEDULE_VACATION_AUTO,
     }
 
 
@@ -157,6 +165,25 @@ def _parse_stream_time(raw: str) -> str | None:
     if hour > 23 or minute > 59:
         return None
     return f"{hour:02d}:{minute:02d}"
+
+
+def parse_stream_schedule_slots(raw: str) -> list[tuple[str, str]] | None:
+    """Parse lines like '15:30 Disponia' → [(time, title), ...]. None if invalid."""
+    lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    out: list[tuple[str, str]] = []
+    for line in lines:
+        match = _STREAM_SLOT_LINE_PATTERN.match(line)
+        if not match:
+            return None
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        title = match.group(3).strip()
+        if hour > 23 or minute > 59 or not title:
+            return None
+        out.append((f"{hour:02d}:{minute:02d}", title))
+    return out
 
 
 def _stream_schedule_show_finish(context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -331,24 +358,13 @@ async def _prompt_stream_schedule_game(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
     STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
 
     dates: list[date] = context.user_data["stream_schedule_dates"]
     index = int(context.user_data["stream_schedule_index"])
     current_date = dates[index]
-    context.user_data.pop("stream_schedule_game", None)
     message = t(
-        "stream_schedule_game_prompt",
+        "stream_schedule_slots_prompt",
         lang,
         date=format_stream_schedule_prompt_date(current_date, lang),
     )
@@ -368,67 +384,6 @@ async def _prompt_stream_schedule_game(
         context.bot, reply_chat_id(update), lang, back=False
     )
     return STREAM_SCHEDULE_GAME
-
-
-async def _prompt_add_another_slot(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
-
-    markup = stream_schedule_more_keyboard(lang)
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            t("stream_schedule_more_prompt", lang),
-            reply_markup=markup,
-        )
-    else:
-        await update.effective_message.reply_text(
-            t("stream_schedule_more_prompt", lang),
-            reply_markup=markup,
-        )
-    return STREAM_SCHEDULE_MORE
-
-
-async def _prompt_stream_schedule_time(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
-
-    keyboard = stream_schedule_day_keyboard(
-        lang,
-        show_finish=False,
-        show_skip=False,
-    )
-    await update.effective_message.reply_text(
-        t("stream_schedule_time_prompt", lang),
-        reply_markup=keyboard,
-    )
-    await _pulse_wizard_keyboard(
-        context.bot, reply_chat_id(update), lang, back=False
-    )
-    return STREAM_SCHEDULE_TIME
 
 
 async def _prompt_publish_on_twitch(
@@ -689,6 +644,8 @@ async def stream_schedule_tz(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 duration_min=_SCHEDULE_DEFAULT_DURATION_MIN,
             )
         return await _prompt_duration_after_publish_yes(update, context, lang)
+    if resume == "vacation":
+        return await _prompt_vacation_start(update, context, lang)
     if resume == "confirm":
         await update.effective_message.reply_text(
             t("stream_schedule_confirm", lang),
@@ -707,7 +664,6 @@ async def stream_schedule_mode_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
     STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
 
     query = update.callback_query
@@ -715,15 +671,15 @@ async def stream_schedule_mode_callback(
     lang = _user_lang(context, query.from_user.id)
     mode = (query.data or "").split(":")[-1]
     if mode == "week":
-        await query.edit_message_text(
-            t("stream_schedule_intro", lang),
-            parse_mode=ParseMode.HTML,
-            reply_markup=stream_schedule_confirm_keyboard(lang),
-        )
-        return STREAM_SCHEDULE_CONFIRM
+        return await _begin_week_schedule(update, context, lang)
+    if mode == "vacation":
+        db: Database = context.application.bot_data["db"]
+        if db.get_schedule_utc_offset_minutes(query.from_user.id) is None:
+            return await _prompt_schedule_tz(update, context, lang, resume="vacation")
+        return await _prompt_vacation_start(update, context, lang)
 
     # Day fix mode — remaining days of the current week (Mon–Sun), including today.
-    db: Database = context.application.bot_data["db"]
+    db = context.application.bot_data["db"]
     local_tz = _user_schedule_tz(db, query.from_user.id)
     today = datetime.now(local_tz).date()
     monday = today - timedelta(days=today.weekday())
@@ -790,22 +746,17 @@ async def _prompt_stream_schedule_fix_game(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
     STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
 
     day_date: date = context.user_data["stream_schedule_fix_date"]
     context.user_data.pop("stream_schedule_fix_game", None)
+    prompt_key = (
+        "stream_schedule_slots_edit_prompt"
+        if context.user_data.get("stream_schedule_edit_id")
+        else "stream_schedule_slots_prompt"
+    )
     text = t(
-        "stream_schedule_fix_game_prompt",
+        prompt_key,
         lang,
         date=format_stream_schedule_prompt_date(day_date, lang),
     )
@@ -953,23 +904,6 @@ async def stream_schedule_noop_callback(
     return STREAM_SCHEDULE_FIX_SLOTS
 
 
-async def stream_schedule_more_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    more = (query.data or "").split(":")[-1] == "1"
-    if more:
-        if context.user_data.get("stream_schedule_fix_date"):
-            context.user_data.pop("stream_schedule_edit_id", None)
-            return await _prompt_stream_schedule_fix_game(update, context, lang)
-        return await _prompt_stream_schedule_game(update, context, lang)
-    if context.user_data.get("stream_schedule_fix_date"):
-        return await _finish_stream_schedule(update, context, lang)
-    return await _advance_stream_schedule_day(update, context, lang)
-
-
 async def stream_schedule_confirm_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -997,155 +931,73 @@ async def stream_schedule_confirm_callback(
 
 async def stream_schedule_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
     STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
 
     lang = _user_lang(context, update.effective_user.id)
     text = (update.effective_message.text or "").strip()
     if is_menu_button(text) or text in all_wizard_nav_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return STREAM_SCHEDULE_GAME
-    if not text:
-        await update.effective_message.reply_text(t("stream_schedule_game_empty", lang))
+    slots = parse_stream_schedule_slots(text)
+    if not slots:
+        await update.effective_message.reply_text(
+            t("stream_schedule_slots_invalid", lang)
+        )
         return STREAM_SCHEDULE_GAME
-    context.user_data["stream_schedule_game"] = text
-    return await _prompt_stream_schedule_time(update, context, lang)
-
-
-async def stream_schedule_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
-
-    lang = _user_lang(context, update.effective_user.id)
-    text = (update.effective_message.text or "").strip()
-    if is_menu_button(text) or text in all_wizard_nav_buttons():
-        await update.effective_message.reply_text(t("finish_setup_first", lang))
-        return STREAM_SCHEDULE_TIME
-    parsed_time = _parse_stream_time(text)
-    if not parsed_time:
-        await update.effective_message.reply_text(t("stream_schedule_time_invalid", lang))
-        return STREAM_SCHEDULE_TIME
     dates: list[date] = context.user_data["stream_schedule_dates"]
     index = int(context.user_data["stream_schedule_index"])
+    day_date = dates[index]
     entries: list[dict] = context.user_data.setdefault("stream_schedule_entries", [])
-    entries.append(
-        {
-            "date": dates[index],
-            "time": parsed_time,
-            "game": context.user_data.pop("stream_schedule_game", ""),
-        }
-    )
-    return await _prompt_add_another_slot(update, context, lang)
+    for parsed_time, game_text in slots:
+        entries.append({"date": day_date, "time": parsed_time, "game": game_text})
+    return await _advance_stream_schedule_day(update, context, lang)
 
 
 async def stream_schedule_fix_game(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
     STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
 
     lang = _user_lang(context, update.effective_user.id)
     text = (update.effective_message.text or "").strip()
     if is_menu_button(text) or text in all_wizard_nav_buttons():
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return STREAM_SCHEDULE_FIX_GAME
-    if not text:
-        await update.effective_message.reply_text(t("stream_schedule_game_empty", lang))
-        return STREAM_SCHEDULE_FIX_GAME
-    context.user_data["stream_schedule_fix_game"] = text
-    return await _prompt_stream_schedule_fix_time(update, context, lang)
-
-
-async def _prompt_stream_schedule_fix_time(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
-
-    await update.effective_message.reply_text(
-        t("stream_schedule_time_prompt", lang),
-        reply_markup=_wizard(lang, back=False),
-    )
-    return STREAM_SCHEDULE_FIX_TIME
-
-
-async def stream_schedule_fix_time(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    _st = _sched_states()
-    STREAM_SCHEDULE_CONFIRM = _st["STREAM_SCHEDULE_CONFIRM"]
-    STREAM_SCHEDULE_DURATION = _st["STREAM_SCHEDULE_DURATION"]
-    STREAM_SCHEDULE_FIX_DAY = _st["STREAM_SCHEDULE_FIX_DAY"]
-    STREAM_SCHEDULE_FIX_GAME = _st["STREAM_SCHEDULE_FIX_GAME"]
-    STREAM_SCHEDULE_FIX_SLOTS = _st["STREAM_SCHEDULE_FIX_SLOTS"]
-    STREAM_SCHEDULE_FIX_TIME = _st["STREAM_SCHEDULE_FIX_TIME"]
-    STREAM_SCHEDULE_GAME = _st["STREAM_SCHEDULE_GAME"]
-    STREAM_SCHEDULE_MODE = _st["STREAM_SCHEDULE_MODE"]
-    STREAM_SCHEDULE_MORE = _st["STREAM_SCHEDULE_MORE"]
-    STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
-    STREAM_SCHEDULE_TIME = _st["STREAM_SCHEDULE_TIME"]
-
-    lang = _user_lang(context, update.effective_user.id)
-    text = (update.effective_message.text or "").strip()
-    if is_menu_button(text) or text in all_wizard_nav_buttons():
-        await update.effective_message.reply_text(t("finish_setup_first", lang))
-        return STREAM_SCHEDULE_FIX_TIME
-    parsed_time = _parse_stream_time(text)
-    if not parsed_time:
+    edit_id = context.user_data.get("stream_schedule_edit_id")
+    if edit_id and "\n" in text:
         await update.effective_message.reply_text(
-            t("stream_schedule_time_invalid", lang)
+            t("stream_schedule_slots_edit_one_line", lang)
         )
-        return STREAM_SCHEDULE_FIX_TIME
+        return STREAM_SCHEDULE_FIX_GAME
+    slots = parse_stream_schedule_slots(text)
+    if not slots:
+        await update.effective_message.reply_text(
+            t(
+                "stream_schedule_slots_edit_invalid"
+                if edit_id
+                else "stream_schedule_slots_invalid",
+                lang,
+            )
+        )
+        return STREAM_SCHEDULE_FIX_GAME
+    if edit_id and len(slots) != 1:
+        await update.effective_message.reply_text(
+            t("stream_schedule_slots_edit_one_line", lang)
+        )
+        return STREAM_SCHEDULE_FIX_GAME
     day_date: date = context.user_data["stream_schedule_fix_date"]
-    game_text = context.user_data.pop("stream_schedule_fix_game", "")
-    edit_id = context.user_data.pop("stream_schedule_edit_id", None)
+    context.user_data.pop("stream_schedule_edit_id", None)
+    first_time, first_game = slots[0]
+    rest = slots[1:]
     if edit_id:
         updates: list[dict] = context.user_data.setdefault("stream_schedule_updates", [])
         found = False
         for upd in updates:
             if upd.get("id") == edit_id:
                 upd["date"] = day_date
-                upd["time"] = parsed_time
-                upd["game"] = game_text
+                upd["time"] = first_time
+                upd["game"] = first_game
                 found = True
                 break
         if not found:
@@ -1153,14 +1005,16 @@ async def stream_schedule_fix_time(
                 {
                     "id": edit_id,
                     "date": day_date,
-                    "time": parsed_time,
-                    "game": game_text,
+                    "time": first_time,
+                    "game": first_game,
                 }
             )
         return await _show_day_slots(update, context, lang)
     entries: list[dict] = context.user_data.setdefault("stream_schedule_entries", [])
-    entries.append({"date": day_date, "time": parsed_time, "game": game_text})
-    return await _prompt_add_another_slot(update, context, lang)
+    entries.append({"date": day_date, "time": first_time, "game": first_game})
+    for parsed_time, game_text in rest:
+        entries.append({"date": day_date, "time": parsed_time, "game": game_text})
+    return await _show_day_slots(update, context, lang)
 
 
 async def stream_schedule_skip_callback(
@@ -1184,6 +1038,230 @@ async def stream_schedule_finish_callback(
 
 def _pending_schedule_publishes(application: Application) -> dict[int, dict]:
     return application.bot_data.setdefault("pending_schedule_publishes", {})
+
+
+def _pending_schedule_vacations(application: Application) -> dict[int, dict]:
+    return application.bot_data.setdefault("pending_schedule_vacations", {})
+
+
+def _vacation_cal_date(offset: int) -> date:
+    return datetime.now(SCHEDULE_TZ).date() + timedelta(days=int(offset))
+
+
+def _vacation_bounds_utc(
+    start_day: date, end_day: date, offset_minutes: int
+) -> tuple[str, str, str]:
+    local_tz = offset_minutes_to_tzinfo(offset_minutes)
+    start_local = datetime(
+        start_day.year, start_day.month, start_day.day, 0, 0, 0, tzinfo=local_tz
+    )
+    end_local = datetime(
+        end_day.year, end_day.month, end_day.day, 23, 59, 59, tzinfo=local_tz
+    )
+    start_iso = start_local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = end_local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return start_iso, end_iso, offset_minutes_to_iana(offset_minutes)
+
+
+async def _prompt_vacation_start(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_VACATION = _st["STREAM_SCHEDULE_VACATION"]
+    context.user_data["vac_phase"] = "start"
+    context.user_data["vac_schedule"] = {"date_offset": 0}
+    text = t("stream_schedule_vacation_start_prompt", lang)
+    markup = stream_schedule_vacation_month_keyboard(lang)
+    chat_id = reply_chat_id(update)
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text, reply_markup=markup)
+        except BadRequest:
+            await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=False)
+    return STREAM_SCHEDULE_VACATION
+
+
+async def _prompt_vacation_end(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_VACATION = _st["STREAM_SCHEDULE_VACATION"]
+    context.user_data["vac_phase"] = "end"
+    start_offset = int(context.user_data.get("vac_start_offset", 0))
+    context.user_data["vac_schedule"] = {"date_offset": start_offset}
+    text = t("stream_schedule_vacation_end_prompt", lang)
+    markup = stream_schedule_vacation_month_keyboard(lang)
+    chat_id = reply_chat_id(update)
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text, reply_markup=markup)
+        except BadRequest:
+            await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    return STREAM_SCHEDULE_VACATION
+
+
+async def _prompt_vacation_auto(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_VACATION_AUTO = _st["STREAM_SCHEDULE_VACATION_AUTO"]
+    text = t("stream_schedule_vacation_auto_prompt", lang)
+    markup = stream_schedule_vacation_auto_keyboard(lang)
+    chat_id = reply_chat_id(update)
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text, reply_markup=markup)
+        except BadRequest:
+            await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    return STREAM_SCHEDULE_VACATION_AUTO
+
+
+async def _begin_week_schedule(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    _init_stream_schedule(context, local_tz=_user_schedule_tz(db, user_id))
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(t("stream_schedule_intro", lang))
+        except BadRequest:
+            pass
+    return await _prompt_stream_schedule_game(update, context, lang)
+
+
+async def stream_schedule_vacation_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    _st = _sched_states()
+    STREAM_SCHEDULE_VACATION = _st["STREAM_SCHEDULE_VACATION"]
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = query.data or ""
+    schedule = context.user_data.setdefault("vac_schedule", {"date_offset": 0})
+    phase = context.user_data.get("vac_phase", "start")
+    prompt_key = (
+        "stream_schedule_vacation_end_prompt"
+        if phase == "end"
+        else "stream_schedule_vacation_start_prompt"
+    )
+
+    if data == "vac:calendar" or data == "vac:time":
+        await query.edit_message_text(
+            t(prompt_key, lang),
+            reply_markup=stream_schedule_vacation_month_keyboard(lang),
+        )
+        return STREAM_SCHEDULE_VACATION
+    if data == "vac:noop":
+        return STREAM_SCHEDULE_VACATION
+    if data.startswith("vac:month:"):
+        raw = data.split(":", 2)[2]
+        try:
+            year_s, month_s = raw.split("-", 1)
+            year, month = int(year_s), int(month_s)
+        except ValueError:
+            return STREAM_SCHEDULE_VACATION
+        if not (1 <= month <= 12):
+            return STREAM_SCHEDULE_VACATION
+        month_label = format_schedule_month_label(year, month, lang)
+        await query.edit_message_text(
+            t("schedule_pick_day", lang, month=month_label),
+            reply_markup=schedule_calendar_days_keyboard(
+                lang, year, month, schedule, prefix="vac"
+            ),
+        )
+        return STREAM_SCHEDULE_VACATION
+    if data.startswith("vac:date:"):
+        try:
+            offset = int(data.split(":")[2])
+        except ValueError:
+            return STREAM_SCHEDULE_VACATION
+        day = _vacation_cal_date(offset)
+        if phase == "start":
+            context.user_data["vac_start_offset"] = offset
+            context.user_data["vac_start_date"] = day
+            return await _prompt_vacation_end(update, context, lang)
+        start_day: date = context.user_data.get("vac_start_date") or day
+        if day < start_day:
+            await query.edit_message_text(
+                t("stream_schedule_vacation_end_before_start", lang),
+                reply_markup=stream_schedule_vacation_month_keyboard(lang),
+            )
+            return STREAM_SCHEDULE_VACATION
+        context.user_data["vac_end_offset"] = offset
+        context.user_data["vac_end_date"] = day
+        return await _prompt_vacation_auto(update, context, lang)
+    return STREAM_SCHEDULE_VACATION
+
+
+async def stream_schedule_vacation_auto_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    auto_exit = (query.data or "").split(":")[-1] == "1"
+    start_day: date | None = context.user_data.get("vac_start_date")
+    end_day: date | None = context.user_data.get("vac_end_date")
+    if not isinstance(start_day, date) or not isinstance(end_day, date):
+        context.user_data.clear()
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("stream_schedule_vacation_fail", lang, error="no dates"),
+            reply_markup=_menu(lang, user_id),
+        )
+        return ConversationHandler.END
+
+    db: Database = context.application.bot_data["db"]
+    if not await prem.has_feature(context.bot, db, user_id, "schedule_publish"):
+        from premium_handlers import send_premium_screen
+
+        context.user_data.clear()
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(
+            context.bot,
+            user_id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="schedule_vacation",
+            feature="schedule_publish",
+        )
+        return ConversationHandler.END
+
+    offset_minutes = db.get_schedule_utc_offset_minutes(user_id)
+    if offset_minutes is None:
+        offset_minutes = int(SCHEDULE_TZ.utcoffset(None).total_seconds() // 60)
+    start_iso, end_iso, tz_name = _vacation_bounds_utc(
+        start_day, end_day, int(offset_minutes)
+    )
+    _pending_schedule_vacations(context.application)[user_id] = {
+        "start_time": start_iso,
+        "end_time": end_iso,
+        "timezone": tz_name,
+        "auto_exit": auto_exit,
+        "end_date": end_day.isoformat(),
+    }
+    context.user_data.clear()
+    return await _start_schedule_publish_auth(update, context, user_id, lang)
 
 
 async def stream_schedule_publish_callback(
@@ -1363,6 +1441,12 @@ async def _complete_schedule_publish(
 
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    vacation = _pending_schedule_vacations(application).pop(owner_id, None)
+    if vacation is not None:
+        await _complete_schedule_vacation(
+            application, owner_id, error, token_info, vacation
+        )
+        return
     if error:
         await application.bot.send_message(
             owner_id,
@@ -1535,6 +1619,160 @@ async def _complete_schedule_publish(
         }
     markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
     await application.bot.send_message(owner_id, text, reply_markup=markup)
+
+
+async def _complete_schedule_vacation(
+    application: Application,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+    vacation: dict,
+) -> None:
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    if error or not token_info:
+        await application.bot.send_message(
+            owner_id,
+            t(
+                "stream_schedule_vacation_fail",
+                lang,
+                error=error or "no token",
+            ),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+
+    access = token_info.get("access_token", "")
+    twitch_user_id = token_info.get("twitch_user_id", "")
+    refresh = token_info.get("refresh_token", "")
+    twitch: TwitchClient = application.bot_data["twitch"]
+    try:
+        await asyncio.to_thread(
+            twitch.update_schedule_vacation,
+            access,
+            twitch_user_id,
+            enabled=True,
+            start_time=str(vacation.get("start_time") or ""),
+            end_time=str(vacation.get("end_time") or ""),
+            timezone=str(vacation.get("timezone") or "Etc/UTC"),
+        )
+    except Exception as exc:
+        logger.exception("Failed to enable Twitch vacation for user=%s", owner_id)
+        await application.bot.send_message(
+            owner_id,
+            t("stream_schedule_vacation_fail", lang, error=str(exc)),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+
+    auto_exit = bool(vacation.get("auto_exit"))
+    end_iso = str(vacation.get("end_time") or "")
+    if auto_exit and end_iso:
+        db.set_vacation_auto_exit_at(owner_id, end_iso)
+    else:
+        db.set_vacation_auto_exit_at(owner_id, None)
+
+    if auto_exit and refresh and twitch_user_id:
+        existing = db.get_twitch_sync(owner_id)
+        if existing and existing.period_days > 0:
+            db.update_twitch_sync_tokens(
+                owner_id,
+                refresh,
+                last_sync_at=existing.last_sync_at
+                or datetime.now(timezone.utc).isoformat(),
+                next_sync_at=existing.next_sync_at,
+            )
+        else:
+            db.upsert_twitch_sync(
+                owner_id=owner_id,
+                twitch_user_id=twitch_user_id,
+                refresh_token=refresh,
+                period_days=int(existing.period_days) if existing else 0,
+                next_sync_at=(
+                    existing.next_sync_at
+                    if existing
+                    else datetime.now(timezone.utc).isoformat()
+                ),
+                last_sync_at=existing.last_sync_at if existing else None,
+            )
+        refresh = ""
+
+    if auto_exit:
+        end_day_raw = str(vacation.get("end_date") or "")
+        try:
+            end_day = date.fromisoformat(end_day_raw)
+            date_label = format_stream_schedule_date(end_day, lang)
+        except ValueError:
+            date_label = end_day_raw or end_iso
+        text = t("stream_schedule_vacation_ok_auto", lang, date=date_label)
+    else:
+        text = t("stream_schedule_vacation_ok", lang)
+
+    buttons = []
+    if refresh:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_save_token", lang),
+                    callback_data=f"sched_save_token:{owner_id}",
+                )
+            ]
+        )
+        application.bot_data.setdefault("pending_schedule_tokens", {})[owner_id] = {
+            "refresh_token": refresh,
+            "twitch_user_id": twitch_user_id,
+        }
+    markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
+    await application.bot.send_message(owner_id, text, reply_markup=markup)
+
+
+async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Disable Twitch vacation when stored auto-exit time is due."""
+    from twitch import SCHEDULE_SCOPE
+
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for owner_id in db.get_due_vacation_auto_exits(now_iso):
+        sync = db.get_twitch_sync(owner_id)
+        lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+        if not sync or not sync.refresh_token:
+            db.set_vacation_auto_exit_at(owner_id, None)
+            continue
+        try:
+            token_data = await asyncio.to_thread(
+                twitch.refresh_user_token, sync.refresh_token
+            )
+            access = token_data.get("access_token") or ""
+            refresh = token_data.get("refresh_token") or sync.refresh_token
+            if not access or not await asyncio.to_thread(
+                twitch.token_has_scope, access, SCHEDULE_SCOPE
+            ):
+                db.set_vacation_auto_exit_at(owner_id, None)
+                continue
+            if refresh != sync.refresh_token:
+                db.update_twitch_sync_tokens(
+                    owner_id,
+                    refresh,
+                    last_sync_at=sync.last_sync_at
+                    or datetime.now(timezone.utc).isoformat(),
+                    next_sync_at=sync.next_sync_at,
+                )
+            await asyncio.to_thread(
+                twitch.update_schedule_vacation,
+                access,
+                sync.twitch_user_id,
+                enabled=False,
+            )
+            db.set_vacation_auto_exit_at(owner_id, None)
+            await context.bot.send_message(
+                owner_id,
+                t("stream_schedule_vacation_exit_ok", lang),
+                reply_markup=_menu(lang, owner_id),
+            )
+        except Exception:
+            logger.exception("Vacation auto-exit failed for user=%s", owner_id)
+            db.set_vacation_auto_exit_at(owner_id, None)
 
 
 async def schedule_save_token_callback(

@@ -29,6 +29,7 @@ from i18n import (
     watch_cats_nav_keyboard,
     watch_cats_pick_keyboard,
     watch_delete_pick_keyboard,
+    watch_filters_keyboard,
     watch_lang_keyboard,
     watch_mature_keyboard,
     watch_pick_keyboard,
@@ -51,6 +52,7 @@ def _ws() -> dict[str, int]:
     from bot import (
         WATCH_CATEGORIES,
         WATCH_DELETE,
+        WATCH_FILTERS,
         WATCH_LANGUAGE,
         WATCH_MATURE,
         WATCH_PICK,
@@ -62,6 +64,7 @@ def _ws() -> dict[str, int]:
     return {
         "WATCH_CATEGORIES": WATCH_CATEGORIES,
         "WATCH_DELETE": WATCH_DELETE,
+        "WATCH_FILTERS": WATCH_FILTERS,
         "WATCH_LANGUAGE": WATCH_LANGUAGE,
         "WATCH_MATURE": WATCH_MATURE,
         "WATCH_PICK": WATCH_PICK,
@@ -785,6 +788,63 @@ async def _go_watch_categories_prompt(
     return _ws()["WATCH_CATEGORIES"]
 
 
+async def _go_watch_filters_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    context.user_data.setdefault("watch_want_tags", False)
+    context.user_data.setdefault("watch_want_viewers", False)
+    context.user_data.setdefault("watch_want_language", False)
+    context.user_data.setdefault("watch_want_mature", False)
+    text = t("watch_filt_prompt", lang)
+    markup = watch_filters_keyboard(
+        lang,
+        want_tags=bool(context.user_data.get("watch_want_tags")),
+        want_viewers=bool(context.user_data.get("watch_want_viewers")),
+        want_language=bool(context.user_data.get("watch_want_language")),
+        want_mature=bool(context.user_data.get("watch_want_mature")),
+    )
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text, reply_markup=markup)
+        except BadRequest:
+            await context.bot.send_message(
+                query.message.chat_id, text, reply_markup=markup
+            )
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    _set_wizard_back(context, _ws()["WATCH_FILTERS"])
+    return _ws()["WATCH_FILTERS"]
+
+
+def _watch_detail_queue(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
+    q: list[str] = []
+    if context.user_data.get("watch_want_tags"):
+        q.append("tags")
+    if context.user_data.get("watch_want_viewers"):
+        q.append("viewers")
+    if context.user_data.get("watch_want_language"):
+        q.append("language")
+    return q
+
+
+async def _go_watch_next_detail(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    queue = list(context.user_data.get("watch_detail_queue") or [])
+    if not queue:
+        return await _go_watch_save_prompt(update, context, lang)
+    step = queue.pop(0)
+    context.user_data["watch_detail_queue"] = queue
+    if step == "tags":
+        return await _go_watch_tags_prompt(update, context, lang)
+    if step == "viewers":
+        return await _go_watch_viewers_prompt(update, context, lang)
+    if step == "language":
+        return await _go_watch_language_prompt(update, context, lang)
+    return await _go_watch_save_prompt(update, context, lang)
+
+
 async def _go_watch_tags_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
@@ -1362,7 +1422,7 @@ async def receive_watch_category_callback(
             await query.edit_message_reply_markup(None)
         except BadRequest:
             pass
-        return await _go_watch_tags_prompt(update, context, lang)
+        return await _go_watch_filters_prompt(update, context, lang)
     if data == "watch_cat:clear":
         context.user_data["watch_categories"] = []
         await query.edit_message_text(
@@ -1402,7 +1462,7 @@ async def receive_watch_viewers_text(
     lo, hi = parsed
     context.user_data["watch_min_viewers"] = lo
     context.user_data["watch_max_viewers"] = hi
-    return await _go_watch_language_prompt(update, context, lang)
+    return await _go_watch_next_detail(update, context, lang)
 
 
 async def receive_watch_viewers_callback(
@@ -1418,7 +1478,7 @@ async def receive_watch_viewers_callback(
             await query.edit_message_reply_markup(None)
         except BadRequest:
             pass
-        return await _go_watch_language_prompt(update, context, lang)
+        return await _go_watch_next_detail(update, context, lang)
     return _ws()["WATCH_VIEWERS"]
 
 
@@ -1436,7 +1496,7 @@ async def receive_watch_language_callback(
             await query.edit_message_reply_markup(None)
         except BadRequest:
             pass
-        return await _go_watch_mature_prompt(update, context, lang)
+        return await _go_watch_next_detail(update, context, lang)
     if data in ("watch_lang:ru", "watch_lang:en"):
         context.user_data["watch_language"] = data.rsplit(":", 1)[1]
         context.user_data.pop("watch_lang_await_other", None)
@@ -1444,7 +1504,7 @@ async def receive_watch_language_callback(
             await query.edit_message_reply_markup(None)
         except BadRequest:
             pass
-        return await _go_watch_mature_prompt(update, context, lang)
+        return await _go_watch_next_detail(update, context, lang)
     if data == "watch_lang:other":
         context.user_data["watch_lang_await_other"] = True
         await query.edit_message_text(t("watch_lang_other_prompt", lang))
@@ -1468,7 +1528,7 @@ async def receive_watch_language_text(
         return _ws()["WATCH_LANGUAGE"]
     context.user_data["watch_language"] = code
     context.user_data.pop("watch_lang_await_other", None)
-    return await _go_watch_mature_prompt(update, context, lang)
+    return await _go_watch_next_detail(update, context, lang)
 
 
 async def receive_watch_nav_back(
@@ -1480,6 +1540,54 @@ async def receive_watch_nav_back(
     query = update.callback_query
     await query.answer()
     return await wizard_back(update, context)
+
+
+async def receive_watch_filters_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = query.data or ""
+    if data.startswith("watch_filt:toggle:"):
+        key = data.rsplit(":", 1)[-1]
+        flag_key = {
+            "tags": "watch_want_tags",
+            "viewers": "watch_want_viewers",
+            "language": "watch_want_language",
+            "mature": "watch_want_mature",
+        }.get(key)
+        if not flag_key:
+            return _ws()["WATCH_FILTERS"]
+        context.user_data[flag_key] = not bool(context.user_data.get(flag_key))
+        await query.edit_message_reply_markup(
+            watch_filters_keyboard(
+                lang,
+                want_tags=bool(context.user_data.get("watch_want_tags")),
+                want_viewers=bool(context.user_data.get("watch_want_viewers")),
+                want_language=bool(context.user_data.get("watch_want_language")),
+                want_mature=bool(context.user_data.get("watch_want_mature")),
+            )
+        )
+        return _ws()["WATCH_FILTERS"]
+    if data == "watch_filt:next":
+        if not context.user_data.get("watch_want_tags"):
+            context.user_data["watch_tags"] = []
+        if not context.user_data.get("watch_want_viewers"):
+            context.user_data["watch_min_viewers"] = 0
+            context.user_data["watch_max_viewers"] = None
+        if not context.user_data.get("watch_want_language"):
+            context.user_data["watch_language"] = None
+        context.user_data["watch_exclude_mature"] = bool(
+            context.user_data.get("watch_want_mature")
+        )
+        context.user_data["watch_detail_queue"] = _watch_detail_queue(context)
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _go_watch_next_detail(update, context, lang)
+    return _ws()["WATCH_FILTERS"]
 
 
 async def receive_watch_tags_text(
@@ -1497,7 +1605,7 @@ async def receive_watch_tags_text(
         )
         return _ws()["WATCH_TAGS"]
     context.user_data["watch_tags"] = tags
-    return await _go_watch_viewers_prompt(update, context, lang)
+    return await _go_watch_next_detail(update, context, lang)
 
 
 async def receive_watch_tags_callback(
@@ -1512,7 +1620,7 @@ async def receive_watch_tags_callback(
             await query.edit_message_reply_markup(None)
         except BadRequest:
             pass
-        return await _go_watch_viewers_prompt(update, context, lang)
+        return await _go_watch_next_detail(update, context, lang)
     return _ws()["WATCH_TAGS"]
 
 

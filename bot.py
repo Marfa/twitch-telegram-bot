@@ -106,7 +106,6 @@ from i18n import (
     stream_schedule_confirm_keyboard,
     stream_schedule_day_keyboard,
     stream_schedule_fix_day_keyboard,
-    stream_schedule_more_keyboard,
     stream_schedule_occupied_keyboard,
     stream_schedule_duration_keyboard,
     stream_schedule_publish_keyboard,
@@ -302,11 +301,8 @@ from handlers.stream_schedule import (
     _parse_stream_time,
     _pending_schedule_preview,
     _pending_schedule_publishes,
-    _prompt_add_another_slot,
     _prompt_stream_schedule_fix_game,
-    _prompt_stream_schedule_fix_time,
     _prompt_stream_schedule_game,
-    _prompt_stream_schedule_time,
     _schedule_publish_error_text,
     _schedule_segment_game,
     _show_day_slots,
@@ -324,16 +320,16 @@ from handlers.stream_schedule import (
     stream_schedule_fix_edit_callback,
     stream_schedule_fix_game,
     stream_schedule_fix_slots_done_callback,
-    stream_schedule_fix_time,
     stream_schedule_game,
     stream_schedule_mode_callback,
-    stream_schedule_more_callback,
     stream_schedule_noop_callback,
     stream_schedule_publish_callback,
     stream_schedule_skip_callback,
-    stream_schedule_time,
     stream_schedule_tz,
     stream_schedule_tz_callback,
+    stream_schedule_vacation_auto_callback,
+    stream_schedule_vacation_callback,
+    process_vacation_auto_exits,
 )
 
 from handlers.settings import (
@@ -416,6 +412,7 @@ from handlers.watch import (
     receive_watch_del_clear,
     receive_watch_del_go,
     receive_watch_del_sel,
+    receive_watch_filters_callback,
     receive_watch_language_callback,
     receive_watch_language_text,
     receive_watch_mature_callback,
@@ -695,6 +692,7 @@ logger = logging.getLogger(__name__)
     WATCH_PICK,
     WATCH_DELETE,
     WATCH_CATEGORIES,
+    WATCH_FILTERS,
     WATCH_TAGS,
     WATCH_VIEWERS,
     WATCH_LANGUAGE,
@@ -712,7 +710,9 @@ logger = logging.getLogger(__name__)
     STREAM_SCHEDULE_MORE,
     PAUSE_ALERTS_DAYS,
     ADMIN_REFUND_CHARGE,
-) = range(64)
+    STREAM_SCHEDULE_VACATION,
+    STREAM_SCHEDULE_VACATION_AUTO,
+) = range(67)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2562,6 +2562,21 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     stream_schedule_tz_callback, pattern=r"^stream_sched:tz:"
                 ),
             ],
+            STREAM_SCHEDULE_VACATION: [
+                _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
+                CallbackQueryHandler(
+                    stream_schedule_vacation_callback, pattern=r"^vac:"
+                ),
+            ],
+            STREAM_SCHEDULE_VACATION_AUTO: [
+                _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
+                CallbackQueryHandler(
+                    stream_schedule_vacation_auto_callback,
+                    pattern=r"^stream_sched:vac_auto:[01]$",
+                ),
+            ],
             STREAM_SCHEDULE_FIX_DAY: [
                 _wiz_cancel,
                 CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
@@ -2597,18 +2612,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_fix_game),
             ],
-            STREAM_SCHEDULE_FIX_TIME: [
-                _wiz_cancel,
-                CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_fix_time),
-            ],
-            STREAM_SCHEDULE_MORE: [
-                _wiz_cancel,
-                CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
-                CallbackQueryHandler(
-                    stream_schedule_more_callback, pattern=r"^stream_sched:more:[01]$"
-                ),
-            ],
             STREAM_SCHEDULE_CONFIRM: [
                 _wiz_cancel,
                 CallbackQueryHandler(
@@ -2624,13 +2627,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(stream_schedule_skip_callback, pattern=r"^stream_sched:skip$"),
                 CallbackQueryHandler(stream_schedule_finish_callback, pattern=r"^stream_sched:finish$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_game),
-            ],
-            STREAM_SCHEDULE_TIME: [
-                _wiz_cancel,
-                CallbackQueryHandler(cancel, pattern=r"^stream_sched:cancel$"),
-                CallbackQueryHandler(stream_schedule_skip_callback, pattern=r"^stream_sched:skip$"),
-                CallbackQueryHandler(stream_schedule_finish_callback, pattern=r"^stream_sched:finish$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, stream_schedule_time),
             ],
             STREAM_SCHEDULE_PUBLISH: [
                 _wiz_cancel,
@@ -2680,6 +2676,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     receive_watch_category_callback, pattern=r"^watch_cat:"
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_category_text),
+            ],
+            WATCH_FILTERS: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
+                CallbackQueryHandler(
+                    receive_watch_filters_callback, pattern=r"^watch_filt:"
+                ),
             ],
             WATCH_TAGS: [
                 _wiz_cancel,
@@ -2881,6 +2886,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.job_queue.run_repeating(
         check_schedule_reminders, interval=SCHEDULE_CHECK_INTERVAL, first=25
     )
+    app.job_queue.run_repeating(process_vacation_auto_exits, interval=300, first=70)
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(purge_old_broadcasts, interval=24 * 3600, first=300)
     app.job_queue.run_repeating(

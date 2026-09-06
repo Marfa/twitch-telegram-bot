@@ -699,6 +699,38 @@ def watch_cats_pick_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def watch_filters_keyboard(
+    lang: str,
+    *,
+    want_tags: bool,
+    want_viewers: bool,
+    want_language: bool,
+    want_mature: bool,
+) -> InlineKeyboardMarkup:
+    def _row(flag: bool, label_key: str, key: str) -> list[InlineKeyboardButton]:
+        mark = "✅ " if flag else "⬜️ "
+        return [
+            InlineKeyboardButton(
+                mark + t(label_key, lang),
+                callback_data=f"watch_filt:toggle:{key}",
+            )
+        ]
+
+    rows = [
+        _row(want_tags, "watch_filt_tags", "tags"),
+        _row(want_viewers, "watch_filt_viewers", "viewers"),
+        _row(want_language, "watch_filt_language", "language"),
+        _row(want_mature, "watch_filt_mature", "mature"),
+        [
+            InlineKeyboardButton(
+                t("watch_filt_next", lang), callback_data="watch_filt:next"
+            )
+        ],
+        _watch_nav_row(lang),
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
 def watch_viewers_keyboard(lang: str, *, show_nav: bool = True) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t("watch_viewers_any", lang), callback_data="watch_viewers:any")],
@@ -1472,8 +1504,49 @@ def stream_schedule_mode_keyboard(lang: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    t("stream_schedule_mode_vacation_btn", lang),
+                    callback_data="stream_sched:mode:vacation",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     t("stream_schedule_mode_tz_btn", lang),
                     callback_data="stream_sched:tz:mode",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
+                )
+            ],
+        ]
+    )
+
+
+def stream_schedule_vacation_month_keyboard(lang: str) -> InlineKeyboardMarkup:
+    kb = schedule_month_keyboard(lang, prefix="vac")
+    rows = [list(row) for row in kb.inline_keyboard]
+    rows[-1] = [
+        InlineKeyboardButton(
+            btn("wizard_cancel", lang), callback_data="stream_sched:cancel"
+        )
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def stream_schedule_vacation_auto_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_vacation_auto_yes", lang),
+                    callback_data="stream_sched:vac_auto:1",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("stream_schedule_vacation_auto_no", lang),
+                    callback_data="stream_sched:vac_auto:0",
                 )
             ],
             [
@@ -1682,25 +1755,6 @@ def stream_schedule_day_keyboard(
         ]
     )
     return InlineKeyboardMarkup(rows)
-
-
-def stream_schedule_more_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("stream_schedule_more_yes", lang),
-                    callback_data="stream_sched:more:1",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("stream_schedule_more_no", lang),
-                    callback_data="stream_sched:more:0",
-                )
-            ],
-        ]
-    )
 
 
 def stream_schedule_occupied_keyboard(

@@ -32,7 +32,7 @@
 | Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, link preview (if URL in template; off with image/chat button) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
-| Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard or **fix slots for a day**, **Time zone** (UTC); publish to Twitch is **Premium** |
+| Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly wizard, **fix slots for a day**, **vacation mode**, **Time zone** (UTC); publish / vacation on Twitch is **Premium** |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
 | Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
@@ -159,11 +159,9 @@ If you have saved filters, the bot offers:
 New search wizard:
 
 1. Twitch categories (up to 5) — or **🎲 I'm feeling lucky** (IGDB random ×5 → live bot language / any; recently released ×5 → live; if empty → VOD for the same games; 18+ allowed)
-2. Stream tags (optional; stream must include all listed)
-3. Viewer range
-4. Stream language (optional)
-5. Exclude mature or allow
-6. Save filter for later (up to 5) or just this once
+2. Checkboxes for extra filters: tags / viewers / language / exclude mature (unchecked = any)
+3. Value prompts only for checked items (tags, viewer range, language)
+4. Save filter for later (up to 5) or just this once
 
 After suggestions (or an empty result):
 
@@ -191,17 +189,16 @@ Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (se
 
 | Mode | What it does |
 |---|---|
-| **Create schedule for the week** | Weekly text wizard Monday through Sunday |
-| **Fix slots for a day** | Pick one day → game → time → publish; only that day's segments are cleared on Twitch |
+| **Create schedule for the week** | Starts the wizard immediately: slots as `HH:MM title` (multiple lines = multiple slots) |
+| **Fix slots for a day** | Pick a day → add/edit slots with the same text format; only that day's segments are cleared on Twitch |
+| **Vacation mode** | Calendar start/end → exit automatically or not → Twitch Vacation Mode (**Premium**); “Upcoming stream” alerts are skipped while vacation is active |
 | **Time zone** | Set UTC offset (`UTC+3`, `UTC-5`, …); saved for Twitch publishing |
 
 **Weekly wizard:**
 
-1. Description and format example
-2. Confirm “Create the schedule?”
-3. For each day: game/stream title and time (`15:30`) — in **your** time zone
-4. **No stream planned** — skip the day
-5. From day 2 — **Finish** (not shown on the last day)
+1. For each day: slots as text (`15:30 Disponia` — multiple lines at once)
+2. **No stream planned** — skip the day
+3. From day 2 — **Finish** (not shown on the last day)
 
 Result — ready-to-post text, for example:
 
@@ -254,7 +251,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below” |
 | 📦 Other | Whisper alerts, schedule, what to watch, chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
-| ↳ 📅 Manage schedule | Weekly text, time zone; Twitch sync — Premium |
+| ↳ 📅 Manage schedule | Week, day, vacation, time zone; Twitch sync — Premium |
 | ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
 | ⚙️ Settings | Premium, sync, ignored words, system alerts, language, partner program |
