@@ -715,6 +715,54 @@ async def _smoke_wizard(db) -> None:
     state = await cancel(update, ctx)
     assert state == ConversationHandler.END
 
+    # Existing channel → dup prompt → Edit must open edit menu (no TypeError on kwargs).
+    from handlers.wizard import receive_channel_dup
+    from i18n import t as _t
+
+    uid_dup = _FREE_UID + 21
+    db.upsert_user(uid_dup)
+    db.set_user_locale(uid_dup, "ru")
+    dup_sub_id = db.add_subscription(
+        owner_id=uid_dup,
+        twitch_username="dupchan",
+        twitch_user_id="9021",
+        message_template="{username} live",
+        dest_type="dm",
+        chat_id=uid_dup,
+        thread_id=None,
+    )
+    twitch = MagicMock()
+    twitch.parse_username.return_value = "dupchan"
+    twitch.get_user.return_value = {
+        "id": "9021",
+        "login": "dupchan",
+        "display_name": "Dup",
+    }
+    twitch.is_twitch_url.return_value = False
+    application, bot = _app(db, twitch=twitch)
+    update = _msg_update(uid_dup, "dupchan")
+    ctx = _ctx(application, {"alert_type": "live"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["CHANNEL_DUP"]
+    update, query = _cb_update(uid_dup, f"dup:edit:{dup_sub_id}")
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on",
+        new=AsyncMock(return_value=False),
+    ):
+        state = await receive_channel_dup(update, ctx)
+    assert state == ConversationHandler.END
+    assert bot.send_message.await_count >= 2
+    edit_texts = [
+        c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or ""
+        for c in bot.send_message.await_args_list
+    ]
+    assert any("dupchan" in str(t) for t in edit_texts)
+    assert any(_t("menu_subs", "ru") in str(t) for t in edit_texts)
+    assert query.edit_message_text.await_args.args[0] == "✓"
+
     # Edit mode: unchecking "use global list" must persist False (not only UI).
     uid = _FREE_UID + 20
     db.upsert_user(uid)
