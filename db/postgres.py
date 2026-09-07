@@ -17,6 +17,7 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     PremiumChannel,
+    PremiumGift,
     PremiumPurchase,
     ReferralCreditRef,
     ReferralStats,
@@ -757,6 +758,30 @@ class PostgresDatabase:
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_share_tokens_sub_purpose
                 ON alert_share_tokens(source_sub_id, purpose)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS premium_gifts (
+                    token TEXT PRIMARY KEY,
+                    buyer_id BIGINT NOT NULL,
+                    kind TEXT NOT NULL,
+                    charge_id TEXT NOT NULL UNIQUE,
+                    stars INTEGER NOT NULL DEFAULT 0,
+                    message TEXT NOT NULL DEFAULT '',
+                    image_file_id TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    recipient_id BIGINT NOT NULL DEFAULT 0,
+                    until_unix BIGINT NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    redeemed_at TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_premium_gifts_charge
+                ON premium_gifts(charge_id)
                 """
             )
             cur.execute(
@@ -4262,6 +4287,16 @@ class PostgresDatabase:
                 return int(row["user_id"])
             cur.execute(
                 """
+                SELECT buyer_id AS user_id
+                FROM premium_gifts WHERE charge_id = %s
+                """,
+                (cid,),
+            )
+            row = cur.fetchone()
+            if row:
+                return int(row["user_id"])
+            cur.execute(
+                """
                 SELECT user_id, premium_features FROM users
                 WHERE position(%s in premium_features) > 0
                 """,
@@ -4274,6 +4309,218 @@ class PostgresDatabase:
                 if cid in charges.values():
                     return int(r["user_id"])
         return None
+
+    @staticmethod
+    def _row_to_premium_gift(row) -> PremiumGift:
+        return PremiumGift(
+            token=str(row["token"] or ""),
+            buyer_id=int(row["buyer_id"] or 0),
+            kind=str(row["kind"] or ""),
+            charge_id=str(row["charge_id"] or ""),
+            stars=int(row["stars"] or 0),
+            message=str(row["message"] or ""),
+            image_file_id=str(row["image_file_id"] or ""),
+            status=str(row["status"] or "pending"),
+            recipient_id=int(row["recipient_id"] or 0),
+            until_unix=int(row["until_unix"] or 0),
+            created_at=str(row["created_at"] or ""),
+            redeemed_at=str(row["redeemed_at"] or ""),
+        )
+
+    def create_premium_gift(
+        self,
+        *,
+        buyer_id: int,
+        kind: str,
+        charge_id: str,
+        stars: int,
+    ) -> PremiumGift:
+        cid = str(charge_id or "").strip()
+        kind_s = str(kind or "").strip()
+        if not cid or kind_s not in ("month", "year", "life"):
+            raise ValueError("invalid gift params")
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE charge_id = %s",
+                (cid,),
+            )
+            existing = cur.fetchone()
+            if existing:
+                return self._row_to_premium_gift(existing)
+            for _ in range(8):
+                token = secrets.token_urlsafe(12)
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO premium_gifts (
+                            token, buyer_id, kind, charge_id, stars
+                        ) VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (token, int(buyer_id), kind_s, cid, int(stars)),
+                    )
+                    cur.execute(
+                        "SELECT * FROM premium_gifts WHERE token = %s",
+                        (token,),
+                    )
+                    row = cur.fetchone()
+                    return self._row_to_premium_gift(row)
+                except Exception:
+                    conn.rollback()
+                    cur = self._cursor(conn)
+                    continue
+            raise RuntimeError("failed to allocate premium gift token")
+
+    def get_premium_gift(self, token: str) -> PremiumGift | None:
+        raw = (token or "").strip()
+        if not raw:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE token = %s",
+                (raw,),
+            )
+            row = cur.fetchone()
+        return self._row_to_premium_gift(row) if row else None
+
+    def find_premium_gift_by_charge(self, charge_id: str) -> PremiumGift | None:
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE charge_id = %s",
+                (cid,),
+            )
+            row = cur.fetchone()
+        return self._row_to_premium_gift(row) if row else None
+
+    def update_premium_gift_customize(
+        self,
+        token: str,
+        *,
+        message: str | None = None,
+        image_file_id: str | None = None,
+    ) -> PremiumGift | None:
+        raw = (token or "").strip()
+        if not raw:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE token = %s",
+                (raw,),
+            )
+            row = cur.fetchone()
+            if not row or str(row["status"] or "") not in ("pending", "ready"):
+                return None
+            msg = str(row["message"] or "") if message is None else str(message)
+            img = (
+                str(row["image_file_id"] or "")
+                if image_file_id is None
+                else str(image_file_id)
+            )
+            cur.execute(
+                """
+                UPDATE premium_gifts
+                SET message = %s, image_file_id = %s
+                WHERE token = %s
+                """,
+                (msg, img, raw),
+            )
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE token = %s",
+                (raw,),
+            )
+            row = cur.fetchone()
+        return self._row_to_premium_gift(row) if row else None
+
+    def mark_premium_gift_ready(self, token: str) -> PremiumGift | None:
+        raw = (token or "").strip()
+        if not raw:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE premium_gifts SET status = 'ready'
+                WHERE token = %s AND status = 'pending'
+                """,
+                (raw,),
+            )
+            if (cur.rowcount or 0) <= 0:
+                cur.execute(
+                    "SELECT * FROM premium_gifts WHERE token = %s",
+                    (raw,),
+                )
+                row = cur.fetchone()
+                if row and str(row["status"] or "") == "ready":
+                    return self._row_to_premium_gift(row)
+                return None
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE token = %s",
+                (raw,),
+            )
+            row = cur.fetchone()
+        return self._row_to_premium_gift(row) if row else None
+
+    def redeem_premium_gift(
+        self, token: str, recipient_id: int, *, until_unix: int
+    ) -> PremiumGift | None:
+        raw = (token or "").strip()
+        rid = int(recipient_id or 0)
+        if not raw or rid <= 0:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE premium_gifts
+                SET status = 'redeemed',
+                    recipient_id = %s,
+                    until_unix = %s,
+                    redeemed_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+                WHERE token = %s AND status = 'ready'
+                """,
+                (rid, int(until_unix), raw),
+            )
+            if (cur.rowcount or 0) <= 0:
+                return None
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE token = %s",
+                (raw,),
+            )
+            row = cur.fetchone()
+        return self._row_to_premium_gift(row) if row else None
+
+    def revoke_premium_gift_by_charge(self, charge_id: str) -> PremiumGift | None:
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE charge_id = %s",
+                (cid,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cur.execute(
+                """
+                UPDATE premium_gifts SET status = 'revoked'
+                WHERE charge_id = %s AND status <> 'revoked'
+                """,
+                (cid,),
+            )
+            cur.execute(
+                "SELECT * FROM premium_gifts WHERE charge_id = %s",
+                (cid,),
+            )
+            row = cur.fetchone()
+        return self._row_to_premium_gift(row) if row else None
 
     def get_referral_credit_by_charge(
         self, charge_id: str

@@ -307,7 +307,7 @@ def invoice_payload(
         tid = str(twitch_user_id or "").strip()
         login = str(twitch_login or "").strip().lower()
         return f"{PREMIUM_INVOICE_PREFIX}channel:{user_id}:{tid}:{login}"
-    if kind in ("month", "year", "life"):
+    if kind in ("month", "year", "life", "gift_month", "gift_year", "gift_life"):
         return f"{PREMIUM_INVOICE_PREFIX}{kind}:{user_id}"
     # legacy: premium:{uid}
     return f"{PREMIUM_INVOICE_PREFIX}{user_id}"
@@ -316,7 +316,7 @@ def invoice_payload(
 @dataclass(frozen=True)
 class ParsedInvoice:
     user_id: int
-    kind: str  # month | year | life | feat | channel | legacy
+    kind: str  # month | year | life | feat | channel | legacy | gift_*
     features: tuple[str, ...] = ()
     twitch_user_id: str = ""
     twitch_login: str = ""
@@ -335,7 +335,7 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
     if not uid_s.isdigit():
         return None
     uid = int(uid_s)
-    if kind in ("month", "year", "life"):
+    if kind in ("month", "year", "life", "gift_month", "gift_year", "gift_life"):
         return ParsedInvoice(user_id=uid, kind=kind)
     if kind == "feat":
         feat_raw = parts[2] if len(parts) > 2 else ""
@@ -354,6 +354,16 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
             user_id=uid, kind="channel", twitch_user_id=tid, twitch_login=login
         )
     return None
+
+
+GIFT_INVOICE_KINDS = frozenset({"gift_month", "gift_year", "gift_life"})
+
+
+def gift_plan_kind(invoice_kind: str) -> str | None:
+    """Map gift_month → month, etc."""
+    if invoice_kind not in GIFT_INVOICE_KINDS:
+        return None
+    return invoice_kind.removeprefix("gift_")
 
 
 def get_status(db: Database, user_id: int) -> PremiumStatus:
@@ -731,6 +741,7 @@ def apply_stars_payment(
     charge_id: str,
     until_unix: int,
     stars_paid: int | None = None,
+    credit_referral: bool = True,
 ) -> None:
     db.set_premium_stars(
         user_id,
@@ -738,12 +749,13 @@ def apply_stars_payment(
         until_unix=until_unix,
         canceled=False,
     )
-    credit_referral_commission(
-        db,
-        invitee_id=user_id,
-        charge_id=charge_id,
-        stars_paid=stars_paid if stars_paid is not None else stars_price(user_id),
-    )
+    if credit_referral:
+        credit_referral_commission(
+            db,
+            invitee_id=user_id,
+            charge_id=charge_id,
+            stars_paid=stars_paid if stars_paid is not None else stars_price(user_id),
+        )
 
 
 def apply_lifetime_payment(
@@ -752,14 +764,20 @@ def apply_lifetime_payment(
     *,
     charge_id: str,
     stars_paid: int | None = None,
+    credit_referral: bool = True,
 ) -> None:
     db.set_premium_permanent(user_id, True)
-    credit_referral_commission(
-        db,
-        invitee_id=user_id,
-        charge_id=charge_id,
-        stars_paid=stars_paid if stars_paid is not None else stars_lifetime_price(user_id),
-    )
+    if credit_referral:
+        credit_referral_commission(
+            db,
+            invitee_id=user_id,
+            charge_id=charge_id,
+            stars_paid=(
+                stars_paid
+                if stars_paid is not None
+                else stars_lifetime_price(user_id)
+            ),
+        )
 
 
 def apply_features_payment(
@@ -817,6 +835,88 @@ def apply_premium_channel_payment(
         charge_id=charge_id,
         stars_paid=stars_paid if stars_paid is not None else stars_channel_price(user_id),
     )
+
+
+def gift_duration_seconds(kind: str) -> int:
+    if kind == "month":
+        return stars_period()
+    if kind == "year":
+        return year_seconds()
+    return 0
+
+
+def apply_gift_purchase_commission(
+    db: Database,
+    *,
+    buyer_id: int,
+    charge_id: str,
+    kind: str,
+    stars_paid: int,
+) -> None:
+    """Referral commission for the gift buyer (payer), not the recipient."""
+    if kind == "life":
+        default = stars_lifetime_price(buyer_id)
+    elif kind == "year":
+        default = stars_year_price(buyer_id)
+    else:
+        default = stars_price(buyer_id)
+    credit_referral_commission(
+        db,
+        invitee_id=buyer_id,
+        charge_id=charge_id,
+        stars_paid=stars_paid if stars_paid > 0 else default,
+    )
+
+
+def apply_gift_redeem(
+    db: Database,
+    token: str,
+    recipient_id: int,
+) -> tuple[object, int] | None:
+    """Claim a ready gift for recipient. Returns (gift, until_unix) or None.
+
+    until_unix is 0 for lifetime. No referral commission (already credited on purchase).
+    """
+    gift = db.get_premium_gift(token)
+    if gift is None or gift.status != "ready":
+        return None
+    rid = int(recipient_id)
+    if rid <= 0:
+        return None
+    now = int(time.time())
+    st = get_status(db, rid)
+    if gift.kind == "life":
+        claimed = db.redeem_premium_gift(token, rid, until_unix=0)
+        if claimed is None:
+            return None
+        apply_lifetime_payment(
+            db,
+            rid,
+            charge_id=claimed.charge_id,
+            stars_paid=claimed.stars,
+            credit_referral=False,
+        )
+        return claimed, 0
+    period = gift_duration_seconds(gift.kind)
+    if period <= 0:
+        return None
+    base = now
+    if st.stars_active and st.stars_until > base:
+        base = int(st.stars_until)
+    until = base + period
+    claimed = db.redeem_premium_gift(token, rid, until_unix=until)
+    if claimed is None:
+        return None
+    apply_stars_payment(
+        db,
+        rid,
+        charge_id=claimed.charge_id,
+        until_unix=until,
+        stars_paid=claimed.stars,
+        credit_referral=False,
+    )
+    db.set_premium_stars_canceled(rid, True)
+    return claimed, until
 
 
 def credit_referral_commission(
@@ -1056,6 +1156,27 @@ def revoke_premium_for_charge(
     revoked: list[str] = []
     if not cid or user_id <= 0:
         return revoked
+
+    gift = db.find_premium_gift_by_charge(cid)
+    if gift is not None:
+        recipient = int(gift.recipient_id or 0) if gift.status == "redeemed" else 0
+        kind = str(gift.kind or "")
+        db.revoke_premium_gift_by_charge(cid)
+        revoked.append(f"gift:{kind or 'unknown'}")
+        if recipient > 0:
+            st = get_status(db, recipient)
+            if kind == "life" and st.permanent:
+                db.set_premium_permanent(recipient, False)
+                revoked.append("gift_life")
+            elif st.stars_charge_id == cid:
+                db.set_premium_stars(
+                    recipient, charge_id="", until_unix=0, canceled=True
+                )
+                revoked.append("gift_stars")
+            pause_unentitled_subscriptions(db, recipient)
+        db.delete_referral_credit_by_charge(cid)
+        return revoked
+
     st = get_status(db, user_id)
     if st.stars_charge_id == cid:
         db.set_premium_stars(user_id, charge_id="", until_unix=0, canceled=True)

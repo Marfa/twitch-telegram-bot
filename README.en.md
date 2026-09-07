@@ -34,7 +34,7 @@
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
-| Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel — see [Premium](#premium) |
+| Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / 🧪 **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; refund by charge_id; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
@@ -51,6 +51,7 @@ Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the
 | Month | 100 | 30 days, auto-renew |
 | Year | 1000 | 365 days |
 | Lifetime | 2000 | permanent |
+| Gift (month / year / forever) | 100 / 1000 / 2000 | one-time, no renew; link for recipient (🧪 beta) |
 | Single feature | 20 | 30 days each |
 | Streamer premium channel | 1500 | one-time for that channel |
 

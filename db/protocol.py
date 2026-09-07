@@ -9,6 +9,7 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     PremiumChannel,
+    PremiumGift,
     ReferralCreditRef,
     ReferralStats,
     ReferralWithdrawal,
@@ -586,6 +587,35 @@ class Database(Protocol):
     def delete_premium_channel_by_charge(self, charge_id: str) -> bool: ...
 
     def find_user_id_by_premium_charge(self, charge_id: str) -> int | None: ...
+
+    def create_premium_gift(
+        self,
+        *,
+        buyer_id: int,
+        kind: str,
+        charge_id: str,
+        stars: int,
+    ) -> PremiumGift: ...
+
+    def get_premium_gift(self, token: str) -> PremiumGift | None: ...
+
+    def find_premium_gift_by_charge(self, charge_id: str) -> PremiumGift | None: ...
+
+    def update_premium_gift_customize(
+        self,
+        token: str,
+        *,
+        message: str | None = None,
+        image_file_id: str | None = None,
+    ) -> PremiumGift | None: ...
+
+    def mark_premium_gift_ready(self, token: str) -> PremiumGift | None: ...
+
+    def redeem_premium_gift(
+        self, token: str, recipient_id: int, *, until_unix: int
+    ) -> PremiumGift | None: ...
+
+    def revoke_premium_gift_by_charge(self, charge_id: str) -> PremiumGift | None: ...
 
     def get_referral_credit_by_charge(
         self, charge_id: str

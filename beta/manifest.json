@@ -65,6 +65,15 @@
       "issue_label": "beta/live-remind-button",
       "stage": "beta",
       "created_at": "2026-09-06"
+    },
+    {
+      "id": "gift-premium",
+      "branch": "feat/gift-premium",
+      "title_key": "beta_feat_gift_premium",
+      "description_key": "beta_feat_gift_premium_desc",
+      "issue_label": "beta/gift-premium",
+      "stage": "beta",
+      "created_at": "2026-09-07"
     }
   ]
 }

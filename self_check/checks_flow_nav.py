@@ -22,6 +22,7 @@ from i18n import (
     other_menu,
     partner_menu,
     premium_gate_keyboard,
+    premium_gift_keyboard,
     settings_menu,
     language_keyboard,
     stream_schedule_confirm_keyboard,
@@ -150,12 +151,17 @@ def _cb_update(user_id: int, data: str, capture: _BotCapture | None = None):
     query.data = data
     query.answer = AsyncMock()
     query.from_user = SimpleNamespace(id=user_id)
-    query.message = SimpleNamespace(chat_id=user_id, message_id=1)
+    msg = MagicMock()
+    msg.chat_id = user_id
+    msg.message_id = 1
     if capture is not None:
         capture.wrap_query(query)
+        capture.wrap_message(msg)
     else:
         query.edit_message_text = AsyncMock()
         query.edit_message_reply_markup = AsyncMock()
+        msg.reply_text = AsyncMock()
+    query.message = msg
     update = MagicMock()
     update.callback_query = query
     update.effective_user = SimpleNamespace(id=user_id)
@@ -222,6 +228,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("watch_tags", watch_tags_keyboard(loc)),
             ("watch_save", watch_save_keyboard(loc)),
             ("twitch_link_offer", _twitch_link_offer_keyboard(loc, "shroud")),
+            ("premium_gift_plans", premium_gift_keyboard(loc, user_id=_FREE_UID)),
         ]
         for name, markup in cases:
             assert markup_has_escape_hatch(markup), (
@@ -1311,6 +1318,83 @@ async def _scenario_share_alert_offer(db) -> None:
     assert len(db.get_subscriptions_by_owner(stranger)) == 2
 
 
+async def _scenario_premium_gift(db) -> None:
+    """§ Premium gift (beta): plan screen Back; customize Skip; redeem decline."""
+    from handlers.premium_gift import (
+        maybe_offer_pending_gift,
+        on_gift_decline,
+        on_gift_skip_img,
+        on_gift_skip_msg,
+        start_gift_customize,
+    )
+    from i18n import premium_gift_keyboard
+    from premium_handlers import on_premium_callback
+
+    buyer = _FREE_UID + 21
+    db.upsert_user(buyer)
+    db.set_user_locale(buyer, "ru")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(buyer, "premium:gift", cap)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True), patch(
+        "handlers.premium_gift.gift_enabled", return_value=True
+    ):
+        await on_premium_callback(update, ctx)
+    query.edit_message_text.assert_awaited()
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    assert markup_has_escape_hatch(markup), "premium gift plans missing Back"
+    cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium:feat_back" in cbs
+    assert "premium:gift_month" in cbs
+    assert markup_has_escape_hatch(premium_gift_keyboard("ru", user_id=buyer))
+
+    gift = db.create_premium_gift(
+        buyer_id=buyer, kind="month", charge_id="stx_flow_gift", stars=100
+    )
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
+    update = _msg_update(buyer, "pay_done", cap)
+    ctx = _ctx(application)
+    await start_gift_customize(update, ctx, token=gift.token)
+    cap.assert_turn("premium_gift_ask_message")
+
+    update, query = _cb_update(buyer, "premium:gift_skip_msg", cap)
+    await on_gift_skip_msg(update, ctx)
+    cap.assert_turn("premium_gift_ask_image")
+
+    update, query = _cb_update(buyer, "premium:gift_skip_img", cap)
+    await on_gift_skip_img(update, ctx)
+    cap.assert_turn("premium_gift_link_ready")
+    ready = db.get_premium_gift(gift.token)
+    assert ready is not None and ready.status == "ready"
+
+    recipient = _FREE_UID + 22
+    db.upsert_user(recipient)
+    db.set_user_locale(recipient, "ru")
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    ctx.user_data["pending_gift_token"] = gift.token
+    await maybe_offer_pending_gift(ctx, recipient, "ru")
+    cap.assert_turn("premium_gift_offer")
+
+    update, query = _cb_update(recipient, "gift_decline", cap)
+    await on_gift_decline(update, ctx)
+    query.edit_message_text.assert_awaited()
+
+
 async def _scenario_twitch_link_wizard_offer(db) -> None:
     """§12 Twitch URL in DM outside wizard — offer create; decline; accept starts wizard."""
     from telegram.constants import ChatType
@@ -1670,6 +1754,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_subscriptions_edit_checkboxes(db)
         await _scenario_subscriptions_delete(db)
         await _scenario_share_alert_offer(db)
+        await _scenario_premium_gift(db)
         await _scenario_twitch_link_wizard_offer(db)
         await _scenario_subscriptions_list_pages(db)
         await _scenario_schedule_deep(db)
