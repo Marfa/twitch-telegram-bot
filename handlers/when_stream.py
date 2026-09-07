@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -16,6 +16,9 @@ from i18n import SCHEDULE_TZ, t
 from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
+
+WHEN_STREAM_COOLDOWN = timedelta(minutes=1)
+_when_stream_last: dict[int, datetime] = {}
 
 # Free-text triggers. Leading @bot is common under Telegram privacy mode.
 WHEN_STREAM_TEXT_RE = re.compile(
@@ -70,14 +73,32 @@ def format_when_stream_line(
     lang: str,
     username: str,
     start: datetime,
-    game: str,
+    category: str,
     show_username: bool,
 ) -> str:
     local = start.astimezone(SCHEDULE_TZ)
     when = local.strftime("%d.%m.%Y %H:%M MSK")
-    game_label = (game or "").strip() or "—"
+    category_label = (category or "").strip() or "—"
     key = "when_stream_named" if show_username else "when_stream"
-    return t(key, lang, username=username, when=when, game=game_label)
+    return t(key, lang, username=username, when=when, category=category_label)
+
+
+def _cooldown_allows(chat_id: int, *, now: datetime | None = None) -> bool:
+    """True if the command may reply; marks the chat on success path only via mark."""
+    at = now or datetime.now(timezone.utc)
+    last = _when_stream_last.get(chat_id)
+    if last is not None and at - last < WHEN_STREAM_COOLDOWN:
+        return False
+    return True
+
+
+def _mark_cooldown(chat_id: int, *, now: datetime | None = None) -> None:
+    _when_stream_last[chat_id] = now or datetime.now(timezone.utc)
+
+
+def reset_when_stream_cooldown() -> None:
+    """Test helper."""
+    _when_stream_last.clear()
 
 
 async def when_stream_command(
@@ -89,33 +110,39 @@ async def when_stream_command(
     if not message or not chat or not user:
         return
 
+    chat_id = int(chat.id)
+    if not _cooldown_allows(chat_id):
+        return
+
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     lang = _user_lang(context, user.id)
 
-    subs = db.get_enabled_subscriptions_by_chat_id(int(chat.id))
+    subs = db.get_enabled_subscriptions_by_chat_id(chat_id)
     streamers = unique_streamers_for_chat(subs)
     if not streamers:
         return
 
     lines: list[str] = []
     show_name = len(streamers) > 1
+    fetched_ok = False
     for uid, username in streamers:
         try:
             schedule = await asyncio.to_thread(twitch.get_channel_schedule, uid)
         except Exception:
             logger.exception("when_stream: schedule fetch failed for %s", uid)
             continue
+        fetched_ok = True
         segment = next_upcoming_segment(schedule)
         if segment is None:
             continue
         start = _parse_segment_start(segment)
         if start is None:
             continue
-        category = segment.get("category") or {}
-        game = (
-            str(category.get("name") or "")
-            if isinstance(category, dict)
+        cat = segment.get("category") or {}
+        category = (
+            str(cat.get("name") or "")
+            if isinstance(cat, dict)
             else ""
         )
         lines.append(
@@ -123,11 +150,17 @@ async def when_stream_command(
                 lang=lang,
                 username=username,
                 start=start,
-                game=game,
+                category=category,
                 show_username=show_name,
             )
         )
 
-    if not lines:
+    if lines:
+        text = "\n".join(lines)
+    elif fetched_ok:
+        text = t("when_stream_no_schedule", lang)
+    else:
         return
-    await message.reply_text("\n".join(lines))
+
+    _mark_cooldown(chat_id)
+    await message.reply_text(text)
