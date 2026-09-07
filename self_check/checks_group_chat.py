@@ -1,6 +1,7 @@
 """Group vs private chat discipline: setup gate, reply targets, PostHog context."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -46,6 +47,101 @@ def _check_premium_and_helpers() -> None:
     assert GROUP_SETUP_CALLBACK_PATTERN.startswith("^")
     error_src = (_ROOT / "bot.py").read_text(encoding="utf-8")
     assert "chat_context_properties(update)" in error_src
+    assert "when_stream_command" in error_src
+    assert 'CommandHandler("when"' in error_src
+
+
+def _check_when_stream_helpers() -> None:
+    from handlers.when_stream import (
+        WHEN_STREAM_TEXT_RE,
+        format_when_stream_line,
+        next_upcoming_segment,
+        unique_streamers_for_chat,
+    )
+
+    assert WHEN_STREAM_TEXT_RE.match("Когда стрим?")
+    assert WHEN_STREAM_TEXT_RE.match("когда стрим")
+    assert WHEN_STREAM_TEXT_RE.match("When stream?")
+    assert WHEN_STREAM_TEXT_RE.match("When is the stream?")
+    assert not WHEN_STREAM_TEXT_RE.match("когда стрим завтра")
+
+    subs = [
+        SimpleNamespace(twitch_user_id="1", twitch_username="alpha"),
+        SimpleNamespace(twitch_user_id="1", twitch_username="alpha"),
+        SimpleNamespace(twitch_user_id="2", twitch_username="beta"),
+    ]
+    assert unique_streamers_for_chat(subs) == [("1", "alpha"), ("2", "beta")]
+
+    now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert next_upcoming_segment({"segments": [], "vacation": None}, now=now) is None
+    assert (
+        next_upcoming_segment(
+            {
+                "segments": [],
+                "vacation": {
+                    "start_time": "2029-01-01T00:00:00Z",
+                    "end_time": "2031-01-01T00:00:00Z",
+                },
+            },
+            now=now,
+        )
+        is None
+    )
+    past = {
+        "id": "past",
+        "start_time": "2029-12-01T12:00:00Z",
+        "category": {"name": "Old"},
+    }
+    future = {
+        "id": "future",
+        "start_time": "2030-01-02T15:00:00Z",
+        "category": {"name": "Elden Ring"},
+    }
+    canceled = {
+        "id": "x",
+        "start_time": "2030-01-01T18:00:00Z",
+        "canceled_until": "2030-01-03T00:00:00Z",
+        "category": {"name": "Skip"},
+    }
+    seg = next_upcoming_segment(
+        {"segments": [past, canceled, future], "vacation": None}, now=now
+    )
+    assert seg is not None and seg["id"] == "future"
+
+    line = format_when_stream_line(
+        lang="ru",
+        username="alpha",
+        start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
+        game="Elden Ring",
+        show_username=False,
+    )
+    assert "MSK" in line and "Elden Ring" in line
+    named = format_when_stream_line(
+        lang="en",
+        username="alpha",
+        start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
+        game="Elden Ring",
+        show_username=True,
+    )
+    assert "alpha" in named and "Elden Ring" in named
+
+
+async def _check_when_stream_silent() -> None:
+    from handlers.when_stream import when_stream_command
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=900001),
+        effective_chat=SimpleNamespace(id=-1001, type=ChatType.SUPERGROUP),
+        effective_message=AsyncMock(),
+        callback_query=None,
+    )
+    db = MagicMock()
+    db.get_user_locale = MagicMock(return_value="ru")
+    db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[])
+    ctx = MagicMock()
+    ctx.application.bot_data = {"db": db, "twitch": MagicMock()}
+    await when_stream_command(update, ctx)
+    update.effective_message.reply_text.assert_not_awaited()
 
 
 async def _check_group_setup_gate() -> None:
@@ -155,6 +251,8 @@ def _check_wizard_schedule_reply_targets() -> None:
 def check_group_chat() -> None:
     _check_premium_and_helpers()
     _check_wizard_schedule_reply_targets()
+    _check_when_stream_helpers()
     import asyncio
 
     asyncio.run(_check_group_setup_gate())
+    asyncio.run(_check_when_stream_silent())

@@ -38,7 +38,7 @@
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; refund by charge_id; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
-| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
+| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
 ## Premium
@@ -243,6 +243,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
+| `/when` | When is the stream? (in a group/channel with an alert — next Twitch schedule slot; silent if none). Also the text “When stream?” / «Когда стрим?» |
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |

@@ -38,7 +38,7 @@ English: [README.en.md](README.en.md)
 | Партнёрка | Реферальная ссылка, 10% от Stars Premium приглашённых, заявки на вывод (вручную) |
 | Админка | Рассылка в фоне; отложенная; статистика; DeepL; выводы; refund по charge_id; демо; **ежедневный дайджест новых Premium-оплат** (источник из аналитики) |
 | Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, Logs (WARNING+), ежедневный `daily_bot_stats` (03:00 UTC) |
-| Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
+| Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
 ## Premium
@@ -243,6 +243,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `/help` | Справка |
 | `/cancel` | Отменить текущий мастер |
 | `/schedule` | Управление расписанием |
+| `/when` | Когда стрим? (в группе/канале с оповещением — ближайший слот Twitch schedule; без расписания молчит). Также текст «Когда стрим?» |
 | `/feedback` | Обратная связь |
 | `/settings` | Настройки |
 | ➕ Новая подписка | Тип оповещения → мастер |

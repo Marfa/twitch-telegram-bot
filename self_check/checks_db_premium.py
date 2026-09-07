@@ -721,9 +721,12 @@ def check_db_premium() -> None:
         assert db.get_subscription(sid_a, 1).enabled is False
         assert db.get_subscription(sid_a, 1).delivery_paused is True
         assert db.get_subscription(sid_b, 1).delivery_paused is True
+        assert db.get_enabled_subscriptions_by_chat_id(ch) == []
         db.clear_delivery_paused(sid_a, enabled=True)
         assert db.get_subscription(sid_a, 1).enabled is True
         assert db.get_subscription(sid_a, 1).delivery_paused is False
+        by_chat = db.get_enabled_subscriptions_by_chat_id(ch)
+        assert len(by_chat) == 1 and by_chat[0].id == sid_a
         db.clear_delivery_paused(sid_b, enabled=False)
         assert db.get_subscription(sid_b, 1).enabled is False
         assert db.get_subscription(sid_b, 1).delivery_paused is False

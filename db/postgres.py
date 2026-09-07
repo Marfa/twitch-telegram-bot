@@ -2165,6 +2165,22 @@ class PostgresDatabase:
             )
             return int(cur.rowcount)
 
+    def get_enabled_subscriptions_by_chat_id(
+        self, chat_id: int
+    ) -> list[Subscription]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE chat_id = %s AND enabled = TRUE
+                ORDER BY id
+                """,
+                (chat_id,),
+            )
+            rows = cur.fetchall()
+        return [_row_to_sub(r) for r in rows]
+
     def list_delivery_paused_for_chat(self, chat_id: int) -> list[Subscription]:
         with self._conn() as conn:
             cur = self._cursor(conn)

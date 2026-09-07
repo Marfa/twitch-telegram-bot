@@ -1055,6 +1055,14 @@ def check_core() -> None:
         assert tr("edit_image_keep", loc)
         assert tr("schedule_reminder_prompt", loc)
         assert tr("schedule_reminder_minutes_prompt", loc)
+        assert tr("when_stream", loc, when="01.01.2030 18:00 MSK", game="Just Chatting")
+        assert tr(
+            "when_stream_named",
+            loc,
+            username="x",
+            when="01.01.2030 18:00 MSK",
+            game="Just Chatting",
+        )
         assert tr("schedule_live_add_prompt", loc)
         assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
         assert tr("alert_type_prompt", loc)
