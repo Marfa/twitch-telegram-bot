@@ -1701,7 +1701,7 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if status == ChatMemberStatus.BANNED:
             from handlers.delivery import apply_user_blocked
 
-            apply_user_blocked(db, user_id)
+            apply_user_blocked(db, user_id, source="my_chat_member")
         elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
             clear_user_blocked(db, user_id)
         return
@@ -1838,7 +1838,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         if _is_user_blocked_error(err):
             db = context.application.bot_data.get("db")
             if db is not None and user_id is not None:
-                apply_user_blocked(db, user_id)
+                apply_user_blocked(db, user_id, source="handler")
             logger.warning("User %s blocked the bot (or deactivated): %s", user_id, err)
             return
     logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))

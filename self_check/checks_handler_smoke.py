@@ -1154,12 +1154,31 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert dm_sub.delivery_paused is False
     assert dm_sub.enabled is True
 
-    _mark_destination_unreachable(
-        db, dm_sub, Forbidden("Forbidden: bot was blocked by the user")
-    )
+    with patch("handlers.delivery.analytics.capture") as capture:
+        _mark_destination_unreachable(
+            db, dm_sub, Forbidden("Forbidden: bot was blocked by the user")
+        )
     assert db.is_bot_blocked(_FREE_UID) is True
+    capture.assert_called_once()
+    assert capture.call_args.args[1] == "bot_blocked"
+    assert capture.call_args.args[2]["source"] == "delivery"
+    assert capture.call_args.args[2]["dest_type"] == "dm"
     clear_user_blocked(db, _FREE_UID)
     db.set_chat_unreachable(channel_id, False)
+
+    # Successful DM delivery records alert_sent for churn analysis.
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+    bot.send_photo = AsyncMock()
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
+    dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
+    with patch("handlers.delivery.analytics.capture") as capture:
+        ok_dm = await _send_notification(bot, db, dm_sub, "dm delivered")
+    assert ok_dm is True
+    alert_calls = [c for c in capture.call_args_list if c.args[1] == "alert_sent"]
+    assert len(alert_calls) == 1
+    assert alert_calls[0].args[2]["alert_type"] == "live"
+    assert alert_calls[0].args[2]["dest_type"] == "dm"
 
     application, bot = _app(db)
     ctx = _ctx(application)
@@ -1175,10 +1194,15 @@ async def _smoke_delivery_and_helpers(db) -> None:
     update = _msg_update(_FREE_UID)
     ctx = _ctx(application)
     ctx.error = Forbidden("Forbidden: bot was blocked by the user")
-    with patch("bot.analytics.capture_exception") as capture_exc:
+    with patch("bot.analytics.capture_exception") as capture_exc, patch(
+        "handlers.delivery.analytics.capture"
+    ) as capture_block:
         await error_handler(update, ctx)
     capture_exc.assert_not_called()
     assert db.is_bot_blocked(_FREE_UID) is True
+    capture_block.assert_called_once()
+    assert capture_block.call_args.args[1] == "bot_blocked"
+    assert capture_block.call_args.args[2]["source"] == "handler"
     clear_user_blocked(db, _FREE_UID)
 
     # Non-blocked Forbidden still goes to PostHog.

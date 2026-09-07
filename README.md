@@ -363,6 +363,21 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 
 Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subscriptions_*`, `unique_twitch_channels`, `premium_paid`, `blocked_users`, `sys_*`, `locale_*`.
 
+Premium (уже в PostHog, Trends / Funnels):
+
+| Событие | Когда | Полезные properties |
+|---|---|---|
+| `premium_gate_shown` / `premium_gate_get` | гейт фичи → «Получить Premium» | `feature`, `first_step` |
+| `premium_opened` | экран Premium | `source`, `feature` |
+| `premium_pay_started` | выдан invoice link | `kind`, `stars`, `source`, `feature` |
+| `premium_purchased` | успешная оплата плана / à la carte | `kind`, `stars`, `features`, `source`, `feature` |
+| `premium_channel_purchased` | Premium-канал стримера | `stars`, `twitch_login`, `source` |
+| `premium_gift_purchased` / `premium_gift_redeemed` | подарок куплен / принят | `kind`, `stars` / `buyer_id` |
+
+Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (breakdown `source` / `kind`). Сумма Stars: Trends → `premium_purchased` → Property value `stars` (sum).
+
+Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …) и опционально `alert_type` / `dest_type`; успешная DM-доставка — `alert_sent` (тот же `alert_type`). В Trends: path `alert_sent` → `bot_blocked` или breakdown `bot_blocked` by `source`.
+
 Разовый снимок / приближённый backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (на VPS в контейнере bot).
 
 ## Архитектура

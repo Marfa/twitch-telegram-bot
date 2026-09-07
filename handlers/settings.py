@@ -754,7 +754,7 @@ async def notify_whisper_received(application: Application, event: Any) -> None:
         except Forbidden:
             from handlers.delivery import apply_user_blocked
 
-            apply_user_blocked(db, alert.owner_id)
+            apply_user_blocked(db, alert.owner_id, source="whisper")
         except BadRequest as exc:
             logger.warning(
                 "Cannot send whisper alert to %s: %s", alert.owner_id, exc
@@ -778,7 +778,7 @@ async def on_whisper_eventsub_revoked(
         except Forbidden:
             from handlers.delivery import apply_user_blocked
 
-            apply_user_blocked(db, owner_id)
+            apply_user_blocked(db, owner_id, source="whisper_revoke")
         except BadRequest as exc:
             logger.warning("Cannot send whisper revoke notice to %s: %s", owner_id, exc)
 
