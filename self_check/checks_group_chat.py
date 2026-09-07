@@ -61,9 +61,13 @@ def _check_when_stream_helpers() -> None:
 
     assert WHEN_STREAM_TEXT_RE.match("Когда стрим?")
     assert WHEN_STREAM_TEXT_RE.match("когда стрим")
+    assert WHEN_STREAM_TEXT_RE.match("@twitch2telegram_bot Когда стрим?")
+    assert WHEN_STREAM_TEXT_RE.match("@twitch2telegram_bot  Когда стрим?")
     assert WHEN_STREAM_TEXT_RE.match("When stream?")
     assert WHEN_STREAM_TEXT_RE.match("When is the stream?")
+    assert WHEN_STREAM_TEXT_RE.match("@bot When is the stream?")
     assert not WHEN_STREAM_TEXT_RE.match("когда стрим завтра")
+    assert not WHEN_STREAM_TEXT_RE.match("@bot когда стрим завтра")
 
     subs = [
         SimpleNamespace(twitch_user_id="1", twitch_username="alpha"),

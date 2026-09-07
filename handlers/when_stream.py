@@ -17,9 +17,9 @@ from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
-# Free-text triggers (privacy mode: only if bot can read group messages).
+# Free-text triggers. Leading @bot is common under Telegram privacy mode.
 WHEN_STREAM_TEXT_RE = re.compile(
-    r"(?i)^\s*(?:когда\s+стрим|when(?:'s|\s+is)?(?:\s+the)?\s+stream)\s*\??\s*$"
+    r"(?i)^\s*(?:@\w+\s+)*(?:когда\s+стрим|when(?:'s|\s+is)?(?:\s+the)?\s+stream)\s*\??\s*$"
 )
 
 
