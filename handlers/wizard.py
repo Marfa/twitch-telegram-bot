@@ -2414,11 +2414,13 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return _wz()["DEST_CHAT"]
 
     db: Database = context.application.bot_data["db"]
-    ok = await _send_test(
+    from handlers.delivery import test_fail_user_text
+
+    err = await _send_test(
         context.bot, chat_id, thread_id, t("test_ok", lang), db=db
     )
-    if not ok:
-        await message.reply_text(t("test_failed", lang))
+    if err is not None:
+        await message.reply_text(test_fail_user_text(err, lang))
         return _wz()["DEST_CHAT"]
 
     context.user_data["pending_chat_id"] = chat_id

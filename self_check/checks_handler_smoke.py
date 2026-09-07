@@ -1072,6 +1072,13 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert _is_chat_unreachable_error(
         Forbidden("Forbidden: bot is not a member of the channel chat")
     )
+    from handlers.delivery import _is_topic_closed_error, test_fail_user_text
+
+    assert _is_topic_closed_error(BadRequest("Topic_closed"))
+    assert not _is_chat_unreachable_error(BadRequest("Topic_closed"))
+    assert "закрыта" in test_fail_user_text(BadRequest("Topic_closed"), "ru").lower()
+    assert "closed" in test_fail_user_text(BadRequest("Topic_closed"), "en").lower()
+    assert "прав" in test_fail_user_text(Forbidden("no rights"), "ru").lower()
 
     bot = AsyncMock()
     bot.send_message = AsyncMock(side_effect=Forbidden("blocked"))

@@ -399,6 +399,23 @@ def _is_chat_unreachable_error(exc: BaseException) -> bool:
     return any(n in msg for n in _CHAT_UNREACHABLE_NEEDLES)
 
 
+def _is_topic_closed_error(exc: BaseException) -> bool:
+    # Thread-only; do not treat as chat-unreachable (other topics may still work).
+    return "topic_closed" in _exc_text(exc)
+
+
+def test_fail_user_text(exc: BaseException, lang: str) -> str:
+    if _is_topic_closed_error(exc):
+        return t("test_failed_topic_closed", lang)
+    return t("test_failed", lang)
+
+
+def delivery_fail_reason_text(exc: BaseException, lang: str) -> str:
+    if _is_topic_closed_error(exc):
+        return t("delivery_fail_reason_topic_closed", lang)
+    return str(exc)
+
+
 def _mark_destination_unreachable(db: Database, sub: Subscription, exc: BaseException) -> None:
     if sub.dest_type == "dm":
         if _is_user_blocked_error(exc) or _is_chat_unreachable_error(exc):
@@ -591,17 +608,24 @@ async def _maybe_notify_delivery_failure(
     chat_label = _delivery_fail_chat_label(
         await _resolve_chat_display_name(bot, sub), sub.chat_id
     )
+    notice_kwargs = dict(
+        sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
+        twitch_username=sub.twitch_username,
+        chat_name=chat_label,
+    )
+    if _is_topic_closed_error(exc):
+        notice = t("delivery_fail_notice_topic_closed", lang, **notice_kwargs)
+    else:
+        notice = t(
+            "delivery_fail_notice",
+            lang,
+            reason=delivery_fail_reason_text(exc, lang),
+            **notice_kwargs,
+        )
     try:
         await bot.send_message(
             sub.owner_id,
-            t(
-                "delivery_fail_notice",
-                lang,
-                sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
-                twitch_username=sub.twitch_username,
-                chat_name=chat_label,
-                reason=str(exc),
-            ),
+            notice,
             reply_markup=delivery_fail_notice_keyboard(sub.id, lang),
         )
         _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
@@ -865,7 +889,8 @@ async def _send_notification(
 
 async def _send_test(
     bot, chat_id: int, thread_id: int | None, text: str, *, db: Database | None = None
-) -> bool:
+) -> BaseException | None:
+    """Send a destination probe. Returns None on success, else the Telegram error."""
     kwargs: dict = {"chat_id": chat_id, "text": text}
     if thread_id:
         kwargs["message_thread_id"] = thread_id
@@ -873,14 +898,14 @@ async def _send_test(
         await bot.send_message(**kwargs)
         if db is not None:
             clear_chat_unreachable(db, chat_id)
-        return True
+        return None
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", chat_id, exc)
         if db is not None and _is_chat_unreachable_error(exc):
             apply_chat_unreachable(db, chat_id)
         elif db is not None and _is_user_blocked_error(exc):
             apply_user_blocked(db, chat_id)
-        return False
+        return exc
 
 
 async def purge_expired_blocked_users(context) -> None:
