@@ -56,8 +56,12 @@ def _check_when_stream_helpers() -> None:
         WHEN_STREAM_TEXT_RE,
         format_when_stream_line,
         next_upcoming_segment,
+        reset_when_stream_cooldown,
         unique_streamers_for_chat,
+        _cooldown_allows,
+        _mark_cooldown,
     )
+    from i18n import t
 
     assert WHEN_STREAM_TEXT_RE.match("Когда стрим?")
     assert WHEN_STREAM_TEXT_RE.match("когда стрим")
@@ -116,23 +120,34 @@ def _check_when_stream_helpers() -> None:
         lang="ru",
         username="alpha",
         start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
-        game="Elden Ring",
+        category="Elden Ring",
         show_username=False,
     )
-    assert "MSK" in line and "Elden Ring" in line
+    assert line.startswith("Следующий эфир будет ")
+    assert "Категория Elden Ring" in line
+    assert "MSK" in line
     named = format_when_stream_line(
         lang="en",
         username="alpha",
         start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
-        game="Elden Ring",
+        category="Elden Ring",
         show_username=True,
     )
-    assert "alpha" in named and "Elden Ring" in named
+    assert "alpha" in named and "Category Elden Ring" in named
+    assert t("when_stream_no_schedule", "ru").startswith("Откуда мне-то знать?")
+
+    reset_when_stream_cooldown()
+    assert _cooldown_allows(-1001, now=now)
+    _mark_cooldown(-1001, now=now)
+    assert not _cooldown_allows(-1001, now=now)
+    assert _cooldown_allows(-1001, now=datetime(2030, 1, 1, 12, 1, tzinfo=timezone.utc))
+    reset_when_stream_cooldown()
 
 
 async def _check_when_stream_silent() -> None:
-    from handlers.when_stream import when_stream_command
+    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
 
+    reset_when_stream_cooldown()
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=900001),
         effective_chat=SimpleNamespace(id=-1001, type=ChatType.SUPERGROUP),
@@ -147,6 +162,37 @@ async def _check_when_stream_silent() -> None:
     await when_stream_command(update, ctx)
     update.effective_message.reply_text.assert_not_awaited()
 
+
+async def _check_when_stream_no_schedule() -> None:
+    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
+    from i18n import t
+
+    reset_when_stream_cooldown()
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=900001),
+        effective_chat=SimpleNamespace(id=-1002, type=ChatType.SUPERGROUP),
+        effective_message=AsyncMock(),
+        callback_query=None,
+    )
+    sub = SimpleNamespace(twitch_user_id="42", twitch_username="marfapr")
+    db = MagicMock()
+    db.get_user_locale = MagicMock(return_value="ru")
+    db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub])
+    twitch = MagicMock()
+    twitch.get_channel_schedule = MagicMock(
+        return_value={"segments": [], "vacation": None}
+    )
+    ctx = MagicMock()
+    ctx.application.bot_data = {"db": db, "twitch": twitch}
+    await when_stream_command(update, ctx)
+    update.effective_message.reply_text.assert_awaited_once_with(
+        t("when_stream_no_schedule", "ru")
+    )
+    # Cooldown: second call is silent.
+    update.effective_message.reply_text.reset_mock()
+    await when_stream_command(update, ctx)
+    update.effective_message.reply_text.assert_not_awaited()
+    reset_when_stream_cooldown()
 
 async def _check_group_setup_gate() -> None:
     from bot_helpers import (
@@ -260,3 +306,4 @@ def check_group_chat() -> None:
 
     asyncio.run(_check_group_setup_gate())
     asyncio.run(_check_when_stream_silent())
+    asyncio.run(_check_when_stream_no_schedule())
