@@ -22,6 +22,7 @@ from i18n import (
     main_menu,
     premium_actions_keyboard,
     premium_features_keyboard,
+    premium_gift_keyboard,
     premium_owned_keyboard,
     t,
 )
@@ -218,6 +219,9 @@ def _premium_markup(
     db: Database, user_id: int, lang: str, *, free_chat: bool, force_free: bool
 ) -> InlineKeyboardMarkup | None:
     """Action buttons for free / partial UX; cancel when Stars auto-renew is on."""
+    from handlers.premium_gift import gift_enabled
+
+    show_gift = gift_enabled(db, user_id)
     if force_free:
         return premium_actions_keyboard(
             lang,
@@ -225,11 +229,22 @@ def _premium_markup(
             show_plans=True,
             show_features=True,
             show_owned=False,
+            show_gift=show_gift,
             user_id=user_id,
         )
     st = prem.get_status(db, user_id)
     # Custom 1⭐ (etc.) testers still need pay buttons even with free-chat Premium.
     if (st.permanent or free_chat) and not prem.has_custom_stars_price(user_id):
+        if show_gift:
+            return premium_actions_keyboard(
+                lang,
+                show_trial=False,
+                show_plans=False,
+                show_features=False,
+                show_owned=False,
+                show_gift=True,
+                user_id=user_id,
+            )
         return None
     if (
         st.twitch_active
@@ -238,6 +253,16 @@ def _premium_markup(
         and not st.has_active_features
         and not prem.has_custom_stars_price(user_id)
     ):
+        if show_gift:
+            return premium_actions_keyboard(
+                lang,
+                show_trial=False,
+                show_plans=False,
+                show_features=False,
+                show_owned=False,
+                show_gift=True,
+                user_id=user_id,
+            )
         return None
     full = st.has_full_plan
     show_owned = bool(
@@ -256,6 +281,7 @@ def _premium_markup(
         show_plans=show_plans,
         show_features=show_features,
         show_owned=show_owned,
+        show_gift=show_gift,
         user_id=user_id,
     )
 
@@ -503,6 +529,55 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer()
         context.user_data.pop("premium_feat_sel", None)
         await send_premium_screen(context.bot, user_id, lang, db, edit_message=query.message)
+        return
+
+    if data == "premium:gift":
+        from handlers.premium_gift import gift_enabled
+
+        if not gift_enabled(db, user_id):
+            await query.answer()
+            return
+        await query.answer()
+        await query.edit_message_text(
+            t("premium_gift_intro", lang),
+            reply_markup=premium_gift_keyboard(lang, user_id=user_id),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if data in ("premium:gift_month", "premium:gift_year", "premium:gift_life"):
+        from handlers.premium_gift import gift_enabled
+
+        if not gift_enabled(db, user_id):
+            await query.answer()
+            return
+        await query.answer()
+        gift_kind = data.split(":", 1)[1]
+        plan = prem.gift_plan_kind(gift_kind) or "month"
+        if plan == "year":
+            stars = prem.stars_year_price(user_id)
+            title = t("premium_gift_pay_year_title", lang)
+            desc = t("premium_gift_pay_year_description", lang, stars=stars)
+        elif plan == "life":
+            stars = prem.stars_lifetime_price(user_id)
+            title = t("premium_gift_pay_life_title", lang)
+            desc = t("premium_gift_pay_life_description", lang, stars=stars)
+        else:
+            stars = prem.stars_price(user_id)
+            title = t("premium_gift_pay_month_title", lang)
+            desc = t("premium_gift_pay_month_description", lang, stars=stars)
+        await _send_invoice_link(
+            query,
+            title=title,
+            description=desc,
+            payload=prem.invoice_payload(user_id, gift_kind),
+            stars=stars,
+            lang=lang,
+            subscription_period=None,
+            context=context,
+            user_id=user_id,
+            kind=gift_kind,
+        )
         return
 
     if data == "premium:owned":
@@ -1011,6 +1086,51 @@ async def successful_premium_payment(
     until_unix = 0
     features_s = ""
     stars_eff = stars_paid
+
+    if parsed.kind in prem.GIFT_INVOICE_KINDS:
+        plan = prem.gift_plan_kind(parsed.kind) or "month"
+        if plan == "year":
+            stars_eff = stars_paid or prem.stars_year_price(parsed.user_id)
+        elif plan == "life":
+            stars_eff = stars_paid or prem.stars_lifetime_price(parsed.user_id)
+        else:
+            stars_eff = stars_paid or prem.stars_price(parsed.user_id)
+        gift = db.create_premium_gift(
+            buyer_id=parsed.user_id,
+            kind=plan,
+            charge_id=charge_id,
+            stars=stars_eff,
+        )
+        prem.apply_gift_purchase_commission(
+            db,
+            buyer_id=parsed.user_id,
+            charge_id=charge_id,
+            kind=plan,
+            stars_paid=stars_eff,
+        )
+        db.record_premium_purchase(
+            user_id=parsed.user_id,
+            charge_id=charge_id,
+            kind=parsed.kind,
+            stars=stars_eff,
+            features="",
+            until_unix=0,
+            source=attr.get("source", ""),
+            source_feature=attr.get("feature", ""),
+        )
+        analytics.capture(
+            parsed.user_id,
+            "premium_gift_purchased",
+            {"kind": plan, "stars": stars_eff, **attr},
+        )
+        await msg.reply_text(
+            t("premium_gift_pay_done", lang, user_id=parsed.user_id),
+            parse_mode=ParseMode.HTML,
+        )
+        from handlers.premium_gift import start_gift_customize
+
+        await start_gift_customize(update, context, token=gift.token)
+        return
 
     if parsed.kind in ("month", "legacy"):
         until_unix = until_sub if until_sub > 0 else now + prem.stars_period()

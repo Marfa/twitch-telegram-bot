@@ -396,6 +396,33 @@ def check_handlers() -> None:
         assert "deleted_subscriptions_cart" in toggle_ids
         db.upsert_user(2)
         assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
+        from unittest.mock import patch
+
+        with patch(
+            "handlers.premium_gift.gift_enabled", return_value=True
+        ):
+            kb_gift = _premium_markup(
+                db, 2, "ru", free_chat=True, force_free=False
+            )
+            assert kb_gift is not None
+            assert kb_gift.inline_keyboard[-1][0].callback_data == "premium:gift"
+        from i18n import premium_gift_keyboard
+
+        gkb = premium_gift_keyboard("ru", user_id=2)
+        g_cbs = [
+            b.callback_data
+            for row in gkb.inline_keyboard
+            for b in row
+            if b.callback_data
+        ]
+        assert g_cbs == [
+            "premium:gift_month",
+            "premium:gift_year",
+            "premium:gift_life",
+            "premium:feat_back",
+        ]
+        assert tr("btn_premium_gift", "ru")
+        assert tr("beta_feat_gift_premium", "ru")
     from premium_handlers import premium_benefits_text
 
     _pt = tr(
