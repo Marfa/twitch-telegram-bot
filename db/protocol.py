@@ -545,6 +545,10 @@ class Database(Protocol):
         refresh_token: str,
     ) -> None: ...
 
+    def set_drops_digest_enabled(self, owner_id: int, enabled: bool) -> None: ...
+
+    def list_drops_digest_owner_ids(self) -> list[int]: ...
+
     def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None: ...
 
     def delete_drops_auth(self, owner_id: int) -> None: ...
@@ -558,6 +562,25 @@ class Database(Protocol):
         owner_id: int,
         campaign_id: str,
         subscription_id: int,
+        *,
+        first_seen_at: str,
+    ) -> None: ...
+
+    def has_seen_drop_claim(self, owner_id: int, drop_id: str) -> bool: ...
+
+    def mark_drop_claim_seen(
+        self, owner_id: int, drop_id: str, *, first_seen_at: str
+    ) -> None: ...
+
+    def has_seen_drop_stream(
+        self, owner_id: int, subscription_id: int, stream_id: str
+    ) -> bool: ...
+
+    def mark_drop_stream_seen(
+        self,
+        owner_id: int,
+        subscription_id: int,
+        stream_id: str,
         *,
         first_seen_at: str,
     ) -> None: ...

@@ -3060,12 +3060,23 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
-    from handlers.drops import check_drops, on_drops_subscribe_streams
+    from handlers.drops import (
+        check_drops,
+        on_drops_claim_action,
+        on_drops_digest_toggle,
+        on_drops_get_alerts,
+    )
     from premium_handlers import refresh_premium_twitch_job
 
     app.add_handler(
+        CallbackQueryHandler(on_drops_digest_toggle, pattern=r"^drops_digest:toggle$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_drops_get_alerts, pattern=r"^drops_get:")
+    )
+    app.add_handler(
         CallbackQueryHandler(
-            on_drops_subscribe_streams, pattern=r"^drops_sub_streams:\d+:"
+            on_drops_claim_action, pattern=r"^drops_claim:(?:pause|del):\d+$"
         )
     )
 

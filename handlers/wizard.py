@@ -1698,26 +1698,35 @@ async def _apply_drops_game(
     lang: str,
     game: dict[str, Any],
 ) -> int:
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+    from handlers.drops import create_drops_game_subscription
+
     game_id = str(game.get("id") or game.get("game_id") or "")
     game_name = str(
         game.get("name")
         or game.get("game_name")
-        or game.get("box_art_url")
         or game_id
     )
     if not game_id:
         await update.effective_message.reply_text(t("drops_catalog_fetch_failed", lang))
         return _wz()["CHANNEL"]
-    context.user_data["drops_game_id"] = game_id
-    context.user_data["twitch_username"] = game_name
-    context.user_data["twitch_user_id"] = f"drops:{update.effective_user.id}:{secrets.token_hex(4)}"
-    context.user_data["twitch_display_name"] = game_name
-    context.user_data["notify_on_drops"] = True
-    context.user_data["notify_on_live"] = False
-    await update.effective_message.reply_text(
-        t("drops_game_selected", lang, game=game_name)
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    _sub, key = await create_drops_game_subscription(
+        context.bot,
+        db,
+        user_id,
+        lang,
+        game_id=game_id,
+        game_name=game_name,
+        campaign_name=str(game.get("campaign_name") or game.get("name") or ""),
     )
-    return await _go_template_prompt(update, context, lang)
+    await update.effective_message.reply_text(
+        t(key, lang, game=game_name, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+        reply_markup=_menu(lang, user_id),
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 async def receive_drops_game_callback(
@@ -1739,12 +1748,6 @@ async def receive_drops_game_callback(
         idx = int(raw[2])
     except ValueError:
         return _wz()["CHANNEL"]
-    context.user_data["alert_type"] = "drops"
-    context.user_data["notify_on_drops"] = True
-    context.user_data["notify_on_live"] = False
-    context.user_data["notify_on_end"] = False
-    context.user_data["notify_on_category_change"] = False
-    context.user_data["skip_schedule_check"] = True
     cands = context.user_data.get("drops_catalog_candidates") or []
     if not cands:
         cands = (
@@ -1761,6 +1764,9 @@ async def receive_drops_game_callback(
         {
             "id": str(camp.get("game_id") or ""),
             "name": str(camp.get("game_name") or camp.get("name") or ""),
+            "campaign_name": str(camp.get("name") or ""),
+            "game_id": str(camp.get("game_id") or ""),
+            "game_name": str(camp.get("game_name") or ""),
         },
     )
 
