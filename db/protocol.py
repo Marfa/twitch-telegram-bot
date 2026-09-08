@@ -543,6 +543,8 @@ class Database(Protocol):
         twitch_user_id: str,
         twitch_login: str,
         refresh_token: str,
+        access_token: str = "",
+        access_expires_at: int = 0,
     ) -> None: ...
 
     def set_drops_digest_enabled(self, owner_id: int, enabled: bool) -> None: ...
@@ -550,6 +552,15 @@ class Database(Protocol):
     def list_drops_digest_owner_ids(self) -> list[int]: ...
 
     def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None: ...
+
+    def update_drops_auth_access(
+        self,
+        owner_id: int,
+        *,
+        access_token: str,
+        access_expires_at: int,
+        refresh_token: str | None = None,
+    ) -> None: ...
 
     def delete_drops_auth(self, owner_id: int) -> None: ...
 

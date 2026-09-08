@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import logging
 import re
@@ -28,7 +29,13 @@ logger = logging.getLogger(__name__)
 
 DROPS_BETA_ID = "drops-alerts"
 DROPS_FEATURE_ID = "alert_types"
-_DROPS_STREAM_ALERT_COOLDOWN_SEC = 3600
+
+
+def drops_device_id_for(owner_id: int) -> str:
+    """Stable per-user X-Device-Id so GQL works after bot restarts."""
+    return hashlib.sha256(f"drops-gql-device:{int(owner_id)}".encode()).hexdigest()[:32]
+
+
 _DROPS_CATALOG_LIMIT = 12
 _DIGEST_SEEN_SUB_ID = 0
 _ACTIVE_CAMPAIGN_STATUSES = frozenset({"ACTIVE", "ENABLED", ""})
@@ -69,8 +76,11 @@ async def send_drops_oauth_prompt(
     application: Any | None = None,
 ) -> None:
     """Start Twitch device-code login required for the Drops GQL catalog."""
+    device_id = drops_device_id_for(user_id)
     try:
-        started = await asyncio.to_thread(twitch.start_drops_device_code)
+        started = await asyncio.to_thread(
+            twitch.start_drops_device_code, device_id=device_id
+        )
     except Exception:
         logger.exception("drops device-code start failed user=%s", user_id)
         await bot.send_message(user_id, t("drops_oauth_failed", lang))
@@ -122,6 +132,9 @@ def _access_token_for_owner(
     auth = db.get_drops_auth(owner_id)
     if not auth or not auth.refresh_token:
         return None
+    now = int(time.time())
+    if auth.access_token and int(auth.access_expires_at or 0) > now + 60:
+        return auth.access_token
     try:
         data = twitch.refresh_drops_gql_token(auth.refresh_token)
     except Exception as exc:
@@ -130,12 +143,21 @@ def _access_token_for_owner(
         logger.warning(
             "drops GQL token refresh failed owner=%s status=%s", owner_id, status
         )
+        if auth.access_token and int(auth.access_expires_at or 0) > now:
+            return auth.access_token
         return None
     access = str(data.get("access_token") or "")
+    if not access:
+        return None
     new_refresh = str(data.get("refresh_token") or "") or auth.refresh_token
-    if new_refresh != auth.refresh_token:
-        db.update_drops_auth_refresh(owner_id, new_refresh)
-    return access or None
+    expires_in = max(60, int(data.get("expires_in") or 14400))
+    db.update_drops_auth_access(
+        owner_id,
+        access_token=access,
+        access_expires_at=now + expires_in,
+        refresh_token=new_refresh if new_refresh != auth.refresh_token else None,
+    )
+    return access
 
 
 def _drops_list_label(*, game_name: str, campaign_name: str, game_id: str) -> str:
@@ -201,6 +223,9 @@ async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None
         twitch_user_id=uid,
         twitch_login=login,
         refresh_token=refresh,
+        access_token=access,
+        access_expires_at=int(time.time())
+        + max(60, int(token_info.get("expires_in") or 14400)),
     )
     analytics.capture(user_id, "drops_oauth_linked", {})
     await context.bot.send_message(user_id, t("drops_oauth_done", lang))
@@ -253,10 +278,11 @@ def list_active_drop_campaigns(
     )
     if not access:
         return None
+    device_id = drops_device_id_for(owner_id)
     try:
-        campaigns = twitch.get_viewer_drop_campaigns(access)
+        campaigns = twitch.get_viewer_drop_campaigns(access, device_id=device_id)
         try:
-            claims = twitch.get_inventory_claimed_drops(access)
+            claims = twitch.get_inventory_claimed_drops(access, device_id=device_id)
             _enrich_claimed(campaigns, claims)
         except Exception:
             logger.warning("drops inventory claim enrich failed owner=%s", owner_id)
@@ -440,19 +466,99 @@ def _format_stream_alert(
     )
 
 
-def _stream_alert_cooled_down(db: Database, owner_id: int, sub_id: int) -> bool:
-    """True when another stream-list alert may be sent (never or ≥1h ago)."""
-    raw = db.get_drop_stream_alert_at(owner_id, sub_id)
-    if not raw:
-        return True
+def _mark_streams_seen(
+    db: Database,
+    owner_id: int,
+    sub_id: int,
+    streams: list[dict[str, Any]],
+    *,
+    now_iso: str,
+) -> None:
+    for stream in streams:
+        sid = str(stream.get("id") or "")
+        if sid:
+            db.mark_drop_stream_seen(
+                owner_id, sub_id, sid, first_seen_at=now_iso
+            )
+
+
+async def send_drops_stream_alert(
+    bot: Any,
+    db: Database,
+    twitch: TwitchClient,
+    sub: Subscription,
+    lang: str,
+    *,
+    campaign: dict[str, Any] | None = None,
+    only_new: bool = False,
+) -> int:
+    """Send stream list alert. Returns number of streams included (0 = none sent)."""
+    if sub is None or not is_drops_sub(sub) or not sub.enabled:
+        return 0
+    game_id = (sub.drops_game_id or "").strip()
+    if not game_id:
+        return 0
+    promo_logins = {
+        str(x).strip().lower()
+        for x in prem.list_promo_channel_logins(db)
+        if str(x).strip()
+    }
     try:
-        last = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return True
-    age = (datetime.now(timezone.utc) - last).total_seconds()
-    return age >= _DROPS_STREAM_ALERT_COOLDOWN_SEC
+        streams = await asyncio.to_thread(
+            twitch.get_streams_with_drops,
+            game_id,
+            first=40,
+            limit=40 if only_new else 5,
+            promo_logins=promo_logins,
+        )
+    except Exception:
+        logger.exception("drops streams fetch failed game=%s", game_id)
+        return 0
+    if only_new:
+        streams = [
+            s
+            for s in streams
+            if str(s.get("id") or "")
+            and not db.has_seen_drop_stream(sub.owner_id, sub.id, str(s.get("id")))
+        ][:5]
+    else:
+        streams = streams[:5]
+    if not streams:
+        return 0
+    camp = campaign or {
+        "name": sub.twitch_username,
+        "game_name": sub.twitch_username,
+        "game_id": game_id,
+        "how_to_earn": "",
+        "drops": [],
+    }
+    text = _format_stream_alert(lang, campaign=camp, streams=streams)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        await bot.send_message(
+            sub.chat_id,
+            text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            message_thread_id=sub.thread_id,
+        )
+    except Exception:
+        logger.exception(
+            "drops stream alert failed owner=%s sub=%s", sub.owner_id, sub.id
+        )
+        return 0
+    _mark_streams_seen(db, sub.owner_id, sub.id, streams, now_iso=now_iso)
+    analytics.capture(
+        sub.owner_id,
+        "drops_stream_alert_sent",
+        {
+            "subscription_id": sub.id,
+            "game_id": game_id,
+            "stream_count": len(streams),
+            "only_new": only_new,
+        },
+    )
+    return len(streams)
 
 
 def _digest_alert_keyboard(lang: str, campaign_id: str) -> InlineKeyboardMarkup:
@@ -497,6 +603,8 @@ async def create_drops_game_subscription(
     game_id: str,
     game_name: str,
     campaign_name: str = "",
+    twitch: TwitchClient | None = None,
+    campaign: dict[str, Any] | None = None,
 ) -> tuple[Subscription | None, str]:
     """One-tap private-chat drops subscription. Returns (sub, status_key)."""
     game_id = (game_id or "").strip()
@@ -571,6 +679,17 @@ async def create_drops_game_subscription(
     )
     if not enabled:
         return sub, "drops_subscribed_paused"
+    if sub is not None and twitch is not None:
+        camp = campaign or {
+            "name": drop_display,
+            "game_name": game_display,
+            "game_id": game_id,
+            "how_to_earn": "",
+            "drops": [],
+        }
+        await send_drops_stream_alert(
+            bot, db, twitch, sub, lang, campaign=camp, only_new=False
+        )
     return sub, "drops_subscribed_ok"
 
 
@@ -620,6 +739,8 @@ async def create_drops_from_campaign_payload(
     user_id: int,
     lang: str,
     camp: dict[str, Any],
+    *,
+    twitch: TwitchClient | None = None,
 ) -> str:
     sub, key = await create_drops_game_subscription(
         bot,
@@ -629,6 +750,8 @@ async def create_drops_from_campaign_payload(
         game_id=str(camp.get("game_id") or ""),
         game_name=str(camp.get("game_name") or ""),
         campaign_name=str(camp.get("name") or ""),
+        twitch=twitch,
+        campaign=camp,
     )
     del sub
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
@@ -674,7 +797,12 @@ async def on_drops_get_alerts(
         await context.bot.send_message(user_id, t("drops_catalog_fetch_failed", lang))
         return
     text = await create_drops_from_campaign_payload(
-        context.bot, db, user_id, lang, camp
+        context.bot,
+        db,
+        user_id,
+        lang,
+        camp,
+        twitch=context.application.bot_data["twitch"],
     )
     await context.bot.send_message(user_id, text, reply_markup=_menu(lang, user_id))
 
@@ -738,7 +866,9 @@ async def _check_drops_digest(
             continue
         try:
             campaigns = await asyncio.to_thread(
-                twitch.get_viewer_drop_campaigns, access
+                twitch.get_viewer_drop_campaigns,
+                access,
+                device_id=drops_device_id_for(owner_id),
             )
         except Exception:
             logger.exception("drops digest fetch failed owner=%s", owner_id)
@@ -820,6 +950,7 @@ async def _check_drops_streams(
     twitch: TwitchClient,
     now_iso: str,
 ) -> None:
+    del now_iso
     subs = db.get_enabled_drops_subscriptions()
     if not subs:
         return
@@ -837,7 +968,9 @@ async def _check_drops_streams(
         if access:
             try:
                 all_c = await asyncio.to_thread(
-                    twitch.get_viewer_drop_campaigns, access
+                    twitch.get_viewer_drop_campaigns,
+                    access,
+                    device_id=drops_device_id_for(owner_id),
                 )
                 for c in all_c:
                     gid = str(c.get("game_id") or "")
@@ -847,67 +980,21 @@ async def _check_drops_streams(
                 logger.exception("drops stream campaigns failed owner=%s", owner_id)
 
         lang = _user_lang(db, owner_id)
-        promo_logins = {
-            str(x).strip().lower()
-            for x in prem.list_promo_channel_logins(db)
-            if str(x).strip()
-        }
         for sub in owner_subs:
             game_id = (sub.drops_game_id or "").strip()
             if not game_id:
                 continue
-            if not _stream_alert_cooled_down(db, owner_id, sub.id):
-                continue
-            try:
-                streams = await asyncio.to_thread(
-                    twitch.get_streams_with_drops,
-                    game_id,
-                    first=40,
-                    limit=5,
-                    promo_logins=promo_logins,
-                )
-            except Exception:
-                logger.exception("drops streams fetch failed game=%s", game_id)
-                continue
-            if not streams:
-                continue
-            camps = campaigns_by_game.get(game_id) or [
-                {
-                    "name": sub.twitch_username,
-                    "game_name": sub.twitch_username,
-                    "game_id": game_id,
-                    "how_to_earn": "",
-                    "drops": [],
-                }
-            ]
-            campaign = camps[0]
-            text = _format_stream_alert(
-                lang, campaign=campaign, streams=streams
+            camps = campaigns_by_game.get(game_id) or None
+            campaign = camps[0] if camps else None
+            await send_drops_stream_alert(
+                context.bot,
+                db,
+                twitch,
+                sub,
+                lang,
+                campaign=campaign,
+                only_new=True,
             )
-            try:
-                await context.bot.send_message(
-                    sub.chat_id,
-                    text,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                    message_thread_id=sub.thread_id,
-                )
-                db.mark_drop_stream_alert(owner_id, sub.id, at=now_iso)
-                analytics.capture(
-                    owner_id,
-                    "drops_stream_alert_sent",
-                    {
-                        "subscription_id": sub.id,
-                        "game_id": game_id,
-                        "stream_count": len(streams),
-                    },
-                )
-            except Exception:
-                logger.exception(
-                    "drops stream alert failed owner=%s sub=%s",
-                    owner_id,
-                    sub.id,
-                )
 
 
 async def _check_drops_claims(
@@ -932,7 +1019,9 @@ async def _check_drops_claims(
             continue
         try:
             claims = await asyncio.to_thread(
-                twitch.get_inventory_claimed_drops, access
+                twitch.get_inventory_claimed_drops,
+                access,
+                device_id=drops_device_id_for(owner_id),
             )
         except Exception:
             logger.exception("drops claims fetch failed owner=%s", owner_id)

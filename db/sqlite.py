@@ -261,6 +261,19 @@ class SqliteDatabase:
                 "ALTER TABLE drops_auth ADD COLUMN digest_enabled "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        drops_auth_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(drops_auth)")
+        }
+        if drops_auth_cols and "access_token" not in drops_auth_cols:
+            conn.execute(
+                "ALTER TABLE drops_auth ADD COLUMN access_token "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        if drops_auth_cols and "access_expires_at" not in drops_auth_cols:
+            conn.execute(
+                "ALTER TABLE drops_auth ADD COLUMN access_expires_at "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS drop_claim_seen (
@@ -527,7 +540,9 @@ class SqliteDatabase:
                 twitch_user_id TEXT NOT NULL DEFAULT '',
                 twitch_login TEXT NOT NULL DEFAULT '',
                 refresh_token TEXT NOT NULL DEFAULT '',
-                digest_enabled INTEGER NOT NULL DEFAULT 0
+                digest_enabled INTEGER NOT NULL DEFAULT 0,
+                access_token TEXT NOT NULL DEFAULT '',
+                access_expires_at INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -3675,8 +3690,16 @@ class SqliteDatabase:
             digest_enabled=bool(row["digest_enabled"])
             if "digest_enabled" in row.keys()
             else False,
+            access_token=str(row["access_token"] or "")
+            if "access_token" in row.keys()
+            else "",
+            access_expires_at=int(row["access_expires_at"] or 0)
+            if "access_expires_at" in row.keys()
+            else 0,
         )
         auth.refresh_token = decrypt_secret(auth.refresh_token)
+        if auth.access_token:
+            auth.access_token = decrypt_secret(auth.access_token)
         return auth
 
     def upsert_drops_auth(
@@ -3686,22 +3709,35 @@ class SqliteDatabase:
         twitch_user_id: str,
         twitch_login: str,
         refresh_token: str,
+        access_token: str = "",
+        access_expires_at: int = 0,
     ) -> None:
         from token_crypto import encrypt_secret
 
         enc = encrypt_secret(refresh_token) if refresh_token else ""
+        enc_at = encrypt_secret(access_token) if access_token else ""
         with self._conn() as conn:
             conn.execute(
                 """
                 INSERT INTO drops_auth (
-                    owner_id, twitch_user_id, twitch_login, refresh_token
-                ) VALUES (?, ?, ?, ?)
+                    owner_id, twitch_user_id, twitch_login, refresh_token,
+                    access_token, access_expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(owner_id) DO UPDATE SET
                     twitch_user_id = excluded.twitch_user_id,
                     twitch_login = excluded.twitch_login,
-                    refresh_token = excluded.refresh_token
+                    refresh_token = excluded.refresh_token,
+                    access_token = excluded.access_token,
+                    access_expires_at = excluded.access_expires_at
                 """,
-                (owner_id, twitch_user_id, twitch_login, enc),
+                (
+                    owner_id,
+                    twitch_user_id,
+                    twitch_login,
+                    enc,
+                    enc_at,
+                    int(access_expires_at or 0),
+                ),
             )
 
     def set_drops_digest_enabled(self, owner_id: int, enabled: bool) -> None:
@@ -3733,6 +3769,38 @@ class SqliteDatabase:
                 "UPDATE drops_auth SET refresh_token = ? WHERE owner_id = ?",
                 (enc, owner_id),
             )
+
+    def update_drops_auth_access(
+        self,
+        owner_id: int,
+        *,
+        access_token: str,
+        access_expires_at: int,
+        refresh_token: str | None = None,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc_at = encrypt_secret(access_token) if access_token else ""
+        with self._conn() as conn:
+            if refresh_token is not None:
+                enc_rt = encrypt_secret(refresh_token) if refresh_token else ""
+                conn.execute(
+                    """
+                    UPDATE drops_auth
+                    SET access_token = ?, access_expires_at = ?, refresh_token = ?
+                    WHERE owner_id = ?
+                    """,
+                    (enc_at, int(access_expires_at or 0), enc_rt, owner_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE drops_auth
+                    SET access_token = ?, access_expires_at = ?
+                    WHERE owner_id = ?
+                    """,
+                    (enc_at, int(access_expires_at or 0), owner_id),
+                )
 
     def delete_drops_auth(self, owner_id: int) -> None:
         with self._conn() as conn:

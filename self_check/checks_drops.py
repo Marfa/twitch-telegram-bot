@@ -192,7 +192,9 @@ def _check_drops_catalog_uses_access_token() -> None:
     twitch.get_inventory_claimed_drops.return_value = {}
     out = list_active_drop_campaigns(db, twitch, 7, access_token="fresh-at")
     assert out and out[0]["id"] == "c1"
-    twitch.get_viewer_drop_campaigns.assert_called_once_with("fresh-at")
+    twitch.get_viewer_drop_campaigns.assert_called_once()
+    assert twitch.get_viewer_drop_campaigns.call_args.args[0] == "fresh-at"
+    assert twitch.get_viewer_drop_campaigns.call_args.kwargs.get("device_id")
     twitch.refresh_drops_gql_token.assert_not_called()
 
 
@@ -297,23 +299,29 @@ def _check_drops_digest_db() -> None:
         )
         assert db.has_seen_drop_stream(7, 1, "s1")
         assert db.get_drop_stream_alert_at(7, 1) is None
-        from datetime import datetime, timedelta, timezone
-
-        from handlers.drops import _stream_alert_cooled_down
-
-        recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-        db.mark_drop_stream_alert(7, 1, at=recent)
-        assert db.get_drop_stream_alert_at(7, 1) == recent
-        assert not _stream_alert_cooled_down(db, 7, 1)
-        old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        db.mark_drop_stream_alert(7, 1, at=old)
-        assert _stream_alert_cooled_down(db, 7, 1)
+        db.mark_drop_stream_alert(7, 1, at="2026-01-01T00:00:00+00:00")
+        assert db.get_drop_stream_alert_at(7, 1) == "2026-01-01T00:00:00+00:00"
+        db.upsert_drops_auth(
+            7,
+            twitch_user_id="1",
+            twitch_login="u",
+            refresh_token="rt",
+            access_token="at",
+            access_expires_at=9999999999,
+        )
+        auth2 = db.get_drops_auth(7)
+        assert auth2 is not None and auth2.access_token == "at"
+        assert auth2.access_expires_at == 9999999999
 
 
 def _check_drops_list_label_and_oauth_keep() -> None:
-    from handlers.drops import _access_token_for_owner, _drops_list_label
+    from handlers.drops import _access_token_for_owner, _drops_list_label, drops_device_id_for
     from i18n import t
     from unittest.mock import MagicMock
+
+    assert len(drops_device_id_for(1)) == 32
+    assert drops_device_id_for(1) == drops_device_id_for(1)
+    assert drops_device_id_for(1) != drops_device_id_for(2)
 
     assert _drops_list_label(
         game_name="Hearthstone", campaign_name="Hero Pack", game_id="1"
@@ -331,9 +339,16 @@ def _check_drops_list_label_and_oauth_keep() -> None:
     assert "без мастера" not in ru
 
     db = MagicMock()
-    auth = SimpleNamespace(refresh_token="rt")
+    auth = SimpleNamespace(
+        refresh_token="rt", access_token="cached", access_expires_at=10**11
+    )
     db.get_drops_auth.return_value = auth
     twitch = MagicMock()
+    assert _access_token_for_owner(db, twitch, 1) == "cached"
+    twitch.refresh_drops_gql_token.assert_not_called()
+
+    auth2 = SimpleNamespace(refresh_token="rt", access_token="", access_expires_at=0)
+    db.get_drops_auth.return_value = auth2
 
     class _Resp:
         status_code = 401

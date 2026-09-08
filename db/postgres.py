@@ -652,6 +652,18 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE drops_auth
+                ADD COLUMN IF NOT EXISTS access_token TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE drops_auth
+                ADD COLUMN IF NOT EXISTS access_expires_at BIGINT NOT NULL DEFAULT 0
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS drop_campaign_seen (
                     owner_id BIGINT NOT NULL,
                     campaign_id TEXT NOT NULL,
@@ -4027,8 +4039,16 @@ class PostgresDatabase:
             digest_enabled=bool(row["digest_enabled"])
             if "digest_enabled" in row.keys()
             else False,
+            access_token=str(row["access_token"] or "")
+            if "access_token" in row.keys()
+            else "",
+            access_expires_at=int(row["access_expires_at"] or 0)
+            if "access_expires_at" in row.keys()
+            else 0,
         )
         auth.refresh_token = decrypt_secret(auth.refresh_token)
+        if auth.access_token:
+            auth.access_token = decrypt_secret(auth.access_token)
         return auth
 
     def upsert_drops_auth(
@@ -4038,23 +4058,36 @@ class PostgresDatabase:
         twitch_user_id: str,
         twitch_login: str,
         refresh_token: str,
+        access_token: str = "",
+        access_expires_at: int = 0,
     ) -> None:
         from token_crypto import encrypt_secret
 
         enc = encrypt_secret(refresh_token) if refresh_token else ""
+        enc_at = encrypt_secret(access_token) if access_token else ""
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
                 """
                 INSERT INTO drops_auth (
-                    owner_id, twitch_user_id, twitch_login, refresh_token
-                ) VALUES (%s, %s, %s, %s)
+                    owner_id, twitch_user_id, twitch_login, refresh_token,
+                    access_token, access_expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT(owner_id) DO UPDATE SET
                     twitch_user_id = EXCLUDED.twitch_user_id,
                     twitch_login = EXCLUDED.twitch_login,
-                    refresh_token = EXCLUDED.refresh_token
+                    refresh_token = EXCLUDED.refresh_token,
+                    access_token = EXCLUDED.access_token,
+                    access_expires_at = EXCLUDED.access_expires_at
                 """,
-                (owner_id, twitch_user_id, twitch_login, enc),
+                (
+                    owner_id,
+                    twitch_user_id,
+                    twitch_login,
+                    enc,
+                    enc_at,
+                    int(access_expires_at or 0),
+                ),
             )
 
     def set_drops_digest_enabled(self, owner_id: int, enabled: bool) -> None:
@@ -4088,6 +4121,39 @@ class PostgresDatabase:
                 "UPDATE drops_auth SET refresh_token = %s WHERE owner_id = %s",
                 (enc, owner_id),
             )
+
+    def update_drops_auth_access(
+        self,
+        owner_id: int,
+        *,
+        access_token: str,
+        access_expires_at: int,
+        refresh_token: str | None = None,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc_at = encrypt_secret(access_token) if access_token else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if refresh_token is not None:
+                enc_rt = encrypt_secret(refresh_token) if refresh_token else ""
+                cur.execute(
+                    """
+                    UPDATE drops_auth
+                    SET access_token = %s, access_expires_at = %s, refresh_token = %s
+                    WHERE owner_id = %s
+                    """,
+                    (enc_at, int(access_expires_at or 0), enc_rt, owner_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE drops_auth
+                    SET access_token = %s, access_expires_at = %s
+                    WHERE owner_id = %s
+                    """,
+                    (enc_at, int(access_expires_at or 0), owner_id),
+                )
 
     def delete_drops_auth(self, owner_id: int) -> None:
         with self._conn() as conn:
