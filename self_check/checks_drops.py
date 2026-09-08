@@ -170,6 +170,30 @@ def _check_drops_device_oauth_only() -> None:
     assert user_has_twitch_oauth(_WithDrops(), 1)  # type: ignore[arg-type]
 
 
+def _check_drops_catalog_uses_access_token() -> None:
+    """Fresh device-code access token must be used without an immediate refresh."""
+    from handlers.drops import list_active_drop_campaigns
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    db.get_drops_auth.return_value = SimpleNamespace(refresh_token="rt")
+    twitch = MagicMock()
+    twitch.get_viewer_drop_campaigns.return_value = [
+        {
+            "id": "c1",
+            "name": "Camp",
+            "status": "ACTIVE",
+            "game_id": "1",
+            "game_name": "Game",
+        }
+    ]
+    out = list_active_drop_campaigns(db, twitch, 7, access_token="fresh-at")
+    assert out and out[0]["id"] == "c1"
+    twitch.get_viewer_drop_campaigns.assert_called_once_with("fresh-at")
+    twitch.refresh_drops_gql_token.assert_not_called()
+
+
 def run() -> None:
     _check_drops_alert_type_keyboard_last()
     _check_drops_payload_and_migrate()
@@ -179,6 +203,7 @@ def run() -> None:
     _check_drops_active_cap_on_bulk()
     _check_drops_oauth_prompt_html()
     _check_drops_device_oauth_only()
+    _check_drops_catalog_uses_access_token()
 
 
 if __name__ == "__main__":
