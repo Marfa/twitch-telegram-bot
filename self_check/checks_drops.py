@@ -186,12 +186,55 @@ def _check_drops_catalog_uses_access_token() -> None:
             "status": "ACTIVE",
             "game_id": "1",
             "game_name": "Game",
+            "drops": [],
         }
     ]
+    twitch.get_inventory_claimed_drops.return_value = {}
     out = list_active_drop_campaigns(db, twitch, 7, access_token="fresh-at")
     assert out and out[0]["id"] == "c1"
     twitch.get_viewer_drop_campaigns.assert_called_once_with("fresh-at")
     twitch.refresh_drops_gql_token.assert_not_called()
+
+
+def _check_drops_digest_and_tags() -> None:
+    from i18n import drops_catalog_keyboard, t
+    from twitch import TwitchClient
+
+    assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Enabled"]})
+    assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Включены"]})
+    assert not TwitchClient.stream_has_drops_tag({"tags": ["English"]})
+
+    kb = drops_catalog_keyboard(
+        "ru",
+        [{"name": "C", "game_name": "G", "id": "1", "claimed": True}],
+        digest_enabled=True,
+    )
+    labels = [b.text for r in kb.inline_keyboard for b in r]
+    assert any("Подписаться на новые Drops" in (x or "") for x in labels)
+    assert any((x or "").startswith("✅") for x in labels)
+    assert any("получено" in (x or "") for x in labels)
+    assert "Получать оповещения" in t("drops_get_alerts_btn", "ru")
+    assert "Вы получили Drops" in t("drops_claim_alert_body", "ru", name="X")
+
+
+def _check_drops_digest_db() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "t.db")
+        db.upsert_user(7)
+        db.upsert_drops_auth(
+            7, twitch_user_id="1", twitch_login="u", refresh_token="rt"
+        )
+        assert 7 not in db.list_drops_digest_owner_ids()
+        db.set_drops_digest_enabled(7, True)
+        auth = db.get_drops_auth(7)
+        assert auth is not None and auth.digest_enabled
+        assert 7 in db.list_drops_digest_owner_ids()
+        db.mark_drop_claim_seen(7, "d1", first_seen_at="2026-01-01T00:00:00Z")
+        assert db.has_seen_drop_claim(7, "d1")
+        db.mark_drop_stream_seen(
+            7, 1, "s1", first_seen_at="2026-01-01T00:00:00Z"
+        )
+        assert db.has_seen_drop_stream(7, 1, "s1")
 
 
 def run() -> None:
@@ -204,6 +247,8 @@ def run() -> None:
     _check_drops_oauth_prompt_html()
     _check_drops_device_oauth_only()
     _check_drops_catalog_uses_access_token()
+    _check_drops_digest_and_tags()
+    _check_drops_digest_db()
 
 
 if __name__ == "__main__":

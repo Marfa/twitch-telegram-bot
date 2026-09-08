@@ -639,8 +639,15 @@ class PostgresDatabase:
                     owner_id BIGINT PRIMARY KEY,
                     twitch_user_id TEXT NOT NULL DEFAULT '',
                     twitch_login TEXT NOT NULL DEFAULT '',
-                    refresh_token TEXT NOT NULL DEFAULT ''
+                    refresh_token TEXT NOT NULL DEFAULT '',
+                    digest_enabled BOOLEAN NOT NULL DEFAULT FALSE
                 )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE drops_auth
+                ADD COLUMN IF NOT EXISTS digest_enabled BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             cur.execute(
@@ -651,6 +658,27 @@ class PostgresDatabase:
                     subscription_id BIGINT NOT NULL,
                     first_seen_at TIMESTAMPTZ NOT NULL,
                     PRIMARY KEY (owner_id, campaign_id, subscription_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS drop_claim_seen (
+                    owner_id BIGINT NOT NULL,
+                    drop_id TEXT NOT NULL,
+                    first_seen_at TIMESTAMPTZ NOT NULL,
+                    PRIMARY KEY (owner_id, drop_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS drop_stream_seen (
+                    owner_id BIGINT NOT NULL,
+                    subscription_id BIGINT NOT NULL,
+                    stream_id TEXT NOT NULL,
+                    first_seen_at TIMESTAMPTZ NOT NULL,
+                    PRIMARY KEY (owner_id, subscription_id, stream_id)
                 )
                 """
             )
@@ -3996,6 +4024,9 @@ class PostgresDatabase:
             twitch_user_id=str(row["twitch_user_id"] or ""),
             twitch_login=str(row["twitch_login"] or ""),
             refresh_token=str(row["refresh_token"] or ""),
+            digest_enabled=bool(row["digest_enabled"])
+            if "digest_enabled" in row.keys()
+            else False,
         )
         auth.refresh_token = decrypt_secret(auth.refresh_token)
         return auth
@@ -4025,6 +4056,27 @@ class PostgresDatabase:
                 """,
                 (owner_id, twitch_user_id, twitch_login, enc),
             )
+
+    def set_drops_digest_enabled(self, owner_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE drops_auth SET digest_enabled = %s WHERE owner_id = %s",
+                (bool(enabled), owner_id),
+            )
+
+    def list_drops_digest_owner_ids(self) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT owner_id FROM drops_auth
+                WHERE digest_enabled = TRUE
+                  AND COALESCE(refresh_token, '') != ''
+                """
+            )
+            rows = cur.fetchall()
+        return [int(r["owner_id"]) for r in rows]
 
     def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None:
         from token_crypto import encrypt_secret
@@ -4074,6 +4126,67 @@ class PostgresDatabase:
                 ON CONFLICT DO NOTHING
                 """,
                 (owner_id, campaign_id, subscription_id, first_seen_at),
+            )
+
+    def has_seen_drop_claim(self, owner_id: int, drop_id: str) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM drop_claim_seen
+                WHERE owner_id = %s AND drop_id = %s
+                """,
+                (owner_id, drop_id),
+            )
+            return cur.fetchone() is not None
+
+    def mark_drop_claim_seen(
+        self, owner_id: int, drop_id: str, *, first_seen_at: str
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO drop_claim_seen (
+                    owner_id, drop_id, first_seen_at
+                ) VALUES (%s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (owner_id, drop_id, first_seen_at),
+            )
+
+    def has_seen_drop_stream(
+        self, owner_id: int, subscription_id: int, stream_id: str
+    ) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM drop_stream_seen
+                WHERE owner_id = %s AND subscription_id = %s AND stream_id = %s
+                """,
+                (owner_id, subscription_id, stream_id),
+            )
+            return cur.fetchone() is not None
+
+    def mark_drop_stream_seen(
+        self,
+        owner_id: int,
+        subscription_id: int,
+        stream_id: str,
+        *,
+        first_seen_at: str,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO drop_stream_seen (
+                    owner_id, subscription_id, stream_id, first_seen_at
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (owner_id, subscription_id, stream_id, first_seen_at),
             )
 
     def get_chat_send_count(self, owner_id: int, day: str) -> int:

@@ -49,7 +49,12 @@ _GQL_VIEWER_DROPS_DASHBOARD_HASH = (
 _GQL_DROP_CAMPAIGN_DETAILS_HASH = (
     "039277bf98f3130929262cc7c6efd9c141ca3749cb6dca442fc8ead9a53f77c1"
 )
-_DROPS_ENABLED_TAG = "Drops Enabled"
+_GQL_INVENTORY_HASH = (
+    "8337eb8541b314040b0edde0c09c5c7a2783ba1960aa9edfbf3bac16d0fec404"
+)
+# Helix stream tags for Drops-enabled (EN + RU), compared casefold.
+_DROPS_ENABLED_TAG_NEEDLES = ("drops enabled", "drops включены")
+_DROPS_ENABLED_TAG = "Drops Enabled"  # back-compat label
 _CHANNEL_ABOUT_GQL = """
 query ChannelAboutLinks($login: String!) {
   user(login: $login) {
@@ -413,13 +418,23 @@ class TwitchClient:
         game_id = str(game.get("id") or raw.get("gameId") or "").strip()
         game_name = str(game.get("displayName") or game.get("name") or "").strip()
         status = str(raw.get("status") or "").strip().upper()
+        details = str(
+            raw.get("details")
+            or raw.get("description")
+            or raw.get("detailsURL")
+            or ""
+        ).strip()
         drops_raw = raw.get("timeBasedDrops") or raw.get("timeBasedDrop") or []
         if isinstance(drops_raw, dict):
             drops_raw = [drops_raw]
         drops: list[dict[str, Any]] = []
+        how_parts: list[str] = []
+        all_claimed = True
+        any_drop = False
         for d in drops_raw if isinstance(drops_raw, list) else []:
             if not isinstance(d, dict):
                 continue
+            any_drop = True
             required = d.get("requiredMinutesWatched")
             try:
                 minutes = int(required) if required is not None else None
@@ -434,14 +449,26 @@ class TwitchClient:
                         names.append(str(node["name"]))
                     elif isinstance(edge, dict) and edge.get("name"):
                         names.append(str(edge["name"]))
+            self_edge = d.get("self") if isinstance(d.get("self"), dict) else {}
+            is_claimed = bool(self_edge.get("isClaimed")) if self_edge else False
+            if not is_claimed:
+                all_claimed = False
+            drop_name = str(d.get("name") or "")
             drops.append(
                 {
                     "id": str(d.get("id") or ""),
-                    "name": str(d.get("name") or ""),
+                    "name": drop_name,
                     "required_minutes": minutes,
                     "benefit_names": names,
+                    "is_claimed": is_claimed,
                 }
             )
+            bit = drop_name or (", ".join(names) if names else "")
+            if minutes is not None and bit:
+                how_parts.append(f"{bit}: {minutes} min")
+            elif bit:
+                how_parts.append(bit)
+        how_to_earn = details or "; ".join(how_parts)
         return {
             "id": campaign_id,
             "name": str(raw.get("name") or "").strip(),
@@ -450,6 +477,8 @@ class TwitchClient:
             "game_name": game_name,
             "starts_at": str(raw.get("startAt") or raw.get("startsAt") or ""),
             "ends_at": str(raw.get("endAt") or raw.get("endsAt") or ""),
+            "how_to_earn": how_to_earn,
+            "claimed": bool(any_drop and all_claimed),
             "drops": drops,
         }
 
@@ -492,6 +521,52 @@ class TwitchClient:
             return None
         return self._parse_drop_campaign(raw)
 
+    def get_inventory_claimed_drops(
+        self, access_token: str
+    ) -> dict[str, dict[str, Any]]:
+        """Map drop_id -> {name, campaign_id, game_id, is_claimed} from Inventory GQL."""
+        body = self._gql_persisted(
+            operation_name="Inventory",
+            sha256_hash=_GQL_INVENTORY_HASH,
+            variables={"fetchRewardCampaigns": False},
+            access_token=access_token,
+        )
+        current = ((body.get("data") or {}).get("currentUser") or {})
+        inventory = current.get("inventory") or {}
+        if not isinstance(inventory, dict):
+            inventory = {}
+        out: dict[str, dict[str, Any]] = {}
+        campaigns = inventory.get("dropCampaignsInProgress") or []
+        for camp in campaigns if isinstance(campaigns, list) else []:
+            if not isinstance(camp, dict):
+                continue
+            campaign_id = str(camp.get("id") or "")
+            game = camp.get("game") if isinstance(camp.get("game"), dict) else {}
+            game_id = str(game.get("id") or "")
+            for d in camp.get("timeBasedDrops") or []:
+                if not isinstance(d, dict):
+                    continue
+                drop_id = str(d.get("id") or "").strip()
+                if not drop_id:
+                    continue
+                self_edge = d.get("self") if isinstance(d.get("self"), dict) else {}
+                out[drop_id] = {
+                    "id": drop_id,
+                    "name": str(d.get("name") or ""),
+                    "campaign_id": campaign_id,
+                    "game_id": game_id,
+                    "is_claimed": bool(self_edge.get("isClaimed")),
+                }
+        return out
+
+    @staticmethod
+    def stream_has_drops_tag(stream: dict[str, Any]) -> bool:
+        tags = stream.get("tags") or []
+        if not isinstance(tags, list):
+            return False
+        lowered = {str(t).casefold() for t in tags if t}
+        return any(needle in lowered for needle in _DROPS_ENABLED_TAG_NEEDLES)
+
     def get_streams_with_drops(
         self,
         game_id: str,
@@ -500,13 +575,9 @@ class TwitchClient:
         first: int = 20,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        """Live streams in a game that advertise the Drops Enabled tag (Helix heuristic)."""
+        """Live streams in a game that advertise a Drops Enabled tag (EN/RU)."""
         streams = self.get_streams_by_game(game_id, language=language, first=first)
-        tagged = [
-            s
-            for s in streams
-            if _DROPS_ENABLED_TAG in (s.get("tags") or [])
-        ]
+        tagged = [s for s in streams if self.stream_has_drops_tag(s)]
         return tagged[: max(0, limit)]
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:

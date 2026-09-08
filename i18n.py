@@ -760,13 +760,27 @@ def drops_game_pick_keyboard(
 
 
 def drops_catalog_keyboard(
-    lang: str, campaigns: list[dict[str, str]]
+    lang: str,
+    campaigns: list[dict[str, str]],
+    *,
+    digest_enabled: bool = False,
 ) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+    mark = "✅ " if digest_enabled else "⬜️ "
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                mark + t("drops_digest_checkbox", lang),
+                callback_data="drops_digest:toggle",
+            )
+        ]
+    ]
+    claimed_mark = t("drops_claimed_mark", lang)
     for i, c in enumerate(campaigns):
         game = (c.get("game_name") or "").strip()
         name = (c.get("name") or c.get("id") or "?").strip()
         label = f"{game} — {name}" if game else name
+        if c.get("claimed"):
+            label = f"{claimed_mark} {label}"
         rows.append(
             [
                 InlineKeyboardButton(

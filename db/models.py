@@ -522,6 +522,7 @@ class DropsAuth:
     twitch_user_id: str
     twitch_login: str
     refresh_token: str
+    digest_enabled: bool = False
 
 
 def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
