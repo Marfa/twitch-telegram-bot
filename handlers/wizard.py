@@ -1721,6 +1721,8 @@ async def _apply_drops_game(
         game_id=game_id,
         game_name=game_name,
         campaign_name=campaign_name,
+        twitch=context.application.bot_data["twitch"],
+        campaign=game,
     )
     drop = campaign_name or game_name
     await update.effective_message.reply_text(

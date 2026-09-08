@@ -183,7 +183,10 @@ class TwitchClient:
             random.choice("0123456789abcdef") for _ in range(32)
         )
 
-    def _drops_gql_headers(self, access_token: str, *, client_id: str) -> dict[str, str]:
+    def _drops_gql_headers(
+        self, access_token: str, *, client_id: str, device_id: str | None = None
+    ) -> dict[str, str]:
+        did = (device_id or self._drops_device_id or "").strip() or self._drops_device_id
         return {
             "Accept": "*/*",
             "Accept-Language": "en-US",
@@ -194,17 +197,18 @@ class TwitchClient:
             "Origin": "https://www.twitch.tv",
             "Referer": "https://www.twitch.tv/",
             "User-Agent": _TWITCH_DROPS_GQL_USER_AGENT,
-            "X-Device-Id": self._drops_device_id,
+            "X-Device-Id": did,
         }
 
-    def _drops_oauth_headers(self) -> dict[str, str]:
+    def _drops_oauth_headers(self, *, device_id: str | None = None) -> dict[str, str]:
+        did = (device_id or self._drops_device_id or "").strip() or self._drops_device_id
         return {
             "Accept": "application/json",
             "Client-Id": _TWITCH_DROPS_GQL_CLIENT_ID,
             "Origin": "https://www.twitch.tv",
             "Referer": "https://www.twitch.tv/",
             "User-Agent": _TWITCH_DROPS_GQL_USER_AGENT,
-            "X-Device-Id": self._drops_device_id,
+            "X-Device-Id": did,
         }
 
     def parse_username(self, text: str) -> str | None:
@@ -366,6 +370,7 @@ class TwitchClient:
         variables: dict[str, Any],
         access_token: str,
         client_id: str | None = None,
+        device_id: str | None = None,
     ) -> dict[str, Any]:
         """Undocumented gql.twitch.tv persisted query (may break without notice).
 
@@ -373,7 +378,9 @@ class TwitchClient:
         (device-code), not a Helix token from our confidential app Client-ID.
         """
         cid = (client_id or _TWITCH_DROPS_GQL_CLIENT_ID).strip()
-        headers = self._drops_gql_headers(access_token, client_id=cid)
+        headers = self._drops_gql_headers(
+            access_token, client_id=cid, device_id=device_id
+        )
         payload = {
             "operationName": operation_name,
             "variables": variables,
@@ -482,13 +489,16 @@ class TwitchClient:
             "drops": drops,
         }
 
-    def get_viewer_drop_campaigns(self, access_token: str) -> list[dict[str, Any]]:
+    def get_viewer_drop_campaigns(
+        self, access_token: str, *, device_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """Active drop campaigns visible to the authenticated user (GQL)."""
         body = self._gql_persisted(
             operation_name="ViewerDropsDashboard",
             sha256_hash=_GQL_VIEWER_DROPS_DASHBOARD_HASH,
             variables={"fetchRewardCampaigns": False},
             access_token=access_token,
+            device_id=device_id,
         )
         data = body.get("data") or {}
         current = data.get("currentUser")
@@ -522,7 +532,7 @@ class TwitchClient:
         return self._parse_drop_campaign(raw)
 
     def get_inventory_claimed_drops(
-        self, access_token: str
+        self, access_token: str, *, device_id: str | None = None
     ) -> dict[str, dict[str, Any]]:
         """Map drop_id -> {name, campaign_id, game_id, is_claimed} from Inventory GQL."""
         body = self._gql_persisted(
@@ -530,6 +540,7 @@ class TwitchClient:
             sha256_hash=_GQL_INVENTORY_HASH,
             variables={"fetchRewardCampaigns": False},
             access_token=access_token,
+            device_id=device_id,
         )
         current = ((body.get("data") or {}).get("currentUser") or {})
         inventory = current.get("inventory") or {}
@@ -1082,11 +1093,13 @@ class TwitchClient:
         resp.raise_for_status()
         return resp.json()
 
-    def start_drops_device_code(self) -> dict[str, Any]:
+    def start_drops_device_code(
+        self, *, device_id: str | None = None
+    ) -> dict[str, Any]:
         """Device-code login for Drops GQL (Android public Client-ID, no secret)."""
         resp = self._session.post(
             "https://id.twitch.tv/oauth2/device",
-            headers=self._drops_oauth_headers(),
+            headers=self._drops_oauth_headers(device_id=device_id),
             data={
                 "client_id": _TWITCH_DROPS_GQL_CLIENT_ID,
                 "scopes": "",
