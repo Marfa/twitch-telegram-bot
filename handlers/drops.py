@@ -23,7 +23,7 @@ from twitch import DROPS_OAUTH_SCOPES, TwitchClient
 logger = logging.getLogger(__name__)
 
 DROPS_BETA_ID = "drops-alerts"
-DROPS_FEATURE_ID = "drops_alerts"
+DROPS_FEATURE_ID = "alert_types"
 _DROPS_STREAM_SUBSCRIBE_CAP = 5
 _DROPS_CATALOG_LIMIT = 12
 _ACTIVE_CAMPAIGN_STATUSES = frozenset({"ACTIVE", "ENABLED", ""})

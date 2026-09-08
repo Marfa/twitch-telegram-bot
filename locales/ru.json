@@ -201,7 +201,7 @@
   "premium_feat_extra_alerts": "Активных оповещений больше {free_limit}",
   "premium_feat_extra_alerts_desc": "Снимает лимит {free_limit} активных оповещений на бесплатном плане. Неактивные подписки и так без лимита.",
   "premium_feat_alert_types": "Типы кроме старта стрима",
-  "premium_feat_alert_types_desc": "Оповещения о смене категории, предстоящем стриме по расписанию и окончании эфира — не только о старте.",
+  "premium_feat_alert_types_desc": "Оповещения о смене категории, предстоящем стриме по расписанию, окончании эфира и Twitch Drops — не только о старте.",
   "premium_feat_twitch_sync": "Автосинхронизация фолловов Twitch",
   "premium_feat_twitch_sync_desc": "Периодически сверяет фолловы на Twitch с подписками в боте: новые каналы добавляются, отфолловленные импорты удаляются.",
   "premium_feat_advanced_mode": "Продвинутые опции оповещений",
@@ -916,8 +916,6 @@
   "drops_subscribe_failed": "Не удалось получить стримы.",
   "drops_subscribe_result": "Добавлено live-оповещений: {created} (на паузе: {paused}, пропущено: {skipped}).",
   "drops_type_change_unsupported": "Смену типа на/с Drops сделайте через «Новая подписка» (нужна игра).",
-  "premium_feat_drops_alerts": "Оповещения о Twitch Drops",
-  "premium_feat_drops_alerts_desc": "Алерты о новых drop-кампаниях по выбранной игре и быстрая подписка на стримы с Drops.",
   "beta_feat_drops_alerts": "Twitch Drops",
-  "beta_feat_drops_alerts_desc": "Подписка на игру → оповещения о новых Drops (без автоклейма)."
+  "beta_feat_drops_alerts_desc": "Подписка на игру → оповещения о новых Drops (без автоклейма). Входит в Premium «Типы кроме старта стрима»."
 }

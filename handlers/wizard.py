@@ -404,7 +404,7 @@ async def _show_premium_gate(
 
 _GATE_FEATURE_LABEL = {
     "alert_type": "premium_feat_alert_types",
-    "drops_alerts": "premium_feat_drops_alerts",
+    "alert_types": "premium_feat_alert_types",
     "sync": "premium_feat_twitch_sync",
     "ignore_keywords": "premium_feat_ignore_keywords",
     "delay": "premium_feat_delay",
@@ -1658,9 +1658,9 @@ async def _go_drops_catalog_step(
         )
         context.user_data.clear()
         return ConversationHandler.END
-    if not await prem.has_feature(context.bot, db, user_id, "drops_alerts"):
+    if not await prem.has_feature(context.bot, db, user_id, "alert_types"):
         return await _show_premium_gate(
-            update, context, feature="drops_alerts", first_step=True
+            update, context, feature="alert_types", first_step=True
         )
     wizard_kb = _wizard(lang, back=True)
     _set_wizard_back(context, _wz()["CHANNEL"])

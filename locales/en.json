@@ -201,7 +201,7 @@
   "premium_feat_extra_alerts": "More than {free_limit} active alerts",
   "premium_feat_extra_alerts_desc": "Removes the free-plan cap of {free_limit} active alerts. Paused subscriptions stay unlimited either way.",
   "premium_feat_alert_types": "Alert types beyond live start",
-  "premium_feat_alert_types_desc": "Category-change, upcoming-stream (schedule), and stream-end alerts — not only go-live.",
+  "premium_feat_alert_types_desc": "Category-change, upcoming-stream (schedule), stream-end, and Twitch Drops alerts — not only go-live.",
   "premium_feat_twitch_sync": "Twitch follow auto-sync",
   "premium_feat_twitch_sync_desc": "Periodically syncs Twitch follows with bot subscriptions: new follows are added, unfollowed imports are removed.",
   "premium_feat_advanced_mode": "Advanced alert options",
@@ -916,8 +916,6 @@
   "drops_subscribe_failed": "Could not fetch streams.",
   "drops_subscribe_result": "Live alerts added: {created} (paused: {paused}, skipped: {skipped}).",
   "drops_type_change_unsupported": "To switch to/from Drops, use New subscription (a game is required).",
-  "premium_feat_drops_alerts": "Twitch Drops alerts",
-  "premium_feat_drops_alerts_desc": "Alerts for new drop campaigns for a chosen game and quick subscribe to Drops streams.",
   "beta_feat_drops_alerts": "Twitch Drops",
-  "beta_feat_drops_alerts_desc": "Subscribe to a game → alerts for new Drops (no auto-claim)."
+  "beta_feat_drops_alerts_desc": "Subscribe to a game → alerts for new Drops (no auto-claim). Part of Premium «Alert types beyond live start»."
 }

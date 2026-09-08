@@ -80,7 +80,6 @@
       "branch": "feat/drops-alerts",
       "title_key": "beta_feat_drops_alerts",
       "description_key": "beta_feat_drops_alerts_desc",
-      "premium_feature_id": "drops_alerts",
       "issue_label": "beta/drops-alerts",
       "stage": "beta",
       "created_at": "2026-09-08"
