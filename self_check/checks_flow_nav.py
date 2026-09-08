@@ -598,7 +598,7 @@ async def _scenario_wizard_deep(db) -> None:
 
 
 async def _scenario_import(db) -> None:
-    from handlers.subscriptions import start_twitch_import
+    from handlers.subscriptions import on_import_oauth_manual, start_twitch_import
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -622,6 +622,67 @@ async def _scenario_import(db) -> None:
     ), patch("health.create_oauth_state", return_value="oauth-state"):
         await start_twitch_import(update, ctx)
     cap.assert_turn("import_oauth_success")
+
+    # Saved OAuth → manual import + Cancel (no authorize URL).
+    db.upsert_user(_FREE_UID)
+    db.upsert_twitch_sync(
+        owner_id=_FREE_UID,
+        twitch_user_id="tw1",
+        refresh_token="rtok",
+        period_days=7,
+        next_sync_at="2099-01-01T00:00:00+00:00",
+    )
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("import_twitch", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "config.twitch_oauth_redirect_uri",
+        return_value="https://example.com/oauth/callback",
+    ):
+        await start_twitch_import(update, ctx)
+    found_manual = any(
+        getattr(key, "callback_data", None) == "import_oauth:manual"
+        for markup in cap.markups
+        for row in (getattr(markup, "inline_keyboard", None) or [])
+        for key in row
+    )
+    assert found_manual, "expected import_oauth:manual when refresh token is saved"
+    cap.assert_turn("import_oauth_manual")
+
+    twitch.refresh_user_token.return_value = {
+        "access_token": "at",
+        "refresh_token": "rtok2",
+    }
+    twitch.get_followed_channels.return_value = [
+        {"broadcaster_id": "99", "broadcaster_login": "impchan"}
+    ]
+    application, bot = _app(db, twitch=twitch)
+    query = AsyncMock()
+    query.data = "import_oauth:manual"
+    query.from_user = SimpleNamespace(id=_FREE_UID)
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=_FREE_UID),
+        effective_message=None,
+    )
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions._deliver_import_result", new=AsyncMock()
+    ) as deliver:
+        await on_import_oauth_manual(update, ctx)
+    query.answer.assert_awaited()
+    deliver.assert_awaited()
+    subs = [
+        s
+        for s in db.get_subscriptions_by_owner(_FREE_UID)
+        if (s.twitch_username or "").lower() == "impchan"
+    ]
+    assert len(subs) == 1
+    assert subs[0].enabled is False
 
 
 async def _scenario_alert_history(db) -> None:

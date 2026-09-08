@@ -172,6 +172,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("lang_cancel", "lang:cancel"),
     ("import_mode", "import_mode:once"),
     ("import_oauth_cancel", "import_oauth:cancel"),
+    ("import_oauth_manual", "import_oauth:manual"),
     ("sched_save_token", "sched_save_token:1"),
     ("image_ask_game_cover", "image_ask:game_cover"),
 )

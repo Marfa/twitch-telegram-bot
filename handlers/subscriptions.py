@@ -657,6 +657,48 @@ async def cancel_pause_notifications(
     return ConversationHandler.END
 
 
+def _import_oauth_authorize_keyboard(lang: str, url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("import_oauth_button", lang), url=url)],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="import_oauth:cancel"
+                )
+            ],
+        ]
+    )
+
+
+def _import_oauth_manual_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("import_oauth_manual_button", lang),
+                    callback_data="import_oauth:manual",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="import_oauth:cancel"
+                )
+            ],
+        ]
+    )
+
+
+def _import_oauth_sync_note_suffix(lang: str, sync) -> str:
+    if sync is None or sync.period_days <= 0:
+        return ""
+    return "\n\n" + t(
+        "import_oauth_sync_note",
+        lang,
+        days=sync.period_days,
+        btn_settings=btn("settings", lang),
+    )
+
+
 async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER, twitch_oauth_redirect_uri
     from health import create_oauth_state
@@ -678,31 +720,24 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=_menu(lang, user_id),
         )
         return
+    sync = db.get_twitch_sync(user_id)
+    analytics.capture(user_id, "twitch_import_started")
+    if sync and (sync.refresh_token or "").strip():
+        prompt = t("import_oauth_saved_prompt", lang) + _import_oauth_sync_note_suffix(
+            lang, sync
+        )
+        await update.effective_message.reply_text(
+            prompt,
+            reply_markup=_import_oauth_manual_keyboard(lang),
+        )
+        return
     twitch: TwitchClient = context.application.bot_data["twitch"]
     state = create_oauth_state(user_id, lang)
     url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
-    analytics.capture(user_id, "twitch_import_started")
-    prompt = t("import_oauth_prompt", lang)
-    sync = db.get_twitch_sync(user_id)
-    if sync and sync.period_days > 0:
-        prompt += "\n\n" + t(
-            "import_oauth_sync_note",
-            lang,
-            days=sync.period_days,
-            btn_settings=btn("settings", lang),
-        )
+    prompt = t("import_oauth_prompt", lang) + _import_oauth_sync_note_suffix(lang, sync)
     await update.effective_message.reply_text(
         prompt,
-        reply_markup=InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton(t("import_oauth_button", lang), url=url)],
-                [
-                    InlineKeyboardButton(
-                        btn("wizard_cancel", lang), callback_data="import_oauth:cancel"
-                    )
-                ],
-            ]
-        ),
+        reply_markup=_import_oauth_authorize_keyboard(lang, url),
     )
 
 
@@ -717,6 +752,77 @@ async def cancel_twitch_import(
     await query.edit_message_text(t("cancelled", lang))
     await context.bot.send_message(
         user_id, t("menu_subs", lang), reply_markup=_subs_kb(lang, db, user_id)
+    )
+
+
+async def on_import_oauth_manual(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """One-time follow import using a stored twitch_sync refresh token."""
+    from config import twitch_oauth_redirect_uri
+    from health import create_oauth_state
+
+    query = update.callback_query
+    try:
+        await query.answer()
+    except BadRequest:
+        return
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    sync = db.get_twitch_sync(user_id)
+    if not sync or not (sync.refresh_token or "").strip():
+        await query.edit_message_text(t("import_pending_expired", lang))
+        return
+    await query.edit_message_text(t("import_oauth_manual_running", lang))
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+
+    async def _show_reauth() -> None:
+        redirect_uri = twitch_oauth_redirect_uri()
+        if not redirect_uri:
+            await query.edit_message_text(t("import_oauth_unavailable", lang))
+            return
+        state = create_oauth_state(user_id, lang)
+        url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
+        await query.edit_message_text(
+            t("import_oauth_manual_failed", lang),
+            reply_markup=_import_oauth_authorize_keyboard(lang, url),
+        )
+
+    try:
+        token_data = await asyncio.to_thread(
+            twitch.refresh_user_token, sync.refresh_token
+        )
+        access = token_data.get("access_token") or ""
+        refresh = token_data.get("refresh_token") or sync.refresh_token
+        followed = await asyncio.to_thread(
+            twitch.get_followed_channels, access, sync.twitch_user_id
+        )
+    except Exception:
+        logger.exception("Manual Twitch import failed for owner %s", user_id)
+        db.delete_twitch_sync(user_id)
+        await _show_reauth()
+        return
+
+    db.update_twitch_sync_tokens(
+        user_id,
+        refresh,
+        last_sync_at=datetime.now(timezone.utc).isoformat(),
+        next_sync_at=sync.next_sync_at,
+    )
+    imported, skipped, limited, removed_names, new_subs, ask_streamers = (
+        await _run_followed_import(context.application, user_id, followed)
+    )
+    await _deliver_import_result(
+        context.application,
+        user_id,
+        lang,
+        imported,
+        skipped,
+        limited,
+        new_subs,
+        removed_names=removed_names,
+        ask_streamers=ask_streamers,
     )
 
 

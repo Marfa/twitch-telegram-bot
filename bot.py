@@ -608,6 +608,7 @@ from handlers.subscriptions import (
     on_import_enable,
     on_import_mode_once,
     on_import_mode_sync,
+    on_import_oauth_manual,
     on_list_type,
     on_list_page,
     on_list_page_noop,
@@ -2004,6 +2005,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(cancel_twitch_import, pattern=r"^import_oauth:cancel$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_import_oauth_manual, pattern=r"^import_oauth:manual$"),
         group=0,
     )
     app.add_handler(
