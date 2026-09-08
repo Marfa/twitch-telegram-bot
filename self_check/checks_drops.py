@@ -140,35 +140,34 @@ def _check_drops_active_cap_on_bulk() -> None:
 def _check_drops_oauth_prompt_html() -> None:
     from i18n import t
 
-    ru = t("drops_oauth_prompt", "ru")
-    en = t("drops_oauth_prompt", "en")
-    assert "привязка Twitch" in ru
+    ru = t("drops_oauth_prompt", "ru", code="ABCD1234", url="https://www.twitch.tv/activate")
+    en = t("drops_oauth_prompt", "en", code="ABCD1234", url="https://www.twitch.tv/activate")
+    assert "ABCD1234" in ru and "activate" in ru
     assert "<b>" in ru and "</b>" in ru
     assert "неофициальный API" in ru
+    assert "<code>" in ru
     assert "<b>" in en and "unofficial API" in en
+    assert t("drops_catalog_fetch_failed", "ru") == (
+        "Не удалось загрузить список Drops. Попробуйте позже."
+    )
+    assert "вручную" not in t("drops_catalog_empty", "ru")
+    assert "manually" not in t("drops_catalog_fetch_failed", "en").lower()
 
 
-def _check_drops_reuse_any_oauth() -> None:
+def _check_drops_device_oauth_only() -> None:
     from handlers.drops import user_has_twitch_oauth
     from types import SimpleNamespace
 
-    class _Db:
+    class _NoDrops:
         def get_drops_auth(self, _uid):
             return None
 
-        def get_twitch_sync(self, _uid):
+    class _WithDrops:
+        def get_drops_auth(self, _uid):
             return SimpleNamespace(refresh_token="rt")
 
-        def get_chat_auth(self, _uid):
-            return None
-
-        def get_whisper_alert(self, _uid):
-            return None
-
-        def get_premium_twitch_refresh(self, _uid):
-            return None
-
-    assert user_has_twitch_oauth(_Db(), 1)  # type: ignore[arg-type]
+    assert not user_has_twitch_oauth(_NoDrops(), 1)  # type: ignore[arg-type]
+    assert user_has_twitch_oauth(_WithDrops(), 1)  # type: ignore[arg-type]
 
 
 def run() -> None:
@@ -179,7 +178,7 @@ def run() -> None:
     _check_drops_premium_gate()
     _check_drops_active_cap_on_bulk()
     _check_drops_oauth_prompt_html()
-    _check_drops_reuse_any_oauth()
+    _check_drops_device_oauth_only()
 
 
 if __name__ == "__main__":

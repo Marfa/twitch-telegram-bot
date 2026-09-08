@@ -33,9 +33,16 @@ TWITCH_URL_RE = re.compile(
 )
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 
-# ponytail: public Twitch web player Client-ID for gql.twitch.tv only (undocumented; may break).
+# ponytail: public Twitch web player Client-ID for anonymous gql only (channel about).
 _TWITCH_GQL_WEB_CLIENT_ID = "kimne78kx3ncx6brgo4" "mv6wki5h1ko"
-# Persisted-query hashes from Twitch web / TwitchDropsMiner; update if GQL breaks.
+# Android app Client-ID — device-code tokens work with ViewerDropsDashboard GQL
+# (Helix tokens from our confidential app do not). Same approach as TwitchDropsMiner.
+_TWITCH_DROPS_GQL_CLIENT_ID = "kd1unb4b3q4t58fwlpcbzcbnm76a8fp"
+_TWITCH_DROPS_GQL_USER_AGENT = (
+    "Dalvik/2.1.0 (Linux; U; Android 16; SM-S911B Build/TP1A.220624.014) "
+    "tv.twitch.android.app/25.3.0/2503006"
+)
+# Persisted-query hashes from TwitchDropsMiner; update if GQL breaks.
 _GQL_VIEWER_DROPS_DASHBOARD_HASH = (
     "c16bb890cc8ce7647a96ee69cd313d423a378a3dedadf630a1017cde18975feb"
 )
@@ -166,6 +173,34 @@ class TwitchClient:
         self._session = requests.Session()
         self._token = ""
         self._token_expires = 0.0
+        # Stable fake device id for Android-app GQL (TwitchDropsMiner pattern).
+        self._drops_device_id = "".join(
+            random.choice("0123456789abcdef") for _ in range(32)
+        )
+
+    def _drops_gql_headers(self, access_token: str, *, client_id: str) -> dict[str, str]:
+        return {
+            "Accept": "*/*",
+            "Accept-Language": "en-US",
+            "Client-ID": client_id,
+            "Client-Id": client_id,
+            "Authorization": f"OAuth {access_token}",
+            "Content-Type": "application/json",
+            "Origin": "https://www.twitch.tv",
+            "Referer": "https://www.twitch.tv/",
+            "User-Agent": _TWITCH_DROPS_GQL_USER_AGENT,
+            "X-Device-Id": self._drops_device_id,
+        }
+
+    def _drops_oauth_headers(self) -> dict[str, str]:
+        return {
+            "Accept": "application/json",
+            "Client-Id": _TWITCH_DROPS_GQL_CLIENT_ID,
+            "Origin": "https://www.twitch.tv",
+            "Referer": "https://www.twitch.tv/",
+            "User-Agent": _TWITCH_DROPS_GQL_USER_AGENT,
+            "X-Device-Id": self._drops_device_id,
+        }
 
     def parse_username(self, text: str) -> str | None:
         text = text.strip()
@@ -325,19 +360,15 @@ class TwitchClient:
         sha256_hash: str,
         variables: dict[str, Any],
         access_token: str,
+        client_id: str | None = None,
     ) -> dict[str, Any]:
         """Undocumented gql.twitch.tv persisted query (may break without notice).
 
-        Client-ID must match the Helix app that issued ``access_token`` (our
-        TWITCH_CLIENT_ID). The public web Client-ID only works with web session
-        tokens, not with bot OAuth.
+        Drops catalog requires a token issued for ``_TWITCH_DROPS_GQL_CLIENT_ID``
+        (device-code), not a Helix token from our confidential app Client-ID.
         """
-        headers = {
-            "Client-ID": TWITCH_CLIENT_ID,
-            "Authorization": f"OAuth {access_token}",
-            "Content-Type": "application/json",
-            "Referer": "https://www.twitch.tv/",
-        }
+        cid = (client_id or _TWITCH_DROPS_GQL_CLIENT_ID).strip()
+        headers = self._drops_gql_headers(access_token, client_id=cid)
         payload = {
             "operationName": operation_name,
             "variables": variables,
@@ -362,7 +393,6 @@ class TwitchClient:
             return {}
         errors = body.get("errors")
         if errors:
-            # Do not log full error payloads (may include tokens / PII).
             msg = ""
             if isinstance(errors, list) and errors and isinstance(errors[0], dict):
                 msg = str(errors[0].get("message") or "")[:120]
@@ -950,6 +980,82 @@ class TwitchClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    def start_drops_device_code(self) -> dict[str, Any]:
+        """Device-code login for Drops GQL (Android public Client-ID, no secret)."""
+        resp = self._session.post(
+            "https://id.twitch.tv/oauth2/device",
+            headers=self._drops_oauth_headers(),
+            data={
+                "client_id": _TWITCH_DROPS_GQL_CLIENT_ID,
+                "scopes": "",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "device_code": str(data.get("device_code") or ""),
+            "user_code": str(data.get("user_code") or ""),
+            "verification_uri": str(
+                data.get("verification_uri") or "https://www.twitch.tv/activate"
+            ),
+            "interval": max(3, int(data.get("interval") or 5)),
+            "expires_in": max(60, int(data.get("expires_in") or 1800)),
+        }
+
+    def poll_drops_device_code(self, device_code: str) -> dict[str, Any] | None:
+        """Return token payload when authorized; None while pending; raise on hard fail."""
+        resp = self._session.post(
+            "https://id.twitch.tv/oauth2/token",
+            headers=self._drops_oauth_headers(),
+            data={
+                "client_id": _TWITCH_DROPS_GQL_CLIENT_ID,
+                "device_code": device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        try:
+            err = resp.json()
+        except Exception:
+            err = {}
+        code = str(err.get("message") or err.get("error") or "")
+        if code in ("authorization_pending", "slow_down"):
+            return None
+        resp.raise_for_status()
+        return None
+
+    def refresh_drops_gql_token(self, refresh_token: str) -> dict[str, Any]:
+        """Refresh a Drops device-code token (public client — no secret)."""
+        resp = self._session.post(
+            "https://id.twitch.tv/oauth2/token",
+            headers=self._drops_oauth_headers(),
+            data={
+                "client_id": _TWITCH_DROPS_GQL_CLIENT_ID,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_drops_token_user(self, user_access_token: str) -> dict[str, Any] | None:
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/users",
+            headers={
+                "Client-ID": _TWITCH_DROPS_GQL_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+                "User-Agent": _TWITCH_DROPS_GQL_USER_AGENT,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        return data[0] if data else None
 
     def get_token_user(self, user_access_token: str) -> dict[str, Any] | None:
         resp = self._session.get(
