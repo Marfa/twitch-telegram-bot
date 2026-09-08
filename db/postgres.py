@@ -16,6 +16,7 @@ from .models import (
     BotStats,
     ChatAuth,
     DeletedSubscriptionCartItem,
+    DropsAuth,
     PremiumChannel,
     PremiumGift,
     PremiumPurchase,
@@ -267,6 +268,20 @@ class PostgresDatabase:
                 ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS notify_on_category_change
                 BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS notify_on_drops
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS drops_game_id
+                TEXT NOT NULL DEFAULT ''
                 """
             )
             cur.execute(
@@ -620,6 +635,27 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS drops_auth (
+                    owner_id BIGINT PRIMARY KEY,
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    twitch_login TEXT NOT NULL DEFAULT '',
+                    refresh_token TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS drop_campaign_seen (
+                    owner_id BIGINT NOT NULL,
+                    campaign_id TEXT NOT NULL,
+                    subscription_id BIGINT NOT NULL,
+                    first_seen_at TIMESTAMPTZ NOT NULL,
+                    PRIMARY KEY (owner_id, campaign_id, subscription_id)
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS chat_send_daily (
                     owner_id BIGINT NOT NULL,
                     day TEXT NOT NULL,
@@ -824,6 +860,8 @@ class PostgresDatabase:
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
+        notify_on_drops: bool = False,
+        drops_game_id: str = "",
         delete_other_alerts: bool = False,
         is_demo: bool = False,
     ) -> int:
@@ -842,8 +880,9 @@ class PostgresDatabase:
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
+                    notify_on_drops, drops_game_id,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -876,6 +915,8 @@ class PostgresDatabase:
                     bool(notify_on_live),
                     bool(notify_on_end),
                     bool(notify_on_category_change),
+                    bool(notify_on_drops),
+                    str(drops_game_id or ""),
                     bool(delete_other_alerts),
                     bool(is_demo),
                 ),
@@ -1134,40 +1175,82 @@ class PostgresDatabase:
                 payload = json.loads(r.get("subscription_json") or "{}")
             except Exception:
                 continue
-                from premium import alert_type_entitled_sync, is_promo_channel
-                from types import SimpleNamespace
+            from premium import alert_type_entitled_sync, is_promo_channel
+            from types import SimpleNamespace
 
-                login = str(payload.get("twitch_username") or "")
-                promo = is_promo_channel(login, self)
-                type_ok = alert_type_entitled_sync(
-                    self,
-                    owner_id,
-                    SimpleNamespace(
-                        notify_on_live=bool(payload.get("notify_on_live", True)),
-                        notify_on_end=bool(payload.get("notify_on_end")),
-                        notify_on_category_change=bool(
-                            payload.get("notify_on_category_change")
-                        ),
-                        schedule_reminder_configured=bool(
-                            payload.get("schedule_reminder_configured")
-                        ),
-                        twitch_username=login,
+            login = str(payload.get("twitch_username") or "")
+            promo = is_promo_channel(login, self)
+            type_ok = alert_type_entitled_sync(
+                self,
+                owner_id,
+                SimpleNamespace(
+                    notify_on_live=bool(payload.get("notify_on_live", True)),
+                    notify_on_end=bool(payload.get("notify_on_end")),
+                    notify_on_category_change=bool(
+                        payload.get("notify_on_category_change")
                     ),
+                    notify_on_drops=bool(payload.get("notify_on_drops")),
+                    schedule_reminder_configured=bool(
+                        payload.get("schedule_reminder_configured")
+                    ),
+                    twitch_username=login,
+                ),
+            )
+            if not type_ok:
+                sub_enabled = False
+            elif promo:
+                sub_enabled = True
+            elif max_enabled is not None:
+                sub_enabled = slots_used < max(0, int(max_enabled))
+            else:
+                sub_enabled = True
+            payload["enabled"] = sub_enabled
+            if sub_enabled:
+                enabled_restored += 1
+                if not promo:
+                    slots_used += 1
+            # Drop keys add_subscription does not accept.
+            payload.pop("sync_user_edited", None)
+            payload.pop("category_watch_live_ids", None)
+            payload.pop("category_watch_primed", None)
+            self.add_subscription(owner_id=owner_id, **{
+                k: payload[k]
+                for k in (
+                    "twitch_username",
+                    "twitch_user_id",
+                    "message_template",
+                    "dest_type",
+                    "chat_id",
+                    "thread_id",
+                    "delete_previous",
+                    "notify_delete_fail",
+                    "disable_link_preview",
+                    "strip_name_mentions",
+                    "attach_chat_button",
+                    "attach_live_remind_button",
+                    "custom_buttons",
+                    "delay_minutes",
+                    "suppress_repeat_minutes",
+                    "schedule_reminder_minutes",
+                    "schedule_reminder_configured",
+                    "ignore_keywords",
+                    "use_global_ignore",
+                    "image_file_id",
+                    "image_position",
+                    "enabled",
+                    "from_twitch_sync",
+                    "from_watch_suggest",
+                    "category_watch_prefs",
+                    "notify_on_live",
+                    "notify_on_end",
+                    "notify_on_category_change",
+                    "notify_on_drops",
+                    "drops_game_id",
+                    "delete_other_alerts",
+                    "is_demo",
                 )
-                if not type_ok:
-                    sub_enabled = False
-                elif promo:
-                    sub_enabled = True
-                elif max_enabled is not None:
-                    sub_enabled = slots_used < max(0, int(max_enabled))
-                else:
-                    sub_enabled = True
-                payload["enabled"] = sub_enabled
-                if sub_enabled:
-                    enabled_restored += 1
-                    if not promo:
-                        slots_used += 1
-                self.add_subscription(owner_id=owner_id, **payload)
+                if k in payload
+            })
             restored_ids.append(int(r["id"]))
 
         if not restored_ids:
@@ -1232,11 +1315,15 @@ class PostgresDatabase:
             "notify_on_live",
             "notify_on_end",
             "notify_on_category_change",
+            "notify_on_drops",
+            "drops_game_id",
             "delete_other_alerts",
             "ignore_keywords",
             "use_global_ignore",
             "image_file_id",
             "image_position",
+            "twitch_username",
+            "twitch_user_id",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1255,6 +1342,7 @@ class PostgresDatabase:
                 "notify_on_live",
                 "notify_on_end",
                 "notify_on_category_change",
+                "notify_on_drops",
                 "delete_other_alerts",
                 "use_global_ignore",
             ):
@@ -1265,7 +1353,7 @@ class PostgresDatabase:
                 "schedule_reminder_minutes",
             ):
                 values.append(max(0, int(value)))
-            elif key == "ignore_keywords":
+            elif key in ("ignore_keywords", "drops_game_id", "twitch_username", "twitch_user_id"):
                 values.append(str(value or ""))
             elif key == "image_file_id":
                 values.append(str(value) if value else None)
@@ -1341,6 +1429,8 @@ class PostgresDatabase:
                 WHERE enabled = TRUE
                   AND COALESCE(category_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%'
+                  AND twitch_user_id NOT LIKE 'drops:%'
+                  AND COALESCE(notify_on_drops, FALSE) = FALSE
                   AND (
                     notify_on_live = TRUE
                     OR notify_on_end = TRUE
@@ -1360,6 +1450,21 @@ class PostgresDatabase:
                 WHERE enabled = TRUE
                   AND notify_on_live = TRUE
                   AND COALESCE(category_watch_prefs, '') != ''
+                ORDER BY id
+                """
+            )
+            rows = cur.fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def get_enabled_drops_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE enabled = TRUE
+                  AND notify_on_drops = TRUE
+                  AND COALESCE(drops_game_id, '') != ''
                 ORDER BY id
                 """
             )
@@ -3872,6 +3977,103 @@ class PostgresDatabase:
                     refresh_token = EXCLUDED.refresh_token
                 """,
                 (owner_id, twitch_user_id, twitch_login, enc),
+            )
+
+    def get_drops_auth(self, owner_id: int) -> DropsAuth | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM drops_auth WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        auth = DropsAuth(
+            owner_id=int(row["owner_id"]),
+            twitch_user_id=str(row["twitch_user_id"] or ""),
+            twitch_login=str(row["twitch_login"] or ""),
+            refresh_token=str(row["refresh_token"] or ""),
+        )
+        auth.refresh_token = decrypt_secret(auth.refresh_token)
+        return auth
+
+    def upsert_drops_auth(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO drops_auth (
+                    owner_id, twitch_user_id, twitch_login, refresh_token
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    refresh_token = EXCLUDED.refresh_token
+                """,
+                (owner_id, twitch_user_id, twitch_login, enc),
+            )
+
+    def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE drops_auth SET refresh_token = %s WHERE owner_id = %s",
+                (enc, owner_id),
+            )
+
+    def delete_drops_auth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("DELETE FROM drops_auth WHERE owner_id = %s", (owner_id,))
+
+    def has_seen_drop_campaign(
+        self, owner_id: int, campaign_id: str, subscription_id: int
+    ) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM drop_campaign_seen
+                WHERE owner_id = %s AND campaign_id = %s AND subscription_id = %s
+                """,
+                (owner_id, campaign_id, subscription_id),
+            )
+            return cur.fetchone() is not None
+
+    def mark_drop_campaign_seen(
+        self,
+        owner_id: int,
+        campaign_id: str,
+        subscription_id: int,
+        *,
+        first_seen_at: str,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO drop_campaign_seen (
+                    owner_id, campaign_id, subscription_id, first_seen_at
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (owner_id, campaign_id, subscription_id, first_seen_at),
             )
 
     def get_chat_send_count(self, owner_id: int, day: str) -> int:

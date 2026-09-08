@@ -744,6 +744,21 @@ def watch_cats_pick_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def drops_game_pick_keyboard(
+    lang: str, cats: list[dict[str, str]]
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                (c.get("name") or "?")[:64],
+                callback_data=f"drops_game:pick:{i}",
+            )
+        ]
+        for i, c in enumerate(cats)
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
 def watch_filters_keyboard(
     lang: str,
     *,
@@ -1298,41 +1313,53 @@ def schedule_reminder_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def alert_type_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+def alert_type_keyboard(
+    lang: str, *, show_drops: bool = False
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
         [
+            InlineKeyboardButton(
+                t("alert_type_live", lang),
+                callback_data="alert_type:live",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                t("alert_type_category", lang),
+                callback_data="alert_type:category",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                t("alert_type_upcoming", lang),
+                callback_data="alert_type:upcoming",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                t("alert_type_end", lang),
+                callback_data="alert_type:end",
+            )
+        ],
+    ]
+    if show_drops:
+        rows.append(
             [
                 InlineKeyboardButton(
-                    t("alert_type_live", lang),
-                    callback_data="alert_type:live",
+                    t("alert_type_drops", lang),
+                    callback_data="alert_type:drops",
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("alert_type_category", lang),
-                    callback_data="alert_type:category",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("alert_type_upcoming", lang),
-                    callback_data="alert_type:upcoming",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("alert_type_end", lang),
-                    callback_data="alert_type:end",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    btn("wizard_cancel", lang),
-                    callback_data="alert_type:cancel",
-                )
-            ],
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang),
+                callback_data="alert_type:cancel",
+            )
         ]
     )
+    return InlineKeyboardMarkup(rows)
 
 
 def delete_sibling_keyboard(lang: str) -> InlineKeyboardMarkup:

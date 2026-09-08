@@ -482,6 +482,7 @@ from handlers.wizard import (
     receive_delay_minutes,
     receive_delay_send,
     receive_delete_fail_notify,
+    receive_drops_game_callback,
     receive_delete_old,
     receive_delete_sibling,
     receive_dest_chat,
@@ -2459,7 +2460,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
                 CallbackQueryHandler(
-                    receive_alert_type, pattern=r"^alert_type:(live|category|upcoming|end)$"
+                    receive_alert_type, pattern=r"^alert_type:(live|category|upcoming|end|drops)$"
                 ),
             ],
             PREMIUM_GATE: [
@@ -2471,6 +2472,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CHANNEL: [
                 _wiz_cancel,
                 _wiz_back,
+                CallbackQueryHandler(
+                    receive_drops_game_callback, pattern=r"^drops_game:pick:\d+$"
+                ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel),
             ],
             CHANNEL_DUP: [
@@ -3055,9 +3059,17 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
+    from handlers.drops import check_drops, on_drops_subscribe_streams
     from premium_handlers import refresh_premium_twitch_job
 
+    app.add_handler(
+        CallbackQueryHandler(
+            on_drops_subscribe_streams, pattern=r"^drops_sub_streams:\d+:"
+        )
+    )
+
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
+    app.job_queue.run_repeating(check_drops, interval=max(900, CHECK_INTERVAL * 6), first=120)
     app.job_queue.run_repeating(
         check_schedule_reminders, interval=SCHEDULE_CHECK_INTERVAL, first=25
     )

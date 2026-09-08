@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import re
+import secrets
 from types import SimpleNamespace
 from typing import Any
 
@@ -403,6 +404,7 @@ async def _show_premium_gate(
 
 _GATE_FEATURE_LABEL = {
     "alert_type": "premium_feat_alert_types",
+    "drops_alerts": "premium_feat_drops_alerts",
     "sync": "premium_feat_twitch_sync",
     "ignore_keywords": "premium_feat_ignore_keywords",
     "delay": "premium_feat_delay",
@@ -700,9 +702,15 @@ async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def _go_alert_type_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    import beta as beta_features
+    from handlers.drops import DROPS_BETA_ID
+
     chat_id = reply_chat_id(update)
+    user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    show_drops = beta_features.is_enabled(db, user_id, DROPS_BETA_ID)
     text = t("alert_type_prompt", lang)
-    markup = alert_type_keyboard(lang)
+    markup = alert_type_keyboard(lang, show_drops=show_drops)
     parse_mode = ParseMode.HTML if "<b>" in text else None
     if update.callback_query:
         await context.bot.send_message(
@@ -1594,24 +1602,164 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     kind = query.data.split(":", 1)[1]
-    if kind not in ("live", "category", "upcoming", "end"):
+    if kind not in ("live", "category", "upcoming", "end", "drops"):
         return _wz()["ALERT_TYPE"]
-    # Non-live types: Premium gate after channel is known (promo channel unlocks).
+    if kind == "drops":
+        from handlers.drops import drops_feature_available
+
+        db: Database = context.application.bot_data["db"]
+        if not drops_feature_available(db, query.from_user.id):
+            await query.edit_message_text(t("drops_beta_required", lang))
+            return ConversationHandler.END
+    # Non-live types: Premium gate after channel/game is known (promo channel unlocks).
     context.user_data["alert_type"] = kind
     context.user_data["notify_on_end"] = kind == "end"
     context.user_data["notify_on_category_change"] = kind == "category"
+    context.user_data["notify_on_drops"] = kind == "drops"
     context.user_data["delete_other_alerts"] = False
     if kind in ("live", "end", "category"):
         context.user_data["skip_schedule_check"] = True
         context.user_data["notify_on_live"] = kind == "live"
         if kind in ("end", "category"):
             context.user_data["notify_on_live"] = False
+    elif kind == "drops":
+        context.user_data["skip_schedule_check"] = True
+        context.user_data["notify_on_live"] = False
+        context.user_data["notify_on_end"] = False
+        context.user_data["notify_on_category_change"] = False
     else:
         context.user_data.pop("skip_schedule_check", None)
         context.user_data["notify_on_live"] = False
         context.user_data["notify_on_end"] = False
     await query.edit_message_text("✓")
+    if kind == "drops":
+        return await _go_drops_game_prompt(update, context, lang)
     return await _go_channel_prompt(update, context, lang)
+
+
+async def _go_drops_game_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    from handlers.drops import drops_feature_available, send_drops_oauth_prompt
+
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not drops_feature_available(db, user_id):
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("drops_beta_required", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    if not await prem.has_feature(context.bot, db, user_id, "drops_alerts"):
+        return await _show_premium_gate(
+            update, context, feature="drops_alerts", first_step=True
+        )
+    if not db.get_drops_auth(user_id):
+        twitch: TwitchClient = context.application.bot_data["twitch"]
+        await send_drops_oauth_prompt(context.bot, twitch, user_id, lang)
+        # Continue wizard after OAuth; user can re-enter type or we keep waiting on game.
+    chat_id = reply_chat_id(update)
+    text = t("drops_game_prompt", lang)
+    if update.callback_query:
+        await context.bot.send_message(
+            chat_id, text, reply_markup=_wizard(lang, back=True)
+        )
+    else:
+        await update.effective_message.reply_text(
+            text, reply_markup=_wizard(lang, back=True)
+        )
+    _set_wizard_back(context, _wz()["CHANNEL"])
+    return _wz()["CHANNEL"]
+
+
+async def _apply_drops_game(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    game: dict[str, Any],
+) -> int:
+    game_id = str(game.get("id") or "")
+    game_name = str(game.get("name") or game.get("box_art_url") or game_id)
+    if not game_id:
+        await update.effective_message.reply_text(t("drops_game_not_found", lang, query=""))
+        return _wz()["CHANNEL"]
+    context.user_data["drops_game_id"] = game_id
+    context.user_data["twitch_username"] = game_name
+    context.user_data["twitch_user_id"] = f"drops:{update.effective_user.id}:{secrets.token_hex(4)}"
+    context.user_data["twitch_display_name"] = game_name
+    context.user_data["notify_on_drops"] = True
+    context.user_data["notify_on_live"] = False
+    await update.effective_message.reply_text(
+        t("drops_game_selected", lang, game=game_name)
+    )
+    return await _go_template_prompt(update, context, lang)
+
+
+async def _receive_drops_game_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    text: str,
+) -> int:
+    from i18n import drops_game_pick_keyboard
+
+    query = (text or "").strip()
+    if not query:
+        await update.effective_message.reply_text(t("drops_game_prompt", lang))
+        return _wz()["CHANNEL"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    try:
+        found = await asyncio.to_thread(twitch.search_categories, query, first=5)
+    except Exception:
+        logger.exception("drops game search failed")
+        await update.effective_message.reply_text(
+            t("drops_game_not_found", lang, query=query)
+        )
+        return _wz()["CHANNEL"]
+    if not found:
+        await update.effective_message.reply_text(
+            t("drops_game_not_found", lang, query=query)
+        )
+        return _wz()["CHANNEL"]
+    if len(found) == 1:
+        return await _apply_drops_game(update, context, lang, found[0])
+    context.user_data["drops_game_candidates"] = [
+        {"id": str(g.get("id") or ""), "name": str(g.get("name") or "")}
+        for g in found
+    ]
+    await update.effective_message.reply_text(
+        t("drops_game_pick", lang),
+        reply_markup=drops_game_pick_keyboard(
+            lang, context.user_data["drops_game_candidates"]
+        ),
+    )
+    return _wz()["CHANNEL"]
+
+
+async def receive_drops_game_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if context.user_data.get("alert_type") != "drops":
+        return _wz()["CHANNEL"]
+    raw = (query.data or "").split(":", 2)
+    if len(raw) != 3 or raw[0] != "drops_game":
+        return _wz()["CHANNEL"]
+    try:
+        idx = int(raw[2])
+    except ValueError:
+        return _wz()["CHANNEL"]
+    cands = context.user_data.get("drops_game_candidates") or []
+    if idx < 0 or idx >= len(cands):
+        return _wz()["CHANNEL"]
+    await query.edit_message_text("✓")
+    # Fabricate message path for _apply_drops_game replies
+    return await _apply_drops_game(update, context, lang, cands[idx])
+
 
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
@@ -1621,6 +1769,9 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if is_menu_button(text):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return _wz()["CHANNEL"]
+
+    if context.user_data.get("alert_type") == "drops":
+        return await _receive_drops_game_text(update, context, lang, text)
 
     twitch: TwitchClient = context.application.bot_data["twitch"]
     username = twitch.parse_username(text)
@@ -2659,20 +2810,32 @@ async def _finish_subscription(
         notify_on_live = True
         notify_on_end = False
         notify_on_category_change = False
+        notify_on_drops = False
     elif alert_type == "end":
         notify_on_live = False
         notify_on_end = True
         notify_on_category_change = False
+        notify_on_drops = False
     elif alert_type == "category":
         notify_on_live = False
         notify_on_end = False
         notify_on_category_change = True
+        notify_on_drops = False
     elif alert_type == "upcoming":
         notify_on_live = False
         notify_on_end = False
         notify_on_category_change = False
+        notify_on_drops = False
+    elif alert_type == "drops":
+        notify_on_live = False
+        notify_on_end = False
+        notify_on_category_change = False
+        notify_on_drops = True
     else:
         notify_on_live = bool(data.get("notify_on_live", True))
+        notify_on_drops = bool(data.get("notify_on_drops", False))
+
+    drops_game_id = str(data.get("drops_game_id") or "") if notify_on_drops else ""
 
     try:
         if edit_sub_id and live_addon:
@@ -2752,6 +2915,7 @@ async def _finish_subscription(
                 notify_on_live=notify_on_live,
                 notify_on_end=notify_on_end,
                 notify_on_category_change=notify_on_category_change,
+                notify_on_drops=notify_on_drops,
                 schedule_reminder_configured=bool(
                     data.get("schedule_reminder_configured")
                 )
@@ -2804,6 +2968,8 @@ async def _finish_subscription(
                 notify_on_live=notify_on_live,
                 notify_on_end=notify_on_end,
                 notify_on_category_change=notify_on_category_change,
+                notify_on_drops=notify_on_drops,
+                drops_game_id=drops_game_id,
                 delete_other_alerts=delete_other_alerts,
                 is_demo=demo_mode.is_active(owner_id),
             )

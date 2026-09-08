@@ -237,23 +237,25 @@ class Subscription:
     notify_on_live: bool
     notify_on_end: bool
     notify_on_category_change: bool
-    ignore_keywords: str
-    use_global_ignore: bool
-    image_file_id: str | None
-    image_position: str
-    notify_cooldown_until: str | None
-    last_message_id: int | None
-    last_schedule_reminder_segment_id: str | None
-    from_twitch_sync: bool
-    from_watch_suggest: bool
-    sync_user_edited: bool
-    category_watch_prefs: str
-    category_watch_live_ids: str
-    category_watch_primed: bool
-    delete_other_alerts: bool
-    is_demo: bool
-    trial_paused: bool
-    delivery_paused: bool
+    notify_on_drops: bool = False
+    drops_game_id: str = ""
+    ignore_keywords: str = ""
+    use_global_ignore: bool = False
+    image_file_id: str | None = None
+    image_position: str = ""
+    notify_cooldown_until: str | None = None
+    last_message_id: int | None = None
+    last_schedule_reminder_segment_id: str | None = None
+    from_twitch_sync: bool = False
+    from_watch_suggest: bool = False
+    sync_user_edited: bool = False
+    category_watch_prefs: str = ""
+    category_watch_live_ids: str = ""
+    category_watch_primed: bool = False
+    delete_other_alerts: bool = False
+    is_demo: bool = False
+    trial_paused: bool = False
+    delivery_paused: bool = False
 
 
 @dataclass(frozen=True)
@@ -315,6 +317,8 @@ class PremiumGift:
 
 
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
+    if payload.get("notify_on_drops"):
+        return "drops"
     if payload.get("notify_on_category_change"):
         return "category"
     if payload.get("notify_on_end"):
@@ -334,6 +338,8 @@ def migrate_sub_fields_for_alert_type(
         out["notify_on_live"] = True
         out["notify_on_end"] = False
         out["notify_on_category_change"] = False
+        out["notify_on_drops"] = False
+        out["drops_game_id"] = ""
         out["delete_other_alerts"] = False
         out["schedule_reminder_minutes"] = 0
         out["schedule_reminder_configured"] = False
@@ -341,6 +347,8 @@ def migrate_sub_fields_for_alert_type(
         out["notify_on_live"] = False
         out["notify_on_end"] = False
         out["notify_on_category_change"] = True
+        out["notify_on_drops"] = False
+        out["drops_game_id"] = ""
         out["suppress_repeat_minutes"] = 0
         out["schedule_reminder_minutes"] = 0
         out["schedule_reminder_configured"] = False
@@ -350,6 +358,8 @@ def migrate_sub_fields_for_alert_type(
         out["notify_on_live"] = False
         out["notify_on_end"] = True
         out["notify_on_category_change"] = False
+        out["notify_on_drops"] = False
+        out["drops_game_id"] = ""
         out["delete_other_alerts"] = False
         out["suppress_repeat_minutes"] = 0
         out["schedule_reminder_minutes"] = 0
@@ -358,12 +368,26 @@ def migrate_sub_fields_for_alert_type(
         out["notify_on_live"] = False
         out["notify_on_end"] = False
         out["notify_on_category_change"] = False
+        out["notify_on_drops"] = False
+        out["drops_game_id"] = ""
         out["delete_other_alerts"] = False
         out["suppress_repeat_minutes"] = 0
         out["delay_minutes"] = 0
         if not out.get("schedule_reminder_configured"):
             out["schedule_reminder_minutes"] = 0
             out["schedule_reminder_configured"] = False
+    elif new_type == "drops":
+        out["notify_on_live"] = False
+        out["notify_on_end"] = False
+        out["notify_on_category_change"] = False
+        out["notify_on_drops"] = True
+        out["delete_other_alerts"] = False
+        out["suppress_repeat_minutes"] = 0
+        out["delay_minutes"] = 0
+        out["schedule_reminder_minutes"] = 0
+        out["schedule_reminder_configured"] = False
+        out["attach_live_remind_button"] = False
+        out["category_watch_prefs"] = ""
     else:
         return out
 
@@ -398,6 +422,12 @@ def _cart_item_from_row(row_id: int, deleted_at: object, subscription_json: obje
 
 def is_category_watch_sub(sub: Subscription) -> bool:
     return bool((sub.category_watch_prefs or "").strip())
+
+
+def is_drops_sub(sub: Subscription) -> bool:
+    return bool(getattr(sub, "notify_on_drops", False)) and bool(
+        (getattr(sub, "drops_game_id", "") or "").strip()
+    )
 
 
 def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
@@ -435,6 +465,8 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "notify_on_live": bool(sub.notify_on_live),
         "notify_on_end": bool(sub.notify_on_end),
         "notify_on_category_change": bool(sub.notify_on_category_change),
+        "notify_on_drops": bool(sub.notify_on_drops),
+        "drops_game_id": sub.drops_game_id or "",
         "delete_other_alerts": bool(sub.delete_other_alerts),
         "is_demo": bool(sub.is_demo),
     }
@@ -478,6 +510,14 @@ class WhisperAlert:
 
 @dataclass
 class ChatAuth:
+    owner_id: int
+    twitch_user_id: str
+    twitch_login: str
+    refresh_token: str
+
+
+@dataclass
+class DropsAuth:
     owner_id: int
     twitch_user_id: str
     twitch_login: str
@@ -651,6 +691,8 @@ def _row_to_sub(row: Any) -> Subscription:
         notify_on_category_change=bool(row["notify_on_category_change"])
         if "notify_on_category_change" in keys
         else False,
+        notify_on_drops=bool(row["notify_on_drops"]) if "notify_on_drops" in keys else False,
+        drops_game_id=str(row["drops_game_id"] or "") if "drops_game_id" in keys else "",
         ignore_keywords=str(row["ignore_keywords"] or ""),
         use_global_ignore=bool(row["use_global_ignore"])
         if "use_global_ignore" in keys

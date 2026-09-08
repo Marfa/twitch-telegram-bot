@@ -484,6 +484,8 @@ def _share_link_for_sub(
 
 
 def _alert_type_from_sub(sub: Subscription) -> str:
+    if getattr(sub, "notify_on_drops", False):
+        return "drops"
     if sub.notify_on_category_change:
         return "category"
     if sub.notify_on_end:
@@ -969,7 +971,7 @@ async def on_list_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-_EDIT_ALERT_TYPE_ORDER = ("live", "category", "upcoming", "end")
+_EDIT_ALERT_TYPE_ORDER = ("live", "category", "upcoming", "end", "drops")
 
 
 def _edit_present_types(subs: list[Subscription]) -> list[str]:
@@ -1375,6 +1377,11 @@ async def complete_twitch_import(
         return
     if purpose == "chat":
         await complete_chat_oauth(application, owner_id, error, token_info)
+        return
+    if purpose == "drops":
+        from handlers.drops import complete_drops_oauth
+
+        await complete_drops_oauth(application, owner_id, error, token_info)
         return
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
@@ -3493,8 +3500,12 @@ def _alert_type_label(kind: str, lang: str) -> str:
     return t(f"alert_type_{kind}", lang)
 
 
-def _other_alert_types(current: str) -> list[str]:
-    return [kind for kind in _EDIT_ALERT_TYPE_ORDER if kind != current]
+def _other_alert_types(current: str, *, show_drops: bool = False) -> list[str]:
+    return [
+        kind
+        for kind in _EDIT_ALERT_TYPE_ORDER
+        if kind != current and (kind != "drops" or show_drops)
+    ]
 
 
 def _edit_alert_type_pick_keyboard(
@@ -3503,8 +3514,9 @@ def _edit_alert_type_pick_keyboard(
     *,
     mode: str,
     current_type: str,
+    show_drops: bool = False,
 ) -> InlineKeyboardMarkup:
-    types = _other_alert_types(current_type)
+    types = _other_alert_types(current_type, show_drops=show_drops)
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -3539,6 +3551,8 @@ _TYPE_MIGRATION_KEYS = (
     "notify_on_live",
     "notify_on_end",
     "notify_on_category_change",
+    "notify_on_drops",
+    "drops_game_id",
     "delete_other_alerts",
 )
 
@@ -3558,8 +3572,11 @@ async def _alert_type_allowed(
 ) -> str | None:
     if new_type == "live":
         return None
+    if new_type == "drops" or _alert_type_from_sub(sub) == "drops":
+        return "drops_type"
+    feature = "drops_alerts" if new_type == "drops" else "alert_types"
     if not await prem.has_feature(
-        bot, db, owner_id, "alert_types", channel=sub.twitch_username
+        bot, db, owner_id, feature, channel=sub.twitch_username
     ):
         return "premium"
     if new_type == "upcoming":
@@ -3612,6 +3629,8 @@ def _add_subscription_from_snapshot(
         notify_on_live=bool(snapshot.get("notify_on_live", True)),
         notify_on_end=bool(snapshot.get("notify_on_end")),
         notify_on_category_change=bool(snapshot.get("notify_on_category_change")),
+        notify_on_drops=bool(snapshot.get("notify_on_drops")),
+        drops_game_id=str(snapshot.get("drops_game_id") or ""),
         delete_other_alerts=bool(snapshot.get("delete_other_alerts")),
         is_demo=bool(snapshot.get("is_demo")),
     )
@@ -3631,13 +3650,21 @@ async def on_edit_change_type_click(
         await query.edit_message_text(t("sub_not_found", lang))
         return
     current = _alert_type_from_sub(sub)
-    if not _other_alert_types(current):
+    import beta as beta_features
+    from handlers.drops import DROPS_BETA_ID
+
+    show_drops = beta_features.is_enabled(db, owner_id, DROPS_BETA_ID)
+    if not _other_alert_types(current, show_drops=show_drops):
         await query.answer(t("edit_change_type_cancelled", lang), show_alert=True)
         return
     await query.edit_message_text(
         t("edit_change_type_pick", lang),
         reply_markup=_edit_alert_type_pick_keyboard(
-            sub_id, lang, mode="change", current_type=current
+            sub_id,
+            lang,
+            mode="change",
+            current_type=current,
+            show_drops=show_drops,
         ),
     )
 
@@ -3709,13 +3736,21 @@ async def on_edit_copy_change_click(
         )
         return
     current = _alert_type_from_sub(sub)
-    if not _other_alert_types(current):
+    import beta as beta_features
+    from handlers.drops import DROPS_BETA_ID
+
+    show_drops = beta_features.is_enabled(db, owner_id, DROPS_BETA_ID)
+    if not _other_alert_types(current, show_drops=show_drops):
         await query.answer(t("edit_copy_cancelled", lang), show_alert=True)
         return
     await query.edit_message_text(
         t("edit_copy_change_pick", lang),
         reply_markup=_edit_alert_type_pick_keyboard(
-            sub_id, lang, mode="copy", current_type=current
+            sub_id,
+            lang,
+            mode="copy",
+            current_type=current,
+            show_drops=show_drops,
         ),
     )
 
@@ -3765,6 +3800,9 @@ async def on_edit_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if block == "no_schedule":
         await query.edit_message_text(t("alert_type_no_schedule", lang))
+        return
+    if block == "drops_type":
+        await query.edit_message_text(t("drops_type_change_unsupported", lang))
         return
 
     snapshot = migrate_sub_fields_for_alert_type(
@@ -3836,6 +3874,7 @@ def _share_alert_type_label(payload: dict, lang: str) -> str:
         "category": "alert_type_category",
         "upcoming": "alert_type_upcoming",
         "end": "alert_type_end",
+        "drops": "alert_type_drops",
     }.get(kind, "alert_type_live")
     return t(key, lang)
 
