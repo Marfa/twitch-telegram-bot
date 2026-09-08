@@ -432,7 +432,7 @@ def _check_drops_list_label_and_oauth_keep() -> None:
     db.delete_drops_auth.assert_not_called()
 
 
-def _check_drops_subs_list_hides_edit_share() -> None:
+def _check_drops_subs_list_edit_no_share() -> None:
     from unittest.mock import MagicMock, patch
 
     import beta as beta_features
@@ -469,10 +469,12 @@ def _check_drops_subs_list_hides_edit_share() -> None:
         disable_link_preview=True,
         message_template="Drops: Hearthstone — Hero Pack",
         is_demo=False,
+        notify_cooldown_until=None,
     )
     line = _format_sub_line(sub, "ru", 25)  # type: ignore[arg-type]
     assert "Hearthstone — Hero Pack" in line
     assert t("sub_list_alert_drops", "ru") in line
+    assert t("sub_list_game_cooldown", "ru", hours=1) in line
 
     db = MagicMock()
     db.get_subscriptions_by_owner.return_value = [sub]
@@ -481,8 +483,45 @@ def _check_drops_subs_list_hides_edit_share() -> None:
     callbacks = [b.callback_data for r in rows for b in r]
     assert any((c or "").startswith("toggle:") for c in callbacks)
     assert any((c or "").startswith("list_del:") for c in callbacks)
-    assert not any((c or "").startswith("edit:") for c in callbacks)
+    assert any((c or "").startswith("edit:") for c in callbacks)
     assert not any((c or "").startswith("share_show:") for c in callbacks)
+    assert "раз в час" in t("drops_subscribed_ok", "ru", game="G", drop="D")
+    assert "стримам" in t("drops_catalog_prompt", "ru")
+
+
+def _check_drops_stream_alert_cooldown() -> None:
+    """only_new must no-op while notify_cooldown_until is in the future."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from handlers.drops import send_drops_stream_alert
+
+    future = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    sub = SimpleNamespace(
+        id=1,
+        owner_id=7,
+        enabled=True,
+        drops_game_id="99",
+        notify_on_drops=True,
+        chat_id=7,
+        thread_id=None,
+        twitch_username="HS",
+        notify_cooldown_until=future,
+        suppress_repeat_minutes=0,
+    )
+    bot = AsyncMock()
+    db = MagicMock()
+    twitch = MagicMock()
+    n = asyncio.run(
+        send_drops_stream_alert(
+            bot, db, twitch, sub, "ru", only_new=True  # type: ignore[arg-type]
+        )
+    )
+    assert n == 0
+    bot.send_message.assert_not_called()
+    twitch.get_streams_with_drops.assert_not_called()
 
 
 def _check_game_subs_list_edit_no_share() -> None:
@@ -549,7 +588,8 @@ def run() -> None:
     _check_drops_digest_db()
     _check_drops_gql_soft_errors()
     _check_drops_list_label_and_oauth_keep()
-    _check_drops_subs_list_hides_edit_share()
+    _check_drops_subs_list_edit_no_share()
+    _check_drops_stream_alert_cooldown()
     _check_game_subs_list_edit_no_share()
 
 

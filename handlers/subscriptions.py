@@ -357,6 +357,15 @@ def _format_sub_line(
     settings: list[str] = []
     if getattr(sub, "notify_on_drops", False):
         settings.append(t("sub_list_alert_drops", lang))
+        from handlers.notifications import category_watch_cooldown_hours
+
+        settings.append(
+            t(
+                "sub_list_game_cooldown",
+                lang,
+                hours=category_watch_cooldown_hours(sub),
+            )
+        )
     elif is_category_watch_sub(sub):
         settings.append(t("sub_list_alert_game", lang))
         from handlers.notifications import category_watch_cooldown_hours
@@ -763,22 +772,19 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        # Drops: toggle+delete only. Game alerts: edit = cooldown hours (no share).
+        # Drops / game alerts: edit = cooldown hours (no share for either).
         drops_locked = is_drops_sub(s)
         game = is_category_watch_sub(s)
         row1 = [
             InlineKeyboardButton(
                 _inline_btn_label(toggle_label),
                 callback_data=f"toggle:{s.id}",
-            )
+            ),
+            InlineKeyboardButton(
+                _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
+                callback_data=f"edit:{s.id}",
+            ),
         ]
-        if not drops_locked:
-            row1.append(
-                InlineKeyboardButton(
-                    _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
-                    callback_data=f"edit:{s.id}",
-                )
-            )
         rows.append(row1)
         row2 = [
             InlineKeyboardButton(
@@ -2051,7 +2057,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not sub or not _sub_in_current_mode(sub, query.from_user.id):
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
-    if is_category_watch_sub(sub):
+    if is_category_watch_sub(sub) or is_drops_sub(sub):
         context.user_data.clear()
         context.user_data["edit_sub_id"] = sub_id
         context.user_data["edit_game_cooldown"] = True
@@ -2063,9 +2069,6 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             reply_markup=_wizard(lang, back=False),
         )
         return _sub_states()["EDIT_REPEAT"]
-    if is_drops_sub(sub):
-        await query.edit_message_text(t("drops_edit_unsupported", lang))
-        return ConversationHandler.END
     context.user_data.pop("edit_game_cooldown", None)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     show_adv = await prem.advanced_mode_on(
@@ -2152,7 +2155,7 @@ async def receive_edit_game_cooldown(
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
     sub = db.get_subscription(int(sub_id), owner_id)
-    if not sub or not is_category_watch_sub(sub):
+    if not sub or not (is_category_watch_sub(sub) or is_drops_sub(sub)):
         await update.effective_message.reply_text(t("sub_not_found", lang))
         context.user_data.clear()
         return ConversationHandler.END

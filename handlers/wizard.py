@@ -1797,7 +1797,6 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return _wz()["CHANNEL"]
 
     if context.user_data.get("alert_type") == "drops":
-        await update.effective_message.reply_text(t("drops_catalog_pick_hint", lang))
         return _wz()["CHANNEL"]
 
     twitch: TwitchClient = context.application.bot_data["twitch"]

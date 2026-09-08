@@ -326,6 +326,16 @@ def list_active_drop_campaigns(
     return None
 
 
+def _with_extra_markup(
+    markup: InlineKeyboardMarkup, extra: Any | None
+) -> InlineKeyboardMarkup:
+    if extra is None or not getattr(extra, "inline_keyboard", None):
+        return markup
+    rows = [list(r) for r in markup.inline_keyboard]
+    rows.extend(list(r) for r in extra.inline_keyboard)
+    return InlineKeyboardMarkup(rows)
+
+
 async def send_drops_catalog(
     bot: Any,
     db: Database,
@@ -365,22 +375,19 @@ async def send_drops_catalog(
         await bot.send_message(
             user_id,
             t("drops_catalog_fetch_failed", lang),
-            reply_markup=drops_catalog_keyboard(
-                lang,
-                [],
-                digest_enabled=digest_on,
-                show_rebind=True,
+            reply_markup=_with_extra_markup(
+                drops_catalog_keyboard(
+                    lang,
+                    [],
+                    digest_enabled=digest_on,
+                    show_rebind=True,
+                ),
+                reply_markup_extra,
             ),
         )
         if not has_oauth:
             await send_drops_oauth_prompt(
                 bot, twitch, user_id, lang, application=application
-            )
-        if reply_markup_extra is not None:
-            await bot.send_message(
-                user_id,
-                t("drops_catalog_pick_hint", lang),
-                reply_markup=reply_markup_extra,
             )
         return []
     if not campaigns:
@@ -390,19 +397,16 @@ async def send_drops_catalog(
         await bot.send_message(
             user_id,
             t("drops_catalog_empty", lang),
-            reply_markup=drops_catalog_keyboard(
-                lang,
-                [],
-                digest_enabled=digest_on,
-                show_rebind=True,
+            reply_markup=_with_extra_markup(
+                drops_catalog_keyboard(
+                    lang,
+                    [],
+                    digest_enabled=digest_on,
+                    show_rebind=True,
+                ),
+                reply_markup_extra,
             ),
         )
-        if reply_markup_extra is not None:
-            await bot.send_message(
-                user_id,
-                t("drops_catalog_pick_hint", lang),
-                reply_markup=reply_markup_extra,
-            )
         return []
 
     compact = [
@@ -428,16 +432,11 @@ async def send_drops_catalog(
     await bot.send_message(
         user_id,
         t("drops_catalog_prompt", lang),
-        reply_markup=drops_catalog_keyboard(
-            lang, compact, digest_enabled=digest_on
+        reply_markup=_with_extra_markup(
+            drops_catalog_keyboard(lang, compact, digest_enabled=digest_on),
+            reply_markup_extra,
         ),
     )
-    if reply_markup_extra is not None:
-        await bot.send_message(
-            user_id,
-            t("drops_catalog_pick_hint", lang),
-            reply_markup=reply_markup_extra,
-        )
     return compact
 
 
@@ -549,7 +548,15 @@ async def send_drops_stream_alert(
     only_new: bool = False,
 ) -> int:
     """Send stream list alert. Returns number of streams included (0 = none sent)."""
+    from handlers.notifications import (
+        _category_watch_cooling_down,
+        category_watch_cooldown_minutes,
+    )
+
     if sub is None or not is_drops_sub(sub) or not sub.enabled:
+        return 0
+    # Periodic job: respect per-sub cooldown (default 1h). Immediate snapshot skips this.
+    if only_new and _category_watch_cooling_down(sub):
         return 0
     game_id = (sub.drops_game_id or "").strip()
     if not game_id:
@@ -604,6 +611,7 @@ async def send_drops_stream_alert(
         )
         return 0
     _mark_streams_seen(db, sub.owner_id, sub.id, streams, now_iso=now_iso)
+    db.set_notify_cooldown(sub.id, category_watch_cooldown_minutes(sub))
     analytics.capture(
         sub.owner_id,
         "drops_stream_alert_sent",
