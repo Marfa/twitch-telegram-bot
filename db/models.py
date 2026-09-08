@@ -423,7 +423,7 @@ def _cart_item_from_row(row_id: int, deleted_at: object, subscription_json: obje
 
 
 def is_category_watch_sub(sub: Subscription) -> bool:
-    return bool((sub.category_watch_prefs or "").strip())
+    return bool((getattr(sub, "category_watch_prefs", "") or "").strip())
 
 
 def is_drops_sub(sub: Subscription) -> bool:

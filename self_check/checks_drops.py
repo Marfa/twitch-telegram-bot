@@ -461,6 +461,56 @@ def _check_drops_subs_list_hides_edit_share() -> None:
     assert not any((c or "").startswith("share_show:") for c in callbacks)
 
 
+def _check_game_subs_list_hides_edit_share() -> None:
+    from unittest.mock import MagicMock, patch
+
+    import beta as beta_features
+    from handlers.subscriptions import _subs_toggle_keyboard
+
+    sub = SimpleNamespace(
+        id=26,
+        enabled=True,
+        twitch_username="Just Chatting + tags",
+        chat_id=1,
+        dest_type="dm",
+        thread_id=None,
+        ignore_keywords="",
+        use_global_ignore=False,
+        notify_on_live=True,
+        notify_on_end=False,
+        notify_on_category_change=False,
+        notify_on_drops=False,
+        drops_game_id="",
+        schedule_reminder_minutes=0,
+        schedule_reminder_configured=False,
+        image_file_id=None,
+        image_position="",
+        strip_name_mentions=False,
+        delay_minutes=0,
+        suppress_repeat_minutes=0,
+        delete_previous=False,
+        notify_delete_fail=False,
+        delete_other_alerts=False,
+        custom_buttons="[]",
+        attach_chat_button=False,
+        attach_live_remind_button=False,
+        disable_link_preview=True,
+        message_template="hi",
+        is_demo=False,
+        category_watch_prefs='{"categories":[{"id":"1","name":"Just Chatting"}]}',
+        from_watch_suggest=True,
+    )
+    db = MagicMock()
+    db.get_subscriptions_by_owner.return_value = [sub]
+    with patch.object(beta_features, "is_enabled", return_value=True):
+        rows = _subs_toggle_keyboard(db, 1, "ru", [sub])  # type: ignore[list-item]
+    callbacks = [b.callback_data for r in rows for b in r]
+    assert any((c or "").startswith("toggle:") for c in callbacks)
+    assert any((c or "").startswith("list_del:") for c in callbacks)
+    assert not any((c or "").startswith("edit:") for c in callbacks)
+    assert not any((c or "").startswith("share_show:") for c in callbacks)
+
+
 def run() -> None:
     _check_drops_alert_type_keyboard_last()
     _check_drops_payload_and_migrate()
@@ -476,6 +526,7 @@ def run() -> None:
     _check_drops_gql_soft_errors()
     _check_drops_list_label_and_oauth_keep()
     _check_drops_subs_list_hides_edit_share()
+    _check_game_subs_list_hides_edit_share()
 
 
 if __name__ == "__main__":

@@ -753,14 +753,15 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        drops = is_drops_sub(s)
+        # Drops / game alerts: toggle+delete only (no edit/share).
+        locked = is_drops_sub(s) or is_category_watch_sub(s)
         row1 = [
             InlineKeyboardButton(
                 _inline_btn_label(toggle_label),
                 callback_data=f"toggle:{s.id}",
             )
         ]
-        if not drops:
+        if not locked:
             row1.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
@@ -774,7 +775,7 @@ def _subs_toggle_keyboard(
                 callback_data=f"list_del:{s.id}",
             )
         ]
-        if show_share and not drops:
+        if show_share and not locked:
             row2.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_share_short', lang)} {tag}"),
