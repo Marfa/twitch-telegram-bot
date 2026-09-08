@@ -322,10 +322,49 @@ def _check_drops_digest_db() -> None:
         assert auth2.access_expires_at == 9999999999
 
 
+def _check_drops_gql_soft_errors() -> None:
+    from unittest.mock import MagicMock
+
+    from twitch import TwitchClient
+
+    client = TwitchClient.__new__(TwitchClient)
+    client._drops_device_id = "a" * 32
+    client._session = MagicMock()
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {
+        "data": {"currentUser": {"dropCampaigns": []}},
+        "errors": [{"message": "service error"}],
+    }
+    client._session.post.return_value = resp
+    body = TwitchClient._gql_persisted(
+        client,
+        operation_name="ViewerDropsDashboard",
+        sha256_hash="abc",
+        variables={},
+        access_token="tok",
+    )
+    assert body["data"]["currentUser"]["dropCampaigns"] == []
+
+    resp.json.return_value = {"errors": [{"message": "PersistedQueryNotFound"}]}
+    try:
+        TwitchClient._gql_persisted(
+            client,
+            operation_name="ViewerDropsDashboard",
+            sha256_hash="abc",
+            variables={},
+            access_token="tok",
+        )
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError:
+        pass
+
+
 def _check_drops_list_label_and_oauth_keep() -> None:
+    from unittest.mock import MagicMock
+
     from handlers.drops import _access_token_for_owner, _drops_list_label, drops_device_id_for
     from i18n import t
-    from unittest.mock import MagicMock
 
     assert len(drops_device_id_for(1)) == 32
     assert drops_device_id_for(1) == drops_device_id_for(1)
@@ -434,6 +473,7 @@ def run() -> None:
     _check_drops_catalog_uses_access_token()
     _check_drops_digest_and_tags()
     _check_drops_digest_db()
+    _check_drops_gql_soft_errors()
     _check_drops_list_label_and_oauth_keep()
     _check_drops_subs_list_hides_edit_share()
 

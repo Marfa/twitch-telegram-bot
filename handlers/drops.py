@@ -110,6 +110,7 @@ async def send_drops_oauth_prompt(
         "interval": interval,
         "expires_at": time.time() + expires_in,
         "lang": lang,
+        "device_id": device_id,
     }
     jq = getattr(application, "job_queue", None)
     if jq is not None:
@@ -192,7 +193,9 @@ async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None
     lang = str(pending.get("lang") or _user_lang(db, user_id))
     try:
         token_info = await asyncio.to_thread(
-            twitch.poll_drops_device_code, str(pending.get("device_code") or "")
+            twitch.poll_drops_device_code,
+            str(pending.get("device_code") or ""),
+            device_id=str(pending.get("device_id") or "") or None,
         )
     except Exception:
         logger.exception("drops device poll failed user=%s", user_id)
@@ -273,24 +276,45 @@ def list_active_drop_campaigns(
     access_token: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """Return ACTIVE campaigns or None on auth/API failure."""
-    access = (access_token or "").strip() or _access_token_for_owner(
-        db, twitch, owner_id
-    )
-    if not access:
-        return None
     device_id = drops_device_id_for(owner_id)
-    try:
+    forced_token = (access_token or "").strip() or None
+
+    def _fetch(access: str) -> list[dict[str, Any]]:
         campaigns = twitch.get_viewer_drop_campaigns(access, device_id=device_id)
         try:
             claims = twitch.get_inventory_claimed_drops(access, device_id=device_id)
             _enrich_claimed(campaigns, claims)
         except Exception:
             logger.warning("drops inventory claim enrich failed owner=%s", owner_id)
-    except Exception:
-        logger.exception("drops catalog fetch failed owner=%s", owner_id)
-        return None
-    active = [c for c in campaigns if _campaign_active(c) and str(c.get("id") or "")]
-    return active[:_DROPS_CATALOG_LIMIT]
+        active = [
+            c for c in campaigns if _campaign_active(c) and str(c.get("id") or "")
+        ]
+        return active[:_DROPS_CATALOG_LIMIT]
+
+    for attempt in (1, 2):
+        access = forced_token or _access_token_for_owner(db, twitch, owner_id)
+        forced_token = None
+        if not access:
+            return None
+        try:
+            return _fetch(access)
+        except Exception:
+            logger.exception(
+                "drops catalog fetch failed owner=%s attempt=%s", owner_id, attempt
+            )
+            if attempt == 1:
+                # Drop cached access and refresh once — stale AT often yields null user.
+                try:
+                    db.update_drops_auth_access(
+                        owner_id, access_token="", access_expires_at=0
+                    )
+                except Exception:
+                    logger.exception(
+                        "drops access cache clear failed owner=%s", owner_id
+                    )
+                continue
+            return None
+    return None
 
 
 async def send_drops_catalog(

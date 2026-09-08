@@ -187,11 +187,15 @@ class TwitchClient:
         self, access_token: str, *, client_id: str, device_id: str | None = None
     ) -> dict[str, str]:
         did = (device_id or self._drops_device_id or "").strip() or self._drops_device_id
+        session_id = "".join(random.choice("0123456789abcdef") for _ in range(16))
         return {
             "Accept": "*/*",
+            "Accept-Encoding": "gzip",
             "Accept-Language": "en-US",
-            "Client-ID": client_id,
+            "Pragma": "no-cache",
+            "Cache-Control": "no-cache",
             "Client-Id": client_id,
+            "Client-Session-Id": session_id,
             "Authorization": f"OAuth {access_token}",
             "Content-Type": "application/json",
             "Origin": "https://www.twitch.tv",
@@ -404,12 +408,23 @@ class TwitchClient:
         if not isinstance(body, dict):
             return {}
         errors = body.get("errors")
+        data = body.get("data")
         if errors:
             msg = ""
             if isinstance(errors, list) and errors and isinstance(errors[0], dict):
                 msg = str(errors[0].get("message") or "")[:120]
-            logger.warning("Twitch GQL %s failed: %s", operation_name, msg or "error")
-            raise RuntimeError(f"twitch gql {operation_name} failed")
+            # Twitch often returns soft errors alongside usable data — only fail hard
+            # when there is nothing to read (TwitchDropsMiner does the same).
+            if not isinstance(data, dict) or not data:
+                logger.warning(
+                    "Twitch GQL %s failed: %s", operation_name, msg or "error"
+                )
+                raise RuntimeError(f"twitch gql {operation_name} failed")
+            logger.warning(
+                "Twitch GQL %s soft error (using data): %s",
+                operation_name,
+                msg or "error",
+            )
         return body
 
     @staticmethod
@@ -1118,11 +1133,13 @@ class TwitchClient:
             "expires_in": max(60, int(data.get("expires_in") or 1800)),
         }
 
-    def poll_drops_device_code(self, device_code: str) -> dict[str, Any] | None:
+    def poll_drops_device_code(
+        self, device_code: str, *, device_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Return token payload when authorized; None while pending; raise on hard fail."""
         resp = self._session.post(
             "https://id.twitch.tv/oauth2/token",
-            headers=self._drops_oauth_headers(),
+            headers=self._drops_oauth_headers(device_id=device_id),
             data={
                 "client_id": _TWITCH_DROPS_GQL_CLIENT_ID,
                 "device_code": device_code,
