@@ -273,6 +273,10 @@ def _check_drops_digest_and_tags() -> None:
     )
     labels = [b.text for r in kb.inline_keyboard for b in r]
     assert any("Подписаться на новые Drops" in (x or "") for x in labels)
+    empty_kb = drops_catalog_keyboard("ru", [], digest_enabled=False)
+    empty_labels = [b.text for r in empty_kb.inline_keyboard for b in r]
+    assert any("Подписаться на новые Drops" in (x or "") for x in empty_labels)
+    assert len(empty_kb.inline_keyboard) >= 1
     assert any((x or "").startswith("✅") for x in labels)
     assert any("получено" in (x or "") for x in labels)
     assert "Получать оповещения" in t("drops_get_alerts_btn", "ru")
