@@ -1,6 +1,6 @@
-# Twitch → Telegram stream notifications
+# Twitch → Telegram — stream alerts, Drops, whispers, and schedule tools
 
-**Go-live, category change, upcoming, or stream end — the bot notifies wherever you choose.** Setup in Telegram.
+**Go-live, category change, upcoming or stream end, a new Drop, or a Twitch whisper — the bot notifies wherever you choose.** Manage Twitch schedule from Telegram.
 
 > [!IMPORTANT]
 > **Live bot:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu
