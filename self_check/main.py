@@ -83,6 +83,9 @@ def main() -> None:
     check_flow_nav()
     check_callback_wiring()
     check_alert_setting_order()
+    from .checks_drops import run as check_drops
+
+    check_drops()
     print("ok")
 
 

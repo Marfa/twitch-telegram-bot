@@ -192,7 +192,7 @@ def _check_inline_wizard_keyboards() -> None:
 
     for loc in SUPPORTED_LOCALES:
         cases = [
-            ("alert_type_keyboard", alert_type_keyboard(loc)),
+            ("alert_type_keyboard", alert_type_keyboard(loc, show_drops=True)),
             ("premium_gate_first", premium_gate_keyboard(loc, first_step=True)),
             ("premium_gate_later", premium_gate_keyboard(loc, first_step=False)),
             ("stream_schedule_confirm", stream_schedule_confirm_keyboard(loc)),
@@ -863,6 +863,28 @@ async def _scenario_wizard_custom_buttons(db) -> None:
     ):
         await _go_custom_buttons_step(update, ctx, "ru")
     cap.assert_turn("wizard_custom_buttons")
+
+
+async def _scenario_wizard_drops_game(db) -> None:
+    """§2 Drops game prompt — Cancel/Back on wizard Reply keyboard."""
+    from handlers.wizard import _go_drops_game_prompt
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data["alert_type"] = "drops"
+    with (
+        patch("handlers.drops.drops_feature_available", return_value=True),
+        patch(
+            "handlers.wizard.prem.has_feature",
+            new=AsyncMock(return_value=True),
+        ),
+        patch.object(db, "get_drops_auth", return_value={"owner_id": _FREE_UID}),
+    ):
+        await _go_drops_game_prompt(update, ctx, "ru")
+    cap.assert_turn("wizard_drops_game")
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:
@@ -1661,6 +1683,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_template_typo(db)
         await _scenario_wizard_finish(db)
         await _scenario_wizard_custom_buttons(db)
+        await _scenario_wizard_drops_game(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_image_ask(db)
         await _scenario_import(db)

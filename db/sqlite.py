@@ -16,6 +16,7 @@ from .models import (
     BotStats,
     ChatAuth,
     DeletedSubscriptionCartItem,
+    DropsAuth,
     PremiumChannel,
     PremiumPurchase,
     ReferralCreditRef,
@@ -240,6 +241,16 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN custom_buttons "
                 "TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "notify_on_drops" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN notify_on_drops "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "drops_game_id" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN drops_game_id "
+                "TEXT NOT NULL DEFAULT ''"
             )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "locale" not in user_cols:
@@ -481,6 +492,27 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS drops_auth (
+                owner_id INTEGER PRIMARY KEY,
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                twitch_login TEXT NOT NULL DEFAULT '',
+                refresh_token TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS drop_campaign_seen (
+                owner_id INTEGER NOT NULL,
+                campaign_id TEXT NOT NULL,
+                subscription_id INTEGER NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                PRIMARY KEY (owner_id, campaign_id, subscription_id)
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS chat_send_daily (
                 owner_id INTEGER NOT NULL,
                 day TEXT NOT NULL,
@@ -649,6 +681,8 @@ class SqliteDatabase:
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
+        notify_on_drops: bool = False,
+        drops_game_id: str = "",
         delete_other_alerts: bool = False,
         is_demo: bool = False,
     ) -> int:
@@ -666,8 +700,9 @@ class SqliteDatabase:
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
+                    notify_on_drops, drops_game_id,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -699,6 +734,8 @@ class SqliteDatabase:
                     int(bool(notify_on_live)),
                     int(bool(notify_on_end)),
                     int(bool(notify_on_category_change)),
+                    int(bool(notify_on_drops)),
+                    str(drops_game_id or ""),
                     int(bool(delete_other_alerts)),
                     int(bool(is_demo)),
                 ),
@@ -951,6 +988,7 @@ class SqliteDatabase:
                         notify_on_category_change=bool(
                             payload.get("notify_on_category_change")
                         ),
+                        notify_on_drops=bool(payload.get("notify_on_drops")),
                         schedule_reminder_configured=bool(
                             payload.get("schedule_reminder_configured")
                         ),
@@ -985,9 +1023,10 @@ class SqliteDatabase:
                         from_twitch_sync, from_watch_suggest,
                         category_watch_prefs,
                         notify_on_live, notify_on_end, notify_on_category_change,
+                        notify_on_drops, drops_game_id,
                         delete_other_alerts, is_demo
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1020,6 +1059,8 @@ class SqliteDatabase:
                         int(bool(payload.get("notify_on_live"))),
                         int(bool(payload.get("notify_on_end"))),
                         int(bool(payload.get("notify_on_category_change"))),
+                        int(bool(payload.get("notify_on_drops"))),
+                        payload.get("drops_game_id") or "",
                         int(bool(payload.get("delete_other_alerts"))),
                         int(bool(payload.get("is_demo"))),
                     ),
@@ -1079,11 +1120,15 @@ class SqliteDatabase:
             "notify_on_live",
             "notify_on_end",
             "notify_on_category_change",
+            "notify_on_drops",
+            "drops_game_id",
             "delete_other_alerts",
             "ignore_keywords",
             "use_global_ignore",
             "image_file_id",
             "image_position",
+            "twitch_username",
+            "twitch_user_id",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1102,6 +1147,7 @@ class SqliteDatabase:
                 "notify_on_live",
                 "notify_on_end",
                 "notify_on_category_change",
+                "notify_on_drops",
                 "delete_other_alerts",
                 "use_global_ignore",
             ):
@@ -1112,7 +1158,7 @@ class SqliteDatabase:
                 "schedule_reminder_minutes",
             ):
                 values.append(max(0, int(value)))
-            elif key == "ignore_keywords":
+            elif key in ("ignore_keywords", "drops_game_id", "twitch_username", "twitch_user_id"):
                 values.append(str(value or ""))
             elif key == "image_file_id":
                 values.append(str(value) if value else None)
@@ -1182,6 +1228,8 @@ class SqliteDatabase:
                 WHERE enabled = 1
                   AND COALESCE(category_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%'
+                  AND twitch_user_id NOT LIKE 'drops:%'
+                  AND COALESCE(notify_on_drops, 0) = 0
                   AND (
                     notify_on_live = 1
                     OR notify_on_end = 1
@@ -1199,6 +1247,19 @@ class SqliteDatabase:
                 WHERE enabled = 1
                   AND notify_on_live = 1
                   AND COALESCE(category_watch_prefs, '') != ''
+                ORDER BY id
+                """
+            ).fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def get_enabled_drops_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE enabled = 1
+                  AND notify_on_drops = 1
+                  AND COALESCE(drops_game_id, '') != ''
                 ORDER BY id
                 """
             ).fetchall()
@@ -3504,6 +3565,95 @@ class SqliteDatabase:
                     refresh_token = excluded.refresh_token
                 """,
                 (owner_id, twitch_user_id, twitch_login, enc),
+            )
+
+    def get_drops_auth(self, owner_id: int) -> DropsAuth | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM drops_auth WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return None
+        auth = DropsAuth(
+            owner_id=int(row["owner_id"]),
+            twitch_user_id=str(row["twitch_user_id"] or ""),
+            twitch_login=str(row["twitch_login"] or ""),
+            refresh_token=str(row["refresh_token"] or ""),
+        )
+        auth.refresh_token = decrypt_secret(auth.refresh_token)
+        return auth
+
+    def upsert_drops_auth(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO drops_auth (
+                    owner_id, twitch_user_id, twitch_login, refresh_token
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    twitch_user_id = excluded.twitch_user_id,
+                    twitch_login = excluded.twitch_login,
+                    refresh_token = excluded.refresh_token
+                """,
+                (owner_id, twitch_user_id, twitch_login, enc),
+            )
+
+    def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE drops_auth SET refresh_token = ? WHERE owner_id = ?",
+                (enc, owner_id),
+            )
+
+    def delete_drops_auth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM drops_auth WHERE owner_id = ?", (owner_id,))
+
+    def has_seen_drop_campaign(
+        self, owner_id: int, campaign_id: str, subscription_id: int
+    ) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM drop_campaign_seen
+                WHERE owner_id = ? AND campaign_id = ? AND subscription_id = ?
+                """,
+                (owner_id, campaign_id, subscription_id),
+            ).fetchone()
+        return row is not None
+
+    def mark_drop_campaign_seen(
+        self,
+        owner_id: int,
+        campaign_id: str,
+        subscription_id: int,
+        *,
+        first_seen_at: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO drop_campaign_seen (
+                    owner_id, campaign_id, subscription_id, first_seen_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (owner_id, campaign_id, subscription_id, first_seen_at),
             )
 
     def get_chat_send_count(self, owner_id: int, day: str) -> int:

@@ -22,6 +22,8 @@ CHAT_WRITE_SCOPE = "user:write:chat"
 CHAT_OAUTH_SCOPES = f"{CHAT_READ_SCOPE} {CHAT_WRITE_SCOPE}"
 # Schedule publish may overwrite twitch_sync used by follow import — keep both.
 SCHEDULE_OAUTH_SCOPES = f"{SCHEDULE_SCOPE} {FOLLOWS_SCOPE}"
+# Drops GQL needs a user session; Helix scopes are unused by gql but authorize requires one.
+DROPS_OAUTH_SCOPES = FOLLOWS_SCOPE
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,14 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 
 # ponytail: public Twitch web player Client-ID for gql.twitch.tv only (undocumented; may break).
 _TWITCH_GQL_WEB_CLIENT_ID = "kimne78kx3ncx6brgo4" "mv6wki5h1ko"
+# Persisted-query hashes from Twitch web (TwitchDropsMiner / site); update if GQL breaks.
+_GQL_VIEWER_DROPS_DASHBOARD_HASH = (
+    "5a4da2ab3d5b47c9f9ce864e727b2cb346af1e3ea8b897fe8f704a97ff017619"
+)
+_GQL_DROP_CAMPAIGN_DETAILS_HASH = (
+    "039277bf98f3130929262cc7c6efd9c141ca3749cb6dca442fc8ead9a53f77c1"
+)
+_DROPS_ENABLED_TAG = "Drops Enabled"
 _CHANNEL_ABOUT_GQL = """
 query ChannelAboutLinks($login: String!) {
   user(login: $login) {
@@ -307,6 +317,154 @@ class TwitchClient:
             add(url=link_url, label=label, kind="social")
 
         return links
+
+    def _gql_persisted(
+        self,
+        *,
+        operation_name: str,
+        sha256_hash: str,
+        variables: dict[str, Any],
+        access_token: str,
+    ) -> dict[str, Any]:
+        """Undocumented gql.twitch.tv persisted query (may break without notice)."""
+        headers = {
+            "Client-ID": _TWITCH_GQL_WEB_CLIENT_ID,
+            "Authorization": f"OAuth {access_token}",
+            "Content-Type": "application/json",
+            "Referer": "https://www.twitch.tv/",
+        }
+        payload = {
+            "operationName": operation_name,
+            "variables": variables,
+            "extensions": {
+                "persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": sha256_hash,
+                }
+            },
+        }
+        resp = self._session.post(
+            "https://gql.twitch.tv/gql",
+            headers=headers,
+            json=payload,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if isinstance(body, list):
+            body = body[0] if body else {}
+        if body.get("errors"):
+            logger.warning(
+                "Twitch GQL %s errors: %s",
+                operation_name,
+                type(body["errors"]).__name__,
+            )
+        return body if isinstance(body, dict) else {}
+
+    @staticmethod
+    def _parse_drop_campaign(raw: dict[str, Any]) -> dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
+        campaign_id = str(raw.get("id") or "").strip()
+        if not campaign_id:
+            return None
+        game = raw.get("game") or {}
+        if not isinstance(game, dict):
+            game = {}
+        game_id = str(game.get("id") or raw.get("gameId") or "").strip()
+        game_name = str(game.get("displayName") or game.get("name") or "").strip()
+        status = str(raw.get("status") or "").strip().upper()
+        drops_raw = raw.get("timeBasedDrops") or raw.get("timeBasedDrop") or []
+        if isinstance(drops_raw, dict):
+            drops_raw = [drops_raw]
+        drops: list[dict[str, Any]] = []
+        for d in drops_raw if isinstance(drops_raw, list) else []:
+            if not isinstance(d, dict):
+                continue
+            required = d.get("requiredMinutesWatched")
+            try:
+                minutes = int(required) if required is not None else None
+            except (TypeError, ValueError):
+                minutes = None
+            benefit = d.get("benefitEdges") or d.get("benefits") or []
+            names: list[str] = []
+            if isinstance(benefit, list):
+                for edge in benefit:
+                    node = edge.get("benefit") if isinstance(edge, dict) else None
+                    if isinstance(node, dict) and node.get("name"):
+                        names.append(str(node["name"]))
+                    elif isinstance(edge, dict) and edge.get("name"):
+                        names.append(str(edge["name"]))
+            drops.append(
+                {
+                    "id": str(d.get("id") or ""),
+                    "name": str(d.get("name") or ""),
+                    "required_minutes": minutes,
+                    "benefit_names": names,
+                }
+            )
+        return {
+            "id": campaign_id,
+            "name": str(raw.get("name") or "").strip(),
+            "status": status,
+            "game_id": game_id,
+            "game_name": game_name,
+            "starts_at": str(raw.get("startAt") or raw.get("startsAt") or ""),
+            "ends_at": str(raw.get("endAt") or raw.get("endsAt") or ""),
+            "drops": drops,
+        }
+
+    def get_viewer_drop_campaigns(self, access_token: str) -> list[dict[str, Any]]:
+        """Active drop campaigns visible to the authenticated user (GQL)."""
+        body = self._gql_persisted(
+            operation_name="ViewerDropsDashboard",
+            sha256_hash=_GQL_VIEWER_DROPS_DASHBOARD_HASH,
+            variables={"fetchRewardCampaigns": False},
+            access_token=access_token,
+        )
+        current = ((body.get("data") or {}).get("currentUser") or {})
+        raw_list = current.get("dropCampaigns") or []
+        out: list[dict[str, Any]] = []
+        for raw in raw_list if isinstance(raw_list, list) else []:
+            parsed = self._parse_drop_campaign(raw if isinstance(raw, dict) else {})
+            if parsed:
+                out.append(parsed)
+        return out
+
+    def get_drop_campaign_details(
+        self, access_token: str, *, campaign_id: str, channel_login: str = ""
+    ) -> dict[str, Any] | None:
+        body = self._gql_persisted(
+            operation_name="DropCampaignDetails",
+            sha256_hash=_GQL_DROP_CAMPAIGN_DETAILS_HASH,
+            variables={
+                "dropID": campaign_id,
+                "channelLogin": channel_login or "",
+            },
+            access_token=access_token,
+        )
+        user = ((body.get("data") or {}).get("user") or {})
+        raw = user.get("dropCampaign")
+        if not isinstance(raw, dict):
+            return None
+        return self._parse_drop_campaign(raw)
+
+    def get_streams_with_drops(
+        self,
+        game_id: str,
+        *,
+        language: str | None = None,
+        first: int = 20,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Live streams in a game that advertise the Drops Enabled tag (Helix heuristic)."""
+        streams = self.get_streams_by_game(game_id, language=language, first=first)
+        tagged = [
+            s
+            for s in streams
+            if _DROPS_ENABLED_TAG in (s.get("tags") or [])
+        ]
+        return tagged[: max(0, limit)]
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Helix allows at most 100 user_id params per /streams request."""

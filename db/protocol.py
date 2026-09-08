@@ -8,6 +8,7 @@ from .models import (
     BotStats,
     ChatAuth,
     DeletedSubscriptionCartItem,
+    DropsAuth,
     PremiumChannel,
     ReferralCreditRef,
     ReferralStats,
@@ -52,6 +53,8 @@ class Database(Protocol):
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
+        notify_on_drops: bool = False,
+        drops_game_id: str = "",
         delete_other_alerts: bool = False,
         is_demo: bool = False,
     ) -> int: ...
@@ -122,6 +125,8 @@ class Database(Protocol):
     def get_unique_twitch_user_ids(self) -> list[str]: ...
 
     def get_enabled_category_watch_subscriptions(self) -> list[Subscription]: ...
+
+    def get_enabled_drops_subscriptions(self) -> list[Subscription]: ...
 
     def set_category_watch_live_state(
         self, sub_id: int, live_ids: list[str], *, primed: bool
@@ -522,6 +527,34 @@ class Database(Protocol):
         twitch_user_id: str,
         twitch_login: str,
         refresh_token: str,
+    ) -> None: ...
+
+    def get_drops_auth(self, owner_id: int) -> DropsAuth | None: ...
+
+    def upsert_drops_auth(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None: ...
+
+    def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None: ...
+
+    def delete_drops_auth(self, owner_id: int) -> None: ...
+
+    def has_seen_drop_campaign(
+        self, owner_id: int, campaign_id: str, subscription_id: int
+    ) -> bool: ...
+
+    def mark_drop_campaign_seen(
+        self,
+        owner_id: int,
+        campaign_id: str,
+        subscription_id: int,
+        *,
+        first_seen_at: str,
     ) -> None: ...
 
     def get_chat_send_count(self, owner_id: int, day: str) -> int: ...

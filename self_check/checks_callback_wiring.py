@@ -194,7 +194,7 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
     today = date(2026, 8, 26)
     fix_dates = [today, today + timedelta(days=1)]
     samples: list[tuple[str, Any, dict[str, Any]]] = [
-        ("alert_type", alert_type_keyboard, {"lang": loc}),
+        ("alert_type", alert_type_keyboard, {"lang": loc, "show_drops": True}),
         ("premium_gate_first", premium_gate_keyboard, {"lang": loc, "first_step": True}),
         ("premium_gate_later", premium_gate_keyboard, {"lang": loc, "first_step": False}),
         ("dest", dest_keyboard, {"lang": loc}),

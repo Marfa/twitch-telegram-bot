@@ -43,6 +43,7 @@ FEATURE_IDS: tuple[str, ...] = (
     "alert_history",
     "deleted_subscriptions_cart",
     "stream_chat",
+    "drops_alerts",
 )
 
 # Wizard steps bundled into advanced_mode (legacy à la carte ids still honored).
@@ -86,6 +87,7 @@ _FEATURE_LABEL_KEYS = {
     "alert_history": "premium_feat_alert_history",
     "deleted_subscriptions_cart": "premium_feat_deleted_subscriptions_cart",
     "stream_chat": "premium_feat_stream_chat",
+    "drops_alerts": "premium_feat_drops_alerts",
 }
 
 # Free Mini App chat: read unlimited; send capped unless stream_chat / full plan.
@@ -999,6 +1001,7 @@ def is_live_only_alert(sub: Any) -> bool:
         and not getattr(sub, "notify_on_end", False)
         and not getattr(sub, "notify_on_category_change", False)
         and not getattr(sub, "schedule_reminder_configured", False)
+        and not getattr(sub, "notify_on_drops", False)
     )
 
 
@@ -1012,6 +1015,8 @@ def alert_type_entitled_sync(
     if is_live_only_alert(sub):
         return True
     channel = getattr(sub, "twitch_username", None)
+    if getattr(sub, "notify_on_drops", False):
+        return has_feature_sync(db, user_id, "drops_alerts", channel=channel)
     return has_feature_sync(db, user_id, "alert_types", channel=channel)
 
 
@@ -1026,6 +1031,8 @@ async def alert_type_entitled(
     if is_live_only_alert(sub):
         return True
     channel = getattr(sub, "twitch_username", None)
+    if getattr(sub, "notify_on_drops", False):
+        return await has_feature(bot, db, user_id, "drops_alerts", channel=channel)
     return await has_feature(bot, db, user_id, "alert_types", channel=channel)
 
 
