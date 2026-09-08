@@ -247,6 +247,7 @@ def _check_inline_wizard_keyboards() -> None:
 async def _scenario_menus_and_wizards(db) -> None:
     from handlers.settings import open_other_menu, open_settings_menu
     from handlers.stream_schedule import start_stream_schedule
+    from handlers.watch import start_watch_lucky
 
     cap = _BotCapture()
 
@@ -256,6 +257,22 @@ async def _scenario_menus_and_wizards(db) -> None:
     ctx = _ctx(application)
     await open_other_menu(update, ctx)
     cap.assert_turn("open_other_menu")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("watch", "ru"), cap)
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
+    with (
+        patch("handlers.watch.analytics.capture"),
+        patch(
+            "handlers.watch._fetch_lucky_watch_suggestions",
+            new=AsyncMock(return_value=([], [], [])),
+        ),
+    ):
+        await start_watch_lucky(update, ctx)
+    cap.assert_turn("watch_lucky_other")
 
     application, bot = _app(db)
     cap = _BotCapture()

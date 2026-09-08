@@ -957,12 +957,130 @@ async def start_what_to_watch(
     return await _start_watch_wizard(update, context, lang)
 
 
+async def start_watch_lucky(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """📦 Other → What to watch?: I'm-feeling-lucky only (no filter wizard)."""
+    user_id = update.effective_user.id
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    lang = _user_lang(context, user_id)
+    context.user_data.clear()
+    _set_watch_recommended_mode(context, user_id, enabled=False)
+    analytics.capture(user_id, "watch_lucky_opened", {})
+    status = await update.effective_message.reply_text(
+        t("watch_lucky_searching", lang)
+    )
+    return await _run_watch_lucky(
+        context,
+        user_id=user_id,
+        lang=lang,
+        chat_id=update.effective_chat.id,
+        status_message=status,
+        stay_in_categories_on_empty=False,
+    )
+
+
 async def start_watch_change(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     query = update.callback_query
     await query.answer()
     return await start_what_to_watch(update, context)
+
+
+async def _run_watch_lucky(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int,
+    lang: str,
+    chat_id: int,
+    status_message=None,
+    edit_message=None,
+    stay_in_categories_on_empty: bool = False,
+) -> int:
+    async def _show(text: str, reply_markup=None) -> None:
+        target = status_message or edit_message
+        edit = getattr(target, "edit_text", None) if target is not None else None
+        if callable(edit):
+            try:
+                await edit(text, reply_markup=reply_markup)
+                return
+            except BadRequest:
+                pass
+        await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
+
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    prefer = _bot_lang_to_twitch(lang)
+    try:
+        cats, streams, vods = await _fetch_lucky_watch_suggestions(
+            twitch, prefer_language=prefer
+        )
+    except Exception:
+        logger.exception("watch lucky failed")
+        await _show(t("watch_suggest_error", lang))
+        return (
+            _ws()["WATCH_CATEGORIES"]
+            if stay_in_categories_on_empty
+            else ConversationHandler.END
+        )
+    if not streams and not vods:
+        markup = (
+            _watch_cats_keyboard(context, lang, has_cats=False)
+            if stay_in_categories_on_empty
+            else None
+        )
+        await _show(t("watch_lucky_empty", lang), reply_markup=markup)
+        if not stay_in_categories_on_empty:
+            await context.bot.send_message(
+                chat_id,
+                t("menu_main", lang),
+                reply_markup=_menu(lang, user_id),
+            )
+        return (
+            _ws()["WATCH_CATEGORIES"]
+            if stay_in_categories_on_empty
+            else ConversationHandler.END
+        )
+    prefs = WatchPrefs(
+        categories=cats,
+        min_viewers=0,
+        max_viewers=None,
+        language=None,
+        tags=[],
+        exclude_mature=False,
+    )
+    context.user_data["watch_categories"] = list(cats)
+    context.user_data["watch_tags"] = []
+    context.user_data["watch_min_viewers"] = 0
+    context.user_data["watch_max_viewers"] = None
+    context.user_data["watch_language"] = None
+    context.user_data["watch_exclude_mature"] = False
+    analytics.capture(
+        user_id,
+        "watch_lucky",
+        {
+            "categories": len(cats),
+            "streams": len(streams),
+            "vods": len(vods),
+        },
+    )
+    _set_watch_lucky_mode(context, user_id, enabled=True)
+    edit_target = edit_message if hasattr(edit_message, "edit_text") else None
+    if edit_target is None and hasattr(status_message, "edit_text"):
+        edit_target = status_message
+    await _send_watch_suggestions(
+        bot=context.bot,
+        chat_id=chat_id,
+        user_id=user_id,
+        context=context,
+        prefs=prefs,
+        edit_message=edit_target,
+        streams=streams or None,
+        vods=vods or None,
+        allow_vod=False,
+    )
+    return ConversationHandler.END
 
 
 async def on_watch_again(
@@ -1057,6 +1175,8 @@ async def on_watch_create_alerts(
         )
         return
 
+    from handlers.notifications import CATEGORY_WATCH_COOLDOWN_MINUTES
+
     enabled = await prem.can_enable_more_async(context.bot, db, user_id)
     label = watch_filter_auto_name(prefs)
     db.add_subscription(
@@ -1072,6 +1192,7 @@ async def on_watch_create_alerts(
         notify_on_live=True,
         notify_on_end=False,
         notify_on_category_change=False,
+        suppress_repeat_minutes=CATEGORY_WATCH_COOLDOWN_MINUTES,
         from_watch_suggest=True,
         category_watch_prefs=prefs_json,
         is_demo=demo_mode.is_active(user_id),
@@ -1321,67 +1442,15 @@ async def receive_watch_category_callback(
             await context.bot.send_message(
                 query.message.chat_id, t("watch_lucky_searching", lang)
             )
-        twitch: TwitchClient = context.application.bot_data["twitch"]
-        prefer = _bot_lang_to_twitch(lang)
-        try:
-            cats, streams, vods = await _fetch_lucky_watch_suggestions(
-                twitch, prefer_language=prefer
-            )
-        except Exception:
-            logger.exception("watch lucky failed")
-            await context.bot.send_message(
-                query.message.chat_id, t("watch_suggest_error", lang)
-            )
-            return _ws()["WATCH_CATEGORIES"]
-        if not streams and not vods:
-            try:
-                await query.edit_message_text(
-                    t("watch_lucky_empty", lang),
-                    reply_markup=_watch_cats_keyboard(context, lang, has_cats=False),
-                )
-            except BadRequest:
-                await context.bot.send_message(
-                    query.message.chat_id,
-                    t("watch_lucky_empty", lang),
-                    reply_markup=_watch_cats_keyboard(context, lang, has_cats=False),
-                )
-            return _ws()["WATCH_CATEGORIES"]
-        prefs = WatchPrefs(
-            categories=cats,
-            min_viewers=0,
-            max_viewers=None,
-            language=None,
-            tags=[],
-            exclude_mature=False,
-        )
-        context.user_data["watch_categories"] = list(cats)
-        context.user_data["watch_tags"] = []
-        context.user_data["watch_min_viewers"] = 0
-        context.user_data["watch_max_viewers"] = None
-        context.user_data["watch_language"] = None
-        context.user_data["watch_exclude_mature"] = False
-        analytics.capture(
-            user_id,
-            "watch_lucky",
-            {
-                "categories": len(cats),
-                "streams": len(streams),
-                "vods": len(vods),
-            },
-        )
-        _set_watch_lucky_mode(context, user_id, enabled=True)
-        await _send_watch_suggestions(
-            bot=context.bot,
-            chat_id=query.message.chat_id,
+        return await _run_watch_lucky(
+            context,
             user_id=user_id,
-            context=context,
-            prefs=prefs,
+            lang=lang,
+            chat_id=query.message.chat_id,
+            status_message=query.message,
             edit_message=query.message,
-            streams=streams or None,
-            vods=vods or None,
-            allow_vod=False,
+            stay_in_categories_on_empty=True,
         )
-        return ConversationHandler.END
     if data == "watch_cat:recommended":
         db: Database = context.application.bot_data["db"]
         twitch: TwitchClient = context.application.bot_data["twitch"]

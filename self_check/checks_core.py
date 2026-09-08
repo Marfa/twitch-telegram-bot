@@ -569,6 +569,7 @@ def check_core() -> None:
         settings_menu,
         subscriptions_menu,
         stream_schedule_duration_keyboard,
+        watch_cats_nav_keyboard,
         watch_suggest_keyboard,
     )
 
@@ -618,7 +619,8 @@ def check_core() -> None:
         other_kb = other_menu(loc).keyboard
         assert [[b.text for b in row] for row in other_kb] == [
             [btn("whisper_alerts", loc), btn("create_schedule", loc)],
-            [btn("chat", loc), btn("back", loc)],
+            [btn("watch", loc), btn("chat", loc)],
+            [btn("back", loc)],
         ]
         for i, row in enumerate(other_kb):
             if i == len(other_kb) - 1 and len(row) == 1:
@@ -1009,6 +1011,12 @@ def check_core() -> None:
         assert btn("welcome_demo_delete", loc)
         assert tr("watch_cats_prompt", loc, max=5)
         assert tr("watch_cats_lucky", loc)
+        lucky_cbs = [
+            b.callback_data
+            for r in watch_cats_nav_keyboard(loc, has_cats=False).inline_keyboard
+            for b in r
+        ]
+        assert "watch_cat:lucky" not in lucky_cbs
         assert tr("watch_cats_recommended", loc)
         assert tr("watch_recommended_header", loc)
         assert tr("watch_recommended_empty", loc)
@@ -1038,6 +1046,9 @@ def check_core() -> None:
         assert tr("watch_create_alerts", loc)
         assert tr("watch_create_alerts_dup", loc)
         assert tr("edit_watch_locked", loc)
+        assert tr("edit_game_cooldown_prompt", loc)
+        assert tr("edit_game_cooldown_invalid", loc)
+        assert tr("sub_list_game_cooldown", loc, hours=1)
         assert tr("import_mode_prompt", loc)
         assert tr("sync_menu_off", loc)
         assert tr("sync_unfollow_ask", loc, list="@x")

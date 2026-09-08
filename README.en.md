@@ -23,7 +23,8 @@
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
-| 🎲 Game alert | In **➕ New subscription** (under Drops): saved filters; live → else VOD; I'm feeling lucky; catch new streams by filter; own category in **📋 My subscriptions** |
+| 🎲 Game alert | In **➕ New subscription** (under Drops): saved filters; live → else VOD; catch new streams by filter; own category in **📋 My subscriptions** |
+| 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
@@ -145,9 +146,11 @@ With “delete old” enabled, the bot removes the previous alert before a new o
 
 After setup the bot sends **“✅ Setup complete!”** to DM and a test message to the chosen chat.
 
-### Game alert
+### Game alert / What to watch?
 
-**🎲 Game alert** (**➕ New subscription**, under Drops) — random live streams matching your filters (available to everyone, no Premium). If none are live — recent VODs for the same categories. Created alerts appear in **📋 My subscriptions** under “Game alert”.
+**🎲 What to watch?** (**📦 Other**) — feeling lucky immediately (random games → live).
+
+**🎲 Game alert** (**➕ New subscription**, under Drops) — filter wizard without feeling lucky. If none are live — recent VODs. Created alerts appear in **📋 My subscriptions** under “Game alert”.
 
 If you have saved filters, the bot offers:
 
@@ -159,7 +162,7 @@ If you have saved filters, the bot offers:
 
 New search wizard:
 
-1. Twitch categories (up to 5) — or **🎲 I'm feeling lucky** (IGDB random ×5 → live bot language / any; recently released ×5 → live; if empty → VOD for the same games; 18+ allowed)
+1. Twitch categories (up to 5) — no feeling lucky here (that lives in **📦 Other** → What to watch?)
 2. Checkboxes for extra filters: tags / viewers / language / exclude mature (unchecked = any)
 3. Value prompts only for checked items (tags, viewer range, language)
 4. Save filter for later (up to 5) or just this once
@@ -168,7 +171,7 @@ After suggestions (or an empty result):
 
 | Button | Action |
 |---|---|
-| **Watch new streams by this filter?** | Game alert: up to 5 new streams in one message (search format); defaults only, toggle/delete only |
+| **Watch new streams by this filter?** | Game alert: up to 5 new streams in one message (search format); frequency 1–24 h (**✏️**, default 1 h); toggle / edit / delete only |
 | **Suggest again** | Another random set |
 | **Filters / new search** | Pick again / wizard |
 
@@ -251,9 +254,10 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below” |
-| 📦 Other | Whisper alerts, schedule, chat |
+| 📦 Other | Whisper alerts, schedule, what to watch (feeling lucky), chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
+| ↳ 🎲 What to watch? | Feeling lucky immediately; again / filters |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
 | ⚙️ Settings | Premium, sync, ignored words, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |

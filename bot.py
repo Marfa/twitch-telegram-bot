@@ -429,6 +429,7 @@ from handlers.watch import (
     receive_watch_viewers_callback,
     receive_watch_viewers_text,
     start_watch_change,
+    start_watch_lucky,
 )
 
 from handlers.wizard import (
@@ -772,6 +773,7 @@ def _help_text(lang: str) -> str:
         btn_other=btn("other", lang),
         btn_whisper_alerts=btn("whisper_alerts", lang),
         btn_create_schedule=btn("create_schedule", lang),
+        btn_watch=btn("watch", lang),
         btn_chat=btn("chat", lang),
         btn_settings=btn("settings", lang),
         btn_feedback=btn("feedback", lang),
@@ -1426,6 +1428,11 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if context.user_data.get("edit_game_cooldown"):
+        from handlers.subscriptions import receive_edit_game_cooldown
+
+        return await receive_edit_game_cooldown(update, context)
+
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
     if not sub_id:
@@ -2347,7 +2354,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
         group=0,
     )
-    app.add_handler(CallbackQueryHandler(on_edit_pick, pattern=r"^edit:\d+$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_welcome_demo_delete, pattern=r"^welcome_del:\d+$"),
         group=0,
@@ -2387,6 +2393,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(
                 dm_only_conv_entry(on_twitch_link_start),
                 pattern=r"^twitch_link:start:[a-zA-Z0-9_]{4,25}$",
+            ),
+            MessageHandler(
+                _btn_filter("watch"), dm_only_conv_entry(start_watch_lucky)
             ),
             MessageHandler(
                 _btn_filter("create_schedule"), dm_only_conv_entry(start_stream_schedule)
@@ -2444,6 +2453,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_repeat_mute),
                 pattern=r"^edit_f:\d+:repeat$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(on_edit_pick), pattern=r"^edit:\d+$"
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_watch_change), pattern=r"^watch:change$"

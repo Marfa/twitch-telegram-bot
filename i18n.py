@@ -164,6 +164,7 @@ def all_menu_buttons() -> set[str]:
         "back_settings",
         "admin_withdrawals",
         "admin_refund",
+        "watch",
         "chat",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
@@ -232,7 +233,7 @@ def subscriptions_menu(
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
-    keys = ["whisper_alerts", "create_schedule", "chat", "back"]
+    keys = ["whisper_alerts", "create_schedule", "watch", "chat", "back"]
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
     return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
 
@@ -662,13 +663,7 @@ def welcome_demo_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
 def watch_cats_nav_keyboard(
     lang: str, *, has_cats: bool, show_recommended: bool = False
 ) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                t("watch_cats_lucky", lang), callback_data="watch_cat:lucky"
-            )
-        ]
-    ]
+    rows: list[list[InlineKeyboardButton]] = []
     if show_recommended:
         rows.append(
             [

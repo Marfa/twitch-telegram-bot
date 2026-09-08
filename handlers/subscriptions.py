@@ -359,6 +359,15 @@ def _format_sub_line(
         settings.append(t("sub_list_alert_drops", lang))
     elif is_category_watch_sub(sub):
         settings.append(t("sub_list_alert_game", lang))
+        from handlers.notifications import category_watch_cooldown_hours
+
+        settings.append(
+            t(
+                "sub_list_game_cooldown",
+                lang,
+                hours=category_watch_cooldown_hours(sub),
+            )
+        )
     elif sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
     elif sub.notify_on_category_change:
@@ -400,6 +409,7 @@ def _format_sub_line(
         if (
             not sub.notify_on_category_change
             and not sub.notify_on_end
+            and not is_category_watch_sub(sub)
             and sub.suppress_repeat_minutes > 0
         ):
             settings.append(
@@ -753,15 +763,16 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        # Drops / game alerts: toggle+delete only (no edit/share).
-        locked = is_drops_sub(s) or is_category_watch_sub(s)
+        # Drops: toggle+delete only. Game alerts: edit = cooldown hours (no share).
+        drops_locked = is_drops_sub(s)
+        game = is_category_watch_sub(s)
         row1 = [
             InlineKeyboardButton(
                 _inline_btn_label(toggle_label),
                 callback_data=f"toggle:{s.id}",
             )
         ]
-        if not locked:
+        if not drops_locked:
             row1.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
@@ -775,7 +786,7 @@ def _subs_toggle_keyboard(
                 callback_data=f"list_del:{s.id}",
             )
         ]
-        if show_share and not locked:
+        if show_share and not drops_locked and not game:
             row2.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_share_short', lang)} {tag}"),
@@ -2028,7 +2039,9 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await query.edit_message_text(t("enable_all_done", lang, count=count))
 
 
-async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    from telegram.ext import ConversationHandler
+
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
@@ -2037,13 +2050,23 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub or not _sub_in_current_mode(sub, query.from_user.id):
         await query.edit_message_text(t("sub_not_found", lang))
-        return
-    if sub.from_watch_suggest or is_category_watch_sub(sub):
-        await query.edit_message_text(t("edit_watch_locked", lang))
-        return
+        return ConversationHandler.END
+    if is_category_watch_sub(sub):
+        context.user_data.clear()
+        context.user_data["edit_sub_id"] = sub_id
+        context.user_data["edit_game_cooldown"] = True
+        context.user_data["wizard_edit"] = True
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("edit_game_cooldown_prompt", lang),
+            reply_markup=_wizard(lang, back=False),
+        )
+        return _sub_states()["EDIT_REPEAT"]
     if is_drops_sub(sub):
         await query.edit_message_text(t("drops_edit_unsupported", lang))
-        return
+        return ConversationHandler.END
+    context.user_data.pop("edit_game_cooldown", None)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     show_adv = await prem.advanced_mode_on(
         context.bot, db, query.from_user.id, channel=sub.twitch_username
@@ -2088,6 +2111,63 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         reply_markup=_edit_options_for_sub(sub, lang, show_advanced=show_adv, db=db),
         parse_mode=ParseMode.HTML,
     )
+    return ConversationHandler.END
+
+
+async def receive_edit_game_cooldown(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from telegram.ext import ConversationHandler
+
+    from handlers.notifications import (
+        CATEGORY_WATCH_COOLDOWN_HOURS_MAX,
+        CATEGORY_WATCH_COOLDOWN_HOURS_MIN,
+    )
+
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _sub_states()["EDIT_REPEAT"]
+    if not raw.isdigit():
+        await update.effective_message.reply_text(
+            t("edit_game_cooldown_invalid", lang)
+        )
+        return _sub_states()["EDIT_REPEAT"]
+    hours = int(raw)
+    if hours != 0 and (
+        hours < CATEGORY_WATCH_COOLDOWN_HOURS_MIN
+        or hours > CATEGORY_WATCH_COOLDOWN_HOURS_MAX
+    ):
+        await update.effective_message.reply_text(
+            t("edit_game_cooldown_invalid", lang)
+        )
+        return _sub_states()["EDIT_REPEAT"]
+
+    minutes = 0 if hours == 0 else hours * 60
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    sub = db.get_subscription(int(sub_id), owner_id)
+    if not sub or not is_category_watch_sub(sub):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        return ConversationHandler.END
+    sub_num = _owner_sub_number(db, owner_id, int(sub_id))
+    if not db.update_subscription(
+        int(sub_id), owner_id, suppress_repeat_minutes=minutes
+    ):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2420,6 +2500,7 @@ async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_T
 
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
+    context.user_data.pop("edit_game_cooldown", None)
     current = _repeat_current_label(sub.suppress_repeat_minutes, lang)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text("✓")

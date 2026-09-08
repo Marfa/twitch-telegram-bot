@@ -31,8 +31,33 @@ from twitch import (
 logger = logging.getLogger(__name__)
 
 _WATCH_CATEGORY_NOTIFY_CAP = 5
+# Fixed mute between game-alert digests (not the editable stream-start suppress).
+CATEGORY_WATCH_COOLDOWN_MINUTES = 60
+CATEGORY_WATCH_COOLDOWN_HOURS_MIN = 1
+CATEGORY_WATCH_COOLDOWN_HOURS_MAX = 24
 # Helix can omit category right after go-live; wait once, then send with whatever we get.
 LIVE_GAME_RECHECK_SECONDS = 20
+
+
+def category_watch_cooldown_minutes(sub: Subscription) -> int:
+    """Effective digest mute: suppress_repeat_minutes, or default 60 when 0."""
+    raw = int(getattr(sub, "suppress_repeat_minutes", 0) or 0)
+    if raw <= 0:
+        return CATEGORY_WATCH_COOLDOWN_MINUTES
+    return raw
+
+
+def category_watch_cooldown_hours(sub: Subscription) -> int:
+    return max(1, category_watch_cooldown_minutes(sub) // 60)
+
+
+def _category_watch_cooling_down(sub: Subscription) -> bool:
+    from db.models import _parse_utc
+
+    until = _parse_utc(getattr(sub, "notify_cooldown_until", None))
+    if until is None:
+        return False
+    return datetime.now(timezone.utc) < until
 
 
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -476,67 +501,103 @@ async def _check_category_watch_alerts(
 
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
+    # Prevent overlapping check_streams ticks from double-sending the same digest.
+    in_flight: set[int] = context.application.bot_data.setdefault(
+        "category_watch_in_flight", set()
+    )
     for sub in subs:
+        if sub.id in in_flight:
+            continue
+        if _category_watch_cooling_down(sub):
+            continue
         prefs = parse_category_watch_prefs(sub.category_watch_prefs)
         if not prefs or not prefs.categories:
             continue
-        pooled: list[dict] = []
-        for cat in prefs.categories:
-            try:
-                batch = await asyncio.to_thread(
-                    twitch.get_streams_by_game,
-                    cat["id"],
-                    language=prefs.language,
-                    first=100,
-                )
-            except Exception:
-                logger.exception(
-                    "category watch fetch failed sub=%s game_id=%s",
-                    sub.id,
-                    cat.get("id"),
+        in_flight.add(sub.id)
+        try:
+            pooled: list[dict] = []
+            fetch_failed = False
+            for cat in prefs.categories:
+                try:
+                    batch = await asyncio.to_thread(
+                        twitch.get_streams_by_game,
+                        cat["id"],
+                        language=prefs.language,
+                        first=100,
+                    )
+                except Exception:
+                    fetch_failed = True
+                    logger.exception(
+                        "category watch fetch failed sub=%s game_id=%s",
+                        sub.id,
+                        cat.get("id"),
+                    )
+                    continue
+                pooled.extend(batch)
+            if fetch_failed:
+                # Incomplete Helix view — do not notify or rewrite live state.
+                continue
+            filtered = filter_streams_for_watch(
+                pooled,
+                min_viewers=prefs.min_viewers,
+                max_viewers=prefs.max_viewers,
+                exclude_mature=prefs.exclude_mature,
+                tags=prefs.tags,
+            )
+            by_uid: dict[str, dict] = {}
+            for stream in filtered:
+                uid = str(stream.get("user_id") or "").strip()
+                if uid and uid not in by_uid:
+                    by_uid[uid] = stream
+            current_uids = set(by_uid)
+            prev_uids = _parse_category_watch_live_ids(sub.category_watch_live_ids)
+            if not sub.category_watch_primed:
+                db.set_category_watch_live_state(
+                    sub.id, sorted(current_uids), primed=True
                 )
                 continue
-            pooled.extend(batch)
-        filtered = filter_streams_for_watch(
-            pooled,
-            min_viewers=prefs.min_viewers,
-            max_viewers=prefs.max_viewers,
-            exclude_mature=prefs.exclude_mature,
-            tags=prefs.tags,
-        )
-        by_uid: dict[str, dict] = {}
-        for stream in filtered:
-            uid = str(stream.get("user_id") or "").strip()
-            if uid and uid not in by_uid:
-                by_uid[uid] = stream
-        current_uids = set(by_uid)
-        prev_uids = _parse_category_watch_live_ids(sub.category_watch_live_ids)
-        if not sub.category_watch_primed:
-            db.set_category_watch_live_state(
-                sub.id, sorted(current_uids), primed=True
+            # Empty result while we tracked live IDs: treat as flaky Helix, keep state.
+            if prev_uids and not current_uids:
+                logger.info(
+                    "category watch empty poll sub=%s; keeping %s live id(s)",
+                    sub.id,
+                    len(prev_uids),
+                )
+                continue
+            new_streams = [by_uid[uid] for uid in (current_uids - prev_uids)]
+            new_streams.sort(
+                key=lambda s: int(s.get("viewer_count") or 0), reverse=True
             )
-            continue
-        new_streams = [by_uid[uid] for uid in (current_uids - prev_uids)]
-        new_streams.sort(
-            key=lambda s: int(s.get("viewer_count") or 0), reverse=True
-        )
-        batch = new_streams[:_WATCH_CATEGORY_NOTIFY_CAP]
-        if batch:
-            lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-            text = _format_watch_suggestions(
-                batch, prefs, lang, db=db, include_prefs=True
-            )
-            await _send_notification(
-                context.bot,
-                db,
-                sub,
-                text,
-                alert_type="live",
-                stream=None,
-                twitch=twitch,
-                parse_mode=ParseMode.HTML,
-            )
-        db.set_category_watch_live_state(sub.id, sorted(current_uids), primed=True)
+            batch = new_streams[:_WATCH_CATEGORY_NOTIFY_CAP]
+            if batch:
+                # Claim IDs before send so a concurrent tick cannot re-notify them.
+                db.set_category_watch_live_state(
+                    sub.id, sorted(current_uids), primed=True
+                )
+                lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                text = _format_watch_suggestions(
+                    batch, prefs, lang, db=db, include_prefs=True
+                )
+                ok = await _send_notification(
+                    context.bot,
+                    db,
+                    sub,
+                    text,
+                    alert_type="live",
+                    stream=None,
+                    twitch=twitch,
+                    parse_mode=ParseMode.HTML,
+                )
+                if ok:
+                    db.set_notify_cooldown(
+                        sub.id, category_watch_cooldown_minutes(sub)
+                    )
+            else:
+                db.set_category_watch_live_state(
+                    sub.id, sorted(current_uids), primed=True
+                )
+        finally:
+            in_flight.discard(sub.id)
 
 
 def _parse_segment_start(segment: dict) -> datetime | None:

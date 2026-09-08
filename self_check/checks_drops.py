@@ -272,7 +272,8 @@ def _check_drops_digest_and_tags() -> None:
     assert "b" in body and "Drops Включены" in body
     assert "c" in body and "Drops Enabled" in body
     assert body.index("b") < body.index("a")
-    assert "👁" in body and "https://twitch.tv/" in body
+    assert "👁" in body
+    assert any(ln.strip().startswith("https://twitch.tv/") for ln in body.splitlines())
     assert "Условие получения" not in body
     assert "Как зарабатывать" not in t("drops_digest_alert_body", "ru")
     assert "{streams}" in t("drops_stream_alert_body", "ru")
@@ -484,7 +485,7 @@ def _check_drops_subs_list_hides_edit_share() -> None:
     assert not any((c or "").startswith("share_show:") for c in callbacks)
 
 
-def _check_game_subs_list_hides_edit_share() -> None:
+def _check_game_subs_list_edit_no_share() -> None:
     from unittest.mock import MagicMock, patch
 
     import beta as beta_features
@@ -530,7 +531,7 @@ def _check_game_subs_list_hides_edit_share() -> None:
     callbacks = [b.callback_data for r in rows for b in r]
     assert any((c or "").startswith("toggle:") for c in callbacks)
     assert any((c or "").startswith("list_del:") for c in callbacks)
-    assert not any((c or "").startswith("edit:") for c in callbacks)
+    assert any((c or "").startswith("edit:") for c in callbacks)
     assert not any((c or "").startswith("share_show:") for c in callbacks)
 
 
@@ -549,7 +550,7 @@ def run() -> None:
     _check_drops_gql_soft_errors()
     _check_drops_list_label_and_oauth_keep()
     _check_drops_subs_list_hides_edit_share()
-    _check_game_subs_list_hides_edit_share()
+    _check_game_subs_list_edit_no_share()
 
 
 if __name__ == "__main__":
