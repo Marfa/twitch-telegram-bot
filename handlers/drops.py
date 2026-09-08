@@ -240,6 +240,7 @@ async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None
         lang,
         bot_data=context.application.bot_data,
         access_token=access,
+        application=context.application,
     )
 
 
@@ -298,10 +299,11 @@ def list_active_drop_campaigns(
             return None
         try:
             return _fetch(access)
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "drops catalog fetch failed owner=%s attempt=%s", owner_id, attempt
             )
+            unauthorized = "unauthorized" in str(exc).lower()
             if attempt == 1:
                 # Drop cached access and refresh once — stale AT often yields null user.
                 try:
@@ -313,6 +315,13 @@ def list_active_drop_campaigns(
                         "drops access cache clear failed owner=%s", owner_id
                     )
                 continue
+            if unauthorized:
+                try:
+                    db.delete_drops_auth(owner_id)
+                except Exception:
+                    logger.exception(
+                        "drops_auth wipe after unauthorized owner=%s", owner_id
+                    )
             return None
     return None
 
@@ -328,6 +337,7 @@ async def send_drops_catalog(
     user_data: dict[str, Any] | None = None,
     reply_markup_extra: Any = None,
     access_token: str | None = None,
+    application: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch and send the available-Drops list with digest checkbox."""
     campaigns = await asyncio.to_thread(
@@ -349,13 +359,23 @@ async def send_drops_catalog(
         _clear_store()
         auth = db.get_drops_auth(user_id)
         digest_on = bool(auth and auth.digest_enabled)
+        has_oauth = user_has_drops_oauth(db, user_id)
+        # Always offer rebind on fetch fail — after unauthorized wipe has_oauth
+        # is already False, so gating on it hid the button when users need it most.
         await bot.send_message(
             user_id,
             t("drops_catalog_fetch_failed", lang),
             reply_markup=drops_catalog_keyboard(
-                lang, [], digest_enabled=digest_on
+                lang,
+                [],
+                digest_enabled=digest_on,
+                show_rebind=True,
             ),
         )
+        if not has_oauth:
+            await send_drops_oauth_prompt(
+                bot, twitch, user_id, lang, application=application
+            )
         if reply_markup_extra is not None:
             await bot.send_message(
                 user_id,
@@ -371,7 +391,10 @@ async def send_drops_catalog(
             user_id,
             t("drops_catalog_empty", lang),
             reply_markup=drops_catalog_keyboard(
-                lang, [], digest_enabled=digest_on
+                lang,
+                [],
+                digest_enabled=digest_on,
+                show_rebind=True,
             ),
         )
         if reply_markup_extra is not None:
@@ -727,6 +750,32 @@ async def create_drops_game_subscription(
     return sub, "drops_subscribed_ok"
 
 
+async def on_drops_rebind(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Clear stored Drops OAuth and start device-code login again."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    lang = _user_lang(db, user_id)
+    try:
+        db.delete_drops_auth(user_id)
+    except Exception:
+        logger.exception("drops rebind delete failed user=%s", user_id)
+    await context.bot.send_message(user_id, t("drops_rebind_started", lang))
+    await send_drops_oauth_prompt(
+        context.bot,
+        twitch,
+        user_id,
+        lang,
+        application=context.application,
+    )
+
+
 async def on_drops_digest_toggle(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -754,7 +803,10 @@ async def on_drops_digest_toggle(
     try:
         await query.edit_message_reply_markup(
             reply_markup=drops_catalog_keyboard(
-                lang, cands, digest_enabled=new_state
+                lang,
+                cands,
+                digest_enabled=new_state,
+                show_rebind=not cands,
             )
         )
     except Exception:

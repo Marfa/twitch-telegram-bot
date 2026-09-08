@@ -1693,6 +1693,7 @@ async def _go_drops_catalog_step(
         bot_data=context.application.bot_data,
         user_data=context.user_data,
         reply_markup_extra=wizard_kb,
+        application=context.application,
     )
     return _wz()["CHANNEL"]
 

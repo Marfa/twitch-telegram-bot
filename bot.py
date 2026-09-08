@@ -3064,11 +3064,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         on_drops_claim_action,
         on_drops_digest_toggle,
         on_drops_get_alerts,
+        on_drops_rebind,
     )
     from premium_handlers import refresh_premium_twitch_job
 
     app.add_handler(
         CallbackQueryHandler(on_drops_digest_toggle, pattern=r"^drops_digest:toggle$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_drops_rebind, pattern=r"^drops_rebind$")
     )
     app.add_handler(
         CallbackQueryHandler(on_drops_get_alerts, pattern=r"^drops_get:")

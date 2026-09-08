@@ -763,6 +763,7 @@ def drops_catalog_keyboard(
     campaigns: list[dict[str, str]],
     *,
     digest_enabled: bool = False,
+    show_rebind: bool = False,
 ) -> InlineKeyboardMarkup:
     mark = "✅ " if digest_enabled else "⬜️ "
     rows: list[list[InlineKeyboardButton]] = [
@@ -785,6 +786,15 @@ def drops_catalog_keyboard(
                 InlineKeyboardButton(
                     label[:64],
                     callback_data=f"drops_camp:pick:{i}",
+                )
+            ]
+        )
+    if show_rebind:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("drops_rebind_btn", lang),
+                    callback_data="drops_rebind",
                 )
             ]
         )

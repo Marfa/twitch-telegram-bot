@@ -152,8 +152,9 @@ def _check_drops_oauth_prompt_html() -> None:
     assert "<code>" in ru
     assert "<b>" in en and "unofficial API" in en
     assert t("drops_catalog_fetch_failed", "ru") == (
-        "Не удалось загрузить список Drops. Попробуйте позже."
+        "Не удалось загрузить список Drops. Попробуйте позже или перепривяжите Twitch."
     )
+    assert "re-link" in t("drops_catalog_fetch_failed", "en").lower()
     assert "вручную" not in t("drops_catalog_empty", "ru")
     assert "manually" not in t("drops_catalog_fetch_failed", "en").lower()
 
@@ -277,10 +278,12 @@ def _check_drops_digest_and_tags() -> None:
     )
     labels = [b.text for r in kb.inline_keyboard for b in r]
     assert any("Подписаться на новые Drops" in (x or "") for x in labels)
-    empty_kb = drops_catalog_keyboard("ru", [], digest_enabled=False)
+    empty_kb = drops_catalog_keyboard("ru", [], digest_enabled=False, show_rebind=True)
     empty_labels = [b.text for r in empty_kb.inline_keyboard for b in r]
     assert any("Подписаться на новые Drops" in (x or "") for x in empty_labels)
-    assert len(empty_kb.inline_keyboard) >= 1
+    assert any("Перепривязать Twitch" in (x or "") for x in empty_labels)
+    assert any((b.callback_data or "") == "drops_rebind" for r in empty_kb.inline_keyboard for b in r)
+    assert len(empty_kb.inline_keyboard) >= 2
     assert any((x or "").startswith("✅") for x in labels)
     assert any("получено" in (x or "") for x in labels)
     assert "Получать оповещения" in t("drops_get_alerts_btn", "ru")

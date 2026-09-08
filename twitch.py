@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 import re
@@ -187,10 +188,10 @@ class TwitchClient:
         self, access_token: str, *, client_id: str, device_id: str | None = None
     ) -> dict[str, str]:
         did = (device_id or self._drops_device_id or "").strip() or self._drops_device_id
-        session_id = "".join(random.choice("0123456789abcdef") for _ in range(16))
+        # Stable session per device (TwitchDropsMiner keeps one session_id per login).
+        session_id = hashlib.sha256(f"drops-sess:{did}".encode()).hexdigest()[:16]
         return {
             "Accept": "*/*",
-            "Accept-Encoding": "gzip",
             "Accept-Language": "en-US",
             "Pragma": "no-cache",
             "Cache-Control": "no-cache",
@@ -518,7 +519,16 @@ class TwitchClient:
         data = body.get("data") or {}
         current = data.get("currentUser")
         if not isinstance(current, dict):
-            logger.warning("Twitch GQL ViewerDropsDashboard: currentUser missing")
+            # Log keys only — never tokens.
+            logger.warning(
+                "Twitch GQL ViewerDropsDashboard: currentUser missing data_keys=%s err=%s",
+                list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+                (
+                    str((body.get("errors") or [{}])[0].get("message") or "")[:120]
+                    if isinstance(body.get("errors"), list) and body.get("errors")
+                    else ""
+                ),
+            )
             raise RuntimeError("twitch gql ViewerDropsDashboard unauthorized")
         raw_list = current.get("dropCampaigns") or []
         out: list[dict[str, Any]] = []
