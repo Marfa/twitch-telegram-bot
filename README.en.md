@@ -34,11 +34,11 @@
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
 | System alerts | Toggle admin broadcasts (updates / availability / other); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
-| Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel — see [Premium](#premium) |
+| Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / 🧪 **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; refund by charge_id; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
-| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
+| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
 ## Premium
@@ -51,6 +51,7 @@ Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the
 | Month | 100 | 30 days, auto-renew |
 | Year | 1000 | 365 days |
 | Lifetime | 2000 | permanent |
+| Gift (month / year / forever) | 100 / 1000 / 2000 | one-time, no renew; link for recipient (🧪 beta) |
 | Single feature | 20 | 30 days each |
 | Streamer premium channel | 1500 | one-time for that channel |
 
@@ -244,6 +245,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
+| `/when` | When is the stream? (in a group/channel with an alert — next Twitch schedule slot; witty reply if none; 1 min cooldown). Also the text “When stream?” / «Когда стрим?» |
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
@@ -361,6 +363,21 @@ Optional. Use the **Project API key** (`phc_…`) from Project settings → Proj
 | Admin stats snapshot | `daily_bot_stats` event daily at 03:00 UTC |
 
 `daily_bot_stats` properties: `users`, `notify_users`, `unique_owners`, `subscriptions_*`, `unique_twitch_channels`, `premium_paid`, `blocked_users`, `sys_*`, `locale_*`.
+
+Premium (already in PostHog, Trends / Funnels):
+
+| Event | When | Useful properties |
+|---|---|---|
+| `premium_gate_shown` / `premium_gate_get` | feature gate → Get Premium | `feature`, `first_step` |
+| `premium_opened` | Premium screen | `source`, `feature` |
+| `premium_pay_started` | invoice link issued | `kind`, `stars`, `source`, `feature` |
+| `premium_purchased` | plan / à la carte paid | `kind`, `stars`, `features`, `source`, `feature` |
+| `premium_channel_purchased` | streamer Premium channel | `stars`, `twitch_login`, `source` |
+| `premium_gift_purchased` / `premium_gift_redeemed` | gift bought / claimed | `kind`, `stars` / `buyer_id` |
+
+Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (break down by `source` / `kind`). Stars volume: Trends → `premium_purchased` → Property value `stars` (sum).
+
+Churn / blocks: `bot_blocked` with `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …) and optional `alert_type` / `dest_type`; successful DM delivery → `alert_sent` (same `alert_type`). In Trends: path `alert_sent` → `bot_blocked`, or break down `bot_blocked` by `source`.
 
 One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (on VPS inside the bot container).
 

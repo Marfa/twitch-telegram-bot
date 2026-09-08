@@ -721,9 +721,12 @@ def check_db_premium() -> None:
         assert db.get_subscription(sid_a, 1).enabled is False
         assert db.get_subscription(sid_a, 1).delivery_paused is True
         assert db.get_subscription(sid_b, 1).delivery_paused is True
+        assert db.get_enabled_subscriptions_by_chat_id(ch) == []
         db.clear_delivery_paused(sid_a, enabled=True)
         assert db.get_subscription(sid_a, 1).enabled is True
         assert db.get_subscription(sid_a, 1).delivery_paused is False
+        by_chat = db.get_enabled_subscriptions_by_chat_id(ch)
+        assert len(by_chat) == 1 and by_chat[0].id == sid_a
         db.clear_delivery_paused(sid_b, enabled=False)
         assert db.get_subscription(sid_b, 1).enabled is False
         assert db.get_subscription(sid_b, 1).delivery_paused is False
@@ -1013,6 +1016,11 @@ def check_db_premium() -> None:
     assert ch_p is not None and ch_p.kind == "channel"
     assert ch_p.user_id == 9 and ch_p.twitch_user_id == "42"
     assert ch_p.twitch_login == "streamerx"
+    gift_p = parse_invoice_payload(invoice_payload(11, "gift_month"))
+    assert gift_p is not None and gift_p.kind == "gift_month" and gift_p.user_id == 11
+    assert parse_invoice_payload(invoice_payload(11, "gift_year")).kind == "gift_year"
+    assert parse_invoice_payload(invoice_payload(11, "gift_life")).kind == "gift_life"
+    assert prem.gift_plan_kind("gift_month") == "month"
     from config import FREE_CHAT_ID, PREMIUM_CHANNEL_STARS
 
     assert FREE_CHAT_ID == -1002155969539
@@ -1500,3 +1508,43 @@ def check_db_premium() -> None:
     assert "99" in line and "100" in line and "menu" in line
     assert tr("daily_premium_purchases", "ru", count=1, lines=line)
     assert tr("daily_premium_purchases", "en", count=1, lines=line)
+
+    with tempfile.TemporaryDirectory() as gift_tmp:
+        gdb = SqliteDatabase(Path(gift_tmp) / "gift.db")
+        gdb.upsert_user(501)
+        gdb.upsert_user(502)
+        gift = gdb.create_premium_gift(
+            buyer_id=501, kind="month", charge_id="stx_gift_1", stars=100
+        )
+        assert gift.status == "pending" and gift.token
+        assert gdb.create_premium_gift(
+            buyer_id=501, kind="month", charge_id="stx_gift_1", stars=100
+        ).token == gift.token
+        gdb.update_premium_gift_customize(gift.token, message="hi")
+        gdb.update_premium_gift_customize(gift.token, image_file_id="fileABC")
+        ready = gdb.mark_premium_gift_ready(gift.token)
+        assert ready is not None and ready.status == "ready"
+        assert ready.message == "hi" and ready.image_file_id == "fileABC"
+        assert gdb.find_premium_gift_by_charge("stx_gift_1") is not None
+        assert gdb.find_user_id_by_premium_charge("stx_gift_1") == 501
+        result = prem.apply_gift_redeem(gdb, gift.token, 502)
+        assert result is not None
+        claimed, until = result
+        assert claimed.status == "redeemed" and claimed.recipient_id == 502
+        assert until > int(datetime.now(timezone.utc).timestamp())
+        st = prem.get_status(gdb, 502)
+        assert st.stars_active and st.stars_canceled
+        assert st.stars_charge_id == "stx_gift_1"
+        assert gdb.redeem_premium_gift(gift.token, 503, until_unix=1) is None
+        revoked = prem.revoke_premium_for_charge(gdb, 501, "stx_gift_1")
+        assert any(x.startswith("gift") for x in revoked)
+        assert not prem.get_status(gdb, 502).stars_active
+        life = gdb.create_premium_gift(
+            buyer_id=501, kind="life", charge_id="stx_gift_life", stars=2000
+        )
+        gdb.mark_premium_gift_ready(life.token)
+        life_res = prem.apply_gift_redeem(gdb, life.token, 502)
+        assert life_res is not None
+        assert prem.get_status(gdb, 502).permanent
+        prem.revoke_premium_for_charge(gdb, 501, "stx_gift_life")
+        assert not prem.get_status(gdb, 502).permanent

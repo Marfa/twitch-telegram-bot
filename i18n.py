@@ -294,6 +294,7 @@ def premium_actions_keyboard(
     show_plans: bool = True,
     show_features: bool = True,
     show_owned: bool = False,
+    show_gift: bool = False,
     user_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     from premium import stars_feature_price, stars_lifetime_price, stars_price, stars_year_price
@@ -358,7 +359,51 @@ def premium_actions_keyboard(
                 )
             ]
         )
+    if show_gift:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_gift", lang), callback_data="premium:gift"
+                )
+            ]
+        )
     return InlineKeyboardMarkup(rows)
+
+
+def premium_gift_keyboard(lang: str, *, user_id: int | None = None) -> InlineKeyboardMarkup:
+    from premium import stars_lifetime_price, stars_price, stars_year_price
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_gift_month", lang, stars=stars_price(user_id)),
+                    callback_data="premium:gift_month",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_gift_year", lang, stars=stars_year_price(user_id)),
+                    callback_data="premium:gift_year",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t(
+                        "btn_premium_gift_life",
+                        lang,
+                        stars=stars_lifetime_price(user_id),
+                    ),
+                    callback_data="premium:gift_life",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("premium_feat_back", lang), callback_data="premium:feat_back"
+                )
+            ],
+        ]
+    )
 
 
 def premium_features_keyboard(

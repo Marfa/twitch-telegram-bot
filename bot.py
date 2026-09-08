@@ -289,6 +289,7 @@ from handlers.notifications import (
     live_transitions,
     needs_live_game_recheck,
 )
+from handlers.when_stream import WHEN_STREAM_TEXT_RE, when_stream_command
 from handlers.stream_schedule import (
     _SCHEDULE_DEFAULT_DURATION_MIN,
     _SCHEDULE_FIX_DAY_BETA_ID,
@@ -887,8 +888,10 @@ async def _send_welcome(
     lucky_nth: int | None = None,
 ) -> int:
     user_id = update.effective_user.id
-    # Share deep-link first start: skip welcome demo — user is here for the shared alert.
-    seed_demo = first_start and not context.user_data.get("pending_share_token")
+    # Share/gift deep-link first start: skip welcome demo.
+    seed_demo = first_start and not context.user_data.get(
+        "pending_share_token"
+    ) and not context.user_data.get("pending_gift_token")
     await _send_welcome_bundle(
         context.application,
         context.bot,
@@ -899,6 +902,9 @@ async def _send_welcome(
         lucky_nth=lucky_nth,
     )
     await _maybe_offer_pending_share(context, user_id, lang)
+    from handlers.premium_gift import maybe_offer_pending_gift
+
+    await maybe_offer_pending_gift(context, user_id, lang)
     return ConversationHandler.END
 
 
@@ -930,6 +936,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             lucky_nth = n
     _apply_referral_start_arg(db, user_id, context.args)
     _apply_share_start_arg(db, context, context.args)
+    from handlers.premium_gift import apply_gift_start_arg
+
+    apply_gift_start_arg(db, context, context.args)
     lang = db.get_user_locale(user_id)
     analytics.capture(
         user_id,
@@ -1022,10 +1031,14 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         query.from_user.id,
         lang,
         first_start=first_start
-        and not context.user_data.get("pending_share_token"),
+        and not context.user_data.get("pending_share_token")
+        and not context.user_data.get("pending_gift_token"),
         lucky_nth=int(lucky_nth) if lucky_nth else None,
     )
     await _maybe_offer_pending_share(context, query.from_user.id, lang)
+    from handlers.premium_gift import maybe_offer_pending_gift
+
+    await maybe_offer_pending_gift(context, query.from_user.id, lang)
     return ConversationHandler.END
 
 
@@ -1689,7 +1702,7 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if status == ChatMemberStatus.BANNED:
             from handlers.delivery import apply_user_blocked
 
-            apply_user_blocked(db, user_id)
+            apply_user_blocked(db, user_id, source="my_chat_member")
         elif status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
             clear_user_blocked(db, user_id)
         return
@@ -1749,6 +1762,62 @@ async def successful_premium_payment_router(
     await successful_premium_payment(update, context)
 
 
+async def _on_gift_skip_msg_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.premium_gift import on_gift_skip_msg
+
+    await on_gift_skip_msg(update, context)
+
+
+async def _on_gift_write_msg_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.premium_gift import on_gift_write_msg
+
+    await on_gift_write_msg(update, context)
+
+
+async def _on_gift_skip_img_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.premium_gift import on_gift_skip_img
+
+    await on_gift_skip_img(update, context)
+
+
+async def _on_gift_accept_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.premium_gift import on_gift_accept
+
+    await on_gift_accept(update, context)
+
+
+async def _on_gift_decline_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.premium_gift import on_gift_decline
+
+    await on_gift_decline(update, context)
+
+
+async def _gift_wiz_text_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.premium_gift import gift_wiz_text
+
+    await gift_wiz_text(update, context)
+
+
+async def _gift_wiz_photo_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.premium_gift import gift_wiz_photo
+
+    await gift_wiz_photo(update, context)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     err = context.error
     if isinstance(err, Conflict):
@@ -1770,7 +1839,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         if _is_user_blocked_error(err):
             db = context.application.bot_data.get("db")
             if db is not None and user_id is not None:
-                apply_user_blocked(db, user_id)
+                apply_user_blocked(db, user_id, source="handler")
             logger.warning("User %s blocked the bot (or deactivated): %s", user_id, err)
             return
     logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
@@ -1908,6 +1977,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CommandHandler("feedback", report_problem), group=0)
+    app.add_handler(CommandHandler("when", when_stream_command), group=0)
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.Regex(WHEN_STREAM_TEXT_RE),
+            when_stream_command,
+        ),
+        group=0,
+    )
     app.add_handler(
         MessageHandler(_btn_filter("manage"), open_subscriptions_menu),
         group=0,
@@ -2117,8 +2194,36 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_premium_callback_router,
-            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+)$",
+            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+|gift|gift_month|gift_year|gift_life)$",
         ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            _on_gift_skip_msg_router, pattern=r"^premium:gift_skip_msg$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            _on_gift_write_msg_router, pattern=r"^premium:gift_write_msg$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            _on_gift_skip_img_router, pattern=r"^premium:gift_skip_img$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            _on_gift_accept_router, pattern=r"^gift_accept:[A-Za-z0-9_-]+$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(_on_gift_decline_router, pattern=r"^gift_decline$"),
         group=0,
     )
     app.add_handler(
@@ -2835,6 +2940,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     async def orphan_wizard_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # After deploy, wizard ReplyKeyboard may remain while conversation state is gone.
+        from handlers.premium_gift import _GIFT_WIZ_TOKEN, gift_wiz_cancel
+
+        if context.user_data.get(_GIFT_WIZ_TOKEN):
+            await gift_wiz_cancel(update, context)
+            return
         try:
             key = conv._get_key(update)
         except Exception:
@@ -2913,6 +3023,23 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(MessageHandler(_btn_filter("wizard_cancel"), orphan_wizard_nav), group=0)
     app.add_handler(MessageHandler(_btn_filter("wizard_back"), orphan_wizard_nav), group=0)
+    # Gift customize wizard (outside ConversationHandler).
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+            _gift_wiz_text_router,
+            block=False,
+        ),
+        group=1,
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.PHOTO,
+            _gift_wiz_photo_router,
+            block=False,
+        ),
+        group=1,
+    )
     # After all menu ReplyKeyboard handlers — must not steal Settings/etc.
     app.add_handler(
         MessageHandler(

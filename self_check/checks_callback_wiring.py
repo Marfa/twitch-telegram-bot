@@ -28,6 +28,7 @@ from i18n import (
     link_preview_keyboard,
     premium_actions_keyboard,
     premium_gate_keyboard,
+    premium_gift_keyboard,
     premium_owned_keyboard,
     schedule_calendar_days_keyboard,
     schedule_keyboard,
@@ -112,6 +113,11 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("share_dup_edit", f"share_dup:edit:{_SAMPLE_SUB}"),
     ("share_dup_continue", "share_dup:continue:abc123XYZ_-"),
     ("share_decline", "share_decline"),
+    ("gift_accept", "gift_accept:abc123XYZ_-"),
+    ("gift_decline", "gift_decline"),
+    ("premium_gift", "premium:gift"),
+    ("premium_gift_month", "premium:gift_month"),
+    ("premium_gift_skip_msg", "premium:gift_skip_msg"),
     ("twitch_link_start", "twitch_link:start:shroud"),
     ("twitch_link_decline", "twitch_link:decline"),
     ("list_del", f"list_del:{_SAMPLE_SUB}"),
@@ -330,6 +336,11 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
         (
             "premium_actions",
             premium_actions_keyboard,
+            {"lang": loc, "user_id": 1, "show_gift": True},
+        ),
+        (
+            "premium_gift",
+            premium_gift_keyboard,
             {"lang": loc, "user_id": 1},
         ),
         (

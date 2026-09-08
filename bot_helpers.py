@@ -334,7 +334,7 @@ async def _send_dm_html(
             if "blocked" in str(retry_exc).lower():
                 from handlers.delivery import apply_user_blocked
 
-                apply_user_blocked(db, uid)
+                apply_user_blocked(db, uid, source="system_dm")
                 return _result("blocked")
             logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
             return _result("failed")
@@ -345,7 +345,7 @@ async def _send_dm_html(
         if "blocked" in str(exc).lower():
             from handlers.delivery import apply_user_blocked
 
-            apply_user_blocked(db, uid)
+            apply_user_blocked(db, uid, source="system_dm")
             return _result("blocked")
         logger.warning("Broadcast to %s failed: %s", uid, exc)
         return _result("failed")

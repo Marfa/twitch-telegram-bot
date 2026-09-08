@@ -34,11 +34,11 @@ English: [README.en.md](README.en.md)
 | Импорт из Twitch | OAuth → разово или синхронизация; только новые фолловы, ручные подписки не трогает |
 | Расписание стримов | **📅 Управление расписанием** в **📦 Прочее**: недельный мастер (текст), **поправить слоты на день** / **режим отпуска** / публикация на Twitch — **Premium** («Работа с расписанием Twitch»), **Часовой пояс** (UTC) |
 | Системные оповещения | Вкл/выкл рассылок об обновлениях, доступности и прочих; падения Twitch (status.twitch.com); оповещения о проблемах Cursor (status.cursor.com) — только админам |
-| Премиум | Триал / Stars месяц·год·lifetime / à la carte / саб Twitch / премиум-канал — см. [Premium](#premium) |
+| Премиум | Триал / Stars месяц·год·lifetime / à la carte / саб Twitch / премиум-канал / 🧪 **подарок** — см. [Premium](#premium) |
 | Партнёрка | Реферальная ссылка, 10% от Stars Premium приглашённых, заявки на вывод (вручную) |
 | Админка | Рассылка в фоне; отложенная; статистика; DeepL; выводы; refund по charge_id; демо; **ежедневный дайджест новых Premium-оплат** (источник из аналитики) |
 | Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, Logs (WARNING+), ежедневный `daily_bot_stats` (03:00 UTC) |
-| Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/feedback`, `/settings` |
+| Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
 ## Premium
@@ -51,6 +51,7 @@ English: [README.en.md](README.en.md)
 | Месяц | 100 | 30 дней, автопродление |
 | Год | 1000 | 365 дней |
 | Lifetime | 2000 | бессрочно |
+| Подарок (месяц / год / forever) | 100 / 1000 / 2000 | разовый, без продления; ссылка для получателя (🧪 бета) |
 | Одна функция | 20 | 30 дней за каждую |
 | Премиум-канал стримера | 1500 | разовый, для канала |
 
@@ -244,6 +245,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `/help` | Справка |
 | `/cancel` | Отменить текущий мастер |
 | `/schedule` | Управление расписанием |
+| `/when` | Когда стрим? (в группе/канале с оповещением — ближайший слот Twitch schedule; без расписания — «Откуда мне-то знать?…»; кулдаун 1 мин). Также текст «Когда стрим?» |
 | `/feedback` | Обратная связь |
 | `/settings` | Настройки |
 | ➕ Новая подписка | Тип оповещения → мастер |
@@ -361,6 +363,21 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | Снимок админ-статистики | событие `daily_bot_stats` каждый день в 03:00 UTC |
 
 Properties у `daily_bot_stats`: `users`, `notify_users`, `unique_owners`, `subscriptions_*`, `unique_twitch_channels`, `premium_paid`, `blocked_users`, `sys_*`, `locale_*`.
+
+Premium (уже в PostHog, Trends / Funnels):
+
+| Событие | Когда | Полезные properties |
+|---|---|---|
+| `premium_gate_shown` / `premium_gate_get` | гейт фичи → «Получить Premium» | `feature`, `first_step` |
+| `premium_opened` | экран Premium | `source`, `feature` |
+| `premium_pay_started` | выдан invoice link | `kind`, `stars`, `source`, `feature` |
+| `premium_purchased` | успешная оплата плана / à la carte | `kind`, `stars`, `features`, `source`, `feature` |
+| `premium_channel_purchased` | Premium-канал стримера | `stars`, `twitch_login`, `source` |
+| `premium_gift_purchased` / `premium_gift_redeemed` | подарок куплен / принят | `kind`, `stars` / `buyer_id` |
+
+Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (breakdown `source` / `kind`). Сумма Stars: Trends → `premium_purchased` → Property value `stars` (sum).
+
+Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …) и опционально `alert_type` / `dest_type`; успешная DM-доставка — `alert_sent` (тот же `alert_type`). В Trends: path `alert_sent` → `bot_blocked` или breakdown `bot_blocked` by `source`.
 
 Разовый снимок / приближённый backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (на VPS в контейнере bot).
 

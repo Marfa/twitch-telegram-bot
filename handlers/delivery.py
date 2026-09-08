@@ -5,6 +5,7 @@ import html
 import logging
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from typing import Any
 
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, WebAppInfo
@@ -399,16 +400,49 @@ def _is_chat_unreachable_error(exc: BaseException) -> bool:
     return any(n in msg for n in _CHAT_UNREACHABLE_NEEDLES)
 
 
-def _mark_destination_unreachable(db: Database, sub: Subscription, exc: BaseException) -> None:
+def _is_topic_closed_error(exc: BaseException) -> bool:
+    # Thread-only; do not treat as chat-unreachable (other topics may still work).
+    return "topic_closed" in _exc_text(exc)
+
+
+def test_fail_user_text(exc: BaseException, lang: str) -> str:
+    if _is_topic_closed_error(exc):
+        return t("test_failed_topic_closed", lang)
+    return t("test_failed", lang)
+
+
+def delivery_fail_reason_text(exc: BaseException, lang: str) -> str:
+    if _is_topic_closed_error(exc):
+        return t("delivery_fail_reason_topic_closed", lang)
+    return str(exc)
+
+
+def _block_context(sub: Subscription, *, alert_type: str = "live") -> dict[str, Any]:
+    return {
+        "dest_type": sub.dest_type,
+        "alert_type": alert_type,
+        "subscription_id": sub.id,
+        "twitch_username": sub.twitch_username,
+    }
+
+
+def _mark_destination_unreachable(
+    db: Database,
+    sub: Subscription,
+    exc: BaseException,
+    *,
+    alert_type: str = "live",
+) -> None:
+    props = _block_context(sub, alert_type=alert_type)
     if sub.dest_type == "dm":
         if _is_user_blocked_error(exc) or _is_chat_unreachable_error(exc):
-            apply_user_blocked(db, sub.chat_id)
+            apply_user_blocked(db, sub.chat_id, source="delivery", properties=props)
         return
     if _is_chat_unreachable_error(exc):
         apply_chat_unreachable(db, sub.chat_id)
         return
     if _is_user_blocked_error(exc):
-        apply_user_blocked(db, sub.owner_id)
+        apply_user_blocked(db, sub.owner_id, source="delivery", properties=props)
 
 
 def resume_delivery_for_chat(db: Database, chat_id: int) -> int:
@@ -429,11 +463,20 @@ def resume_delivery_for_chat(db: Database, chat_id: int) -> int:
     return resumed
 
 
-def apply_user_blocked(db: Database, user_id: int) -> int:
+def apply_user_blocked(
+    db: Database,
+    user_id: int,
+    *,
+    source: str = "unknown",
+    properties: dict[str, Any] | None = None,
+) -> int:
     already = db.is_bot_blocked(user_id)
     db.set_bot_blocked(user_id, True)
     if not already:
-        analytics.capture(user_id, "bot_blocked")
+        props: dict[str, Any] = {"source": source}
+        if properties:
+            props.update(properties)
+        analytics.capture(user_id, "bot_blocked", props)
     return db.pause_delivery_for_chat(user_id)
 
 
@@ -591,23 +634,35 @@ async def _maybe_notify_delivery_failure(
     chat_label = _delivery_fail_chat_label(
         await _resolve_chat_display_name(bot, sub), sub.chat_id
     )
+    notice_kwargs = dict(
+        sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
+        twitch_username=sub.twitch_username,
+        chat_name=chat_label,
+    )
+    if _is_topic_closed_error(exc):
+        notice = t("delivery_fail_notice_topic_closed", lang, **notice_kwargs)
+    else:
+        notice = t(
+            "delivery_fail_notice",
+            lang,
+            reason=delivery_fail_reason_text(exc, lang),
+            **notice_kwargs,
+        )
     try:
         await bot.send_message(
             sub.owner_id,
-            t(
-                "delivery_fail_notice",
-                lang,
-                sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
-                twitch_username=sub.twitch_username,
-                chat_name=chat_label,
-                reason=str(exc),
-            ),
+            notice,
             reply_markup=delivery_fail_notice_keyboard(sub.id, lang),
         )
         _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
     except (BadRequest, Forbidden) as notify_exc:
         if _is_user_blocked_error(notify_exc):
-            apply_user_blocked(db, sub.owner_id)
+            apply_user_blocked(
+                db,
+                sub.owner_id,
+                source="delivery_fail_notice",
+                properties=_block_context(sub),
+            )
         logger.warning(
             "Cannot notify owner %s about delivery failure: %s",
             sub.owner_id,
@@ -817,12 +872,12 @@ async def _send_notification(
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
-            _mark_destination_unreachable(db, sub, retry_exc)
+            _mark_destination_unreachable(db, sub, retry_exc, alert_type=alert_type)
             await _maybe_notify_delivery_failure(bot, db, sub, retry_exc)
             return False
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
-        _mark_destination_unreachable(db, sub, exc)
+        _mark_destination_unreachable(db, sub, exc, alert_type=alert_type)
         await _maybe_notify_delivery_failure(bot, db, sub, exc)
         return False
 
@@ -860,12 +915,23 @@ async def _send_notification(
             )
         except Exception:
             logger.exception("Failed to record alert history for sub %s", sub.id)
+        analytics.capture(
+            sub.owner_id,
+            "alert_sent",
+            {
+                "alert_type": alert_type,
+                "dest_type": sub.dest_type,
+                "subscription_id": sub.id,
+                "twitch_username": sub.twitch_username,
+            },
+        )
     return True
 
 
 async def _send_test(
     bot, chat_id: int, thread_id: int | None, text: str, *, db: Database | None = None
-) -> bool:
+) -> BaseException | None:
+    """Send a destination probe. Returns None on success, else the Telegram error."""
     kwargs: dict = {"chat_id": chat_id, "text": text}
     if thread_id:
         kwargs["message_thread_id"] = thread_id
@@ -873,14 +939,14 @@ async def _send_test(
         await bot.send_message(**kwargs)
         if db is not None:
             clear_chat_unreachable(db, chat_id)
-        return True
+        return None
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", chat_id, exc)
         if db is not None and _is_chat_unreachable_error(exc):
             apply_chat_unreachable(db, chat_id)
         elif db is not None and _is_user_blocked_error(exc):
-            apply_user_blocked(db, chat_id)
-        return False
+            apply_user_blocked(db, chat_id, source="test_send")
+        return exc
 
 
 async def purge_expired_blocked_users(context) -> None:

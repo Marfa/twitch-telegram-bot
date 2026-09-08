@@ -233,7 +233,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             except Forbidden:
                 from handlers.delivery import apply_user_blocked
 
-                apply_user_blocked(db, user_id)
+                apply_user_blocked(db, user_id, source="trial_expiry")
             except BadRequest:
                 logger.exception(
                     "Failed to send trial expiry notice to %s", user_id

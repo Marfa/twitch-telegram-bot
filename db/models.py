@@ -300,6 +300,22 @@ class PremiumPurchase:
     paid_at: str
 
 
+@dataclass(frozen=True)
+class PremiumGift:
+    token: str
+    buyer_id: int
+    kind: str  # month | year | life
+    charge_id: str
+    stars: int
+    message: str = ""
+    image_file_id: str = ""
+    status: str = "pending"  # pending | ready | redeemed | revoked
+    recipient_id: int = 0
+    until_unix: int = 0
+    created_at: str = ""
+    redeemed_at: str = ""
+
+
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
     if payload.get("notify_on_drops"):
         return "drops"
