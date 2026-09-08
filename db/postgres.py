@@ -4156,9 +4156,17 @@ class PostgresDatabase:
                 )
 
     def delete_drops_auth(self, owner_id: int) -> None:
+        # Keep the row so digest_enabled survives re-link / token wipe.
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute("DELETE FROM drops_auth WHERE owner_id = %s", (owner_id,))
+            cur.execute(
+                """
+                UPDATE drops_auth
+                SET refresh_token = '', access_token = '', access_expires_at = 0
+                WHERE owner_id = %s
+                """,
+                (owner_id,),
+            )
 
     def has_seen_drop_campaign(
         self, owner_id: int, campaign_id: str, subscription_id: int

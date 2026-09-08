@@ -463,64 +463,63 @@ def _format_dates(campaign: dict[str, Any]) -> str:
     return f"{starts} — {ends}"
 
 
-def _format_how_to_earn(lang: str, campaign: dict[str, Any]) -> str:
-    how = str(campaign.get("how_to_earn") or "").strip()
-    if how:
-        return html.escape(how)
-    parts: list[str] = []
-    for d in campaign.get("drops") or []:
-        if not isinstance(d, dict):
-            continue
-        mins = d.get("required_minutes")
-        dname = str(d.get("name") or "")
-        benefits = ", ".join(d.get("benefit_names") or [])
-        bit = dname or benefits or "?"
-        if mins is not None:
-            parts.append(f"{html.escape(bit)} ({mins} min)")
-        else:
-            parts.append(html.escape(bit))
-    return "; ".join(parts) if parts else "—"
-
-
 def _format_digest_alert(lang: str, campaign: dict[str, Any]) -> str:
     name = html.escape(str(campaign.get("name") or t("drops_unnamed", lang)))
+    game = html.escape(str(campaign.get("game_name") or "").strip() or "—")
     return t(
         "drops_digest_alert_body",
         lang,
         name=name,
+        game=game,
         dates=_format_dates(campaign),
-        how=_format_how_to_earn(lang, campaign),
     )
-
-
-def _format_stream_line(stream: dict[str, Any]) -> str:
-    login = str(stream.get("user_login") or "").strip()
-    if not login:
-        return ""
-    display = html.escape(str(stream.get("user_name") or login))
-    url = f"https://www.twitch.tv/{login}"
-    tag = TwitchClient.matched_drops_tag(stream)
-    line = f'• <a href="{html.escape(url, quote=True)}">{display}</a>'
-    if tag:
-        line += f" ({html.escape(tag)})"
-    return line
 
 
 def _format_stream_alert(
-    lang: str, *, campaign: dict[str, Any], streams: list[dict[str, Any]]
+    lang: str,
+    *,
+    campaign: dict[str, Any],
+    streams: list[dict[str, Any]],
+    db: Database,
 ) -> str:
-    game = html.escape(str(campaign.get("game_name") or ""))
+    from handlers.watch import _premium_channel_badge_html
+
+    game = html.escape(str(campaign.get("game_name") or "").strip() or "—")
     name = html.escape(str(campaign.get("name") or t("drops_unnamed", lang)))
-    lines = [ln for s in streams if (ln := _format_stream_line(s))]
-    streams_block = "\n".join(lines) if lines else "—"
-    return t(
-        "drops_stream_alert_body",
-        lang,
-        game=game,
-        name=name,
-        how=_format_how_to_earn(lang, campaign),
-        streams=streams_block,
-    )
+    lines = [
+        t("drops_stream_alert_header", lang, game=game, name=name),
+        "",
+    ]
+    for i, stream in enumerate(streams, start=1):
+        login_raw = str(stream.get("user_login") or "").strip().lower()
+        if not login_raw:
+            continue
+        login = html.escape(login_raw)
+        display = html.escape(str(stream.get("user_name") or login_raw))
+        title = html.escape(str(stream.get("title") or "—"))
+        stream_game = html.escape(
+            str(stream.get("game_name") or campaign.get("game_name") or "—")
+        )
+        viewers = int(stream.get("viewer_count") or 0)
+        badge = _premium_channel_badge_html(lang, login=login_raw, db=db)
+        tag = TwitchClient.matched_drops_tag(stream)
+        drops_tag = f" ({html.escape(tag)})" if tag else ""
+        lines.append(
+            t(
+                "drops_stream_alert_item",
+                lang,
+                n=i,
+                display=display,
+                login=login,
+                title=title,
+                game=stream_game,
+                viewers=viewers,
+                premium_badge=badge,
+                drops_tag=drops_tag,
+            )
+        )
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _mark_streams_seen(
@@ -589,7 +588,7 @@ async def send_drops_stream_alert(
         "how_to_earn": "",
         "drops": [],
     }
-    text = _format_stream_alert(lang, campaign=camp, streams=streams)
+    text = _format_stream_alert(lang, campaign=camp, streams=streams, db=db)
     now_iso = datetime.now(timezone.utc).isoformat()
     try:
         await bot.send_message(
@@ -987,25 +986,14 @@ async def _check_drops_digest(
             db.mark_drop_campaign_seen(
                 owner_id, cid, _DIGEST_SEEN_SUB_ID, first_seen_at=now_iso
             )
-            # Enrich how_to_earn from details when thin.
-            if not str(campaign.get("how_to_earn") or "").strip():
-                try:
-                    detailed = await asyncio.to_thread(
-                        twitch.get_drop_campaign_details,
-                        access,
-                        campaign_id=cid,
-                    )
-                    if detailed:
-                        campaign = detailed
-                except Exception:
-                    pass
+            # Seed catalog cache for «Получать оповещения» without how-to-earn.
             compact_row = {
                 "id": cid,
                 "name": str(campaign.get("name") or ""),
                 "game_id": str(campaign.get("game_id") or ""),
                 "game_name": str(campaign.get("game_name") or ""),
                 "claimed": bool(campaign.get("claimed")),
-                "how_to_earn": str(campaign.get("how_to_earn") or ""),
+                "how_to_earn": "",
                 "starts_at": str(campaign.get("starts_at") or ""),
                 "ends_at": str(campaign.get("ends_at") or ""),
                 "drops": campaign.get("drops") or [],

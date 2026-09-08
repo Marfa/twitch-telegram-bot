@@ -261,15 +261,22 @@ def _check_drops_digest_and_tags() -> None:
     assert [s["user_login"] for s in promo_first] == ["a", "d", "b", "c"]
 
     from handlers.drops import _format_stream_alert
+    from types import SimpleNamespace
 
     body = _format_stream_alert(
         "ru",
         campaign={"game_name": "G", "name": "Camp", "how_to_earn": "watch", "drops": []},
         streams=ordered,
+        db=SimpleNamespace(is_premium_channel_login=lambda _l: False),  # type: ignore[arg-type]
     )
     assert "b" in body and "Drops Включены" in body
     assert "c" in body and "Drops Enabled" in body
     assert body.index("b") < body.index("a")
+    assert "👁" in body and "https://twitch.tv/" in body
+    assert "Условие получения" not in body
+    assert "Как зарабатывать" not in t("drops_digest_alert_body", "ru")
+    assert "{streams}" in t("drops_stream_alert_body", "ru")
+    assert "{drops_tag}" in t("drops_stream_alert_item", "ru")
 
     kb = drops_catalog_keyboard(
         "ru",
@@ -288,7 +295,7 @@ def _check_drops_digest_and_tags() -> None:
     assert any("получено" in (x or "") for x in labels)
     assert "Получать оповещения" in t("drops_get_alerts_btn", "ru")
     assert "Вы получили Drops" in t("drops_claim_alert_body", "ru", name="X")
-    assert "{streams}" in t("drops_stream_alert_body", "ru")
+    assert "{drops_tag}" in t("drops_stream_alert_item", "ru")
 
 
 def _check_drops_digest_db() -> None:
@@ -323,6 +330,19 @@ def _check_drops_digest_db() -> None:
         auth2 = db.get_drops_auth(7)
         assert auth2 is not None and auth2.access_token == "at"
         assert auth2.access_expires_at == 9999999999
+        assert auth2.digest_enabled
+        db.delete_drops_auth(7)
+        cleared = db.get_drops_auth(7)
+        assert cleared is not None
+        assert not (cleared.refresh_token or "").strip()
+        assert cleared.digest_enabled
+        assert 7 not in db.list_drops_digest_owner_ids()
+        db.upsert_drops_auth(
+            7, twitch_user_id="1", twitch_login="u", refresh_token="rt2"
+        )
+        assert 7 in db.list_drops_digest_owner_ids()
+        rebound = db.get_drops_auth(7)
+        assert rebound is not None and rebound.digest_enabled
 
 
 def _check_drops_gql_soft_errors() -> None:
