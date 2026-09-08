@@ -1644,6 +1644,7 @@ async def _go_drops_catalog_step(
         drops_feature_available,
         send_drops_catalog,
         send_drops_oauth_prompt,
+        user_has_twitch_oauth,
     )
 
     db: Database = context.application.bot_data["db"]
@@ -1664,7 +1665,7 @@ async def _go_drops_catalog_step(
         )
     wizard_kb = _wizard(lang, back=True)
     _set_wizard_back(context, _wz()["CHANNEL"])
-    if not db.get_drops_auth(user_id):
+    if not user_has_twitch_oauth(db, user_id):
         await send_drops_oauth_prompt(context.bot, twitch, user_id, lang)
         await context.bot.send_message(
             chat_id,

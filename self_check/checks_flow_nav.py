@@ -896,7 +896,7 @@ async def _scenario_wizard_drops_game(db) -> None:
             "handlers.wizard.prem.has_feature",
             new=AsyncMock(return_value=True),
         ),
-        patch.object(db, "get_drops_auth", return_value={"owner_id": _FREE_UID}),
+        patch("handlers.drops.user_has_twitch_oauth", return_value=True),
         patch("handlers.drops.list_active_drop_campaigns", return_value=[]),
     ):
         await _go_drops_catalog_step(update, ctx, "ru")

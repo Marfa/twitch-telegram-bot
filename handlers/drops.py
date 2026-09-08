@@ -72,21 +72,90 @@ async def send_drops_oauth_prompt(
     )
 
 
+def user_has_twitch_oauth(db: Database, user_id: int) -> bool:
+    """True if any bot feature already stored a Twitch user refresh for this Telegram user."""
+    return _first_refresh_source(db, user_id) is not None
+
+
+def _first_refresh_source(
+    db: Database, owner_id: int
+) -> tuple[str, str, Any] | None:
+    """(source, refresh_token, row_or_None) — prefer drops_auth, then other OAuth stores."""
+    auth = db.get_drops_auth(owner_id)
+    if auth and auth.refresh_token:
+        return ("drops", auth.refresh_token, auth)
+    sync = db.get_twitch_sync(owner_id)
+    if sync and sync.refresh_token:
+        return ("sync", sync.refresh_token, sync)
+    chat = db.get_chat_auth(owner_id)
+    if chat and chat.refresh_token:
+        return ("chat", chat.refresh_token, chat)
+    whisper = db.get_whisper_alert(owner_id)
+    if whisper and whisper.refresh_token:
+        return ("whisper", whisper.refresh_token, whisper)
+    premium_rt = db.get_premium_twitch_refresh(owner_id)
+    if premium_rt:
+        return ("premium", premium_rt, None)
+    return None
+
+
+def _persist_rotated_refresh(
+    db: Database,
+    owner_id: int,
+    source: str,
+    new_refresh: str,
+    meta: Any,
+) -> None:
+    """Write rotated refresh back to the same store (Twitch invalidates the old one)."""
+    if source == "drops":
+        db.update_drops_auth_refresh(owner_id, new_refresh)
+        return
+    if source == "sync" and meta is not None:
+        db.update_twitch_sync_tokens(
+            owner_id,
+            new_refresh,
+            last_sync_at=str(getattr(meta, "last_sync_at", "") or ""),
+            next_sync_at=str(getattr(meta, "next_sync_at", "") or ""),
+        )
+        return
+    if source == "chat" and meta is not None:
+        db.upsert_chat_auth(
+            owner_id,
+            twitch_user_id=str(meta.twitch_user_id or ""),
+            twitch_login=str(meta.twitch_login or ""),
+            refresh_token=new_refresh,
+        )
+        return
+    if source == "whisper" and meta is not None:
+        db.upsert_whisper_alert(
+            owner_id,
+            enabled=bool(meta.enabled),
+            twitch_user_id=str(meta.twitch_user_id or ""),
+            twitch_login=str(meta.twitch_login or ""),
+            refresh_token=new_refresh,
+            eventsub_id=str(getattr(meta, "eventsub_id", "") or ""),
+        )
+        return
+    if source == "premium":
+        db.set_premium_twitch_refresh(owner_id, new_refresh)
+
+
 def _access_token_for_owner(
     db: Database, twitch: TwitchClient, owner_id: int
 ) -> str | None:
-    auth = db.get_drops_auth(owner_id)
-    if not auth or not auth.refresh_token:
+    found = _first_refresh_source(db, owner_id)
+    if not found:
         return None
+    source, refresh, meta = found
     try:
-        data = twitch.refresh_user_token(auth.refresh_token)
+        data = twitch.refresh_user_token(refresh)
     except Exception:
-        logger.warning("drops token refresh failed for owner=%s", owner_id)
+        logger.warning("drops token refresh failed owner=%s source=%s", owner_id, source)
         return None
     access = str(data.get("access_token") or "")
-    new_refresh = str(data.get("refresh_token") or "") or auth.refresh_token
-    if new_refresh != auth.refresh_token:
-        db.update_drops_auth_refresh(owner_id, new_refresh)
+    new_refresh = str(data.get("refresh_token") or "") or refresh
+    if new_refresh != refresh:
+        _persist_rotated_refresh(db, owner_id, source, new_refresh, meta)
     return access or None
 
 

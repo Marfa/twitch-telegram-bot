@@ -142,10 +142,33 @@ def _check_drops_oauth_prompt_html() -> None:
 
     ru = t("drops_oauth_prompt", "ru")
     en = t("drops_oauth_prompt", "en")
-    assert "автоматизация" in ru
+    assert "привязка Twitch" in ru
     assert "<b>" in ru and "</b>" in ru
     assert "неофициальный API" in ru
     assert "<b>" in en and "unofficial API" in en
+
+
+def _check_drops_reuse_any_oauth() -> None:
+    from handlers.drops import user_has_twitch_oauth
+    from types import SimpleNamespace
+
+    class _Db:
+        def get_drops_auth(self, _uid):
+            return None
+
+        def get_twitch_sync(self, _uid):
+            return SimpleNamespace(refresh_token="rt")
+
+        def get_chat_auth(self, _uid):
+            return None
+
+        def get_whisper_alert(self, _uid):
+            return None
+
+        def get_premium_twitch_refresh(self, _uid):
+            return None
+
+    assert user_has_twitch_oauth(_Db(), 1)  # type: ignore[arg-type]
 
 
 def run() -> None:
@@ -156,6 +179,7 @@ def run() -> None:
     _check_drops_premium_gate()
     _check_drops_active_cap_on_bulk()
     _check_drops_oauth_prompt_html()
+    _check_drops_reuse_any_oauth()
 
 
 if __name__ == "__main__":

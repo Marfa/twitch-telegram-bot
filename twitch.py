@@ -35,9 +35,9 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 
 # ponytail: public Twitch web player Client-ID for gql.twitch.tv only (undocumented; may break).
 _TWITCH_GQL_WEB_CLIENT_ID = "kimne78kx3ncx6brgo4" "mv6wki5h1ko"
-# Persisted-query hashes from Twitch web (TwitchDropsMiner / site); update if GQL breaks.
+# Persisted-query hashes from Twitch web / TwitchDropsMiner; update if GQL breaks.
 _GQL_VIEWER_DROPS_DASHBOARD_HASH = (
-    "5a4da2ab3d5b47c9f9ce864e727b2cb346af1e3ea8b897fe8f704a97ff017619"
+    "c16bb890cc8ce7647a96ee69cd313d423a378a3dedadf630a1017cde18975feb"
 )
 _GQL_DROP_CAMPAIGN_DETAILS_HASH = (
     "039277bf98f3130929262cc7c6efd9c141ca3749cb6dca442fc8ead9a53f77c1"
@@ -326,9 +326,14 @@ class TwitchClient:
         variables: dict[str, Any],
         access_token: str,
     ) -> dict[str, Any]:
-        """Undocumented gql.twitch.tv persisted query (may break without notice)."""
+        """Undocumented gql.twitch.tv persisted query (may break without notice).
+
+        Client-ID must match the Helix app that issued ``access_token`` (our
+        TWITCH_CLIENT_ID). The public web Client-ID only works with web session
+        tokens, not with bot OAuth.
+        """
         headers = {
-            "Client-ID": _TWITCH_GQL_WEB_CLIENT_ID,
+            "Client-ID": TWITCH_CLIENT_ID,
             "Authorization": f"OAuth {access_token}",
             "Content-Type": "application/json",
             "Referer": "https://www.twitch.tv/",
@@ -353,13 +358,17 @@ class TwitchClient:
         body = resp.json()
         if isinstance(body, list):
             body = body[0] if body else {}
-        if body.get("errors"):
-            logger.warning(
-                "Twitch GQL %s errors: %s",
-                operation_name,
-                type(body["errors"]).__name__,
-            )
-        return body if isinstance(body, dict) else {}
+        if not isinstance(body, dict):
+            return {}
+        errors = body.get("errors")
+        if errors:
+            # Do not log full error payloads (may include tokens / PII).
+            msg = ""
+            if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+                msg = str(errors[0].get("message") or "")[:120]
+            logger.warning("Twitch GQL %s failed: %s", operation_name, msg or "error")
+            raise RuntimeError(f"twitch gql {operation_name} failed")
+        return body
 
     @staticmethod
     def _parse_drop_campaign(raw: dict[str, Any]) -> dict[str, Any] | None:
