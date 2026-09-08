@@ -1633,20 +1633,26 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["notify_on_end"] = False
     await query.edit_message_text("✓")
     if kind == "drops":
-        return await _go_drops_game_prompt(update, context, lang)
+        return await _go_drops_catalog_step(update, context, lang)
     return await _go_channel_prompt(update, context, lang)
 
 
-async def _go_drops_game_prompt(
+async def _go_drops_catalog_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    from handlers.drops import drops_feature_available, send_drops_oauth_prompt
+    from handlers.drops import (
+        drops_feature_available,
+        send_drops_catalog,
+        send_drops_oauth_prompt,
+    )
 
     db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
     user_id = update.effective_user.id
+    chat_id = reply_chat_id(update)
     if not drops_feature_available(db, user_id):
         await context.bot.send_message(
-            reply_chat_id(update),
+            chat_id,
             t("drops_beta_required", lang),
             reply_markup=_menu(lang, user_id),
         )
@@ -1656,21 +1662,26 @@ async def _go_drops_game_prompt(
         return await _show_premium_gate(
             update, context, feature="drops_alerts", first_step=True
         )
-    if not db.get_drops_auth(user_id):
-        twitch: TwitchClient = context.application.bot_data["twitch"]
-        await send_drops_oauth_prompt(context.bot, twitch, user_id, lang)
-        # Continue wizard after OAuth; user can re-enter type or we keep waiting on game.
-    chat_id = reply_chat_id(update)
-    text = t("drops_game_prompt", lang)
-    if update.callback_query:
-        await context.bot.send_message(
-            chat_id, text, reply_markup=_wizard(lang, back=True)
-        )
-    else:
-        await update.effective_message.reply_text(
-            text, reply_markup=_wizard(lang, back=True)
-        )
+    wizard_kb = _wizard(lang, back=True)
     _set_wizard_back(context, _wz()["CHANNEL"])
+    if not db.get_drops_auth(user_id):
+        await send_drops_oauth_prompt(context.bot, twitch, user_id, lang)
+        await context.bot.send_message(
+            chat_id,
+            t("drops_catalog_need_oauth", lang),
+            reply_markup=wizard_kb,
+        )
+        return _wz()["CHANNEL"]
+    await send_drops_catalog(
+        context.bot,
+        db,
+        twitch,
+        user_id,
+        lang,
+        bot_data=context.application.bot_data,
+        user_data=context.user_data,
+        reply_markup_extra=wizard_kb,
+    )
     return _wz()["CHANNEL"]
 
 
@@ -1680,8 +1691,13 @@ async def _apply_drops_game(
     lang: str,
     game: dict[str, Any],
 ) -> int:
-    game_id = str(game.get("id") or "")
-    game_name = str(game.get("name") or game.get("box_art_url") or game_id)
+    game_id = str(game.get("id") or game.get("game_id") or "")
+    game_name = str(
+        game.get("name")
+        or game.get("game_name")
+        or game.get("box_art_url")
+        or game_id
+    )
     if not game_id:
         await update.effective_message.reply_text(t("drops_game_not_found", lang, query=""))
         return _wz()["CHANNEL"]
@@ -1744,20 +1760,50 @@ async def receive_drops_game_callback(
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
-    if context.user_data.get("alert_type") != "drops":
+    raw = (query.data or "").split(":")
+    if len(raw) < 2 or raw[0] not in ("drops_game", "drops_camp"):
         return _wz()["CHANNEL"]
-    raw = (query.data or "").split(":", 2)
-    if len(raw) != 3 or raw[0] != "drops_game":
+    action = raw[1]
+    if action == "cancel":
+        await query.edit_message_text("✓")
+        return await cancel(update, context)
+    if action != "pick" or len(raw) != 3:
         return _wz()["CHANNEL"]
     try:
         idx = int(raw[2])
     except ValueError:
         return _wz()["CHANNEL"]
+    if raw[0] == "drops_camp":
+        context.user_data["alert_type"] = "drops"
+        context.user_data["notify_on_drops"] = True
+        context.user_data["notify_on_live"] = False
+        context.user_data["notify_on_end"] = False
+        context.user_data["notify_on_category_change"] = False
+        context.user_data["skip_schedule_check"] = True
+        cands = context.user_data.get("drops_catalog_candidates") or []
+        if not cands:
+            cands = (
+                context.application.bot_data.get("drops_catalog_by_user") or {}
+            ).get(query.from_user.id) or []
+        if idx < 0 or idx >= len(cands):
+            return _wz()["CHANNEL"]
+        camp = cands[idx]
+        await query.edit_message_text("✓")
+        return await _apply_drops_game(
+            update,
+            context,
+            lang,
+            {
+                "id": str(camp.get("game_id") or ""),
+                "name": str(camp.get("game_name") or camp.get("name") or ""),
+            },
+        )
+    if context.user_data.get("alert_type") != "drops":
+        return _wz()["CHANNEL"]
     cands = context.user_data.get("drops_game_candidates") or []
     if idx < 0 or idx >= len(cands):
         return _wz()["CHANNEL"]
     await query.edit_message_text("✓")
-    # Fabricate message path for _apply_drops_game replies
     return await _apply_drops_game(update, context, lang, cands[idx])
 
 

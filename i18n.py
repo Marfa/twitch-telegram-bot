@@ -759,6 +759,33 @@ def drops_game_pick_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def drops_catalog_keyboard(
+    lang: str, campaigns: list[dict[str, str]]
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, c in enumerate(campaigns):
+        game = (c.get("game_name") or "").strip()
+        name = (c.get("name") or c.get("id") or "?").strip()
+        label = f"{game} — {name}" if game else name
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    label[:64],
+                    callback_data=f"drops_camp:pick:{i}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang),
+                callback_data="drops_camp:cancel",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
 def watch_filters_keyboard(
     lang: str,
     *,

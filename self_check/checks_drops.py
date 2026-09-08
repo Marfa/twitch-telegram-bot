@@ -137,6 +137,17 @@ def _check_drops_active_cap_on_bulk() -> None:
         assert any(s.twitch_username == "extra" and not s.enabled for s in subs)
 
 
+def _check_drops_oauth_prompt_html() -> None:
+    from i18n import t
+
+    ru = t("drops_oauth_prompt", "ru")
+    en = t("drops_oauth_prompt", "en")
+    assert "автоматизация" in ru
+    assert "<b>" in ru and "</b>" in ru
+    assert "неофициальный API" in ru
+    assert "<b>" in en and "unofficial API" in en
+
+
 def run() -> None:
     _check_drops_alert_type_keyboard_last()
     _check_drops_payload_and_migrate()
@@ -144,6 +155,7 @@ def run() -> None:
     _check_drops_sub_helper()
     _check_drops_premium_gate()
     _check_drops_active_cap_on_bulk()
+    _check_drops_oauth_prompt_html()
 
 
 if __name__ == "__main__":

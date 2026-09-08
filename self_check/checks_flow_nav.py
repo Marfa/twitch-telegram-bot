@@ -195,6 +195,7 @@ def _check_submenu_reply_keyboards() -> None:
 
 def _check_inline_wizard_keyboards() -> None:
     from handlers.wizard import _twitch_link_offer_keyboard
+    from i18n import drops_catalog_keyboard
 
     for loc in SUPPORTED_LOCALES:
         cases = [
@@ -229,6 +230,13 @@ def _check_inline_wizard_keyboards() -> None:
             ("watch_save", watch_save_keyboard(loc)),
             ("twitch_link_offer", _twitch_link_offer_keyboard(loc, "shroud")),
             ("premium_gift_plans", premium_gift_keyboard(loc, user_id=_FREE_UID)),
+            (
+                "drops_catalog",
+                drops_catalog_keyboard(
+                    loc,
+                    [{"name": "Camp", "game_name": "Game", "id": "1"}],
+                ),
+            ),
         ]
         for name, markup in cases:
             assert markup_has_escape_hatch(markup), (
@@ -873,8 +881,8 @@ async def _scenario_wizard_custom_buttons(db) -> None:
 
 
 async def _scenario_wizard_drops_game(db) -> None:
-    """§2 Drops game prompt — Cancel/Back on wizard Reply keyboard."""
-    from handlers.wizard import _go_drops_game_prompt
+    """§2 Drops catalog — Cancel/Back on wizard Reply keyboard after auth."""
+    from handlers.wizard import _go_drops_catalog_step
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -889,9 +897,10 @@ async def _scenario_wizard_drops_game(db) -> None:
             new=AsyncMock(return_value=True),
         ),
         patch.object(db, "get_drops_auth", return_value={"owner_id": _FREE_UID}),
+        patch("handlers.drops.list_active_drop_campaigns", return_value=[]),
     ):
-        await _go_drops_game_prompt(update, ctx, "ru")
-    cap.assert_turn("wizard_drops_game")
+        await _go_drops_catalog_step(update, ctx, "ru")
+    cap.assert_turn("wizard_drops_catalog")
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:

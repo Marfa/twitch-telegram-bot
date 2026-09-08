@@ -19,6 +19,7 @@ from i18n import (
     delete_old_keyboard,
     delete_sibling_keyboard,
     dest_keyboard,
+    drops_catalog_keyboard,
     edit_bool_keyboard,
     edit_options_keyboard,
     ignored_words_keyboard,
@@ -201,6 +202,14 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
     fix_dates = [today, today + timedelta(days=1)]
     samples: list[tuple[str, Any, dict[str, Any]]] = [
         ("alert_type", alert_type_keyboard, {"lang": loc, "show_drops": True}),
+        (
+            "drops_catalog",
+            drops_catalog_keyboard,
+            {
+                "lang": loc,
+                "campaigns": [{"name": "Camp", "game_name": "Game", "id": "1"}],
+            },
+        ),
         ("premium_gate_first", premium_gate_keyboard, {"lang": loc, "first_step": True}),
         ("premium_gate_later", premium_gate_keyboard, {"lang": loc, "first_step": False}),
         ("dest", dest_keyboard, {"lang": loc}),
