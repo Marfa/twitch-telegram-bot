@@ -499,7 +499,7 @@ def _check_drops_subs_list_edit_no_share() -> None:
     assert any((c or "").startswith("list_del:") for c in callbacks)
     assert any((c or "").startswith("edit:") for c in callbacks)
     assert not any((c or "").startswith("share_show:") for c in callbacks)
-    assert "60 мин" in t("drops_subscribed_ok", "ru", game="G", drop="D")
+    assert "частота обновлений" in t("drops_subscribed_ok", "ru", game="G", drop="D")
     assert "стримам" in t("drops_catalog_prompt", "ru")
 
 
