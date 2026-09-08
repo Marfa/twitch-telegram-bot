@@ -802,6 +802,7 @@ async def _send_notification(
     stream_id: str = "",
     vod_offset_seconds: int | None = None,
     twitch: TwitchClient | None = None,
+    parse_mode: str | None = None,
 ) -> bool:
     if _user_notifications_paused(db, sub.owner_id):
         return True
@@ -819,9 +820,12 @@ async def _send_notification(
     chat_markup = None
     from twitch import template_uses_html
 
-    alert_parse_mode = (
-        ParseMode.HTML if template_uses_html(sub.message_template or "") else None
-    )
+    if parse_mode is None:
+        alert_parse_mode = (
+            ParseMode.HTML if template_uses_html(sub.message_template or "") else None
+        )
+    else:
+        alert_parse_mode = parse_mode
     try:
         lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
         bot_username = ""

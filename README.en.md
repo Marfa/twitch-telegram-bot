@@ -168,7 +168,7 @@ After suggestions (or an empty result):
 
 | Button | Action |
 |---|---|
-| **Watch new streams by this filter?** | Stream-start alert for the current filter (Helix by category); defaults only, delete-only |
+| **Watch new streams by this filter?** | Game alert: up to 5 new streams in one message (search format); defaults only, toggle/delete only |
 | **Suggest again** | Another random set |
 | **Filters / new search** | Pick again / wizard |
 

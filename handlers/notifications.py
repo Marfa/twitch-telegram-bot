@@ -470,10 +470,9 @@ def _parse_category_watch_live_ids(raw: str | None) -> set[str]:
 async def _check_category_watch_alerts(
     context: ContextTypes.DEFAULT_TYPE, subs: list[Subscription]
 ) -> None:
-    from bot import (
-        _effective_ignore_keywords,
-        _render_sub_template,
-    )
+    from telegram.constants import ParseMode
+
+    from handlers.watch import _format_watch_suggestions
 
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
@@ -517,17 +516,15 @@ async def _check_category_watch_alerts(
                 sub.id, sorted(current_uids), primed=True
             )
             continue
-        new_uids = sorted(current_uids - prev_uids)
-        notified = 0
-        for uid in new_uids:
-            if notified >= _WATCH_CATEGORY_NOTIFY_CAP:
-                break
-            stream = by_uid[uid]
-            username = stream.get("user_login", stream.get("user_name", ""))
-            game = stream.get("game_name", "")
-            title = stream.get("title", "")
-            text = _render_sub_template(
-                sub, username, game, title, twitch=twitch, stream=stream
+        new_streams = [by_uid[uid] for uid in (current_uids - prev_uids)]
+        new_streams.sort(
+            key=lambda s: int(s.get("viewer_count") or 0), reverse=True
+        )
+        batch = new_streams[:_WATCH_CATEGORY_NOTIFY_CAP]
+        if batch:
+            lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+            text = _format_watch_suggestions(
+                batch, prefs, lang, db=db, include_prefs=True
             )
             await _send_notification(
                 context.bot,
@@ -535,10 +532,10 @@ async def _check_category_watch_alerts(
                 sub,
                 text,
                 alert_type="live",
-                stream=stream,
+                stream=None,
                 twitch=twitch,
+                parse_mode=ParseMode.HTML,
             )
-            notified += 1
         db.set_category_watch_live_state(sub.id, sorted(current_uids), primed=True)
 
 

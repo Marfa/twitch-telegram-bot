@@ -1814,3 +1814,126 @@ def check_handlers() -> None:
         )
         assert tr("lucky_premium_reason_nth", "ru", n=200)
         assert tr("lucky_premium_reason_monthly", "ru", month="2026-10")
+
+        _check_category_watch_digest_and_legacy()
+
+
+def _check_category_watch_digest_and_legacy() -> None:
+    """Game alerts: search-format digest (≤5); legacy category_watch rows still work."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from handlers.notifications import (
+        _WATCH_CATEGORY_NOTIFY_CAP,
+        _check_category_watch_alerts,
+    )
+    from handlers.subscriptions import _alert_type_from_sub
+    from handlers.watch import _format_watch_suggestions
+    from i18n import t
+
+    assert _WATCH_CATEGORY_NOTIFY_CAP == 5
+
+    prefs = WatchPrefs(
+        categories=[{"id": "509658", "name": "Just Chatting"}],
+        min_viewers=0,
+        max_viewers=None,
+        language=None,
+        tags=[],
+        exclude_mature=True,
+    )
+    prefs_json = dump_category_watch_prefs(prefs)
+    # Pre–button-move row: prefs column set (from_watch_suggest may be True).
+    legacy = SimpleNamespace(
+        id=1,
+        owner_id=42,
+        enabled=True,
+        category_watch_prefs=prefs_json,
+        category_watch_live_ids='["old"]',
+        category_watch_primed=True,
+        from_watch_suggest=True,
+        notify_on_drops=False,
+        notify_on_category_change=False,
+        notify_on_end=False,
+        notify_on_live=True,
+        schedule_reminder_minutes=0,
+        twitch_username="Just Chatting",
+        twitch_user_id="cw:42:old",
+        message_template=tr("import_default_template", "ru"),
+        dest_type="dm",
+        chat_id=42,
+        thread_id=None,
+        delete_previous=False,
+        disable_link_preview=True,
+        attach_chat_button=False,
+        attach_live_remind_button=False,
+        image_file_id=None,
+        image_position="",
+        suppress_repeat_minutes=0,
+    )
+    assert is_category_watch_sub(legacy)  # type: ignore[arg-type]
+    assert _alert_type_from_sub(legacy) == "game"  # type: ignore[arg-type]
+
+    streams = [
+        {
+            "user_id": str(i),
+            "user_login": f"u{i}",
+            "user_name": f"U{i}",
+            "title": f"T{i}",
+            "game_name": "Just Chatting",
+            "viewer_count": 100 - i,
+        }
+        for i in range(1, 8)
+    ]
+    db_mock = MagicMock()
+    text = _format_watch_suggestions(
+        streams[:5], prefs, "ru", db=db_mock, include_prefs=True
+    )
+    assert t("watch_suggest_header", "ru") in text
+    assert "1. <b>U1</b>" in text
+    assert "5. <b>U5</b>" in text
+    assert "6. <b>U6</b>" not in text
+    assert "https://twitch.tv/u1" in text
+
+    sent: list[dict] = []
+
+    async def _capture_send(bot, db, sub, body, **kwargs):
+        sent.append({"text": body, "kwargs": kwargs, "sub_id": sub.id})
+        return True
+
+    twitch = MagicMock()
+    twitch.get_streams_by_game.return_value = streams
+    application = MagicMock()
+    application.bot_data = {"db": MagicMock(), "twitch": twitch}
+    bot = AsyncMock()
+    ctx = MagicMock()
+    ctx.application = application
+    ctx.bot = bot
+
+    db = application.bot_data["db"]
+    db.get_user_locale.return_value = "ru"
+    db.set_category_watch_live_state = MagicMock()
+
+    with (
+        patch(
+            "handlers.notifications.filter_streams_for_watch",
+            side_effect=lambda pooled, **kw: pooled,
+        ),
+        patch(
+            "handlers.notifications._send_notification",
+            new=AsyncMock(side_effect=_capture_send),
+        ),
+        patch(
+            "handlers.watch._premium_channel_badge_html",
+            return_value="",
+        ),
+    ):
+        asyncio.run(_check_category_watch_alerts(ctx, [legacy]))  # type: ignore[list-item]
+
+    assert len(sent) == 1
+    assert sent[0]["sub_id"] == 1
+    body = sent[0]["text"]
+    assert t("watch_suggest_header", "ru") in body
+    assert body.count("https://twitch.tv/") == 5
+    assert sent[0]["kwargs"].get("parse_mode")
+    db.set_category_watch_live_state.assert_called()
