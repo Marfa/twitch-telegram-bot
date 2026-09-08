@@ -1666,7 +1666,13 @@ async def _go_drops_catalog_step(
     wizard_kb = _wizard(lang, back=True)
     _set_wizard_back(context, _wz()["CHANNEL"])
     if not user_has_twitch_oauth(db, user_id):
-        await send_drops_oauth_prompt(context.bot, twitch, user_id, lang)
+        await send_drops_oauth_prompt(
+            context.bot,
+            twitch,
+            user_id,
+            lang,
+            application=context.application,
+        )
         await context.bot.send_message(
             chat_id,
             t("drops_catalog_need_oauth", lang),
@@ -1682,6 +1688,7 @@ async def _go_drops_catalog_step(
         bot_data=context.application.bot_data,
         user_data=context.user_data,
         reply_markup_extra=wizard_kb,
+        application=context.application,
     )
     return _wz()["CHANNEL"]
 
@@ -1700,7 +1707,7 @@ async def _apply_drops_game(
         or game_id
     )
     if not game_id:
-        await update.effective_message.reply_text(t("drops_game_not_found", lang, query=""))
+        await update.effective_message.reply_text(t("drops_catalog_fetch_failed", lang))
         return _wz()["CHANNEL"]
     context.user_data["drops_game_id"] = game_id
     context.user_data["twitch_username"] = game_name
@@ -1714,47 +1721,6 @@ async def _apply_drops_game(
     return await _go_template_prompt(update, context, lang)
 
 
-async def _receive_drops_game_text(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    lang: str,
-    text: str,
-) -> int:
-    from i18n import drops_game_pick_keyboard
-
-    query = (text or "").strip()
-    if not query:
-        await update.effective_message.reply_text(t("drops_game_prompt", lang))
-        return _wz()["CHANNEL"]
-    twitch: TwitchClient = context.application.bot_data["twitch"]
-    try:
-        found = await asyncio.to_thread(twitch.search_categories, query, first=5)
-    except Exception:
-        logger.exception("drops game search failed")
-        await update.effective_message.reply_text(
-            t("drops_game_not_found", lang, query=query)
-        )
-        return _wz()["CHANNEL"]
-    if not found:
-        await update.effective_message.reply_text(
-            t("drops_game_not_found", lang, query=query)
-        )
-        return _wz()["CHANNEL"]
-    if len(found) == 1:
-        return await _apply_drops_game(update, context, lang, found[0])
-    context.user_data["drops_game_candidates"] = [
-        {"id": str(g.get("id") or ""), "name": str(g.get("name") or "")}
-        for g in found
-    ]
-    await update.effective_message.reply_text(
-        t("drops_game_pick", lang),
-        reply_markup=drops_game_pick_keyboard(
-            lang, context.user_data["drops_game_candidates"]
-        ),
-    )
-    return _wz()["CHANNEL"]
-
-
 async def receive_drops_game_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -1762,7 +1728,7 @@ async def receive_drops_game_callback(
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     raw = (query.data or "").split(":")
-    if len(raw) < 2 or raw[0] not in ("drops_game", "drops_camp"):
+    if len(raw) < 2 or raw[0] != "drops_camp":
         return _wz()["CHANNEL"]
     action = raw[1]
     if action == "cancel":
@@ -1774,38 +1740,30 @@ async def receive_drops_game_callback(
         idx = int(raw[2])
     except ValueError:
         return _wz()["CHANNEL"]
-    if raw[0] == "drops_camp":
-        context.user_data["alert_type"] = "drops"
-        context.user_data["notify_on_drops"] = True
-        context.user_data["notify_on_live"] = False
-        context.user_data["notify_on_end"] = False
-        context.user_data["notify_on_category_change"] = False
-        context.user_data["skip_schedule_check"] = True
-        cands = context.user_data.get("drops_catalog_candidates") or []
-        if not cands:
-            cands = (
-                context.application.bot_data.get("drops_catalog_by_user") or {}
-            ).get(query.from_user.id) or []
-        if idx < 0 or idx >= len(cands):
-            return _wz()["CHANNEL"]
-        camp = cands[idx]
-        await query.edit_message_text("✓")
-        return await _apply_drops_game(
-            update,
-            context,
-            lang,
-            {
-                "id": str(camp.get("game_id") or ""),
-                "name": str(camp.get("game_name") or camp.get("name") or ""),
-            },
-        )
-    if context.user_data.get("alert_type") != "drops":
-        return _wz()["CHANNEL"]
-    cands = context.user_data.get("drops_game_candidates") or []
+    context.user_data["alert_type"] = "drops"
+    context.user_data["notify_on_drops"] = True
+    context.user_data["notify_on_live"] = False
+    context.user_data["notify_on_end"] = False
+    context.user_data["notify_on_category_change"] = False
+    context.user_data["skip_schedule_check"] = True
+    cands = context.user_data.get("drops_catalog_candidates") or []
+    if not cands:
+        cands = (
+            context.application.bot_data.get("drops_catalog_by_user") or {}
+        ).get(query.from_user.id) or []
     if idx < 0 or idx >= len(cands):
         return _wz()["CHANNEL"]
+    camp = cands[idx]
     await query.edit_message_text("✓")
-    return await _apply_drops_game(update, context, lang, cands[idx])
+    return await _apply_drops_game(
+        update,
+        context,
+        lang,
+        {
+            "id": str(camp.get("game_id") or ""),
+            "name": str(camp.get("game_name") or camp.get("name") or ""),
+        },
+    )
 
 
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1818,7 +1776,8 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return _wz()["CHANNEL"]
 
     if context.user_data.get("alert_type") == "drops":
-        return await _receive_drops_game_text(update, context, lang, text)
+        await update.effective_message.reply_text(t("drops_catalog_pick_hint", lang))
+        return _wz()["CHANNEL"]
 
     twitch: TwitchClient = context.application.bot_data["twitch"]
     username = twitch.parse_username(text)

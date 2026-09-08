@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,7 +19,7 @@ import premium as prem
 from bot_helpers import _menu
 from db import Database, Subscription, is_drops_sub
 from i18n import DEFAULT_LOCALE, drops_catalog_keyboard, t
-from twitch import DROPS_OAUTH_SCOPES, TwitchClient
+from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ DROPS_FEATURE_ID = "alert_types"
 _DROPS_STREAM_SUBSCRIBE_CAP = 5
 _DROPS_CATALOG_LIMIT = 12
 _ACTIVE_CAMPAIGN_STATUSES = frozenset({"ACTIVE", "ENABLED", ""})
+_PENDING_DEVICE_KEY = "drops_device_pending"
 
 
 def drops_feature_available(db: Database, user_id: int) -> bool:
@@ -45,118 +47,160 @@ def _user_lang(db: Database, user_id: int) -> str:
     return db.get_user_locale(user_id) or DEFAULT_LOCALE
 
 
+def user_has_drops_oauth(db: Database, user_id: int) -> bool:
+    """True when a Drops device-code refresh token is stored (Helix sync tokens are not enough)."""
+    auth = db.get_drops_auth(user_id)
+    return bool(auth and auth.refresh_token)
+
+
+# Back-compat alias for older call sites / checks.
+user_has_twitch_oauth = user_has_drops_oauth
+
+
 async def send_drops_oauth_prompt(
     bot: Any,
     twitch: TwitchClient,
     user_id: int,
     lang: str,
+    *,
+    application: Any | None = None,
 ) -> None:
-    from config import twitch_oauth_redirect_uri
-    from health import create_oauth_state
-
-    redirect = twitch_oauth_redirect_uri()
-    if not redirect:
-        await bot.send_message(user_id, t("drops_oauth_unavailable", lang))
+    """Start Twitch device-code login required for the Drops GQL catalog."""
+    try:
+        started = await asyncio.to_thread(twitch.start_drops_device_code)
+    except Exception:
+        logger.exception("drops device-code start failed user=%s", user_id)
+        await bot.send_message(user_id, t("drops_oauth_failed", lang))
         return
-    state = create_oauth_state(user_id, lang, purpose="drops")
-    url = twitch.build_authorize_url(
-        redirect_uri=redirect, state=state, scopes=DROPS_OAUTH_SCOPES
-    )
+    device_code = str(started.get("device_code") or "")
+    user_code = str(started.get("user_code") or "")
+    uri = str(started.get("verification_uri") or "https://www.twitch.tv/activate")
+    interval = int(started.get("interval") or 5)
+    expires_in = int(started.get("expires_in") or 1800)
+    if not device_code or not user_code:
+        await bot.send_message(user_id, t("drops_oauth_failed", lang))
+        return
     await bot.send_message(
         user_id,
-        t("drops_oauth_prompt", lang),
+        t("drops_oauth_prompt", lang, code=user_code, url=uri),
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(t("drops_oauth_button", lang), url=url)]]
+            [[InlineKeyboardButton(t("drops_oauth_button", lang), url=uri)]]
         ),
     )
-
-
-def user_has_twitch_oauth(db: Database, user_id: int) -> bool:
-    """True if any bot feature already stored a Twitch user refresh for this Telegram user."""
-    return _first_refresh_source(db, user_id) is not None
-
-
-def _first_refresh_source(
-    db: Database, owner_id: int
-) -> tuple[str, str, Any] | None:
-    """(source, refresh_token, row_or_None) — prefer drops_auth, then other OAuth stores."""
-    auth = db.get_drops_auth(owner_id)
-    if auth and auth.refresh_token:
-        return ("drops", auth.refresh_token, auth)
-    sync = db.get_twitch_sync(owner_id)
-    if sync and sync.refresh_token:
-        return ("sync", sync.refresh_token, sync)
-    chat = db.get_chat_auth(owner_id)
-    if chat and chat.refresh_token:
-        return ("chat", chat.refresh_token, chat)
-    whisper = db.get_whisper_alert(owner_id)
-    if whisper and whisper.refresh_token:
-        return ("whisper", whisper.refresh_token, whisper)
-    premium_rt = db.get_premium_twitch_refresh(owner_id)
-    if premium_rt:
-        return ("premium", premium_rt, None)
-    return None
-
-
-def _persist_rotated_refresh(
-    db: Database,
-    owner_id: int,
-    source: str,
-    new_refresh: str,
-    meta: Any,
-) -> None:
-    """Write rotated refresh back to the same store (Twitch invalidates the old one)."""
-    if source == "drops":
-        db.update_drops_auth_refresh(owner_id, new_refresh)
+    if application is None:
         return
-    if source == "sync" and meta is not None:
-        db.update_twitch_sync_tokens(
-            owner_id,
-            new_refresh,
-            last_sync_at=str(getattr(meta, "last_sync_at", "") or ""),
-            next_sync_at=str(getattr(meta, "next_sync_at", "") or ""),
+    pending = application.bot_data.setdefault(_PENDING_DEVICE_KEY, {})
+    pending[user_id] = {
+        "device_code": device_code,
+        "interval": interval,
+        "expires_at": time.time() + expires_in,
+        "lang": lang,
+    }
+    jq = getattr(application, "job_queue", None)
+    if jq is not None:
+        name = f"drops_device:{user_id}"
+        for old in jq.get_jobs_by_name(name) or []:
+            old.schedule_removal()
+        jq.run_repeating(
+            poll_drops_device_code_job,
+            interval=max(3, interval),
+            first=max(3, interval),
+            data={"user_id": user_id},
+            name=name,
+            job_kwargs={"misfire_grace_time": 30},
         )
-        return
-    if source == "chat" and meta is not None:
-        db.upsert_chat_auth(
-            owner_id,
-            twitch_user_id=str(meta.twitch_user_id or ""),
-            twitch_login=str(meta.twitch_login or ""),
-            refresh_token=new_refresh,
-        )
-        return
-    if source == "whisper" and meta is not None:
-        db.upsert_whisper_alert(
-            owner_id,
-            enabled=bool(meta.enabled),
-            twitch_user_id=str(meta.twitch_user_id or ""),
-            twitch_login=str(meta.twitch_login or ""),
-            refresh_token=new_refresh,
-            eventsub_id=str(getattr(meta, "eventsub_id", "") or ""),
-        )
-        return
-    if source == "premium":
-        db.set_premium_twitch_refresh(owner_id, new_refresh)
 
 
 def _access_token_for_owner(
     db: Database, twitch: TwitchClient, owner_id: int
 ) -> str | None:
-    found = _first_refresh_source(db, owner_id)
-    if not found:
+    auth = db.get_drops_auth(owner_id)
+    if not auth or not auth.refresh_token:
         return None
-    source, refresh, meta = found
     try:
-        data = twitch.refresh_user_token(refresh)
+        data = twitch.refresh_drops_gql_token(auth.refresh_token)
     except Exception:
-        logger.warning("drops token refresh failed owner=%s source=%s", owner_id, source)
+        logger.warning("drops GQL token refresh failed owner=%s — clearing auth", owner_id)
+        try:
+            db.delete_drops_auth(owner_id)
+        except Exception:
+            logger.exception("drops_auth delete failed owner=%s", owner_id)
         return None
     access = str(data.get("access_token") or "")
-    new_refresh = str(data.get("refresh_token") or "") or refresh
-    if new_refresh != refresh:
-        _persist_rotated_refresh(db, owner_id, source, new_refresh, meta)
+    new_refresh = str(data.get("refresh_token") or "") or auth.refresh_token
+    if new_refresh != auth.refresh_token:
+        db.update_drops_auth_refresh(owner_id, new_refresh)
     return access or None
+
+
+async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    job = context.job
+    if job is None:
+        return
+    user_id = int((job.data or {}).get("user_id") or 0)
+    if not user_id:
+        job.schedule_removal()
+        return
+    pending_map = context.application.bot_data.get(_PENDING_DEVICE_KEY) or {}
+    pending = pending_map.get(user_id)
+    if not pending:
+        job.schedule_removal()
+        return
+    if time.time() >= float(pending.get("expires_at") or 0):
+        pending_map.pop(user_id, None)
+        job.schedule_removal()
+        lang = str(pending.get("lang") or DEFAULT_LOCALE)
+        await context.bot.send_message(user_id, t("drops_oauth_failed", lang))
+        return
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    db: Database = context.application.bot_data["db"]
+    lang = str(pending.get("lang") or _user_lang(db, user_id))
+    try:
+        token_info = await asyncio.to_thread(
+            twitch.poll_drops_device_code, str(pending.get("device_code") or "")
+        )
+    except Exception:
+        logger.exception("drops device poll failed user=%s", user_id)
+        pending_map.pop(user_id, None)
+        job.schedule_removal()
+        await context.bot.send_message(user_id, t("drops_oauth_failed", lang))
+        return
+    if token_info is None:
+        return
+    pending_map.pop(user_id, None)
+    job.schedule_removal()
+    refresh = str(token_info.get("refresh_token") or "")
+    access = str(token_info.get("access_token") or "")
+    if not refresh or not access:
+        await context.bot.send_message(user_id, t("drops_oauth_failed", lang))
+        return
+    login = ""
+    uid = ""
+    try:
+        user = await asyncio.to_thread(twitch.get_drops_token_user, access)
+        if user:
+            login = str(user.get("login") or "")
+            uid = str(user.get("id") or "")
+    except Exception:
+        logger.warning("drops device user lookup failed user=%s", user_id)
+    db.upsert_drops_auth(
+        user_id,
+        twitch_user_id=uid,
+        twitch_login=login,
+        refresh_token=refresh,
+    )
+    analytics.capture(user_id, "drops_oauth_linked", {})
+    await context.bot.send_message(user_id, t("drops_oauth_done", lang))
+    await send_drops_catalog(
+        context.bot,
+        db,
+        twitch,
+        user_id,
+        lang,
+        bot_data=context.application.bot_data,
+    )
 
 
 def list_active_drop_campaigns(
@@ -172,7 +216,6 @@ def list_active_drop_campaigns(
         logger.exception("drops catalog fetch failed owner=%s", owner_id)
         return None
     active = [c for c in campaigns if _campaign_active(c) and str(c.get("id") or "")]
-    # Prefer unique games first for the picker; keep campaign identity.
     return active[:_DROPS_CATALOG_LIMIT]
 
 
@@ -186,6 +229,7 @@ async def send_drops_catalog(
     bot_data: dict[str, Any] | None = None,
     user_data: dict[str, Any] | None = None,
     reply_markup_extra: Any = None,
+    application: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch and send the available-Drops list. Returns campaigns stored for pick."""
     campaigns = await asyncio.to_thread(list_active_drop_campaigns, db, twitch, user_id)
@@ -199,6 +243,16 @@ async def send_drops_catalog(
 
     if campaigns is None:
         _clear_store()
+        if not user_has_drops_oauth(db, user_id):
+            await send_drops_oauth_prompt(
+                bot, twitch, user_id, lang, application=application
+            )
+            await bot.send_message(
+                user_id,
+                t("drops_catalog_need_oauth", lang),
+                reply_markup=reply_markup_extra,
+            )
+            return []
         await bot.send_message(
             user_id,
             t("drops_catalog_fetch_failed", lang),
@@ -207,11 +261,11 @@ async def send_drops_catalog(
         return []
     if not campaigns:
         _clear_store()
-        text = t("drops_catalog_empty", lang)
-        if reply_markup_extra is not None:
-            await bot.send_message(user_id, text, reply_markup=reply_markup_extra)
-        else:
-            await bot.send_message(user_id, text)
+        await bot.send_message(
+            user_id,
+            t("drops_catalog_empty", lang),
+            reply_markup=reply_markup_extra,
+        )
         return []
 
     compact = [
@@ -235,7 +289,7 @@ async def send_drops_catalog(
     if reply_markup_extra is not None:
         await bot.send_message(
             user_id,
-            t("drops_game_prompt", lang),
+            t("drops_catalog_pick_hint", lang),
             reply_markup=reply_markup_extra,
         )
     return compact
@@ -247,33 +301,14 @@ async def complete_drops_oauth(
     error: str | None,
     token_info: dict[str, str] | None,
 ) -> None:
+    """Legacy Helix redirect callback — Drops now uses device-code; ask user to retry."""
+    del token_info  # Helix tokens cannot load the GQL catalog.
     db: Database = application.bot_data["db"]
-    twitch: TwitchClient = application.bot_data["twitch"]
     lang = _user_lang(db, owner_id)
-    if error or not token_info:
-        key = "oauth_denied" if error == "access_denied" else "drops_oauth_failed"
-        await application.bot.send_message(owner_id, t(key, lang))
+    if error == "access_denied":
+        await application.bot.send_message(owner_id, t("oauth_denied", lang))
         return
-    refresh = token_info.get("refresh_token") or ""
-    if not refresh:
-        await application.bot.send_message(owner_id, t("drops_oauth_failed", lang))
-        return
-    db.upsert_drops_auth(
-        owner_id,
-        twitch_user_id=str(token_info.get("twitch_user_id") or ""),
-        twitch_login=str(token_info.get("twitch_login") or ""),
-        refresh_token=refresh,
-    )
-    analytics.capture(owner_id, "drops_oauth_linked", {})
-    await application.bot.send_message(owner_id, t("drops_oauth_done", lang))
-    await send_drops_catalog(
-        application.bot,
-        db,
-        twitch,
-        owner_id,
-        lang,
-        bot_data=application.bot_data,
-    )
+    await application.bot.send_message(owner_id, t("drops_oauth_use_device", lang))
 
 
 def _campaign_active(campaign: dict[str, Any]) -> bool:

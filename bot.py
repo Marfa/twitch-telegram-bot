@@ -2474,7 +2474,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_drops_game_callback,
-                    pattern=r"^(?:drops_game:pick:\d+|drops_camp:(?:pick:\d+|cancel))$",
+                    pattern=r"^drops_camp:(?:pick:\d+|cancel)$",
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel),
             ],
