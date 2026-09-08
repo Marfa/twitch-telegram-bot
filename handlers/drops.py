@@ -121,12 +121,17 @@ def _access_token_for_owner(
         return None
     try:
         data = twitch.refresh_drops_gql_token(auth.refresh_token)
-    except Exception:
-        logger.warning("drops GQL token refresh failed owner=%s — clearing auth", owner_id)
-        try:
-            db.delete_drops_auth(owner_id)
-        except Exception:
-            logger.exception("drops_auth delete failed owner=%s", owner_id)
+    except Exception as exc:
+        # Only drop stored auth on hard auth rejection — not on transient errors.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        logger.warning(
+            "drops GQL token refresh failed owner=%s status=%s", owner_id, status
+        )
+        if status in (400, 401, 403):
+            try:
+                db.delete_drops_auth(owner_id)
+            except Exception:
+                logger.exception("drops_auth delete failed owner=%s", owner_id)
         return None
     access = str(data.get("access_token") or "")
     new_refresh = str(data.get("refresh_token") or "") or auth.refresh_token
@@ -193,6 +198,8 @@ async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None
     )
     analytics.capture(user_id, "drops_oauth_linked", {})
     await context.bot.send_message(user_id, t("drops_oauth_done", lang))
+    # Use the fresh access token — do not refresh immediately (that wiped auth
+    # and triggered a second device-code prompt when refresh failed).
     await send_drops_catalog(
         context.bot,
         db,
@@ -200,14 +207,19 @@ async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None
         user_id,
         lang,
         bot_data=context.application.bot_data,
+        access_token=access,
     )
 
 
 def list_active_drop_campaigns(
-    db: Database, twitch: TwitchClient, owner_id: int
+    db: Database,
+    twitch: TwitchClient,
+    owner_id: int,
+    *,
+    access_token: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """Return ACTIVE campaigns or None on auth/API failure."""
-    access = _access_token_for_owner(db, twitch, owner_id)
+    access = (access_token or "").strip() or _access_token_for_owner(db, twitch, owner_id)
     if not access:
         return None
     try:
@@ -229,10 +241,16 @@ async def send_drops_catalog(
     bot_data: dict[str, Any] | None = None,
     user_data: dict[str, Any] | None = None,
     reply_markup_extra: Any = None,
-    application: Any | None = None,
+    access_token: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch and send the available-Drops list. Returns campaigns stored for pick."""
-    campaigns = await asyncio.to_thread(list_active_drop_campaigns, db, twitch, user_id)
+    campaigns = await asyncio.to_thread(
+        list_active_drop_campaigns,
+        db,
+        twitch,
+        user_id,
+        access_token=access_token,
+    )
     store = bot_data if bot_data is not None else None
 
     def _clear_store() -> None:
@@ -243,16 +261,6 @@ async def send_drops_catalog(
 
     if campaigns is None:
         _clear_store()
-        if not user_has_drops_oauth(db, user_id):
-            await send_drops_oauth_prompt(
-                bot, twitch, user_id, lang, application=application
-            )
-            await bot.send_message(
-                user_id,
-                t("drops_catalog_need_oauth", lang),
-                reply_markup=reply_markup_extra,
-            )
-            return []
         await bot.send_message(
             user_id,
             t("drops_catalog_fetch_failed", lang),

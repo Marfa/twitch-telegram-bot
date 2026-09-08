@@ -461,7 +461,11 @@ class TwitchClient:
             variables={"fetchRewardCampaigns": False},
             access_token=access_token,
         )
-        current = ((body.get("data") or {}).get("currentUser") or {})
+        data = body.get("data") or {}
+        current = data.get("currentUser")
+        if not isinstance(current, dict):
+            logger.warning("Twitch GQL ViewerDropsDashboard: currentUser missing")
+            raise RuntimeError("twitch gql ViewerDropsDashboard unauthorized")
         raw_list = current.get("dropCampaigns") or []
         out: list[dict[str, Any]] = []
         for raw in raw_list if isinstance(raw_list, list) else []:
@@ -1030,9 +1034,10 @@ class TwitchClient:
 
     def refresh_drops_gql_token(self, refresh_token: str) -> dict[str, Any]:
         """Refresh a Drops device-code token (public client — no secret)."""
+        # Plain form POST — extra Android headers have caused refresh to fail
+        # immediately after device-code exchange, wiping auth and re-prompting.
         resp = self._session.post(
             "https://id.twitch.tv/oauth2/token",
-            headers=self._drops_oauth_headers(),
             data={
                 "client_id": _TWITCH_DROPS_GQL_CLIENT_ID,
                 "grant_type": "refresh_token",
