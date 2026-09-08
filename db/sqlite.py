@@ -3824,6 +3824,37 @@ class SqliteDatabase:
                 (owner_id, subscription_id, stream_id, first_seen_at),
             )
 
+    # Sentinel row in drop_stream_seen: last stream-list alert pulse per sub.
+    _DROP_STREAM_ALERT_ID = "__alert__"
+
+    def get_drop_stream_alert_at(
+        self, owner_id: int, subscription_id: int
+    ) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT first_seen_at FROM drop_stream_seen
+                WHERE owner_id = ? AND subscription_id = ? AND stream_id = ?
+                """,
+                (owner_id, subscription_id, self._DROP_STREAM_ALERT_ID),
+            ).fetchone()
+        return str(row["first_seen_at"]) if row else None
+
+    def mark_drop_stream_alert(
+        self, owner_id: int, subscription_id: int, *, at: str
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO drop_stream_seen (
+                    owner_id, subscription_id, stream_id, first_seen_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(owner_id, subscription_id, stream_id)
+                DO UPDATE SET first_seen_at = excluded.first_seen_at
+                """,
+                (owner_id, subscription_id, self._DROP_STREAM_ALERT_ID, at),
+            )
+
     def get_chat_send_count(self, owner_id: int, day: str) -> int:
         with self._conn() as conn:
             row = conn.execute(

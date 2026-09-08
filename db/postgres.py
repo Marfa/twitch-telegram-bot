@@ -4189,6 +4189,39 @@ class PostgresDatabase:
                 (owner_id, subscription_id, stream_id, first_seen_at),
             )
 
+    _DROP_STREAM_ALERT_ID = "__alert__"
+
+    def get_drop_stream_alert_at(
+        self, owner_id: int, subscription_id: int
+    ) -> str | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT first_seen_at FROM drop_stream_seen
+                WHERE owner_id = %s AND subscription_id = %s AND stream_id = %s
+                """,
+                (owner_id, subscription_id, self._DROP_STREAM_ALERT_ID),
+            )
+            row = cur.fetchone()
+        return str(row["first_seen_at"]) if row else None
+
+    def mark_drop_stream_alert(
+        self, owner_id: int, subscription_id: int, *, at: str
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO drop_stream_seen (
+                    owner_id, subscription_id, stream_id, first_seen_at
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT (owner_id, subscription_id, stream_id)
+                DO UPDATE SET first_seen_at = EXCLUDED.first_seen_at
+                """,
+                (owner_id, subscription_id, self._DROP_STREAM_ALERT_ID, at),
+            )
+
     def get_chat_send_count(self, owner_id: int, day: str) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)

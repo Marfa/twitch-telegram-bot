@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 DROPS_BETA_ID = "drops-alerts"
 DROPS_FEATURE_ID = "alert_types"
+_DROPS_STREAM_ALERT_COOLDOWN_SEC = 3600
 _DROPS_CATALOG_LIMIT = 12
 _DIGEST_SEEN_SUB_ID = 0
 _ACTIVE_CAMPAIGN_STATUSES = frozenset({"ACTIVE", "ENABLED", ""})
@@ -125,20 +126,24 @@ def _access_token_for_owner(
         data = twitch.refresh_drops_gql_token(auth.refresh_token)
     except Exception as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
+        # Keep drops_auth — wiping it forced device-code on every wizard open.
         logger.warning(
             "drops GQL token refresh failed owner=%s status=%s", owner_id, status
         )
-        if status in (400, 401, 403):
-            try:
-                db.delete_drops_auth(owner_id)
-            except Exception:
-                logger.exception("drops_auth delete failed owner=%s", owner_id)
         return None
     access = str(data.get("access_token") or "")
     new_refresh = str(data.get("refresh_token") or "") or auth.refresh_token
     if new_refresh != auth.refresh_token:
         db.update_drops_auth_refresh(owner_id, new_refresh)
     return access or None
+
+
+def _drops_list_label(*, game_name: str, campaign_name: str, game_id: str) -> str:
+    game = (game_name or "").strip() or game_id
+    drop = (campaign_name or "").strip()
+    if game and drop and drop.casefold() != game.casefold():
+        return f"{game} — {drop}"[:64]
+    return (game or drop or game_id)[:64]
 
 
 async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -405,18 +410,49 @@ def _format_digest_alert(lang: str, campaign: dict[str, Any]) -> str:
     )
 
 
+def _format_stream_line(stream: dict[str, Any]) -> str:
+    login = str(stream.get("user_login") or "").strip()
+    if not login:
+        return ""
+    display = html.escape(str(stream.get("user_name") or login))
+    url = f"https://www.twitch.tv/{login}"
+    tag = TwitchClient.matched_drops_tag(stream)
+    line = f'• <a href="{html.escape(url, quote=True)}">{display}</a>'
+    if tag:
+        line += f" ({html.escape(tag)})"
+    return line
+
+
 def _format_stream_alert(
-    lang: str, *, campaign: dict[str, Any], stream: dict[str, Any]
+    lang: str, *, campaign: dict[str, Any], streams: list[dict[str, Any]]
 ) -> str:
     game = html.escape(str(campaign.get("game_name") or ""))
     name = html.escape(str(campaign.get("name") or t("drops_unnamed", lang)))
+    lines = [ln for s in streams if (ln := _format_stream_line(s))]
+    streams_block = "\n".join(lines) if lines else "—"
     return t(
         "drops_stream_alert_body",
         lang,
         game=game,
         name=name,
         how=_format_how_to_earn(lang, campaign),
+        streams=streams_block,
     )
+
+
+def _stream_alert_cooled_down(db: Database, owner_id: int, sub_id: int) -> bool:
+    """True when another stream-list alert may be sent (never or ≥1h ago)."""
+    raw = db.get_drop_stream_alert_at(owner_id, sub_id)
+    if not raw:
+        return True
+    try:
+        last = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    age = (datetime.now(timezone.utc) - last).total_seconds()
+    return age >= _DROPS_STREAM_ALERT_COOLDOWN_SEC
 
 
 def _digest_alert_keyboard(lang: str, campaign_id: str) -> InlineKeyboardMarkup:
@@ -427,19 +463,6 @@ def _digest_alert_keyboard(lang: str, campaign_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     t("drops_get_alerts_btn", lang),
                     callback_data=f"drops_get:{cid}",
-                )
-            ]
-        ]
-    )
-
-
-def _stream_alert_keyboard(lang: str, login: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("drops_go_stream_btn", lang),
-                    url=f"https://www.twitch.tv/{login}",
                 )
             ]
         ]
@@ -487,11 +510,34 @@ async def create_drops_game_subscription(
         if is_drops_sub(s) and (s.drops_game_id or "") == game_id
     ]
     if existing:
+        game_display = (game_name or "").strip() or game_id
+        drop_display = (campaign_name or "").strip()
+        label = _drops_list_label(
+            game_name=game_display,
+            campaign_name=drop_display,
+            game_id=game_id,
+        )
+        patch: dict[str, object] = {}
+        if label and (existing[0].twitch_username or "") != label:
+            patch["twitch_username"] = label
+        if (existing[0].dest_type or "") != "dm":
+            patch["dest_type"] = "dm"
+        if patch:
+            db.update_subscription(
+                existing[0].id, user_id, mark_sync_edited=False, **patch
+            )
+            refreshed = db.get_subscription(existing[0].id, user_id)
+            if refreshed is not None:
+                return refreshed, "drops_already_subscribed"
         return existing[0], "drops_already_subscribed"
     if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
         return None, "sub_limit"
-    display = (game_name or campaign_name or game_id).strip() or f"drops-{game_id}"
-    login = re.sub(r"[^a-z0-9_]", "", display.lower())[:25] or f"g{game_id}"[:25]
+    game_display = (game_name or "").strip() or game_id
+    drop_display = (campaign_name or "").strip() or game_display
+    label = _drops_list_label(
+        game_name=game_display, campaign_name=drop_display, game_id=game_id
+    )
+    login = re.sub(r"[^a-z0-9_]", "", game_display.lower())[:25] or f"g{game_id}"[:25]
     enabled = await prem.may_enable_subscription_async(
         bot, db, user_id, twitch_username=login
     )
@@ -499,8 +545,10 @@ async def create_drops_game_subscription(
         owner_id=user_id,
         twitch_username=login,
         twitch_user_id=f"drops:{user_id}:{secrets.token_hex(4)}",
-        message_template=t("drops_default_template", lang, game=display),
-        dest_type="private",
+        message_template=t(
+            "drops_default_template", lang, game=game_display, drop=drop_display
+        ),
+        dest_type="dm",
         chat_id=user_id,
         thread_id=None,
         disable_link_preview=True,
@@ -510,6 +558,10 @@ async def create_drops_game_subscription(
         notify_on_category_change=False,
         notify_on_drops=True,
         drops_game_id=game_id,
+    )
+    # Preserve casing / drop title for list UI (add_subscription lowercases login).
+    db.update_subscription(
+        sub_id, user_id, twitch_username=label, mark_sync_edited=False
     )
     sub = db.get_subscription(sub_id, user_id)
     analytics.capture(
@@ -581,10 +633,13 @@ async def create_drops_from_campaign_payload(
     del sub
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
+    game = str(camp.get("game_name") or "")
+    drop = str(camp.get("name") or game)
     return t(
         key,
         lang,
-        game=str(camp.get("game_name") or camp.get("name") or ""),
+        game=game or drop,
+        drop=drop or game,
         limit=MAX_SUBSCRIPTIONS_PER_OWNER,
     )
 
@@ -792,9 +847,16 @@ async def _check_drops_streams(
                 logger.exception("drops stream campaigns failed owner=%s", owner_id)
 
         lang = _user_lang(db, owner_id)
+        promo_logins = {
+            str(x).strip().lower()
+            for x in prem.list_promo_channel_logins(db)
+            if str(x).strip()
+        }
         for sub in owner_subs:
             game_id = (sub.drops_game_id or "").strip()
             if not game_id:
+                continue
+            if not _stream_alert_cooled_down(db, owner_id, sub.id):
                 continue
             try:
                 streams = await asyncio.to_thread(
@@ -802,9 +864,12 @@ async def _check_drops_streams(
                     game_id,
                     first=40,
                     limit=5,
+                    promo_logins=promo_logins,
                 )
             except Exception:
                 logger.exception("drops streams fetch failed game=%s", game_id)
+                continue
+            if not streams:
                 continue
             camps = campaigns_by_game.get(game_id) or [
                 {
@@ -816,56 +881,33 @@ async def _check_drops_streams(
                 }
             ]
             campaign = camps[0]
-            # First poll: seed stream ids without spam.
-            live_ids = [
-                str(s.get("id") or "") for s in streams if str(s.get("id") or "")
-            ]
-            any_seen = any(
-                db.has_seen_drop_stream(owner_id, sub.id, sid) for sid in live_ids
+            text = _format_stream_alert(
+                lang, campaign=campaign, streams=streams
             )
-            if not any_seen and live_ids:
-                for sid in live_ids:
-                    db.mark_drop_stream_seen(
-                        owner_id, sub.id, sid, first_seen_at=now_iso
-                    )
-                continue
-            for stream in streams:
-                sid = str(stream.get("id") or "")
-                login = str(stream.get("user_login") or "").lower()
-                if not sid or not login:
-                    continue
-                if db.has_seen_drop_stream(owner_id, sub.id, sid):
-                    continue
-                db.mark_drop_stream_seen(
-                    owner_id, sub.id, sid, first_seen_at=now_iso
+            try:
+                await context.bot.send_message(
+                    sub.chat_id,
+                    text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                    message_thread_id=sub.thread_id,
                 )
-                text = _format_stream_alert(
-                    lang, campaign=campaign, stream=stream
+                db.mark_drop_stream_alert(owner_id, sub.id, at=now_iso)
+                analytics.capture(
+                    owner_id,
+                    "drops_stream_alert_sent",
+                    {
+                        "subscription_id": sub.id,
+                        "game_id": game_id,
+                        "stream_count": len(streams),
+                    },
                 )
-                try:
-                    await context.bot.send_message(
-                        sub.chat_id,
-                        text,
-                        parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
-                        reply_markup=_stream_alert_keyboard(lang, login),
-                        message_thread_id=sub.thread_id,
-                    )
-                    analytics.capture(
-                        owner_id,
-                        "drops_stream_alert_sent",
-                        {
-                            "subscription_id": sub.id,
-                            "stream_id": sid,
-                            "game_id": game_id,
-                        },
-                    )
-                except Exception:
-                    logger.exception(
-                        "drops stream alert failed owner=%s sub=%s",
-                        owner_id,
-                        sub.id,
-                    )
+            except Exception:
+                logger.exception(
+                    "drops stream alert failed owner=%s sub=%s",
+                    owner_id,
+                    sub.id,
+                )
 
 
 async def _check_drops_claims(

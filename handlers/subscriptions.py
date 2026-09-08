@@ -30,7 +30,13 @@ from bot_helpers import (
     _wizard,
     reply_chat_id,
 )
-from db import Database, Subscription, TwitchSync, is_category_watch_sub
+from db import (
+    Database,
+    Subscription,
+    TwitchSync,
+    is_category_watch_sub,
+    is_drops_sub,
+)
 from db.models import (
     _subscription_cart_snapshot,
     alert_type_from_payload,
@@ -349,7 +355,9 @@ def _format_sub_line(
     )
     keywords = html.escape(sub.ignore_keywords or "")
     settings: list[str] = []
-    if sub.notify_on_end:
+    if getattr(sub, "notify_on_drops", False):
+        settings.append(t("sub_list_alert_drops", lang))
+    elif sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
     elif sub.notify_on_category_change:
         settings.append(t("sub_list_alert_category", lang))
@@ -741,25 +749,28 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    _inline_btn_label(toggle_label),
-                    callback_data=f"toggle:{s.id}",
-                ),
+        drops = is_drops_sub(s)
+        row1 = [
+            InlineKeyboardButton(
+                _inline_btn_label(toggle_label),
+                callback_data=f"toggle:{s.id}",
+            )
+        ]
+        if not drops:
+            row1.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
                     callback_data=f"edit:{s.id}",
-                ),
-            ]
-        )
+                )
+            )
+        rows.append(row1)
         row2 = [
             InlineKeyboardButton(
                 _inline_btn_label(f"{t('sub_list_delete', lang)} {tag}"),
                 callback_data=f"list_del:{s.id}",
             )
         ]
-        if show_share:
+        if show_share and not drops:
             row2.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_share_short', lang)} {tag}"),
@@ -2024,6 +2035,9 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if sub.from_watch_suggest or is_category_watch_sub(sub):
         await query.edit_message_text(t("edit_watch_locked", lang))
+        return
+    if is_drops_sub(sub):
+        await query.edit_message_text(t("drops_edit_unsupported", lang))
         return
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     show_adv = await prem.advanced_mode_on(
@@ -4016,6 +4030,9 @@ async def on_share_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     sub = db.get_subscription(sub_id, user_id)
     if sub is None or not _sub_in_current_mode(sub, user_id):
         await query.answer(t("sub_not_found", lang), show_alert=True)
+        return
+    if is_drops_sub(sub):
+        await query.answer(t("drops_share_unsupported", lang), show_alert=True)
         return
     bot_username = await _bot_username(context.bot, context.application.bot_data)
     link = _share_link_for_sub(db, user_id, sub, bot_username)
