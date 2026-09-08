@@ -40,6 +40,7 @@ from bot import (
     _help_text,
     _is_link_preview_disabled,
     _is_http_timeout,
+    _is_stale_callback_query,
     _is_unchanged_message_edit,
     _load_posthog_seen_report_ids,
     _message_link,
@@ -464,6 +465,14 @@ def check_core() -> None:
     )
     assert not _is_unchanged_message_edit(BadRequest("Chat not found"))
     assert not _is_unchanged_message_edit(RuntimeError("not modified"))
+    assert _is_stale_callback_query(
+        BadRequest(
+            "Query is too old and response timeout expired or query id is invalid"
+        )
+    )
+    assert _is_stale_callback_query(BadRequest("query id is invalid"))
+    assert not _is_stale_callback_query(BadRequest("Chat not found"))
+    assert not _is_stale_callback_query(RuntimeError("query is too old"))
     with tempfile.TemporaryDirectory() as tmp:
         seen_path = Path(tmp) / "posthog_seen_reports.json"
         assert _load_posthog_seen_report_ids(seen_path) == set()

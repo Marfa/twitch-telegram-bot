@@ -203,6 +203,7 @@ from handlers.monitoring import (
     _format_posthog_status_message,
     _format_twitch_status_message,
     _is_http_timeout,
+    _is_stale_callback_query,
     _is_unchanged_message_edit,
     _load_posthog_seen_report_ids,
     _save_posthog_seen_report_ids,
@@ -1833,6 +1834,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.warning(t("network_transient", DEFAULT_LOCALE, err=err))
         return
     if isinstance(err, BaseException) and _is_unchanged_message_edit(err):
+        return
+    if isinstance(err, BaseException) and _is_stale_callback_query(err):
         return
     user_id = None
     if isinstance(update, Update) and update.effective_user is not None:

@@ -322,10 +322,11 @@ def _import_result_keyboard(
         unique.append(sub)
     for i, sub in enumerate(unique, 1):
         tag = f"#{i} {sub.twitch_username}"
+        enable_label = f"✅ {tag}" if sub.enabled else f"{t('toggle_on', lang)} {tag}"
         rows.append(
             [
                 InlineKeyboardButton(
-                    _inline_btn_label(f"{t('toggle_on', lang)} {tag}"),
+                    _inline_btn_label(enable_label),
                     callback_data=f"imp_en:{sub.id}",
                 ),
                 InlineKeyboardButton(
@@ -1859,6 +1860,11 @@ async def _refresh_import_result_message(
 async def on_import_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Enable one imported (paused) subscription from the import-result screen."""
     query = update.callback_query
+    # Answer before any free-chat / premium awaits — Telegram expires callback ids ~30s.
+    try:
+        await query.answer()
+    except BadRequest:
+        return
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
@@ -1869,18 +1875,15 @@ async def on_import_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         or sub.owner_id != owner_id
         or not _sub_in_current_mode(sub, owner_id)
     ):
-        await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
         return
     if sub.enabled:
-        await query.answer(t("sub_enabled", lang, sub_id=_owner_sub_number(db, owner_id, sub_id)))
         await _refresh_import_result_message(update, context, owner_id, lang)
         return
     if getattr(sub, "trial_paused", False):
         if not await prem.has_premium(context.bot, db, owner_id):
             from premium_handlers import send_premium_screen
 
-            await query.answer()
             await query.edit_message_text(t("premium_trial_paused_enable", lang))
             await send_premium_screen(
                 context.bot,
@@ -1896,7 +1899,6 @@ async def on_import_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not await prem.alert_type_entitled(context.bot, db, owner_id, sub):
         from premium_handlers import send_premium_screen
 
-        await query.answer()
         await query.edit_message_text(
             t(
                 "premium_enable_need_feature",
@@ -1920,7 +1922,6 @@ async def on_import_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ):
         from premium_handlers import send_premium_screen
 
-        await query.answer()
         await query.edit_message_text(
             t("premium_active_limit", lang, limit=prem.free_active_limit())
         )
@@ -1937,11 +1938,8 @@ async def on_import_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     new_state = db.toggle_subscription(sub_id, owner_id)
     if new_state is None:
-        await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    sub_num = _owner_sub_number(db, owner_id, sub_id)
-    await query.answer(t("sub_enabled" if new_state else "sub_disabled", lang, sub_id=sub_num))
     await _refresh_import_result_message(update, context, owner_id, lang)
 
 
@@ -3504,6 +3502,11 @@ async def _refresh_current_subs_list(
 
 async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    # Answer before any free-chat / premium awaits — Telegram expires callback ids ~30s.
+    try:
+        await query.answer()
+    except BadRequest:
+        return
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":", 1)[1])
     db: Database = context.application.bot_data["db"]
@@ -3513,14 +3516,12 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         or sub.owner_id != query.from_user.id
         or not _sub_in_current_mode(sub, query.from_user.id)
     ):
-        await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
         return
     if not sub.enabled and getattr(sub, "trial_paused", False):
         if not await prem.has_premium(context.bot, db, query.from_user.id):
             from premium_handlers import send_premium_screen
 
-            await query.answer()
             await query.edit_message_text(t("premium_trial_paused_enable", lang))
             await send_premium_screen(
                 context.bot,
@@ -3538,7 +3539,6 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ):
         from premium_handlers import send_premium_screen
 
-        await query.answer()
         await query.edit_message_text(
             t(
                 "premium_enable_need_feature",
@@ -3562,7 +3562,6 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ):
         from premium_handlers import send_premium_screen
 
-        await query.answer()
         await query.edit_message_text(
             t("premium_active_limit", lang, limit=prem.free_active_limit())
         )
@@ -3579,12 +3578,8 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     new_state = db.toggle_subscription(sub_id, query.from_user.id)
     if new_state is None:
-        await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
-    key = "sub_enabled" if new_state else "sub_disabled"
-    await query.answer(t(key, lang, sub_id=sub_num))
     await _refresh_current_subs_list(
         bot=context.bot,
         query=query,

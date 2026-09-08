@@ -153,6 +153,7 @@ def check_handlers() -> None:
     assert "_is_unchanged_message_edit(err)" in bot_src or (
         "_is_unchanged_message_edit(err)" in monitoring_src
     )
+    assert "_is_stale_callback_query(err)" in bot_src
     # Interactive reply while user blocked the bot → soft-fail, not PostHog noise.
     eh_src = inspect.getsource(bot_mod.error_handler)
     assert "_is_user_blocked_error" in eh_src
@@ -1728,6 +1729,67 @@ def check_handlers() -> None:
         assert tdb.get_subscription(end_id, 4242).enabled is False
         edited = query.edit_message_text.await_args.args[0]
         assert "Premium" in edited or "премиум" in edited.lower()
+
+    # on_import_enable / on_toggle must answer callback before premium awaits
+    # (Telegram expires query ids ~30s → BadRequest "Query is too old").
+    import inspect as _inspect
+
+    from handlers.subscriptions import on_import_enable, on_toggle
+
+    for _fn in (on_import_enable, on_toggle):
+        _src = _inspect.getsource(_fn)
+        _answer_at = _src.find("await query.answer()")
+        assert _answer_at > 0, f"{_fn.__name__} must answer callback"
+        for _await_name in (
+            "prem.has_premium",
+            "prem.alert_type_entitled",
+            "prem.can_enable_more_async",
+        ):
+            _hit = _src.find(_await_name)
+            if _hit > 0:
+                assert _answer_at < _hit, (
+                    f"{_fn.__name__}: answer() must come before {_await_name}"
+                )
+
+    with tempfile.TemporaryDirectory() as imp_tmp:
+        idb = SqliteDatabase(Path(imp_tmp) / "imp.db")
+        idb.upsert_user(5151)
+        sid = idb.add_subscription(
+            5151,
+            "impchan",
+            "99",
+            "hi",
+            "dm",
+            5151,
+            None,
+            enabled=False,
+        )
+        query = AsyncMock()
+        query.data = f"imp_en:{sid}"
+        query.from_user = SimpleNamespace(id=5151)
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        update = SimpleNamespace(callback_query=query)
+        context = MagicMock()
+        context.application.bot_data = {
+            "db": idb,
+            "import_result_state": {
+                5151: {"header": "imported", "sub_ids": [sid]},
+            },
+        }
+        context.bot = AsyncMock()
+        context.user_data = {}
+        with patch(
+            "handlers.subscriptions.prem.has_feature",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "handlers.subscriptions.prem.is_free_chat_member",
+            new=AsyncMock(return_value=False),
+        ):
+            asyncio.run(on_import_enable(update, context))
+        query.answer.assert_awaited()
+        assert idb.get_subscription(sid, 5151).enabled is True
+        assert query.edit_message_text.await_count >= 1
 
     # Lucky Premium: every 100th user + monthly candidate filter.
     import premium_lucky as lucky

@@ -795,6 +795,14 @@ def _is_unchanged_message_edit(exc: BaseException) -> bool:
     return isinstance(exc, BadRequest) and "not modified" in str(exc).lower()
 
 
+def _is_stale_callback_query(exc: BaseException) -> bool:
+    """Telegram: answerCallbackQuery after ~30s or invalid/expired query id."""
+    if not isinstance(exc, BadRequest):
+        return False
+    msg = str(exc).lower()
+    return "query is too old" in msg or "query id is invalid" in msg
+
+
 def _posthog_seen_reports_path() -> Path:
     from config import DATABASE_PATH
 
