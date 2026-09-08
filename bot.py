@@ -3074,6 +3074,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     from handlers.drops import (
         check_drops,
         on_drops_claim_action,
+        on_drops_digest_off,
         on_drops_digest_toggle,
         on_drops_get_alerts,
         on_drops_rebind,
@@ -3082,6 +3083,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     app.add_handler(
         CallbackQueryHandler(on_drops_digest_toggle, pattern=r"^drops_digest:toggle$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_drops_digest_off, pattern=r"^drops_digest:off$")
     )
     app.add_handler(
         CallbackQueryHandler(on_drops_rebind, pattern=r"^drops_rebind$")

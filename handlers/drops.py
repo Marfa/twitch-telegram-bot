@@ -632,16 +632,26 @@ async def send_drops_stream_alert(
     return len(streams)
 
 
-def _digest_alert_keyboard(lang: str, campaign_id: str) -> InlineKeyboardMarkup:
+def _digest_alert_keyboard(
+    lang: str, campaign_id: str, *, drop_name: str = ""
+) -> InlineKeyboardMarkup:
     cid = campaign_id[:48]
+    name = (drop_name or "").strip() or t("drops_unnamed", lang)
+    get_label = t("drops_get_alerts_btn", lang, name=name)[:64]
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    t("drops_get_alerts_btn", lang),
+                    get_label,
                     callback_data=f"drops_get:{cid}",
                 )
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    t("drops_digest_disable_btn", lang)[:64],
+                    callback_data="drops_digest:off",
+                )
+            ],
         ]
     )
 
@@ -836,6 +846,40 @@ async def on_drops_digest_toggle(
     await context.bot.send_message(user_id, tip)
 
 
+async def on_drops_digest_off(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Disable new-Drops digest from a digest alert button."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    lang = _user_lang(db, user_id)
+    if user_has_drops_oauth(db, user_id):
+        db.set_drops_digest_enabled(user_id, False)
+    try:
+        # Keep «get alerts» if present; drop the disable row.
+        markup = query.message.reply_markup if query.message else None
+        rows: list[list[InlineKeyboardButton]] = []
+        if markup:
+            for row in markup.inline_keyboard:
+                kept = [
+                    b
+                    for b in row
+                    if (b.callback_data or "") != "drops_digest:off"
+                ]
+                if kept:
+                    rows.append(kept)
+        await query.edit_message_reply_markup(
+            reply_markup=InlineKeyboardMarkup(rows) if rows else None
+        )
+    except Exception:
+        pass
+    await context.bot.send_message(user_id, t("drops_digest_off", lang))
+
+
 async def create_drops_from_campaign_payload(
     bot: Any,
     db: Database,
@@ -1027,7 +1071,11 @@ async def _check_drops_digest(
                     text,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
-                    reply_markup=_digest_alert_keyboard(lang, cid),
+                    reply_markup=_digest_alert_keyboard(
+                        lang,
+                        cid,
+                        drop_name=str(campaign.get("name") or ""),
+                    ),
                 )
                 analytics.capture(
                     owner_id, "drops_digest_sent", {"campaign_id": cid}

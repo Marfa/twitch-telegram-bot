@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from handlers.drops import _digest_alert_keyboard
 from i18n import (
     admin_other_audience_keyboard,
     admin_type_keyboard,
@@ -215,6 +216,11 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             "drops_catalog_failed",
             drops_catalog_keyboard,
             {"lang": loc, "campaigns": [], "show_rebind": True},
+        ),
+        (
+            "drops_digest_alert",
+            _digest_alert_keyboard,
+            {"lang": loc, "campaign_id": "abc", "drop_name": "Camp"},
         ),
         ("premium_gate_first", premium_gate_keyboard, {"lang": loc, "first_step": True}),
         ("premium_gate_later", premium_gate_keyboard, {"lang": loc, "first_step": False}),

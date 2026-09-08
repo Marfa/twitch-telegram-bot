@@ -260,7 +260,7 @@ def _check_drops_digest_and_tags() -> None:
     )
     assert [s["user_login"] for s in promo_first] == ["a", "d", "b", "c"]
 
-    from handlers.drops import _format_stream_alert
+    from handlers.drops import _digest_alert_keyboard, _format_stream_alert
     from types import SimpleNamespace
 
     body = _format_stream_alert(
@@ -294,9 +294,23 @@ def _check_drops_digest_and_tags() -> None:
     assert len(empty_kb.inline_keyboard) >= 2
     assert any((x or "").startswith("✅") for x in labels)
     assert any("получено" in (x or "") for x in labels)
-    assert "Получать оповещения" in t("drops_get_alerts_btn", "ru")
-    assert "Вы получили Drops" in t("drops_claim_alert_body", "ru", name="X")
-    assert "{drops_tag}" in t("drops_stream_alert_item", "ru")
+    assert "Получать оповещения по Drop" in t(
+        "drops_get_alerts_btn", "ru", name="X"
+    )
+    assert "Доступен новый Drops" in t(
+        "drops_digest_alert_body", "ru", name="N", game="G", dates="d"
+    )
+    assert "Отключить оповещения о новых Drops" in t(
+        "drops_digest_disable_btn", "ru"
+    )
+    kb = _digest_alert_keyboard("ru", "camp1", drop_name="Good Morning Madden")
+    labels = [b.text for r in kb.inline_keyboard for b in r]
+    assert any("Good Morning Madden" in (x or "") for x in labels)
+    assert any(
+        (b.callback_data or "") == "drops_digest:off"
+        for r in kb.inline_keyboard
+        for b in r
+    )
 
 
 def _check_drops_digest_db() -> None:
