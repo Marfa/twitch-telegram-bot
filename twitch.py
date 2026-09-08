@@ -560,25 +560,51 @@ class TwitchClient:
         return out
 
     @staticmethod
-    def stream_has_drops_tag(stream: dict[str, Any]) -> bool:
+    def matched_drops_tag(stream: dict[str, Any]) -> str | None:
+        """Return the stream's Drops tag as stored (EN or RU), if any."""
         tags = stream.get("tags") or []
         if not isinstance(tags, list):
-            return False
-        lowered = {str(t).casefold() for t in tags if t}
-        return any(needle in lowered for needle in _DROPS_ENABLED_TAG_NEEDLES)
+            return None
+        needles = set(_DROPS_ENABLED_TAG_NEEDLES)
+        for tag in tags:
+            raw = str(tag or "").strip()
+            if raw and raw.casefold() in needles:
+                return raw
+        return None
+
+    @staticmethod
+    def stream_has_drops_tag(stream: dict[str, Any]) -> bool:
+        return TwitchClient.matched_drops_tag(stream) is not None
 
     def get_streams_with_drops(
         self,
         game_id: str,
         *,
         language: str | None = None,
-        first: int = 20,
+        first: int = 40,
         limit: int = 5,
+        promo_logins: set[str] | frozenset[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Live streams in a game that advertise a Drops Enabled tag (EN/RU)."""
-        streams = self.get_streams_by_game(game_id, language=language, first=first)
-        tagged = [s for s in streams if self.stream_has_drops_tag(s)]
-        return tagged[: max(0, limit)]
+        """Live streams for a game: promo first, then Drops-tagged, then rest.
+
+        Any language/mature. Promo only if already in Helix results (online).
+        """
+        del language  # always any language for Drops alerts
+        streams = self.get_streams_by_game(game_id, language=None, first=first)
+        promo_set = {
+            str(x).strip().casefold() for x in (promo_logins or ()) if str(x).strip()
+        }
+
+        def _login(s: dict[str, Any]) -> str:
+            return str(s.get("user_login") or "").strip().casefold()
+
+        promo = [s for s in streams if _login(s) in promo_set]
+        rest = [s for s in streams if _login(s) not in promo_set]
+        promo_tagged = [s for s in promo if self.stream_has_drops_tag(s)]
+        promo_untagged = [s for s in promo if not self.stream_has_drops_tag(s)]
+        tagged = [s for s in rest if self.stream_has_drops_tag(s)]
+        untagged = [s for s in rest if not self.stream_has_drops_tag(s)]
+        return (promo_tagged + promo_untagged + tagged + untagged)[: max(0, limit)]
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Helix allows at most 100 user_id params per /streams request."""

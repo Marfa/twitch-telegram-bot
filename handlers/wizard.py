@@ -1707,6 +1707,7 @@ async def _apply_drops_game(
         or game.get("game_name")
         or game_id
     )
+    campaign_name = str(game.get("campaign_name") or game.get("name") or "")
     if not game_id:
         await update.effective_message.reply_text(t("drops_catalog_fetch_failed", lang))
         return _wz()["CHANNEL"]
@@ -1719,10 +1720,17 @@ async def _apply_drops_game(
         lang,
         game_id=game_id,
         game_name=game_name,
-        campaign_name=str(game.get("campaign_name") or game.get("name") or ""),
+        campaign_name=campaign_name,
     )
+    drop = campaign_name or game_name
     await update.effective_message.reply_text(
-        t(key, lang, game=game_name, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+        t(
+            key,
+            lang,
+            game=game_name or drop,
+            drop=drop or game_name,
+            limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+        ),
         reply_markup=_menu(lang, user_id),
     )
     context.user_data.clear()

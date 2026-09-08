@@ -203,6 +203,66 @@ def _check_drops_digest_and_tags() -> None:
     assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Enabled"]})
     assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Включены"]})
     assert not TwitchClient.stream_has_drops_tag({"tags": ["English"]})
+    assert TwitchClient.matched_drops_tag({"tags": ["Drops Enabled"]}) == "Drops Enabled"
+    assert (
+        TwitchClient.matched_drops_tag({"tags": ["Drops Включены"]})
+        == "Drops Включены"
+    )
+
+    class _Tw(TwitchClient):
+        def __init__(self) -> None:
+            pass
+
+        def get_streams_by_game(self, game_id, *, language=None, first=100):  # type: ignore[override]
+            del game_id, language, first
+            return [
+                {
+                    "id": "1",
+                    "user_login": "a",
+                    "tags": ["English"],
+                    "is_mature": True,
+                    "language": "de",
+                },
+                {
+                    "id": "2",
+                    "user_login": "b",
+                    "tags": ["Drops Включены"],
+                    "is_mature": False,
+                    "language": "ru",
+                },
+                {
+                    "id": "3",
+                    "user_login": "c",
+                    "tags": ["Drops Enabled"],
+                    "is_mature": True,
+                    "language": "en",
+                },
+                {
+                    "id": "4",
+                    "user_login": "d",
+                    "tags": [],
+                    "is_mature": False,
+                    "language": "ja",
+                },
+            ]
+
+    ordered = _Tw().get_streams_with_drops("99", limit=5)
+    assert [s["user_login"] for s in ordered] == ["b", "c", "a", "d"]
+    promo_first = _Tw().get_streams_with_drops(
+        "99", limit=5, promo_logins={"d", "a"}
+    )
+    assert [s["user_login"] for s in promo_first] == ["a", "d", "b", "c"]
+
+    from handlers.drops import _format_stream_alert
+
+    body = _format_stream_alert(
+        "ru",
+        campaign={"game_name": "G", "name": "Camp", "how_to_earn": "watch", "drops": []},
+        streams=ordered,
+    )
+    assert "b" in body and "Drops Включены" in body
+    assert "c" in body and "Drops Enabled" in body
+    assert body.index("b") < body.index("a")
 
     kb = drops_catalog_keyboard(
         "ru",
@@ -215,6 +275,7 @@ def _check_drops_digest_and_tags() -> None:
     assert any("получено" in (x or "") for x in labels)
     assert "Получать оповещения" in t("drops_get_alerts_btn", "ru")
     assert "Вы получили Drops" in t("drops_claim_alert_body", "ru", name="X")
+    assert "{streams}" in t("drops_stream_alert_body", "ru")
 
 
 def _check_drops_digest_db() -> None:
@@ -235,6 +296,107 @@ def _check_drops_digest_db() -> None:
             7, 1, "s1", first_seen_at="2026-01-01T00:00:00Z"
         )
         assert db.has_seen_drop_stream(7, 1, "s1")
+        assert db.get_drop_stream_alert_at(7, 1) is None
+        from datetime import datetime, timedelta, timezone
+
+        from handlers.drops import _stream_alert_cooled_down
+
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        db.mark_drop_stream_alert(7, 1, at=recent)
+        assert db.get_drop_stream_alert_at(7, 1) == recent
+        assert not _stream_alert_cooled_down(db, 7, 1)
+        old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        db.mark_drop_stream_alert(7, 1, at=old)
+        assert _stream_alert_cooled_down(db, 7, 1)
+
+
+def _check_drops_list_label_and_oauth_keep() -> None:
+    from handlers.drops import _access_token_for_owner, _drops_list_label
+    from i18n import t
+    from unittest.mock import MagicMock
+
+    assert _drops_list_label(
+        game_name="Hearthstone", campaign_name="Hero Pack", game_id="1"
+    ) == "Hearthstone — Hero Pack"
+    assert _drops_list_label(
+        game_name="Hearthstone", campaign_name="Hearthstone", game_id="1"
+    ) == "Hearthstone"
+    ru = t(
+        "drops_subscribed_ok",
+        "ru",
+        game="Hearthstone",
+        drop="Hero Pack",
+    )
+    assert "Hearthstone" in ru and "Hero Pack" in ru
+    assert "без мастера" not in ru
+
+    db = MagicMock()
+    auth = SimpleNamespace(refresh_token="rt")
+    db.get_drops_auth.return_value = auth
+    twitch = MagicMock()
+
+    class _Resp:
+        status_code = 401
+
+    class _Exc(Exception):
+        response = _Resp()
+
+    twitch.refresh_drops_gql_token.side_effect = _Exc()
+    assert _access_token_for_owner(db, twitch, 1) is None
+    db.delete_drops_auth.assert_not_called()
+
+
+def _check_drops_subs_list_hides_edit_share() -> None:
+    from unittest.mock import MagicMock, patch
+
+    import beta as beta_features
+    from handlers.subscriptions import _format_sub_line, _subs_toggle_keyboard
+    from i18n import t
+
+    sub = SimpleNamespace(
+        id=25,
+        enabled=True,
+        twitch_username="Hearthstone — Hero Pack",
+        chat_id=1,
+        dest_type="dm",
+        thread_id=None,
+        ignore_keywords="",
+        use_global_ignore=False,
+        notify_on_live=False,
+        notify_on_end=False,
+        notify_on_category_change=False,
+        notify_on_drops=True,
+        drops_game_id="99",
+        schedule_reminder_minutes=0,
+        schedule_reminder_configured=False,
+        image_file_id=None,
+        image_position="",
+        strip_name_mentions=False,
+        delay_minutes=0,
+        suppress_repeat_minutes=0,
+        delete_previous=False,
+        notify_delete_fail=False,
+        delete_other_alerts=False,
+        custom_buttons="[]",
+        attach_chat_button=False,
+        attach_live_remind_button=False,
+        disable_link_preview=True,
+        message_template="Drops: Hearthstone — Hero Pack",
+        is_demo=False,
+    )
+    line = _format_sub_line(sub, "ru", 25)  # type: ignore[arg-type]
+    assert "Hearthstone — Hero Pack" in line
+    assert t("sub_list_alert_drops", "ru") in line
+
+    db = MagicMock()
+    db.get_subscriptions_by_owner.return_value = [sub]
+    with patch.object(beta_features, "is_enabled", return_value=True):
+        rows = _subs_toggle_keyboard(db, 1, "ru", [sub])  # type: ignore[list-item]
+    callbacks = [b.callback_data for r in rows for b in r]
+    assert any((c or "").startswith("toggle:") for c in callbacks)
+    assert any((c or "").startswith("list_del:") for c in callbacks)
+    assert not any((c or "").startswith("edit:") for c in callbacks)
+    assert not any((c or "").startswith("share_show:") for c in callbacks)
 
 
 def run() -> None:
@@ -249,6 +411,8 @@ def run() -> None:
     _check_drops_catalog_uses_access_token()
     _check_drops_digest_and_tags()
     _check_drops_digest_db()
+    _check_drops_list_label_and_oauth_keep()
+    _check_drops_subs_list_hides_edit_share()
 
 
 if __name__ == "__main__":
