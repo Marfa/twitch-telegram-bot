@@ -1602,8 +1602,13 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     kind = query.data.split(":", 1)[1]
-    if kind not in ("live", "category", "upcoming", "end", "drops"):
+    if kind not in ("live", "category", "upcoming", "end", "drops", "game"):
         return _wz()["ALERT_TYPE"]
+    if kind == "game":
+        await query.edit_message_text("✓")
+        from handlers.watch import start_what_to_watch
+
+        return await start_what_to_watch(update, context)
     if kind == "drops":
         from handlers.drops import drops_feature_available
 

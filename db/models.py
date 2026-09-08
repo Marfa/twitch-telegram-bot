@@ -319,6 +319,8 @@ class PremiumGift:
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
     if payload.get("notify_on_drops"):
         return "drops"
+    if str(payload.get("category_watch_prefs") or "").strip():
+        return "game"
     if payload.get("notify_on_category_change"):
         return "category"
     if payload.get("notify_on_end"):

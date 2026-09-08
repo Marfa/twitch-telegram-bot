@@ -24,13 +24,17 @@ def _check_drops_alert_type_keyboard_last() -> None:
         for r in hidden.inline_keyboard
         for b in r
     ), "Drops must be hidden when show_drops=False"
+    hidden_cbs = [b.callback_data for r in hidden.inline_keyboard for b in r]
+    assert hidden_cbs[-2] == "alert_type:game"
+    assert hidden_cbs[-1] == "alert_type:cancel"
     markup = alert_type_keyboard("en", show_drops=True)
     rows = markup.inline_keyboard
     assert any(
         (b.callback_data or "") == "alert_type:drops" for r in rows for b in r
     ), "Drops missing from alert type keyboard"
     callbacks = [b.callback_data for r in rows for b in r]
-    assert callbacks[-2] == "alert_type:drops"
+    assert callbacks[-3] == "alert_type:drops"
+    assert callbacks[-2] == "alert_type:game"
     assert callbacks[-1] == "alert_type:cancel"
 
 

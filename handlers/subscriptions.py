@@ -357,6 +357,8 @@ def _format_sub_line(
     settings: list[str] = []
     if getattr(sub, "notify_on_drops", False):
         settings.append(t("sub_list_alert_drops", lang))
+    elif is_category_watch_sub(sub):
+        settings.append(t("sub_list_alert_game", lang))
     elif sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
     elif sub.notify_on_category_change:
@@ -494,6 +496,8 @@ def _share_link_for_sub(
 def _alert_type_from_sub(sub: Subscription) -> str:
     if getattr(sub, "notify_on_drops", False):
         return "drops"
+    if (getattr(sub, "category_watch_prefs", "") or "").strip():
+        return "game"
     if sub.notify_on_category_change:
         return "category"
     if sub.notify_on_end:
@@ -982,7 +986,7 @@ async def on_list_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-_EDIT_ALERT_TYPE_ORDER = ("live", "category", "upcoming", "end", "drops")
+_EDIT_ALERT_TYPE_ORDER = ("live", "category", "upcoming", "end", "drops", "game")
 
 
 def _edit_present_types(subs: list[Subscription]) -> list[str]:
@@ -3518,7 +3522,9 @@ def _other_alert_types(current: str, *, show_drops: bool = False) -> list[str]:
     return [
         kind
         for kind in _EDIT_ALERT_TYPE_ORDER
-        if kind != current and (kind != "drops" or show_drops)
+        if kind != current
+        and kind != "game"
+        and (kind != "drops" or show_drops)
     ]
 
 
@@ -3588,6 +3594,8 @@ async def _alert_type_allowed(
         return None
     if new_type == "drops" or _alert_type_from_sub(sub) == "drops":
         return "drops_type"
+    if new_type == "game" or _alert_type_from_sub(sub) == "game":
+        return "game_type"
     feature = "alert_types"
     if not await prem.has_feature(
         bot, db, owner_id, feature, channel=sub.twitch_username
@@ -3817,6 +3825,9 @@ async def on_edit_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if block == "drops_type":
         await query.edit_message_text(t("drops_type_change_unsupported", lang))
+        return
+    if block == "game_type":
+        await query.edit_message_text(t("game_type_change_unsupported", lang))
         return
 
     snapshot = migrate_sub_fields_for_alert_type(

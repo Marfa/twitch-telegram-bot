@@ -62,6 +62,7 @@ from db import (
     SqliteDatabase,
     WATCH_MAX_FILTERS,
     WatchPrefs,
+    alert_type_from_payload,
     dump_category_watch_prefs,
     dump_watch_filters,
     dump_watch_prefs,
@@ -471,6 +472,9 @@ def check_db_premium() -> None:
         assert watch_sub is not None
         assert watch_sub.from_watch_suggest is True
         assert is_category_watch_sub(watch_sub)
+        assert alert_type_from_payload(
+            {"category_watch_prefs": cw_raw, "notify_on_live": True}
+        ) == "game"
         assert "cw:1:abcd" not in db.get_unique_twitch_user_ids()
         assert any(s.id == watch_sid for s in db.get_enabled_category_watch_subscriptions())
         db.set_category_watch_live_state(watch_sid, ["9"], primed=True)

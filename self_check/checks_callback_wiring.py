@@ -92,7 +92,6 @@ _MENU_BTN_KEYS = (
     "partner_withdrawals",
     "back_settings",
     "admin_withdrawals",
-    "watch",
     "chat",
 )
 

@@ -19,11 +19,11 @@
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
-| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end |
+| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops (beta) · game alert |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
-| 🎲 What to watch? | In **📦 Other**: saved filters; live → else VOD; I'm feeling lucky (live → VOD for same games); button to watch new streams by filter |
+| 🎲 Game alert | In **➕ New subscription** (under Drops): saved filters; live → else VOD; I'm feeling lucky; catch new streams by filter; own category in **📋 My subscriptions** |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
@@ -67,7 +67,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
-| Premium channel for streamers | Free bot interactions for viewers, What-to-watch priority, welcome recommend |
+| Premium channel for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
 
@@ -145,9 +145,9 @@ With “delete old” enabled, the bot removes the previous alert before a new o
 
 After setup the bot sends **“✅ Setup complete!”** to DM and a test message to the chosen chat.
 
-### What to watch?
+### Game alert
 
-**🎲 What to watch?** (in **📦 Other**) — random live streams matching your filters (available to everyone, no Premium). If none are live — recent VODs for the same categories.
+**🎲 Game alert** (**➕ New subscription**, under Drops) — random live streams matching your filters (available to everyone, no Premium). If none are live — recent VODs for the same categories. Created alerts appear in **📋 My subscriptions** under “Game alert”.
 
 If you have saved filters, the bot offers:
 
@@ -251,10 +251,9 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below” |
-| 📦 Other | Whisper alerts, schedule, what to watch, chat |
+| 📦 Other | Whisper alerts, schedule, chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
-| ↳ 🎲 What to watch? | Pick filter / new search / delete filters |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
 | ⚙️ Settings | Premium, sync, ignored words, system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |

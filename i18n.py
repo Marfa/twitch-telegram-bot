@@ -164,7 +164,6 @@ def all_menu_buttons() -> set[str]:
         "back_settings",
         "admin_withdrawals",
         "admin_refund",
-        "watch",
         "chat",
     )
     return {btn(k, loc) for k in keys for loc in SUPPORTED_LOCALES}
@@ -233,7 +232,7 @@ def subscriptions_menu(
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
-    keys = ["whisper_alerts", "create_schedule", "watch", "chat", "back"]
+    keys = ["whisper_alerts", "create_schedule", "chat", "back"]
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
     return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
 
@@ -1392,6 +1391,15 @@ def alert_type_keyboard(
                 )
             ]
         )
+    # Free: always last before Cancel (under Drops when beta shows it).
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("alert_type_game", lang),
+                callback_data="alert_type:game",
+            )
+        ]
+    )
     rows.append(
         [
             InlineKeyboardButton(

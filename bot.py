@@ -429,7 +429,6 @@ from handlers.watch import (
     receive_watch_viewers_callback,
     receive_watch_viewers_text,
     start_watch_change,
-    start_what_to_watch,
 )
 
 from handlers.wizard import (
@@ -773,10 +772,10 @@ def _help_text(lang: str) -> str:
         btn_other=btn("other", lang),
         btn_whisper_alerts=btn("whisper_alerts", lang),
         btn_create_schedule=btn("create_schedule", lang),
-        btn_watch=btn("watch", lang),
         btn_chat=btn("chat", lang),
         btn_settings=btn("settings", lang),
         btn_feedback=btn("feedback", lang),
+        alert_type_game=t("alert_type_game", lang),
     )
 
 
@@ -2389,7 +2388,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 dm_only_conv_entry(on_twitch_link_start),
                 pattern=r"^twitch_link:start:[a-zA-Z0-9_]{4,25}$",
             ),
-            MessageHandler(_btn_filter("watch"), dm_only_conv_entry(start_what_to_watch)),
             MessageHandler(
                 _btn_filter("create_schedule"), dm_only_conv_entry(start_stream_schedule)
             ),
@@ -2460,7 +2458,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
                 CallbackQueryHandler(
-                    receive_alert_type, pattern=r"^alert_type:(live|category|upcoming|end|drops)$"
+                    receive_alert_type,
+                    pattern=r"^alert_type:(live|category|upcoming|end|drops|game)$",
                 ),
             ],
             PREMIUM_GATE: [

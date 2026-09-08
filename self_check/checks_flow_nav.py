@@ -247,7 +247,6 @@ def _check_inline_wizard_keyboards() -> None:
 async def _scenario_menus_and_wizards(db) -> None:
     from handlers.settings import open_other_menu, open_settings_menu
     from handlers.stream_schedule import start_stream_schedule
-    from handlers.watch import start_what_to_watch
 
     cap = _BotCapture()
 
@@ -275,16 +274,6 @@ async def _scenario_menus_and_wizards(db) -> None:
 
     await _go_alert_type_prompt(update, ctx, "ru")
     cap.assert_turn("wizard_alert_type")
-
-    application, bot = _app(db)
-    cap = _BotCapture()
-    cap.wrap(bot)
-    update = _msg_update(_FREE_UID, btn("watch", "ru"), cap)
-    ctx = _ctx(application)
-    db.upsert_user(_FREE_UID)
-    with patch("handlers.watch.analytics.capture"):
-        await start_what_to_watch(update, ctx)
-    cap.assert_turn("watch_categories")
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -901,6 +890,25 @@ async def _scenario_wizard_drops_game(db) -> None:
     ):
         await _go_drops_catalog_step(update, ctx, "ru")
     cap.assert_turn("wizard_drops_catalog")
+
+
+async def _scenario_wizard_game_alert(db) -> None:
+    """§2/§6 Game alert — alert_type:game → watch categories with Cancel."""
+    from handlers.wizard import receive_alert_type
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "alert_type:game", cap)
+    update.effective_message = query.message
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
+    with (
+        patch("handlers.watch.analytics.capture"),
+        patch("handlers.watch._live_promo_streams", return_value=[]),
+    ):
+        await receive_alert_type(update, ctx)
+    cap.assert_turn("wizard_game_alert_categories")
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:
@@ -1777,6 +1785,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_finish(db)
         await _scenario_wizard_custom_buttons(db)
         await _scenario_wizard_drops_game(db)
+        await _scenario_wizard_game_alert(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_image_ask(db)
         await _scenario_import(db)

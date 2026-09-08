@@ -618,8 +618,7 @@ def check_core() -> None:
         other_kb = other_menu(loc).keyboard
         assert [[b.text for b in row] for row in other_kb] == [
             [btn("whisper_alerts", loc), btn("create_schedule", loc)],
-            [btn("watch", loc), btn("chat", loc)],
-            [btn("back", loc)],
+            [btn("chat", loc), btn("back", loc)],
         ]
         for i, row in enumerate(other_kb):
             if i == len(other_kb) - 1 and len(row) == 1:
@@ -1076,6 +1075,8 @@ def check_core() -> None:
         assert tr("alert_type_category", loc)
         assert tr("alert_type_upcoming", loc)
         assert tr("alert_type_end", loc)
+        assert tr("alert_type_game", loc)
+        assert "⭐" not in tr("alert_type_game", loc)
         assert "⭐" in tr("alert_type_category", loc)
         assert "⭐" in tr("alert_type_upcoming", loc)
         assert "⭐" in tr("alert_type_end", loc)
@@ -1118,6 +1119,8 @@ def check_core() -> None:
         assert tr("delete_old_text_category", loc)
         assert tr("delete_sibling_text", loc)
         assert tr("sub_list_alert_category", loc)
+        assert tr("sub_list_alert_game", loc)
+        assert tr("game_type_change_unsupported", loc)
         assert tr("edit_delete_other", loc)
         assert tr("edit_delete_other_menu", loc)
         assert tr("edit_delete_old_menu_category", loc)
