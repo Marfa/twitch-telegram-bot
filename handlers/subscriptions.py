@@ -3574,7 +3574,7 @@ async def _alert_type_allowed(
         return None
     if new_type == "drops" or _alert_type_from_sub(sub) == "drops":
         return "drops_type"
-    feature = "drops_alerts" if new_type == "drops" else "alert_types"
+    feature = "alert_types"
     if not await prem.has_feature(
         bot, db, owner_id, feature, channel=sub.twitch_username
     ):

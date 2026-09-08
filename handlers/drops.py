@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 import analytics
@@ -16,14 +17,15 @@ import beta as beta_features
 import premium as prem
 from bot_helpers import _menu
 from db import Database, Subscription, is_drops_sub
-from i18n import DEFAULT_LOCALE, t
+from i18n import DEFAULT_LOCALE, drops_catalog_keyboard, t
 from twitch import DROPS_OAUTH_SCOPES, TwitchClient
 
 logger = logging.getLogger(__name__)
 
 DROPS_BETA_ID = "drops-alerts"
-DROPS_FEATURE_ID = "drops_alerts"
+DROPS_FEATURE_ID = "alert_types"
 _DROPS_STREAM_SUBSCRIBE_CAP = 5
+_DROPS_CATALOG_LIMIT = 12
 _ACTIVE_CAMPAIGN_STATUSES = frozenset({"ACTIVE", "ENABLED", ""})
 
 
@@ -63,36 +65,11 @@ async def send_drops_oauth_prompt(
     await bot.send_message(
         user_id,
         t("drops_oauth_prompt", lang),
+        parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton(t("drops_oauth_button", lang), url=url)]]
         ),
     )
-
-
-async def complete_drops_oauth(
-    application: Any,
-    owner_id: int,
-    error: str | None,
-    token_info: dict[str, str] | None,
-) -> None:
-    db: Database = application.bot_data["db"]
-    lang = _user_lang(db, owner_id)
-    if error or not token_info:
-        key = "oauth_denied" if error == "access_denied" else "drops_oauth_failed"
-        await application.bot.send_message(owner_id, t(key, lang))
-        return
-    refresh = token_info.get("refresh_token") or ""
-    if not refresh:
-        await application.bot.send_message(owner_id, t("drops_oauth_failed", lang))
-        return
-    db.upsert_drops_auth(
-        owner_id,
-        twitch_user_id=str(token_info.get("twitch_user_id") or ""),
-        twitch_login=str(token_info.get("twitch_login") or ""),
-        refresh_token=refresh,
-    )
-    analytics.capture(owner_id, "drops_oauth_linked", {})
-    await application.bot.send_message(owner_id, t("drops_oauth_done", lang))
 
 
 def _access_token_for_owner(
@@ -111,6 +88,123 @@ def _access_token_for_owner(
     if new_refresh != auth.refresh_token:
         db.update_drops_auth_refresh(owner_id, new_refresh)
     return access or None
+
+
+def list_active_drop_campaigns(
+    db: Database, twitch: TwitchClient, owner_id: int
+) -> list[dict[str, Any]] | None:
+    """Return ACTIVE campaigns or None on auth/API failure."""
+    access = _access_token_for_owner(db, twitch, owner_id)
+    if not access:
+        return None
+    try:
+        campaigns = twitch.get_viewer_drop_campaigns(access)
+    except Exception:
+        logger.exception("drops catalog fetch failed owner=%s", owner_id)
+        return None
+    active = [c for c in campaigns if _campaign_active(c) and str(c.get("id") or "")]
+    # Prefer unique games first for the picker; keep campaign identity.
+    return active[:_DROPS_CATALOG_LIMIT]
+
+
+async def send_drops_catalog(
+    bot: Any,
+    db: Database,
+    twitch: TwitchClient,
+    user_id: int,
+    lang: str,
+    *,
+    bot_data: dict[str, Any] | None = None,
+    user_data: dict[str, Any] | None = None,
+    reply_markup_extra: Any = None,
+) -> list[dict[str, Any]]:
+    """Fetch and send the available-Drops list. Returns campaigns stored for pick."""
+    campaigns = await asyncio.to_thread(list_active_drop_campaigns, db, twitch, user_id)
+    store = bot_data if bot_data is not None else None
+
+    def _clear_store() -> None:
+        if store is not None:
+            store.setdefault("drops_catalog_by_user", {}).pop(user_id, None)
+        if user_data is not None:
+            user_data.pop("drops_catalog_candidates", None)
+
+    if campaigns is None:
+        _clear_store()
+        await bot.send_message(
+            user_id,
+            t("drops_catalog_fetch_failed", lang),
+            reply_markup=reply_markup_extra,
+        )
+        return []
+    if not campaigns:
+        _clear_store()
+        text = t("drops_catalog_empty", lang)
+        if reply_markup_extra is not None:
+            await bot.send_message(user_id, text, reply_markup=reply_markup_extra)
+        else:
+            await bot.send_message(user_id, text)
+        return []
+
+    compact = [
+        {
+            "id": str(c.get("id") or ""),
+            "name": str(c.get("name") or ""),
+            "game_id": str(c.get("game_id") or ""),
+            "game_name": str(c.get("game_name") or ""),
+        }
+        for c in campaigns
+    ]
+    if store is not None:
+        store.setdefault("drops_catalog_by_user", {})[user_id] = compact
+    if user_data is not None:
+        user_data["drops_catalog_candidates"] = compact
+    await bot.send_message(
+        user_id,
+        t("drops_catalog_prompt", lang),
+        reply_markup=drops_catalog_keyboard(lang, compact),
+    )
+    if reply_markup_extra is not None:
+        await bot.send_message(
+            user_id,
+            t("drops_game_prompt", lang),
+            reply_markup=reply_markup_extra,
+        )
+    return compact
+
+
+async def complete_drops_oauth(
+    application: Any,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+) -> None:
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    lang = _user_lang(db, owner_id)
+    if error or not token_info:
+        key = "oauth_denied" if error == "access_denied" else "drops_oauth_failed"
+        await application.bot.send_message(owner_id, t(key, lang))
+        return
+    refresh = token_info.get("refresh_token") or ""
+    if not refresh:
+        await application.bot.send_message(owner_id, t("drops_oauth_failed", lang))
+        return
+    db.upsert_drops_auth(
+        owner_id,
+        twitch_user_id=str(token_info.get("twitch_user_id") or ""),
+        twitch_login=str(token_info.get("twitch_login") or ""),
+        refresh_token=refresh,
+    )
+    analytics.capture(owner_id, "drops_oauth_linked", {})
+    await application.bot.send_message(owner_id, t("drops_oauth_done", lang))
+    await send_drops_catalog(
+        application.bot,
+        db,
+        twitch,
+        owner_id,
+        lang,
+        bot_data=application.bot_data,
+    )
 
 
 def _campaign_active(campaign: dict[str, Any]) -> bool:
