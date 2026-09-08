@@ -323,11 +323,21 @@ async def send_drops_catalog(
 
     if campaigns is None:
         _clear_store()
+        auth = db.get_drops_auth(user_id)
+        digest_on = bool(auth and auth.digest_enabled)
         await bot.send_message(
             user_id,
             t("drops_catalog_fetch_failed", lang),
-            reply_markup=reply_markup_extra,
+            reply_markup=drops_catalog_keyboard(
+                lang, [], digest_enabled=digest_on
+            ),
         )
+        if reply_markup_extra is not None:
+            await bot.send_message(
+                user_id,
+                t("drops_catalog_pick_hint", lang),
+                reply_markup=reply_markup_extra,
+            )
         return []
     if not campaigns:
         _clear_store()
