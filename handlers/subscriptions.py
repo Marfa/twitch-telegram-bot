@@ -357,26 +357,22 @@ def _format_sub_line(
     settings: list[str] = []
     if getattr(sub, "notify_on_drops", False):
         settings.append(t("sub_list_alert_drops", lang))
-        from handlers.notifications import category_watch_cooldown_hours
+        from handlers.notifications import category_watch_cooldown_minutes
 
-        settings.append(
-            t(
-                "sub_list_game_cooldown",
-                lang,
-                hours=category_watch_cooldown_hours(sub),
-            )
-        )
+        cd = category_watch_cooldown_minutes(sub)
+        if cd <= 0:
+            settings.append(t("sub_list_game_cooldown_off", lang))
+        else:
+            settings.append(t("sub_list_game_cooldown", lang, minutes=cd))
     elif is_category_watch_sub(sub):
         settings.append(t("sub_list_alert_game", lang))
-        from handlers.notifications import category_watch_cooldown_hours
+        from handlers.notifications import category_watch_cooldown_minutes
 
-        settings.append(
-            t(
-                "sub_list_game_cooldown",
-                lang,
-                hours=category_watch_cooldown_hours(sub),
-            )
-        )
+        cd = category_watch_cooldown_minutes(sub)
+        if cd <= 0:
+            settings.append(t("sub_list_game_cooldown_off", lang))
+        else:
+            settings.append(t("sub_list_game_cooldown", lang, minutes=cd))
     elif sub.notify_on_end:
         settings.append(t("sub_list_alert_end", lang))
     elif sub.notify_on_category_change:
@@ -419,6 +415,7 @@ def _format_sub_line(
             not sub.notify_on_category_change
             and not sub.notify_on_end
             and not is_category_watch_sub(sub)
+            and not is_drops_sub(sub)
             and sub.suppress_repeat_minutes > 0
         ):
             settings.append(
@@ -772,7 +769,7 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        # Drops / game alerts: edit = cooldown hours (no share for either).
+        # Drops / game alerts: edit = cooldown minutes (no share).
         drops_locked = is_drops_sub(s)
         game = is_category_watch_sub(s)
         row1 = [
@@ -2123,8 +2120,8 @@ async def receive_edit_game_cooldown(
     from telegram.ext import ConversationHandler
 
     from handlers.notifications import (
-        CATEGORY_WATCH_COOLDOWN_HOURS_MAX,
-        CATEGORY_WATCH_COOLDOWN_HOURS_MIN,
+        CATEGORY_WATCH_COOLDOWN_MINUTES_MAX,
+        apply_category_watch_cooldown,
     )
 
     lang = _user_lang(context, update.effective_user.id)
@@ -2141,17 +2138,13 @@ async def receive_edit_game_cooldown(
             t("edit_game_cooldown_invalid", lang)
         )
         return _sub_states()["EDIT_REPEAT"]
-    hours = int(raw)
-    if hours != 0 and (
-        hours < CATEGORY_WATCH_COOLDOWN_HOURS_MIN
-        or hours > CATEGORY_WATCH_COOLDOWN_HOURS_MAX
-    ):
+    minutes = int(raw)
+    if minutes != 0 and minutes > CATEGORY_WATCH_COOLDOWN_MINUTES_MAX:
         await update.effective_message.reply_text(
             t("edit_game_cooldown_invalid", lang)
         )
         return _sub_states()["EDIT_REPEAT"]
 
-    minutes = 0 if hours == 0 else hours * 60
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
     sub = db.get_subscription(int(sub_id), owner_id)
@@ -2165,6 +2158,9 @@ async def receive_edit_game_cooldown(
     ):
         await update.effective_message.reply_text(t("sub_not_found", lang))
     else:
+        # Start/clear mute immediately so a VPS restart cannot leave a stale window.
+        sub = db.get_subscription(int(sub_id), owner_id) or sub
+        apply_category_watch_cooldown(db, sub)
         await update.effective_message.reply_text(
             t("edit_updated", lang, sub_id=sub_num),
             reply_markup=_menu(lang, owner_id),

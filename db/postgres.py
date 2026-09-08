@@ -868,6 +868,31 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_flags (
+                    name TEXT PRIMARY KEY
+                )
+                """
+            )
+            cur.execute(
+                "SELECT 1 FROM schema_flags WHERE name = 'digest_cd_minutes_v1'"
+            )
+            if cur.fetchone() is None:
+                cur.execute(
+                    """
+                    UPDATE subscriptions
+                    SET suppress_repeat_minutes = 60
+                    WHERE suppress_repeat_minutes = 0
+                      AND (
+                        COALESCE(notify_on_drops, FALSE) = TRUE
+                        OR COALESCE(category_watch_prefs, '') != ''
+                      )
+                    """
+                )
+                cur.execute(
+                    "INSERT INTO schema_flags(name) VALUES ('digest_cd_minutes_v1')"
+                )
 
     def add_subscription(
         self,
@@ -1029,6 +1054,14 @@ class PostgresDatabase:
             cur.execute(
                 "UPDATE subscriptions SET notify_cooldown_until = %s WHERE id = %s",
                 (until_iso, sub_id),
+            )
+
+    def clear_notify_cooldown(self, sub_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE subscriptions SET notify_cooldown_until = NULL WHERE id = %s",
+                (sub_id,),
             )
 
     def set_last_schedule_reminder_segment(self, sub_id: int, segment_id: str) -> None:

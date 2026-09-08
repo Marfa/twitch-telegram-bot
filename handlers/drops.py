@@ -550,12 +550,13 @@ async def send_drops_stream_alert(
     """Send stream list alert. Returns number of streams included (0 = none sent)."""
     from handlers.notifications import (
         _category_watch_cooling_down,
+        apply_category_watch_cooldown,
         category_watch_cooldown_minutes,
     )
 
     if sub is None or not is_drops_sub(sub) or not sub.enabled:
         return 0
-    # Periodic job: respect per-sub cooldown (default 1h). Immediate snapshot skips this.
+    # Periodic job: respect per-sub cooldown. Immediate snapshot (only_new=False) skips.
     if only_new and _category_watch_cooling_down(sub):
         return 0
     game_id = (sub.drops_game_id or "").strip()
@@ -597,6 +598,11 @@ async def send_drops_stream_alert(
     }
     text = _format_stream_alert(lang, campaign=camp, streams=streams, db=db)
     now_iso = datetime.now(timezone.utc).isoformat()
+    # Claim before send so overlapping ticks / deploy races cannot re-notify.
+    if only_new:
+        _mark_streams_seen(db, sub.owner_id, sub.id, streams, now_iso=now_iso)
+        if category_watch_cooldown_minutes(sub) > 0:
+            apply_category_watch_cooldown(db, sub)
     try:
         await bot.send_message(
             sub.chat_id,
@@ -610,8 +616,9 @@ async def send_drops_stream_alert(
             "drops stream alert failed owner=%s sub=%s", sub.owner_id, sub.id
         )
         return 0
-    _mark_streams_seen(db, sub.owner_id, sub.id, streams, now_iso=now_iso)
-    db.set_notify_cooldown(sub.id, category_watch_cooldown_minutes(sub))
+    if not only_new:
+        _mark_streams_seen(db, sub.owner_id, sub.id, streams, now_iso=now_iso)
+        apply_category_watch_cooldown(db, sub)
     analytics.capture(
         sub.owner_id,
         "drops_stream_alert_sent",
@@ -671,6 +678,8 @@ async def create_drops_game_subscription(
     campaign: dict[str, Any] | None = None,
 ) -> tuple[Subscription | None, str]:
     """One-tap private-chat drops subscription. Returns (sub, status_key)."""
+    from handlers.notifications import CATEGORY_WATCH_COOLDOWN_MINUTES
+
     game_id = (game_id or "").strip()
     if not game_id:
         return None, "drops_catalog_fetch_failed"
@@ -730,6 +739,7 @@ async def create_drops_game_subscription(
         notify_on_category_change=False,
         notify_on_drops=True,
         drops_game_id=game_id,
+        suppress_repeat_minutes=CATEGORY_WATCH_COOLDOWN_MINUTES,
     )
     # Preserve casing / drop title for list UI (add_subscription lowercases login).
     db.update_subscription(

@@ -31,33 +31,37 @@ from twitch import (
 logger = logging.getLogger(__name__)
 
 _WATCH_CATEGORY_NOTIFY_CAP = 5
-# Fixed mute between game-alert digests (not the editable stream-start suppress).
+# Default digest mute for new game / Drops alerts (editable; 0 = off).
 CATEGORY_WATCH_COOLDOWN_MINUTES = 60
-CATEGORY_WATCH_COOLDOWN_HOURS_MIN = 1
-CATEGORY_WATCH_COOLDOWN_HOURS_MAX = 24
+CATEGORY_WATCH_COOLDOWN_MINUTES_MAX = 24 * 60
 # Helix can omit category right after go-live; wait once, then send with whatever we get.
 LIVE_GAME_RECHECK_SECONDS = 20
 
 
 def category_watch_cooldown_minutes(sub: Subscription) -> int:
-    """Effective digest mute: suppress_repeat_minutes, or default 60 when 0."""
-    raw = int(getattr(sub, "suppress_repeat_minutes", 0) or 0)
-    if raw <= 0:
-        return CATEGORY_WATCH_COOLDOWN_MINUTES
-    return raw
-
-
-def category_watch_cooldown_hours(sub: Subscription) -> int:
-    return max(1, category_watch_cooldown_minutes(sub) // 60)
+    """Per-sub mute in minutes. 0 = no cooldown (explicit)."""
+    return max(0, int(getattr(sub, "suppress_repeat_minutes", 0) or 0))
 
 
 def _category_watch_cooling_down(sub: Subscription) -> bool:
+    if category_watch_cooldown_minutes(sub) <= 0:
+        return False
     from db.models import _parse_utc
 
     until = _parse_utc(getattr(sub, "notify_cooldown_until", None))
     if until is None:
         return False
     return datetime.now(timezone.utc) < until
+
+
+def apply_category_watch_cooldown(db: Database, sub: Subscription) -> None:
+    minutes = category_watch_cooldown_minutes(sub)
+    if minutes > 0:
+        db.set_notify_cooldown(sub.id, minutes)
+    else:
+        clear = getattr(db, "clear_notify_cooldown", None)
+        if callable(clear):
+            clear(sub.id)
 
 
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -589,9 +593,7 @@ async def _check_category_watch_alerts(
                     parse_mode=ParseMode.HTML,
                 )
                 if ok:
-                    db.set_notify_cooldown(
-                        sub.id, category_watch_cooldown_minutes(sub)
-                    )
+                    apply_category_watch_cooldown(db, sub)
             else:
                 db.set_category_watch_live_state(
                     sub.id, sorted(current_uids), primed=True

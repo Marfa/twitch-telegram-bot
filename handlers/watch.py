@@ -86,7 +86,7 @@ def _set_wizard_back(context: ContextTypes.DEFAULT_TYPE, state: int) -> None:
     _impl(context, state)
 
 
-_WATCH_MAX_CATS = 5
+_WATCH_MAX_CATS = 1
 _WATCH_SUGGEST_N = 5
 _WATCH_MAX_TAGS = 10
 
@@ -1406,9 +1406,13 @@ async def _add_watch_category(
 ) -> int:
     cats: list[dict[str, str]] = context.user_data.setdefault("watch_categories", [])
     entry = {"id": str(cat["id"]), "name": str(cat.get("name") or "")}
-    if not any(c["id"] == entry["id"] for c in cats):
+    if _WATCH_MAX_CATS <= 1:
+        cats[:] = [entry]
+    elif not any(c["id"] == entry["id"] for c in cats):
         cats.append(entry)
     context.user_data.pop("watch_cat_candidates", None)
+    if len(cats) >= _WATCH_MAX_CATS:
+        return await _go_watch_filters_prompt(update, context, lang)
     await update.effective_message.reply_text(
         t(
             "watch_cats_added",

@@ -459,7 +459,7 @@ def _check_drops_subs_list_edit_no_share() -> None:
         image_position="",
         strip_name_mentions=False,
         delay_minutes=0,
-        suppress_repeat_minutes=0,
+        suppress_repeat_minutes=60,
         delete_previous=False,
         notify_delete_fail=False,
         delete_other_alerts=False,
@@ -474,7 +474,7 @@ def _check_drops_subs_list_edit_no_share() -> None:
     line = _format_sub_line(sub, "ru", 25)  # type: ignore[arg-type]
     assert "Hearthstone — Hero Pack" in line
     assert t("sub_list_alert_drops", "ru") in line
-    assert t("sub_list_game_cooldown", "ru", hours=1) in line
+    assert t("sub_list_game_cooldown", "ru", minutes=60) in line
 
     db = MagicMock()
     db.get_subscriptions_by_owner.return_value = [sub]
@@ -485,7 +485,7 @@ def _check_drops_subs_list_edit_no_share() -> None:
     assert any((c or "").startswith("list_del:") for c in callbacks)
     assert any((c or "").startswith("edit:") for c in callbacks)
     assert not any((c or "").startswith("share_show:") for c in callbacks)
-    assert "раз в час" in t("drops_subscribed_ok", "ru", game="G", drop="D")
+    assert "60 мин" in t("drops_subscribed_ok", "ru", game="G", drop="D")
     assert "стримам" in t("drops_catalog_prompt", "ru")
 
 
@@ -509,7 +509,7 @@ def _check_drops_stream_alert_cooldown() -> None:
         thread_id=None,
         twitch_username="HS",
         notify_cooldown_until=future,
-        suppress_repeat_minutes=0,
+        suppress_repeat_minutes=120,
     )
     bot = AsyncMock()
     db = MagicMock()

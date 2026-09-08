@@ -741,6 +741,33 @@ class SqliteDatabase:
             )
             """
         )
+        # One-shot: digest cooldown UI moves to minutes; former 0 meant default 60m.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_flags (
+                name TEXT PRIMARY KEY
+            )
+            """
+        )
+        flag = conn.execute(
+            "SELECT 1 FROM schema_flags WHERE name = 'digest_cd_minutes_v1'"
+        ).fetchone()
+        if flag is None:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET suppress_repeat_minutes = 60
+                WHERE suppress_repeat_minutes = 0
+                  AND (
+                    COALESCE(notify_on_drops, 0) = 1
+                    OR COALESCE(category_watch_prefs, '') != ''
+                  )
+                """
+            )
+            conn.execute(
+                "INSERT INTO schema_flags(name) VALUES ('digest_cd_minutes_v1')"
+            )
+
     def add_subscription(
         self,
         owner_id: int,
@@ -893,6 +920,13 @@ class SqliteDatabase:
             conn.execute(
                 "UPDATE subscriptions SET notify_cooldown_until = ? WHERE id = ?",
                 (until_iso, sub_id),
+            )
+
+    def clear_notify_cooldown(self, sub_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE subscriptions SET notify_cooldown_until = NULL WHERE id = ?",
+                (sub_id,),
             )
 
     def set_last_schedule_reminder_segment(self, sub_id: int, segment_id: str) -> None:

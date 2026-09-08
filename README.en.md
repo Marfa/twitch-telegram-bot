@@ -162,7 +162,7 @@ If you have saved filters, the bot offers:
 
 New search wizard:
 
-1. Twitch categories (up to 5) — no feeling lucky here (that lives in **📦 Other** → What to watch?)
+1. Twitch categories (one) — no feeling lucky here (that lives in **📦 Other** → What to watch?); then filters immediately
 2. Checkboxes for extra filters: tags / viewers / language / exclude mature (unchecked = any)
 3. Value prompts only for checked items (tags, viewer range, language)
 4. Save filter for later (up to 5) or just this once
@@ -171,7 +171,7 @@ After suggestions (or an empty result):
 
 | Button | Action |
 |---|---|
-| **Watch new streams by this filter?** | Game alert: up to 5 new streams in one message (search format); frequency 1–24 h (**✏️**, default 1 h); toggle / edit / delete only |
+| **Watch new streams by this filter?** | Game alert: 1 category → filters next; up to 5 new streams in one message; frequency in **minutes** (**✏️**, default 60, 0 = off); toggle / edit / delete |
 | **Suggest again** | Another random set |
 | **Filters / new search** | Pick again / wizard |
 

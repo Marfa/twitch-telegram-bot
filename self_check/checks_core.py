@@ -1009,7 +1009,7 @@ def check_core() -> None:
         assert tr("start_welcome_demo", loc, channel="marfapr")
         assert btn("welcome_demo_edit", loc)
         assert btn("welcome_demo_delete", loc)
-        assert tr("watch_cats_prompt", loc, max=5)
+        assert tr("watch_cats_prompt", loc)
         assert tr("watch_cats_lucky", loc)
         lucky_cbs = [
             b.callback_data
@@ -1048,7 +1048,8 @@ def check_core() -> None:
         assert tr("edit_watch_locked", loc)
         assert tr("edit_game_cooldown_prompt", loc)
         assert tr("edit_game_cooldown_invalid", loc)
-        assert tr("sub_list_game_cooldown", loc, hours=1)
+        assert tr("sub_list_game_cooldown", loc, minutes=60)
+        assert tr("sub_list_game_cooldown_off", loc)
         assert tr("import_mode_prompt", loc)
         assert tr("sync_menu_off", loc)
         assert tr("sync_unfollow_ask", loc, list="@x")

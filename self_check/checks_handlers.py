@@ -1830,7 +1830,6 @@ def _check_category_watch_digest_and_legacy() -> None:
         _WATCH_CATEGORY_NOTIFY_CAP,
         _category_watch_cooling_down,
         _check_category_watch_alerts,
-        category_watch_cooldown_hours,
         category_watch_cooldown_minutes,
     )
     from handlers.subscriptions import _alert_type_from_sub
@@ -1880,15 +1879,17 @@ def _check_category_watch_digest_and_legacy() -> None:
     )
     assert is_category_watch_sub(legacy)  # type: ignore[arg-type]
     assert _alert_type_from_sub(legacy) == "game"  # type: ignore[arg-type]
-    assert category_watch_cooldown_minutes(legacy) == 60  # type: ignore[arg-type]
-    assert category_watch_cooldown_hours(legacy) == 1  # type: ignore[arg-type]
+    assert category_watch_cooldown_minutes(legacy) == 0  # type: ignore[arg-type]
+    legacy_60 = SimpleNamespace(**{**legacy.__dict__, "suppress_repeat_minutes": 60})
+    assert category_watch_cooldown_minutes(legacy_60) == 60  # type: ignore[arg-type]
     legacy_3h = SimpleNamespace(**{**legacy.__dict__, "suppress_repeat_minutes": 180})
-    assert category_watch_cooldown_hours(legacy_3h) == 3  # type: ignore[arg-type]
+    assert category_watch_cooldown_minutes(legacy_3h) == 180  # type: ignore[arg-type]
     assert not _category_watch_cooling_down(legacy)  # type: ignore[arg-type]
     cooling = SimpleNamespace(
+        suppress_repeat_minutes=60,
         notify_cooldown_until=(
             datetime.now(timezone.utc) + timedelta(minutes=30)
-        ).isoformat()
+        ).isoformat(),
     )
     assert _category_watch_cooling_down(cooling)  # type: ignore[arg-type]
 
@@ -1956,6 +1957,36 @@ def _check_category_watch_digest_and_legacy() -> None:
     assert body.count("https://twitch.tv/") == 5
     assert sent[0]["kwargs"].get("parse_mode")
     db.set_category_watch_live_state.assert_called()
+    # suppress=0 → no cooldown after send
+    db.set_notify_cooldown.assert_not_called()
+
+    sent.clear()
+    db.set_notify_cooldown.reset_mock()
+    db.set_category_watch_live_state.reset_mock()
+    with_default = SimpleNamespace(
+        **{
+            **legacy.__dict__,
+            "suppress_repeat_minutes": CATEGORY_WATCH_COOLDOWN_MINUTES,
+            "notify_cooldown_until": None,
+            "category_watch_live_ids": '["old"]',
+        }
+    )
+    with (
+        patch(
+            "handlers.notifications.filter_streams_for_watch",
+            side_effect=lambda pooled, **kw: pooled,
+        ),
+        patch(
+            "handlers.notifications._send_notification",
+            new=AsyncMock(side_effect=_capture_send),
+        ),
+        patch(
+            "handlers.watch._premium_channel_badge_html",
+            return_value="",
+        ),
+    ):
+        asyncio.run(_check_category_watch_alerts(ctx, [with_default]))  # type: ignore[list-item]
+    assert len(sent) == 1
     db.set_notify_cooldown.assert_called_once_with(1, CATEGORY_WATCH_COOLDOWN_MINUTES)
 
     sent.clear()
@@ -1993,6 +2024,7 @@ def _check_category_watch_digest_and_legacy() -> None:
     cooling_sub = SimpleNamespace(
         **{
             **legacy.__dict__,
+            "suppress_repeat_minutes": 60,
             "notify_cooldown_until": (
                 datetime.now(timezone.utc) + timedelta(minutes=30)
             ).isoformat(),
