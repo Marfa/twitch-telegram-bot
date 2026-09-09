@@ -61,7 +61,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Feature | What it unlocks |
 |---|---|
 | More than 5 active alerts | Removes the free-plan cap of 5 active alerts |
-| Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (beta: catalog + digest from twitchdrops.app, stream alerts up to 5 live with Drops-tag priority, how-to, claimed) |
+| Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (beta: full catalog with pagination + hourly new-campaign digest from twitchdrops.app, stream alerts up to 5 live with Drops-tag priority, how-to) |
 | Twitch follow auto-sync | Periodic import of new follows / removal of unfollows |
 | Advanced alert options | Ignore keywords, delayed send, repeat mute, delete previous |
 | Twitch schedule tools | Publish slots, fix a day, vacation mode on Twitch |

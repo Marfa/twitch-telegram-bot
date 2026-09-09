@@ -1646,10 +1646,8 @@ async def _go_drops_catalog_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     from handlers.drops import (
-        _access_token_for_owner,
         drops_feature_available,
         send_drops_catalog,
-        send_drops_oauth_prompt,
     )
 
     db: Database = context.application.bot_data["db"]
@@ -1670,15 +1668,6 @@ async def _go_drops_catalog_step(
         )
     wizard_kb = _wizard(lang, back=True)
     _set_wizard_back(context, _wz()["CHANNEL"])
-    access = await asyncio.to_thread(_access_token_for_owner, db, twitch, user_id)
-    if not access:
-        await send_drops_oauth_prompt(
-            context.bot,
-            twitch,
-            user_id,
-            lang,
-            application=context.application,
-        )
     await send_drops_catalog(
         context.bot,
         db,
@@ -1688,8 +1677,6 @@ async def _go_drops_catalog_step(
         bot_data=context.application.bot_data,
         user_data=context.user_data,
         reply_markup_extra=wizard_kb,
-        access_token=access,
-        application=context.application,
     )
     return _wz()["CHANNEL"]
 
@@ -1754,6 +1741,38 @@ async def receive_drops_game_callback(
     if action == "cancel":
         await query.edit_message_text("✓")
         return await cancel(update, context)
+    if action == "noop":
+        return _wz()["CHANNEL"]
+    if action == "page" and len(raw) == 3:
+        try:
+            page = int(raw[2])
+        except ValueError:
+            return _wz()["CHANNEL"]
+        cands = context.user_data.get("drops_catalog_candidates") or []
+        if not cands:
+            cands = (
+                context.application.bot_data.get("drops_catalog_by_user") or {}
+            ).get(query.from_user.id) or []
+        db: Database = context.application.bot_data["db"]
+        auth = db.get_drops_auth(query.from_user.id)
+        digest_on = bool(auth and auth.digest_enabled)
+        context.user_data["drops_catalog_page"] = page
+        from handlers.drops import _DROPS_CATALOG_PAGE_SIZE
+        from i18n import drops_catalog_keyboard
+
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=drops_catalog_keyboard(
+                    lang,
+                    cands,
+                    digest_enabled=digest_on,
+                    page=page,
+                    page_size=_DROPS_CATALOG_PAGE_SIZE,
+                )
+            )
+        except Exception:
+            pass
+        return _wz()["CHANNEL"]
     if action != "pick" or len(raw) != 3:
         return _wz()["CHANNEL"]
     try:
@@ -1781,6 +1800,19 @@ async def receive_drops_game_callback(
             "game_name": str(camp.get("game_name") or ""),
         },
     )
+
+
+async def start_drops_from_digest(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Entry from digest alert: open Drops catalog wizard."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    context.user_data.clear()
+    context.user_data["alert_type"] = "drops"
+    lang = _user_lang(context, update.effective_user.id)
+    return await _go_drops_catalog_step(update, context, lang)
 
 
 async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

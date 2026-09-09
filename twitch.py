@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import random
 import re
@@ -16,8 +15,6 @@ import requests
 from config import (
     TWITCH_CLIENT_ID,
     TWITCH_CLIENT_SECRET,
-    TWITCH_DROPS_CLIENT_ID,
-    TWITCH_DROPS_CLIENT_SECRET,
 )
 
 FOLLOWS_SCOPE = "user:read:follows"
@@ -29,8 +26,6 @@ CHAT_WRITE_SCOPE = "user:write:chat"
 CHAT_OAUTH_SCOPES = f"{CHAT_READ_SCOPE} {CHAT_WRITE_SCOPE}"
 # Schedule publish may overwrite twitch_sync used by follow import — keep both.
 SCHEDULE_OAUTH_SCOPES = f"{SCHEDULE_SCOPE} {FOLLOWS_SCOPE}"
-# Drops GQL needs a user session; Helix scopes are unused by gql but authorize requires one.
-DROPS_OAUTH_SCOPES = FOLLOWS_SCOPE
 
 logger = logging.getLogger(__name__)
 
@@ -42,22 +37,6 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 
 # ponytail: public Twitch web player Client-ID for anonymous gql only (channel about).
 _TWITCH_GQL_WEB_CLIENT_ID = "kimne78kx3ncx6brgo4" "mv6wki5h1ko"
-# Android UA — Twitch GQL drops catalog expects mobile-app shaped requests
-# (same pattern as TwitchDropsMiner). Client-ID comes from TWITCH_DROPS_CLIENT_ID.
-_DROPS_GQL_USER_AGENT = (
-    "Dalvik/2.1.0 (Linux; U; Android 16; SM-S911B Build/TP1A.220624.014) "
-    "tv.twitch.android.app/25.3.0/2503006"
-)
-# Persisted-query hashes from TwitchDropsMiner; update if GQL breaks.
-_GQL_VIEWER_DROPS_DASHBOARD_HASH = (
-    "c16bb890cc8ce7647a96ee69cd313d423a378a3dedadf630a1017cde18975feb"
-)
-_GQL_DROP_CAMPAIGN_DETAILS_HASH = (
-    "039277bf98f3130929262cc7c6efd9c141ca3749cb6dca442fc8ead9a53f77c1"
-)
-_GQL_INVENTORY_HASH = (
-    "8337eb8541b314040b0edde0c09c5c7a2783ba1960aa9edfbf3bac16d0fec404"
-)
 # Helix stream tags for Drops-enabled (EN + RU + short "Drops"), compared casefold.
 _DROPS_ENABLED_TAG_NEEDLES = ("drops enabled", "drops включены", "drops")
 _DROPS_ENABLED_TAG = "Drops Enabled"  # back-compat label
@@ -190,42 +169,6 @@ class TwitchClient:
         self._session = requests.Session()
         self._token = ""
         self._token_expires = 0.0
-        # Stable device id for Drops GQL session headers.
-        self._drops_device_id = "".join(
-            random.choice("0123456789abcdef") for _ in range(32)
-        )
-
-    def _drops_gql_headers(
-        self, access_token: str, *, client_id: str, device_id: str | None = None
-    ) -> dict[str, str]:
-        did = (device_id or self._drops_device_id or "").strip() or self._drops_device_id
-        # Stable session per device (TwitchDropsMiner keeps one session_id per login).
-        session_id = hashlib.sha256(f"drops-sess:{did}".encode()).hexdigest()[:16]
-        return {
-            "Accept": "*/*",
-            "Accept-Language": "en-US",
-            "Pragma": "no-cache",
-            "Cache-Control": "no-cache",
-            "Client-Id": client_id,
-            "Client-Session-Id": session_id,
-            "Authorization": f"OAuth {access_token}",
-            "Content-Type": "application/json",
-            "Origin": "https://www.twitch.tv",
-            "Referer": "https://www.twitch.tv/",
-            "User-Agent": _DROPS_GQL_USER_AGENT,
-            "X-Device-Id": did,
-        }
-
-    def _drops_oauth_headers(self, *, device_id: str | None = None) -> dict[str, str]:
-        did = (device_id or self._drops_device_id or "").strip() or self._drops_device_id
-        return {
-            "Accept": "application/json",
-            "Client-Id": TWITCH_DROPS_CLIENT_ID,
-            "Origin": "https://www.twitch.tv",
-            "Referer": "https://www.twitch.tv/",
-            "User-Agent": _DROPS_GQL_USER_AGENT,
-            "X-Device-Id": did,
-        }
 
     def parse_username(self, text: str) -> str | None:
         text = text.strip()
@@ -377,234 +320,6 @@ class TwitchClient:
             add(url=link_url, label=label, kind="social")
 
         return links
-
-    def _gql_persisted(
-        self,
-        *,
-        operation_name: str,
-        sha256_hash: str,
-        variables: dict[str, Any],
-        access_token: str,
-        client_id: str | None = None,
-        device_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Undocumented gql.twitch.tv persisted query (may break without notice).
-
-        Drops catalog needs a token issued for ``TWITCH_DROPS_CLIENT_ID`` (default:
-        Twitch Android public client). Helix tokens from our confidential app get 401.
-        """
-        cid = (client_id or TWITCH_DROPS_CLIENT_ID).strip()
-        headers = self._drops_gql_headers(
-            access_token, client_id=cid, device_id=device_id
-        )
-        payload = {
-            "operationName": operation_name,
-            "variables": variables,
-            "extensions": {
-                "persistedQuery": {
-                    "version": 1,
-                    "sha256Hash": sha256_hash,
-                }
-            },
-        }
-        resp = self._session.post(
-            "https://gql.twitch.tv/gql",
-            headers=headers,
-            json=payload,
-            timeout=20,
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        if isinstance(body, list):
-            body = body[0] if body else {}
-        if not isinstance(body, dict):
-            return {}
-        errors = body.get("errors")
-        data = body.get("data")
-        if errors:
-            msg = ""
-            if isinstance(errors, list) and errors and isinstance(errors[0], dict):
-                msg = str(errors[0].get("message") or "")[:120]
-            # Twitch often returns soft errors alongside usable data — only fail hard
-            # when there is nothing to read (TwitchDropsMiner does the same).
-            if not isinstance(data, dict) or not data:
-                logger.warning(
-                    "Twitch GQL %s failed: %s", operation_name, msg or "error"
-                )
-                raise RuntimeError(f"twitch gql {operation_name} failed")
-            logger.warning(
-                "Twitch GQL %s soft error (using data): %s",
-                operation_name,
-                msg or "error",
-            )
-        return body
-
-    @staticmethod
-    def _parse_drop_campaign(raw: dict[str, Any]) -> dict[str, Any] | None:
-        if not isinstance(raw, dict):
-            return None
-        campaign_id = str(raw.get("id") or "").strip()
-        if not campaign_id:
-            return None
-        game = raw.get("game") or {}
-        if not isinstance(game, dict):
-            game = {}
-        game_id = str(game.get("id") or raw.get("gameId") or "").strip()
-        game_name = str(game.get("displayName") or game.get("name") or "").strip()
-        status = str(raw.get("status") or "").strip().upper()
-        details = str(
-            raw.get("details")
-            or raw.get("description")
-            or raw.get("detailsURL")
-            or ""
-        ).strip()
-        drops_raw = raw.get("timeBasedDrops") or raw.get("timeBasedDrop") or []
-        if isinstance(drops_raw, dict):
-            drops_raw = [drops_raw]
-        drops: list[dict[str, Any]] = []
-        how_parts: list[str] = []
-        all_claimed = True
-        any_drop = False
-        for d in drops_raw if isinstance(drops_raw, list) else []:
-            if not isinstance(d, dict):
-                continue
-            any_drop = True
-            required = d.get("requiredMinutesWatched")
-            try:
-                minutes = int(required) if required is not None else None
-            except (TypeError, ValueError):
-                minutes = None
-            benefit = d.get("benefitEdges") or d.get("benefits") or []
-            names: list[str] = []
-            if isinstance(benefit, list):
-                for edge in benefit:
-                    node = edge.get("benefit") if isinstance(edge, dict) else None
-                    if isinstance(node, dict) and node.get("name"):
-                        names.append(str(node["name"]))
-                    elif isinstance(edge, dict) and edge.get("name"):
-                        names.append(str(edge["name"]))
-            self_edge = d.get("self") if isinstance(d.get("self"), dict) else {}
-            is_claimed = bool(self_edge.get("isClaimed")) if self_edge else False
-            if not is_claimed:
-                all_claimed = False
-            drop_name = str(d.get("name") or "")
-            drops.append(
-                {
-                    "id": str(d.get("id") or ""),
-                    "name": drop_name,
-                    "required_minutes": minutes,
-                    "benefit_names": names,
-                    "is_claimed": is_claimed,
-                }
-            )
-            bit = drop_name or (", ".join(names) if names else "")
-            if minutes is not None and bit:
-                how_parts.append(f"{bit}: {minutes} min")
-            elif bit:
-                how_parts.append(bit)
-        how_to_earn = details or "; ".join(how_parts)
-        return {
-            "id": campaign_id,
-            "name": str(raw.get("name") or "").strip(),
-            "status": status,
-            "game_id": game_id,
-            "game_name": game_name,
-            "starts_at": str(raw.get("startAt") or raw.get("startsAt") or ""),
-            "ends_at": str(raw.get("endAt") or raw.get("endsAt") or ""),
-            "how_to_earn": how_to_earn,
-            "claimed": bool(any_drop and all_claimed),
-            "drops": drops,
-        }
-
-    def get_viewer_drop_campaigns(
-        self, access_token: str, *, device_id: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Active drop campaigns visible to the authenticated user (GQL)."""
-        body = self._gql_persisted(
-            operation_name="ViewerDropsDashboard",
-            sha256_hash=_GQL_VIEWER_DROPS_DASHBOARD_HASH,
-            variables={"fetchRewardCampaigns": False},
-            access_token=access_token,
-            device_id=device_id,
-        )
-        data = body.get("data") or {}
-        current = data.get("currentUser")
-        if not isinstance(current, dict):
-            # Log keys only — never tokens.
-            logger.warning(
-                "Twitch GQL ViewerDropsDashboard: currentUser missing data_keys=%s err=%s",
-                list(data.keys()) if isinstance(data, dict) else type(data).__name__,
-                (
-                    str((body.get("errors") or [{}])[0].get("message") or "")[:120]
-                    if isinstance(body.get("errors"), list) and body.get("errors")
-                    else ""
-                ),
-            )
-            raise RuntimeError("twitch gql ViewerDropsDashboard unauthorized")
-        raw_list = current.get("dropCampaigns") or []
-        out: list[dict[str, Any]] = []
-        for raw in raw_list if isinstance(raw_list, list) else []:
-            parsed = self._parse_drop_campaign(raw if isinstance(raw, dict) else {})
-            if parsed:
-                out.append(parsed)
-        return out
-
-    def get_drop_campaign_details(
-        self, access_token: str, *, campaign_id: str, channel_login: str = ""
-    ) -> dict[str, Any] | None:
-        body = self._gql_persisted(
-            operation_name="DropCampaignDetails",
-            sha256_hash=_GQL_DROP_CAMPAIGN_DETAILS_HASH,
-            variables={
-                "dropID": campaign_id,
-                "channelLogin": channel_login or "",
-            },
-            access_token=access_token,
-        )
-        user = ((body.get("data") or {}).get("user") or {})
-        raw = user.get("dropCampaign")
-        if not isinstance(raw, dict):
-            return None
-        return self._parse_drop_campaign(raw)
-
-    def get_inventory_claimed_drops(
-        self, access_token: str, *, device_id: str | None = None
-    ) -> dict[str, dict[str, Any]]:
-        """Map drop_id -> {name, campaign_id, game_id, is_claimed} from Inventory GQL."""
-        body = self._gql_persisted(
-            operation_name="Inventory",
-            sha256_hash=_GQL_INVENTORY_HASH,
-            variables={"fetchRewardCampaigns": False},
-            access_token=access_token,
-            device_id=device_id,
-        )
-        current = ((body.get("data") or {}).get("currentUser") or {})
-        inventory = current.get("inventory") or {}
-        if not isinstance(inventory, dict):
-            inventory = {}
-        out: dict[str, dict[str, Any]] = {}
-        campaigns = inventory.get("dropCampaignsInProgress") or []
-        for camp in campaigns if isinstance(campaigns, list) else []:
-            if not isinstance(camp, dict):
-                continue
-            campaign_id = str(camp.get("id") or "")
-            game = camp.get("game") if isinstance(camp.get("game"), dict) else {}
-            game_id = str(game.get("id") or "")
-            for d in camp.get("timeBasedDrops") or []:
-                if not isinstance(d, dict):
-                    continue
-                drop_id = str(d.get("id") or "").strip()
-                if not drop_id:
-                    continue
-                self_edge = d.get("self") if isinstance(d.get("self"), dict) else {}
-                out[drop_id] = {
-                    "id": drop_id,
-                    "name": str(d.get("name") or ""),
-                    "campaign_id": campaign_id,
-                    "game_id": game_id,
-                    "is_claimed": bool(self_edge.get("isClaimed")),
-                }
-        return out
 
     @staticmethod
     def matched_drops_tag(stream: dict[str, Any]) -> str | None:
@@ -1147,95 +862,6 @@ class TwitchClient:
         )
         resp.raise_for_status()
         return resp.json()
-
-    def start_drops_device_code(
-        self, *, device_id: str | None = None
-    ) -> dict[str, Any]:
-        """Device-code login for Drops GQL (TWITCH_DROPS_CLIENT_ID, default Android)."""
-        resp = self._session.post(
-            "https://id.twitch.tv/oauth2/device",
-            headers=self._drops_oauth_headers(device_id=device_id),
-            data={
-                "client_id": TWITCH_DROPS_CLIENT_ID,
-                "scopes": "",
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return {
-            "device_code": str(data.get("device_code") or ""),
-            "user_code": str(data.get("user_code") or ""),
-            "verification_uri": str(
-                data.get("verification_uri") or "https://www.twitch.tv/activate"
-            ),
-            "interval": max(3, int(data.get("interval") or 5)),
-            "expires_in": max(60, int(data.get("expires_in") or 1800)),
-        }
-
-    def poll_drops_device_code(
-        self, device_code: str, *, device_id: str | None = None
-    ) -> dict[str, Any] | None:
-        """Return token payload when authorized; None while pending; raise on hard fail."""
-        data: dict[str, str] = {
-            "client_id": TWITCH_DROPS_CLIENT_ID,
-            "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        }
-        if TWITCH_DROPS_CLIENT_SECRET:
-            data["client_secret"] = TWITCH_DROPS_CLIENT_SECRET
-        resp = self._session.post(
-            "https://id.twitch.tv/oauth2/token",
-            headers=self._drops_oauth_headers(device_id=device_id),
-            data=data,
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            return resp.json()
-        try:
-            err = resp.json()
-        except Exception:
-            err = {}
-        code = str(err.get("message") or err.get("error") or "")
-        if code in ("authorization_pending", "slow_down"):
-            return None
-        resp.raise_for_status()
-        return None
-
-    def refresh_drops_gql_token(self, refresh_token: str) -> dict[str, Any]:
-        """Refresh a Drops device-code token.
-
-        Android public Client-ID cannot refresh (Twitch: missing client secret).
-        Own public/confidential drops clients may refresh when secret is set.
-        """
-        data: dict[str, str] = {
-            "client_id": TWITCH_DROPS_CLIENT_ID,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }
-        if TWITCH_DROPS_CLIENT_SECRET:
-            data["client_secret"] = TWITCH_DROPS_CLIENT_SECRET
-        resp = self._session.post(
-            "https://id.twitch.tv/oauth2/token",
-            data=data,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    def get_drops_token_user(self, user_access_token: str) -> dict[str, Any] | None:
-        resp = self._session.get(
-            "https://api.twitch.tv/helix/users",
-            headers={
-                "Client-ID": TWITCH_DROPS_CLIENT_ID,
-                "Authorization": f"Bearer {user_access_token}",
-                "User-Agent": _DROPS_GQL_USER_AGENT,
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("data") or []
-        return data[0] if data else None
 
     def get_token_user(self, user_access_token: str) -> dict[str, Any] | None:
         resp = self._session.get(
@@ -2489,7 +2115,6 @@ def _parse_twitchdrops_app_campaign(raw: dict[str, Any]) -> dict[str, Any] | Non
                 "name": drop_name,
                 "required_minutes": required,
                 "benefit_names": names,
-                "is_claimed": False,
             }
         )
         bit = drop_name or reward
@@ -2509,7 +2134,6 @@ def _parse_twitchdrops_app_campaign(raw: dict[str, Any]) -> dict[str, Any] | Non
         "starts_at": str(raw.get("startAt") or ""),
         "ends_at": str(raw.get("endAt") or ""),
         "how_to_earn": how_to_earn,
-        "claimed": False,
         "drops": drops,
     }
 
@@ -2546,12 +2170,30 @@ def _parse_twitchdrops_app_how_to_html(page_html: str) -> str:
     )
     if not m:
         return ""
+
+    def _abs_href(href: str) -> str:
+        href = html_unescape(href).strip()
+        if href.startswith("/"):
+            return f"{_TWITCHDROPS_APP_BASE}{href}"
+        return href
+
+    def _anchor_to_text(match: re.Match[str]) -> str:
+        href = _abs_href(match.group(1))
+        label = re.sub(r"<[^>]+>", "", match.group(2))
+        label = html_unescape(label)
+        label = re.sub(r"\s+", " ", label).strip()
+        if not re.match(r"^https?://", href, re.IGNORECASE):
+            return label
+        if label:
+            return f"{label} ({href})"
+        return href
+
     steps: list[str] = []
     for li in re.finditer(r"<li\b[^>]*>(.*?)</li>", m.group(1), re.IGNORECASE | re.DOTALL):
         chunk = li.group(1)
         chunk = re.sub(
             r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-            r"\2",
+            _anchor_to_text,
             chunk,
             flags=re.IGNORECASE | re.DOTALL,
         )

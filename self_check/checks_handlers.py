@@ -1027,7 +1027,9 @@ def check_handlers() -> None:
             lang="ru",
         )
         assert "• 17:00 — <b>frank_sg</b> 🙄" in hist_block
-        assert "Hello &lt;b&gt;x&lt;/b&gt;" in hist_block
+        # Stored alert bodies are already Telegram HTML — do not escape again.
+        assert "Hello <b>x</b>" in hist_block
+        assert "&lt;b&gt;" not in hist_block
         assert '<a href="https://twitch.tv/frank_sg">Перейти к стриму</a>' in hist_block
         viewed_block = _format_alert_history_block(
             time_str="17:00",

@@ -210,18 +210,17 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             {
                 "lang": loc,
                 "campaigns": [{"name": "Camp", "game_name": "Game", "id": "1"}],
-                "show_rebind": True,
             },
         ),
         (
             "drops_catalog_failed",
             drops_catalog_keyboard,
-            {"lang": loc, "campaigns": [], "show_rebind": True},
+            {"lang": loc, "campaigns": []},
         ),
         (
             "drops_digest_alert",
             _digest_alert_keyboard,
-            {"lang": loc, "campaign_id": "abc", "drop_name": "Camp"},
+            {"lang": loc},
         ),
         ("premium_gate_first", premium_gate_keyboard, {"lang": loc, "first_step": True}),
         ("premium_gate_later", premium_gate_keyboard, {"lang": loc, "first_step": False}),

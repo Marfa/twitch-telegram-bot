@@ -37,14 +37,6 @@ def _env_bool(name: str, default: bool = False) -> bool:
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "")
-# Drops GQL (ViewerDropsDashboard) only accepts tokens from Twitch's Android
-# public Client-ID — our Helix confidential app gets gql 401. Optional override
-# if Twitch ever allows another client; leave secret empty for public clients.
-_TWITCH_DROPS_ANDROID_CLIENT_ID = "kd1unb4b3q4t58fwlpcbzcbnm76a8fp"
-TWITCH_DROPS_CLIENT_ID = (
-    os.getenv("TWITCH_DROPS_CLIENT_ID", "").strip() or _TWITCH_DROPS_ANDROID_CLIENT_ID
-)
-TWITCH_DROPS_CLIENT_SECRET = os.getenv("TWITCH_DROPS_CLIENT_SECRET", "").strip()
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 # Schedule reminders need one Helix call per channel; poll slower than live checks.
 SCHEDULE_CHECK_INTERVAL = int(os.getenv("SCHEDULE_CHECK_INTERVAL", "180"))

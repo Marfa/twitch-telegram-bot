@@ -509,6 +509,7 @@ from handlers.wizard import (
     offer_twitch_link_wizard,
     on_twitch_link_decline,
     on_twitch_link_start,
+    start_drops_from_digest,
     start_new_subscription,
     wizard_back,
 )
@@ -2399,6 +2400,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("schedule", dm_only_conv_entry(start_stream_schedule)),
             MessageHandler(_btn_filter("new"), dm_only_conv_entry(start_new_subscription)),
             CallbackQueryHandler(
+                dm_only_conv_entry(start_drops_from_digest),
+                pattern=r"^drops_digest:open$",
+            ),
+            CallbackQueryHandler(
                 dm_only_conv_entry(on_twitch_link_start),
                 pattern=r"^twitch_link:start:[a-zA-Z0-9_]{4,25}$",
             ),
@@ -2493,7 +2498,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_drops_game_callback,
-                    pattern=r"^drops_camp:(?:pick:\d+|cancel)$",
+                    pattern=r"^drops_camp:(?:pick:\d+|page:\d+|noop|cancel)$",
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel),
             ],
@@ -3081,11 +3086,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
     from handlers.drops import (
         check_drops,
-        on_drops_claim_action,
         on_drops_digest_off,
         on_drops_digest_toggle,
         on_drops_get_alerts,
-        on_drops_rebind,
     )
     from premium_handlers import refresh_premium_twitch_job
 
@@ -3096,15 +3099,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_drops_digest_off, pattern=r"^drops_digest:off$")
     )
     app.add_handler(
-        CallbackQueryHandler(on_drops_rebind, pattern=r"^drops_rebind$")
-    )
-    app.add_handler(
         CallbackQueryHandler(on_drops_get_alerts, pattern=r"^drops_get:")
-    )
-    app.add_handler(
-        CallbackQueryHandler(
-            on_drops_claim_action, pattern=r"^drops_claim:(?:pause|del):\d+$"
-        )
     )
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)

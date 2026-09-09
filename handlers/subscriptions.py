@@ -1515,11 +1515,6 @@ async def complete_twitch_import(
     if purpose == "chat":
         await complete_chat_oauth(application, owner_id, error, token_info)
         return
-    if purpose == "drops":
-        from handlers.drops import complete_drops_oauth
-
-        await complete_drops_oauth(application, owner_id, error, token_info)
-        return
     db: Database = application.bot_data["db"]
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:

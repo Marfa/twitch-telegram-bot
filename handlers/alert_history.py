@@ -136,7 +136,7 @@ def _format_alert_history_block(
             status=status,
         )
     ]
-    parts.append(t("alert_history_body", lang, text=html.escape(body)))
+    parts.append(t("alert_history_body", lang, text=body))
     url = _resolve_stream_url(username, stream_url)
     action_bits: list[str] = []
     if url:

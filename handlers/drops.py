@@ -1,14 +1,12 @@
-"""Twitch Drops alerts: device-code OAuth, catalog, stream + claim jobs."""
+"""Twitch Drops alerts: twitchdrops.app catalog, digest, and stream jobs."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import html
 import logging
 import re
 import secrets
-import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,16 +28,11 @@ logger = logging.getLogger(__name__)
 DROPS_BETA_ID = "drops-alerts"
 DROPS_FEATURE_ID = "alert_types"
 
-
-def drops_device_id_for(owner_id: int) -> str:
-    """Stable per-user X-Device-Id so GQL works after bot restarts."""
-    return hashlib.sha256(f"drops-gql-device:{int(owner_id)}".encode()).hexdigest()[:32]
-
-
-_DROPS_CATALOG_LIMIT = 12
+_DROPS_CATALOG_PAGE_SIZE = 8
 _DIGEST_SEEN_SUB_ID = 0
+_DIGEST_MIN_INTERVAL_SEC = 3600
+_DIGEST_LAST_FLUSH_KEY = "drops_digest_last_flush"
 _ACTIVE_CAMPAIGN_STATUSES = frozenset({"ACTIVE", "ENABLED", ""})
-_PENDING_DEVICE_KEY = "drops_device_pending"
 
 
 def drops_feature_available(db: Database, user_id: int) -> bool:
@@ -58,135 +51,6 @@ def _user_lang(db: Database, user_id: int) -> str:
     return db.get_user_locale(user_id) or DEFAULT_LOCALE
 
 
-def user_has_drops_oauth(db: Database, user_id: int) -> bool:
-    """True when a Drops device-code refresh token is stored."""
-    auth = db.get_drops_auth(user_id)
-    return bool(auth and auth.refresh_token)
-
-
-user_has_twitch_oauth = user_has_drops_oauth
-
-
-async def send_drops_oauth_prompt(
-    bot: Any,
-    twitch: TwitchClient,
-    user_id: int,
-    lang: str,
-    *,
-    application: Any | None = None,
-) -> None:
-    """Start Twitch device-code login required for the Drops GQL catalog."""
-    device_id = drops_device_id_for(user_id)
-    try:
-        started = await asyncio.to_thread(
-            twitch.start_drops_device_code, device_id=device_id
-        )
-    except Exception:
-        logger.exception("drops device-code start failed user=%s", user_id)
-        await bot.send_message(user_id, t("drops_oauth_failed", lang))
-        return
-    device_code = str(started.get("device_code") or "")
-    user_code = str(started.get("user_code") or "")
-    uri = str(started.get("verification_uri") or "https://www.twitch.tv/activate")
-    interval = int(started.get("interval") or 5)
-    expires_in = int(started.get("expires_in") or 1800)
-    if not device_code or not user_code:
-        await bot.send_message(user_id, t("drops_oauth_failed", lang))
-        return
-    await bot.send_message(
-        user_id,
-        t("drops_oauth_prompt", lang, code=user_code, url=uri),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(t("drops_oauth_button", lang), url=uri)]]
-        ),
-    )
-    if application is None:
-        return
-    pending = application.bot_data.setdefault(_PENDING_DEVICE_KEY, {})
-    pending[user_id] = {
-        "device_code": device_code,
-        "interval": interval,
-        "expires_at": time.time() + expires_in,
-        "lang": lang,
-        "device_id": device_id,
-    }
-    jq = getattr(application, "job_queue", None)
-    if jq is not None:
-        name = f"drops_device:{user_id}"
-        for old in jq.get_jobs_by_name(name) or []:
-            old.schedule_removal()
-        jq.run_repeating(
-            poll_drops_device_code_job,
-            interval=max(3, interval),
-            first=max(3, interval),
-            data={"user_id": user_id},
-            name=name,
-            job_kwargs={"misfire_grace_time": 30},
-        )
-
-
-def _access_token_for_owner(
-    db: Database, twitch: TwitchClient, owner_id: int
-) -> str | None:
-    auth = db.get_drops_auth(owner_id)
-    if not auth or not auth.refresh_token:
-        return None
-    now = int(time.time())
-    if auth.access_token and int(auth.access_expires_at or 0) > now + 60:
-        return auth.access_token
-    try:
-        data = twitch.refresh_drops_gql_token(auth.refresh_token)
-    except Exception as exc:
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        twitch_msg = ""
-        try:
-            body = getattr(getattr(exc, "response", None), "json", lambda: {})()
-            if isinstance(body, dict):
-                twitch_msg = str(body.get("message") or body.get("error") or "")[:80]
-        except Exception:
-            twitch_msg = ""
-        # Keep drops_auth on soft failures and on "missing client secret" (Android
-        # public client cannot refresh — wiping forced a useless re-prompt loop).
-        # Wipe only when Twitch says the refresh token itself is dead.
-        msg_l = twitch_msg.lower()
-        hard = status in (400, 401) and any(
-            n in msg_l
-            for n in (
-                "invalid refresh",
-                "invalid_grant",
-            )
-        )
-        logger.warning(
-            "drops GQL token refresh failed owner=%s status=%s msg=%s",
-            owner_id,
-            status,
-            twitch_msg or "-",
-        )
-        if hard:
-            try:
-                db.delete_drops_auth(owner_id)
-            except Exception:
-                logger.exception("drops_auth wipe after hard refresh fail owner=%s", owner_id)
-            return None
-        if auth.access_token and int(auth.access_expires_at or 0) > now:
-            return auth.access_token
-        return None
-    access = str(data.get("access_token") or "")
-    if not access:
-        return None
-    new_refresh = str(data.get("refresh_token") or "") or auth.refresh_token
-    expires_in = max(60, int(data.get("expires_in") or 14400))
-    db.update_drops_auth_access(
-        owner_id,
-        access_token=access,
-        access_expires_at=now + expires_in,
-        refresh_token=new_refresh if new_refresh != auth.refresh_token else None,
-    )
-    return access
-
-
 def _drops_list_label(*, game_name: str, campaign_name: str, game_id: str) -> str:
     game = (game_name or "").strip() or game_id
     drop = (campaign_name or "").strip()
@@ -195,117 +59,19 @@ def _drops_list_label(*, game_name: str, campaign_name: str, game_id: str) -> st
     return (game or drop or game_id)[:64]
 
 
-async def poll_drops_device_code_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    job = context.job
-    if job is None:
-        return
-    user_id = int((job.data or {}).get("user_id") or 0)
-    if not user_id:
-        job.schedule_removal()
-        return
-    pending_map = context.application.bot_data.get(_PENDING_DEVICE_KEY) or {}
-    pending = pending_map.get(user_id)
-    if not pending:
-        job.schedule_removal()
-        return
-    if time.time() >= float(pending.get("expires_at") or 0):
-        pending_map.pop(user_id, None)
-        job.schedule_removal()
-        lang = str(pending.get("lang") or DEFAULT_LOCALE)
-        await context.bot.send_message(user_id, t("drops_oauth_failed", lang))
-        return
-    twitch: TwitchClient = context.application.bot_data["twitch"]
-    db: Database = context.application.bot_data["db"]
-    lang = str(pending.get("lang") or _user_lang(db, user_id))
-    try:
-        token_info = await asyncio.to_thread(
-            twitch.poll_drops_device_code,
-            str(pending.get("device_code") or ""),
-            device_id=str(pending.get("device_id") or "") or None,
-        )
-    except Exception:
-        logger.exception("drops device poll failed user=%s", user_id)
-        pending_map.pop(user_id, None)
-        job.schedule_removal()
-        await context.bot.send_message(user_id, t("drops_oauth_failed", lang))
-        return
-    if token_info is None:
-        return
-    pending_map.pop(user_id, None)
-    job.schedule_removal()
-    refresh = str(token_info.get("refresh_token") or "")
-    access = str(token_info.get("access_token") or "")
-    if not refresh or not access:
-        await context.bot.send_message(user_id, t("drops_oauth_failed", lang))
-        return
-    login = ""
-    uid = ""
-    try:
-        user = await asyncio.to_thread(twitch.get_drops_token_user, access)
-        if user:
-            login = str(user.get("login") or "")
-            uid = str(user.get("id") or "")
-    except Exception:
-        logger.warning("drops device user lookup failed user=%s", user_id)
-    db.upsert_drops_auth(
-        user_id,
-        twitch_user_id=uid,
-        twitch_login=login,
-        refresh_token=refresh,
-        access_token=access,
-        access_expires_at=int(time.time())
-        + max(60, int(token_info.get("expires_in") or 14400)),
-    )
-    analytics.capture(user_id, "drops_oauth_linked", {})
-    await context.bot.send_message(user_id, t("drops_oauth_done", lang))
-    await send_drops_catalog(
-        context.bot,
-        db,
-        twitch,
-        user_id,
-        lang,
-        bot_data=context.application.bot_data,
-        access_token=access,
-        application=context.application,
-    )
-
-
 def _campaign_active(campaign: dict[str, Any]) -> bool:
     status = str(campaign.get("status") or "").upper()
     return status in _ACTIVE_CAMPAIGN_STATUSES or status == "ACTIVE"
-
-
-def _enrich_claimed(
-    campaigns: list[dict[str, Any]], claims: dict[str, dict[str, Any]]
-) -> None:
-    claimed_ids = {
-        did for did, info in claims.items() if info.get("is_claimed")
-    }
-    for c in campaigns:
-        drops = c.get("drops") or []
-        ids = [str(d.get("id") or "") for d in drops if isinstance(d, dict)]
-        ids = [i for i in ids if i]
-        if ids and all(i in claimed_ids for i in ids):
-            c["claimed"] = True
-        for d in drops:
-            if not isinstance(d, dict):
-                continue
-            did = str(d.get("id") or "")
-            if did in claims:
-                d["is_claimed"] = bool(claims[did].get("is_claimed"))
 
 
 def list_active_drop_campaigns(
     db: Database,
     twitch: TwitchClient,
     owner_id: int,
-    *,
-    access_token: str | None = None,
+    **_kwargs: Any,
 ) -> list[dict[str, Any]] | None:
-    """Return ACTIVE campaigns from twitchdrops.app, or None on API failure.
-
-    OAuth is optional: used only to mark already-claimed drops in the catalog.
-    """
+    """Return ACTIVE campaigns from twitchdrops.app, or None on API failure."""
+    del db  # signature kept for callers; catalog needs no auth row
     try:
         campaigns = twitch.fetch_twitchdrops_app_campaigns(sort="new")
     except Exception:
@@ -314,19 +80,7 @@ def list_active_drop_campaigns(
     active = [
         c for c in campaigns if _campaign_active(c) and str(c.get("id") or "")
     ]
-    out = active[:_DROPS_CATALOG_LIMIT]
-    access = (access_token or "").strip() or _access_token_for_owner(
-        db, twitch, owner_id
-    )
-    if access:
-        try:
-            claims = twitch.get_inventory_claimed_drops(
-                access, device_id=drops_device_id_for(owner_id)
-            )
-            _enrich_claimed(out, claims)
-        except Exception:
-            logger.warning("drops inventory claim enrich failed owner=%s", owner_id)
-    return out
+    return active
 
 
 def _with_extra_markup(
@@ -349,17 +103,14 @@ async def send_drops_catalog(
     bot_data: dict[str, Any] | None = None,
     user_data: dict[str, Any] | None = None,
     reply_markup_extra: Any = None,
-    access_token: str | None = None,
-    application: Any | None = None,
+    **_kwargs: Any,
 ) -> list[dict[str, Any]]:
     """Fetch and send the available-Drops list with digest checkbox."""
-    del application  # reserved for callers that still pass application=
     campaigns = await asyncio.to_thread(
         list_active_drop_campaigns,
         db,
         twitch,
         user_id,
-        access_token=access_token,
     )
     store = bot_data if bot_data is not None else None
 
@@ -378,9 +129,7 @@ async def send_drops_catalog(
             user_id,
             t("drops_catalog_fetch_failed", lang),
             reply_markup=_with_extra_markup(
-                drops_catalog_keyboard(
-                    lang, [], digest_enabled=digest_on, show_rebind=True
-                ),
+                drops_catalog_keyboard(lang, [], digest_enabled=digest_on),
                 reply_markup_extra,
             ),
         )
@@ -391,9 +140,7 @@ async def send_drops_catalog(
             user_id,
             t("drops_catalog_empty", lang),
             reply_markup=_with_extra_markup(
-                drops_catalog_keyboard(
-                    lang, [], digest_enabled=digest_on, show_rebind=True
-                ),
+                drops_catalog_keyboard(lang, [], digest_enabled=digest_on),
                 reply_markup_extra,
             ),
         )
@@ -406,7 +153,6 @@ async def send_drops_catalog(
             "game_id": str(c.get("game_id") or ""),
             "game_name": str(c.get("game_name") or ""),
             "game_slug": str(c.get("game_slug") or ""),
-            "claimed": bool(c.get("claimed")),
             "how_to_earn": str(c.get("how_to_earn") or ""),
             "starts_at": str(c.get("starts_at") or ""),
             "ends_at": str(c.get("ends_at") or ""),
@@ -418,31 +164,22 @@ async def send_drops_catalog(
         store.setdefault("drops_catalog_by_user", {})[user_id] = compact
     if user_data is not None:
         user_data["drops_catalog_candidates"] = compact
+        user_data["drops_catalog_page"] = 0
     await bot.send_message(
         user_id,
         t("drops_catalog_prompt", lang),
         reply_markup=_with_extra_markup(
-            drops_catalog_keyboard(lang, compact, digest_enabled=digest_on),
+            drops_catalog_keyboard(
+                lang,
+                compact,
+                digest_enabled=digest_on,
+                page=0,
+                page_size=_DROPS_CATALOG_PAGE_SIZE,
+            ),
             reply_markup_extra,
         ),
     )
     return compact
-
-
-async def complete_drops_oauth(
-    application: Any,
-    owner_id: int,
-    error: str | None,
-    token_info: dict[str, str] | None,
-) -> None:
-    """Legacy Helix redirect — Drops uses device-code."""
-    del token_info
-    db: Database = application.bot_data["db"]
-    lang = _user_lang(db, owner_id)
-    if error == "access_denied":
-        await application.bot.send_message(owner_id, t("oauth_denied", lang))
-        return
-    await application.bot.send_message(owner_id, t("drops_oauth_use_device", lang))
 
 
 def _format_dates(campaign: dict[str, Any]) -> str:
@@ -451,16 +188,25 @@ def _format_dates(campaign: dict[str, Any]) -> str:
     return f"{starts} — {ends}"
 
 
-def _format_digest_alert(lang: str, campaign: dict[str, Any]) -> str:
-    name = html.escape(str(campaign.get("name") or t("drops_unnamed", lang)))
-    game = html.escape(str(campaign.get("game_name") or "").strip() or "—")
-    return t(
-        "drops_digest_alert_body",
-        lang,
-        name=name,
-        game=game,
-        dates=_format_dates(campaign),
-    )
+def _format_digest_alert(lang: str, campaigns: list[dict[str, Any]]) -> str:
+    lines = [
+        t("drops_digest_alert_header", lang, n=len(campaigns)),
+        "",
+    ]
+    for campaign in campaigns:
+        name = html.escape(str(campaign.get("name") or t("drops_unnamed", lang)))
+        game = html.escape(str(campaign.get("game_name") or "").strip() or "—")
+        lines.append(
+            t(
+                "drops_digest_alert_item",
+                lang,
+                name=name,
+                game=game,
+                dates=_format_dates(campaign),
+            )
+        )
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _resolve_how_to_earn(twitch: TwitchClient, campaign: dict[str, Any]) -> str:
@@ -654,43 +400,19 @@ async def send_drops_stream_alert(
     return len(streams)
 
 
-def _digest_alert_keyboard(
-    lang: str, campaign_id: str, *, drop_name: str = ""
-) -> InlineKeyboardMarkup:
-    cid = campaign_id[:48]
-    name = (drop_name or "").strip() or t("drops_unnamed", lang)
-    get_label = t("drops_get_alerts_btn", lang, name=name)[:64]
+def _digest_alert_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    get_label,
-                    callback_data=f"drops_get:{cid}",
+                    t("drops_digest_open_btn", lang)[:64],
+                    callback_data="drops_digest:open",
                 )
             ],
             [
                 InlineKeyboardButton(
                     t("drops_digest_disable_btn", lang)[:64],
                     callback_data="drops_digest:off",
-                )
-            ],
-        ]
-    )
-
-
-def _claim_alert_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("drops_claim_pause_btn", lang),
-                    callback_data=f"drops_claim:pause:{sub_id}",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("drops_claim_delete_btn", lang),
-                    callback_data=f"drops_claim:del:{sub_id}",
                 )
             ],
         ]
@@ -799,32 +521,6 @@ async def create_drops_game_subscription(
     return sub, "drops_subscribed_ok"
 
 
-async def on_drops_rebind(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Clear stored Drops OAuth and start device-code login again."""
-    query = update.callback_query
-    if not query:
-        return
-    await query.answer()
-    user_id = query.from_user.id
-    db: Database = context.application.bot_data["db"]
-    twitch: TwitchClient = context.application.bot_data["twitch"]
-    lang = _user_lang(db, user_id)
-    try:
-        db.delete_drops_auth(user_id)
-    except Exception:
-        logger.exception("drops rebind delete failed user=%s", user_id)
-    await context.bot.send_message(user_id, t("drops_rebind_started", lang))
-    await send_drops_oauth_prompt(
-        context.bot,
-        twitch,
-        user_id,
-        lang,
-        application=context.application,
-    )
-
-
 def _ensure_drops_auth_row(db: Database, user_id: int) -> None:
     """Create a digest-capable drops_auth row without requiring OAuth."""
     if db.get_drops_auth(user_id) is not None:
@@ -855,13 +551,15 @@ async def on_drops_digest_toggle(
         )
         or []
     )
+    page = int(context.user_data.get("drops_catalog_page") or 0)
     try:
         await query.edit_message_reply_markup(
             reply_markup=drops_catalog_keyboard(
                 lang,
                 cands,
                 digest_enabled=new_state,
-                show_rebind=not cands,
+                page=page,
+                page_size=_DROPS_CATALOG_PAGE_SIZE,
             )
         )
     except Exception:
@@ -978,49 +676,14 @@ async def on_drops_get_alerts(
     await context.bot.send_message(user_id, text, reply_markup=_menu(lang, user_id))
 
 
-async def on_drops_claim_action(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    query = update.callback_query
-    if not query or not query.data:
-        return
-    await query.answer()
-    user_id = query.from_user.id
-    db: Database = context.application.bot_data["db"]
-    lang = _user_lang(db, user_id)
-    parts = query.data.split(":")
-    if len(parts) != 3 or parts[0] != "drops_claim":
-        return
-    action = parts[1]
-    try:
-        sub_id = int(parts[2])
-    except ValueError:
-        return
-    sub = db.get_subscription(sub_id, user_id)
-    if sub is None or not is_drops_sub(sub):
-        await context.bot.send_message(user_id, t("drops_subscribe_gone", lang))
-        return
-    if action == "pause":
-        if sub.enabled:
-            db.toggle_subscription(sub_id, user_id)
-        await query.edit_message_reply_markup(reply_markup=None)
-        await context.bot.send_message(user_id, t("drops_claim_paused", lang))
-        return
-    if action == "del":
-        db.delete_subscription(sub_id, user_id, to_cart=True)
-        await query.edit_message_reply_markup(reply_markup=None)
-        await context.bot.send_message(user_id, t("drops_claim_deleted", lang))
-
-
 async def check_drops(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Digest new campaigns, stream alerts for game subs, claim notifications."""
+    """Digest new campaigns and stream alerts for game subs."""
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     now_iso = datetime.now(timezone.utc).isoformat()
 
     await _check_drops_digest(context, db, twitch, now_iso)
     await _check_drops_streams(context, db, twitch, now_iso)
-    await _check_drops_claims(context, db, twitch, now_iso)
 
 
 async def _check_drops_digest(
@@ -1029,6 +692,8 @@ async def _check_drops_digest(
     twitch: TwitchClient,
     now_iso: str,
 ) -> None:
+    import time
+
     owners = db.list_drops_digest_owner_ids()
     if not owners:
         return
@@ -1043,6 +708,8 @@ async def _check_drops_digest(
         c for c in campaigns if _campaign_active(c) and str(c.get("id") or "")
     ]
     store = context.application.bot_data.setdefault("drops_catalog_by_user", {})
+    last_flush = context.application.bot_data.setdefault(_DIGEST_LAST_FLUSH_KEY, {})
+    now_ts = time.time()
     for owner_id in owners:
         if not await drops_entitled(context.bot, db, owner_id):
             continue
@@ -1060,11 +727,33 @@ async def _check_drops_digest(
                     _DIGEST_SEEN_SUB_ID,
                     first_seen_at=now_iso,
                 )
+            last_flush[owner_id] = now_ts
             continue
-        for campaign in active:
+        new_camps = [
+            c
+            for c in active
+            if not db.has_seen_drop_campaign(
+                owner_id, str(c["id"]), _DIGEST_SEEN_SUB_ID
+            )
+        ]
+        if not new_camps:
+            continue
+        if now_ts - float(last_flush.get(owner_id) or 0) < _DIGEST_MIN_INTERVAL_SEC:
+            continue
+        text = _format_digest_alert(lang, new_camps)
+        try:
+            await context.bot.send_message(
+                owner_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=_digest_alert_keyboard(lang),
+            )
+        except Exception:
+            logger.exception("drops digest send failed owner=%s", owner_id)
+            continue
+        for campaign in new_camps:
             cid = str(campaign["id"])
-            if db.has_seen_drop_campaign(owner_id, cid, _DIGEST_SEEN_SUB_ID):
-                continue
             db.mark_drop_campaign_seen(
                 owner_id, cid, _DIGEST_SEEN_SUB_ID, first_seen_at=now_iso
             )
@@ -1074,7 +763,6 @@ async def _check_drops_digest(
                 "game_id": str(campaign.get("game_id") or ""),
                 "game_name": str(campaign.get("game_name") or ""),
                 "game_slug": str(campaign.get("game_slug") or ""),
-                "claimed": bool(campaign.get("claimed")),
                 "how_to_earn": str(campaign.get("how_to_earn") or ""),
                 "starts_at": str(campaign.get("starts_at") or ""),
                 "ends_at": str(campaign.get("ends_at") or ""),
@@ -1084,24 +772,12 @@ async def _check_drops_digest(
             store[owner_id] = [compact_row] + [
                 x for x in prev if str(x.get("id")) != cid
             ]
-            text = _format_digest_alert(lang, campaign)
-            try:
-                await context.bot.send_message(
-                    owner_id,
-                    text,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                    reply_markup=_digest_alert_keyboard(
-                        lang,
-                        cid,
-                        drop_name=str(campaign.get("name") or ""),
-                    ),
-                )
-                analytics.capture(
-                    owner_id, "drops_digest_sent", {"campaign_id": cid}
-                )
-            except Exception:
-                logger.exception("drops digest send failed owner=%s", owner_id)
+        last_flush[owner_id] = now_ts
+        analytics.capture(
+            owner_id,
+            "drops_digest_sent",
+            {"campaign_count": len(new_camps)},
+        )
 
 
 async def _check_drops_streams(
@@ -1151,91 +827,3 @@ async def _check_drops_streams(
                 campaign=campaign,
                 only_new=True,
             )
-
-
-async def _check_drops_claims(
-    context: ContextTypes.DEFAULT_TYPE,
-    db: Database,
-    twitch: TwitchClient,
-    now_iso: str,
-) -> None:
-    subs = db.get_enabled_drops_subscriptions()
-    if not subs:
-        return
-    by_owner: dict[int, list[Subscription]] = {}
-    for sub in subs:
-        if is_drops_sub(sub):
-            by_owner.setdefault(sub.owner_id, []).append(sub)
-
-    for owner_id, owner_subs in by_owner.items():
-        if not await drops_entitled(context.bot, db, owner_id):
-            continue
-        access = await asyncio.to_thread(_access_token_for_owner, db, twitch, owner_id)
-        if not access:
-            continue
-        try:
-            claims = await asyncio.to_thread(
-                twitch.get_inventory_claimed_drops,
-                access,
-                device_id=drops_device_id_for(owner_id),
-            )
-        except Exception:
-            logger.exception("drops claims fetch failed owner=%s", owner_id)
-            continue
-        game_ids = {
-            (s.drops_game_id or "").strip()
-            for s in owner_subs
-            if (s.drops_game_id or "").strip()
-        }
-        lang = _user_lang(db, owner_id)
-        claimed_items = [
-            (drop_id, info)
-            for drop_id, info in claims.items()
-            if info.get("is_claimed")
-            and (
-                not str(info.get("game_id") or "")
-                or str(info.get("game_id") or "") in game_ids
-            )
-        ]
-        any_seen = any(
-            db.has_seen_drop_claim(owner_id, did) for did, _ in claimed_items
-        )
-        if not any_seen and claimed_items:
-            for drop_id, _info in claimed_items:
-                db.mark_drop_claim_seen(owner_id, drop_id, first_seen_at=now_iso)
-            continue
-        for drop_id, info in claimed_items:
-            if db.has_seen_drop_claim(owner_id, drop_id):
-                continue
-            db.mark_drop_claim_seen(owner_id, drop_id, first_seen_at=now_iso)
-            game_id = str(info.get("game_id") or "")
-            matching = [
-                s
-                for s in owner_subs
-                if not game_id or (s.drops_game_id or "") == game_id
-            ]
-            if not matching:
-                continue
-            sub = matching[0]
-            name = html.escape(
-                str(info.get("name") or t("drops_unnamed", lang))
-            )
-            text = t("drops_claim_alert_body", lang, name=name)
-            try:
-                await context.bot.send_message(
-                    sub.chat_id,
-                    text,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=_claim_alert_keyboard(lang, sub.id),
-                    message_thread_id=sub.thread_id,
-                )
-                analytics.capture(
-                    owner_id,
-                    "drops_claim_alert_sent",
-                    {"subscription_id": sub.id, "drop_id": drop_id},
-                )
-            except Exception:
-                logger.exception(
-                    "drops claim alert failed owner=%s drop=%s", owner_id, drop_id
-                )
-

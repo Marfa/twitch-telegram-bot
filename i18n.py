@@ -758,7 +758,8 @@ def drops_catalog_keyboard(
     campaigns: list[dict[str, str]],
     *,
     digest_enabled: bool = False,
-    show_rebind: bool = False,
+    page: int = 0,
+    page_size: int = 8,
 ) -> InlineKeyboardMarkup:
     mark = "✅ " if digest_enabled else "⬜️ "
     rows: list[list[InlineKeyboardButton]] = [
@@ -769,30 +770,40 @@ def drops_catalog_keyboard(
             )
         ]
     ]
-    claimed_mark = t("drops_claimed_mark", lang)
-    for i, c in enumerate(campaigns):
+    total = len(campaigns)
+    pages = max(1, (total + max(1, page_size) - 1) // max(1, page_size))
+    page = max(0, min(int(page), pages - 1))
+    start = page * page_size
+    chunk = campaigns[start : start + page_size]
+    for i, c in enumerate(chunk):
         game = (c.get("game_name") or "").strip()
         name = (c.get("name") or c.get("id") or "?").strip()
         label = f"{game} — {name}" if game else name
-        if c.get("claimed"):
-            label = f"{claimed_mark} {label}"
         rows.append(
             [
                 InlineKeyboardButton(
                     label[:64],
-                    callback_data=f"drops_camp:pick:{i}",
+                    callback_data=f"drops_camp:pick:{start + i}",
                 )
             ]
         )
-    if show_rebind:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("drops_rebind_btn", lang),
-                    callback_data="drops_rebind",
-                )
-            ]
+    if pages > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton("‹", callback_data=f"drops_camp:page:{page - 1}")
+            )
+        nav.append(
+            InlineKeyboardButton(
+                f"{page + 1}/{pages}",
+                callback_data="drops_camp:noop",
+            )
         )
+        if page < pages - 1:
+            nav.append(
+                InlineKeyboardButton("›", callback_data=f"drops_camp:page:{page + 1}")
+            )
+        rows.append(nav)
     rows.append(
         [
             InlineKeyboardButton(
