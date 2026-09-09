@@ -147,18 +147,15 @@ def _access_token_for_owner(
                 twitch_msg = str(body.get("message") or body.get("error") or "")[:80]
         except Exception:
             twitch_msg = ""
-        # Keep drops_auth on soft/transient failures; wipe on permanent OAuth death
-        # so the user is re-prompted (e.g. stale Android-client tokens after migrate).
-        hard = status in (400, 401) and (
-            not twitch_msg
-            or any(
-                n in twitch_msg.lower()
-                for n in (
-                    "invalid refresh",
-                    "invalid_grant",
-                    "missing client secret",
-                    "invalid client",
-                )
+        # Keep drops_auth on soft failures and on "missing client secret" (Android
+        # public client cannot refresh — wiping forced a useless re-prompt loop).
+        # Wipe only when Twitch says the refresh token itself is dead.
+        msg_l = twitch_msg.lower()
+        hard = status in (400, 401) and any(
+            n in msg_l
+            for n in (
+                "invalid refresh",
+                "invalid_grant",
             )
         )
         logger.warning(
@@ -344,13 +341,13 @@ def list_active_drop_campaigns(
                         "drops access cache clear failed owner=%s", owner_id
                     )
                 continue
+            # Do not wipe refresh on GQL 401: Helix confidential tokens validate but
+            # gql rejects them — wiping caused an immediate second Activate prompt.
             if unauthorized:
-                try:
-                    db.delete_drops_auth(owner_id)
-                except Exception:
-                    logger.exception(
-                        "drops_auth wipe after unauthorized owner=%s", owner_id
-                    )
+                logger.warning(
+                    "drops catalog unauthorized owner=%s (keeping drops_auth for rebind)",
+                    owner_id,
+                )
             return None
     return None
 

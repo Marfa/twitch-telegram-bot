@@ -448,6 +448,20 @@ def _check_drops_list_label_and_oauth_keep() -> None:
     assert _access_token_for_owner(db, twitch, 1) is None
     db.delete_drops_auth.assert_not_called()
 
+    # Android public client: Twitch returns missing client secret — keep auth.
+    class _RespNoSecret:
+        status_code = 400
+
+        def json(self):
+            return {"status": 400, "message": "missing client secret"}
+
+    class _ExcNoSecret(Exception):
+        response = _RespNoSecret()
+
+    twitch.refresh_drops_gql_token.side_effect = _ExcNoSecret()
+    assert _access_token_for_owner(db, twitch, 1) is None
+    db.delete_drops_auth.assert_not_called()
+
     class _RespHard:
         status_code = 400
 
@@ -604,12 +618,14 @@ def _check_game_subs_list_edit_no_share() -> None:
     assert not any((c or "").startswith("share_show:") for c in callbacks)
 
 
-def _check_drops_confidential_refresh_uses_secret() -> None:
-    """Drops refresh must send our confidential client_secret (not Android public)."""
+def _check_drops_uses_android_client_by_default() -> None:
+    """Default Drops Client-ID is Android public (GQL); Helix confidential gets 401."""
     from unittest.mock import MagicMock, patch
 
-    import twitch as twitch_mod
+    from config import TWITCH_DROPS_CLIENT_ID, _TWITCH_DROPS_ANDROID_CLIENT_ID
     from twitch import TwitchClient
+
+    assert TWITCH_DROPS_CLIENT_ID == _TWITCH_DROPS_ANDROID_CLIENT_ID
 
     client = TwitchClient()
     fake = MagicMock()
@@ -622,15 +638,10 @@ def _check_drops_confidential_refresh_uses_secret() -> None:
     }
     with patch.object(client, "_session") as session:
         session.post.return_value = fake
-        out = client.refresh_drops_gql_token("rt1")
-    assert out["access_token"] == "at"
-    kwargs = session.post.call_args.kwargs
-    data = kwargs.get("data") or {}
-    assert data.get("client_id") == twitch_mod.TWITCH_CLIENT_ID
-    assert data.get("client_secret") == twitch_mod.TWITCH_CLIENT_SECRET
-    assert data.get("grant_type") == "refresh_token"
-    assert data.get("refresh_token") == "rt1"
-    assert "kd1unb4b3q4t58fwlpcbzcbnm76a8fp" not in str(data)
+        client.refresh_drops_gql_token("rt1")
+    data = session.post.call_args.kwargs.get("data") or {}
+    assert data.get("client_id") == _TWITCH_DROPS_ANDROID_CLIENT_ID
+    assert "client_secret" not in data
 
 
 def run() -> None:
@@ -647,7 +658,7 @@ def run() -> None:
     _check_drops_digest_db()
     _check_drops_gql_soft_errors()
     _check_drops_list_label_and_oauth_keep()
-    _check_drops_confidential_refresh_uses_secret()
+    _check_drops_uses_android_client_by_default()
     _check_drops_subs_list_edit_no_share()
     _check_drops_stream_alert_cooldown()
     _check_game_subs_list_edit_no_share()
