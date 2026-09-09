@@ -3789,7 +3789,6 @@ class SqliteDatabase:
                 """
                 SELECT owner_id FROM drops_auth
                 WHERE digest_enabled = 1
-                  AND COALESCE(refresh_token, '') != ''
                 """
             ).fetchall()
         return [int(r["owner_id"]) for r in rows]

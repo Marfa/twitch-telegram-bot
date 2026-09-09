@@ -176,7 +176,7 @@ def _check_drops_device_oauth_only() -> None:
 
 
 def _check_drops_catalog_uses_access_token() -> None:
-    """Fresh device-code access token must be used without an immediate refresh."""
+    """Catalog comes from twitchdrops.app; OAuth only enriches claimed marks."""
     from handlers.drops import list_active_drop_campaigns
     from types import SimpleNamespace
     from unittest.mock import MagicMock
@@ -184,37 +184,44 @@ def _check_drops_catalog_uses_access_token() -> None:
     db = MagicMock()
     db.get_drops_auth.return_value = SimpleNamespace(refresh_token="rt")
     twitch = MagicMock()
-    twitch.get_viewer_drop_campaigns.return_value = [
+    twitch.fetch_twitchdrops_app_campaigns.return_value = [
         {
             "id": "c1",
             "name": "Camp",
             "status": "ACTIVE",
             "game_id": "1",
             "game_name": "Game",
-            "drops": [],
+            "game_slug": "game",
+            "drops": [{"id": "d1", "name": "Drop"}],
         }
     ]
-    twitch.get_inventory_claimed_drops.return_value = {}
+    twitch.get_inventory_claimed_drops.return_value = {
+        "d1": {"is_claimed": True},
+    }
     out = list_active_drop_campaigns(db, twitch, 7, access_token="fresh-at")
     assert out and out[0]["id"] == "c1"
-    twitch.get_viewer_drop_campaigns.assert_called_once()
-    assert twitch.get_viewer_drop_campaigns.call_args.args[0] == "fresh-at"
-    assert twitch.get_viewer_drop_campaigns.call_args.kwargs.get("device_id")
+    assert out[0].get("claimed") is True
+    twitch.fetch_twitchdrops_app_campaigns.assert_called_once()
+    twitch.get_inventory_claimed_drops.assert_called_once()
+    assert twitch.get_inventory_claimed_drops.call_args.args[0] == "fresh-at"
+    twitch.get_viewer_drop_campaigns.assert_not_called()
     twitch.refresh_drops_gql_token.assert_not_called()
 
 
-def _check_drops_digest_and_tags() -> None:
+def _check_drops_tags_and_catalog_keyboard() -> None:
     from i18n import drops_catalog_keyboard, t
-    from twitch import TwitchClient
+    from twitch import TwitchClient, _parse_twitchdrops_app_how_to_html
 
     assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Enabled"]})
     assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Включены"]})
+    assert TwitchClient.stream_has_drops_tag({"tags": ["Drops"]})
     assert not TwitchClient.stream_has_drops_tag({"tags": ["English"]})
     assert TwitchClient.matched_drops_tag({"tags": ["Drops Enabled"]}) == "Drops Enabled"
     assert (
         TwitchClient.matched_drops_tag({"tags": ["Drops Включены"]})
         == "Drops Включены"
     )
+    assert TwitchClient.matched_drops_tag({"tags": ["Drops"]}) == "Drops"
 
     class _Tw(TwitchClient):
         def __init__(self) -> None:
@@ -251,33 +258,60 @@ def _check_drops_digest_and_tags() -> None:
                     "is_mature": False,
                     "language": "ja",
                 },
+                {
+                    "id": "5",
+                    "user_login": "e",
+                    "tags": ["Drops"],
+                    "is_mature": False,
+                    "language": "en",
+                },
             ]
 
     ordered = _Tw().get_streams_with_drops("99", limit=5)
-    assert [s["user_login"] for s in ordered] == ["b", "c", "a", "d"]
+    assert [s["user_login"] for s in ordered] == ["b", "c", "e", "a", "d"]
     promo_first = _Tw().get_streams_with_drops(
         "99", limit=5, promo_logins={"d", "a"}
     )
-    assert [s["user_login"] for s in promo_first] == ["a", "d", "b", "c"]
+    assert [s["user_login"] for s in promo_first] == ["a", "d", "b", "c", "e"]
+
+    how_html = """
+    <h2>How to get these drops</h2>
+    <ol class="how-to-steps">
+      <li><div class="hts-text"><strong>Link account</strong> — do it.</div></li>
+      <li><div class="hts-text"><strong>Watch</strong> — streams with Drops.</div></li>
+    </ol>
+    """
+    how_text = _parse_twitchdrops_app_how_to_html(how_html)
+    assert "1. Link account" in how_text and "2. Watch" in how_text
 
     from handlers.drops import _digest_alert_keyboard, _format_stream_alert
     from types import SimpleNamespace
+    from unittest.mock import patch
 
-    body = _format_stream_alert(
-        "ru",
-        campaign={"game_name": "G", "name": "Camp", "how_to_earn": "watch", "drops": []},
-        streams=ordered,
-        db=SimpleNamespace(is_premium_channel_login=lambda _l: False),  # type: ignore[arg-type]
-    )
+    with patch("translate.translate_text", side_effect=lambda text, **_: text):
+        body = _format_stream_alert(
+            "ru",
+            campaign={
+                "game_name": "G",
+                "name": "Camp",
+                "how_to_earn": how_text,
+                "drops": [],
+            },
+            streams=ordered,
+            db=SimpleNamespace(is_premium_channel_login=lambda _l: False),  # type: ignore[arg-type]
+        )
     assert "b" in body and "Drops Включены" in body
     assert "c" in body and "Drops Enabled" in body
+    assert "e" in body and "Drops" in body
     assert body.index("b") < body.index("a")
     assert "👁" in body
     assert any(ln.strip().startswith("https://twitch.tv/") for ln in body.splitlines())
-    assert "Условие получения" not in body
-    assert "Как зарабатывать" not in t("drops_digest_alert_body", "ru")
+    assert "Как получить" in body
+    assert "Link account" in body
     assert "{streams}" in t("drops_stream_alert_body", "ru")
     assert "{drops_tag}" in t("drops_stream_alert_item", "ru")
+    assert "{text}" in t("drops_how_to_get", "ru")
+    assert "Как зарабатывать" not in t("drops_digest_alert_body", "ru")
 
     kb = drops_catalog_keyboard(
         "ru",
@@ -286,14 +320,17 @@ def _check_drops_digest_and_tags() -> None:
     )
     labels = [b.text for r in kb.inline_keyboard for b in r]
     assert any("Подписаться на новые Drops" in (x or "") for x in labels)
+    assert any((x or "").startswith("✅") for x in labels)
+    assert any("получено" in (x or "") for x in labels)
     empty_kb = drops_catalog_keyboard("ru", [], digest_enabled=False, show_rebind=True)
     empty_labels = [b.text for r in empty_kb.inline_keyboard for b in r]
     assert any("Подписаться на новые Drops" in (x or "") for x in empty_labels)
     assert any("Перепривязать Twitch" in (x or "") for x in empty_labels)
-    assert any((b.callback_data or "") == "drops_rebind" for r in empty_kb.inline_keyboard for b in r)
-    assert len(empty_kb.inline_keyboard) >= 2
-    assert any((x or "").startswith("✅") for x in labels)
-    assert any("получено" in (x or "") for x in labels)
+    assert any(
+        (b.callback_data or "") == "drops_rebind"
+        for r in empty_kb.inline_keyboard
+        for b in r
+    )
     assert "Получать оповещения по Drop" in t(
         "drops_get_alerts_btn", "ru", name="X"
     )
@@ -303,12 +340,12 @@ def _check_drops_digest_and_tags() -> None:
     assert "Отключить оповещения о новых Drops" in t(
         "drops_digest_disable_btn", "ru"
     )
-    kb = _digest_alert_keyboard("ru", "camp1", drop_name="Good Morning Madden")
-    labels = [b.text for r in kb.inline_keyboard for b in r]
-    assert any("Good Morning Madden" in (x or "") for x in labels)
+    dkb = _digest_alert_keyboard("ru", "camp1", drop_name="Good Morning Madden")
+    dlabels = [b.text for r in dkb.inline_keyboard for b in r]
+    assert any("Good Morning Madden" in (x or "") for x in dlabels)
     assert any(
         (b.callback_data or "") == "drops_digest:off"
-        for r in kb.inline_keyboard
+        for r in dkb.inline_keyboard
         for b in r
     )
 
@@ -331,33 +368,51 @@ def _check_drops_digest_db() -> None:
             7, 1, "s1", first_seen_at="2026-01-01T00:00:00Z"
         )
         assert db.has_seen_drop_stream(7, 1, "s1")
-        assert db.get_drop_stream_alert_at(7, 1) is None
-        db.mark_drop_stream_alert(7, 1, at="2026-01-01T00:00:00+00:00")
-        assert db.get_drop_stream_alert_at(7, 1) == "2026-01-01T00:00:00+00:00"
-        db.upsert_drops_auth(
-            7,
-            twitch_user_id="1",
-            twitch_login="u",
-            refresh_token="rt",
-            access_token="at",
-            access_expires_at=9999999999,
-        )
-        auth2 = db.get_drops_auth(7)
-        assert auth2 is not None and auth2.access_token == "at"
-        assert auth2.access_expires_at == 9999999999
-        assert auth2.digest_enabled
         db.delete_drops_auth(7)
         cleared = db.get_drops_auth(7)
         assert cleared is not None
         assert not (cleared.refresh_token or "").strip()
         assert cleared.digest_enabled
-        assert 7 not in db.list_drops_digest_owner_ids()
-        db.upsert_drops_auth(
-            7, twitch_user_id="1", twitch_login="u", refresh_token="rt2"
-        )
+        # Digest does not need OAuth — survives token wipe.
         assert 7 in db.list_drops_digest_owner_ids()
+        db.upsert_drops_auth(
+            7, twitch_user_id="", twitch_login="", refresh_token=""
+        )
+        db.set_drops_digest_enabled(7, True)
+        assert 7 in db.list_drops_digest_owner_ids()
+
+
+def _check_drops_auth_seen_db() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "t.db")
+        db.upsert_user(7)
+        db.upsert_drops_auth(
+            7, twitch_user_id="1", twitch_login="u", refresh_token="rt"
+        )
+        auth = db.get_drops_auth(7)
+        assert auth is not None and (auth.refresh_token or "").strip()
+        assert not db.has_seen_drop_claim(7, "d1")
+        db.mark_drop_claim_seen(7, "d1", first_seen_at="2026-01-01T00:00:00+00:00")
+        assert db.has_seen_drop_claim(7, "d1")
+        assert not db.has_seen_drop_stream(7, 1, "s1")
+        db.mark_drop_stream_seen(7, 1, "s1", first_seen_at="2026-01-01T00:00:00+00:00")
+        assert db.has_seen_drop_stream(7, 1, "s1")
+        db.update_drops_auth_access(
+            7, access_token="at", access_expires_at=10**11, refresh_token="rt2"
+        )
+        auth2 = db.get_drops_auth(7)
+        assert auth2 is not None
+        assert auth2.access_token == "at"
+        assert auth2.refresh_token == "rt2"
+        db.delete_drops_auth(7)
+        cleared = db.get_drops_auth(7)
+        assert cleared is not None
+        assert not (cleared.refresh_token or "").strip()
+        db.upsert_drops_auth(
+            7, twitch_user_id="1", twitch_login="u", refresh_token="rt3"
+        )
         rebound = db.get_drops_auth(7)
-        assert rebound is not None and rebound.digest_enabled
+        assert rebound is not None and rebound.refresh_token == "rt3"
 
 
 def _check_drops_gql_soft_errors() -> None:
@@ -654,8 +709,9 @@ def run() -> None:
     _check_drops_oauth_prompt_html()
     _check_drops_device_oauth_only()
     _check_drops_catalog_uses_access_token()
-    _check_drops_digest_and_tags()
+    _check_drops_tags_and_catalog_keyboard()
     _check_drops_digest_db()
+    _check_drops_auth_seen_db()
     _check_drops_gql_soft_errors()
     _check_drops_list_label_and_oauth_keep()
     _check_drops_uses_android_client_by_default()

@@ -4138,7 +4138,6 @@ class PostgresDatabase:
                 """
                 SELECT owner_id FROM drops_auth
                 WHERE digest_enabled = TRUE
-                  AND COALESCE(refresh_token, '') != ''
                 """
             )
             rows = cur.fetchall()

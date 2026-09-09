@@ -907,7 +907,7 @@
   "drops_game_pick": "Pick a game:",
   "drops_game_not_found": "Game “{query}” not found. Try another name.",
   "drops_game_selected": "Game: {game}. Next — message template.",
-  "drops_oauth_prompt": "To load available Drops, open the link and enter code <code>{code}</code>:\n{url}\n\nAfter activation the catalog will appear here.\n\n<b>An unofficial API is used; there is a low risk of account ban.</b>",
+  "drops_oauth_prompt": "To mark claimed Drops in the catalog and get claim alerts, open the link and enter code <code>{code}</code>:\n{url}\n\nThe active-campaign catalog loads without linking.\n\n<b>An unofficial API is used; there is a low risk of account ban.</b>",
   "drops_oauth_button": "Open Twitch activate",
   "drops_oauth_unavailable": "OAuth unavailable: set PUBLIC_BASE_URL.",
   "drops_oauth_failed": "Could not link Twitch for Drops. Try again.",
@@ -929,6 +929,7 @@
   "drops_stream_alert_header": "Streams for Drops <b>{name}</b> ({game}):",
   "drops_stream_alert_item": "{n}. <b>{display}</b>{premium_badge}{drops_tag} (@{login})\n{title}\n🎮 {game} · 👁 {viewers}\nhttps://twitch.tv/{login}",
   "drops_stream_alert_body": "Streams for Drops <b>{name}</b> ({game}):\n\n{streams}",
+  "drops_how_to_get": "<b>How to get</b>\n{text}",
   "drops_go_stream_btn": "Open stream",
   "drops_claim_alert_body": "You received Drops <b>{name}</b>.",
   "drops_claim_pause_btn": "Pause alert",
@@ -946,7 +947,7 @@
   "drops_need_premium": "Premium «Alert types beyond live start» (or a full plan) is required.",
   "drops_unnamed": "Drops campaign",
   "drops_alert_body": "🎁 <b>New Drops</b>\n{name}\nGame: {game}\n{starts} — {ends}\n\nStreams with Drops:\n{streams}",
-  "drops_alert_no_streams": "No live streams with the Drops Enabled tag right now.",
+  "drops_alert_no_streams": "No live streams for this game right now.",
   "drops_subscribe_streams_btn": "Subscribe to Drops streams",
   "drops_subscribe_gone": "Drops subscription not found.",
   "drops_subscribe_failed": "Could not fetch streams.",
@@ -954,5 +955,5 @@
   "drops_type_change_unsupported": "To switch to/from Drops, use New subscription (a game is required).",
   "game_type_change_unsupported": "To switch to/from Game alert, use New subscription.",
   "beta_feat_drops_alerts": "Twitch Drops",
-  "beta_feat_drops_alerts_desc": "Campaign catalog: new-Drops digest and per-game stream alerts (no auto-claim). Part of Premium «Alert types beyond live start»."
+  "beta_feat_drops_alerts_desc": "Catalog of active Drops (twitchdrops.app) and per-campaign stream alerts with how-to text (no auto-claim). Part of Premium «Alert types beyond live start»."
 }

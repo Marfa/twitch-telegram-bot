@@ -1646,10 +1646,10 @@ async def _go_drops_catalog_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     from handlers.drops import (
+        _access_token_for_owner,
         drops_feature_available,
         send_drops_catalog,
         send_drops_oauth_prompt,
-        user_has_twitch_oauth,
     )
 
     db: Database = context.application.bot_data["db"]
@@ -1670,7 +1670,8 @@ async def _go_drops_catalog_step(
         )
     wizard_kb = _wizard(lang, back=True)
     _set_wizard_back(context, _wz()["CHANNEL"])
-    if not user_has_twitch_oauth(db, user_id):
+    access = await asyncio.to_thread(_access_token_for_owner, db, twitch, user_id)
+    if not access:
         await send_drops_oauth_prompt(
             context.bot,
             twitch,
@@ -1678,12 +1679,6 @@ async def _go_drops_catalog_step(
             lang,
             application=context.application,
         )
-        await context.bot.send_message(
-            chat_id,
-            t("drops_catalog_need_oauth", lang),
-            reply_markup=wizard_kb,
-        )
-        return _wz()["CHANNEL"]
     await send_drops_catalog(
         context.bot,
         db,
@@ -1693,6 +1688,7 @@ async def _go_drops_catalog_step(
         bot_data=context.application.bot_data,
         user_data=context.user_data,
         reply_markup_extra=wizard_kb,
+        access_token=access,
         application=context.application,
     )
     return _wz()["CHANNEL"]

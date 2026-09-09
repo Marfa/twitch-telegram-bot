@@ -7,6 +7,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
+from html import unescape as html_unescape
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
@@ -57,9 +58,15 @@ _GQL_DROP_CAMPAIGN_DETAILS_HASH = (
 _GQL_INVENTORY_HASH = (
     "8337eb8541b314040b0edde0c09c5c7a2783ba1960aa9edfbf3bac16d0fec404"
 )
-# Helix stream tags for Drops-enabled (EN + RU), compared casefold.
-_DROPS_ENABLED_TAG_NEEDLES = ("drops enabled", "drops включены")
+# Helix stream tags for Drops-enabled (EN + RU + short "Drops"), compared casefold.
+_DROPS_ENABLED_TAG_NEEDLES = ("drops enabled", "drops включены", "drops")
 _DROPS_ENABLED_TAG = "Drops Enabled"  # back-compat label
+_TWITCHDROPS_APP_BASE = "https://twitchdrops.app"
+_TWITCHDROPS_APP_UA = "Mozilla/5.0 (compatible; MarfaTwitchTelegramBot/1.0)"
+# ponytail: in-process cache for game_id→slug / how-to; ceiling = process lifetime.
+_twitchdrops_app_slug_by_game_id: dict[str, str] = {}
+_twitchdrops_app_how_to_cache: dict[str, tuple[float, str]] = {}
+_TWITCHDROPS_HOW_TO_TTL_SEC = 6 * 3600
 _CHANNEL_ABOUT_GQL = """
 query ChannelAboutLinks($login: String!) {
   user(login: $login) {
@@ -628,6 +635,7 @@ class TwitchClient:
         """Live streams for a game: promo first, then Drops-tagged, then rest.
 
         Any language/mature. Promo only if already in Helix results (online).
+        Untagged streams are included after tagged ones.
         """
         del language  # always any language for Drops alerts
         streams = self.get_streams_by_game(game_id, language=None, first=first)
@@ -645,6 +653,24 @@ class TwitchClient:
         tagged = [s for s in rest if self.stream_has_drops_tag(s)]
         untagged = [s for s in rest if not self.stream_has_drops_tag(s)]
         return (promo_tagged + promo_untagged + tagged + untagged)[: max(0, limit)]
+
+    def fetch_twitchdrops_app_campaigns(
+        self, *, sort: str = "new"
+    ) -> list[dict[str, Any]]:
+        """Public catalog from twitchdrops.app (no OAuth)."""
+        return fetch_twitchdrops_app_campaigns(sort=sort, session=self._session)
+
+    def fetch_twitchdrops_app_how_to(self, game_slug: str) -> str:
+        """Plain-text «How to get these drops» for a game slug."""
+        return fetch_twitchdrops_app_how_to(game_slug, session=self._session)
+
+    @staticmethod
+    def twitchdrops_app_slug_for_game_id(game_id: str) -> str | None:
+        gid = str(game_id or "").strip()
+        if not gid:
+            return None
+        slug = _twitchdrops_app_slug_by_game_id.get(gid)
+        return slug or None
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Helix allows at most 100 user_id params per /streams request."""
@@ -2432,6 +2458,134 @@ def pick_random_streams(
         random.shuffle(unique)
         return unique
     return random.sample(unique, n)
+
+
+def _parse_twitchdrops_app_campaign(raw: dict[str, Any]) -> dict[str, Any] | None:
+    campaign_id = str(raw.get("id") or "").strip()
+    if not campaign_id:
+        return None
+    game_id = str(raw.get("gameId") or "").strip()
+    game_name = str(raw.get("game") or "").strip()
+    game_slug = str(raw.get("gameSlug") or "").strip()
+    if game_id and game_slug:
+        _twitchdrops_app_slug_by_game_id[game_id] = game_slug
+    drops_raw = raw.get("drops") or []
+    drops: list[dict[str, Any]] = []
+    how_parts: list[str] = []
+    for d in drops_raw if isinstance(drops_raw, list) else []:
+        if not isinstance(d, dict):
+            continue
+        minutes = d.get("requiredMinutes")
+        try:
+            required = int(minutes) if minutes is not None else None
+        except (TypeError, ValueError):
+            required = None
+        drop_name = str(d.get("name") or d.get("rewardName") or "").strip()
+        reward = str(d.get("rewardName") or "").strip()
+        names = [reward] if reward and reward != drop_name else []
+        drops.append(
+            {
+                "id": str(d.get("id") or ""),
+                "name": drop_name,
+                "required_minutes": required,
+                "benefit_names": names,
+                "is_claimed": False,
+            }
+        )
+        bit = drop_name or reward
+        if required is not None and bit:
+            how_parts.append(f"{bit}: {required} min")
+        elif bit:
+            how_parts.append(bit)
+    details = str(raw.get("description") or "").strip()
+    how_to_earn = details or "; ".join(how_parts)
+    return {
+        "id": campaign_id,
+        "name": str(raw.get("name") or "").strip(),
+        "status": str(raw.get("status") or "").strip(),
+        "game_id": game_id,
+        "game_name": game_name,
+        "game_slug": game_slug,
+        "starts_at": str(raw.get("startAt") or ""),
+        "ends_at": str(raw.get("endAt") or ""),
+        "how_to_earn": how_to_earn,
+        "claimed": False,
+        "drops": drops,
+    }
+
+
+def fetch_twitchdrops_app_campaigns(
+    *, sort: str = "new", session: requests.Session | None = None
+) -> list[dict[str, Any]]:
+    """Active campaigns from https://twitchdrops.app/?sort=new (public JSON)."""
+    http = session if session is not None else requests
+    resp = http.get(
+        f"{_TWITCHDROPS_APP_BASE}/api/drops",
+        params={"sort": sort or "new"},
+        headers={"User-Agent": _TWITCHDROPS_APP_UA, "Accept": "application/json"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    raw_list = body.get("campaigns") if isinstance(body, dict) else body
+    out: list[dict[str, Any]] = []
+    for raw in raw_list if isinstance(raw_list, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        parsed = _parse_twitchdrops_app_campaign(raw)
+        if parsed:
+            out.append(parsed)
+    return out
+
+
+def _parse_twitchdrops_app_how_to_html(page_html: str) -> str:
+    m = re.search(
+        r"How to get these drops</h2>\s*<ol class=\"how-to-steps\">(.*?)</ol>",
+        page_html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return ""
+    steps: list[str] = []
+    for li in re.finditer(r"<li\b[^>]*>(.*?)</li>", m.group(1), re.IGNORECASE | re.DOTALL):
+        chunk = li.group(1)
+        chunk = re.sub(
+            r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+            r"\2",
+            chunk,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        chunk = re.sub(r"<br\s*/?>", "\n", chunk, flags=re.IGNORECASE)
+        chunk = re.sub(r"<[^>]+>", "", chunk)
+        chunk = html_unescape(chunk)
+        chunk = re.sub(r"[ \t]+", " ", chunk)
+        chunk = re.sub(r"\n+", " ", chunk).strip()
+        if chunk:
+            steps.append(chunk)
+    return "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
+
+
+def fetch_twitchdrops_app_how_to(
+    game_slug: str, *, session: requests.Session | None = None
+) -> str:
+    """Fetch and cache «How to get these drops» text for a game slug."""
+    slug = re.sub(r"[^a-z0-9\-]", "", str(game_slug or "").strip().lower())
+    if not slug:
+        return ""
+    now = time.time()
+    cached = _twitchdrops_app_how_to_cache.get(slug)
+    if cached and cached[0] > now:
+        return cached[1]
+    http = session if session is not None else requests
+    resp = http.get(
+        f"{_TWITCHDROPS_APP_BASE}/game/{slug}",
+        headers={"User-Agent": _TWITCHDROPS_APP_UA, "Accept": "text/html"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    text = _parse_twitchdrops_app_how_to_html(resp.text)
+    _twitchdrops_app_how_to_cache[slug] = (now + _TWITCHDROPS_HOW_TO_TTL_SEC, text)
+    return text
 
 
 TWITCH_STATUS_URL = "https://status.twitch.com/api/v2/summary.json"

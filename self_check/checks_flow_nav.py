@@ -948,7 +948,7 @@ async def _scenario_wizard_custom_buttons(db) -> None:
 
 
 async def _scenario_wizard_drops_game(db) -> None:
-    """§2 Drops catalog — Cancel/Back on wizard Reply keyboard after auth."""
+    """§2.1 Drops catalog — Cancel/Back on wizard Reply keyboard."""
     from handlers.wizard import _go_drops_catalog_step
 
     application, bot = _app(db)
@@ -963,7 +963,7 @@ async def _scenario_wizard_drops_game(db) -> None:
             "handlers.wizard.prem.has_feature",
             new=AsyncMock(return_value=True),
         ),
-        patch("handlers.drops.user_has_twitch_oauth", return_value=True),
+        patch("handlers.drops._access_token_for_owner", return_value="tok"),
         patch("handlers.drops.list_active_drop_campaigns", return_value=[]),
     ):
         await _go_drops_catalog_step(update, ctx, "ru")
