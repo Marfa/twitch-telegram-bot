@@ -140,10 +140,39 @@ def _access_token_for_owner(
         data = twitch.refresh_drops_gql_token(auth.refresh_token)
     except Exception as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
-        # Keep drops_auth — wiping it forced device-code on every wizard open.
-        logger.warning(
-            "drops GQL token refresh failed owner=%s status=%s", owner_id, status
+        twitch_msg = ""
+        try:
+            body = getattr(getattr(exc, "response", None), "json", lambda: {})()
+            if isinstance(body, dict):
+                twitch_msg = str(body.get("message") or body.get("error") or "")[:80]
+        except Exception:
+            twitch_msg = ""
+        # Keep drops_auth on soft/transient failures; wipe on permanent OAuth death
+        # so the user is re-prompted (e.g. stale Android-client tokens after migrate).
+        hard = status in (400, 401) and (
+            not twitch_msg
+            or any(
+                n in twitch_msg.lower()
+                for n in (
+                    "invalid refresh",
+                    "invalid_grant",
+                    "missing client secret",
+                    "invalid client",
+                )
+            )
         )
+        logger.warning(
+            "drops GQL token refresh failed owner=%s status=%s msg=%s",
+            owner_id,
+            status,
+            twitch_msg or "-",
+        )
+        if hard:
+            try:
+                db.delete_drops_auth(owner_id)
+            except Exception:
+                logger.exception("drops_auth wipe after hard refresh fail owner=%s", owner_id)
+            return None
         if auth.access_token and int(auth.access_expires_at or 0) > now:
             return auth.access_token
         return None

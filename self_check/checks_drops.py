@@ -435,15 +435,31 @@ def _check_drops_list_label_and_oauth_keep() -> None:
     auth2 = SimpleNamespace(refresh_token="rt", access_token="", access_expires_at=0)
     db.get_drops_auth.return_value = auth2
 
-    class _Resp:
-        status_code = 401
+    class _RespSoft:
+        status_code = 503
 
-    class _Exc(Exception):
-        response = _Resp()
+        def json(self):
+            return {"message": "upstream"}
 
-    twitch.refresh_drops_gql_token.side_effect = _Exc()
+    class _ExcSoft(Exception):
+        response = _RespSoft()
+
+    twitch.refresh_drops_gql_token.side_effect = _ExcSoft()
     assert _access_token_for_owner(db, twitch, 1) is None
     db.delete_drops_auth.assert_not_called()
+
+    class _RespHard:
+        status_code = 400
+
+        def json(self):
+            return {"status": 400, "message": "Invalid refresh token"}
+
+    class _ExcHard(Exception):
+        response = _RespHard()
+
+    twitch.refresh_drops_gql_token.side_effect = _ExcHard()
+    assert _access_token_for_owner(db, twitch, 1) is None
+    db.delete_drops_auth.assert_called_once_with(1)
 
 
 def _check_drops_subs_list_edit_no_share() -> None:
@@ -588,6 +604,35 @@ def _check_game_subs_list_edit_no_share() -> None:
     assert not any((c or "").startswith("share_show:") for c in callbacks)
 
 
+def _check_drops_confidential_refresh_uses_secret() -> None:
+    """Drops refresh must send our confidential client_secret (not Android public)."""
+    from unittest.mock import MagicMock, patch
+
+    import twitch as twitch_mod
+    from twitch import TwitchClient
+
+    client = TwitchClient()
+    fake = MagicMock()
+    fake.status_code = 200
+    fake.raise_for_status = MagicMock()
+    fake.json.return_value = {
+        "access_token": "at",
+        "refresh_token": "rt2",
+        "expires_in": 100,
+    }
+    with patch.object(client, "_session") as session:
+        session.post.return_value = fake
+        out = client.refresh_drops_gql_token("rt1")
+    assert out["access_token"] == "at"
+    kwargs = session.post.call_args.kwargs
+    data = kwargs.get("data") or {}
+    assert data.get("client_id") == twitch_mod.TWITCH_CLIENT_ID
+    assert data.get("client_secret") == twitch_mod.TWITCH_CLIENT_SECRET
+    assert data.get("grant_type") == "refresh_token"
+    assert data.get("refresh_token") == "rt1"
+    assert "kd1unb4b3q4t58fwlpcbzcbnm76a8fp" not in str(data)
+
+
 def run() -> None:
     _check_drops_alert_type_keyboard_last()
     _check_drops_payload_and_migrate()
@@ -602,6 +647,7 @@ def run() -> None:
     _check_drops_digest_db()
     _check_drops_gql_soft_errors()
     _check_drops_list_label_and_oauth_keep()
+    _check_drops_confidential_refresh_uses_secret()
     _check_drops_subs_list_edit_no_share()
     _check_drops_stream_alert_cooldown()
     _check_game_subs_list_edit_no_share()
