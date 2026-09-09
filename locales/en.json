@@ -128,6 +128,8 @@
   "watch_create_alerts_none": "No filter to watch. Run «Game alert» again first.",
   "watch_create_alerts_dup": "A game alert with this filter already exists.",
   "edit_watch_locked": "This game alert watches streams by category/filter.\nEditing changes how often digests are sent.",
+  "edit_game_menu": "Game alert #{sub_id} — {username}\n\n{summary}\n\nWhat to change?",
+  "edit_game_cooldown": "Alert frequency",
   "edit_game_cooldown_prompt": "To change alert frequency (default: 60 minutes), enter minutes. 0 — no cooldown",
   "edit_game_cooldown_invalid": "Enter minutes from 1 to 1440, or 0 for no cooldown.",
   "sub_list_game_cooldown": "• Alert frequency: every {minutes} min",

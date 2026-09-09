@@ -1254,6 +1254,7 @@ class SqliteDatabase:
             "image_position",
             "twitch_username",
             "twitch_user_id",
+            "category_watch_prefs",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1283,7 +1284,13 @@ class SqliteDatabase:
                 "schedule_reminder_minutes",
             ):
                 values.append(max(0, int(value)))
-            elif key in ("ignore_keywords", "drops_game_id", "twitch_username", "twitch_user_id"):
+            elif key in (
+                "ignore_keywords",
+                "drops_game_id",
+                "twitch_username",
+                "twitch_user_id",
+                "category_watch_prefs",
+            ):
                 values.append(str(value or ""))
             elif key == "image_file_id":
                 values.append(str(value) if value else None)

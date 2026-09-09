@@ -2190,6 +2190,37 @@ def scheduled_list_keyboard(items: list[int], lang: str) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(rows)
 
 
+def edit_game_options_keyboard(
+    sub_id: int,
+    lang: str,
+    *,
+    tags_label: str,
+    viewers_label: str,
+    language_label: str,
+    exclude_mature: bool,
+) -> InlineKeyboardMarkup:
+    """Game-alert editor: filter fields + cooldown. Mature is an in-place checkbox."""
+    mature_mark = "✅ " if exclude_mature else "⬜️ "
+
+    def _btn(label: str, field: str) -> list[InlineKeyboardButton]:
+        return [
+            InlineKeyboardButton(
+                label[:64],
+                callback_data=f"edit_g:{sub_id}:{field}",
+            )
+        ]
+
+    return InlineKeyboardMarkup(
+        [
+            _btn(f"{t('watch_filt_tags', lang)}: {tags_label}", "tags"),
+            _btn(f"{t('watch_filt_viewers', lang)}: {viewers_label}", "viewers"),
+            _btn(f"{t('watch_filt_language', lang)}: {language_label}", "language"),
+            _btn(mature_mark + t("watch_filt_mature", lang), "mature"),
+            _btn(t("edit_game_cooldown", lang), "cooldown"),
+        ]
+    )
+
+
 def edit_options_keyboard(
     sub_id: int,
     lang: str,

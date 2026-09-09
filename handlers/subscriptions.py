@@ -38,9 +38,12 @@ from db import (
     is_drops_sub,
 )
 from db.models import (
+    WatchPrefs,
     _subscription_cart_snapshot,
     alert_type_from_payload,
+    dump_category_watch_prefs,
     migrate_sub_fields_for_alert_type,
+    parse_category_watch_prefs,
 )
 from handlers.delivery import _resolve_chat_display_name
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
@@ -52,6 +55,7 @@ from i18n import (
     btn,
     dest_keyboard,
     dest_label,
+    edit_game_options_keyboard,
     ignore_keywords_keyboard,
     import_mode_keyboard,
     is_menu_button,
@@ -61,8 +65,17 @@ from i18n import (
     delete_all_confirm_keyboard,
     t,
     t_bullet,
+    watch_lang_keyboard,
+    watch_tags_keyboard,
+    watch_viewers_keyboard,
 )
-from twitch import TwitchClient, is_game_cover_image, normalize_ignore_keywords, template_has_link
+from twitch import (
+    TwitchClient,
+    is_game_cover_image,
+    normalize_ignore_keywords,
+    normalize_watch_tags,
+    template_has_link,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2153,7 +2166,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not sub or not _sub_in_current_mode(sub, query.from_user.id):
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
-    if is_category_watch_sub(sub) or is_drops_sub(sub):
+    if is_drops_sub(sub):
         context.user_data.clear()
         context.user_data["edit_sub_id"] = sub_id
         context.user_data["edit_game_cooldown"] = True
@@ -2165,6 +2178,18 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             reply_markup=_wizard(lang, back=False),
         )
         return _sub_states()["EDIT_REPEAT"]
+    if is_category_watch_sub(sub):
+        context.user_data.clear()
+        prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+        if not prefs:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        await query.edit_message_text(
+            _edit_game_menu_text(lang, db, query.from_user.id, sub, prefs),
+            reply_markup=_edit_game_options_for_sub(sub, lang, prefs),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
     context.user_data.pop("edit_game_cooldown", None)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     show_adv = await prem.advanced_mode_on(
@@ -2213,6 +2238,420 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+def _edit_game_options_for_sub(
+    sub: Subscription, lang: str, prefs: WatchPrefs
+) -> InlineKeyboardMarkup:
+    from handlers.watch import _watch_viewers_label
+
+    tags_label = (
+        ", ".join(prefs.tags) if prefs.tags else t("watch_tags_label_any", lang)
+    )
+    return edit_game_options_keyboard(
+        sub.id,
+        lang,
+        tags_label=tags_label,
+        viewers_label=_watch_viewers_label(prefs, lang),
+        language_label=prefs.language or t("watch_lang_label_any", lang),
+        exclude_mature=bool(prefs.exclude_mature),
+    )
+
+
+def _edit_game_menu_text(
+    lang: str,
+    db: Database,
+    owner_id: int,
+    sub: Subscription,
+    prefs: WatchPrefs,
+) -> str:
+    from handlers.notifications import category_watch_cooldown_minutes
+    from handlers.watch import _watch_prefs_summary
+
+    sub_num = _owner_sub_number(db, owner_id, sub.id)
+    cd = category_watch_cooldown_minutes(sub)
+    cd_line = (
+        t("sub_list_game_cooldown_off", lang)
+        if cd <= 0
+        else t("sub_list_game_cooldown", lang, minutes=cd)
+    )
+    summary = f"{_watch_prefs_summary(prefs, lang)}\n{cd_line}"
+    return t(
+        "edit_game_menu",
+        lang,
+        sub_id=sub_num,
+        username=html.escape(sub.twitch_username),
+        summary=summary,
+    )
+
+
+async def _reshow_game_edit_menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    sub: Subscription,
+    lang: str,
+    prefs: WatchPrefs,
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    text = _edit_game_menu_text(lang, db, sub.owner_id, sub, prefs)
+    kb = _edit_game_options_for_sub(sub, lang, prefs)
+    query = update.callback_query
+    if query:
+        await query.edit_message_text(
+            text, reply_markup=kb, parse_mode=ParseMode.HTML
+        )
+        return
+    await update.effective_message.reply_text(
+        text, reply_markup=kb, parse_mode=ParseMode.HTML
+    )
+
+
+async def on_edit_game_mature(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    lang = _user_lang(context, query.from_user.id)
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        await query.answer()
+        return
+    sub_id = int(parts[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub or not is_category_watch_sub(sub):
+        await query.answer()
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+    if not prefs:
+        await query.answer()
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    await query.answer()
+    prefs.exclude_mature = not bool(prefs.exclude_mature)
+    db.update_subscription(
+        sub_id,
+        query.from_user.id,
+        category_watch_prefs=dump_category_watch_prefs(prefs),
+    )
+    sub = db.get_subscription(sub_id, query.from_user.id) or sub
+    await _reshow_game_edit_menu(update, context, sub=sub, lang=lang, prefs=prefs)
+
+
+async def start_edit_game_field(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from telegram.ext import ConversationHandler
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        return ConversationHandler.END
+    sub_id = int(parts[1])
+    field = parts[2]
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub or not is_category_watch_sub(sub):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+    if not prefs:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+
+    context.user_data.clear()
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["edit_game_field"] = field
+    context.user_data["wizard_edit"] = True
+    if field == "cooldown":
+        context.user_data["edit_game_cooldown"] = True
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("edit_game_cooldown_prompt", lang),
+            reply_markup=_wizard(lang, back=False),
+        )
+        return _sub_states()["EDIT_REPEAT"]
+    if field == "tags":
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("watch_tags_prompt", lang),
+            reply_markup=watch_tags_keyboard(lang, show_nav=False),
+            parse_mode=ParseMode.HTML,
+        )
+        await _pulse_wizard_keyboard(context, update, lang, back=False)
+        return _sub_states()["EDIT_REPEAT"]
+    if field == "viewers":
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("watch_viewers_prompt", lang),
+            reply_markup=watch_viewers_keyboard(lang, show_nav=False),
+            parse_mode=ParseMode.HTML,
+        )
+        await _pulse_wizard_keyboard(context, update, lang, back=False)
+        return _sub_states()["EDIT_REPEAT"]
+    if field == "language":
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("watch_lang_prompt", lang),
+            reply_markup=watch_lang_keyboard(lang, show_nav=False),
+        )
+        await _pulse_wizard_keyboard(context, update, lang, back=False)
+        return _sub_states()["EDIT_REPEAT"]
+    return ConversationHandler.END
+
+
+async def _finish_edit_game_prefs(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    prefs: WatchPrefs,
+) -> int:
+    from telegram.ext import ConversationHandler
+
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    if not db.update_subscription(
+        int(sub_id),
+        owner_id,
+        category_watch_prefs=dump_category_watch_prefs(prefs),
+    ):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        return ConversationHandler.END
+    sub = db.get_subscription(int(sub_id), owner_id)
+    context.user_data.clear()
+    if not sub:
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    await _reshow_game_edit_menu(update, context, sub=sub, lang=lang, prefs=prefs)
+    return ConversationHandler.END
+
+
+async def receive_edit_game_tags_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _sub_states()["EDIT_REPEAT"]
+    tags = normalize_watch_tags(raw, limit=10)
+    if not tags:
+        await update.effective_message.reply_text(
+            t("watch_tags_bad", lang),
+            reply_markup=watch_tags_keyboard(lang, show_nav=False),
+            parse_mode=ParseMode.HTML,
+        )
+        return _sub_states()["EDIT_REPEAT"]
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(int(sub_id), update.effective_user.id)
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs) if sub else None
+    if not prefs:
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    prefs.tags = tags
+    return await _finish_edit_game_prefs(update, context, prefs=prefs)
+
+
+async def receive_edit_game_tags_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data != "watch_tags:skip":
+        return _sub_states()["EDIT_REPEAT"]
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(int(sub_id), query.from_user.id)
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs) if sub else None
+    if not prefs:
+        await query.edit_message_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    prefs.tags = []
+    try:
+        await query.edit_message_reply_markup(None)
+    except BadRequest:
+        pass
+    return await _finish_edit_game_prefs(update, context, prefs=prefs)
+
+
+async def receive_edit_game_viewers_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from handlers.watch import _parse_watch_viewers
+
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _sub_states()["EDIT_REPEAT"]
+    parsed = _parse_watch_viewers(raw)
+    if parsed is None:
+        await update.effective_message.reply_text(
+            t("watch_viewers_bad", lang),
+            reply_markup=watch_viewers_keyboard(lang, show_nav=False),
+            parse_mode=ParseMode.HTML,
+        )
+        return _sub_states()["EDIT_REPEAT"]
+    lo, hi = parsed
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(int(sub_id), update.effective_user.id)
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs) if sub else None
+    if not prefs:
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    prefs.min_viewers = lo
+    prefs.max_viewers = hi
+    return await _finish_edit_game_prefs(update, context, prefs=prefs)
+
+
+async def receive_edit_game_viewers_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    if query.data != "watch_viewers:any":
+        return _sub_states()["EDIT_REPEAT"]
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(int(sub_id), query.from_user.id)
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs) if sub else None
+    if not prefs:
+        await query.edit_message_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    prefs.min_viewers = 0
+    prefs.max_viewers = None
+    try:
+        await query.edit_message_reply_markup(None)
+    except BadRequest:
+        pass
+    return await _finish_edit_game_prefs(update, context, prefs=prefs)
+
+
+async def receive_edit_game_language_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = query.data or ""
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(int(sub_id), query.from_user.id)
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs) if sub else None
+    if not prefs:
+        await query.edit_message_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    if data == "watch_lang:any":
+        prefs.language = None
+        context.user_data.pop("edit_game_lang_other", None)
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _finish_edit_game_prefs(update, context, prefs=prefs)
+    if data in ("watch_lang:ru", "watch_lang:en"):
+        prefs.language = data.rsplit(":", 1)[1]
+        context.user_data.pop("edit_game_lang_other", None)
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _finish_edit_game_prefs(update, context, prefs=prefs)
+    if data == "watch_lang:other":
+        context.user_data["edit_game_lang_other"] = True
+        await query.edit_message_text(t("watch_lang_other_prompt", lang))
+        return _sub_states()["EDIT_REPEAT"]
+    return _sub_states()["EDIT_REPEAT"]
+
+
+async def receive_edit_game_language_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import re
+
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _sub_states()["EDIT_REPEAT"]
+    if not context.user_data.get("edit_game_lang_other"):
+        await update.effective_message.reply_text(
+            t("watch_lang_prompt", lang),
+            reply_markup=watch_lang_keyboard(lang, show_nav=False),
+        )
+        return _sub_states()["EDIT_REPEAT"]
+    code = raw.lower()
+    if not re.compile(r"^[a-zA-Z]{2}$").match(code):
+        await update.effective_message.reply_text(t("watch_lang_bad", lang))
+        return _sub_states()["EDIT_REPEAT"]
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(int(sub_id), update.effective_user.id)
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs) if sub else None
+    if not prefs:
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        from telegram.ext import ConversationHandler
+
+        return ConversationHandler.END
+    prefs.language = code
+    context.user_data.pop("edit_game_lang_other", None)
+    return await _finish_edit_game_prefs(update, context, prefs=prefs)
+
+
 async def receive_edit_game_cooldown(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -2256,15 +2695,23 @@ async def receive_edit_game_cooldown(
         int(sub_id), owner_id, suppress_repeat_minutes=minutes
     ):
         await update.effective_message.reply_text(t("sub_not_found", lang))
-    else:
-        # Start/clear mute immediately so a VPS restart cannot leave a stale window.
-        sub = db.get_subscription(int(sub_id), owner_id) or sub
-        apply_category_watch_cooldown(db, sub)
-        await update.effective_message.reply_text(
-            t("edit_updated", lang, sub_id=sub_num),
-            reply_markup=_menu(lang, owner_id),
-        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    # Start/clear mute immediately so a VPS restart cannot leave a stale window.
+    sub = db.get_subscription(int(sub_id), owner_id) or sub
+    apply_category_watch_cooldown(db, sub)
     context.user_data.clear()
+    if is_category_watch_sub(sub):
+        prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+        if prefs:
+            await _reshow_game_edit_menu(
+                update, context, sub=sub, lang=lang, prefs=prefs
+            )
+            return ConversationHandler.END
+    await update.effective_message.reply_text(
+        t("edit_updated", lang, sub_id=sub_num),
+        reply_markup=_menu(lang, owner_id),
+    )
     return ConversationHandler.END
 
 

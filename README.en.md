@@ -171,7 +171,7 @@ After suggestions (or an empty result):
 
 | Button | Action |
 |---|---|
-| **Watch new streams by this filter?** | Game alert: 1 category → filters next; up to 5 new streams in one message; frequency in **minutes** (**✏️**, default 60, 0 = off); toggle / edit / delete |
+| **Watch new streams by this filter?** | Game alert: 1 category → filters next; up to 5 new streams in one message; **✏️** — tags / viewers / language / exclude 18+ / frequency in **minutes** (default 60, 0 = off); toggle and delete |
 | **Suggest again** | Another random set |
 | **Filters / new search** | Pick again / wizard |
 

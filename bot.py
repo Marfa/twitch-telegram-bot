@@ -600,6 +600,7 @@ from handlers.subscriptions import (
     on_edit_change_type_click,
     on_edit_copy_click,
     on_edit_copy_change_click,
+    on_edit_game_mature,
     on_edit_pick,
     on_edit_set,
     on_edit_type,
@@ -627,6 +628,13 @@ from handlers.subscriptions import (
     offer_shared_alert,
     on_sync_change_period,
     on_sync_disable,
+    receive_edit_game_language_callback,
+    receive_edit_game_language_text,
+    receive_edit_game_tags_callback,
+    receive_edit_game_tags_text,
+    receive_edit_game_viewers_callback,
+    receive_edit_game_viewers_text,
+    start_edit_game_field,
     on_sync_now,
     on_sync_unfollow_answer,
     on_toggle,
@@ -1435,6 +1443,13 @@ async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE
         from handlers.subscriptions import receive_edit_game_cooldown
 
         return await receive_edit_game_cooldown(update, context)
+    field = context.user_data.get("edit_game_field")
+    if field == "tags":
+        return await receive_edit_game_tags_text(update, context)
+    if field == "viewers":
+        return await receive_edit_game_viewers_text(update, context)
+    if field == "language":
+        return await receive_edit_game_language_text(update, context)
 
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
@@ -2383,6 +2398,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_edit_game_mature, pattern=r"^edit_g:\d+:mature$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_edit_set,
             pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview|chat_button):[01]$",
@@ -2469,6 +2488,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_edit_pick), pattern=r"^edit:\d+$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_game_field),
+                pattern=r"^edit_g:\d+:(tags|viewers|language|cooldown)$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_watch_change), pattern=r"^watch:change$"
@@ -2649,6 +2672,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             EDIT_REPEAT: [
                 _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_edit_game_tags_callback, pattern=r"^watch_tags:"
+                ),
+                CallbackQueryHandler(
+                    receive_edit_game_viewers_callback, pattern=r"^watch_viewers:"
+                ),
+                CallbackQueryHandler(
+                    receive_edit_game_language_callback, pattern=r"^watch_lang:"
+                ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_repeat),
             ],
             EDIT_SCHEDULE_REMINDER: [

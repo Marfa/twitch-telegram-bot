@@ -227,7 +227,7 @@ def group_setup_menu_filter():
 
 
 GROUP_SETUP_CALLBACK_PATTERN = (
-    r"^(import_mode:|sync:|edit_f:|edit_set:|watch:|alert_type:|premium_gate:|"
+    r"^(import_mode:|sync:|edit_f:|edit_g:|edit_set:|watch:|alert_type:|premium_gate:|"
     r"dup:|dest:|strip_name:|image_ask:|image_pos:|ignore_keywords:|"
     r"template_typo:|stored_typo_fix:|list_type:|delete_|enable_all|toggle:|sub_toggle:|"
     r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"

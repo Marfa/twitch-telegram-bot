@@ -479,6 +479,17 @@ def check_db_premium() -> None:
         assert any(s.id == watch_sid for s in db.get_enabled_category_watch_subscriptions())
         db.set_category_watch_live_state(watch_sid, ["9"], primed=True)
         assert db.get_subscription(watch_sid, 1).category_watch_primed is True
+        cw_prefs.exclude_mature = False
+        cw_prefs.tags = ["fps"]
+        assert db.update_subscription(
+            watch_sid, 1, category_watch_prefs=dump_category_watch_prefs(cw_prefs)
+        )
+        updated_cw = parse_category_watch_prefs(
+            db.get_subscription(watch_sid, 1).category_watch_prefs
+        )
+        assert updated_cw is not None
+        assert updated_cw.exclude_mature is False
+        assert updated_cw.tags == ["fps"]
         assert db.delete_subscription(watch_sid, 1)
         assert db.update_subscription(sub_id, 1, notify_on_live=False)
         sub = db.get_subscription(sub_id, 1)

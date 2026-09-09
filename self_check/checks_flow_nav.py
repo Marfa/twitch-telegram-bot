@@ -1261,6 +1261,107 @@ async def _scenario_subscriptions_delete(db) -> None:
     assert any("Удалить все" in text for text in labels)
 
 
+async def _scenario_subscriptions_edit_game_alert(db) -> None:
+    """§4/§6 game alert editor — filters menu; Exclude 18+ checkbox; tags step has Cancel."""
+    from db.models import WatchPrefs, dump_category_watch_prefs
+    from handlers.subscriptions import (
+        edit_menu,
+        on_edit_game_mature,
+        on_edit_pick,
+        start_edit_game_field,
+    )
+
+    prefs = WatchPrefs(
+        categories=[{"id": "509658", "name": "Just Chatting"}],
+        exclude_mature=True,
+    )
+    sub_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="Just Chatting",
+        twitch_user_id=f"cw:{_FREE_UID}:flow",
+        message_template="game",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        from_watch_suggest=True,
+        category_watch_prefs=dump_category_watch_prefs(prefs),
+        notify_on_live=True,
+        suppress_repeat_minutes=60,
+    )
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("edit", "ru"), cap)
+    ctx = _ctx(application)
+    await edit_menu(update, ctx)
+    update, _query = _cb_update(_FREE_UID, f"edit:{sub_id}", cap)
+    await on_edit_pick(update, ctx)
+    edit_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert f"edit_g:{sub_id}:tags" in edit_cbs
+    assert f"edit_g:{sub_id}:viewers" in edit_cbs
+    assert f"edit_g:{sub_id}:language" in edit_cbs
+    assert f"edit_g:{sub_id}:mature" in edit_cbs
+    assert f"edit_g:{sub_id}:cooldown" in edit_cbs
+    mature_labels = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+        if (b.callback_data or "") == f"edit_g:{sub_id}:mature"
+    ]
+    assert mature_labels and mature_labels[-1].startswith("✅ ")
+
+    update, _query = _cb_update(_FREE_UID, f"edit_g:{sub_id}:mature", cap)
+    await on_edit_game_mature(update, ctx)
+    sub = db.get_subscription(sub_id, _FREE_UID)
+    assert sub is not None
+    from db.models import parse_category_watch_prefs
+
+    updated = parse_category_watch_prefs(sub.category_watch_prefs)
+    assert updated is not None
+    assert updated.exclude_mature is False
+    mature_off = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+        if (b.callback_data or "") == f"edit_g:{sub_id}:mature"
+    ]
+    assert mature_off and mature_off[-1].startswith("⬜️ ")
+    assert not any(
+        (b.callback_data or "").startswith("watch_mature:")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    )
+
+    cap.markups.clear()
+    cap.pulsed_wizard = False
+
+    async def _pulse(*_a, **_k):
+        cap.note_pulse()
+
+    update, _query = _cb_update(_FREE_UID, f"edit_g:{sub_id}:tags", cap)
+    with patch("handlers.subscriptions._pulse_wizard_keyboard", new=_pulse):
+        state = await start_edit_game_field(update, ctx)
+    from bot import EDIT_REPEAT
+
+    assert state == EDIT_REPEAT
+    assert ctx.user_data.get("edit_game_field") == "tags"
+    cap.assert_turn("subscriptions_edit_game_tags")
+    assert db.delete_subscription(sub_id, _FREE_UID)
+
+
 async def _scenario_subscriptions_edit_pick(db) -> None:
     from handlers.subscriptions import edit_menu, on_edit_pick
 
@@ -1868,6 +1969,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)
+        await _scenario_subscriptions_edit_game_alert(db)
         await _scenario_subscriptions_edit_type_copy(db)
         await _scenario_subscriptions_edit_checkboxes(db)
         await _scenario_subscriptions_delete(db)

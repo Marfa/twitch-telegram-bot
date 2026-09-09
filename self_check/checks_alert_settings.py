@@ -261,6 +261,61 @@ def check_alert_setting_order() -> None:
     assert "edit_f:1:repeat" in live_labels
     assert not live_labels["edit_f:1:repeat"].startswith(("✅ ", "⬜️ "))
 
+    from i18n import edit_game_options_keyboard, watch_filters_keyboard
+
+    # Exclude 18+ is a checkbox on create filters and game editor — no follow-up step.
+    filt = watch_filters_keyboard(
+        "en",
+        want_tags=False,
+        want_viewers=False,
+        want_language=False,
+        want_mature=True,
+    )
+    filt_cbs = {
+        (btn.callback_data or ""): btn.text
+        for row in filt.inline_keyboard
+        for btn in row
+    }
+    assert filt_cbs.get("watch_filt:toggle:mature", "").startswith("✅ ")
+    assert "watch_mature:1" not in filt_cbs
+    assert "watch_mature:0" not in filt_cbs
+
+    game_edit = edit_game_options_keyboard(
+        1,
+        "en",
+        tags_label="any",
+        viewers_label="any",
+        language_label="any",
+        exclude_mature=True,
+    )
+    game_cbs = {
+        (btn.callback_data or ""): btn.text
+        for row in game_edit.inline_keyboard
+        for btn in row
+    }
+    assert set(game_cbs) == {
+        "edit_g:1:tags",
+        "edit_g:1:viewers",
+        "edit_g:1:language",
+        "edit_g:1:mature",
+        "edit_g:1:cooldown",
+    }
+    assert game_cbs["edit_g:1:mature"].startswith("✅ ")
+    off = edit_game_options_keyboard(
+        1,
+        "en",
+        tags_label="any",
+        viewers_label="any",
+        language_label="any",
+        exclude_mature=False,
+    )
+    off_cbs = {
+        (btn.callback_data or ""): btn.text
+        for row in off.inline_keyboard
+        for btn in row
+    }
+    assert off_cbs["edit_g:1:mature"].startswith("⬜️ ")
+
     from i18n import chat_button_keyboard, edit_bool_keyboard, t
 
     for loc in ("en", "ru"):

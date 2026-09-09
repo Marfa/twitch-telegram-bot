@@ -1055,6 +1055,8 @@ def check_core() -> None:
         assert tr("watch_create_alerts", loc)
         assert tr("watch_create_alerts_dup", loc)
         assert tr("edit_watch_locked", loc)
+        assert tr("edit_game_menu", loc, sub_id=1, username="x", summary="s")
+        assert tr("edit_game_cooldown", loc)
         assert tr("edit_game_cooldown_prompt", loc)
         assert tr("edit_game_cooldown_invalid", loc)
         assert tr("sub_list_game_cooldown", loc, minutes=60)
