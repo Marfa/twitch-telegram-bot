@@ -416,7 +416,8 @@ class TwitchClient:
     ) -> list[dict[str, Any]]:
         """Helix VODs/highlights/uploads for a broadcaster. Max first=100."""
         uid = (user_id or "").strip()
-        if not uid:
+        # Category-watch / drops rows use synthetic ids (cw:…, drops:…); Helix 400s on those.
+        if not uid.isdigit():
             return []
         resp = self._session.get(
             "https://api.twitch.tv/helix/videos",

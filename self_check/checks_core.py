@@ -149,6 +149,10 @@ def check_core() -> None:
     assert t.is_twitch_url("twitch.tv/marfapr")
     assert not t.is_twitch_url("marfapr")
     assert not t.is_twitch_url("@marfapr")
+    # Synthetic category-watch / drops ids must not hit Helix /videos (400).
+    assert t.get_videos_by_user("cw:150697169:1e3af59a") == []
+    assert t.get_videos_by_user("drops:1:abcd") == []
+    assert t.get_videos_by_user("") == []
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"

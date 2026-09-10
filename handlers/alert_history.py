@@ -185,7 +185,8 @@ async def _fill_alert_history_vods(
         for item in items
         if not (item.vod_id or "").strip()
         and (item.stream_id or "").strip()
-        and (item.twitch_user_id or "").strip()
+        # Helix user_id is numeric; skip cw:/drops: synthetic subscription ids.
+        and (item.twitch_user_id or "").strip().isdigit()
     ]
     if not missing:
         return

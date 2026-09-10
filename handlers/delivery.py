@@ -896,13 +896,20 @@ async def _send_notification(
     # History is for the user's DM inbox only — skip channel/group destinations.
     if sub.dest_type == "dm":
         try:
+            # Prefer stream broadcaster id — category-watch/drops subs store cw:/drops: synthetics.
+            stream_uid = str((stream or {}).get("user_id") or "").strip()
+            history_uid = (
+                stream_uid
+                if stream_uid.isdigit()
+                else (sub.twitch_user_id or "")
+            )
             db.add_alert_history(
                 sub.owner_id,
                 subscription_id=sub.id,
                 twitch_username=sub.twitch_username,
                 alert_type=alert_type,
                 message_text=text,
-                twitch_user_id=sub.twitch_user_id,
+                twitch_user_id=history_uid,
                 stream_id=(
                     (stream_id or "").strip()
                     or (str(stream.get("id") or "") if stream else "")
