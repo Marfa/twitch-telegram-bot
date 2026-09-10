@@ -18,7 +18,7 @@ from db import (
 )
 from handlers.alert_history import _vod_offset_seconds
 from handlers.delivery import _send_notification
-from i18n import DEFAULT_LOCALE, t
+from i18n import DEFAULT_LOCALE, format_duration_hm, t
 from twitch import (
     TwitchClient,
     filter_streams_for_watch,
@@ -158,7 +158,8 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
     if is_on_notify_cooldown(sub):
         return
     end_stream = _end_stream_from_job(job_data)
-    username, game, title, extra = _end_alert_template_args(sub, end_stream)
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    username, game, title, extra = _end_alert_template_args(sub, end_stream, lang)
     text = _render_sub_template(
         sub,
         username,
@@ -311,15 +312,19 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 if snap:
                     last_streams[uid] = snap
             # Snapshot before category_change_events clears offline uids from last_*.
-            offline_end_streams = {
-                uid: _offline_end_stream(
+            ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            offline_end_streams: dict[str, dict | None] = {}
+            for uid in went_offline:
+                end_stream = _offline_end_stream(
                     uid,
                     last_streams=last_streams,
                     last_games=last_games,
                     last_game_names=last_game_names,
                 )
-                for uid in went_offline
-            }
+                if end_stream and end_stream.get("started_at"):
+                    end_stream = dict(end_stream)
+                    end_stream["ended_at"] = ended_at
+                offline_end_streams[uid] = end_stream
             category_changed = category_change_events(
                 last_games,
                 user_ids,
@@ -397,7 +402,10 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         continue
                     if is_on_notify_cooldown(sub):
                         continue
-                    username, game, title, extra = _end_alert_template_args(sub, end_stream)
+                    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                    username, game, title, extra = _end_alert_template_args(
+                        sub, end_stream, lang
+                    )
                     if sub.delay_minutes > 0:
                         delay_data: dict = {
                             "sub_id": sub.id,
@@ -766,6 +774,7 @@ def _end_stream_from_job(job_data: dict) -> dict | None:
 def _end_alert_template_args(
     sub: Subscription,
     end_stream: dict | None,
+    lang: str = DEFAULT_LOCALE,
 ) -> tuple[str, str, str, dict[str, str] | None]:
     username = str((end_stream or {}).get("user_login") or sub.twitch_username)
     game = str((end_stream or {}).get("game_name") or "").strip() or "—"
@@ -774,6 +783,7 @@ def _end_alert_template_args(
     mins = stream_duration_minutes(end_stream)
     if mins != "—":
         extra["minutes"] = mins
+        extra["duration"] = format_duration_hm(int(mins), lang)
     return username, game, title, extra or None
 
 

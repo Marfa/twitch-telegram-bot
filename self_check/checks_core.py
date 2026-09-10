@@ -79,7 +79,7 @@ from db import (
     _normalize_pg_url,
     open_database,
 )
-from i18n import SUPPORTED_LOCALES, btn, t as tr
+from i18n import SUPPORTED_LOCALES, btn, format_duration_hm, t as tr
 from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
 from telegram.error import BadRequest
 from premium import FEATURE_IDS
@@ -880,10 +880,36 @@ def check_core() -> None:
             "game_name": "Just Chatting",
             "title": "My title",
             "started_at": "2026-01-01T00:00:00Z",
+            "ended_at": "2026-01-01T02:05:00Z",
         },
+        "ru",
     )
     assert user == "foo" and game == "Just Chatting" and title == "My title"
-    assert extra and "minutes" in extra
+    assert extra == {"minutes": "125", "duration": "2 часа 5 минут"}
+    assert (
+        render_template(
+            "ended after {duration} ({minutes})",
+            "foo",
+            extra=extra,
+        )
+        == "ended after 2 часа 5 минут (125)"
+    )
+    assert format_duration_hm(1, "ru") == "1 минута"
+    assert format_duration_hm(2, "ru") == "2 минуты"
+    assert format_duration_hm(5, "ru") == "5 минут"
+    assert format_duration_hm(21, "ru") == "21 минута"
+    assert format_duration_hm(22, "ru") == "22 минуты"
+    assert format_duration_hm(60, "ru") == "1 час"
+    assert format_duration_hm(61, "ru") == "1 час 1 минута"
+    assert format_duration_hm(125, "en") == "2 hours 5 minutes"
+    assert format_duration_hm(1, "en") == "1 minute"
+    assert format_duration_hm(60, "en") == "1 hour"
+    assert stream_duration_minutes(
+        {
+            "started_at": "2026-01-01T00:00:00Z",
+            "ended_at": "2026-01-01T00:45:00Z",
+        }
+    ) == "45"
     assert stream_duration_minutes(None) == "—"
     assert normalize_ignore_keywords("foo, bar , baz") == "foo, bar, baz"
     assert normalize_ignore_keywords("") == ""
@@ -1018,6 +1044,8 @@ def check_core() -> None:
         assert tr("start_welcome_demo", loc, channel="marfapr")
         assert btn("welcome_demo_edit", loc)
         assert btn("welcome_demo_delete", loc)
+        assert "{duration}" in tr("placeholders_page_body", loc)
+        assert tr("duration_n_unit", loc, n=2, unit=tr("duration_unit_hour_few", loc))
         assert tr("watch_cats_prompt", loc)
         assert tr("watch_cats_lucky", loc)
         lucky_cbs = [

@@ -1767,6 +1767,7 @@ def _template_values(
         "id": "—",
         "type": "—",
         "minutes": "—",
+        "duration": "—",
     }
     if not stream:
         return values
@@ -1817,6 +1818,7 @@ _TEMPLATE_PLACEHOLDERS = (
     "id",
     "type",
     "minutes",
+    "duration",
 )
 _STREAM_SNAPSHOT_KEYS = (
     "user_login",
@@ -1859,8 +1861,7 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "preview": "thumbnail_url",
     "mature": "is_mature",
     "lang": "language",
-    "duration": "minutes",
-    "length": "minutes",
+    "length": "duration",
     "streamid": "id",
     "stream_id": "id",
 }
@@ -1958,6 +1959,7 @@ def stream_end_snapshot(stream: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def stream_duration_minutes(stream: dict[str, Any] | None) -> str:
+    """Whole minutes from started_at to ended_at (or now). «—» if unknown."""
     started = (stream or {}).get("started_at")
     if not started:
         return "—"
@@ -1965,7 +1967,14 @@ def stream_duration_minutes(stream: dict[str, Any] | None) -> str:
         start = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
         if start.tzinfo is None:
             start = start.replace(tzinfo=timezone.utc)
-        delta = datetime.now(timezone.utc) - start
+        ended_raw = (stream or {}).get("ended_at")
+        if ended_raw:
+            end = datetime.fromisoformat(str(ended_raw).replace("Z", "+00:00"))
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+        else:
+            end = datetime.now(timezone.utc)
+        delta = end - start
         return str(max(1, int(delta.total_seconds() // 60)))
     except (TypeError, ValueError):
         return "—"

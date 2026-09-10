@@ -43,6 +43,37 @@ def t(key: str, lang: str, **kwargs: object) -> str:
     return text.format(**kwargs) if kwargs else text
 
 
+def _plural_form(n: int, lang: str) -> str:
+    """Return one|few|many for locale plural rules (en: one vs many; ru: Slavic)."""
+    locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    n_abs = abs(int(n))
+    if locale == "ru":
+        n100 = n_abs % 100
+        n10 = n_abs % 10
+        if 11 <= n100 <= 14:
+            return "many"
+        if n10 == 1:
+            return "one"
+        if 2 <= n10 <= 4:
+            return "few"
+        return "many"
+    return "one" if n_abs == 1 else "many"
+
+
+def format_duration_hm(total_minutes: int, lang: str) -> str:
+    """Human stream length: «2 часа 5 минут» / «2 hours 5 minutes»."""
+    total = max(0, int(total_minutes))
+    hours, minutes = divmod(total, 60)
+    parts: list[str] = []
+    if hours:
+        unit = t(f"duration_unit_hour_{_plural_form(hours, lang)}", lang)
+        parts.append(t("duration_n_unit", lang, n=hours, unit=unit))
+    if minutes or not parts:
+        unit = t(f"duration_unit_minute_{_plural_form(minutes, lang)}", lang)
+        parts.append(t("duration_n_unit", lang, n=minutes, unit=unit))
+    return " ".join(parts)
+
+
 def t_bullet(key: str, lang: str, **kwargs: object) -> str:
     """Subscription list line: same copy as wizard notes, with a leading bullet."""
     return f"• {t(key, lang, **kwargs)}"
