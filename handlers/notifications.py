@@ -21,6 +21,7 @@ from handlers.delivery import _send_notification
 from i18n import DEFAULT_LOCALE, format_duration_hm, t
 from twitch import (
     TwitchClient,
+    accumulate_viewer_stats,
     filter_streams_for_watch,
     render_template,
     should_ignore_stream,
@@ -310,7 +311,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             for uid, stream in live_streams.items():
                 snap = stream_end_snapshot(stream)
                 if snap:
-                    last_streams[uid] = snap
+                    last_streams[uid] = accumulate_viewer_stats(
+                        last_streams.get(uid), snap
+                    )
             # Snapshot before category_change_events clears offline uids from last_*.
             ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             offline_end_streams: dict[str, dict | None] = {}

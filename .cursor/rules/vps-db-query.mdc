@@ -1,5 +1,5 @@
 ---
-description: Prod DB queries — only via scripts/vps-psql.sh (live VPS Postgres)
+description: Prod DB queries — scripts/vps-psql.sh (live VPS, Aiven DR fallback)
 alwaysApply: true
 ---
 
@@ -7,18 +7,29 @@ alwaysApply: true
 
 ## Canonical path
 
-**Only** use [`scripts/vps-psql.sh`](scripts/vps-psql.sh) for live prod data (payments, premium status, users, subscriptions).
+**Only** use [`scripts/vps-psql.sh`](scripts/vps-psql.sh) for prod-ish data (payments, premium status, users, subscriptions).
 
 ```bash
 ./scripts/vps-psql.sh -c "SELECT …"
 ./scripts/vps-psql.sh -At -c "SELECT …"
 echo "SELECT …" | ./scripts/vps-psql.sh
+./scripts/vps-psql.sh --aiven -c "SELECT …"
 ```
 
-SSH target: `root@bot.themarfa.name` → `/opt/twitch-telegram-bot` →
-`docker compose -f compose.vps.yml exec -T db psql -U bot -d bot`.
+Default (`VPS_PSQL_SOURCE=auto`):
+
+1. **Live VPS** — SSH `root@bot.themarfa.name` → `/opt/twitch-telegram-bot` →
+   `docker compose -f compose.vps.yml exec -T db psql -U bot -d bot`
+2. If SSH fails and `AIVEN_DATABASE_URL` is available — **Aiven cold DR mirror**
+   (nightly sync ≈ 03:15 UTC; **may lag**; bot does not use Aiven)
+
+Force a source: `--vps` / `--aiven`, or `VPS_PSQL_SOURCE=vps|aiven|auto`.
+
+When using Aiven, the script prints a lag note on stderr. Prefer live VPS when SSH works.
 
 ## Auth on any PC
+
+### VPS SSH
 
 Do **not** assume `~/.ssh/artalk_vps` exists (that name is only a local convenience on one machine).
 
@@ -37,15 +48,24 @@ Host bot.themarfa.name
   IdentitiesOnly yes
 ```
 
-If SSH fails, report the script error and **stop** — do not invent fallbacks.
+### Aiven URL
+
+First match wins (URL is **never** logged):
+
+1. `AIVEN_DATABASE_URL` already in the environment
+2. Else `AIVEN_DATABASE_URL=…` from the repo `.env` (same key as on VPS)
+
+Aiven client order: local `psql` → [`scripts/aiven-psql.py`](scripts/aiven-psql.py) (psycopg/psycopg2) → Docker `postgres` image.
+
+If both VPS and Aiven fail, report the script error and **stop** — do not invent further fallbacks.
 
 ## Do not invent
 
 - Local `data/bot.db` / `DATABASE_PATH` — not prod
 - Local `.env` `DATABASE_URL` (`host=db`) — Docker-network only on VPS
-- `AIVEN_DATABASE_URL` — cold nightly DR mirror; may lag
 - Ad-hoc `ssh` / `gh workflow` / Bot API to “find” the DB
 - New one-off query scripts unless the user asks
+- Treating Aiven as live truth without saying it may lag
 
 ## Premium unlock check (example)
 

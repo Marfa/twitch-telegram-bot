@@ -1760,6 +1760,8 @@ def _template_values(
         "name": name or "—",
         "started_at": "—",
         "viewer_count": "—",
+        "viewer_avg": "—",
+        "viewer_peak": "—",
         "thumbnail_url": "—",
         "tags": "—",
         "language": "—",
@@ -1777,6 +1779,10 @@ def _template_values(
         values["started_at"] = str(started)
     if stream.get("viewer_count") is not None:
         values["viewer_count"] = str(stream.get("viewer_count"))
+    if stream.get("viewer_avg") is not None:
+        values["viewer_avg"] = str(stream.get("viewer_avg"))
+    if stream.get("viewer_peak") is not None:
+        values["viewer_peak"] = str(stream.get("viewer_peak"))
     thumb = str(stream.get("thumbnail_url") or "")
     if thumb:
         values["thumbnail_url"] = thumb.replace("{width}", "480").replace(
@@ -1811,6 +1817,8 @@ _TEMPLATE_PLACEHOLDERS = (
     "name",
     "started_at",
     "viewer_count",
+    "viewer_avg",
+    "viewer_peak",
     "thumbnail_url",
     "tags",
     "language",
@@ -1850,6 +1858,15 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "viewers": "viewer_count",
     "viewercount": "viewer_count",
     "viewer": "viewer_count",
+    "avgviewers": "viewer_avg",
+    "avg_viewers": "viewer_avg",
+    "average_viewers": "viewer_avg",
+    "viewers_avg": "viewer_avg",
+    "vieweravg": "viewer_avg",
+    "peakviewers": "viewer_peak",
+    "peak_viewers": "viewer_peak",
+    "viewers_peak": "viewer_peak",
+    "viewerpeak": "viewer_peak",
     "gamename": "game",
     "game_name": "game",
     "category": "game",
@@ -1956,6 +1973,49 @@ def stream_end_snapshot(stream: dict[str, Any]) -> dict[str, Any] | None:
         and not out.get("user_login")
     ):
         return None
+    return out
+
+
+def _same_live_stream(prev: dict[str, Any] | None, snap: dict[str, Any]) -> bool:
+    if not prev:
+        return False
+    prev_id, snap_id = prev.get("id"), snap.get("id")
+    if prev_id or snap_id:
+        return bool(prev_id) and bool(snap_id) and str(prev_id) == str(snap_id)
+    prev_start, snap_start = prev.get("started_at"), snap.get("started_at")
+    if prev_start and snap_start:
+        return str(prev_start) == str(snap_start)
+    return False
+
+
+def accumulate_viewer_stats(
+    prev: dict[str, Any] | None,
+    snap: dict[str, Any],
+) -> dict[str, Any]:
+    """Fold Helix viewer_count into running avg/peak on the end-alert snapshot.
+
+    Average is over bot poll samples for this stream id (not Twitch Analytics).
+    """
+    out = dict(snap)
+    raw = out.get("viewer_count")
+    if raw is None:
+        return out
+    try:
+        viewers = int(raw)
+    except (TypeError, ValueError):
+        return out
+    if viewers < 0:
+        return out
+    if _same_live_stream(prev, out):
+        total = int(prev.get("_viewer_sum") or 0) + viewers  # type: ignore[union-attr]
+        n = int(prev.get("_viewer_n") or 0) + 1  # type: ignore[union-attr]
+        peak = max(int(prev.get("viewer_peak") or 0), viewers)  # type: ignore[union-attr]
+    else:
+        total, n, peak = viewers, 1, viewers
+    out["_viewer_sum"] = total
+    out["_viewer_n"] = n
+    out["viewer_peak"] = peak
+    out["viewer_avg"] = int(round(total / n)) if n else viewers
     return out
 
 

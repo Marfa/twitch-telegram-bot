@@ -130,7 +130,7 @@ For **upcoming stream**, after the channel and schedule check — template and s
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
-**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title**: on create — **Extras**; on edit — edit menu (same labels as Extras). Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
+**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `viewer_avg`, `viewer_peak`, `thumbnail_url`, `tags`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title**: on create — **Extras**; on edit — edit menu (same labels as Extras). Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
 
 
 **Group or community** — send:

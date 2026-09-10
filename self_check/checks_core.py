@@ -24,6 +24,7 @@ from twitch import (
     should_ignore_stream,
     stream_duration_minutes,
     stream_end_snapshot,
+    accumulate_viewer_stats,
     template_uses_html,
     twitch_status_fingerprint,
 )
@@ -853,11 +854,38 @@ def check_core() -> None:
             "title": "Test stream",
             "viewer_count": 42,
             "started_at": "2026-01-01T12:00:00Z",
+            "id": "stream-1",
             "tags": ["en", "fps"],
         }
     )
     assert snap and snap["title"] == "Test stream" and snap["viewer_count"] == 42
     assert stream_end_snapshot({}) is None
+    acc1 = accumulate_viewer_stats(None, snap)
+    assert acc1["viewer_avg"] == 42 and acc1["viewer_peak"] == 42
+    acc2 = accumulate_viewer_stats(
+        acc1,
+        {**snap, "viewer_count": 10},
+    )
+    assert acc2["viewer_avg"] == 26 and acc2["viewer_peak"] == 42
+    acc3 = accumulate_viewer_stats(
+        acc2,
+        {**snap, "viewer_count": 20},
+    )
+    assert acc3["viewer_avg"] == 24 and acc3["viewer_peak"] == 42
+    # New stream id resets running stats.
+    reset = accumulate_viewer_stats(
+        acc3,
+        {**snap, "id": "other", "viewer_count": 5},
+    )
+    assert reset["viewer_avg"] == 5 and reset["viewer_peak"] == 5
+    assert (
+        render_template(
+            "{viewer_avg}/{viewer_peak}",
+            "x",
+            stream=acc3,
+        )
+        == "24/42"
+    )
     last_streams = {
         "1": snap,
     }
@@ -1049,6 +1077,8 @@ def check_core() -> None:
         assert btn("welcome_demo_edit", loc)
         assert btn("welcome_demo_delete", loc)
         assert "{duration}" in tr("placeholders_page_body", loc)
+        assert "{viewer_avg}" in tr("placeholders_page_body", loc)
+        assert "{viewer_peak}" in tr("placeholders_page_body", loc)
         assert tr("duration_n_unit", loc, n=2, unit=tr("duration_unit_hour_few", loc))
         assert tr("watch_cats_prompt", loc)
         assert tr("watch_cats_lucky", loc)
