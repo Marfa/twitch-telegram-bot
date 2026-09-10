@@ -2167,6 +2167,14 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await query.edit_message_text(t("sub_not_found", lang))
         return ConversationHandler.END
     if is_drops_sub(sub):
+        from handlers.drops import drops_configure_block_reason
+
+        block = await drops_configure_block_reason(
+            context.bot, db, query.from_user.id
+        )
+        if block:
+            await query.edit_message_text(t(block, lang))
+            return ConversationHandler.END
         context.user_data.clear()
         context.user_data["edit_sub_id"] = sub_id
         context.user_data["edit_game_cooldown"] = True

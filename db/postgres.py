@@ -370,6 +370,12 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS receive_beta_updates BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS bot_blocked BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
@@ -790,6 +796,14 @@ class PostgresDatabase:
                     opted_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     opted_out_at TIMESTAMPTZ,
                     PRIMARY KEY (user_id, feature_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS beta_feature_announcements (
+                    feature_id TEXT PRIMARY KEY,
+                    announced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
@@ -2559,6 +2573,49 @@ class PostgresDatabase:
                 """,
                 (user_id, enabled),
             )
+
+    def get_receive_beta_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT receive_beta_updates FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return False
+        return bool(row["receive_beta_updates"])
+
+    def set_receive_beta_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, receive_beta_updates) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    receive_beta_updates = EXCLUDED.receive_beta_updates
+                """,
+                (user_id, enabled),
+            )
+
+    def get_beta_update_recipients(self) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT DISTINCT ids.uid AS user_id
+                FROM (
+                    SELECT user_id AS uid FROM users
+                    UNION
+                    SELECT owner_id AS uid FROM subscriptions
+                ) AS ids
+                LEFT JOIN users u ON u.user_id = ids.uid
+                WHERE COALESCE(u.bot_blocked, FALSE) = FALSE
+                  AND COALESCE(u.receive_beta_updates, FALSE) = TRUE
+                """
+            )
+            rows = cur.fetchall()
+        return [int(r["user_id"]) for r in rows]
 
     def get_notifications_paused_until(self, user_id: int) -> int:
         with self._conn() as conn:
@@ -4561,6 +4618,65 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return sorted(int(r["user_id"]) for r in rows)
+
+    def user_has_beta_enrollment(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM user_beta_enrollments
+                WHERE user_id = %s AND enrolled = TRUE
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        return row is not None
+
+    def ensure_beta_announce_baseline(self, feature_ids: list[str]) -> None:
+        unique = list(dict.fromkeys(str(fid) for fid in feature_ids if str(fid)))
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT 1 FROM schema_flags WHERE name = %s",
+                ("beta_announce_baseline_v1",),
+            )
+            if cur.fetchone():
+                return
+            for fid in unique:
+                cur.execute(
+                    """
+                    INSERT INTO beta_feature_announcements (feature_id, announced_at)
+                    VALUES (%s, NOW())
+                    ON CONFLICT (feature_id) DO NOTHING
+                    """,
+                    (fid,),
+                )
+            cur.execute(
+                "INSERT INTO schema_flags(name) VALUES ('beta_announce_baseline_v1')"
+            )
+
+    def list_announced_beta_feature_ids(self) -> list[str]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("SELECT feature_id FROM beta_feature_announcements")
+            rows = cur.fetchall()
+        return [str(r["feature_id"]) for r in rows]
+
+    def mark_beta_feature_announced(self, feature_id: str) -> None:
+        fid = str(feature_id or "").strip()
+        if not fid:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO beta_feature_announcements (feature_id, announced_at)
+                VALUES (%s, NOW())
+                ON CONFLICT (feature_id) DO NOTHING
+                """,
+                (fid,),
+            )
 
     def is_premium_channel_login(self, login: str) -> bool:
         key = (login or "").strip().lower()

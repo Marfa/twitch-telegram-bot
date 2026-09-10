@@ -1291,6 +1291,9 @@ def check_handlers() -> None:
     assert "All Systems Operational" in msg_ok
     assert tr("broadcast_started", "ru")
     assert f"({TWITCH_STATUS_HOST})" in tr("sys_notifications_menu", "ru")
+    assert tr("sys_beta_label", "ru")
+    assert tr("beta_announce_header", "ru")
+    assert tr("drops_configure_locked", "ru")
 
     ph_ok = {
         "overall": "operational",
@@ -1565,8 +1568,7 @@ def check_handlers() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             share_db = open_database(Path(tmp) / "live_remind.db")
             share_db.upsert_user(42)
-            share_db.set_beta_enrollment(42, "live-remind-button", True)
-            # seed a list-share token first
+            # Delivery keeps configured remind button without beta enrollment.
             list_token = share_db.ensure_alert_share_token(
                 42, 7, {"notify_on_live": False, "schedule_reminder_minutes": 30}
             )

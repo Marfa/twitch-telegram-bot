@@ -352,8 +352,6 @@ def _live_remind_button_url(
 
     if not beta_features.is_enabled(db, sub.owner_id, "share-alerts"):
         return None
-    if not beta_features.is_enabled(db, sub.owner_id, "live-remind-button"):
-        return None
     token = db.ensure_alert_share_token(
         sub.owner_id,
         sub.id,

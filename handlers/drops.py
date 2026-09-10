@@ -41,10 +41,28 @@ def drops_feature_available(db: Database, user_id: int) -> bool:
     return True
 
 
-async def drops_entitled(bot: Any, db: Database, user_id: int) -> bool:
+async def drops_configure_block_reason(
+    bot: Any, db: Database, user_id: int
+) -> str | None:
+    """None if user may create/edit drops; else i18n key for the lock message."""
     if not drops_feature_available(db, user_id):
-        return False
-    return await prem.has_feature(bot, db, user_id, DROPS_FEATURE_ID)
+        return "drops_beta_required"
+    if not await prem.has_feature(bot, db, user_id, DROPS_FEATURE_ID):
+        return "drops_need_premium"
+    return None
+
+
+async def drops_entitled(bot: Any, db: Database, user_id: int) -> bool:
+    return await drops_configure_block_reason(bot, db, user_id) is None
+
+
+async def maybe_clear_drops_digest_after_beta_exit(
+    bot: Any, db: Database, user_id: int
+) -> None:
+    """Turn off new-Drops digest when leaving beta without alert_types Premium."""
+    if await prem.has_feature(bot, db, user_id, DROPS_FEATURE_ID):
+        return
+    db.set_drops_digest_enabled(user_id, False)
 
 
 def _user_lang(db: Database, user_id: int) -> str:
@@ -446,7 +464,8 @@ async def create_drops_game_subscription(
     if not game_id:
         return None, "drops_catalog_fetch_failed"
     if not await drops_entitled(bot, db, user_id):
-        return None, "drops_need_premium"
+        reason = await drops_configure_block_reason(bot, db, user_id)
+        return None, reason or "drops_need_premium"
     existing = [
         s
         for s in db.get_subscriptions_by_owner(user_id)
@@ -551,6 +570,11 @@ async def on_drops_digest_toggle(
     _ensure_drops_auth_row(db, user_id)
     auth = db.get_drops_auth(user_id)
     new_state = not bool(auth and auth.digest_enabled)
+    if new_state:
+        block = await drops_configure_block_reason(context.bot, db, user_id)
+        if block:
+            await context.bot.send_message(user_id, t(block, lang))
+            return
     db.set_drops_digest_enabled(user_id, new_state)
     cands = (
         context.user_data.get("drops_catalog_candidates")
@@ -817,8 +841,6 @@ async def _check_drops_streams(
         logger.exception("drops stream campaigns fetch failed")
 
     for owner_id, owner_subs in by_owner.items():
-        if not await drops_entitled(context.bot, db, owner_id):
-            continue
         lang = _user_lang(db, owner_id)
         for sub in owner_subs:
             game_id = (sub.drops_game_id or "").strip()

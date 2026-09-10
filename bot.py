@@ -349,6 +349,7 @@ from handlers.settings import (
     notify_whisper_received,
     on_beta_toggle,
     on_sys_availability_toggle,
+    on_sys_beta_toggle,
     on_sys_other_toggle,
     on_sys_sync_toggle,
     on_sys_updates_toggle,
@@ -366,6 +367,7 @@ from handlers.settings import (
     start_ignored_words,
     start_language_change,
     sync_stream_chat_menu_button,
+    announce_new_beta_features,
 )
 
 from handlers.watch import (
@@ -2220,6 +2222,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_sys_sync_toggle, pattern=r"^sys_sync:toggle$"),
         group=0,
     )
+    app.add_handler(
+        CallbackQueryHandler(on_sys_beta_toggle, pattern=r"^sys_beta:toggle$"),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(
         CallbackQueryHandler(
@@ -3028,7 +3034,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|list_del:\d+$|list_del_ok:\d+$|list_del_no:\d+$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
-                r"sys_updates:|sys_availability:|sys_other:|sys_sync:|"
+                r"sys_updates:|sys_availability:|sys_other:|sys_sync:|sys_beta:|"
                 r"whisper_alerts:|"
                 r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
             ),
@@ -3136,6 +3142,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
     app.job_queue.run_repeating(check_drops, interval=max(900, CHECK_INTERVAL * 6), first=120)
+    app.job_queue.run_repeating(
+        announce_new_beta_features, interval=3600, first=90
+    )
     app.job_queue.run_repeating(
         check_schedule_reminders, interval=SCHEDULE_CHECK_INTERVAL, first=25
     )

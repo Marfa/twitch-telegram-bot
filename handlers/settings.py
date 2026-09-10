@@ -152,6 +152,7 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
             availability_enabled=db.get_receive_availability_updates(user_id),
             other_enabled=db.get_receive_other_updates(user_id),
             sync_enabled=db.get_receive_sync_updates(user_id),
+            beta_enabled=db.get_receive_beta_updates(user_id),
         ),
     )
 
@@ -216,12 +217,19 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     title = t(feat.title_key, lang)
     enrolled = beta_features.is_enrolled(db, user_id, feature_id)
     new_state = not enrolled
+    had_enrollment = db.user_has_beta_enrollment(user_id)
     db.set_beta_enrollment(user_id, feature_id, new_state)
+    if new_state and not had_enrollment:
+        db.set_receive_beta_updates(user_id, True)
     analytics.capture(
         user_id,
         "beta_feature_opt_in" if new_state else "beta_feature_opt_out",
         {"feature_id": feature_id, "premium_feature_id": feat.premium_feature_id or ""},
     )
+    if feature_id == "drops-alerts" and not new_state:
+        from handlers.drops import maybe_clear_drops_digest_after_beta_exit
+
+        await maybe_clear_drops_digest_after_beta_exit(context.bot, db, user_id)
     if feature_id == "stream-chat":
         await sync_stream_chat_menu_button(context.bot, db, user_id)
         chat_id = reply_chat_id(update)
@@ -794,6 +802,7 @@ async def _refresh_sys_notifications_menu(
             availability_enabled=db.get_receive_availability_updates(user_id),
             other_enabled=db.get_receive_other_updates(user_id),
             sync_enabled=db.get_receive_sync_updates(user_id),
+            beta_enabled=db.get_receive_beta_updates(user_id),
         ),
     )
 
@@ -838,4 +847,61 @@ async def on_sys_sync_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db.upsert_user(user_id)
     db.set_receive_sync_updates(user_id, not db.get_receive_sync_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+
+async def on_sys_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    db.set_receive_beta_updates(user_id, not db.get_receive_beta_updates(user_id))
+    await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+
+async def announce_new_beta_features(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """DM opted-in users when a beta feature first appears in the manifest."""
+    import html as html_lib
+
+    from bot_helpers import _BROADCAST_SEND_PAUSE, _send_dm_html
+    from i18n import DEFAULT_LOCALE
+
+    db: Database = context.application.bot_data["db"]
+    pending = beta_features.pending_beta_announcements(db)
+    if not pending:
+        return
+    recipients = [
+        uid for uid in db.get_beta_update_recipients() if not db.is_bot_blocked(uid)
+    ]
+    locales = db.get_user_locales(recipients) if recipients else {}
+    for feat in pending:
+        for uid in recipients:
+            lang = locales.get(uid) or DEFAULT_LOCALE
+            title = t(feat.title_key, lang)
+            desc = t(feat.description_key, lang)
+            body = (
+                f"{html_lib.escape(t('beta_announce_header', lang))}\n\n"
+                f"<b>{html_lib.escape(title)}</b>\n"
+                f"{html_lib.escape(desc)}"
+            )
+            footer = t(
+                "broadcast_footer",
+                lang,
+                type=t("sys_beta_label", lang),
+            )
+            await _send_dm_html(
+                context.bot,
+                db,
+                uid,
+                f"{body}\n\n{footer}",
+                disable_web_page_preview=True,
+            )
+            await asyncio.sleep(_BROADCAST_SEND_PAUSE)
+        db.mark_beta_feature_announced(feat.id)
+        logger.info(
+            "Announced beta feature %s to %s recipients",
+            feat.id,
+            len(recipients),
+        )
 

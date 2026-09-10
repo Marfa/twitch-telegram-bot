@@ -367,6 +367,7 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
                 "availability_enabled": False,
                 "other_enabled": True,
                 "sync_enabled": False,
+                "beta_enabled": True,
             },
         ),
         (

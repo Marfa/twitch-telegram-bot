@@ -346,6 +346,38 @@ def _check_drops_tags_and_catalog_keyboard() -> None:
     )
 
 
+def _check_drops_digest_clears_without_premium() -> None:
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import premium as prem
+    from handlers.drops import (
+        DROPS_BETA_ID,
+        DROPS_FEATURE_ID,
+        maybe_clear_drops_digest_after_beta_exit,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "t.db")
+        db.upsert_user(7)
+        db.upsert_drops_auth(
+            7, twitch_user_id="1", twitch_login="u", refresh_token="rt"
+        )
+        db.set_beta_enrollment(7, DROPS_BETA_ID, True)
+        db.set_drops_digest_enabled(7, True)
+        assert 7 in db.list_drops_digest_owner_ids()
+        db.set_beta_enrollment(7, DROPS_BETA_ID, False)
+        assert not prem.has_feature_sync(db, 7, DROPS_FEATURE_ID)
+        bot = MagicMock()
+        with patch.object(prem, "has_feature", new=AsyncMock(return_value=False)):
+            asyncio.run(maybe_clear_drops_digest_after_beta_exit(bot, db, 7))
+        assert 7 not in db.list_drops_digest_owner_ids()
+        db.set_drops_digest_enabled(7, True)
+        with patch.object(prem, "has_feature", new=AsyncMock(return_value=True)):
+            asyncio.run(maybe_clear_drops_digest_after_beta_exit(bot, db, 7))
+        assert 7 in db.list_drops_digest_owner_ids()
+
+
 def _check_drops_digest_db() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         db = open_database(Path(tmp) / "t.db")
@@ -584,6 +616,7 @@ def run() -> None:
     _check_drops_catalog_from_app_only()
     _check_drops_tags_and_catalog_keyboard()
     _check_drops_digest_db()
+    _check_drops_digest_clears_without_premium()
     _check_drops_auth_seen_db()
     _check_drops_list_label()
     _check_drops_subs_list_edit_no_share()

@@ -1557,11 +1557,13 @@ def sys_notifications_keyboard(
     availability_enabled: bool,
     other_enabled: bool,
     sync_enabled: bool,
+    beta_enabled: bool = False,
 ) -> InlineKeyboardMarkup:
     updates_mark = "✅ " if updates_enabled else "❌ "
     availability_mark = "✅ " if availability_enabled else "❌ "
     other_mark = "✅ " if other_enabled else "❌ "
     sync_mark = "✅ " if sync_enabled else "❌ "
+    beta_mark = "✅ " if beta_enabled else "❌ "
     return InlineKeyboardMarkup(
         [
             [
@@ -1586,6 +1588,12 @@ def sys_notifications_keyboard(
                 InlineKeyboardButton(
                     sync_mark + t("sys_sync_label", lang),
                     callback_data="sys_sync:toggle",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    beta_mark + t("sys_beta_label", lang),
+                    callback_data="sys_beta:toggle",
                 )
             ],
         ]

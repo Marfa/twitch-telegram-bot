@@ -689,6 +689,12 @@ def check_db_premium() -> None:
         db.set_receive_sync_updates(1, False)
         assert db.get_receive_sync_updates(1) is False
         db.set_receive_sync_updates(1, True)
+        assert db.get_receive_beta_updates(1) is False
+        db.set_receive_beta_updates(1, True)
+        assert db.get_receive_beta_updates(1) is True
+        assert 1 in db.get_beta_update_recipients()
+        db.set_receive_beta_updates(1, False)
+        assert 1 not in db.get_beta_update_recipients()
         db.set_receive_bot_updates(1, True)
         db.set_receive_availability_updates(1, True)
         db.set_receive_other_updates(1, True)

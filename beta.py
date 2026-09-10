@@ -184,6 +184,14 @@ def user_ids_with_active_enrollment(db: Database) -> list[int]:
     ]
 
 
+def pending_beta_announcements(db: Database) -> list[BetaFeature]:
+    """Active beta features not yet announced to users (after one-time baseline)."""
+    active = list_features(stages=_ACTIVE_STAGES)
+    db.ensure_beta_announce_baseline([feat.id for feat in active])
+    announced = set(db.list_announced_beta_feature_ids())
+    return [feat for feat in active if feat.id not in announced]
+
+
 def grants_premium_feature(db: Database, user_id: int, premium_feature_id: str) -> bool:
     """Beta bypass for prem.has_feature_sync (alpha/beta stages only)."""
     from demo_mode import is_active
@@ -305,6 +313,50 @@ def _self_check() -> None:
         # GA: feature is on for everyone; premium bypass is gone.
         assert is_enabled(db, 1, "demo_feat")
         assert not grants_premium_feature(db, 1, "alert_history")
+        load_manifest(_MANIFEST_PATH)
+
+    # Announcement baseline: existing betas are seeded; a later id is pending.
+    with tempfile.TemporaryDirectory() as tmp2:
+        path2 = Path(tmp2) / "manifest2.json"
+        path2.write_text(
+            json.dumps(
+                {
+                    "features": [
+                        {
+                            "id": "old_beta",
+                            "branch": "feat/old",
+                            "title_key": "t",
+                            "description_key": "d",
+                            "issue_label": "beta/old",
+                            "stage": "beta",
+                            "created_at": "2026-01-01",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        load_manifest(path2)
+        db2 = SqliteDatabase(Path(tmp2) / "a.db")
+        assert pending_beta_announcements(db2) == []
+        raw2 = json.loads(path2.read_text(encoding="utf-8"))
+        raw2["features"].append(
+            {
+                "id": "new_beta",
+                "branch": "feat/new",
+                "title_key": "t2",
+                "description_key": "d2",
+                "issue_label": "beta/new",
+                "stage": "beta",
+                "created_at": "2026-02-01",
+            }
+        )
+        path2.write_text(json.dumps(raw2), encoding="utf-8")
+        load_manifest(path2)
+        pending = pending_beta_announcements(db2)
+        assert [f.id for f in pending] == ["new_beta"]
+        db2.mark_beta_feature_announced("new_beta")
+        assert pending_beta_announcements(db2) == []
         load_manifest(_MANIFEST_PATH)
 
 
