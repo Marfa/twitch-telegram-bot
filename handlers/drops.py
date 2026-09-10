@@ -64,6 +64,13 @@ def _campaign_active(campaign: dict[str, Any]) -> bool:
     return status in _ACTIVE_CAMPAIGN_STATUSES or status == "ACTIVE"
 
 
+def _catalog_sort_key(campaign: dict[str, Any]) -> tuple[str, str]:
+    game = str(campaign.get("game_name") or "").strip()
+    name = str(campaign.get("name") or campaign.get("id") or "").strip()
+    label = f"{game} — {name}" if game else name
+    return (label.casefold(), str(campaign.get("id") or ""))
+
+
 def list_active_drop_campaigns(
     db: Database,
     twitch: TwitchClient,
@@ -80,6 +87,7 @@ def list_active_drop_campaigns(
     active = [
         c for c in campaigns if _campaign_active(c) and str(c.get("id") or "")
     ]
+    active.sort(key=_catalog_sort_key)
     return active
 
 

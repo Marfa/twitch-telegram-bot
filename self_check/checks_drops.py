@@ -164,17 +164,26 @@ def _check_drops_catalog_from_app_only() -> None:
     twitch = MagicMock()
     twitch.fetch_twitchdrops_app_campaigns.return_value = [
         {
+            "id": "c2",
+            "name": "Beta Camp",
+            "status": "ACTIVE",
+            "game_id": "2",
+            "game_name": "Zebra",
+            "game_slug": "zebra",
+            "drops": [{"id": "d2", "name": "Drop"}],
+        },
+        {
             "id": "c1",
-            "name": "Camp",
+            "name": "Alpha Camp",
             "status": "ACTIVE",
             "game_id": "1",
-            "game_name": "Game",
-            "game_slug": "game",
+            "game_name": "Apex",
+            "game_slug": "apex",
             "drops": [{"id": "d1", "name": "Drop"}],
-        }
+        },
     ]
     out = list_active_drop_campaigns(db, twitch, 7)
-    assert out and out[0]["id"] == "c1"
+    assert out and [c["id"] for c in out] == ["c1", "c2"]
     assert "claimed" not in out[0]
     twitch.fetch_twitchdrops_app_campaigns.assert_called_once()
     assert not hasattr(TwitchClient, "get_viewer_drop_campaigns")
