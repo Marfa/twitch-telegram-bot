@@ -723,6 +723,24 @@ async def _go_alert_type_prompt(
     _set_wizard_back(context, _wz()["ALERT_TYPE"])
     return _wz()["ALERT_TYPE"]
 
+
+async def alert_type_open_other(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Leave new-sub wizard and open the same Other menu as the main menu."""
+    from handlers.settings import open_other_menu
+
+    context.user_data.clear()
+    query = update.callback_query
+    if query:
+        await query.answer()
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
+    await open_other_menu(update, context)
+    return ConversationHandler.END
+
 async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     display = (
         context.user_data.get("twitch_display_name")

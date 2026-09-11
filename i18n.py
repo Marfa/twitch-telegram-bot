@@ -1455,6 +1455,14 @@ def alert_type_keyboard(
             )
         ]
     )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("other", lang),
+                callback_data="alert_type:other",
+            )
+        ]
+    )
     return InlineKeyboardMarkup(rows)
 
 

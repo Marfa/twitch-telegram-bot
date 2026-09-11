@@ -508,6 +508,7 @@ from handlers.wizard import (
     receive_strip_name_toggle,
     receive_template,
     receive_template_typo_confirm,
+    alert_type_open_other,
     offer_twitch_link_wizard,
     on_twitch_link_decline,
     on_twitch_link_start,
@@ -2511,6 +2512,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ALERT_TYPE: [
                 _wiz_cancel,
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
+                CallbackQueryHandler(
+                    alert_type_open_other, pattern=r"^alert_type:other$"
+                ),
                 CallbackQueryHandler(
                     receive_alert_type,
                     pattern=r"^alert_type:(live|category|upcoming|end|drops|game)$",

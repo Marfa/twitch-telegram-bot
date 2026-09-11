@@ -988,6 +988,33 @@ async def _scenario_wizard_game_alert(db) -> None:
     cap.assert_turn("wizard_game_alert_categories")
 
 
+async def _scenario_wizard_alert_type_other(db) -> None:
+    """§2.1 Other — alert_type:other ends wizard and opens §1.4 Other menu."""
+    from handlers.wizard import alert_type_open_other
+    from telegram.ext import ConversationHandler
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "alert_type:other", cap)
+    update.effective_message = query.message
+    ctx = _ctx(application, {"alert_type": "live"})
+    state = await alert_type_open_other(update, ctx)
+    assert state == ConversationHandler.END
+    assert ctx.user_data == {}
+    labels = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "keyboard", None)
+        for row in m.keyboard
+        for b in row
+    ]
+    assert btn("back", "ru") in labels
+    assert btn("watch", "ru") in labels
+    assert btn("create_schedule", "ru") in labels
+    cap.assert_turn("wizard_alert_type_other")
+
+
 async def _scenario_wizard_extras_checkboxes(db) -> None:
     """§2 Extras checkbox values apply without a second Yes/No (delete/delay/repeat)."""
     from handlers.wizard import (
@@ -1964,6 +1991,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_custom_buttons(db)
         await _scenario_wizard_drops_game(db)
         await _scenario_wizard_game_alert(db)
+        await _scenario_wizard_alert_type_other(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_image_ask(db)
         await _scenario_import(db)
