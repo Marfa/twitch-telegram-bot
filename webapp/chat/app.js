@@ -48,6 +48,8 @@
       otherStreamers: "Other streamers",
       homeAdd: "Add to Home Screen",
       homeAdded: "On Home Screen",
+      statusLive: "Live",
+      statusOffline: "Offline",
     },
     ru: {
       live: "Сейчас в эфире",
@@ -86,6 +88,8 @@
       otherStreamers: "Другие стримеры",
       homeAdd: "На экран «Домой»",
       homeAdded: "Уже на «Домой»",
+      statusLive: "В эфире",
+      statusOffline: "Оффлайн",
     },
   };
 
@@ -123,6 +127,7 @@
     if (homeBtn && !homeBtn.classList.contains("hidden")) {
       homeBtn.textContent = homeBtn.dataset.state === "added" ? t.homeAdded : t.homeAdd;
     }
+    if (current) updateChatStatus(current);
   }
 
   function secureStorage() {
@@ -510,6 +515,47 @@
     }
   }
 
+  function streamIsOnline(stream) {
+    if (!stream) return false;
+    // Online list cards omit `online`; resolve always sets it.
+    if (stream.online == null) return true;
+    return Boolean(stream.online);
+  }
+
+  function updateChatStatus(stream) {
+    const box = el("chat-status");
+    if (!box) return;
+    if (!stream) {
+      box.classList.add("hidden");
+      box.textContent = "";
+      box.removeAttribute("title");
+      box.removeAttribute("aria-label");
+      return;
+    }
+    const online = streamIsOnline(stream);
+    const viewers = Math.max(0, parseInt(stream.viewer_count, 10) || 0);
+    box.classList.remove("hidden");
+    box.classList.toggle("is-live", online);
+    box.classList.toggle("is-offline", !online);
+    box.replaceChildren();
+    const dot = document.createElement("span");
+    dot.className = "chat-status-dot";
+    dot.setAttribute("aria-hidden", "true");
+    box.appendChild(dot);
+    const label = document.createElement("span");
+    label.className = "chat-status-label";
+    if (online) {
+      label.textContent = String(viewers);
+      box.title = t.statusLive + " · " + viewers;
+      box.setAttribute("aria-label", t.statusLive + ", " + viewers);
+    } else {
+      label.textContent = t.statusOffline;
+      box.title = t.statusOffline;
+      box.setAttribute("aria-label", t.statusOffline);
+    }
+    box.appendChild(label);
+  }
+
   function openChat(stream) {
     current = stream;
     useFallback = false;
@@ -519,6 +565,7 @@
     el("view-chat").classList.remove("hidden");
     el("chat-title").textContent = stream.display_name || stream.login;
     el("chat-sub").textContent = stream.title || "";
+    updateChatStatus(stream);
     el("btn-fallback").classList.remove("hidden");
     el("btn-info").classList.remove("hidden");
     setLang(lang);
@@ -531,6 +578,7 @@
     current = null;
     infoCache = null;
     hideInfoPanel();
+    updateChatStatus(null);
     el("embed-frame").src = "about:blank";
     el("view-chat").classList.add("hidden");
     el("view-home").classList.remove("hidden");

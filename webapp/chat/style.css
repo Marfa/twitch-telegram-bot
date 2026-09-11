@@ -118,7 +118,52 @@ html, body {
   flex-shrink: 0;
 }
 .chat-meta { flex: 1; min-width: 0; }
-.chat-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.chat-title-row strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1;
+}
+.chat-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #adadb8;
+  flex-shrink: 0;
+}
+.chat-status.is-live {
+  color: var(--fg);
+}
+.chat-status.is-live .chat-status-dot {
+  background: #eb0400;
+  box-shadow: 0 0 0 2px rgba(235, 4, 0, 0.28);
+}
+.chat-status.is-offline .chat-status-dot {
+  background: #adadb8;
+}
+.chat-meta > .muted {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-actions {
   display: flex;
   align-items: center;

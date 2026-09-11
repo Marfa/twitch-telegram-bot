@@ -37,7 +37,10 @@
       <div class="chat-top">
         <button type="button" id="btn-back" class="btn ghost">←</button>
         <div class="chat-meta">
-          <strong id="chat-title">—</strong>
+          <div class="chat-title-row">
+            <strong id="chat-title">—</strong>
+            <span id="chat-status" class="chat-status hidden" aria-live="polite"></span>
+          </div>
           <span id="chat-sub" class="muted"></span>
         </div>
         <div class="chat-actions">
@@ -66,6 +69,6 @@
 
     <p id="fatal" class="fatal hidden"></p>
   </div>
-  <script src="/app/chat/app.js?v=12"></script>
+  <script src="/app/chat/app.js?v=13"></script>
 </body>
 </html>
