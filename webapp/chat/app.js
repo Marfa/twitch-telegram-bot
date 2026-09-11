@@ -50,6 +50,9 @@
       homeAdded: "On Home Screen",
       statusLive: "Live",
       statusOffline: "Offline",
+      openTwitch: "Twitch",
+      embedHint:
+        "Twitch login and Drops inside embed do not work in Telegram — use «Twitch».",
     },
     ru: {
       live: "Сейчас в эфире",
@@ -90,6 +93,9 @@
       homeAdded: "Уже на «Домой»",
       statusLive: "В эфире",
       statusOffline: "Оффлайн",
+      openTwitch: "Twitch",
+      embedHint:
+        "Вход и Drops во встроенном чате в Telegram не работают — откройте «Twitch».",
     },
   };
 
@@ -119,6 +125,10 @@
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
     const infoBtn = el("btn-info");
     if (infoBtn) infoBtn.textContent = t.info;
+    const twitchBtn = el("btn-twitch");
+    if (twitchBtn) twitchBtn.textContent = t.openTwitch;
+    const embedHint = el("embed-hint");
+    if (embedHint) embedHint.textContent = t.embedHint;
     const sendInput = el("send-input");
     const sendBtn = el("btn-send");
     if (sendInput) sendInput.placeholder = t.sendPh;
@@ -558,7 +568,6 @@
 
   function openChat(stream) {
     current = stream;
-    useFallback = false;
     infoCache = null;
     hideInfoPanel();
     el("view-home").classList.add("hidden");
@@ -568,6 +577,7 @@
     updateChatStatus(stream);
     el("btn-fallback").classList.remove("hidden");
     el("btn-info").classList.remove("hidden");
+    el("btn-twitch").classList.remove("hidden");
     setLang(lang);
     applyChatMode();
     updateQuota();
@@ -583,19 +593,27 @@
     el("view-chat").classList.add("hidden");
     el("view-home").classList.remove("hidden");
     el("btn-info").classList.add("hidden");
+    el("btn-twitch").classList.add("hidden");
+    el("embed-hint").classList.add("hidden");
   }
 
   function applyChatMode() {
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
+    const hint = el("embed-hint");
     if (useFallback) {
       el("embed-wrap").classList.add("hidden");
       el("fallback-wrap").classList.remove("hidden");
       el("embed-frame").src = "about:blank";
+      if (hint) hint.classList.add("hidden");
       startIrc(current.login);
     } else {
       stopIrc();
       el("fallback-wrap").classList.add("hidden");
       el("embed-wrap").classList.remove("hidden");
+      if (hint) {
+        hint.textContent = t.embedHint;
+        hint.classList.remove("hidden");
+      }
       const parent = (session && session.embed_parent) || location.hostname;
       const login = encodeURIComponent(current.login);
       el("embed-frame").src =
@@ -820,6 +838,10 @@
   el("btn-back").addEventListener("click", closeChat);
   el("btn-info").addEventListener("click", () => {
     toggleInfoPanel();
+  });
+  el("btn-twitch").addEventListener("click", () => {
+    if (!current || !current.login) return;
+    openExternal("https://www.twitch.tv/" + encodeURIComponent(current.login));
   });
   el("btn-fallback").addEventListener("click", () => {
     useFallback = !useFallback;
