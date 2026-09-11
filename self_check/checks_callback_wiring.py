@@ -11,6 +11,7 @@ from i18n import (
     admin_other_audience_keyboard,
     admin_type_keyboard,
     alert_type_keyboard,
+    new_sub_other_keyboard,
     advanced_options_keyboard,
     channel_dup_keyboard,
     chat_button_keyboard,
@@ -207,6 +208,7 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
     fix_dates = [today, today + timedelta(days=1)]
     samples: list[tuple[str, Any, dict[str, Any]]] = [
         ("alert_type", alert_type_keyboard, {"lang": loc, "show_drops": True}),
+        ("new_sub_other", new_sub_other_keyboard, {"lang": loc}),
         (
             "drops_catalog",
             drops_catalog_keyboard,

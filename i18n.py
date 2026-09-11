@@ -1450,16 +1450,41 @@ def alert_type_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
-                btn("wizard_cancel", lang),
-                callback_data="alert_type:cancel",
+                btn("other", lang),
+                callback_data="alert_type:other",
             )
         ]
     )
     rows.append(
         [
             InlineKeyboardButton(
-                btn("other", lang),
-                callback_data="alert_type:other",
+                btn("wizard_cancel", lang),
+                callback_data="alert_type:cancel",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """Other features from New subscription (§2.1); Back returns to alert type."""
+    keys = ["whisper_alerts", "create_schedule", "watch", "chat"]
+    buttons = [
+        InlineKeyboardButton(btn(k, lang), callback_data=f"new_sub_other:{k}")
+        for k in keys
+    ]
+    rows: list[list[InlineKeyboardButton]] = []
+    i = 0
+    while i + 1 < len(buttons):
+        rows.append([buttons[i], buttons[i + 1]])
+        i += 2
+    if i < len(buttons):
+        rows.append([buttons[i]])
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_back", lang),
+                callback_data="new_sub_other:back",
             )
         ]
     )

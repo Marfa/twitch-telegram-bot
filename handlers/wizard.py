@@ -727,19 +727,57 @@ async def _go_alert_type_prompt(
 async def alert_type_open_other(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Leave new-sub wizard and open the same Other menu as the main menu."""
-    from handlers.settings import open_other_menu
+    """§2.1 → inline Other features (same items as §1.4); stay in ALERT_TYPE."""
+    from i18n import new_sub_other_keyboard
 
-    context.user_data.clear()
     query = update.callback_query
-    if query:
-        await query.answer()
-        try:
-            await query.edit_message_text("✓")
-        except BadRequest:
-            pass
-    await open_other_menu(update, context)
-    return ConversationHandler.END
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    text = t("new_sub_other_prompt", lang)
+    markup = new_sub_other_keyboard(lang)
+    parse_mode = ParseMode.HTML if "<b>" in text else None
+    await query.edit_message_text(text, reply_markup=markup, parse_mode=parse_mode)
+    return _wz()["ALERT_TYPE"]
+
+
+async def receive_new_sub_other(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Handle Other submenu from New subscription: Back or open a feature."""
+    import beta as beta_features
+    from handlers.drops import DROPS_BETA_ID
+    from handlers.settings import open_stream_chat, open_whisper_alerts_menu
+    from handlers.stream_schedule import start_stream_schedule
+    from handlers.watch import start_watch_lucky
+    from i18n import new_sub_other_keyboard
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    action = (query.data or "").split(":", 1)[-1]
+    if action == "back":
+        db: Database = context.application.bot_data["db"]
+        show_drops = beta_features.is_enabled(db, query.from_user.id, DROPS_BETA_ID)
+        text = t("alert_type_prompt", lang)
+        markup = alert_type_keyboard(lang, show_drops=show_drops)
+        parse_mode = ParseMode.HTML if "<b>" in text else None
+        await query.edit_message_text(text, reply_markup=markup, parse_mode=parse_mode)
+        return _wz()["ALERT_TYPE"]
+    if action not in ("whisper_alerts", "create_schedule", "watch", "chat"):
+        markup = new_sub_other_keyboard(lang)
+        await query.edit_message_reply_markup(reply_markup=markup)
+        return _wz()["ALERT_TYPE"]
+    await query.edit_message_text("✓")
+    context.user_data.clear()
+    if action == "whisper_alerts":
+        await open_whisper_alerts_menu(update, context)
+        return ConversationHandler.END
+    if action == "chat":
+        await open_stream_chat(update, context)
+        return ConversationHandler.END
+    if action == "watch":
+        return await start_watch_lucky(update, context)
+    return await start_stream_schedule(update, context)
 
 async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     display = (

@@ -19,6 +19,7 @@ from i18n import (
     delete_all_confirm_keyboard,
     ignored_words_keyboard,
     main_menu,
+    new_sub_other_keyboard,
     other_menu,
     partner_menu,
     premium_gate_keyboard,
@@ -200,6 +201,7 @@ def _check_inline_wizard_keyboards() -> None:
     for loc in SUPPORTED_LOCALES:
         cases = [
             ("alert_type_keyboard", alert_type_keyboard(loc, show_drops=True)),
+            ("new_sub_other_keyboard", new_sub_other_keyboard(loc)),
             ("premium_gate_first", premium_gate_keyboard(loc, first_step=True)),
             ("premium_gate_later", premium_gate_keyboard(loc, first_step=False)),
             ("stream_schedule_confirm", stream_schedule_confirm_keyboard(loc)),
@@ -989,30 +991,51 @@ async def _scenario_wizard_game_alert(db) -> None:
 
 
 async def _scenario_wizard_alert_type_other(db) -> None:
-    """§2.1 Other — alert_type:other ends wizard and opens §1.4 Other menu."""
-    from handlers.wizard import alert_type_open_other
-    from telegram.ext import ConversationHandler
+    """§2.1 Other — inline Other features; Back returns to alert type."""
+    from handlers.wizard import _wz, alert_type_open_other, receive_new_sub_other
 
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)
     update, query = _cb_update(_FREE_UID, "alert_type:other", cap)
     update.effective_message = query.message
-    ctx = _ctx(application, {"alert_type": "live"})
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
     state = await alert_type_open_other(update, ctx)
-    assert state == ConversationHandler.END
-    assert ctx.user_data == {}
+    assert state == _wz()["ALERT_TYPE"]
     labels = [
         b.text
         for m in cap.markups
-        if getattr(m, "keyboard", None)
-        for row in m.keyboard
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
         for b in row
     ]
-    assert btn("back", "ru") in labels
     assert btn("watch", "ru") in labels
     assert btn("create_schedule", "ru") in labels
+    assert btn("whisper_alerts", "ru") in labels
+    assert btn("chat", "ru") in labels
+    assert btn("wizard_back", "ru") in labels
+    assert btn("wizard_cancel", "ru") not in labels
     cap.assert_turn("wizard_alert_type_other")
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "new_sub_other:back", cap)
+    update.effective_message = query.message
+    state = await receive_new_sub_other(update, ctx)
+    assert state == _wz()["ALERT_TYPE"]
+    back_labels = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert btn("other", "ru") in back_labels
+    assert btn("wizard_cancel", "ru") in back_labels
+    cap.assert_turn("wizard_alert_type_other_back")
+    assert markup_has_escape_hatch(new_sub_other_keyboard("ru"))
+    assert markup_has_escape_hatch(alert_type_keyboard("ru", show_drops=True))
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:

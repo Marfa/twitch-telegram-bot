@@ -26,8 +26,8 @@ def _check_drops_alert_type_keyboard_last() -> None:
     ), "Drops must be hidden when show_drops=False"
     hidden_cbs = [b.callback_data for r in hidden.inline_keyboard for b in r]
     assert hidden_cbs[-3] == "alert_type:game"
-    assert hidden_cbs[-2] == "alert_type:cancel"
-    assert hidden_cbs[-1] == "alert_type:other"
+    assert hidden_cbs[-2] == "alert_type:other"
+    assert hidden_cbs[-1] == "alert_type:cancel"
     markup = alert_type_keyboard("en", show_drops=True)
     rows = markup.inline_keyboard
     assert any(
@@ -36,8 +36,8 @@ def _check_drops_alert_type_keyboard_last() -> None:
     callbacks = [b.callback_data for r in rows for b in r]
     assert callbacks[-4] == "alert_type:drops"
     assert callbacks[-3] == "alert_type:game"
-    assert callbacks[-2] == "alert_type:cancel"
-    assert callbacks[-1] == "alert_type:other"
+    assert callbacks[-2] == "alert_type:other"
+    assert callbacks[-1] == "alert_type:cancel"
 
 
 def _check_drops_payload_and_migrate() -> None:

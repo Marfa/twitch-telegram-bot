@@ -297,6 +297,7 @@
   "premium_channel_failed": "Could not verify the Twitch channel. Try again.",
   "new_sub_prompt": "Enter a Twitch channel: link, mobile link, or username.",
   "alert_type_prompt": "Here you can set up different Twitch stream alerts. Choose which alert type to configure:\n- when a stream starts\n- when the stream category changes (no start alert; every change until the stream ends)\n- for an upcoming stream, if the streamer has a schedule\n- when a stream ends\n- new Twitch Drops for a game\n- game alert (new streams in selected categories)",
+  "new_sub_other_prompt": "Other bot features are available here too. Choose:\n- Twitch whisper alerts\n- stream schedule management\n- stream picks («What to watch?»)\n- stream chat",
   "alert_type_live": "Stream start",
   "alert_type_category": "Category change ⭐",
   "alert_type_upcoming": "Upcoming stream ⭐",

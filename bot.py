@@ -509,6 +509,7 @@ from handlers.wizard import (
     receive_template,
     receive_template_typo_confirm,
     alert_type_open_other,
+    receive_new_sub_other,
     offer_twitch_link_wizard,
     on_twitch_link_decline,
     on_twitch_link_start,
@@ -2514,6 +2515,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(cancel, pattern=r"^alert_type:cancel$"),
                 CallbackQueryHandler(
                     alert_type_open_other, pattern=r"^alert_type:other$"
+                ),
+                CallbackQueryHandler(
+                    receive_new_sub_other,
+                    pattern=r"^new_sub_other:(back|whisper_alerts|create_schedule|watch|chat)$",
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,
