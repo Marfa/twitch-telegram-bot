@@ -1464,6 +1464,8 @@ def check_handlers() -> None:
         assert "chat_id" not in default_kwargs
         assert default_kwargs["menu_button"].web_app is not None
 
+        from telegram.error import Forbidden
+
         retry_bot = AsyncMock()
         retry_bot.set_chat_menu_button.side_effect = [
             NetworkError("blip"),
@@ -1474,9 +1476,59 @@ def check_handlers() -> None:
             def get_user_locale(self, uid):
                 return "ru"
 
+            def is_bot_blocked(self, uid):
+                return False
+
         with patch("handlers.settings.asyncio.sleep", new_callable=AsyncMock):
             asyncio.run(sync_stream_chat_menu_button(retry_bot, _RetryDb(), 99))
         assert retry_bot.set_chat_menu_button.await_count == 2
+
+        # Deactivated Telegram account: mark blocked, no ERROR spam / no retry storm.
+        dead_bot = AsyncMock()
+        dead_bot.set_chat_menu_button.side_effect = Forbidden(
+            "Forbidden: user is deactivated"
+        )
+
+        class _DeadDb:
+            def __init__(self):
+                self.blocked = False
+
+            def get_user_locale(self, uid):
+                return "ru"
+
+            def is_bot_blocked(self, uid):
+                return self.blocked
+
+            def set_bot_blocked(self, uid, blocked):
+                self.blocked = bool(blocked)
+
+            def pause_delivery_for_chat(self, chat_id):
+                return 0
+
+        dead_db = _DeadDb()
+        with patch("analytics.capture") as capture_block, patch(
+            "analytics.capture_exception"
+        ) as capture_exc:
+            asyncio.run(sync_stream_chat_menu_button(dead_bot, dead_db, 7574175793))
+        assert dead_db.blocked is True
+        assert capture_exc.call_count == 0
+        assert capture_block.call_count == 1
+        assert capture_block.call_args.args[0] == 7574175793
+        assert capture_block.call_args.args[1] == "bot_blocked"
+        assert capture_block.call_args.args[2]["source"] == "stream_chat_menu"
+
+        # Already blocked: skip Telegram call entirely.
+        skip_bot = AsyncMock()
+
+        class _BlockedDb:
+            def is_bot_blocked(self, uid):
+                return True
+
+            def get_user_locale(self, uid):
+                return "ru"
+
+        asyncio.run(sync_stream_chat_menu_button(skip_bot, _BlockedDb(), 1))
+        assert skip_bot.set_chat_menu_button.await_count == 0
 
         class _FakeDb:
             def get_notify_user_ids(self):

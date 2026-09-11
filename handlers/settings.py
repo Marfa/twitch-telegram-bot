@@ -534,6 +534,14 @@ async def on_whisper_alerts_toggle(
 async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> None:
     """Show or clear the Chat Menu Button for a private chat."""
     from chat_webapp import BETA_FEATURE_ID, chat_webapp_url
+    from handlers.delivery import (
+        _is_chat_unreachable_error,
+        _is_user_blocked_error,
+        apply_user_blocked,
+    )
+
+    if db.is_bot_blocked(user_id):
+        return
 
     lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
     url = chat_webapp_url(
@@ -564,8 +572,43 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
                 )
                 return
             await asyncio.sleep(0.5 * (attempt + 1))
-        except Exception:
+        except (Forbidden, BadRequest) as exc:
+            # Deactivated / blocked / chat gone — mark and stop retrying forever.
+            if _is_user_blocked_error(exc) or _is_chat_unreachable_error(exc):
+                apply_user_blocked(
+                    db,
+                    user_id,
+                    source="stream_chat_menu",
+                    properties={"op": "set_chat_menu_button"},
+                )
+                logger.warning(
+                    "Stream-chat menu sync skipped for unreachable user %s: %s",
+                    user_id,
+                    exc,
+                )
+                return
+            logger.exception(
+                "Failed to sync stream-chat menu button for %s", user_id
+            )
+            analytics.capture_exception(
+                exc,
+                user_id=user_id,
+                properties={
+                    "handler": "handlers.settings.sync_stream_chat_menu_button",
+                    "op": "set_chat_menu_button",
+                },
+            )
+            return
+        except Exception as exc:
             logger.exception("Failed to sync stream-chat menu button for %s", user_id)
+            analytics.capture_exception(
+                exc,
+                user_id=user_id,
+                properties={
+                    "handler": "handlers.settings.sync_stream_chat_menu_button",
+                    "op": "set_chat_menu_button",
+                },
+            )
             return
 
 
