@@ -637,7 +637,7 @@
   "import_oauth_manual_failed": "Не удалось обновить токен Twitch. Авторизуйтесь снова.",
   "import_oauth_unavailable": "Импорт из Twitch не настроен на этом сервере (нужны PUBLIC_BASE_URL и OAuth Redirect URL в Twitch Console).",
   "import_default_template": "Стример {username} вышел в эфир с игрой {game}\nhttps://twitch.tv/{username}",
-  "import_success": "Импорт прошёл успешно.\nДобавлено: {imported}, пропущено (уже есть): {skipped}{removed_note}{limit_note}",
+  "import_success": "Импорт прошёл успешно.\nДобавлено: {imported}, пропущено (уже есть): {skipped}{removed_note}{limit_note}\n\nДля просмотра подписок перейдите в раздел Мои подписки.",
   "import_limit_note": "\nЛимит ({limit}): не импортировано каналов: {limited}.",
   "import_removed_note": "\nУдалено (отписка): {list}",
   "import_failed": "Не удалось авторизоваться на Twitch. Попробуйте снова: ⬇️ Импорт подписок.",
