@@ -637,7 +637,7 @@
   "import_oauth_manual_failed": "Could not refresh the Twitch token. Please authorize again.",
   "import_oauth_unavailable": "Twitch import is not configured on this server (set PUBLIC_BASE_URL and the OAuth redirect URL in Twitch Console).",
   "import_default_template": "Streamer {username} went live with {game}\nhttps://twitch.tv/{username}",
-  "import_success": "Import finished successfully.\nAdded: {imported}, skipped (already listed): {skipped}{removed_note}{limit_note}",
+  "import_success": "Import finished successfully.\nAdded: {imported}, skipped (already listed): {skipped}{removed_note}{limit_note}\n\nTo view your subscriptions, open My subscriptions.",
   "import_limit_note": "\nLimit reached ({limit}): {limited} channel(s) not imported.",
   "import_removed_note": "\nRemoved (unfollowed): {list}",
   "import_failed": "Twitch authorization failed. Try again: ⬇️ Import subscriptions.",
