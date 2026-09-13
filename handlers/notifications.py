@@ -24,6 +24,7 @@ from twitch import (
     accumulate_viewer_stats,
     filter_streams_for_watch,
     render_template,
+    should_ignore_igdb_categories,
     should_ignore_stream,
     stream_duration_minutes,
     stream_end_snapshot,
@@ -37,6 +38,49 @@ CATEGORY_WATCH_COOLDOWN_MINUTES = 60
 CATEGORY_WATCH_COOLDOWN_MINUTES_MAX = 24 * 60
 # Helix can omit category right after go-live; wait once, then send with whatever we get.
 LIVE_GAME_RECHECK_SECONDS = 20
+
+
+async def _should_skip_ignored_alert(
+    sub: Subscription,
+    db: Database,
+    twitch: TwitchClient,
+    game: str,
+    title: str,
+    game_id: str | int | None,
+) -> bool:
+    """Keyword + IGDB ignore when entitled; no Premium/beta → send (fail-closed entitlement)."""
+    import beta as beta_features
+    import premium as prem
+    from bot import _effective_ignore_keywords
+    from twitch import IGNORE_IGDB_BETA_ID
+
+    # After beta ends, grants_premium_feature stops → without Premium ignore does nothing.
+    if not prem.has_feature_sync(db, sub.owner_id, "ignore_keywords"):
+        return False
+    if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
+        return True
+    if not sub.use_global_ignore:
+        return False
+    if not beta_features.is_enabled(db, sub.owner_id, IGNORE_IGDB_BETA_ID):
+        return False
+    stored = db.get_global_ignore_igdb(sub.owner_id)
+    if not stored:
+        return False
+    gid = str(game_id or "").strip()
+    if not gid:
+        return False
+    try:
+        meta = await asyncio.to_thread(
+            twitch.igdb_game_meta_for_twitch_category, gid
+        )
+    except Exception:
+        logger.warning(
+            "IGDB ignore check failed for game_id=%s; sending alert", gid, exc_info=True
+        )
+        return False
+    if meta is None:
+        return False
+    return should_ignore_igdb_categories(meta, stored)
 
 
 def category_watch_cooldown_minutes(sub: Subscription) -> int:
@@ -66,10 +110,7 @@ def apply_category_watch_cooldown(db: Database, sub: Subscription) -> None:
 
 
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
-    from bot import (
-        _effective_ignore_keywords,
-        _render_sub_template,
-    )
+    from bot import _render_sub_template
 
     job_data = context.job.data or {}
     sub_id = job_data["sub_id"]
@@ -115,7 +156,9 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
-    if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
+    if await _should_skip_ignored_alert(
+        sub, db, twitch, game, title, stream.get("game_id")
+    ):
         return
     text = _render_sub_template(
         sub, username, game, title, twitch=twitch, stream=stream
@@ -133,10 +176,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
-    from bot import (
-        _effective_ignore_keywords,
-        _render_sub_template,
-    )
+    from bot import _render_sub_template
 
     job_data = context.job.data or {}
     sub_id = job_data["sub_id"]
@@ -185,10 +225,7 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
 async def _send_delayed_category_notification(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    from bot import (
-        _effective_ignore_keywords,
-        _render_sub_template,
-    )
+    from bot import _render_sub_template
 
     sub_id = context.job.data["sub_id"]
     db: Database = context.application.bot_data["db"]
@@ -215,7 +252,9 @@ async def _send_delayed_category_notification(
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
-    if should_ignore_stream(_effective_ignore_keywords(sub, db), game, title):
+    if await _should_skip_ignored_alert(
+        sub, db, twitch, game, title, stream.get("game_id")
+    ):
         return
     text = _render_sub_template(
         sub, username, game, title, twitch=twitch, stream=stream
@@ -236,10 +275,7 @@ async def _send_delayed_category_notification(
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     import premium as prem
-    from bot import (
-        _effective_ignore_keywords,
-        _render_sub_template,
-    )
+    from bot import _render_sub_template
     from bot_helpers import _user_lang
     from config import CHECK_INTERVAL
 
@@ -357,8 +393,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         continue
                     if is_on_notify_cooldown(sub):
                         continue
-                    if should_ignore_stream(
-                        _effective_ignore_keywords(sub, db), game, title
+                    if await _should_skip_ignored_alert(
+                        sub, db, twitch, game, title, stream.get("game_id")
                     ):
                         continue
                     if sub.delay_minutes > 0:
@@ -458,8 +494,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         continue
                     if is_on_notify_cooldown(sub):
                         continue
-                    if should_ignore_stream(
-                        _effective_ignore_keywords(sub, db), game, title
+                    if await _should_skip_ignored_alert(
+                        sub, db, twitch, game, title, stream.get("game_id")
                     ):
                         continue
                     if sub.delay_minutes > 0:
@@ -627,10 +663,7 @@ def _parse_segment_start(segment: dict) -> datetime | None:
 
 
 async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
-    from bot import (
-        _effective_ignore_keywords,
-        _render_sub_template,
-    )
+    from bot import _render_sub_template
 
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]

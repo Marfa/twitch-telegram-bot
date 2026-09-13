@@ -36,6 +36,8 @@ from i18n import (
     SUPPORTED_LOCALES,
     all_wizard_nav_buttons,
     beta_mode_keyboard,
+    ignore_igdb_delete_keyboard,
+    ignore_igdb_pick_keyboard,
     ignored_words_keyboard,
     is_menu_button,
     language_keyboard,
@@ -44,7 +46,14 @@ from i18n import (
     t,
     whisper_alerts_keyboard,
 )
-from twitch import TwitchClient, merge_ignore_keywords, normalize_ignore_keywords
+from twitch import (
+    IGNORE_IGDB_BETA_ID,
+    IGNORE_IGDB_MAX,
+    TwitchClient,
+    merge_ignore_keywords,
+    normalize_ignore_keywords,
+    parse_ignore_igdb_entries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +83,76 @@ def _global_ignore_state() -> int:
     from bot import GLOBAL_IGNORE_KEYWORDS
 
     return GLOBAL_IGNORE_KEYWORDS
+
+
+def _global_ignore_igdb_state() -> int:
+    from bot import GLOBAL_IGNORE_IGDB
+
+    return GLOBAL_IGNORE_IGDB
+
+
+def _global_ignore_igdb_del_state() -> int:
+    from bot import GLOBAL_IGNORE_IGDB_DELETE
+
+    return GLOBAL_IGNORE_IGDB_DELETE
+
+
+def _ignore_igdb_label(entry: dict, lang: str) -> str:
+    kind = str(entry.get("kind") or "")
+    kind_label = t(f"ignore_igdb_kind_{kind}", lang)
+    name = str(entry.get("name") or "?")
+    return f"{kind_label}: {name}"
+
+
+async def _show_ignored_words_screen(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int,
+    lang: str,
+    db: Database,
+    via_callback: bool = False,
+) -> int:
+    from bot import _ignore_keywords_current_label
+
+    current_raw = db.get_global_ignore_keywords(user_id)
+    cleaned = normalize_ignore_keywords(current_raw)
+    if cleaned != current_raw:
+        db.set_global_ignore_keywords(user_id, cleaned)
+        current_raw = cleaned
+    has_words = bool(current_raw.strip())
+    igdb_ok = beta_features.is_enabled(db, user_id, IGNORE_IGDB_BETA_ID)
+    igdb_entries = db.get_global_ignore_igdb(user_id) if igdb_ok else []
+    has_igdb = bool(igdb_entries)
+    current = _ignore_keywords_current_label(current_raw, lang)
+    if has_words:
+        current = f"<code>{html.escape(current)}</code>"
+    text = t(
+        "ignored_words_prompt",
+        lang,
+        current=current,
+        hint=t(
+            "ignored_words_hint_edit" if has_words else "ignored_words_hint_empty",
+            lang,
+        ),
+    )
+    markup = ignored_words_keyboard(
+        lang, has_words=has_words, has_igdb=has_igdb, show_igdb=igdb_ok
+    )
+    if via_callback and update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(
+                text, parse_mode=ParseMode.HTML, reply_markup=markup
+            )
+        except BadRequest:
+            await context.bot.send_message(
+                user_id, text, parse_mode=ParseMode.HTML, reply_markup=markup
+            )
+    else:
+        await update.effective_message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
+    return _global_ignore_state()
 
 async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -297,32 +376,10 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
             feature="ignore_keywords",
         )
         return ConversationHandler.END
-    from bot import _ignore_keywords_current_label
-
-    current_raw = db.get_global_ignore_keywords(user_id)
-    cleaned = normalize_ignore_keywords(current_raw)
-    if cleaned != current_raw:
-        db.set_global_ignore_keywords(user_id, cleaned)
-        current_raw = cleaned
-    has_words = bool(current_raw.strip())
-    current = _ignore_keywords_current_label(current_raw, lang)
-    if has_words:
-        current = f"<code>{html.escape(current)}</code>"
     # Inline Cancel only — no reply pulse (deleting the carrier drops the menu on many clients).
-    await update.effective_message.reply_text(
-        t(
-            "ignored_words_prompt",
-            lang,
-            current=current,
-            hint=t(
-                "ignored_words_hint_edit" if has_words else "ignored_words_hint_empty",
-                lang,
-            ),
-        ),
-        parse_mode=ParseMode.HTML,
-        reply_markup=ignored_words_keyboard(lang, has_words=has_words),
+    return await _show_ignored_words_screen(
+        update, context, user_id=user_id, lang=lang, db=db
     )
-    return _global_ignore_state()
 
 async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
@@ -383,6 +440,224 @@ async def receive_ignored_words_cancel(
     )
     context.user_data.clear()
     return ConversationHandler.END
+
+
+async def start_ignore_igdb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not beta_features.is_enabled(db, user_id, IGNORE_IGDB_BETA_ID):
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db, via_callback=True
+        )
+    context.user_data.pop("ignore_igdb_candidates", None)
+    await query.edit_message_text(
+        t("ignore_igdb_prompt", lang),
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("ignored_words_cancel", lang),
+                        callback_data="ignore_igdb:cancel",
+                    )
+                ]
+            ]
+        ),
+    )
+    return _global_ignore_igdb_state()
+
+
+async def receive_ignore_igdb_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not beta_features.is_enabled(db, user_id, IGNORE_IGDB_BETA_ID):
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db
+        )
+    text = (update.effective_message.text or "").strip()
+    if text in all_wizard_nav_buttons() or is_menu_button(text):
+        await update.effective_message.reply_text(
+            t("menu_settings", lang),
+            reply_markup=_settings_kb(lang, db, user_id),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    if not text:
+        return _global_ignore_igdb_state()
+    if len(db.get_global_ignore_igdb(user_id)) >= IGNORE_IGDB_MAX:
+        await update.effective_message.reply_text(
+            t("ignore_igdb_full", lang, max=IGNORE_IGDB_MAX),
+        )
+        return _global_ignore_igdb_state()
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    try:
+        found = await asyncio.to_thread(twitch.igdb_search_ignore_entities, text)
+    except Exception:
+        logger.exception("ignore IGDB search failed")
+        await update.effective_message.reply_text(t("ignore_igdb_unavailable", lang))
+        return _global_ignore_igdb_state()
+    if not found:
+        await update.effective_message.reply_text(
+            t("ignore_igdb_not_found", lang, query=text),
+        )
+        return _global_ignore_igdb_state()
+    context.user_data["ignore_igdb_candidates"] = found
+    await update.effective_message.reply_text(
+        t("ignore_igdb_pick", lang),
+        reply_markup=ignore_igdb_pick_keyboard(lang, found),
+    )
+    return _global_ignore_igdb_state()
+
+
+async def receive_ignore_igdb_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not beta_features.is_enabled(db, user_id, IGNORE_IGDB_BETA_ID):
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db
+        )
+    data = query.data or ""
+    if data == "ignore_igdb:cancel":
+        await query.edit_message_text("✓")
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db
+        )
+    if data.startswith("ignore_igdb:pick:"):
+        try:
+            idx = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            return _global_ignore_igdb_state()
+        candidates = list(context.user_data.get("ignore_igdb_candidates") or [])
+        if idx < 0 or idx >= len(candidates):
+            return _global_ignore_igdb_state()
+        entry = candidates[idx]
+        stored = parse_ignore_igdb_entries(db.get_global_ignore_igdb(user_id))
+        key = (entry["kind"], int(entry["id"]))
+        if any((e["kind"], int(e["id"])) == key for e in stored):
+            await query.edit_message_text(t("ignore_igdb_duplicate", lang))
+            return await _show_ignored_words_screen(
+                update, context, user_id=user_id, lang=lang, db=db
+            )
+        if len(stored) >= IGNORE_IGDB_MAX:
+            await query.edit_message_text(
+                t("ignore_igdb_full", lang, max=IGNORE_IGDB_MAX)
+            )
+            return await _show_ignored_words_screen(
+                update, context, user_id=user_id, lang=lang, db=db
+            )
+        stored.append(
+            {
+                "kind": entry["kind"],
+                "id": int(entry["id"]),
+                "name": str(entry.get("name") or ""),
+            }
+        )
+        db.set_global_ignore_igdb(user_id, stored)
+        context.user_data.pop("ignore_igdb_candidates", None)
+        await query.edit_message_text(
+            t(
+                "ignore_igdb_saved",
+                lang,
+                label=html.escape(_ignore_igdb_label(entry, lang)),
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db
+        )
+    return _global_ignore_igdb_state()
+
+
+async def start_ignore_igdb_delete(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if not beta_features.is_enabled(db, user_id, IGNORE_IGDB_BETA_ID):
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db, via_callback=True
+        )
+    entries = db.get_global_ignore_igdb(user_id)
+    if not entries:
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db, via_callback=True
+        )
+    context.user_data["ignore_igdb_del_sel"] = set()
+    await query.edit_message_text(
+        t("ignore_igdb_delete_prompt", lang),
+        reply_markup=ignore_igdb_delete_keyboard(lang, entries, set()),
+    )
+    return _global_ignore_igdb_del_state()
+
+
+async def receive_ignore_igdb_delete_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    data = query.data or ""
+    entries = db.get_global_ignore_igdb(user_id)
+    selected: set[int] = set(context.user_data.get("ignore_igdb_del_sel") or set())
+
+    if data == "ignore_igdb_del:cancel":
+        await query.answer()
+        context.user_data.pop("ignore_igdb_del_sel", None)
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db, via_callback=True
+        )
+    if data == "ignore_igdb_del:clear":
+        await query.answer()
+        selected = set()
+        context.user_data["ignore_igdb_del_sel"] = selected
+        await query.edit_message_reply_markup(
+            reply_markup=ignore_igdb_delete_keyboard(lang, entries, selected)
+        )
+        return _global_ignore_igdb_del_state()
+    if data.startswith("ignore_igdb_del:sel:"):
+        await query.answer()
+        try:
+            idx = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            return _global_ignore_igdb_del_state()
+        if idx in selected:
+            selected.discard(idx)
+        else:
+            selected.add(idx)
+        context.user_data["ignore_igdb_del_sel"] = selected
+        await query.edit_message_reply_markup(
+            reply_markup=ignore_igdb_delete_keyboard(lang, entries, selected)
+        )
+        return _global_ignore_igdb_del_state()
+    if data == "ignore_igdb_del:go":
+        if not selected:
+            await query.answer(t("ignore_igdb_delete_none", lang), show_alert=True)
+            return _global_ignore_igdb_del_state()
+        await query.answer()
+        kept = [e for i, e in enumerate(entries) if i not in selected]
+        removed = len(entries) - len(kept)
+        db.set_global_ignore_igdb(user_id, kept)
+        context.user_data.pop("ignore_igdb_del_sel", None)
+        await query.edit_message_text(t("ignore_igdb_deleted", lang, count=removed))
+        return await _show_ignored_words_screen(
+            update, context, user_id=user_id, lang=lang, db=db
+        )
+    await query.answer()
+    return _global_ignore_igdb_del_state()
 
 def _whisper_alerts_ready() -> bool:
     from config import twitch_eventsub_callback_url, twitch_oauth_redirect_uri

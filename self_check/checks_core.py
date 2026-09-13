@@ -961,6 +961,34 @@ def check_core() -> None:
     assert not should_ignore_stream(r"^Chatting", "Just Chatting", "Playing games")
     assert should_ignore_stream("(unclosed", "foo (unclosed bar", "title")  # invalid re → literal
 
+    from twitch import (
+        parse_ignore_igdb_entries,
+        should_ignore_igdb_categories,
+    )
+
+    assert parse_ignore_igdb_entries("[]") == []
+    assert parse_ignore_igdb_entries('[{"kind":"genre","id":12,"name":"RPG"}]') == [
+        {"kind": "genre", "id": 12, "name": "RPG"}
+    ]
+    assert should_ignore_igdb_categories(
+        {"genres": [12], "game_modes": [], "developers": [], "publishers": []},
+        [{"kind": "genre", "id": 12, "name": "RPG"}],
+    )
+    assert not should_ignore_igdb_categories(
+        {"genres": [1], "game_modes": [], "developers": [], "publishers": []},
+        [{"kind": "genre", "id": 12, "name": "RPG"}],
+    )
+    assert should_ignore_igdb_categories(
+        {"genres": [], "game_modes": [], "developers": [7], "publishers": []},
+        [{"kind": "developer", "id": 7, "name": "CDPR"}],
+    )
+    # fail-open: no meta / empty → do not ignore
+    assert not should_ignore_igdb_categories(None, [{"kind": "genre", "id": 12, "name": "RPG"}])
+    assert not should_ignore_igdb_categories(
+        {"genres": [12], "game_modes": [], "developers": [], "publishers": []},
+        [],
+    )
+
     assert _parse_watch_viewers("100") == (100, None)
     assert _parse_watch_viewers("100-500") == (100, 500)
     assert _parse_watch_viewers("500-100") == (100, 500)

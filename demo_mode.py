@@ -35,6 +35,7 @@ def capture_user_state(db: Database, user_id: int) -> None:
         "locale": db.get_user_locale(user_id),
         "watch": db.get_watch_filters(user_id),
         "ignore": db.get_global_ignore_keywords(user_id),
+        "ignore_igdb": db.get_global_ignore_igdb(user_id),
         "advanced_mode": db.get_advanced_mode_setting(user_id),
         "paused_until": db.get_notifications_paused_until(user_id),
         "tz_offset": db.get_schedule_utc_offset_minutes(user_id),
@@ -60,6 +61,7 @@ def restore_user_state(db: Database, user_id: int) -> None:
         db.set_user_locale(user_id, locale)
     db.set_watch_filters(user_id, list(snap.get("watch") or []))
     db.set_global_ignore_keywords(user_id, str(snap.get("ignore") or ""))
+    db.set_global_ignore_igdb(user_id, list(snap.get("ignore_igdb") or []))
     adv = snap.get("advanced_mode")
     if adv is not None:
         db.set_advanced_mode_setting(user_id, bool(adv))

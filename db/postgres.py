@@ -441,6 +441,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS global_ignore_igdb TEXT NOT NULL DEFAULT '[]'
+                """
+            )
+            cur.execute(
+                """
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.columns
                     WHERE table_schema = 'public'
@@ -2703,6 +2709,35 @@ class PostgresDatabase:
                     global_ignore_keywords = EXCLUDED.global_ignore_keywords
                 """,
                 (user_id, str(keywords or "")),
+            )
+
+    def get_global_ignore_igdb(self, user_id: int) -> list[dict]:
+        from twitch import parse_ignore_igdb_entries
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT global_ignore_igdb FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return []
+        return parse_ignore_igdb_entries(row["global_ignore_igdb"])
+
+    def set_global_ignore_igdb(self, user_id: int, entries: list[dict]) -> None:
+        from twitch import dump_ignore_igdb_entries
+
+        payload = dump_ignore_igdb_entries(entries)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, global_ignore_igdb) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    global_ignore_igdb = EXCLUDED.global_ignore_igdb
+                """,
+                (user_id, payload),
             )
 
     def get_advanced_mode_setting(self, user_id: int) -> bool | None:

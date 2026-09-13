@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
@@ -73,6 +74,9 @@ query ChannelAboutLinks($login: String!) {
 _IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 _IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
 _IGDB_EXTERNAL_GAMES_URL = "https://api.igdb.com/v4/external_games"
+_IGDB_COMPANIES_URL = "https://api.igdb.com/v4/companies"
+_IGDB_GENRES_URL = "https://api.igdb.com/v4/genres"
+_IGDB_GAME_MODES_URL = "https://api.igdb.com/v4/game_modes"
 _IGDB_WHERE = "version_parent = null & name != null"
 # Games that exist as Twitch categories (external_game_source / legacy category = 14).
 _IGDB_WHERE_TWITCH = (
@@ -1642,6 +1646,148 @@ class TwitchClient:
                 return name
         return random.choice(_FALLBACK_GAMES)
 
+    def _igdb_search_named(
+        self, url: str, query: str, *, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        q = (query or "").strip().replace('"', "")
+        if not q:
+            return []
+        headers = self._igdb_headers()
+        # Apicalypse search; limit per endpoint.
+        body = f'search "{q}";\nfields name;\nlimit {max(1, min(10, limit))};'
+        try:
+            resp = self._session.post(url, headers=headers, data=body, timeout=15)
+            resp.raise_for_status()
+            rows = resp.json()
+            if isinstance(rows, list):
+                return [r for r in rows if isinstance(r, dict) and r.get("id")]
+        except Exception as exc:
+            logger.warning("IGDB search failed (%s) url=%s", exc, url)
+        return []
+
+    def igdb_search_ignore_entities(
+        self, query: str, *, limit_per: int = 5
+    ) -> list[dict[str, Any]]:
+        """Search companies/genres/game_modes; companies as developer + publisher."""
+        companies = self._igdb_search_named(
+            _IGDB_COMPANIES_URL, query, limit=limit_per
+        )
+        genres = self._igdb_search_named(_IGDB_GENRES_URL, query, limit=limit_per)
+        modes = self._igdb_search_named(_IGDB_GAME_MODES_URL, query, limit=limit_per)
+        out: list[dict[str, Any]] = []
+        seen: set[tuple[str, int]] = set()
+
+        def _add(kind: str, row: dict[str, Any]) -> None:
+            try:
+                igdb_id = int(row["id"])
+            except (KeyError, TypeError, ValueError):
+                return
+            name = str(row.get("name") or "").strip()
+            if not name or igdb_id <= 0:
+                return
+            key = (kind, igdb_id)
+            if key in seen:
+                return
+            seen.add(key)
+            out.append({"kind": kind, "id": igdb_id, "name": name})
+
+        for row in companies:
+            _add("developer", row)
+            _add("publisher", row)
+        for row in genres:
+            _add("genre", row)
+        for row in modes:
+            _add("game_mode", row)
+        return out
+
+    def igdb_game_meta_for_twitch_category(
+        self, twitch_game_id: str | int | None
+    ) -> dict[str, Any] | None:
+        """Twitch category id → IGDB genres/modes/companies; None on miss/error."""
+        gid = str(twitch_game_id or "").strip()
+        if not gid:
+            return None
+        now = time.monotonic()
+        cached = _igdb_twitch_meta_cache.get(gid)
+        if cached is not None:
+            ts, meta = cached
+            if now - ts < _IGDB_TWITCH_META_TTL_SEC:
+                return meta
+        try:
+            meta = self._igdb_game_meta_for_twitch_category_uncached(gid)
+        except Exception as exc:
+            logger.warning("IGDB Twitch→meta failed for %s (%s)", gid, exc)
+            meta = None
+        _igdb_twitch_meta_cache[gid] = (now, meta)
+        return meta
+
+    def _igdb_game_meta_for_twitch_category_uncached(
+        self, twitch_game_id: str
+    ) -> dict[str, Any] | None:
+        headers = self._igdb_headers()
+        # external uid is string in IGDB; match Twitch Helix game id.
+        body = (
+            f"fields game, uid, external_game_source, category;\n"
+            f'where uid = "{twitch_game_id}" & '
+            f"(external_game_source = {_IGDB_EXTERNAL_TWITCH} "
+            f"| category = {_IGDB_EXTERNAL_TWITCH});\n"
+            f"limit 1;"
+        )
+        resp = self._session.post(
+            _IGDB_EXTERNAL_GAMES_URL, headers=headers, data=body, timeout=15
+        )
+        resp.raise_for_status()
+        rows = resp.json()
+        if not isinstance(rows, list) or not rows:
+            return None
+        game_ref = rows[0].get("game")
+        try:
+            game_id = int(game_ref)
+        except (TypeError, ValueError):
+            return None
+        body2 = (
+            f"fields genres, game_modes, "
+            f"involved_companies.company, involved_companies.developer, "
+            f"involved_companies.publisher;\n"
+            f"where id = {game_id};\n"
+            f"limit 1;"
+        )
+        resp2 = self._session.post(
+            _IGDB_GAMES_URL, headers=headers, data=body2, timeout=15
+        )
+        resp2.raise_for_status()
+        games = resp2.json()
+        if not isinstance(games, list) or not games:
+            return None
+        game = games[0]
+        genres = [int(x) for x in (game.get("genres") or []) if x is not None]
+        modes = [int(x) for x in (game.get("game_modes") or []) if x is not None]
+        developers: list[int] = []
+        publishers: list[int] = []
+        for ic in game.get("involved_companies") or []:
+            if not isinstance(ic, dict):
+                continue
+            try:
+                company_raw = ic.get("company")
+                if isinstance(company_raw, dict):
+                    company_id = int(company_raw.get("id"))
+                else:
+                    company_id = int(company_raw)
+            except (TypeError, ValueError):
+                continue
+            if company_id <= 0:
+                continue
+            if ic.get("developer"):
+                developers.append(company_id)
+            if ic.get("publisher"):
+                publishers.append(company_id)
+        return {
+            "genres": genres,
+            "game_modes": modes,
+            "developers": developers,
+            "publishers": publishers,
+        }
+
 
 def preview_stream_title(locale: str, game: str) -> str:
     """Build a sample stream title from an IGDB/Twitch game name (not 'Test stream')."""
@@ -2039,6 +2185,80 @@ def stream_duration_minutes(stream: dict[str, Any] | None) -> str:
         return str(max(1, int(delta.total_seconds() // 60)))
     except (TypeError, ValueError):
         return "—"
+
+
+# ponytail: Twitch category → IGDB meta TTL; ceiling = process memory / stale genres.
+_igdb_twitch_meta_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_IGDB_TWITCH_META_TTL_SEC = 6 * 3600
+IGNORE_IGDB_KINDS = frozenset({"developer", "publisher", "genre", "game_mode"})
+IGNORE_IGDB_MAX = 20
+IGNORE_IGDB_BETA_ID = "ignore-igdb-categories"
+
+
+def parse_ignore_igdb_entries(raw: Any) -> list[dict[str, Any]]:
+    """Normalize stored JSON list of {kind, id, name}."""
+    if raw is None or raw == "":
+        return []
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    if not isinstance(data, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").strip()
+        if kind not in IGNORE_IGDB_KINDS:
+            continue
+        try:
+            igdb_id = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if igdb_id <= 0:
+            continue
+        key = (kind, igdb_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        name = str(item.get("name") or "").strip() or str(igdb_id)
+        out.append({"kind": kind, "id": igdb_id, "name": name})
+        if len(out) >= IGNORE_IGDB_MAX:
+            break
+    return out
+
+
+def dump_ignore_igdb_entries(entries: list[dict[str, Any]] | None) -> str:
+    return json.dumps(parse_ignore_igdb_entries(entries or []), ensure_ascii=False)
+
+
+def should_ignore_igdb_categories(
+    meta: dict[str, Any] | None,
+    stored: list[dict[str, Any]] | None,
+) -> bool:
+    """True when IGDB game meta intersects stored ignore entities."""
+    if not meta or not stored:
+        return False
+    genre_ids = {int(x) for x in (meta.get("genres") or []) if x is not None}
+    mode_ids = {int(x) for x in (meta.get("game_modes") or []) if x is not None}
+    dev_ids = {int(x) for x in (meta.get("developers") or []) if x is not None}
+    pub_ids = {int(x) for x in (meta.get("publishers") or []) if x is not None}
+    for entry in parse_ignore_igdb_entries(stored):
+        kind = entry["kind"]
+        igdb_id = int(entry["id"])
+        if kind == "genre" and igdb_id in genre_ids:
+            return True
+        if kind == "game_mode" and igdb_id in mode_ids:
+            return True
+        if kind == "developer" and igdb_id in dev_ids:
+            return True
+        if kind == "publisher" and igdb_id in pub_ids:
+            return True
+    return False
 
 
 def normalize_ignore_keywords(text: str) -> str:
