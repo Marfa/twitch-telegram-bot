@@ -2621,6 +2621,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     receive_ignore_keywords_back, pattern=r"^ignore_keywords:back$"
                 ),
+                CallbackQueryHandler(
+                    start_ignore_igdb, pattern=r"^ignored_words:igdb$"
+                ),
+                CallbackQueryHandler(
+                    start_ignore_igdb_delete, pattern=r"^ignored_words:igdb_del$"
+                ),
                 CallbackQueryHandler(cancel, pattern=r"^ignore_keywords:cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_ignore_keywords),
             ],
@@ -2704,6 +2710,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_edit_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
+                ),
+                CallbackQueryHandler(
+                    start_ignore_igdb, pattern=r"^ignored_words:igdb$"
+                ),
+                CallbackQueryHandler(
+                    start_ignore_igdb_delete, pattern=r"^ignored_words:igdb_del$"
                 ),
                 CallbackQueryHandler(cancel, pattern=r"^ignore_keywords:cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_ignore_keywords),

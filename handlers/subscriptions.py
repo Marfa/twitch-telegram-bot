@@ -2811,6 +2811,7 @@ async def start_edit_ignore_keywords(
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     context.user_data["use_global_ignore"] = bool(sub.use_global_ignore)
+    context.user_data["ignore_igdb_return"] = "edit"
     has_keywords = bool(sub.ignore_keywords.strip())
     context.user_data["ignore_keywords_as_cancel"] = True
     current = _ignore_keywords_current_label(sub.ignore_keywords, lang)
@@ -2818,6 +2819,9 @@ async def start_edit_ignore_keywords(
         current = f"<code>{html.escape(current)}</code>"
     hint = t("edit_ignore_keywords_hint_cancel", lang)
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    from handlers.settings import _igdb_kb_flags
+
+    show_igdb, has_igdb = _igdb_kb_flags(db, query.from_user.id)
     await query.edit_message_text("✓")
     # Inline only: Cancel under the prompt (always). No reply keyboard / no junk carrier.
     await context.bot.send_message(
@@ -2834,6 +2838,8 @@ async def start_edit_ignore_keywords(
             lang,
             as_cancel=True,
             use_global=bool(sub.use_global_ignore),
+            show_igdb=show_igdb,
+            has_igdb=has_igdb,
         ),
     )
     return _sub_states()["EDIT_IGNORE_KEYWORDS"]

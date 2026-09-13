@@ -856,6 +856,10 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
         )
     context.user_data.setdefault("use_global_ignore", False)
     context.user_data["ignore_keywords_as_cancel"] = False
+    context.user_data["ignore_igdb_return"] = "wizard"
+    from handlers.settings import _igdb_kb_flags
+
+    show_igdb, has_igdb = _igdb_kb_flags(db, user_id)
     # Inline Back/Cancel (like template step). Reply pulse+delete is unreliable here.
     await update.effective_message.reply_text(
         t("ignore_keywords_prompt", lang),
@@ -865,6 +869,8 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
             use_global=bool(context.user_data.get("use_global_ignore")),
             show_back=True,
             show_cancel=True,
+            show_igdb=show_igdb,
+            has_igdb=has_igdb,
         ),
     )
     _set_wizard_back(context, _wz()["IGNORE_KEYWORDS"])
@@ -2315,6 +2321,10 @@ async def receive_ignore_keywords_global_toggle(
 
     if not new_val:
         as_cancel = bool(context.user_data.get("ignore_keywords_as_cancel"))
+        from handlers.settings import _igdb_kb_flags
+
+        db: Database = context.application.bot_data["db"]
+        show_igdb, has_igdb = _igdb_kb_flags(db, query.from_user.id)
         await query.edit_message_reply_markup(
             reply_markup=ignore_keywords_keyboard(
                 lang,
@@ -2322,6 +2332,8 @@ async def receive_ignore_keywords_global_toggle(
                 use_global=False,
                 show_back=not as_cancel,
                 show_cancel=not as_cancel,
+                show_igdb=show_igdb,
+                has_igdb=has_igdb,
             )
         )
         return _wz()["IGNORE_KEYWORDS"]
