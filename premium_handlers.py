@@ -423,6 +423,23 @@ async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
+def _attribution_for_payment(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    parsed: prem.ParsedInvoice,
+) -> dict[str, str]:
+    """Prefer in-memory attribution; fall back to tokens baked into the invoice."""
+    attr = take_premium_attribution(context, user_id)
+    if attr.get("source"):
+        return attr
+    if parsed.source:
+        out = {"source": parsed.source}
+        if parsed.source_feature:
+            out["feature"] = parsed.source_feature
+        return out
+    return {}
+
+
 async def _send_invoice_link(
     query,
     *,
@@ -436,6 +453,12 @@ async def _send_invoice_link(
     user_id: int | None = None,
     kind: str = "",
 ) -> None:
+    attr: dict[str, str] = {}
+    if context is not None and user_id is not None:
+        attr = peek_premium_attribution(context, user_id)
+        payload = prem.attach_invoice_attribution(
+            payload, attr.get("source", ""), attr.get("feature", "")
+        )
     prices = [LabeledPrice(title, stars)]
     kwargs: dict = {
         "title": title,
@@ -455,7 +478,7 @@ async def _send_invoice_link(
         return
     if context is not None and user_id is not None:
         props: dict = {"kind": kind or "unknown", "stars": stars}
-        props.update(peek_premium_attribution(context, user_id))
+        props.update(attr)
         analytics.capture(user_id, "premium_pay_started", props)
     await query.edit_message_text(
         t("premium_pay_link", lang),
@@ -999,6 +1022,7 @@ async def complete_premium_oauth(
         twitch_user_id=info.get("twitch_user_id") or "",
         refresh_token=info.get("refresh_token") or None,
     )
+    db.set_premium_twitch_needs_reauth(owner_id, False)
     user = await prem.resolve_marfapr_user(twitch)
     if not user:
         await application.bot.send_message(
@@ -1082,10 +1106,11 @@ async def successful_premium_payment(
     # PTB 21.8+: subscription_expiration_date is datetime, not unix int
     exp = payment.subscription_expiration_date
     until_sub = int(exp.timestamp()) if exp is not None else 0
-    attr = take_premium_attribution(context, parsed.user_id)
+    attr = _attribution_for_payment(context, parsed.user_id, parsed)
     until_unix = 0
     features_s = ""
     stars_eff = stars_paid
+    is_renewal = prem.is_purchase_renewal(db, parsed)
 
     if parsed.kind in prem.GIFT_INVOICE_KINDS:
         plan = prem.gift_plan_kind(parsed.kind) or "month"
@@ -1117,6 +1142,7 @@ async def successful_premium_payment(
             until_unix=0,
             source=attr.get("source", ""),
             source_feature=attr.get("feature", ""),
+            is_renewal=is_renewal,
         )
         analytics.capture(
             parsed.user_id,
@@ -1202,6 +1228,7 @@ async def successful_premium_payment(
             until_unix=until_unix,
             source=attr.get("source", ""),
             source_feature=attr.get("feature", ""),
+            is_renewal=is_renewal,
         )
         analytics.capture(
             parsed.user_id,
@@ -1234,6 +1261,7 @@ async def successful_premium_payment(
         until_unix=until_unix,
         source=attr.get("source", ""),
         source_feature=attr.get("feature", ""),
+        is_renewal=is_renewal,
     )
     analytics.capture(
         parsed.user_id,
@@ -1252,11 +1280,37 @@ async def successful_premium_payment(
 
 
 async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    from handlers.background_jobs import sync_optional_jobs
+
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     broadcaster = await prem.resolve_marfapr_user(twitch)
     b_id = str(broadcaster["id"]) if broadcaster else None
     for uid in db.list_premium_twitch_user_ids():
-        await asyncio.to_thread(
+        _active, newly = await asyncio.to_thread(
             prem.refresh_twitch_premium, db, twitch, uid, broadcaster_id=b_id
         )
+        if not newly:
+            continue
+        lang = db.get_user_locale(uid) or DEFAULT_LOCALE
+        redirect = twitch_oauth_redirect_uri()
+        markup = None
+        if redirect:
+            state = create_oauth_state(uid, lang, purpose="premium")
+            url = twitch.build_authorize_url(
+                redirect_uri=redirect,
+                state=state,
+                scopes=SUBSCRIPTIONS_SCOPE,
+            )
+            markup = InlineKeyboardMarkup(
+                [[InlineKeyboardButton(btn("premium_marfapr", lang), url=url)]]
+            )
+        try:
+            await context.bot.send_message(
+                uid,
+                t("premium_twitch_reauth", lang),
+                reply_markup=markup,
+            )
+        except Exception:
+            logger.exception("Cannot notify %s about premium twitch reauth", uid)
+    sync_optional_jobs(context.application.job_queue, db)

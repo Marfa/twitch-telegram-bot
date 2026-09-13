@@ -576,6 +576,10 @@ async def on_drops_digest_toggle(
             await context.bot.send_message(user_id, t(block, lang))
             return
     db.set_drops_digest_enabled(user_id, new_state)
+    if new_state:
+        from handlers.background_jobs import sync_optional_jobs
+
+        sync_optional_jobs(context.application.job_queue, db)
     cands = (
         context.user_data.get("drops_catalog_candidates")
         or (context.application.bot_data.get("drops_catalog_by_user") or {}).get(
@@ -705,6 +709,9 @@ async def on_drops_get_alerts(
         camp,
         twitch=context.application.bot_data["twitch"],
     )
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(context.application.job_queue, db)
     await context.bot.send_message(user_id, text, reply_markup=_menu(lang, user_id))
 
 
@@ -716,6 +723,9 @@ async def check_drops(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await _check_drops_digest(context, db, twitch, now_iso)
     await _check_drops_streams(context, db, twitch, now_iso)
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(context.application.job_queue, db)
 
 
 async def _check_drops_digest(

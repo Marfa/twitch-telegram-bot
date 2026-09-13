@@ -335,7 +335,6 @@ from handlers.stream_schedule import (
     stream_schedule_vacation_auto_callback,
     stream_schedule_vacation_callback,
     stream_schedule_vacation_manage_callback,
-    process_vacation_auto_exits,
 )
 
 from handlers.settings import (
@@ -1411,6 +1410,10 @@ async def receive_edit_schedule_reminder(
     ):
         await update.effective_message.reply_text(t("sub_not_found", lang))
     else:
+        if minutes > 0:
+            from handlers.background_jobs import sync_optional_jobs
+
+            sync_optional_jobs(context.application.job_queue, db)
         await update.effective_message.reply_text(
             t("edit_updated", lang, sub_id=sub_num),
             reply_markup=_menu(lang, owner_id),
@@ -3130,14 +3133,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=2,
     )
 
-    from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
+    from config import CHECK_INTERVAL
+    from handlers.background_jobs import sync_optional_jobs
     from handlers.drops import (
-        check_drops,
         on_drops_digest_off,
         on_drops_digest_toggle,
         on_drops_get_alerts,
     )
-    from premium_handlers import refresh_premium_twitch_job
 
     app.add_handler(
         CallbackQueryHandler(on_drops_digest_toggle, pattern=r"^drops_digest:toggle$")
@@ -3150,14 +3152,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
-    app.job_queue.run_repeating(check_drops, interval=max(900, CHECK_INTERVAL * 6), first=120)
     app.job_queue.run_repeating(
         announce_new_beta_features, interval=3600, first=90
     )
-    app.job_queue.run_repeating(
-        check_schedule_reminders, interval=SCHEDULE_CHECK_INTERVAL, first=25
-    )
-    app.job_queue.run_repeating(process_vacation_auto_exits, interval=300, first=70)
+    sync_optional_jobs(app.job_queue, db)
     app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
     app.job_queue.run_repeating(purge_old_broadcasts, interval=24 * 3600, first=300)
     app.job_queue.run_repeating(
@@ -3173,8 +3171,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)
     app.job_queue.run_repeating(check_cursor_status, interval=120, first=55)
     app.job_queue.run_repeating(poll_posthog_inbox_reports, interval=300, first=60)
-    app.job_queue.run_repeating(sync_twitch_follows, interval=3600, first=90)
-    app.job_queue.run_repeating(refresh_premium_twitch_job, interval=3600, first=120)
     app.job_queue.run_repeating(
         weekly_new_users_report,
         interval=7 * 24 * 3600,

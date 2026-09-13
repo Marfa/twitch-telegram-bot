@@ -636,6 +636,9 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     twitch: TwitchClient = context.application.bot_data["twitch"]
     user_ids = db.get_unique_schedule_reminder_twitch_ids()
     if not user_ids:
+        from handlers.background_jobs import sync_optional_jobs
+
+        sync_optional_jobs(context.application.job_queue, db)
         return
     now = datetime.now(timezone.utc)
     for uid in user_ids:
@@ -706,6 +709,9 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 db.set_last_schedule_reminder_segment(sub.id, seg_id)
                 break
 
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(context.application.job_queue, db)
 
 
 def needs_live_game_recheck(game: str, delay_minutes: int) -> bool:

@@ -396,6 +396,12 @@ async def _smoke_schedule(db) -> None:
     fail_text2 = bot.send_message.await_args.args[1]
     assert "token dead" not in fail_text2
     assert "API" in fail_text2 or "api" in fail_text2.lower() or "Twitch" in fail_text2
+    assert db.has_any_vacation_auto_exit() is False
+
+    db.set_vacation_auto_exit_at(_FREE_UID, "2099-01-01T00:00:00Z")
+    assert db.has_any_vacation_auto_exit() is True
+    db.set_vacation_auto_exit_at(_FREE_UID, None)
+    assert db.has_any_vacation_auto_exit() is False
 
 
 async def _smoke_settings_oauth(db) -> None:

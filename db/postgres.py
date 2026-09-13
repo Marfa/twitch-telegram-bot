@@ -526,6 +526,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE premium_purchases
+                ADD COLUMN IF NOT EXISTS is_renewal BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_referral_credits_referrer
                 ON referral_credits(referrer_id)
                 """
@@ -609,6 +615,19 @@ class PostgresDatabase:
                     next_sync_at TIMESTAMPTZ NOT NULL,
                     last_sync_at TIMESTAMPTZ
                 )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE twitch_sync
+                ADD COLUMN IF NOT EXISTS needs_reauth BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS premium_twitch_needs_reauth
+                BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             cur.execute(
@@ -1730,6 +1749,7 @@ class PostgresDatabase:
         until_unix: int = 0,
         source: str = "",
         source_feature: str = "",
+        is_renewal: bool = False,
     ) -> bool:
         cid = str(charge_id or "").strip()
         if int(user_id) <= 0 or not cid:
@@ -1740,8 +1760,8 @@ class PostgresDatabase:
                 """
                 INSERT INTO premium_purchases (
                     user_id, charge_id, kind, stars, features, until_unix,
-                    source, source_feature
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    source, source_feature, is_renewal
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (charge_id) DO NOTHING
                 """,
                 (
@@ -1753,6 +1773,7 @@ class PostgresDatabase:
                     max(0, int(until_unix or 0)),
                     str(source or "").strip(),
                     str(source_feature or "").strip(),
+                    bool(is_renewal),
                 ),
             )
             return int(cur.rowcount or 0) > 0
@@ -1763,7 +1784,7 @@ class PostgresDatabase:
             cur.execute(
                 """
                 SELECT id, user_id, charge_id, kind, stars, features, until_unix,
-                       source, source_feature, paid_at
+                       source, source_feature, paid_at, is_renewal
                 FROM premium_purchases
                 WHERE digest_sent_at IS NULL
                 ORDER BY paid_at, id
@@ -1790,6 +1811,7 @@ class PostgresDatabase:
                     source=str(r["source"] or ""),
                     source_feature=str(r["source_feature"] or ""),
                     paid_at=paid_s,
+                    is_renewal=bool(r["is_renewal"]) if "is_renewal" in r.keys() else False,
                 )
             )
         return out
@@ -2896,6 +2918,19 @@ class PostgresDatabase:
             rows = cur.fetchall()
         return [int(r["user_id"]) for r in rows]
 
+    def has_any_vacation_auto_exit(self) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM users
+                WHERE vacation_auto_exit_at IS NOT NULL
+                  AND vacation_auto_exit_at != ''
+                LIMIT 1
+                """
+            )
+            return cur.fetchone() is not None
+
     def get_schedule_utc_offsets_for_users(
         self, user_ids: list[int]
     ) -> dict[int, int | None]:
@@ -3406,6 +3441,36 @@ class PostgresDatabase:
         except Exception:
             return None
 
+    def set_premium_twitch_needs_reauth(self, user_id: int, needs: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_twitch_needs_reauth)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_twitch_needs_reauth = EXCLUDED.premium_twitch_needs_reauth
+                """,
+                (user_id, bool(needs)),
+            )
+
+    def get_premium_twitch_needs_reauth(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT premium_twitch_needs_reauth FROM users WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return False
+        try:
+            return bool(row["premium_twitch_needs_reauth"])
+        except (KeyError, IndexError, TypeError):
+            return False
+
     def list_premium_twitch_user_ids(self) -> list[int]:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -3834,14 +3899,15 @@ class PostgresDatabase:
                 """
                 INSERT INTO twitch_sync (
                     owner_id, twitch_user_id, refresh_token,
-                    period_days, next_sync_at, last_sync_at
-                ) VALUES (%s, %s, %s, %s, %s::timestamptz, %s::timestamptz)
+                    period_days, next_sync_at, last_sync_at, needs_reauth
+                ) VALUES (%s, %s, %s, %s, %s::timestamptz, %s::timestamptz, FALSE)
                 ON CONFLICT (owner_id) DO UPDATE SET
                     twitch_user_id = EXCLUDED.twitch_user_id,
                     refresh_token = EXCLUDED.refresh_token,
                     period_days = EXCLUDED.period_days,
                     next_sync_at = EXCLUDED.next_sync_at,
-                    last_sync_at = EXCLUDED.last_sync_at
+                    last_sync_at = EXCLUDED.last_sync_at,
+                    needs_reauth = FALSE
                 """,
                 (
                     owner_id,
@@ -3911,7 +3977,8 @@ class PostgresDatabase:
                 UPDATE twitch_sync
                 SET refresh_token = %s,
                     last_sync_at = %s::timestamptz,
-                    next_sync_at = %s::timestamptz
+                    next_sync_at = %s::timestamptz,
+                    needs_reauth = FALSE
                 WHERE owner_id = %s
                 """,
                 (enc, last_sync_at, next_sync_at, owner_id),
@@ -3926,6 +3993,7 @@ class PostgresDatabase:
                 """
                 SELECT * FROM twitch_sync
                 WHERE next_sync_at <= %s::timestamptz
+                  AND COALESCE(needs_reauth, FALSE) = FALSE
                 ORDER BY next_sync_at
                 """,
                 (now_iso,),
@@ -3937,6 +4005,32 @@ class PostgresDatabase:
             sync.refresh_token = decrypt_secret(sync.refresh_token)
             out.append(sync)
         return out
+
+    def has_any_periodic_twitch_sync(self) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM twitch_sync
+                WHERE period_days > 0
+                  AND COALESCE(refresh_token, '') != ''
+                  AND COALESCE(needs_reauth, FALSE) = FALSE
+                LIMIT 1
+                """
+            )
+            return cur.fetchone() is not None
+
+    def set_twitch_sync_needs_reauth(self, owner_id: int, needs: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE twitch_sync
+                SET needs_reauth = %s
+                WHERE owner_id = %s
+                """,
+                (bool(needs), owner_id),
+            )
 
     def get_whisper_alert(self, owner_id: int) -> WhisperAlert | None:
         from token_crypto import decrypt_secret
@@ -4206,6 +4300,23 @@ class PostgresDatabase:
             )
             rows = cur.fetchall()
         return [int(r["owner_id"]) for r in rows]
+
+    def has_any_drops_work(self) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 WHERE EXISTS (
+                    SELECT 1 FROM drops_auth WHERE digest_enabled = TRUE
+                ) OR EXISTS (
+                    SELECT 1 FROM subscriptions
+                    WHERE enabled = TRUE
+                      AND COALESCE(notify_on_drops, FALSE) = TRUE
+                      AND COALESCE(drops_game_id, '') != ''
+                )
+                """
+            )
+            return cur.fetchone() is not None
 
     def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None:
         from token_crypto import encrypt_secret

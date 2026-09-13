@@ -1642,6 +1642,10 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 reply_markup=_settings_kb(lang, db, user_id),
             )
             return ConversationHandler.END
+        if days > 0:
+            from handlers.background_jobs import sync_optional_jobs
+
+            sync_optional_jobs(context.application.job_queue, db)
         await update.effective_message.reply_text(
             t("sync_period_updated", lang, days=days),
             reply_markup=_settings_kb(lang, db, user_id),
@@ -1679,6 +1683,10 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         next_sync_at=next_at,
         last_sync_at=now.isoformat(),
     )
+    if days > 0:
+        from handlers.background_jobs import sync_optional_jobs
+
+        sync_optional_jobs(context.application.job_queue, db)
     await update.effective_message.reply_text(
         t("import_sync_enabled", lang, days=days),
     )
@@ -1790,15 +1798,29 @@ async def _sync_owner_follows(
         )
     except Exception:
         logger.exception("Twitch sync failed for owner %s", row.owner_id)
-        db.delete_twitch_sync(row.owner_id)
+        db.set_twitch_sync_needs_reauth(row.owner_id, True)
         try:
+            from config import twitch_oauth_redirect_uri
+            from health import create_oauth_state
+
+            redirect_uri = twitch_oauth_redirect_uri()
+            markup = _menu(lang, row.owner_id)
+            if redirect_uri:
+                state = create_oauth_state(row.owner_id, lang)
+                url = twitch.build_authorize_url(
+                    redirect_uri=redirect_uri, state=state
+                )
+                markup = _import_oauth_authorize_keyboard(lang, url)
             await application.bot.send_message(
                 row.owner_id,
                 t("sync_job_failed", lang),
-                reply_markup=_menu(lang, row.owner_id),
+                reply_markup=markup,
             )
         except Exception:
             logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
+        from handlers.background_jobs import sync_optional_jobs
+
+        sync_optional_jobs(application.job_queue, db)
         return None
 
     imported, skipped, limited, removed_names, _new, ask_streamers = import_followed_as_subscriptions(
@@ -1897,6 +1919,9 @@ async def sync_twitch_follows(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.exception(
                 "Cannot ask owner %s about unfollowed alerts", row.owner_id
             )
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(context.application.job_queue, db)
 
 
 async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4150,13 +4175,12 @@ def _alert_type_label(kind: str, lang: str) -> str:
     return t(f"alert_type_{kind}", lang)
 
 
-def _other_alert_types(current: str, *, show_drops: bool = False) -> list[str]:
+def _other_alert_types(current: str) -> list[str]:
+    # Drops / game need a game id — change/copy type cannot create them.
     return [
         kind
         for kind in _EDIT_ALERT_TYPE_ORDER
-        if kind != current
-        and kind != "game"
-        and (kind != "drops" or show_drops)
+        if kind != current and kind not in ("drops", "game")
     ]
 
 
@@ -4166,9 +4190,8 @@ def _edit_alert_type_pick_keyboard(
     *,
     mode: str,
     current_type: str,
-    show_drops: bool = False,
 ) -> InlineKeyboardMarkup:
-    types = _other_alert_types(current_type, show_drops=show_drops)
+    types = _other_alert_types(current_type)
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -4304,11 +4327,7 @@ async def on_edit_change_type_click(
         await query.edit_message_text(t("sub_not_found", lang))
         return
     current = _alert_type_from_sub(sub)
-    import beta as beta_features
-    from handlers.drops import DROPS_BETA_ID
-
-    show_drops = beta_features.is_enabled(db, owner_id, DROPS_BETA_ID)
-    if not _other_alert_types(current, show_drops=show_drops):
+    if not _other_alert_types(current):
         await query.answer(t("edit_change_type_cancelled", lang), show_alert=True)
         return
     await query.edit_message_text(
@@ -4318,7 +4337,6 @@ async def on_edit_change_type_click(
             lang,
             mode="change",
             current_type=current,
-            show_drops=show_drops,
         ),
     )
 
@@ -4390,11 +4408,7 @@ async def on_edit_copy_change_click(
         )
         return
     current = _alert_type_from_sub(sub)
-    import beta as beta_features
-    from handlers.drops import DROPS_BETA_ID
-
-    show_drops = beta_features.is_enabled(db, owner_id, DROPS_BETA_ID)
-    if not _other_alert_types(current, show_drops=show_drops):
+    if not _other_alert_types(current):
         await query.answer(t("edit_copy_cancelled", lang), show_alert=True)
         return
     await query.edit_message_text(
@@ -4404,7 +4418,6 @@ async def on_edit_copy_change_click(
             lang,
             mode="copy",
             current_type=current,
-            show_drops=show_drops,
         ),
     )
 

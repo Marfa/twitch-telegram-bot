@@ -301,6 +301,10 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
     from bot import _ignore_keywords_current_label
 
     current_raw = db.get_global_ignore_keywords(user_id)
+    cleaned = normalize_ignore_keywords(current_raw)
+    if cleaned != current_raw:
+        db.set_global_ignore_keywords(user_id, cleaned)
+        current_raw = cleaned
     has_words = bool(current_raw.strip())
     current = _ignore_keywords_current_label(current_raw, lang)
     if has_words:

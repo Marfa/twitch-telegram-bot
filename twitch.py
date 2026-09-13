@@ -2043,7 +2043,17 @@ def stream_duration_minutes(stream: dict[str, Any] | None) -> str:
 
 def normalize_ignore_keywords(text: str) -> str:
     parts = [part.strip() for part in text.split(",")]
-    return ", ".join(part for part in parts if part)
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        key = part.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(part)
+    return ", ".join(out)
 
 
 def merge_ignore_keywords(*parts: str) -> str:

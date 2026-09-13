@@ -368,6 +368,7 @@ def _check_drops_digest_clears_without_premium() -> None:
         db.set_beta_enrollment(7, DROPS_BETA_ID, True)
         db.set_drops_digest_enabled(7, True)
         assert 7 in db.list_drops_digest_owner_ids()
+        assert db.has_any_drops_work() is True
         db.set_beta_enrollment(7, DROPS_BETA_ID, False)
         assert not prem.has_feature_sync(db, 7, DROPS_FEATURE_ID)
         bot = MagicMock()

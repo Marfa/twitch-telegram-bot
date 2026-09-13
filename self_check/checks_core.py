@@ -944,8 +944,10 @@ def check_core() -> None:
     ) == "45"
     assert stream_duration_minutes(None) == "—"
     assert normalize_ignore_keywords("foo, bar , baz") == "foo, bar, baz"
+    assert normalize_ignore_keywords("foo, Foo, BAR, bar, baz") == "foo, BAR, baz"
     assert normalize_ignore_keywords("") == ""
     assert merge_ignore_keywords("foo", "bar, baz") == "foo, bar, baz"
+    assert merge_ignore_keywords("foo, bar", "FOO, baz") == "foo, bar, baz"
     assert merge_ignore_keywords("foo", "") == "foo"
     assert merge_ignore_keywords("", "") == ""
     assert should_ignore_stream("chatting", "Just Chatting", "Playing games")

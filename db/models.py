@@ -298,6 +298,7 @@ class PremiumPurchase:
     source: str
     source_feature: str
     paid_at: str
+    is_renewal: bool = False
 
 
 @dataclass(frozen=True)
@@ -498,6 +499,7 @@ class TwitchSync:
     period_days: int
     next_sync_at: str
     last_sync_at: str | None
+    needs_reauth: bool = False
 
 
 @dataclass
@@ -579,6 +581,7 @@ def _row_to_twitch_sync(row: Any) -> TwitchSync:
         period_days=int(row["period_days"]),
         next_sync_at=str(next_at),
         last_sync_at=str(last) if last else None,
+        needs_reauth=bool(row["needs_reauth"]) if "needs_reauth" in row.keys() else False,
     )
 
 

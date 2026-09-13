@@ -3097,6 +3097,14 @@ async def _finish_subscription(
 
     db.upsert_user(owner_id)
 
+    if (
+        int(data.get("schedule_reminder_minutes", 0)) > 0
+        or notify_on_drops
+    ):
+        from handlers.background_jobs import sync_optional_jobs
+
+        sync_optional_jobs(context.application.job_queue, db)
+
     analytics.capture(
         owner_id,
         "subscription_updated" if edit_sub_id else "subscription_created",

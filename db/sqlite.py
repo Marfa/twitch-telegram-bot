@@ -422,6 +422,14 @@ class SqliteDatabase:
             ON premium_purchases(digest_sent_at)
             """
         )
+        pp_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(premium_purchases)").fetchall()
+        }
+        if "is_renewal" not in pp_cols:
+            conn.execute(
+                "ALTER TABLE premium_purchases ADD COLUMN is_renewal "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_referral_credits_referrer
@@ -509,6 +517,22 @@ class SqliteDatabase:
             )
             """
         )
+        ts_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(twitch_sync)").fetchall()
+        }
+        if "needs_reauth" not in ts_cols:
+            conn.execute(
+                "ALTER TABLE twitch_sync ADD COLUMN needs_reauth "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        user_cols2 = {
+            r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "premium_twitch_needs_reauth" not in user_cols2:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN premium_twitch_needs_reauth "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS whisper_alerts (
@@ -1558,6 +1582,7 @@ class SqliteDatabase:
         until_unix: int = 0,
         source: str = "",
         source_feature: str = "",
+        is_renewal: bool = False,
     ) -> bool:
         cid = str(charge_id or "").strip()
         if int(user_id) <= 0 or not cid:
@@ -1567,8 +1592,8 @@ class SqliteDatabase:
                 """
                 INSERT OR IGNORE INTO premium_purchases (
                     user_id, charge_id, kind, stars, features, until_unix,
-                    source, source_feature
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    source, source_feature, is_renewal
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(user_id),
@@ -1579,6 +1604,7 @@ class SqliteDatabase:
                     max(0, int(until_unix or 0)),
                     str(source or "").strip(),
                     str(source_feature or "").strip(),
+                    int(bool(is_renewal)),
                 ),
             )
             return int(cur.rowcount) > 0
@@ -1588,7 +1614,7 @@ class SqliteDatabase:
             rows = conn.execute(
                 """
                 SELECT id, user_id, charge_id, kind, stars, features, until_unix,
-                       source, source_feature, paid_at
+                       source, source_feature, paid_at, is_renewal
                 FROM premium_purchases
                 WHERE digest_sent_at IS NULL
                 ORDER BY paid_at, id
@@ -1606,6 +1632,7 @@ class SqliteDatabase:
                 source=str(r["source"] or ""),
                 source_feature=str(r["source_feature"] or ""),
                 paid_at=str(r["paid_at"] or ""),
+                is_renewal=bool(r["is_renewal"]) if "is_renewal" in r.keys() else False,
             )
             for r in rows
         ]
@@ -2623,6 +2650,18 @@ class SqliteDatabase:
             ).fetchall()
         return [int(r["user_id"]) for r in rows]
 
+    def has_any_vacation_auto_exit(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM users
+                WHERE vacation_auto_exit_at IS NOT NULL
+                  AND vacation_auto_exit_at != ''
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+
     def get_schedule_utc_offsets_for_users(
         self, user_ids: list[int]
     ) -> dict[int, int | None]:
@@ -3105,6 +3144,33 @@ class SqliteDatabase:
         except Exception:
             return None
 
+    def set_premium_twitch_needs_reauth(self, user_id: int, needs: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, premium_twitch_needs_reauth)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    premium_twitch_needs_reauth = excluded.premium_twitch_needs_reauth
+                """,
+                (user_id, int(bool(needs))),
+            )
+
+    def get_premium_twitch_needs_reauth(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT premium_twitch_needs_reauth FROM users WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return False
+        try:
+            return bool(row["premium_twitch_needs_reauth"])
+        except (KeyError, IndexError, TypeError):
+            return False
+
     def list_premium_twitch_user_ids(self) -> list[int]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -3503,14 +3569,15 @@ class SqliteDatabase:
                 """
                 INSERT INTO twitch_sync (
                     owner_id, twitch_user_id, refresh_token,
-                    period_days, next_sync_at, last_sync_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    period_days, next_sync_at, last_sync_at, needs_reauth
+                ) VALUES (?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(owner_id) DO UPDATE SET
                     twitch_user_id = excluded.twitch_user_id,
                     refresh_token = excluded.refresh_token,
                     period_days = excluded.period_days,
                     next_sync_at = excluded.next_sync_at,
-                    last_sync_at = excluded.last_sync_at
+                    last_sync_at = excluded.last_sync_at,
+                    needs_reauth = 0
                 """,
                 (
                     owner_id,
@@ -3573,7 +3640,8 @@ class SqliteDatabase:
             conn.execute(
                 """
                 UPDATE twitch_sync
-                SET refresh_token = ?, last_sync_at = ?, next_sync_at = ?
+                SET refresh_token = ?, last_sync_at = ?, next_sync_at = ?,
+                    needs_reauth = 0
                 WHERE owner_id = ?
                 """,
                 (enc, last_sync_at, next_sync_at, owner_id),
@@ -3587,6 +3655,7 @@ class SqliteDatabase:
                 """
                 SELECT * FROM twitch_sync
                 WHERE next_sync_at <= ?
+                  AND COALESCE(needs_reauth, 0) = 0
                 ORDER BY next_sync_at
                 """,
                 (now_iso,),
@@ -3597,6 +3666,30 @@ class SqliteDatabase:
             sync.refresh_token = decrypt_secret(sync.refresh_token)
             out.append(sync)
         return out
+
+    def has_any_periodic_twitch_sync(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM twitch_sync
+                WHERE period_days > 0
+                  AND COALESCE(refresh_token, '') != ''
+                  AND COALESCE(needs_reauth, 0) = 0
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+
+    def set_twitch_sync_needs_reauth(self, owner_id: int, needs: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE twitch_sync
+                SET needs_reauth = ?
+                WHERE owner_id = ?
+                """,
+                (int(bool(needs)), owner_id),
+            )
 
     def get_whisper_alert(self, owner_id: int) -> WhisperAlert | None:
         from token_crypto import decrypt_secret
@@ -3849,6 +3942,22 @@ class SqliteDatabase:
                 """
             ).fetchall()
         return [int(r["owner_id"]) for r in rows]
+
+    def has_any_drops_work(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 WHERE EXISTS (
+                    SELECT 1 FROM drops_auth WHERE digest_enabled = 1
+                ) OR EXISTS (
+                    SELECT 1 FROM subscriptions
+                    WHERE enabled = 1
+                      AND COALESCE(notify_on_drops, 0) = 1
+                      AND COALESCE(drops_game_id, '') != ''
+                )
+                """
+            ).fetchone()
+        return row is not None
 
     def update_drops_auth_refresh(self, owner_id: int, refresh_token: str) -> None:
         from token_crypto import encrypt_secret

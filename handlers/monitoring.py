@@ -542,10 +542,15 @@ def _format_premium_purchase_line(lang: str, row) -> str:
     source = row.source or "—"
     if row.source_feature:
         source = f"{source}/{row.source_feature}"
+    renewal = t(
+        "premium_purchase_renewal" if row.is_renewal else "premium_purchase_new",
+        lang,
+    )
     return t(
         "daily_premium_purchase_line",
         lang,
         user_id=row.user_id,
+        renewal=renewal,
         kind=kind_label,
         stars=row.stars,
         until=until,
@@ -563,6 +568,8 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
     rows = db.list_undigested_premium_purchases()
     if not rows:
         return
+    renew_count = sum(1 for row in rows if row.is_renewal)
+    new_count = len(rows) - renew_count
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
         lines = "".join(_format_premium_purchase_line(lang, row) for row in rows)
@@ -573,6 +580,8 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
                     "daily_premium_purchases",
                     lang,
                     count=len(rows),
+                    new_count=new_count,
+                    renew_count=renew_count,
                     lines=lines,
                 ),
             )

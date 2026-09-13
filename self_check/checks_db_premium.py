@@ -353,6 +353,13 @@ def check_db_premium() -> None:
         due = db.get_due_twitch_syncs("2020-01-02T00:00:00+00:00")
         assert len(due) == 1 and due[0].owner_id == 1
         assert due[0].refresh_token == "rtok"
+        assert db.has_any_periodic_twitch_sync() is True
+        db.set_twitch_sync_needs_reauth(1, True)
+        assert db.get_twitch_sync(1).needs_reauth is True
+        assert db.get_due_twitch_syncs("2020-01-02T00:00:00+00:00") == []
+        assert db.has_any_periodic_twitch_sync() is False
+        db.set_twitch_sync_needs_reauth(1, False)
+        assert db.get_due_twitch_syncs("2020-01-02T00:00:00+00:00")
         assert db.set_twitch_sync_period(1, 14, "2030-01-01T00:00:00+00:00")
         assert db.get_twitch_sync(1).period_days == 14
         assert db.get_due_twitch_syncs("2020-01-02T00:00:00+00:00") == []
@@ -363,8 +370,18 @@ def check_db_premium() -> None:
             next_sync_at="2030-06-01T00:00:00+00:00",
         )
         assert db.get_twitch_sync(1).refresh_token == "rtok2"
+        assert db.get_twitch_sync(1).needs_reauth is False
+        db.set_twitch_sync_needs_reauth(1, True)
+        db.update_twitch_sync_tokens(
+            1,
+            "rtok3",
+            last_sync_at="2026-01-02T00:00:00+00:00",
+            next_sync_at="2030-07-01T00:00:00+00:00",
+        )
+        assert db.get_twitch_sync(1).needs_reauth is False
         assert db.delete_twitch_sync(1) is True
         assert db.get_twitch_sync(1) is None
+        assert db.has_any_periodic_twitch_sync() is False
         db.upsert_whisper_alert(
             11,
             enabled=True,
@@ -1041,6 +1058,18 @@ def check_db_premium() -> None:
     assert gift_p is not None and gift_p.kind == "gift_month" and gift_p.user_id == 11
     assert parse_invoice_payload(invoice_payload(11, "gift_year")).kind == "gift_year"
     assert parse_invoice_payload(invoice_payload(11, "gift_life")).kind == "gift_life"
+    attributed = prem.attach_invoice_attribution(
+        invoice_payload(7, "feat", ["alert_types"]), "premium_gate", "alert_types"
+    )
+    attr_parsed = parse_invoice_payload(attributed)
+    assert attr_parsed is not None
+    assert attr_parsed.kind == "feat" and attr_parsed.features == ("alert_types",)
+    assert attr_parsed.source == "premium_gate"
+    assert attr_parsed.source_feature == "alert_types"
+    assert parse_invoice_payload(invoice_payload(7, "month")).source == ""
+    assert prem.attach_invoice_attribution(invoice_payload(1, "month"), "") == invoice_payload(
+        1, "month"
+    )
     assert prem.gift_plan_kind("gift_month") == "month"
     from config import FREE_CHAT_ID, PREMIUM_CHANNEL_STARS
 
@@ -1483,6 +1512,22 @@ def check_db_premium() -> None:
     assert peek_premium_attribution(ctx, 42) == {}
     assert take_premium_attribution(ctx, 42) == {}
 
+    from premium_handlers import _attribution_for_payment
+
+    invoice_only = parse_invoice_payload(
+        prem.attach_invoice_attribution(
+            invoice_payload(55, "feat", ["alert_types"]), "menu"
+        )
+    )
+    assert invoice_only is not None
+    assert _attribution_for_payment(ctx, 55, invoice_only) == {"source": "menu"}
+    remember_premium_attribution(ctx, 55, source="premium_gate", feature="alert_types")
+    assert _attribution_for_payment(ctx, 55, invoice_only) == {
+        "source": "premium_gate",
+        "feature": "alert_types",
+    }
+    assert peek_premium_attribution(ctx, 55) == {}
+
     with tempfile.TemporaryDirectory() as pay_tmp:
         pdb = SqliteDatabase(Path(pay_tmp) / "purchases.db")
         assert pdb.record_premium_purchase(
@@ -1493,6 +1538,7 @@ def check_db_premium() -> None:
             until_unix=10**12,
             source="premium_gate",
             source_feature="twitch_sync",
+            is_renewal=True,
         )
         assert not pdb.record_premium_purchase(
             user_id=99,
@@ -1504,8 +1550,61 @@ def check_db_premium() -> None:
         assert len(rows) == 1
         assert rows[0].user_id == 99 and rows[0].source == "premium_gate"
         assert rows[0].source_feature == "twitch_sync"
+        assert rows[0].is_renewal is True
         assert pdb.mark_premium_purchases_digested([rows[0].id]) == 1
         assert pdb.list_undigested_premium_purchases() == []
+
+        assert not prem.is_purchase_renewal(
+            pdb, prem.ParsedInvoice(user_id=99, kind="month")
+        )
+        prem.apply_stars_payment(
+            pdb, 99, charge_id="stx_prev", until_unix=10**12, stars_paid=100
+        )
+        assert prem.is_purchase_renewal(
+            pdb, prem.ParsedInvoice(user_id=99, kind="month")
+        )
+        assert prem.is_purchase_renewal(
+            pdb, prem.ParsedInvoice(user_id=99, kind="year")
+        )
+        assert not prem.is_purchase_renewal(
+            pdb, prem.ParsedInvoice(user_id=99, kind="life")
+        )
+        assert not prem.is_purchase_renewal(
+            pdb,
+            prem.ParsedInvoice(
+                user_id=99, kind="feat", features=("alert_types",)
+            ),
+        )
+        prem.apply_features_payment(
+            pdb,
+            99,
+            feature_ids=["alert_types"],
+            charge_id="stx_feat",
+            until_unix=10**12,
+            stars_paid=50,
+        )
+        assert prem.is_purchase_renewal(
+            pdb,
+            prem.ParsedInvoice(
+                user_id=99, kind="feat", features=("alert_types",)
+            ),
+        )
+        # Expired feature key still counts as renewal.
+        prem.apply_features_payment(
+            pdb,
+            99,
+            feature_ids=["alert_types"],
+            charge_id="stx_feat2",
+            until_unix=1,
+            stars_paid=50,
+        )
+        assert "alert_types" in prem.get_status(pdb, 99).features
+        assert prem.is_purchase_renewal(
+            pdb,
+            prem.ParsedInvoice(
+                user_id=99, kind="feat", features=("alert_types",)
+            ),
+        )
 
     from handlers.monitoring import _format_premium_purchase_line
     from db.models import PremiumPurchase as PP
@@ -1524,11 +1623,44 @@ def check_db_premium() -> None:
             source="menu",
             source_feature="",
             paid_at="2026-01-01",
+            is_renewal=False,
         ),
     )
     assert "99" in line and "100" in line and "menu" in line
-    assert tr("daily_premium_purchases", "ru", count=1, lines=line)
-    assert tr("daily_premium_purchases", "en", count=1, lines=line)
+    assert "новая" in line
+    renew_line = _format_premium_purchase_line(
+        "ru",
+        PP(
+            id=2,
+            user_id=99,
+            charge_id="c2",
+            kind="month",
+            stars=100,
+            features="",
+            until_unix=until_ok,
+            source="menu",
+            source_feature="",
+            paid_at="2026-01-02",
+            is_renewal=True,
+        ),
+    )
+    assert "продление" in renew_line
+    assert tr(
+        "daily_premium_purchases",
+        "ru",
+        count=1,
+        new_count=1,
+        renew_count=0,
+        lines=line,
+    )
+    assert tr(
+        "daily_premium_purchases",
+        "en",
+        count=1,
+        new_count=0,
+        renew_count=1,
+        lines=renew_line,
+    )
 
     with tempfile.TemporaryDirectory() as gift_tmp:
         gdb = SqliteDatabase(Path(gift_tmp) / "gift.db")

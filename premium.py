@@ -313,6 +313,29 @@ def invoice_payload(
     return f"{PREMIUM_INVOICE_PREFIX}{user_id}"
 
 
+_INVOICE_ATTR_MAX_BYTES = 128
+
+
+def _invoice_attr_token(value: str) -> str:
+    """Keep attribution tokens payload-safe (alnum + underscore)."""
+    return "".join(c for c in str(value or "").strip() if c.isalnum() or c == "_")[:40]
+
+
+def attach_invoice_attribution(
+    payload: str, source: str = "", feature: str = ""
+) -> str:
+    """Bake pay-source into invoice payload so it survives bot restarts."""
+    src = _invoice_attr_token(source)
+    if not src or "|" in payload:
+        return payload
+    feat = _invoice_attr_token(feature)
+    suffix = f"|{src}" + (f"|{feat}" if feat else "")
+    out = f"{payload}{suffix}"
+    if len(out.encode("utf-8")) > _INVOICE_ATTR_MAX_BYTES:
+        return payload
+    return out
+
+
 @dataclass(frozen=True)
 class ParsedInvoice:
     user_id: int
@@ -320,14 +343,29 @@ class ParsedInvoice:
     features: tuple[str, ...] = ()
     twitch_user_id: str = ""
     twitch_login: str = ""
+    source: str = ""
+    source_feature: str = ""
 
 
 def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
     if not payload.startswith(PREMIUM_INVOICE_PREFIX):
         return None
     raw = payload[len(PREMIUM_INVOICE_PREFIX) :]
+    attr_source = ""
+    attr_feature = ""
+    if "|" in raw:
+        raw, _, rest = raw.partition("|")
+        bits = rest.split("|", 1)
+        attr_source = _invoice_attr_token(bits[0])
+        if len(bits) > 1:
+            attr_feature = _invoice_attr_token(bits[1])
     if raw.isdigit():
-        return ParsedInvoice(user_id=int(raw), kind="legacy")
+        return ParsedInvoice(
+            user_id=int(raw),
+            kind="legacy",
+            source=attr_source,
+            source_feature=attr_feature,
+        )
     parts = raw.split(":", 3)
     if len(parts) < 2:
         return None
@@ -336,13 +374,24 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
         return None
     uid = int(uid_s)
     if kind in ("month", "year", "life", "gift_month", "gift_year", "gift_life"):
-        return ParsedInvoice(user_id=uid, kind=kind)
+        return ParsedInvoice(
+            user_id=uid,
+            kind=kind,
+            source=attr_source,
+            source_feature=attr_feature,
+        )
     if kind == "feat":
         feat_raw = parts[2] if len(parts) > 2 else ""
         feats = tuple(f for f in feat_raw.split(",") if f in FEATURE_IDS)
         if not feats:
             return None
-        return ParsedInvoice(user_id=uid, kind="feat", features=feats)
+        return ParsedInvoice(
+            user_id=uid,
+            kind="feat",
+            features=feats,
+            source=attr_source,
+            source_feature=attr_feature,
+        )
     if kind == "channel":
         if len(parts) < 4:
             return None
@@ -351,7 +400,12 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
         if not tid or not login:
             return None
         return ParsedInvoice(
-            user_id=uid, kind="channel", twitch_user_id=tid, twitch_login=login
+            user_id=uid,
+            kind="channel",
+            twitch_user_id=tid,
+            twitch_login=login,
+            source=attr_source,
+            source_feature=attr_feature,
         )
     return None
 
@@ -368,6 +422,18 @@ def gift_plan_kind(invoice_kind: str) -> str | None:
 
 def get_status(db: Database, user_id: int) -> PremiumStatus:
     return db.get_premium_status(user_id)
+
+
+def is_purchase_renewal(db: Database, parsed: ParsedInvoice) -> bool:
+    """True when the user already had this plan/feature before this payment."""
+    st = get_status(db, parsed.user_id)
+    if parsed.kind == "feat":
+        return any(fid in st.features for fid in parsed.features)
+    if parsed.kind in ("month", "year", "legacy"):
+        return bool(st.stars_charge_id) or st.stars_until > 0 or st.stars_active
+    if parsed.kind == "life":
+        return bool(st.permanent)
+    return False
 
 
 def is_premium(db: Database, user_id: int) -> bool:
@@ -954,14 +1020,17 @@ def refresh_twitch_premium(
     user_id: int,
     *,
     broadcaster_id: str | None = None,
-) -> bool:
-    """Re-check Twitch channel sub; update cache. Returns whether still active."""
+) -> tuple[bool, bool]:
+    """Re-check Twitch channel sub; update cache.
+
+    Returns (still_active, newly_marked_reauth).
+    """
     status = db.get_premium_status(user_id)
     refresh = db.get_premium_twitch_refresh(user_id)
     if not refresh or not status.twitch_user_id:
         if status.twitch_active:
             db.set_premium_twitch(user_id, active=False)
-        return False
+        return False, False
     try:
         token_data = twitch.refresh_user_token(refresh)
         access = token_data.get("access_token") or ""
@@ -973,7 +1042,7 @@ def refresh_twitch_premium(
             broadcaster = twitch.get_user(PREMIUM_TWITCH_LOGIN)
             if not broadcaster:
                 db.set_premium_twitch(user_id, active=False)
-                return False
+                return False, False
             b_id = str(broadcaster["id"])
         active = twitch.check_user_subscription(
             access, broadcaster_id=b_id, user_id=status.twitch_user_id
@@ -984,10 +1053,16 @@ def refresh_twitch_premium(
             twitch_user_id=status.twitch_user_id,
             refresh_token=new_refresh,
         )
-        return active
+        db.set_premium_twitch_needs_reauth(user_id, False)
+        return active, False
     except Exception:
         logger.exception("Twitch premium refresh failed for %s", user_id)
-        return status.twitch_active
+        already = db.get_premium_twitch_needs_reauth(user_id)
+        db.set_premium_twitch(user_id, active=False)
+        if not already:
+            db.set_premium_twitch_needs_reauth(user_id, True)
+            return False, True
+        return False, False
 
 
 def prune_expired_premium_clocks(db: Database, user_id: int) -> bool:

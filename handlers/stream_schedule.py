@@ -40,6 +40,33 @@ from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
+VACATION_AUTO_JOB_NAME = "vacation_auto_exits"
+_VACATION_AUTO_INTERVAL_SEC = 300
+
+
+def sync_vacation_auto_job(job_queue, db: Database) -> None:
+    """Keep vacation auto-exit (and other optional jobs) in sync with DB state."""
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(job_queue, db)
+
+
+def _set_vacation_auto_exit_at(
+    context: ContextTypes.DEFAULT_TYPE | None,
+    db: Database,
+    owner_id: int,
+    exit_at: str | None,
+    *,
+    application: Application | None = None,
+) -> None:
+    db.set_vacation_auto_exit_at(owner_id, exit_at)
+    jq = None
+    if context is not None:
+        jq = context.application.job_queue
+    elif application is not None:
+        jq = application.job_queue
+    sync_vacation_auto_job(jq, db)
+
 
 def _log_schedule_clear_failed(exc_type: str) -> None:
     logger.warning("Failed to clear Twitch schedule before publish (%s)", exc_type)
@@ -1854,7 +1881,7 @@ async def _complete_schedule_vacation(
         return
 
     if disable:
-        db.set_vacation_auto_exit_at(owner_id, None)
+        _set_vacation_auto_exit_at(None, db, owner_id, None, application=application)
         db.set_vacation_ends_at(owner_id, None)
         text = t("stream_schedule_vacation_manual_exit_ok", lang)
         buttons = []
@@ -1880,9 +1907,11 @@ async def _complete_schedule_vacation(
     db.set_vacation_ends_at(owner_id, end_iso or None)
     _remember_schedule_broadcaster(db, owner_id, twitch_user_id, refresh)
     if auto_exit and end_iso:
-        db.set_vacation_auto_exit_at(owner_id, end_iso)
+        _set_vacation_auto_exit_at(
+            None, db, owner_id, end_iso, application=application
+        )
     else:
-        db.set_vacation_auto_exit_at(owner_id, None)
+        _set_vacation_auto_exit_at(None, db, owner_id, None, application=application)
 
     # Refresh already stored above when present; don't re-offer save if kept.
     if refresh:
@@ -1926,7 +1955,7 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     async def _fail(owner_id: int, lang: str, reason: str) -> None:
-        db.set_vacation_auto_exit_at(owner_id, None)
+        _set_vacation_auto_exit_at(context, db, owner_id, None)
         try:
             await context.bot.send_message(
                 owner_id,
@@ -1975,7 +2004,7 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
                 sync.twitch_user_id,
                 enabled=False,
             )
-            db.set_vacation_auto_exit_at(owner_id, None)
+            _set_vacation_auto_exit_at(context, db, owner_id, None)
             db.set_vacation_ends_at(owner_id, None)
             await context.bot.send_message(
                 owner_id,
@@ -1988,6 +2017,8 @@ async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> Non
                 type(exc).__name__,
             )
             await _fail(owner_id, lang, _vacation_user_error(exc, lang))
+
+    sync_vacation_auto_job(context.application.job_queue, db)
 
 
 async def schedule_save_token_callback(
