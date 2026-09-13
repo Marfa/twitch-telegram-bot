@@ -17,6 +17,8 @@ from i18n import (
     broadcast_menu,
     btn,
     delete_all_confirm_keyboard,
+    ignore_igdb_delete_keyboard,
+    ignore_igdb_pick_keyboard,
     ignored_words_keyboard,
     main_menu,
     new_sub_other_keyboard,
@@ -213,6 +215,30 @@ def _check_inline_wizard_keyboards() -> None:
             ("admin_audience", admin_other_audience_keyboard(loc)),
             ("ignored_words", ignored_words_keyboard(loc, has_words=False)),
             ("ignored_words_clear", ignored_words_keyboard(loc, has_words=True)),
+            (
+                "ignored_words_igdb",
+                ignored_words_keyboard(
+                    loc, has_words=False, has_igdb=True, show_igdb=True
+                ),
+            ),
+            (
+                "ignore_igdb_pick",
+                ignore_igdb_pick_keyboard(
+                    loc,
+                    [
+                        {"kind": "genre", "id": 1, "name": "Shooter"},
+                        {"kind": "publisher", "id": 2, "name": "Valve"},
+                    ],
+                ),
+            ),
+            (
+                "ignore_igdb_delete",
+                ignore_igdb_delete_keyboard(
+                    loc,
+                    [{"kind": "genre", "id": 1, "name": "Shooter"}],
+                    {0},
+                ),
+            ),
             ("language_settings", language_keyboard(loc)),
             ("delete_all_confirm", delete_all_confirm_keyboard(loc)),
             ("template_typo", template_typo_keyboard(loc)),
@@ -492,6 +518,35 @@ async def _scenario_settings_and_partner(db) -> None:
     ):
         await start_ignored_words(update, ctx)
     cap.assert_turn("settings_ignored_words")
+
+
+async def _scenario_ignore_igdb(db) -> None:
+    """§8 — IGDB ignore genres prompt + delete categories (beta)."""
+    from handlers.settings import start_ignore_igdb, start_ignore_igdb_delete
+    from twitch import IGNORE_IGDB_BETA_ID
+
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
+    db.set_beta_enrollment(_FREE_UID, IGNORE_IGDB_BETA_ID, True)
+    db.set_global_ignore_igdb(
+        _FREE_UID, [{"kind": "genre", "id": 12, "name": "RPG"}]
+    )
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, _query = _cb_update(_FREE_UID, "ignored_words:igdb", cap)
+    ctx = _ctx(application)
+    await start_ignore_igdb(update, ctx)
+    cap.assert_turn("settings_ignore_igdb_prompt")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, _query = _cb_update(_FREE_UID, "ignored_words:igdb_del", cap)
+    ctx = _ctx(application)
+    await start_ignore_igdb_delete(update, ctx)
+    cap.assert_turn("settings_ignore_igdb_delete")
 
 
 async def _scenario_admin_broadcast(db) -> None:
@@ -2003,6 +2058,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_channel_step(db)
         await _scenario_subscriptions(db)
         await _scenario_settings_and_partner(db)
+        await _scenario_ignore_igdb(db)
         await _scenario_admin_broadcast(db)
         await _scenario_feedback(db)
         await _scenario_wizard_deep(db)

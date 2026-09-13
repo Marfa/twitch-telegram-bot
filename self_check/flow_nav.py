@@ -38,6 +38,8 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^delete_all:no$|"
     r"^list_del_no:\d+$|"
     r"^ignored_words:cancel$|"
+    r"^ignore_igdb:cancel$|"
+    r"^ignore_igdb_del:cancel$|"
     r"^ignore_keywords:(?:cancel|back)$|"
     r"^cbtn:(?:cancel|back)$|"
     r"^strip_name:(?:cancel|back)$|"

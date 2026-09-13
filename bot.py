@@ -363,6 +363,11 @@ from handlers.settings import (
     receive_ignored_words,
     receive_ignored_words_cancel,
     receive_ignored_words_clear,
+    receive_ignore_igdb_callback,
+    receive_ignore_igdb_delete_callback,
+    receive_ignore_igdb_text,
+    start_ignore_igdb,
+    start_ignore_igdb_delete,
     start_ignored_words,
     start_language_change,
     sync_stream_chat_menu_button,
@@ -720,6 +725,8 @@ logger = logging.getLogger(__name__)
     WATCH_SAVE,
     DELETE_SIBLING_ALERTS,
     GLOBAL_IGNORE_KEYWORDS,
+    GLOBAL_IGNORE_IGDB,
+    GLOBAL_IGNORE_IGDB_DELETE,
     ADMIN_MSG_AUDIENCE,
     ADMIN_MSG_IDS,
     STREAM_SCHEDULE_MODE,
@@ -732,7 +739,7 @@ logger = logging.getLogger(__name__)
     ADMIN_REFUND_CHARGE,
     STREAM_SCHEDULE_VACATION,
     STREAM_SCHEDULE_VACATION_AUTO,
-) = range(67)
+) = range(69)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2622,9 +2629,26 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     receive_ignored_words_clear, pattern=r"^ignored_words:clear$"
                 ),
                 CallbackQueryHandler(
+                    start_ignore_igdb, pattern=r"^ignored_words:igdb$"
+                ),
+                CallbackQueryHandler(
+                    start_ignore_igdb_delete, pattern=r"^ignored_words:igdb_del$"
+                ),
+                CallbackQueryHandler(
                     receive_ignored_words_cancel, pattern=r"^ignored_words:cancel$"
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_ignored_words),
+            ],
+            GLOBAL_IGNORE_IGDB: [
+                CallbackQueryHandler(
+                    receive_ignore_igdb_callback, pattern=r"^ignore_igdb:"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_ignore_igdb_text),
+            ],
+            GLOBAL_IGNORE_IGDB_DELETE: [
+                CallbackQueryHandler(
+                    receive_ignore_igdb_delete_callback, pattern=r"^ignore_igdb_del:"
+                ),
             ],
             LINK_PREVIEW: [
                 _wiz_cancel,

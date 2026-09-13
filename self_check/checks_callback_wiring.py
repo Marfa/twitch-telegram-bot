@@ -26,6 +26,8 @@ from i18n import (
     edit_game_options_keyboard,
     edit_options_keyboard,
     ignored_words_keyboard,
+    ignore_igdb_delete_keyboard,
+    ignore_igdb_pick_keyboard,
     ignore_keywords_keyboard,
     import_mode_keyboard,
     language_keyboard,
@@ -134,6 +136,9 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("delete_all_yes", "delete_all:yes"),
     ("delete_all_no", "delete_all:no"),
     ("delete_sel", f"delete_sel:{_SAMPLE_SUB}"),
+    ("ignore_igdb_pick", "ignore_igdb:pick:0"),
+    ("ignore_igdb_del_sel", "ignore_igdb_del:sel:0"),
+    ("ignored_words_igdb", "ignored_words:igdb"),
     ("watch_again", "watch:again"),
     ("watch_change", "watch:change"),
     ("watch_cat", "watch_cat:lucky"),
@@ -349,6 +354,28 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
         ),
         ("whisper_alerts", whisper_alerts_keyboard, {"lang": loc, "enabled": False}),
         ("ignored_words", ignored_words_keyboard, {"lang": loc, "has_words": False}),
+        (
+            "ignored_words_igdb",
+            ignored_words_keyboard,
+            {"lang": loc, "has_words": True, "has_igdb": True, "show_igdb": True},
+        ),
+        (
+            "ignore_igdb_pick",
+            ignore_igdb_pick_keyboard,
+            {
+                "lang": loc,
+                "candidates": [{"kind": "genre", "id": 12, "name": "RPG"}],
+            },
+        ),
+        (
+            "ignore_igdb_delete",
+            ignore_igdb_delete_keyboard,
+            {
+                "lang": loc,
+                "entries": [{"kind": "developer", "id": 1, "name": "CDPR"}],
+                "selected": set(),
+            },
+        ),
         (
             "ignore_keywords",
             ignore_keywords_keyboard,

@@ -1289,7 +1289,9 @@ def ignore_keywords_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def ignored_words_keyboard(lang: str, *, has_words: bool) -> InlineKeyboardMarkup:
+def ignored_words_keyboard(
+    lang: str, *, has_words: bool, has_igdb: bool = False, show_igdb: bool = False
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if has_words:
         rows.append(
@@ -1300,11 +1302,101 @@ def ignored_words_keyboard(lang: str, *, has_words: bool) -> InlineKeyboardMarku
                 )
             ]
         )
+    if show_igdb:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("ignored_words_igdb", lang),
+                    callback_data="ignored_words:igdb",
+                )
+            ]
+        )
+        if has_igdb:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        t("ignored_words_igdb_delete", lang),
+                        callback_data="ignored_words:igdb_del",
+                    )
+                ]
+            )
     rows.append(
         [
             InlineKeyboardButton(
                 t("ignored_words_cancel", lang),
                 callback_data="ignored_words:cancel",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def ignore_igdb_pick_keyboard(
+    lang: str, candidates: list[dict]
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, c in enumerate(candidates):
+        kind = str(c.get("kind") or "")
+        kind_label = t(f"ignore_igdb_kind_{kind}", lang)
+        name = str(c.get("name") or "?")[:48]
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{kind_label}: {name}"[:64],
+                    callback_data=f"ignore_igdb:pick:{i}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("ignored_words_cancel", lang),
+                callback_data="ignore_igdb:cancel",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def ignore_igdb_delete_keyboard(
+    lang: str, entries: list[dict], selected: set[int]
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, entry in enumerate(entries):
+        kind = str(entry.get("kind") or "")
+        kind_label = t(f"ignore_igdb_kind_{kind}", lang)
+        name = str(entry.get("name") or "?")[:40]
+        mark = "✅ " if i in selected else ""
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{mark}🗑 {kind_label}: {name}"[:64],
+                    callback_data=f"ignore_igdb_del:sel:{i}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("ignore_igdb_delete_go", lang, count=len(selected)),
+                callback_data="ignore_igdb_del:go",
+            )
+        ]
+    )
+    if selected:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("ignore_igdb_delete_clear", lang),
+                    callback_data="ignore_igdb_del:clear",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("ignored_words_cancel", lang),
+                callback_data="ignore_igdb_del:cancel",
             )
         ]
     )

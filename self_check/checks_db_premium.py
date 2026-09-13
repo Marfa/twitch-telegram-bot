@@ -651,6 +651,19 @@ def check_db_premium() -> None:
         assert db.get_global_ignore_keywords(1) == "irl, chatting"
         db.set_global_ignore_keywords(1, "")
         assert db.get_global_ignore_keywords(1) == ""
+        assert db.get_global_ignore_igdb(1) == []
+        db.set_global_ignore_igdb(
+            1,
+            [
+                {"kind": "genre", "id": 5, "name": "Shooter"},
+                {"kind": "publisher", "id": 9, "name": "Valve"},
+            ],
+        )
+        igdb = db.get_global_ignore_igdb(1)
+        assert len(igdb) == 2
+        assert igdb[0]["kind"] == "genre" and igdb[0]["id"] == 5
+        db.set_global_ignore_igdb(1, [])
+        assert db.get_global_ignore_igdb(1) == []
         assert db.mark_template_typo_notice_sent(1) is True
         assert db.mark_template_typo_notice_sent(1) is False
         assert sub.image_file_id is None

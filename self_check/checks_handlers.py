@@ -154,11 +154,19 @@ def check_handlers() -> None:
             encoding="utf-8"
         )
     )
-    global_ignore_chunk = settings_src.split("async def start_ignored_words", 1)[1].split(
-        "async def receive_ignored_words", 1
-    )[0]
+    global_ignore_chunk = settings_src.split(
+        "async def _show_ignored_words_screen", 1
+    )[1].split("async def open_settings_menu", 1)[0]
     assert "_pulse_wizard_keyboard" not in global_ignore_chunk
     assert "ignored_words_keyboard" in global_ignore_chunk
+    assert "has_igdb" in global_ignore_chunk
+    start_ignore_chunk = settings_src.split("async def start_ignored_words", 1)[1].split(
+        "async def receive_ignored_words", 1
+    )[0]
+    assert "_show_ignored_words_screen" in start_ignore_chunk
+    assert "start_ignore_igdb" in settings_src
+    assert "GLOBAL_IGNORE_IGDB" in bot_src
+    assert "ignored_words:igdb" in bot_src
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
     assert "_is_unchanged_message_edit(err)" in bot_src or (

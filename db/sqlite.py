@@ -354,6 +354,11 @@ class SqliteDatabase:
                 "ALTER TABLE users ADD COLUMN global_ignore_keywords "
                 "TEXT NOT NULL DEFAULT ''"
             )
+        if "global_ignore_igdb" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN global_ignore_igdb "
+                "TEXT NOT NULL DEFAULT '[]'"
+            )
         if "premium_permanent" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN premium_permanent INTEGER NOT NULL DEFAULT 0"
@@ -2460,6 +2465,32 @@ class SqliteDatabase:
                     global_ignore_keywords = excluded.global_ignore_keywords
                 """,
                 (user_id, str(keywords or "")),
+            )
+
+    def get_global_ignore_igdb(self, user_id: int) -> list[dict]:
+        from twitch import parse_ignore_igdb_entries
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT global_ignore_igdb FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return []
+        return parse_ignore_igdb_entries(row["global_ignore_igdb"])
+
+    def set_global_ignore_igdb(self, user_id: int, entries: list[dict]) -> None:
+        from twitch import dump_ignore_igdb_entries
+
+        payload = dump_ignore_igdb_entries(entries)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, global_ignore_igdb) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    global_ignore_igdb = excluded.global_ignore_igdb
+                """,
+                (user_id, payload),
             )
 
     def get_advanced_mode_setting(self, user_id: int) -> bool | None:
