@@ -148,6 +148,17 @@ def check_handlers() -> None:
     assert "_pulse_wizard_keyboard" not in create_ignore_chunk
     assert 'ignore_keywords:back"' in bot_src or "ignore_keywords:back$" in bot_src
     assert "receive_ignore_keywords_back" in bot_src
+    # Global ignored-words settings: inline Cancel only (no reply pulse).
+    settings_src = (
+        _Path(__file__).resolve().parents[1].joinpath("handlers/settings.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    global_ignore_chunk = settings_src.split("async def start_ignored_words", 1)[1].split(
+        "async def receive_ignored_words", 1
+    )[0]
+    assert "_pulse_wizard_keyboard" not in global_ignore_chunk
+    assert "ignored_words_keyboard" in global_ignore_chunk
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
     assert "_is_unchanged_message_edit(err)" in bot_src or (

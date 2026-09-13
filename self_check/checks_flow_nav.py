@@ -482,9 +482,6 @@ async def _scenario_settings_and_partner(db) -> None:
     await open_partner_menu(update, ctx)
     cap.assert_turn("partner_menu")
 
-    async def _pulse(bot, chat_id, lang, *, back=True):
-        cap.note_pulse()
-
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)
@@ -492,7 +489,7 @@ async def _scenario_settings_and_partner(db) -> None:
     ctx = _ctx(application)
     with patch(
         "handlers.settings.prem.has_feature", new=AsyncMock(return_value=True)
-    ), patch("handlers.settings._pulse_wizard_keyboard", new=_pulse):
+    ):
         await start_ignored_words(update, ctx)
     cap.assert_turn("settings_ignored_words")
 

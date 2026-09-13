@@ -24,7 +24,6 @@ import demo_mode
 import premium as prem
 from bot_helpers import (
     _menu,
-    _pulse_wizard_keyboard,
     _settings_kb,
     _user_lang,
     _user_notifications_paused,
@@ -309,6 +308,7 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
     current = _ignore_keywords_current_label(current_raw, lang)
     if has_words:
         current = f"<code>{html.escape(current)}</code>"
+    # Inline Cancel only — no reply pulse (deleting the carrier drops the menu on many clients).
     await update.effective_message.reply_text(
         t(
             "ignored_words_prompt",
@@ -322,7 +322,6 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode=ParseMode.HTML,
         reply_markup=ignored_words_keyboard(lang, has_words=has_words),
     )
-    await _pulse_wizard_keyboard(context.bot, user_id, lang, back=False)
     return _global_ignore_state()
 
 async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -330,16 +329,13 @@ async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TY
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     text = (update.effective_message.text or "").strip()
-    if text in all_wizard_nav_buttons():
+    if text in all_wizard_nav_buttons() or is_menu_button(text):
         await update.effective_message.reply_text(
             t("menu_settings", lang),
             reply_markup=_settings_kb(lang, db, user_id),
         )
         context.user_data.clear()
         return ConversationHandler.END
-    if is_menu_button(text):
-        await update.effective_message.reply_text(t("finish_setup_first", lang))
-        return _global_ignore_state()
     added = normalize_ignore_keywords(text)
     if not added:
         await update.effective_message.reply_text(t("ignored_words_hint_empty", lang))
