@@ -19,6 +19,7 @@ from i18n import (
     delete_all_confirm_keyboard,
     ignore_igdb_delete_keyboard,
     ignore_igdb_pick_keyboard,
+    ignore_keywords_keyboard,
     ignored_words_keyboard,
     main_menu,
     new_sub_other_keyboard,
@@ -237,6 +238,22 @@ def _check_inline_wizard_keyboards() -> None:
                     loc,
                     [{"kind": "genre", "id": 1, "name": "Shooter"}],
                     {0},
+                ),
+            ),
+            (
+                "ignore_keywords_wizard",
+                ignore_keywords_keyboard(
+                    loc,
+                    show_back=True,
+                    show_cancel=True,
+                    show_igdb=True,
+                    has_igdb=True,
+                ),
+            ),
+            (
+                "ignore_keywords_edit",
+                ignore_keywords_keyboard(
+                    loc, as_cancel=True, show_igdb=True, has_igdb=False
                 ),
             ),
             ("language_settings", language_keyboard(loc)),

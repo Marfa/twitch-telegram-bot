@@ -988,6 +988,32 @@ def check_core() -> None:
         {"genres": [12], "game_modes": [], "developers": [], "publishers": []},
         [],
     )
+    # IGDB companies/genres/modes have no full-text search — must use where name ~.
+    from unittest.mock import MagicMock
+
+    from twitch import TwitchClient
+
+    client = TwitchClient.__new__(TwitchClient)
+    client._session = MagicMock()
+    posted: list[str] = []
+
+    def _post(url, headers=None, data=None, timeout=None):
+        posted.append(str(data or ""))
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(
+            return_value=[{"id": 1, "name": "Role-playing (RPG)"}]
+        )
+        return resp
+
+    client._session.post = _post
+    client._igdb_headers = MagicMock(return_value={})  # type: ignore[method-assign]
+    hit = client._igdb_search_named(
+        "https://api.igdb.com/v4/genres", "RPG", limit=5
+    )
+    assert hit and hit[0]["name"] == "Role-playing (RPG)"
+    assert posted and "where name ~ *\"RPG\"*" in posted[0]
+    assert "search " not in posted[0]
 
     assert _parse_watch_viewers("100") == (100, None)
     assert _parse_watch_viewers("100-500") == (100, 500)
