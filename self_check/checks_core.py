@@ -1390,10 +1390,12 @@ def check_core() -> None:
         assert "42" in feedback
         assert "<code>42</code>" in feedback
         assert "@immarfa" in feedback
+        assert "igdb.com" in feedback.lower()
         assert "bot_version" not in feedback
         assert "Версия бота" not in feedback
         assert "Bot version" not in feedback
         assert "GitHub Issues" not in feedback
+        assert "igdb.com" in tr("ignore_igdb_prompt", loc).lower()
         from unittest.mock import patch
 
         from i18n import guide_keyboard, guide_url

@@ -575,6 +575,8 @@ async def start_ignore_igdb(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data.pop("ignore_igdb_candidates", None)
     await query.edit_message_text(
         t("ignore_igdb_prompt", lang),
+        parse_mode=ParseMode.HTML,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
         reply_markup=InlineKeyboardMarkup(
             [
                 [
