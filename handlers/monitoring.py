@@ -400,8 +400,7 @@ def _load_admin_growth_snapshots(path: Path | None = None) -> dict[str, dict[str
             continue
         try:
             out[key] = {
-                "count": int(row["count"]),
-                "paid": int(row["paid"]),
+                "users": int(row["users"]),
                 "trials": int(row["trials"]),
             }
         except (KeyError, TypeError, ValueError):
@@ -410,13 +409,13 @@ def _load_admin_growth_snapshots(path: Path | None = None) -> dict[str, dict[str
 
 
 def _save_admin_growth_snapshot(
-    kind: str, *, count: int, paid: int, trials: int, path: Path | None = None
+    kind: str, *, users: int, trials: int, path: Path | None = None
 ) -> None:
     if kind not in _ADMIN_GROWTH_SNAPSHOT_KEYS:
         raise ValueError(f"unknown growth snapshot kind: {kind}")
     path = path or _admin_growth_snapshot_path()
     data = _load_admin_growth_snapshots(path)
-    data[kind] = {"count": count, "paid": paid, "trials": trials}
+    data[kind] = {"users": users, "trials": trials}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
@@ -443,6 +442,7 @@ def _format_growth_report(
     lang: str,
     *,
     template_key: str,
+    users: int,
     count: int,
     paid: int,
     trials: list[tuple[int, int]],
@@ -461,16 +461,15 @@ def _format_growth_report(
         )
         for user_id, until in trials
     )
-    prev_count = previous.get("count") if previous else None
-    prev_paid = previous.get("paid") if previous else None
+    prev_users = previous.get("users") if previous else None
     prev_trials = previous.get("trials") if previous else None
     kwargs: dict[str, object] = {
+        "users": users,
+        "users_delta": _delta_suffix(users, prev_users),
         "count": count,
         "paid": paid,
         "trials": trial_n,
         "trial_list": trial_list,
-        "count_delta": _delta_suffix(count, prev_count),
-        "paid_delta": _delta_suffix(paid, prev_paid),
         "trials_delta": _delta_suffix(trial_n, prev_trials),
     }
     if period is not None:
@@ -495,6 +494,7 @@ async def _send_growth_report_to_admins(
     if count <= 0 and paid <= 0:
         return
     db: Database = context.application.bot_data["db"]
+    users = db.get_bot_stats().users
     previous = _load_admin_growth_snapshots().get(snapshot_kind)
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
@@ -502,6 +502,7 @@ async def _send_growth_report_to_admins(
         text = _format_growth_report(
             lang,
             template_key=template_key,
+            users=users,
             count=count,
             paid=paid,
             trials=trials,
@@ -515,7 +516,7 @@ async def _send_growth_report_to_admins(
                 "Cannot send %s report to admin %s: %s", snapshot_kind, admin_id, exc
             )
     _save_admin_growth_snapshot(
-        snapshot_kind, count=count, paid=paid, trials=len(trials)
+        snapshot_kind, users=users, trials=len(trials)
     )
 
 

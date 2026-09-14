@@ -1198,24 +1198,24 @@ def check_handlers() -> None:
         assert tr(
             "weekly_new_users",
             "ru",
+            users=100,
+            users_delta=" (+41)",
             count=1,
             paid=2,
             trials=len(trials),
             trial_list=trial_list,
-            count_delta=" (+1)",
-            paid_delta=" (-1)",
             trials_delta=" (0)",
         )
         assert tr(
             "monthly_new_users",
             "en",
             period="August 2026",
+            users=500,
+            users_delta="",
             count=10,
             paid=3,
             trials=0,
             trial_list="",
-            count_delta="",
-            paid_delta="",
             trials_delta="",
         ).startswith("📊 Stats for August 2026")
         from handlers.monitoring import (
@@ -1236,13 +1236,15 @@ def check_handlers() -> None:
         growth = _format_growth_report(
             "ru",
             template_key="weekly_new_users",
+            users=1041,
             count=5,
             paid=1,
             trials=[],
-            previous={"count": 3, "paid": 1, "trials": 0},
+            previous={"users": 1000, "trials": 0},
         )
-        assert "Новых пользователей: 5 (+2)" in growth
-        assert "Платных (Stars): 1 (0)" in growth
+        assert "Всего пользователей: 1041 (+41)" in growth
+        assert "Новых за неделю: 5" in growth
+        assert "Платных (Stars) за неделю: 1" in growth
         assert db.count_new_users_between(
             datetime.now(timezone.utc) - timedelta(days=1),
             datetime.now(timezone.utc) + timedelta(days=1),
