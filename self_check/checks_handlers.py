@@ -194,7 +194,12 @@ def check_handlers() -> None:
     cancel_block = ph_src.split('if action == "cancel":', 1)[1].split(
         'if action == "marfapr":', 1
     )[0]
+    feat_cancel_block = ph_src.split(
+        'if data.startswith("premium:cancel_feat:")', 1
+    )[1].split('if data == "premium:feat_pay":', 1)[0]
     assert 't("import_failed"' not in cancel_block
+    assert 't("premium_cancel_failed"' in cancel_block
+    assert 't("premium_cancel_failed"' in feat_cancel_block
     assert "premium_cancel_done" in ph_src
     assert "set_premium_feature_canceled" in ph_src
     assert "clear_premium_feature" not in ph_src.split(

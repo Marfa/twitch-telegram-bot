@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import Application, ContextTypes
 
 import premium as prem
@@ -30,6 +31,36 @@ from i18n import (
 from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
 
 logger = logging.getLogger(__name__)
+
+
+async def _cancel_telegram_star_subscription(
+    bot, user_id: int, charge_id: str, *, log_label: str = ""
+) -> bool:
+    """Cancel Stars auto-renew in Telegram; True if canceled or already canceled."""
+    try:
+        await bot.edit_user_star_subscription(
+            user_id=user_id,
+            telegram_payment_charge_id=charge_id,
+            is_canceled=True,
+        )
+        return True
+    except BadRequest as exc:
+        if "subscription_not_modified" in str(exc).lower():
+            return True
+        logger.exception(
+            "edit_user_star_subscription failed user=%s%s",
+            user_id,
+            f" {log_label}" if log_label else "",
+        )
+        return False
+    except Exception:
+        logger.exception(
+            "edit_user_star_subscription failed user=%s%s",
+            user_id,
+            f" {log_label}" if log_label else "",
+        )
+        return False
+
 
 # Survives ConversationHandler user_data.clear() (gate → get Premium).
 _PREMIUM_ATTR_STORE = "premium_attribution"
@@ -627,19 +658,13 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         charge_id = st.feature_charge_id(fid)
         if charge_id:
-            try:
-                await context.bot.edit_user_star_subscription(
-                    user_id=user_id,
-                    telegram_payment_charge_id=charge_id,
-                    is_canceled=True,
-                )
-            except Exception:
-                # Charge may be invalid/already canceled; still mark local cancel.
-                logger.exception(
-                    "edit_user_star_subscription feature failed user=%s feat=%s",
-                    user_id,
-                    fid,
-                )
+            ok = await _cancel_telegram_star_subscription(
+                context.bot, user_id, charge_id, log_label=f"feat={fid}"
+            )
+            if not ok:
+                await query.answer()
+                await query.edit_message_text(t("premium_cancel_failed", lang))
+                return
         db.set_premium_feature_canceled(user_id, fid)
         until = _fmt_until(st.feature_until(fid))
         await query.answer()
@@ -809,15 +834,12 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not st.stars_charge_id or not st.stars_active:
             await query.edit_message_text(t("premium_cancel_none", lang))
             return
-        try:
-            await context.bot.edit_user_star_subscription(
-                user_id=user_id,
-                telegram_payment_charge_id=st.stars_charge_id,
-                is_canceled=True,
-            )
-        except Exception:
-            # Invalid/test charge_id: still stop offering cancel in-bot.
-            logger.exception("edit_user_star_subscription failed for %s", user_id)
+        ok = await _cancel_telegram_star_subscription(
+            context.bot, user_id, st.stars_charge_id
+        )
+        if not ok:
+            await query.edit_message_text(t("premium_cancel_failed", lang))
+            return
         db.set_premium_stars_canceled(user_id, True)
         await query.edit_message_text(
             t("premium_cancel_done", lang, until=_fmt_until(st.stars_until))
