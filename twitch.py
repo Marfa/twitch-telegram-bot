@@ -1649,12 +1649,19 @@ class TwitchClient:
     def _igdb_search_named(
         self, url: str, query: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
-        q = (query or "").strip().replace('"', "")
+        """Substring match by name. IGDB `search` is only for games/themes/etc., not
+        companies/genres/game_modes — those need where name ~ *"…"*.
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+        # Apicalypse string literals: strip quotes/wildcards that break the clause.
+        q = q.replace("\\", "").replace('"', "").replace("*", "")
         if not q:
             return []
         headers = self._igdb_headers()
-        # Apicalypse search; limit per endpoint.
-        body = f'search "{q}";\nfields name;\nlimit {max(1, min(10, limit))};'
+        lim = max(1, min(10, limit))
+        body = f'fields name;\nwhere name ~ *"{q}"*;\nlimit {lim};'
         try:
             resp = self._session.post(url, headers=headers, data=body, timeout=15)
             resp.raise_for_status()
@@ -1662,7 +1669,7 @@ class TwitchClient:
             if isinstance(rows, list):
                 return [r for r in rows if isinstance(r, dict) and r.get("id")]
         except Exception as exc:
-            logger.warning("IGDB search failed (%s) url=%s", exc, url)
+            logger.warning("IGDB name search failed (%s) url=%s q=%r", exc, url, q)
         return []
 
     def igdb_search_ignore_entities(
