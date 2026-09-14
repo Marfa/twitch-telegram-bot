@@ -7,7 +7,6 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
-from html import unescape as html_unescape
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
@@ -38,41 +37,13 @@ TWITCH_URL_RE = re.compile(
 )
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 
-# ponytail: public Twitch web player Client-ID for anonymous gql only (channel about).
-_TWITCH_GQL_WEB_CLIENT_ID = "kimne78kx3ncx6brgo4" "mv6wki5h1ko"
 # Helix stream tags for Drops-enabled (EN + RU + short "Drops"), compared casefold.
 _DROPS_ENABLED_TAG_NEEDLES = ("drops enabled", "drops включены", "drops")
 _DROPS_ENABLED_TAG = "Drops Enabled"  # back-compat label
 _TWITCHDROPS_APP_BASE = "https://twitchdrops.app"
 _TWITCHDROPS_APP_UA = "Mozilla/5.0 (compatible; MarfaTwitchTelegramBot/1.0)"
-# ponytail: in-process cache for game_id→slug / how-to; ceiling = process lifetime.
+# ponytail: in-process game_id→slug for catalog links; ceiling = process lifetime.
 _twitchdrops_app_slug_by_game_id: dict[str, str] = {}
-_twitchdrops_app_how_to_cache: dict[str, tuple[float, str]] = {}
-_TWITCHDROPS_HOW_TO_TTL_SEC = 6 * 3600
-_CHANNEL_ABOUT_GQL = """
-query ChannelAboutLinks($login: String!) {
-  user(login: $login) {
-    panels {
-      id
-      type
-      ... on DefaultPanel {
-        title
-        description
-        imageURL
-        linkURL
-      }
-    }
-    channel {
-      socialMedias {
-        name
-        title
-        url
-      }
-    }
-  }
-}
-"""
-
 _IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 _IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
 _IGDB_EXTERNAL_GAMES_URL = "https://api.igdb.com/v4/external_games"
@@ -170,9 +141,63 @@ def resolve_sub_image_photo(
     return fid
 
 
+_RATE_LIMIT_MAX_RETRIES = 4
+_RATE_LIMIT_MAX_WAIT_SEC = 60.0
+
+
+def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
+    """Seconds to sleep after HTTP 429 (Retry-After / Ratelimit-Reset / backoff)."""
+    ra = (resp.headers.get("Retry-After") or "").strip()
+    if ra:
+        try:
+            return min(_RATE_LIMIT_MAX_WAIT_SEC, max(0.5, float(ra)))
+        except ValueError:
+            pass
+    reset = (
+        resp.headers.get("Ratelimit-Reset")
+        or resp.headers.get("RateLimit-Reset")
+        or ""
+    ).strip()
+    if reset:
+        try:
+            wait = float(reset) - time.time()
+            if wait > 0:
+                return min(_RATE_LIMIT_MAX_WAIT_SEC, wait + 0.25)
+        except ValueError:
+            pass
+    return min(_RATE_LIMIT_MAX_WAIT_SEC, float(2 ** attempt))
+
+
+def _install_rate_limit_backoff(session: requests.Session) -> None:
+    """Wrap Session.request: retry on 429 with Retry-After / exponential backoff."""
+    orig = session.request
+
+    def request(method: str, url: str, **kwargs: Any) -> requests.Response:
+        last: requests.Response | None = None
+        for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+            last = orig(method, url, **kwargs)
+            if last.status_code != 429 or attempt >= _RATE_LIMIT_MAX_RETRIES:
+                return last
+            wait = _retry_after_seconds(last, attempt)
+            logger.warning(
+                "HTTP 429 method=%s url=%s wait=%.1fs attempt=%s",
+                method,
+                url,
+                wait,
+                attempt + 1,
+            )
+            time.sleep(wait)
+        assert last is not None
+        return last
+
+    session.request = request  # type: ignore[method-assign]
+
+
+
 class TwitchClient:
     def __init__(self) -> None:
         self._session = requests.Session()
+        _install_rate_limit_backoff(self._session)
         self._token = ""
         self._token_expires = 0.0
 
@@ -258,74 +283,19 @@ class TwitchClient:
         return f"{parsed.scheme}://{parsed.netloc}{path}"
 
     def get_channel_about_links(self, login: str) -> list[dict[str, str]]:
-        """Panels + social links from twitch.tv/{login}/about (via internal GQL)."""
+        """Single link to Twitch About — no unofficial GQL (Helix has no panels API)."""
         login = (login or "").strip().lower()
-        if not login:
+        if not login or not USERNAME_RE.match(login):
             return []
-        resp = self._session.post(
-            "https://gql.twitch.tv/gql",
-            headers={
-                "Client-ID": _TWITCH_GQL_WEB_CLIENT_ID,
-                "Referer": "https://www.twitch.tv/",
-                "Content-Type": "application/json",
-            },
-            json={"query": _CHANNEL_ABOUT_GQL, "variables": {"login": login}},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        user = (resp.json().get("data") or {}).get("user") or {}
-        if not user:
-            return []
+        return [
+            {
+                "url": f"https://www.twitch.tv/{login}/about",
+                "label": "About",
+                "image_url": "",
+                "kind": "about",
+            }
+        ]
 
-        seen: set[str] = set()
-        links: list[dict[str, str]] = []
-
-        def add(*, url: str, label: str, image_url: str = "", kind: str) -> None:
-            raw = (url or "").strip()
-            key = self._about_link_key(raw)
-            if not key or key in seen:
-                return
-            seen.add(key)
-            parsed = urlparse(raw)
-            text = (label or "").strip()
-            if not text:
-                text = parsed.netloc.removeprefix("www.")
-            links.append(
-                {
-                    "url": raw,
-                    "label": text,
-                    "image_url": (image_url or "").strip(),
-                    "kind": kind,
-                }
-            )
-
-        for panel in user.get("panels") or []:
-            if not isinstance(panel, dict):
-                continue
-            link_url = str(panel.get("linkURL") or "")
-            if not link_url:
-                continue
-            title = str(panel.get("title") or "").strip()
-            desc = str(panel.get("description") or "").strip()
-            label = title or (desc.split("\n", 1)[0][:120] if desc else "")
-            add(
-                url=link_url,
-                label=label,
-                image_url=str(panel.get("imageURL") or ""),
-                kind="panel",
-            )
-
-        channel = user.get("channel") or {}
-        for item in channel.get("socialMedias") or []:
-            if not isinstance(item, dict):
-                continue
-            link_url = str(item.get("url") or "")
-            if link_url.startswith("mailto:"):
-                continue
-            label = str(item.get("title") or item.get("name") or "").strip()
-            add(url=link_url, label=label, kind="social")
-
-        return links
 
     @staticmethod
     def matched_drops_tag(stream: dict[str, Any]) -> str | None:
@@ -381,10 +351,6 @@ class TwitchClient:
         """Public catalog from twitchdrops.app (no OAuth)."""
         return fetch_twitchdrops_app_campaigns(sort=sort, session=self._session)
 
-    def fetch_twitchdrops_app_how_to(self, game_slug: str) -> str:
-        """Plain-text «How to get these drops» for a game slug."""
-        return fetch_twitchdrops_app_how_to(game_slug, session=self._session)
-
     @staticmethod
     def twitchdrops_app_slug_for_game_id(game_id: str) -> str | None:
         gid = str(game_id or "").strip()
@@ -392,6 +358,11 @@ class TwitchClient:
             return None
         slug = _twitchdrops_app_slug_by_game_id.get(gid)
         return slug or None
+
+    @staticmethod
+    def twitchdrops_app_game_url(game_slug: str) -> str:
+        """Public game page URL on twitchdrops.app (no HTML scrape)."""
+        return twitchdrops_app_game_url(game_slug)
 
     def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Helix allows at most 100 user_id params per /streams request."""
@@ -2505,72 +2476,13 @@ def fetch_twitchdrops_app_campaigns(
     return out
 
 
-def _parse_twitchdrops_app_how_to_html(page_html: str) -> str:
-    m = re.search(
-        r"How to get these drops</h2>\s*<ol class=\"how-to-steps\">(.*?)</ol>",
-        page_html,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not m:
-        return ""
-
-    def _abs_href(href: str) -> str:
-        href = html_unescape(href).strip()
-        if href.startswith("/"):
-            return f"{_TWITCHDROPS_APP_BASE}{href}"
-        return href
-
-    def _anchor_to_text(match: re.Match[str]) -> str:
-        href = _abs_href(match.group(1))
-        label = re.sub(r"<[^>]+>", "", match.group(2))
-        label = html_unescape(label)
-        label = re.sub(r"\s+", " ", label).strip()
-        if not re.match(r"^https?://", href, re.IGNORECASE):
-            return label
-        if label:
-            return f"{label} ({href})"
-        return href
-
-    steps: list[str] = []
-    for li in re.finditer(r"<li\b[^>]*>(.*?)</li>", m.group(1), re.IGNORECASE | re.DOTALL):
-        chunk = li.group(1)
-        chunk = re.sub(
-            r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-            _anchor_to_text,
-            chunk,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        chunk = re.sub(r"<br\s*/?>", "\n", chunk, flags=re.IGNORECASE)
-        chunk = re.sub(r"<[^>]+>", "", chunk)
-        chunk = html_unescape(chunk)
-        chunk = re.sub(r"[ \t]+", " ", chunk)
-        chunk = re.sub(r"\n+", " ", chunk).strip()
-        if chunk:
-            steps.append(chunk)
-    return "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
-
-
-def fetch_twitchdrops_app_how_to(
-    game_slug: str, *, session: requests.Session | None = None
-) -> str:
-    """Fetch and cache «How to get these drops» text for a game slug."""
+def twitchdrops_app_game_url(game_slug: str) -> str:
+    """Canonical public game page on twitchdrops.app (link only — no scrape)."""
     slug = re.sub(r"[^a-z0-9\-]", "", str(game_slug or "").strip().lower())
     if not slug:
         return ""
-    now = time.time()
-    cached = _twitchdrops_app_how_to_cache.get(slug)
-    if cached and cached[0] > now:
-        return cached[1]
-    http = session if session is not None else requests
-    resp = http.get(
-        f"{_TWITCHDROPS_APP_BASE}/game/{slug}",
-        headers={"User-Agent": _TWITCHDROPS_APP_UA, "Accept": "text/html"},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    text = _parse_twitchdrops_app_how_to_html(resp.text)
-    _twitchdrops_app_how_to_cache[slug] = (now + _TWITCHDROPS_HOW_TO_TTL_SEC, text)
-    return text
+    return f"{_TWITCHDROPS_APP_BASE}/game/{slug}"
+
 
 
 TWITCH_STATUS_URL = "https://status.twitch.com/api/v2/summary.json"

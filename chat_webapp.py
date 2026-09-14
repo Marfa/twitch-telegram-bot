@@ -450,7 +450,7 @@ def api_resolve(
 def api_info(
     *, init_data: str = "", token: str = "", query: str = ""
 ) -> tuple[int, dict[str, Any]]:
-    user, err, _token_lang = _require_user(init_data=init_data, token=token)
+    user, err, token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
         code = 401 if (err or "").startswith("unauthorized") else 403
         return _err(code, err or "unauthorized")
@@ -464,6 +464,14 @@ def api_info(
         if not profile:
             return _err(404, "not_found")
         links = _twitch.get_channel_about_links(login)
+        if links:
+            from i18n import DEFAULT_LOCALE, t as _t
+
+            user_id = int(user["id"])
+            lang = token_lang or (
+                _db.get_user_locale(user_id) if _db is not None else None
+            ) or DEFAULT_LOCALE
+            links = [{**links[0], "label": _t("chat_about_on_twitch", lang)}]
         return 200, {
             "ok": True,
             "login": str(profile.get("login") or login).lower(),
@@ -496,7 +504,13 @@ def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[st
     url = _twitch.build_authorize_url(
         redirect_uri=redirect, state=state, scopes=CHAT_OAUTH_SCOPES
     )
-    return 200, {"ok": True, "url": url}
+    from bot_helpers import oauth_legal_suffix
+
+    return 200, {
+        "ok": True,
+        "url": url,
+        "privacy_notice": oauth_legal_suffix(lang).strip(),
+    }
 
 
 def api_send(

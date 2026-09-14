@@ -15,7 +15,7 @@ from telegram.ext import Application, ContextTypes, ConversationHandler
 import analytics
 import beta as beta_features
 import premium as prem
-from bot_helpers import _user_lang, _user_notifications_paused, reply_chat_id
+from bot_helpers import _user_lang, _user_notifications_paused, reply_chat_id, with_oauth_legal
 from db import Database
 from i18n import DEFAULT_LOCALE, follow_monitor_keyboard, other_menu, t
 from twitch import FOLLOWERS_SCOPE, TwitchClient
@@ -214,7 +214,7 @@ async def _send_oauth_prompt(
     )
     await bot.send_message(
         user_id,
-        t("follow_monitor_oauth_prompt", lang),
+        with_oauth_legal(t("follow_monitor_oauth_prompt", lang), lang),
         reply_markup=InlineKeyboardMarkup(
             [
                 [

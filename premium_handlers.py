@@ -13,6 +13,7 @@ from telegram.ext import Application, ContextTypes
 import premium as prem
 import demo_mode
 import analytics
+from bot_helpers import with_oauth_legal
 from config import twitch_oauth_redirect_uri
 from db import Database
 from health import create_oauth_state
@@ -836,7 +837,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         channel = prem.twitch_channel_login()
         await query.edit_message_text(
-            t("premium_marfapr_oauth", lang, channel=channel),
+            with_oauth_legal(t("premium_marfapr_oauth", lang, channel=channel), lang),
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton(btn("premium_marfapr", lang), url=url)]]
             ),
@@ -878,7 +879,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             scopes="",
         )
         await query.edit_message_text(
-            t("premium_channel_oauth", lang),
+            with_oauth_legal(t("premium_channel_oauth", lang), lang),
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
@@ -1308,7 +1309,9 @@ async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None
         try:
             await context.bot.send_message(
                 uid,
-                t("premium_twitch_reauth", lang),
+                with_oauth_legal(t("premium_twitch_reauth", lang), lang)
+                if markup
+                else t("premium_twitch_reauth", lang),
                 reply_markup=markup,
             )
         except Exception:

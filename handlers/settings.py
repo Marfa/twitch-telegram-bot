@@ -29,6 +29,7 @@ from bot_helpers import (
     _user_notifications_paused,
     is_private_chat,
     reply_chat_id,
+    with_oauth_legal,
 )
 from db import Database
 from i18n import (
@@ -837,7 +838,7 @@ async def _send_whisper_oauth_prompt(
     )
     await bot.send_message(
         user_id,
-        t("whisper_alerts_oauth_prompt", lang),
+        with_oauth_legal(t("whisper_alerts_oauth_prompt", lang), lang),
         reply_markup=InlineKeyboardMarkup(
             [
                 [

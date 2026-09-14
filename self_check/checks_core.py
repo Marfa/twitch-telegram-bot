@@ -139,6 +139,51 @@ def check_core() -> None:
 
     CHANNEL = "marfapr"
     t = TwitchClient()
+    assert t.get_channel_about_links("marfapr") == [
+        {
+            "url": "https://www.twitch.tv/marfapr/about",
+            "label": "About",
+            "image_url": "",
+            "kind": "about",
+        }
+    ]
+    assert t.get_channel_about_links("") == []
+    # 429 backoff: Retry-After respected once, then success.
+    from unittest.mock import MagicMock, patch
+    from twitch import _install_rate_limit_backoff, _retry_after_seconds
+
+    fake429 = MagicMock()
+    fake429.status_code = 429
+    fake429.headers = {"Retry-After": "0"}
+    fake200 = MagicMock()
+    fake200.status_code = 200
+    fake200.headers = {}
+    assert _retry_after_seconds(fake429, 0) == 0.5
+    sess = MagicMock()
+    calls = {"n": 0}
+
+    def _orig(method, url, **kwargs):
+        calls["n"] += 1
+        return fake429 if calls["n"] == 1 else fake200
+
+    sess.request = _orig
+    _install_rate_limit_backoff(sess)
+    with patch("twitch.time.sleep") as sleep_mock:
+        out = sess.request("GET", "https://api.twitch.tv/helix/users")
+    assert out.status_code == 200 and calls["n"] == 2
+    sleep_mock.assert_called_once()
+    from bot_helpers import oauth_legal_suffix, with_oauth_legal
+    from health import _privacy_page
+    from i18n import t as i18n_t
+
+    assert "not affiliated" in i18n_t("twitch_not_affiliated", "en").lower()
+    assert "аффилирован" in i18n_t("twitch_not_affiliated", "ru")
+    assert "encrypted" in i18n_t("oauth_privacy_notice", "en").lower()
+    legal = oauth_legal_suffix("en")
+    assert "not affiliated" in legal.lower()
+    assert with_oauth_legal("Auth now.", "en").startswith("Auth now.")
+    assert b"Privacy" in _privacy_page("en") or b"privacy" in _privacy_page("en").lower()
+    assert "Developer Services Agreement".encode() in _privacy_page("en")
     assert t.parse_username(CHANNEL) == CHANNEL
     assert t.parse_username("https://www.twitch.tv/marfapr") == CHANNEL
     assert t.parse_username("https://twitch.tv/Marfapr") == CHANNEL

@@ -194,7 +194,7 @@ def _check_drops_catalog_from_app_only() -> None:
 
 def _check_drops_tags_and_catalog_keyboard() -> None:
     from i18n import drops_catalog_keyboard, t
-    from twitch import TwitchClient, _parse_twitchdrops_app_how_to_html
+    from twitch import TwitchClient, twitchdrops_app_game_url
 
     assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Enabled"]})
     assert TwitchClient.stream_has_drops_tag({"tags": ["Drops Включены"]})
@@ -206,6 +206,13 @@ def _check_drops_tags_and_catalog_keyboard() -> None:
         == "Drops Включены"
     )
     assert TwitchClient.matched_drops_tag({"tags": ["Drops"]}) == "Drops"
+    assert (
+        twitchdrops_app_game_url("no-mans-sky")
+        == "https://twitchdrops.app/game/no-mans-sky"
+    )
+    assert twitchdrops_app_game_url("Bad/Slug!") == "https://twitchdrops.app/game/badslug"
+    assert twitchdrops_app_game_url("") == ""
+    assert not hasattr(TwitchClient, "fetch_twitchdrops_app_how_to")
 
     class _Tw(TwitchClient):
         def __init__(self) -> None:
@@ -258,24 +265,11 @@ def _check_drops_tags_and_catalog_keyboard() -> None:
     )
     assert [s["user_login"] for s in promo_first] == ["a", "d", "b", "c", "e"]
 
-    how_html = """
-    <h2>How to get these drops</h2>
-    <ol class="how-to-steps">
-      <li><div class="hts-text"><strong>Link account</strong> —
-          <a href="https://albiononline.com/twitch" target="_blank">Connect ↗</a>,
-          or via <a href="https://www.twitch.tv/settings/connections">Twitch Settings</a>.
-      </div></li>
-      <li><div class="hts-text"><strong>Watch</strong> — streams with
-          <a href="/directory">Drops</a>.</div></li>
-    </ol>
-    """
-    how_text = _parse_twitchdrops_app_how_to_html(how_html)
-    assert "1. Link account" in how_text and "2. Watch" in how_text
-    assert "https://albiononline.com/twitch" in how_text
-    assert "https://www.twitch.tv/settings/connections" in how_text
-    assert "https://twitchdrops.app/directory" in how_text
-
-    from handlers.drops import _digest_alert_keyboard, _format_stream_alert
+    from handlers.drops import (
+        _digest_alert_keyboard,
+        _format_digest_alert,
+        _format_stream_alert,
+    )
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -285,7 +279,8 @@ def _check_drops_tags_and_catalog_keyboard() -> None:
             campaign={
                 "game_name": "G",
                 "name": "Camp",
-                "how_to_earn": how_text,
+                "game_slug": "albion-online",
+                "how_to_earn": "Watch any stream for 15 minutes.",
                 "drops": [],
             },
             streams=ordered,
@@ -298,11 +293,20 @@ def _check_drops_tags_and_catalog_keyboard() -> None:
     assert "👁" in body
     assert any(ln.strip().startswith("https://twitch.tv/") for ln in body.splitlines())
     assert "Как получить" in body
-    assert "Link account" in body
+    assert "Watch any stream for 15 minutes." in body
+    assert "https://twitchdrops.app/game/albion-online" in body
     assert "{streams}" in t("drops_stream_alert_body", "ru")
     assert "{drops_tag}" in t("drops_stream_alert_item", "ru")
     assert "{text}" in t("drops_how_to_get", "ru")
+    assert "{url}" in t("drops_details_link", "ru")
     assert "{n}" in t("drops_digest_alert_header", "ru")
+    assert "twitchdrops.app" in t("drops_source_attribution", "ru")
+    assert "twitchdrops.app" in t("drops_source_attribution", "en")
+    digest = _format_digest_alert(
+        "ru",
+        [{"name": "Camp", "game_name": "G", "starts_at": "a", "ends_at": "b"}],
+    )
+    assert "Источник: twitchdrops.app" in digest
 
     kb = drops_catalog_keyboard(
         "ru",

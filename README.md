@@ -61,7 +61,7 @@ English: [README.en.md](README.en.md)
 | Функция | Что даёт |
 |---|---|
 | Активных оповещений больше 5 | Снимает лимит 5 активных оповещений на бесплатном плане |
-| Типы кроме старта стрима | Смена категории, предстоящий по schedule, конец эфира, Drops (бета: полный каталог с пагинацией + сводка новых раз в час с twitchdrops.app, стрим-алерты до 5 live с приоритетом тега Drops, how-to) |
+| Типы кроме старта стрима | Смена категории, предстоящий по schedule, конец эфира, Drops (бета: каталог JSON с twitchdrops.app + attribution, digest раз в час, стрим-алерты до 5 live с приоритетом тега Drops, description + ссылка на страницу игры) |
 | Автосинхронизация фолловов Twitch | Периодический импорт новых / удаление отфолловленных |
 | Продвинутые опции оповещений | Игнор слов, отложенная отправка, заглушка повторов, удаление предыдущих |
 | Публикация / правка / отпуск на Twitch | À la carte **Работа с расписанием Twitch** / полный Premium |
@@ -402,7 +402,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
 | `translate.py` | DeepL для админ-рассылок |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/health`, `/placeholders`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health`, `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue+Report webhook.
 
@@ -415,6 +415,10 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**
 
 См. [LICENSE](LICENSE) · https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+## Twitch и конфиденциальность
+
+Бот **не аффилирован** с Twitch Interactive, Inc., не одобрен и не спонсируется ею. Данные Helix используются только для функций бота (оповещения, импорт, расписание, чат и т.д.), не продаются как датасет. Перед OAuth бот показывает краткое privacy-уведомление; подробности: [`/privacy`](https://bot.themarfa.name/privacy?lang=ru).
 
 ---
 

@@ -193,7 +193,7 @@ async def send_drops_catalog(
         user_data["drops_catalog_page"] = 0
     await bot.send_message(
         user_id,
-        t("drops_catalog_prompt", lang),
+        t("drops_catalog_prompt", lang) + "\n\n" + t("drops_source_attribution", lang),
         reply_markup=_with_extra_markup(
             drops_catalog_keyboard(
                 lang,
@@ -214,6 +214,18 @@ def _format_dates(campaign: dict[str, Any]) -> str:
     return f"{starts} — {ends}"
 
 
+def _campaign_game_url(campaign: dict[str, Any]) -> str:
+    slug = str(campaign.get("game_slug") or "").strip()
+    if not slug:
+        slug = (
+            TwitchClient.twitchdrops_app_slug_for_game_id(
+                str(campaign.get("game_id") or "")
+            )
+            or ""
+        )
+    return TwitchClient.twitchdrops_app_game_url(slug)
+
+
 def _format_digest_alert(lang: str, campaigns: list[dict[str, Any]]) -> str:
     lines = [
         t("drops_digest_alert_header", lang, n=len(campaigns)),
@@ -232,29 +244,8 @@ def _format_digest_alert(lang: str, campaigns: list[dict[str, Any]]) -> str:
             )
         )
         lines.append("")
+    lines.append(t("drops_source_attribution", lang))
     return "\n".join(lines).rstrip()
-
-
-def _resolve_how_to_earn(twitch: TwitchClient, campaign: dict[str, Any]) -> str:
-    """Prefer site «How to get these drops»; fall back to campaign description."""
-    how = str(campaign.get("how_to_earn") or "").strip()
-    slug = str(campaign.get("game_slug") or "").strip()
-    if not slug:
-        slug = (
-            TwitchClient.twitchdrops_app_slug_for_game_id(
-                str(campaign.get("game_id") or "")
-            )
-            or ""
-        )
-    if slug:
-        try:
-            from_site = twitch.fetch_twitchdrops_app_how_to(slug)
-        except Exception:
-            logger.warning("drops how-to fetch failed slug=%s", slug)
-            from_site = ""
-        if from_site:
-            return from_site
-    return how
 
 
 def _format_stream_alert(
@@ -306,6 +297,11 @@ def _format_stream_alert(
     if how:
         how_tr = translate_text(how, target_lang=lang, source_lang="en")
         lines.append(t("drops_how_to_get", lang, text=html.escape(how_tr)))
+    details_url = _campaign_game_url(campaign)
+    if details_url:
+        lines.append(
+            t("drops_details_link", lang, url=html.escape(details_url))
+        )
     return "\n".join(lines).rstrip()
 
 
@@ -389,7 +385,6 @@ async def send_drops_stream_alert(
     )
     if not str(camp.get("game_id") or "").strip():
         camp["game_id"] = game_id
-    camp["how_to_earn"] = await asyncio.to_thread(_resolve_how_to_earn, twitch, camp)
     text = _format_stream_alert(lang, campaign=camp, streams=streams, db=db)
     now_iso = datetime.now(timezone.utc).isoformat()
     # Claim before send so overlapping ticks / deploy races cannot re-notify.

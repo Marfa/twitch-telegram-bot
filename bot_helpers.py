@@ -286,6 +286,22 @@ def _split_telegram_text(text: str, *, limit: int = 4096) -> list[str]:
     return chunks
 
 
+def oauth_legal_suffix(lang: str) -> str:
+    """Privacy + Twitch non-affiliation footer for OAuth authorize prompts."""
+    from config import PUBLIC_BASE_URL
+
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    parts = [t("oauth_privacy_notice", loc), t("twitch_not_affiliated", loc)]
+    base = (PUBLIC_BASE_URL or "").rstrip("/")
+    if base:
+        parts.append(t("oauth_privacy_link", loc, url=f"{base}/privacy?lang={loc}"))
+    return "\n\n" + "\n".join(parts)
+
+
+def with_oauth_legal(text: str, lang: str) -> str:
+    return (text or "").rstrip() + oauth_legal_suffix(lang)
+
+
 async def _send_dm_html(
     bot,
     db: Database,

@@ -29,6 +29,7 @@ from bot_helpers import (
     _user_notifications_paused,
     _wizard,
     reply_chat_id,
+    with_oauth_legal,
 )
 from db import (
     Database,
@@ -750,7 +751,7 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
     url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
     prompt = t("import_oauth_prompt", lang) + _import_oauth_sync_note_suffix(lang, sync)
     await update.effective_message.reply_text(
-        prompt,
+        with_oauth_legal(prompt, lang),
         reply_markup=_import_oauth_authorize_keyboard(lang, url),
     )
 
@@ -1817,7 +1818,9 @@ async def _sync_owner_follows(
                 markup = _import_oauth_authorize_keyboard(lang, url)
             await application.bot.send_message(
                 row.owner_id,
-                t("sync_job_failed", lang),
+                with_oauth_legal(t("sync_job_failed", lang), lang)
+                if redirect_uri
+                else t("sync_job_failed", lang),
                 reply_markup=markup,
             )
         except Exception:

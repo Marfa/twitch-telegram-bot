@@ -12,7 +12,7 @@ from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import beta as beta_features
 import premium as prem
-from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang, _wizard, reply_chat_id
+from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang, _wizard, reply_chat_id, with_oauth_legal
 from db import Database
 from i18n import (
     DEFAULT_LOCALE,
@@ -1620,7 +1620,7 @@ async def _start_schedule_publish_auth(
     url = twitch.build_authorize_url(
         redirect_uri=redirect_uri, state=state, scopes=SCHEDULE_OAUTH_SCOPES
     )
-    auth_text = t("stream_schedule_publish_auth", lang)
+    auth_text = with_oauth_legal(t("stream_schedule_publish_auth", lang), lang)
     markup = InlineKeyboardMarkup(
         [[InlineKeyboardButton(t("stream_schedule_publish_auth_button", lang), url=url)]]
     )

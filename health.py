@@ -503,6 +503,23 @@ def _placeholders_page(lang: str) -> bytes:
     ).encode("utf-8")
 
 
+def _privacy_page(lang: str) -> bytes:
+    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, t
+
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    title = html.escape(t("privacy_page_title", loc))
+    intro = html.escape(t("privacy_page_intro", loc))
+    body = t("privacy_page_body", loc)
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "</head><body style='font-family:sans-serif;max-width:40rem;"
+        "margin:2rem auto;padding:0 1rem;line-height:1.5'>"
+        f"<h1>{title}</h1><p>{intro}</p>{body}</body></html>"
+    ).encode("utf-8")
+
+
 _GUIDE_DIR = Path(__file__).resolve().parent / "webapp" / "guide"
 _GUIDE_FILES = {
     "ru": (_GUIDE_DIR / "ru.html").resolve(),
@@ -720,6 +737,17 @@ class _HealthHandler(BaseHTTPRequestHandler):
             body = _placeholders_page(lang)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/privacy":
+            query = parse_qs(urlparse(self.path).query)
+            lang = (query.get("lang") or ["en"])[0]
+            body = _privacy_page(lang)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "public, max-age=3600")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

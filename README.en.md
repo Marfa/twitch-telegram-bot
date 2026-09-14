@@ -61,7 +61,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Feature | What it unlocks |
 |---|---|
 | More than 5 active alerts | Removes the free-plan cap of 5 active alerts |
-| Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (beta: full catalog with pagination + hourly new-campaign digest from twitchdrops.app, stream alerts up to 5 live with Drops-tag priority, how-to) |
+| Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (beta: JSON catalog from twitchdrops.app with attribution, hourly digest, stream alerts up to 5 live with Drops-tag priority, description + game page link) |
 | Twitch follow auto-sync | Periodic import of new follows / removal of unfollows |
 | Advanced alert options | Ignore keywords, delayed send, repeat mute, delete previous |
 | Twitch schedule tools | Publish slots, fix a day, vacation mode on Twitch |
@@ -402,13 +402,17 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health`, `/placeholders`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health`, `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 
 ## License
 
 **CC BY-NC-SA 4.0** — see [LICENSE](LICENSE)
+
+## Twitch and privacy
+
+This bot is **not affiliated with**, endorsed by, or sponsored by Twitch Interactive, Inc. Helix data is used only to power bot features (alerts, import, schedule, chat, etc.) and is not sold as a dataset. OAuth prompts include a short privacy notice; details: [`/privacy`](https://bot.themarfa.name/privacy?lang=en).
 
 ---
 

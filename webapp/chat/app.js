@@ -34,12 +34,14 @@
       simple: "Simple",
       embed: "Embed",
       info: "Info",
-      infoEmpty: "No links on the channel About page.",
+      infoEmpty: "No About page link.",
       infoLoadFail: "Could not load channel info.",
       quota: "{n} messages left today",
       unlimited: "Unlimited sends",
       limitHit: "Daily limit reached. Premium unlocks unlimited chat.",
       needAuth: "Log in with Twitch to send messages.",
+      oauthPrivacyHint:
+        "OAuth grants the bot Twitch scopes you approve. Tokens are stored encrypted; we do not sell your data. Not affiliated with Twitch.",
       sendFail: "Could not send message.",
       loadFail: "Could not load data ({error}). Close and open Chat again.",
       connecting: "Connecting to chat…",
@@ -77,12 +79,14 @@
       simple: "Простой",
       embed: "Embed",
       info: "Информация",
-      infoEmpty: "На странице «О канале» нет ссылок.",
+      infoEmpty: "Нет ссылки на страницу «О канале».",
       infoLoadFail: "Не удалось загрузить информацию о канале.",
       quota: "Осталось сообщений сегодня: {n}",
       unlimited: "Безлимитная отправка",
       limitHit: "Дневной лимит. Premium снимает ограничение.",
       needAuth: "Войдите в Twitch, чтобы писать.",
+      oauthPrivacyHint:
+        "OAuth даёт боту выбранные права Twitch. Токены хранятся зашифрованно; данные не продаём. Не аффилированы с Twitch.",
       sendFail: "Не удалось отправить.",
       loadFail: "Не удалось загрузить данные ({error}). Закройте и снова откройте «Чат».",
       connecting: "Подключение к чату…",
@@ -853,6 +857,8 @@
   el("btn-login").addEventListener("click", async () => {
     const { body } = await api("/app/chat/api/oauth-url");
     if (!body.ok || !body.url) return;
+    const notice = (body.privacy_notice || t.oauthPrivacyHint || "").trim();
+    if (notice) appendMsg("", notice, true);
     if (tg && tg.openLink) tg.openLink(body.url);
     else window.open(body.url, "_blank");
   });

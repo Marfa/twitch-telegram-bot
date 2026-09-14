@@ -1,0 +1,36 @@
+---
+description: Respect third-party API licenses, ToS, and attribution when integrating
+alwaysApply: true
+---
+
+# API license / ToS compliance
+
+When connecting or extending any third-party API or data feed (Twitch Helix, IGDB, twitchdrops.app, Statuspage, PostHog, Telegram, …), implement **in line with that provider’s license, Developer Agreement, ToS, robots.txt, and documented integration rules**.
+
+## Before first use (and when changing usage)
+
+1. **Find the rules** — official ToS / Developer Agreement / Trademark / rate-limit docs / `robots.txt`. If none are published, treat the public documented API as the ceiling; do not scrape HTML/pages that are not part of the documented API.
+2. **Prefer official / documented endpoints** over scraping, unofficial GQL, or reverse-engineered clients.
+3. **Attribution** — if the provider requires (or clearly expects) source credit, show it in user-facing copy and/or README. Keep a clear path from displayed data back to the source (links).
+4. **Rate limits & caching** — honor documented limits and `Cache-Control` / `Retry-After` / `429` where applicable; poll no faster than needed.
+5. **Commercial / redistribution** — do not sell raw API metadata dumps; Premium may charge for *our* product features that *use* API data, not for reselling the data itself. When unsure, ask before shipping.
+6. **Auth & privacy** — OAuth scopes least-privilege; do not log tokens; privacy notices for user data collected via the API.
+7. **Marks** — Twitch (and other) trademarks only per trademark guidelines; do not imply affiliation/endorsement when the provider forbids it.
+
+## Checklist (PR)
+
+- [ ] Endpoint is documented / allowed (not a disallowed scrape path)
+- [ ] Attribution / disclaimer updated if required
+- [ ] Polling/caching respects provider guidance
+- [ ] No new secret hardcoding; scopes minimal
+- [ ] Self-check or comment notes any intentional gray-area (e.g. unofficial endpoint) with upgrade path
+
+## Twitch Helix (baseline)
+
+Authority: [Twitch Developer Services Agreement](https://legal.twitch.com/legal/developer-agreement) + [API guide](https://dev.twitch.tv/docs/api/guide).
+
+- Use Helix with registered Client-ID / secrets from env
+- Respect rate limits — `TwitchClient` session retries HTTP 429 using `Retry-After` / `Ratelimit-Reset`
+- Attribute / link back to Twitch content when displaying Program Materials; show `twitch_not_affiliated` + OAuth privacy (`/privacy`, `with_oauth_legal`)
+- Do not sell or redistribute Helix metadata as a dataset
+- Do **not** use unofficial `gql.twitch.tv` — Chat Mini App Info links to `twitch.tv/{login}/about` instead
