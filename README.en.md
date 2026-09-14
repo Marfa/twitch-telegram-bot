@@ -98,7 +98,7 @@ Live checks use **Client Credentials**. Follow import uses user OAuth (`user:rea
 
 ## Usage
 
-On first `/start` the bot asks for a language (Russian or English), then shows the welcome text and **main menu**.
+On first `/start` the bot asks for a language (Russian or English), then shows the welcome text and **main menu**. On first start (non-share), **ru** also gets a welcome alert on a random Premium channel; for **en**, `PREMIUM_TWITCH_LOGIN` (`marfapr`) is excluded from that demo seed.
 
 ### New subscription
 

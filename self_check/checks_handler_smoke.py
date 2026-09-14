@@ -1252,6 +1252,35 @@ async def _smoke_group_chat_replies(db) -> None:
         assert cid == group_chat_id
 
 
+async def _smoke_welcome_demo_locale(db) -> None:
+    from bot import _ensure_welcome_premium_channel_subscription
+    import premium as prem
+
+    uid = _FREE_UID + 42
+    db.upsert_user(uid)
+    application, bot = _app(db)
+    twitch = application.bot_data["twitch"]
+    twitch.get_user = MagicMock(
+        return_value={"id": "999", "login": prem.twitch_channel_login() or "marfapr"}
+    )
+    with patch(
+        "bot.prem.may_enable_subscription_async", new=AsyncMock(return_value=True)
+    ):
+        skipped = await _ensure_welcome_premium_channel_subscription(
+            application, bot, uid, "en"
+        )
+    assert skipped is None
+    assert db.get_subscriptions_by_owner(uid) == []
+
+    seeded = await _ensure_welcome_premium_channel_subscription(
+        application, bot, uid, "ru"
+    )
+    assert seeded is not None
+    sub_id, channel = seeded
+    assert channel == (prem.twitch_channel_login() or "marfapr")
+    assert any(s.id == sub_id for s in db.get_subscriptions_by_owner(uid))
+
+
 async def _run_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "smoke.db")
@@ -1268,6 +1297,7 @@ async def _run_smoke() -> None:
         await _smoke_subscriptions(db)
         await _smoke_premium_and_menus(db)
         await _smoke_delivery_and_helpers(db)
+        await _smoke_welcome_demo_locale(db)
 
 
 def check_handler_smoke() -> None:

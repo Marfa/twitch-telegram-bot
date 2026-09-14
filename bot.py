@@ -816,12 +816,21 @@ async def _ensure_welcome_premium_channel_subscription(
     user_id: int,
     lang: str,
 ) -> tuple[int, str] | None:
-    """First-start demo: random Premium channel (config + paid)."""
+    """First-start demo: random Premium channel (config + paid).
+
+    English locale skips the config promo channel (default marfapr); other
+    paid premium_channels are still eligible.
+    """
     db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
     candidates = prem.list_promo_channel_logins(db)
     if not candidates:
         candidates = [prem.twitch_channel_login() or "marfapr"]
+    promo = (prem.twitch_channel_login() or "marfapr").lower()
+    if (lang or "").lower() == "en":
+        candidates = [c for c in candidates if str(c).lower() != promo]
+        if not candidates:
+            return None
     random.shuffle(candidates)
     for login in candidates:
         for sub in _subs_for_owner(db, user_id):
