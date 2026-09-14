@@ -991,8 +991,6 @@ def check_core() -> None:
     # IGDB companies/genres/modes have no full-text search — must use where name ~.
     from unittest.mock import MagicMock
 
-    from twitch import TwitchClient
-
     client = TwitchClient.__new__(TwitchClient)
     client._session = MagicMock()
     posted: list[str] = []
