@@ -154,6 +154,36 @@ def _check_drops_catalog_fetch_copy() -> None:
     assert "re-link" not in t("drops_catalog_fetch_failed", "en").lower()
     assert "вручную" not in t("drops_catalog_empty", "ru")
     assert "twitchdrops.app" not in t("drops_catalog_fetch_failed", "en").lower()
+    assert "получаем" in t("drops_catalog_loading", "ru").lower()
+    assert "fetching" in t("drops_catalog_loading", "en").lower()
+
+
+def _check_drops_catalog_shows_loading() -> None:
+    """Catalog send shows loading text before the fetch finishes."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from handlers.drops import send_drops_catalog
+    from i18n import t
+
+    bot = AsyncMock()
+    status = AsyncMock()
+    bot.send_message = AsyncMock(return_value=status)
+    db = MagicMock()
+    db.get_drops_auth.return_value = None
+    twitch = MagicMock()
+
+    with patch(
+        "handlers.drops.list_active_drop_campaigns",
+        return_value=[],
+    ):
+        asyncio.run(send_drops_catalog(bot, db, twitch, 42, "ru"))
+
+    assert bot.send_message.await_args_list[0].args[1] == t(
+        "drops_catalog_loading", "ru"
+    )
+    status.edit_text.assert_awaited()
+    assert t("drops_catalog_empty", "ru") in status.edit_text.await_args.args[0]
 
 
 def _check_drops_catalog_from_app_only() -> None:
@@ -620,6 +650,7 @@ def run() -> None:
     _check_drops_premium_gate()
     _check_drops_active_cap_on_bulk()
     _check_drops_catalog_fetch_copy()
+    _check_drops_catalog_shows_loading()
     _check_drops_catalog_from_app_only()
     _check_drops_tags_and_catalog_keyboard()
     _check_drops_digest_db()

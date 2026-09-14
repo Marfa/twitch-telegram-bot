@@ -980,6 +980,7 @@
   "drops_game_selected": "Game: {game}. Next — message template.",
   "drops_catalog_prompt": "Available Drops — pick a campaign to get stream alerts for it:",
   "drops_source_attribution": "Source: twitchdrops.app",
+  "drops_catalog_loading": "Fetching the Drops list…",
   "drops_catalog_empty": "No active Drops in the catalog right now. Try again later.",
   "drops_catalog_fetch_failed": "Could not load the Drops list. Try again later.",
   "drops_digest_checkbox": "Subscribe to new Drops",

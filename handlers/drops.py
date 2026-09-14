@@ -12,6 +12,7 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 import analytics
@@ -132,6 +133,8 @@ async def send_drops_catalog(
     **_kwargs: Any,
 ) -> list[dict[str, Any]]:
     """Fetch and send the available-Drops list with digest checkbox."""
+    status = await bot.send_message(user_id, t("drops_catalog_loading", lang))
+
     campaigns = await asyncio.to_thread(
         list_active_drop_campaigns,
         db,
@@ -146,29 +149,32 @@ async def send_drops_catalog(
         if user_data is not None:
             user_data.pop("drops_catalog_candidates", None)
 
+    async def _show(text: str, markup: InlineKeyboardMarkup) -> None:
+        reply_markup = _with_extra_markup(markup, reply_markup_extra)
+        edit = getattr(status, "edit_text", None)
+        if callable(edit):
+            try:
+                await edit(text, reply_markup=reply_markup)
+                return
+            except BadRequest:
+                pass
+        await bot.send_message(user_id, text, reply_markup=reply_markup)
+
     auth = db.get_drops_auth(user_id)
     digest_on = bool(auth and auth.digest_enabled)
 
     if campaigns is None:
         _clear_store()
-        await bot.send_message(
-            user_id,
+        await _show(
             t("drops_catalog_fetch_failed", lang),
-            reply_markup=_with_extra_markup(
-                drops_catalog_keyboard(lang, [], digest_enabled=digest_on),
-                reply_markup_extra,
-            ),
+            drops_catalog_keyboard(lang, [], digest_enabled=digest_on),
         )
         return []
     if not campaigns:
         _clear_store()
-        await bot.send_message(
-            user_id,
+        await _show(
             t("drops_catalog_empty", lang),
-            reply_markup=_with_extra_markup(
-                drops_catalog_keyboard(lang, [], digest_enabled=digest_on),
-                reply_markup_extra,
-            ),
+            drops_catalog_keyboard(lang, [], digest_enabled=digest_on),
         )
         return []
 
@@ -191,18 +197,14 @@ async def send_drops_catalog(
     if user_data is not None:
         user_data["drops_catalog_candidates"] = compact
         user_data["drops_catalog_page"] = 0
-    await bot.send_message(
-        user_id,
+    await _show(
         t("drops_catalog_prompt", lang) + "\n\n" + t("drops_source_attribution", lang),
-        reply_markup=_with_extra_markup(
-            drops_catalog_keyboard(
-                lang,
-                compact,
-                digest_enabled=digest_on,
-                page=0,
-                page_size=_DROPS_CATALOG_PAGE_SIZE,
-            ),
-            reply_markup_extra,
+        drops_catalog_keyboard(
+            lang,
+            compact,
+            digest_enabled=digest_on,
+            page=0,
+            page_size=_DROPS_CATALOG_PAGE_SIZE,
         ),
     )
     return compact

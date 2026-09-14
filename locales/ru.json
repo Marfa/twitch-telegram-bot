@@ -980,6 +980,7 @@
   "drops_game_selected": "Игра: {game}. Дальше — шаблон сообщения.",
   "drops_catalog_prompt": "Доступные Drops — выберите кампанию для получения оповещений по стримам по ней:",
   "drops_source_attribution": "Источник: twitchdrops.app",
+  "drops_catalog_loading": "Получаем список Drops…",
   "drops_catalog_empty": "Сейчас нет активных Drops в каталоге. Попробуйте позже.",
   "drops_catalog_fetch_failed": "Не удалось загрузить список Drops. Попробуйте позже.",
   "drops_digest_checkbox": "Подписаться на новые Drops",
