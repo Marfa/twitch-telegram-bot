@@ -2083,6 +2083,31 @@ async def _scenario_follow_monitor(db) -> None:
     update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
     ctx = _ctx(application)
     await open_other_menu(update, ctx)
+    # Without Premium: screen still opens; monitoring stays off.
+    update = _msg_update(_FREE_UID, btn("follow_monitor", "ru"), cap)
+    with patch(
+        "handlers.follow_monitor.prem.has_feature",
+        new=AsyncMock(return_value=False),
+    ):
+        await open_follow_monitor_menu(update, ctx)
+    labels_free = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert any("мониторинг" in (x or "").lower() for x in labels_free)
+    assert any("Поиск" in (x or "") or "Search" in (x or "") for x in labels_free)
+    assert not any("Оповещать" in (x or "") for x in labels_free)
+    cap.assert_turn("other_follow_monitor_free")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
+    ctx = _ctx(application)
+    await open_other_menu(update, ctx)
     update = _msg_update(_FREE_UID, btn("follow_monitor", "ru"), cap)
     with patch(
         "handlers.follow_monitor.prem.has_feature",

@@ -171,22 +171,15 @@ async def open_follow_monitor_menu(
             reply_markup=other_menu(lang),
         )
         return
+    # After GA (or without Premium): screen/lists stay open; settings need Premium.
     if not premium_ok:
-        from premium_handlers import send_premium_screen
-
-        await send_premium_screen(
+        await maybe_stop_follow_monitor_after_beta_exit(
             context.bot,
-            user_id,
-            lang,
             db,
-            update=update,
-            context=context,
-            source="follow_monitor",
-            feature=FEATURE_ID,
+            user_id,
+            job_queue=context.application.job_queue,
         )
-        return
     row = db.get_follow_monitor(user_id)
-    enabled = bool(row and row.enabled)
     await update.effective_message.reply_text(
         t("follow_monitor_screen", lang),
         parse_mode=ParseMode.HTML,
@@ -671,8 +664,8 @@ async def _show_list(
     user_id = (query.from_user if query else update.effective_user).id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
-    if not beta_ok or not premium_ok:
+    beta_ok, _premium_ok = await _entitled(context.bot, db, user_id)
+    if not beta_ok:
         if query:
             await query.answer()
         return
@@ -812,9 +805,9 @@ async def start_follow_monitor_search(
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
+    beta_ok, _premium_ok = await _entitled(context.bot, db, user_id)
     await query.answer()
-    if not beta_ok or not premium_ok:
+    if not beta_ok:
         return ConversationHandler.END
     await context.bot.send_message(
         reply_chat_id(update),
@@ -829,8 +822,8 @@ async def receive_follow_monitor_search(
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
-    if not beta_ok or not premium_ok:
+    beta_ok, _premium_ok = await _entitled(context.bot, db, user_id)
+    if not beta_ok:
         return ConversationHandler.END
     query = (update.effective_message.text or "").strip()
     if not query:

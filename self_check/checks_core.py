@@ -479,6 +479,14 @@ def check_core() -> None:
     assert i18n_t("whisper_alerts_enable", "ru") == "Включить"
     assert "личных сообщениях" in i18n_t("whisper_alerts_screen", "ru")
     assert i18n_t("btn_whisper_alerts", "ru")
+    assert "Follow/Unfollow" in i18n_t("new_sub_other_prompt", "ru")
+    assert "Premium" in i18n_t("new_sub_other_prompt", "ru")
+    fm_ru = i18n_t("follow_monitor_screen", "ru")
+    assert "Premium" in fm_ru
+    assert "мониторинг" in fm_ru.lower() or "Monitor" in fm_ru
+    assert "выключены" in fm_ru
+    assert "Premium" in i18n_t("follow_monitor_screen", "en")
+    assert "Follow/Unfollow" in i18n_t("new_sub_other_prompt", "en")
 
     created = parse_posthog_issue_payload(
         {
