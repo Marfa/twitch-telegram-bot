@@ -184,6 +184,7 @@ def all_menu_buttons() -> set[str]:
         "sys_notifications",
         "ignored_words",
         "whisper_alerts",
+        "follow_monitor",
         "beta_mode",
         "sync_subs",
         "premium",
@@ -264,7 +265,7 @@ def subscriptions_menu(
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
-    keys = ["whisper_alerts", "create_schedule", "watch", "chat", "back"]
+    keys = ["follow_monitor", "whisper_alerts", "create_schedule", "watch", "chat", "back"]
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
     return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
 
@@ -1437,6 +1438,72 @@ def whisper_alerts_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup
     )
 
 
+def follow_monitor_keyboard(
+    lang: str,
+    *,
+    enabled: bool,
+    notify_follow: bool = False,
+    notify_unfollow: bool = False,
+) -> InlineKeyboardMarkup:
+    mark = "✅ " if enabled else "⬜️ "
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                mark + t("follow_monitor_enable", lang),
+                callback_data="follow_monitor:toggle",
+            )
+        ]
+    ]
+    if enabled:
+        nf = "✅ " if notify_follow else "⬜️ "
+        nu = "✅ " if notify_unfollow else "⬜️ "
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    nf + t("follow_monitor_notify_follow", lang),
+                    callback_data="follow_monitor:notify:follow",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    nu + t("follow_monitor_notify_unfollow", lang),
+                    callback_data="follow_monitor:notify:unfollow",
+                )
+            ]
+        )
+    rows.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    t("follow_monitor_btn_list_follow", lang),
+                    callback_data="follow_monitor:list:current",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("follow_monitor_btn_list_new", lang),
+                    callback_data="follow_monitor:list:new",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("follow_monitor_btn_list_unfollow", lang),
+                    callback_data="follow_monitor:list:unfollow",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("follow_monitor_btn_search", lang),
+                    callback_data="follow_monitor:search",
+                )
+            ],
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
 def message_draft_keyboard(lang: str, *, enabled: bool) -> InlineKeyboardMarkup:
     mark = "✅ " if enabled else "⬜️ "
     return InlineKeyboardMarkup(
@@ -1580,7 +1647,7 @@ def alert_type_keyboard(
 
 def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
     """Other features from New subscription (§2.1); Back returns to alert type."""
-    keys = ["whisper_alerts", "create_schedule", "watch", "chat"]
+    keys = ["follow_monitor", "whisper_alerts", "create_schedule", "watch", "chat"]
     buttons = [
         InlineKeyboardButton(btn(k, lang), callback_data=f"new_sub_other:{k}")
         for k in keys

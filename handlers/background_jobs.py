@@ -9,6 +9,7 @@ JOB_TWITCH_SYNC = "twitch_follows_sync"
 JOB_PREMIUM_TWITCH = "premium_twitch_refresh"
 JOB_DROPS = "drops_check"
 JOB_SCHEDULE_REMINDERS = "schedule_reminders"
+JOB_FOLLOW_MONITOR = "follow_monitor_sync"
 
 
 def ensure_repeating_job(
@@ -36,6 +37,7 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
     """Enable per-user jobs only while someone needs them."""
     from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
     from handlers.drops import check_drops
+    from handlers.follow_monitor import sync_follow_monitors
     from handlers.notifications import check_schedule_reminders
     from handlers.stream_schedule import (
         VACATION_AUTO_JOB_NAME,
@@ -52,6 +54,14 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
         interval=3600,
         first=90,
         enabled=db.has_any_periodic_twitch_sync(),
+    )
+    ensure_repeating_job(
+        job_queue,
+        name=JOB_FOLLOW_MONITOR,
+        callback=sync_follow_monitors,
+        interval=3600,
+        first=150,
+        enabled=db.has_any_enabled_follow_monitor(),
     )
     ensure_repeating_job(
         job_queue,

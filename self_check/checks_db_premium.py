@@ -416,6 +416,36 @@ def check_db_premium() -> None:
         disabled = db.disable_whisper_alerts_for_twitch_user("tw-w")
         assert 12 in disabled
         assert db.get_whisper_alerts_by_twitch_user_id("tw-w") == []
+        now = datetime.now(timezone.utc).isoformat()
+        db.upsert_follow_monitor(
+            21,
+            enabled=True,
+            twitch_user_id="tw-fm",
+            twitch_login="streamer",
+            refresh_token="fmtok",
+            next_sync_at=now,
+        )
+        with db._conn() as conn:
+            fraw = conn.execute(
+                "SELECT refresh_token FROM follow_monitor WHERE owner_id = 21"
+            ).fetchone()["refresh_token"]
+        assert str(fraw).startswith("enc:v1:")
+        fm = db.get_follow_monitor(21)
+        assert fm is not None and fm.enabled and fm.refresh_token == "fmtok"
+        db.replace_follow_monitor_followers(
+            21,
+            [("u1", "alice", "Alice", now), ("u2", "bob", "Bob", now)],
+        )
+        assert db.count_follow_monitor_followers(21) == 2
+        db.add_follow_monitor_events(
+            21, [("follow", "u3", "carol", "Carol")], detected_at=now
+        )
+        assert db.count_follow_monitor_events(21, event_type="follow") == 1
+        hits = db.search_follow_monitor(21, "ali")
+        assert any(h["login"] == "alice" for h in hits)
+        assert db.has_any_enabled_follow_monitor() is True
+        db.set_follow_monitor_enabled(21, False)
+        assert db.get_follow_monitor(21).enabled is False
         from token_crypto import encrypt_secret, decrypt_secret
 
         assert decrypt_secret(encrypt_secret("secret-token")) == "secret-token"

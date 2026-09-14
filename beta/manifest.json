@@ -93,6 +93,16 @@
       "issue_label": "beta/ignore-igdb-categories",
       "stage": "beta",
       "created_at": "2026-09-13"
+    },
+    {
+      "id": "follow-monitor",
+      "branch": "feat/follow-monitor",
+      "title_key": "beta_feat_follow_monitor",
+      "description_key": "beta_feat_follow_monitor_desc",
+      "premium_feature_id": "follow_monitor",
+      "issue_label": "beta/follow-monitor",
+      "stage": "beta",
+      "created_at": "2026-09-14"
     }
   ]
 }

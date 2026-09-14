@@ -17,6 +17,9 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     DropsAuth,
+    FollowMonitor,
+    FollowMonitorEvent,
+    FollowMonitorFollower,
     PremiumChannel,
     PremiumGift,
     PremiumPurchase,
@@ -32,6 +35,9 @@ from .models import (
     _cart_item_from_row,
     _row_to_alert_history,
     _row_to_chat_auth,
+    _row_to_follow_monitor,
+    _row_to_follow_monitor_event,
+    _row_to_follow_monitor_follower,
     _row_to_referral_withdrawal,
     _row_to_sub,
     _row_to_twitch_sync,
@@ -652,6 +658,72 @@ class PostgresDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_whisper_alerts_twitch_user
                 ON whisper_alerts(twitch_user_id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS follow_monitor (
+                    owner_id BIGINT PRIMARY KEY,
+                    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    twitch_login TEXT NOT NULL DEFAULT '',
+                    refresh_token TEXT NOT NULL DEFAULT '',
+                    next_sync_at TIMESTAMPTZ,
+                    last_sync_at TIMESTAMPTZ,
+                    needs_reauth BOOLEAN NOT NULL DEFAULT FALSE,
+                    baseline_done BOOLEAN NOT NULL DEFAULT FALSE,
+                    notify_follow BOOLEAN NOT NULL DEFAULT FALSE,
+                    notify_unfollow BOOLEAN NOT NULL DEFAULT FALSE
+                )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE follow_monitor
+                ADD COLUMN IF NOT EXISTS notify_follow BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE follow_monitor
+                ADD COLUMN IF NOT EXISTS notify_unfollow BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS follow_monitor_followers (
+                    owner_id BIGINT NOT NULL,
+                    twitch_user_id TEXT NOT NULL,
+                    login TEXT NOT NULL DEFAULT '',
+                    display_name TEXT NOT NULL DEFAULT '',
+                    followed_at TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (owner_id, twitch_user_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_follow_monitor_followers_login
+                ON follow_monitor_followers(owner_id, lower(login))
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS follow_monitor_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    login TEXT NOT NULL DEFAULT '',
+                    display_name TEXT NOT NULL DEFAULT '',
+                    detected_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_follow_monitor_events_owner
+                ON follow_monitor_events(owner_id, event_type, detected_at DESC)
                 """
             )
             cur.execute(
@@ -2314,6 +2386,11 @@ class PostgresDatabase:
             cur.execute("DELETE FROM subscriptions WHERE owner_id = %s", (uid,))
             cur.execute("DELETE FROM twitch_sync WHERE owner_id = %s", (uid,))
             cur.execute("DELETE FROM whisper_alerts WHERE owner_id = %s", (uid,))
+            cur.execute("DELETE FROM follow_monitor_events WHERE owner_id = %s", (uid,))
+            cur.execute(
+                "DELETE FROM follow_monitor_followers WHERE owner_id = %s", (uid,)
+            )
+            cur.execute("DELETE FROM follow_monitor WHERE owner_id = %s", (uid,))
             cur.execute("DELETE FROM chat_auth WHERE owner_id = %s", (uid,))
             cur.execute("DELETE FROM chat_send_daily WHERE owner_id = %s", (uid,))
             cur.execute(
@@ -4192,6 +4269,404 @@ class PostgresDatabase:
                 (twitch_user_id,),
             )
         return [int(r["owner_id"]) for r in rows]
+
+    def get_follow_monitor(self, owner_id: int) -> FollowMonitor | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM follow_monitor WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        mon = _row_to_follow_monitor(row)
+        mon.refresh_token = decrypt_secret(mon.refresh_token)
+        return mon
+
+    def upsert_follow_monitor(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+        next_sync_at: str | None = None,
+        last_sync_at: str | None = None,
+        needs_reauth: bool = False,
+        baseline_done: bool | None = None,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT baseline_done FROM follow_monitor WHERE owner_id = %s",
+                (owner_id,),
+            )
+            existing = cur.fetchone()
+            keep_baseline = (
+                bool(existing["baseline_done"])
+                if existing is not None and baseline_done is None
+                else bool(baseline_done) if baseline_done is not None else False
+            )
+            cur.execute(
+                """
+                INSERT INTO follow_monitor (
+                    owner_id, enabled, twitch_user_id, twitch_login,
+                    refresh_token, next_sync_at, last_sync_at,
+                    needs_reauth, baseline_done
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s::timestamptz, %s::timestamptz, %s, %s
+                )
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    enabled = EXCLUDED.enabled,
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    refresh_token = EXCLUDED.refresh_token,
+                    next_sync_at = COALESCE(
+                        EXCLUDED.next_sync_at, follow_monitor.next_sync_at
+                    ),
+                    last_sync_at = COALESCE(
+                        EXCLUDED.last_sync_at, follow_monitor.last_sync_at
+                    ),
+                    needs_reauth = EXCLUDED.needs_reauth,
+                    baseline_done = EXCLUDED.baseline_done
+                """,
+                (
+                    owner_id,
+                    bool(enabled),
+                    twitch_user_id,
+                    twitch_login,
+                    enc,
+                    next_sync_at,
+                    last_sync_at,
+                    bool(needs_reauth),
+                    keep_baseline,
+                ),
+            )
+
+    def set_follow_monitor_enabled(self, owner_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if enabled:
+                now = datetime.now(timezone.utc).isoformat()
+                cur.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET enabled = TRUE,
+                        next_sync_at = COALESCE(next_sync_at, %s::timestamptz)
+                    WHERE owner_id = %s
+                    """,
+                    (now, owner_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET enabled = FALSE,
+                        notify_follow = FALSE,
+                        notify_unfollow = FALSE
+                    WHERE owner_id = %s
+                    """,
+                    (owner_id,),
+                )
+
+    def set_follow_monitor_notify(
+        self,
+        owner_id: int,
+        *,
+        notify_follow: bool | None = None,
+        notify_unfollow: bool | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if notify_follow is not None:
+                cur.execute(
+                    "UPDATE follow_monitor SET notify_follow = %s WHERE owner_id = %s",
+                    (bool(notify_follow), owner_id),
+                )
+            if notify_unfollow is not None:
+                cur.execute(
+                    "UPDATE follow_monitor SET notify_unfollow = %s WHERE owner_id = %s",
+                    (bool(notify_unfollow), owner_id),
+                )
+
+    def update_follow_monitor_sync(
+        self,
+        owner_id: int,
+        *,
+        last_sync_at: str,
+        next_sync_at: str,
+        refresh_token: str | None = None,
+        baseline_done: bool = True,
+        needs_reauth: bool = False,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if refresh_token is not None:
+                enc = encrypt_secret(refresh_token) if refresh_token else ""
+                cur.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET last_sync_at = %s::timestamptz,
+                        next_sync_at = %s::timestamptz,
+                        refresh_token = %s,
+                        baseline_done = %s,
+                        needs_reauth = %s
+                    WHERE owner_id = %s
+                    """,
+                    (
+                        last_sync_at,
+                        next_sync_at,
+                        enc,
+                        bool(baseline_done),
+                        bool(needs_reauth),
+                        owner_id,
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET last_sync_at = %s::timestamptz,
+                        next_sync_at = %s::timestamptz,
+                        baseline_done = %s,
+                        needs_reauth = %s
+                    WHERE owner_id = %s
+                    """,
+                    (
+                        last_sync_at,
+                        next_sync_at,
+                        bool(baseline_done),
+                        bool(needs_reauth),
+                        owner_id,
+                    ),
+                )
+
+    def set_follow_monitor_needs_reauth(self, owner_id: int, needs: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE follow_monitor SET needs_reauth = %s WHERE owner_id = %s",
+                (bool(needs), owner_id),
+            )
+
+    def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM follow_monitor
+                WHERE enabled = TRUE
+                  AND COALESCE(needs_reauth, FALSE) = FALSE
+                  AND next_sync_at IS NOT NULL
+                  AND next_sync_at <= %s::timestamptz
+                ORDER BY next_sync_at
+                """,
+                (now_iso,),
+            )
+            rows = cur.fetchall()
+        out: list[FollowMonitor] = []
+        for row in rows:
+            mon = _row_to_follow_monitor(row)
+            mon.refresh_token = decrypt_secret(mon.refresh_token)
+            out.append(mon)
+        return out
+
+    def has_any_enabled_follow_monitor(self) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM follow_monitor
+                WHERE enabled = TRUE AND COALESCE(needs_reauth, FALSE) = FALSE
+                LIMIT 1
+                """
+            )
+            return cur.fetchone() is not None
+
+    def list_follow_monitor_followers(
+        self, owner_id: int, *, limit: int = 5000, offset: int = 0
+    ) -> list[FollowMonitorFollower]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM follow_monitor_followers
+                WHERE owner_id = %s
+                ORDER BY LOWER(login)
+                LIMIT %s OFFSET %s
+                """,
+                (owner_id, max(1, limit), max(0, offset)),
+            )
+            rows = cur.fetchall()
+        return [_row_to_follow_monitor_follower(r) for r in rows]
+
+    def count_follow_monitor_followers(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM follow_monitor_followers WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        return int(row["c"] if row else 0)
+
+    def replace_follow_monitor_followers(
+        self,
+        owner_id: int,
+        followers: list[tuple[str, str, str, str]],
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM follow_monitor_followers WHERE owner_id = %s",
+                (owner_id,),
+            )
+            if followers:
+                cur.executemany(
+                    """
+                    INSERT INTO follow_monitor_followers (
+                        owner_id, twitch_user_id, login, display_name, followed_at
+                    ) VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (owner_id, tid, login, display, followed)
+                        for tid, login, display, followed in followers
+                    ],
+                )
+
+    def list_follow_monitor_events(
+        self,
+        owner_id: int,
+        *,
+        event_type: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[FollowMonitorEvent]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if event_type:
+                cur.execute(
+                    """
+                    SELECT * FROM follow_monitor_events
+                    WHERE owner_id = %s AND event_type = %s
+                    ORDER BY detected_at DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (owner_id, event_type, max(1, limit), max(0, offset)),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT * FROM follow_monitor_events
+                    WHERE owner_id = %s
+                    ORDER BY detected_at DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (owner_id, max(1, limit), max(0, offset)),
+                )
+            rows = cur.fetchall()
+        return [_row_to_follow_monitor_event(r) for r in rows]
+
+    def count_follow_monitor_events(
+        self, owner_id: int, *, event_type: str | None = None
+    ) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if event_type:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM follow_monitor_events
+                    WHERE owner_id = %s AND event_type = %s
+                    """,
+                    (owner_id, event_type),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM follow_monitor_events
+                    WHERE owner_id = %s
+                    """,
+                    (owner_id,),
+                )
+            row = cur.fetchone()
+        return int(row["c"] if row else 0)
+
+    def add_follow_monitor_events(
+        self,
+        owner_id: int,
+        events: list[tuple[str, str, str, str]],
+        *,
+        detected_at: str,
+    ) -> None:
+        if not events:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.executemany(
+                """
+                INSERT INTO follow_monitor_events (
+                    owner_id, event_type, twitch_user_id, login,
+                    display_name, detected_at
+                ) VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+                """,
+                [
+                    (owner_id, etype, tid, login, display, detected_at)
+                    for etype, tid, login, display in events
+                ],
+            )
+
+    def search_follow_monitor(
+        self, owner_id: int, query: str, *, limit: int = 50
+    ) -> list[dict[str, str]]:
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+        like = f"%{q}%"
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT source, twitch_user_id, login, display_name, at FROM (
+                    SELECT 'current'::text AS source, twitch_user_id, login,
+                           display_name, followed_at AS at
+                    FROM follow_monitor_followers
+                    WHERE owner_id = %s
+                      AND (LOWER(login) LIKE %s OR LOWER(display_name) LIKE %s)
+                    UNION ALL
+                    SELECT event_type AS source, twitch_user_id, login,
+                           display_name, detected_at::text AS at
+                    FROM follow_monitor_events
+                    WHERE owner_id = %s
+                      AND (LOWER(login) LIKE %s OR LOWER(display_name) LIKE %s)
+                ) q
+                ORDER BY at DESC
+                LIMIT %s
+                """,
+                (owner_id, like, like, owner_id, like, like, max(1, limit)),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "source": str(r["source"] or ""),
+                "twitch_user_id": str(r["twitch_user_id"] or ""),
+                "login": str(r["login"] or ""),
+                "display_name": str(r["display_name"] or ""),
+                "at": str(r["at"] or ""),
+            }
+            for r in rows
+        ]
 
     def get_chat_auth(self, owner_id: int) -> ChatAuth | None:
         from token_crypto import decrypt_secret

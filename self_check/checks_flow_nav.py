@@ -1081,6 +1081,7 @@ async def _scenario_wizard_alert_type_other(db) -> None:
     ]
     assert btn("watch", "ru") in labels
     assert btn("create_schedule", "ru") in labels
+    assert btn("follow_monitor", "ru") in labels
     assert btn("whisper_alerts", "ru") in labels
     assert btn("chat", "ru") in labels
     assert btn("wizard_back", "ru") in labels
@@ -2066,6 +2067,74 @@ async def _scenario_settings_extended(db) -> None:
     cap.assert_turn("settings_premium_open")
 
 
+async def _scenario_follow_monitor(db) -> None:
+    """§1.4 Follow/Unfollow screen: enable + lists + search (escape hatch via menu)."""
+    from handlers.follow_monitor import (
+        BETA_FEATURE_ID,
+        FEATURE_ID,
+        open_follow_monitor_menu,
+    )
+    from handlers.settings import open_other_menu
+
+    db.set_beta_enrollment(_FREE_UID, BETA_FEATURE_ID, True)
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
+    ctx = _ctx(application)
+    await open_other_menu(update, ctx)
+    update = _msg_update(_FREE_UID, btn("follow_monitor", "ru"), cap)
+    with patch(
+        "handlers.follow_monitor.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await open_follow_monitor_menu(update, ctx)
+    labels = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert any("мониторинг" in (x or "").lower() for x in labels)
+    assert any("Follow" in (x or "") for x in labels)
+    assert any("Поиск" in (x or "") or "Search" in (x or "") for x in labels)
+    assert not any("Оповещать" in (x or "") for x in labels)
+    cap.assert_turn("other_follow_monitor")
+
+    db.upsert_follow_monitor(
+        _FREE_UID,
+        enabled=True,
+        twitch_user_id="tw",
+        twitch_login="streamer",
+        refresh_token="rt",
+        next_sync_at="2026-01-01T00:00:00+00:00",
+    )
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
+    ctx = _ctx(application)
+    await open_other_menu(update, ctx)
+    update = _msg_update(_FREE_UID, btn("follow_monitor", "ru"), cap)
+    with patch(
+        "handlers.follow_monitor.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await open_follow_monitor_menu(update, ctx)
+    labels_on = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert any("Оповещать о новых Follow" in (x or "") for x in labels_on)
+    assert any("Оповещать о новых Unfollow" in (x or "") for x in labels_on)
+    cap.assert_turn("other_follow_monitor_enabled")
+    _ = FEATURE_ID
+
+
 async def _run_flow_nav_checks() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "flow_nav.db")
@@ -2102,6 +2171,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_vacation(db)
         await _scenario_schedule_publish_chain(db)
         await _scenario_settings_extended(db)
+        await _scenario_follow_monitor(db)
 
 
 def check_flow_nav() -> None:

@@ -9,6 +9,9 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     DropsAuth,
+    FollowMonitor,
+    FollowMonitorEvent,
+    FollowMonitorFollower,
     PremiumChannel,
     PremiumGift,
     ReferralCreditRef,
@@ -547,6 +550,86 @@ class Database(Protocol):
     ) -> None: ...
 
     def disable_whisper_alerts_for_twitch_user(self, twitch_user_id: str) -> list[int]: ...
+
+    def get_follow_monitor(self, owner_id: int) -> FollowMonitor | None: ...
+
+    def upsert_follow_monitor(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+        next_sync_at: str | None = None,
+        last_sync_at: str | None = None,
+        needs_reauth: bool = False,
+        baseline_done: bool | None = None,
+    ) -> None: ...
+
+    def set_follow_monitor_enabled(self, owner_id: int, enabled: bool) -> None: ...
+
+    def set_follow_monitor_notify(
+        self,
+        owner_id: int,
+        *,
+        notify_follow: bool | None = None,
+        notify_unfollow: bool | None = None,
+    ) -> None: ...
+
+    def update_follow_monitor_sync(
+        self,
+        owner_id: int,
+        *,
+        last_sync_at: str,
+        next_sync_at: str,
+        refresh_token: str | None = None,
+        baseline_done: bool = True,
+        needs_reauth: bool = False,
+    ) -> None: ...
+
+    def set_follow_monitor_needs_reauth(self, owner_id: int, needs: bool) -> None: ...
+
+    def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]: ...
+
+    def has_any_enabled_follow_monitor(self) -> bool: ...
+
+    def list_follow_monitor_followers(
+        self, owner_id: int, *, limit: int = 5000, offset: int = 0
+    ) -> list[FollowMonitorFollower]: ...
+
+    def count_follow_monitor_followers(self, owner_id: int) -> int: ...
+
+    def replace_follow_monitor_followers(
+        self,
+        owner_id: int,
+        followers: list[tuple[str, str, str, str]],
+    ) -> None: ...
+
+    def list_follow_monitor_events(
+        self,
+        owner_id: int,
+        *,
+        event_type: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[FollowMonitorEvent]: ...
+
+    def count_follow_monitor_events(
+        self, owner_id: int, *, event_type: str | None = None
+    ) -> int: ...
+
+    def add_follow_monitor_events(
+        self,
+        owner_id: int,
+        events: list[tuple[str, str, str, str]],
+        *,
+        detected_at: str,
+    ) -> None: ...
+
+    def search_follow_monitor(
+        self, owner_id: int, query: str, *, limit: int = 50
+    ) -> list[dict[str, str]]: ...
 
     def get_chat_auth(self, owner_id: int) -> ChatAuth | None: ...
 

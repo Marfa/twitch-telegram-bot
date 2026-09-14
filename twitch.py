@@ -19,6 +19,8 @@ from config import (
 )
 
 FOLLOWS_SCOPE = "user:read:follows"
+# Channel followers list (own channel / mod) — Follow/Unfollow monitor.
+FOLLOWERS_SCOPE = "moderator:read:followers"
 SCHEDULE_SCOPE = "channel:manage:schedule"
 SUBSCRIPTIONS_SCOPE = "user:read:subscriptions"
 WHISPERS_SCOPE = "user:read:whispers"
@@ -828,16 +830,19 @@ class TwitchClient:
         redirect_uri: str,
         state: str,
         scopes: str | None = None,
+        force_verify: bool = False,
     ) -> str:
-        return "https://id.twitch.tv/oauth2/authorize?" + urlencode(
-            {
-                "client_id": TWITCH_CLIENT_ID,
-                "redirect_uri": redirect_uri,
-                "response_type": "code",
-                "scope": FOLLOWS_SCOPE if scopes is None else scopes,
-                "state": state,
-            }
-        )
+        params: dict[str, str] = {
+            "client_id": TWITCH_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": FOLLOWS_SCOPE if scopes is None else scopes,
+            "state": state,
+        }
+        if force_verify:
+            # Re-consent so newly requested scopes (e.g. followers) are granted.
+            params["force_verify"] = "true"
+        return "https://id.twitch.tv/oauth2/authorize?" + urlencode(params)
 
     def exchange_code(self, code: str, *, redirect_uri: str) -> dict[str, Any]:
         resp = self._session.post(
@@ -1048,6 +1053,37 @@ class TwitchClient:
                 headers=headers,
                 params=params,
                 timeout=20,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            out.extend(payload.get("data") or [])
+            cursor = (payload.get("pagination") or {}).get("cursor")
+            if not cursor:
+                break
+        return out
+
+    def get_channel_followers(
+        self, user_access_token: str, broadcaster_id: str
+    ) -> list[dict[str, Any]]:
+        """Followers of a channel. Needs moderator:read:followers (broadcaster OK)."""
+        headers = {
+            "Client-ID": TWITCH_CLIENT_ID,
+            "Authorization": f"Bearer {user_access_token}",
+        }
+        out: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, str | int] = {
+                "broadcaster_id": broadcaster_id,
+                "first": 100,
+            }
+            if cursor:
+                params["after"] = cursor
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/channels/followers",
+                headers=headers,
+                params=params,
+                timeout=30,
             )
             resp.raise_for_status()
             payload = resp.json()

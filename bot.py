@@ -84,6 +84,7 @@ from i18n import (
     ignored_words_keyboard,
     is_menu_button,
     whisper_alerts_keyboard,
+    follow_monitor_keyboard,
     beta_mode_keyboard,
     image_edit_keyboard,
     image_position_keyboard,
@@ -372,6 +373,19 @@ from handlers.settings import (
     start_language_change,
     sync_stream_chat_menu_button,
     announce_new_beta_features,
+)
+from handlers.follow_monitor import (
+    FM_SEARCH,
+    cancel_follow_monitor_search,
+    on_follow_monitor_back,
+    on_follow_monitor_list,
+    on_follow_monitor_noop,
+    on_follow_monitor_notify_toggle,
+    on_follow_monitor_page,
+    on_follow_monitor_toggle,
+    open_follow_monitor_menu,
+    receive_follow_monitor_search,
+    start_follow_monitor_search,
 )
 
 from handlers.watch import (
@@ -792,6 +806,7 @@ def _help_text(lang: str) -> str:
         btn_list=btn("list", lang),
         btn_alert_history=btn("alert_history", lang),
         btn_other=btn("other", lang),
+        btn_follow_monitor=btn("follow_monitor", lang),
         btn_whisper_alerts=btn("whisper_alerts", lang),
         btn_create_schedule=btn("create_schedule", lang),
         btn_watch=btn("watch", lang),
@@ -2219,11 +2234,46 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("follow_monitor"), open_follow_monitor_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("beta_mode"), open_beta_mode_menu),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(on_whisper_alerts_toggle, pattern=r"^whisper_alerts:toggle$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_follow_monitor_toggle, pattern=r"^follow_monitor:toggle$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_follow_monitor_notify_toggle,
+            pattern=r"^follow_monitor:notify:(follow|unfollow)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_follow_monitor_list, pattern=r"^follow_monitor:list:(current|new|unfollow)$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_follow_monitor_page, pattern=r"^follow_monitor:page:(current|new|unfollow):\d+$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_follow_monitor_noop, pattern=r"^follow_monitor:noop$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_follow_monitor_back, pattern=r"^follow_monitor:back$"),
         group=0,
     )
     app.add_handler(
@@ -2537,7 +2587,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_new_sub_other,
-                    pattern=r"^new_sub_other:(back|whisper_alerts|create_schedule|watch|chat)$",
+                    pattern=r"^new_sub_other:(back|follow_monitor|whisper_alerts|create_schedule|watch|chat)$",
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,
@@ -3038,14 +3088,44 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(conv, group=1)
     app.bot_data["main_conv"] = conv
 
+    fm_search_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(
+                start_follow_monitor_search, pattern=r"^follow_monitor:search$"
+            ),
+        ],
+        states={
+            FM_SEARCH: [
+                MessageHandler(
+                    _btn_filter("wizard_cancel"), cancel_follow_monitor_search
+                ),
+                CommandHandler("cancel", cancel_follow_monitor_search),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_follow_monitor_search
+                ),
+            ],
+        },
+        fallbacks=[
+            MessageHandler(_btn_filter("wizard_cancel"), cancel_follow_monitor_search),
+            CommandHandler("cancel", cancel_follow_monitor_search),
+            MessageHandler(_btn_filter("follow_monitor"), cancel_follow_monitor_search),
+            MessageHandler(_btn_filter("other"), cancel_follow_monitor_search),
+            MessageHandler(_btn_filter("back"), cancel_follow_monitor_search),
+        ],
+        allow_reentry=True,
+        name="follow_monitor_search",
+    )
+    app.add_handler(fm_search_conv, group=1)
+
     def _clear_stuck_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        try:
-            key = conv._get_key(update)
-        except Exception:
-            return
-        if key in conv._conversations:
-            del conv._conversations[key]
-            context.user_data.clear()
+        for c in (conv, fm_search_conv):
+            try:
+                key = c._get_key(update)
+            except Exception:
+                continue
+            if key in c._conversations:
+                del c._conversations[key]
+                context.user_data.clear()
 
     async def wake_stuck_on_menu_callback(
         update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -3093,6 +3173,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|sys_beta:|"
                 r"whisper_alerts:|"
+                r"follow_monitor:|"
                 r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
             ),
         ),
@@ -3130,6 +3211,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("sys_notifications")
                 | _btn_filter("ignored_words")
                 | _btn_filter("whisper_alerts")
+                | _btn_filter("follow_monitor")
                 | _btn_filter("sync_subs")
                 | _btn_filter("admin")
                 | _btn_filter("broadcast")

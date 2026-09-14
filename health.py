@@ -420,7 +420,14 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
             raise RuntimeError("no_user")
         twitch_user_id = str(user["id"])
         twitch_login = str(user.get("login") or "")
-        if purpose in ("schedule", "premium", "premium_channel", "whispers", "chat"):
+        if purpose in (
+            "schedule",
+            "premium",
+            "premium_channel",
+            "whispers",
+            "chat",
+            "follow_monitor",
+        ):
             followed = []
         else:
             followed = _oauth_twitch.get_followed_channels(access, twitch_user_id)
