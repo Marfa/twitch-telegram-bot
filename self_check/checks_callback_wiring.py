@@ -53,6 +53,7 @@ from i18n import (
     watch_cats_nav_keyboard,
     watch_filters_keyboard,
     whisper_alerts_keyboard,
+    follow_monitor_keyboard,
 )
 from telegram import InlineKeyboardMarkup
 
@@ -87,6 +88,7 @@ _MENU_BTN_KEYS = (
     "sys_notifications",
     "ignored_words",
     "whisper_alerts",
+    "follow_monitor",
     "beta_mode",
     "sync_subs",
     "premium",
@@ -353,6 +355,17 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             },
         ),
         ("whisper_alerts", whisper_alerts_keyboard, {"lang": loc, "enabled": False}),
+        ("follow_monitor", follow_monitor_keyboard, {"lang": loc, "enabled": False}),
+        (
+            "follow_monitor_on",
+            follow_monitor_keyboard,
+            {
+                "lang": loc,
+                "enabled": True,
+                "notify_follow": True,
+                "notify_unfollow": False,
+            },
+        ),
         ("ignored_words", ignored_words_keyboard, {"lang": loc, "has_words": False}),
         (
             "ignored_words_igdb",

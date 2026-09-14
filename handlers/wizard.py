@@ -746,6 +746,7 @@ async def receive_new_sub_other(
     """Handle Other submenu from New subscription: Back or open a feature."""
     import beta as beta_features
     from handlers.drops import DROPS_BETA_ID
+    from handlers.follow_monitor import open_follow_monitor_menu
     from handlers.settings import open_stream_chat, open_whisper_alerts_menu
     from handlers.stream_schedule import start_stream_schedule
     from handlers.watch import start_watch_lucky
@@ -763,12 +764,21 @@ async def receive_new_sub_other(
         parse_mode = ParseMode.HTML if "<b>" in text else None
         await query.edit_message_text(text, reply_markup=markup, parse_mode=parse_mode)
         return _wz()["ALERT_TYPE"]
-    if action not in ("whisper_alerts", "create_schedule", "watch", "chat"):
+    if action not in (
+        "follow_monitor",
+        "whisper_alerts",
+        "create_schedule",
+        "watch",
+        "chat",
+    ):
         markup = new_sub_other_keyboard(lang)
         await query.edit_message_reply_markup(reply_markup=markup)
         return _wz()["ALERT_TYPE"]
     await query.edit_message_text("✓")
     context.user_data.clear()
+    if action == "follow_monitor":
+        await open_follow_monitor_menu(update, context)
+        return ConversationHandler.END
     if action == "whisper_alerts":
         await open_whisper_alerts_menu(update, context)
         return ConversationHandler.END

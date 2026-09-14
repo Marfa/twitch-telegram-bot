@@ -17,6 +17,9 @@ from .models import (
     ChatAuth,
     DeletedSubscriptionCartItem,
     DropsAuth,
+    FollowMonitor,
+    FollowMonitorEvent,
+    FollowMonitorFollower,
     PremiumChannel,
     PremiumGift,
     PremiumPurchase,
@@ -32,6 +35,9 @@ from .models import (
     _cart_item_from_row,
     _row_to_alert_history,
     _row_to_chat_auth,
+    _row_to_follow_monitor,
+    _row_to_follow_monitor_event,
+    _row_to_follow_monitor_follower,
     _row_to_referral_withdrawal,
     _row_to_sub,
     _row_to_twitch_sync,
@@ -554,6 +560,73 @@ class SqliteDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_whisper_alerts_twitch_user
             ON whisper_alerts(twitch_user_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS follow_monitor (
+                owner_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                twitch_login TEXT NOT NULL DEFAULT '',
+                refresh_token TEXT NOT NULL DEFAULT '',
+                next_sync_at TEXT,
+                last_sync_at TEXT,
+                needs_reauth INTEGER NOT NULL DEFAULT 0,
+                baseline_done INTEGER NOT NULL DEFAULT 0,
+                notify_follow INTEGER NOT NULL DEFAULT 0,
+                notify_unfollow INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        fm_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(follow_monitor)").fetchall()
+        }
+        if "notify_follow" not in fm_cols:
+            conn.execute(
+                "ALTER TABLE follow_monitor ADD COLUMN notify_follow "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "notify_unfollow" not in fm_cols:
+            conn.execute(
+                "ALTER TABLE follow_monitor ADD COLUMN notify_unfollow "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS follow_monitor_followers (
+                owner_id INTEGER NOT NULL,
+                twitch_user_id TEXT NOT NULL,
+                login TEXT NOT NULL DEFAULT '',
+                display_name TEXT NOT NULL DEFAULT '',
+                followed_at TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (owner_id, twitch_user_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_follow_monitor_followers_login
+            ON follow_monitor_followers(owner_id, login)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS follow_monitor_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                login TEXT NOT NULL DEFAULT '',
+                display_name TEXT NOT NULL DEFAULT '',
+                detected_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_follow_monitor_events_owner
+            ON follow_monitor_events(owner_id, event_type, detected_at DESC)
             """
         )
         conn.execute(
@@ -2108,6 +2181,11 @@ class SqliteDatabase:
             conn.execute("DELETE FROM subscriptions WHERE owner_id = ?", (uid,))
             conn.execute("DELETE FROM twitch_sync WHERE owner_id = ?", (uid,))
             conn.execute("DELETE FROM whisper_alerts WHERE owner_id = ?", (uid,))
+            conn.execute("DELETE FROM follow_monitor_events WHERE owner_id = ?", (uid,))
+            conn.execute(
+                "DELETE FROM follow_monitor_followers WHERE owner_id = ?", (uid,)
+            )
+            conn.execute("DELETE FROM follow_monitor WHERE owner_id = ?", (uid,))
             conn.execute("DELETE FROM chat_auth WHERE owner_id = ?", (uid,))
             conn.execute("DELETE FROM chat_send_daily WHERE owner_id = ?", (uid,))
             conn.execute(
@@ -3839,6 +3917,365 @@ class SqliteDatabase:
                 (twitch_user_id,),
             )
         return [int(r["owner_id"]) for r in rows]
+
+    def get_follow_monitor(self, owner_id: int) -> FollowMonitor | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM follow_monitor WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return None
+        mon = _row_to_follow_monitor(row)
+        mon.refresh_token = decrypt_secret(mon.refresh_token)
+        return mon
+
+    def upsert_follow_monitor(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+        next_sync_at: str | None = None,
+        last_sync_at: str | None = None,
+        needs_reauth: bool = False,
+        baseline_done: bool | None = None,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT baseline_done FROM follow_monitor WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+            keep_baseline = (
+                bool(existing["baseline_done"])
+                if existing is not None and baseline_done is None
+                else bool(baseline_done) if baseline_done is not None else False
+            )
+            conn.execute(
+                """
+                INSERT INTO follow_monitor (
+                    owner_id, enabled, twitch_user_id, twitch_login,
+                    refresh_token, next_sync_at, last_sync_at,
+                    needs_reauth, baseline_done
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    twitch_user_id = excluded.twitch_user_id,
+                    twitch_login = excluded.twitch_login,
+                    refresh_token = excluded.refresh_token,
+                    next_sync_at = COALESCE(excluded.next_sync_at, follow_monitor.next_sync_at),
+                    last_sync_at = COALESCE(excluded.last_sync_at, follow_monitor.last_sync_at),
+                    needs_reauth = excluded.needs_reauth,
+                    baseline_done = excluded.baseline_done
+                """,
+                (
+                    owner_id,
+                    1 if enabled else 0,
+                    twitch_user_id,
+                    twitch_login,
+                    enc,
+                    next_sync_at,
+                    last_sync_at,
+                    1 if needs_reauth else 0,
+                    1 if keep_baseline else 0,
+                ),
+            )
+
+    def set_follow_monitor_enabled(self, owner_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            if enabled:
+                conn.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET enabled = 1,
+                        next_sync_at = COALESCE(next_sync_at, ?)
+                    WHERE owner_id = ?
+                    """,
+                    (datetime.now(timezone.utc).isoformat(), owner_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET enabled = 0, notify_follow = 0, notify_unfollow = 0
+                    WHERE owner_id = ?
+                    """,
+                    (owner_id,),
+                )
+
+    def set_follow_monitor_notify(
+        self,
+        owner_id: int,
+        *,
+        notify_follow: bool | None = None,
+        notify_unfollow: bool | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            if notify_follow is not None:
+                conn.execute(
+                    "UPDATE follow_monitor SET notify_follow = ? WHERE owner_id = ?",
+                    (1 if notify_follow else 0, owner_id),
+                )
+            if notify_unfollow is not None:
+                conn.execute(
+                    "UPDATE follow_monitor SET notify_unfollow = ? WHERE owner_id = ?",
+                    (1 if notify_unfollow else 0, owner_id),
+                )
+
+    def update_follow_monitor_sync(
+        self,
+        owner_id: int,
+        *,
+        last_sync_at: str,
+        next_sync_at: str,
+        refresh_token: str | None = None,
+        baseline_done: bool = True,
+        needs_reauth: bool = False,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        with self._conn() as conn:
+            if refresh_token is not None:
+                enc = encrypt_secret(refresh_token) if refresh_token else ""
+                conn.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET last_sync_at = ?, next_sync_at = ?, refresh_token = ?,
+                        baseline_done = ?, needs_reauth = ?
+                    WHERE owner_id = ?
+                    """,
+                    (
+                        last_sync_at,
+                        next_sync_at,
+                        enc,
+                        1 if baseline_done else 0,
+                        1 if needs_reauth else 0,
+                        owner_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE follow_monitor
+                    SET last_sync_at = ?, next_sync_at = ?,
+                        baseline_done = ?, needs_reauth = ?
+                    WHERE owner_id = ?
+                    """,
+                    (
+                        last_sync_at,
+                        next_sync_at,
+                        1 if baseline_done else 0,
+                        1 if needs_reauth else 0,
+                        owner_id,
+                    ),
+                )
+
+    def set_follow_monitor_needs_reauth(self, owner_id: int, needs: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE follow_monitor SET needs_reauth = ? WHERE owner_id = ?",
+                (1 if needs else 0, owner_id),
+            )
+
+    def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM follow_monitor
+                WHERE enabled = 1
+                  AND COALESCE(needs_reauth, 0) = 0
+                  AND next_sync_at IS NOT NULL
+                  AND next_sync_at <= ?
+                ORDER BY next_sync_at
+                """,
+                (now_iso,),
+            ).fetchall()
+        out: list[FollowMonitor] = []
+        for row in rows:
+            mon = _row_to_follow_monitor(row)
+            mon.refresh_token = decrypt_secret(mon.refresh_token)
+            out.append(mon)
+        return out
+
+    def has_any_enabled_follow_monitor(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM follow_monitor
+                WHERE enabled = 1 AND COALESCE(needs_reauth, 0) = 0
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+
+    def list_follow_monitor_followers(
+        self, owner_id: int, *, limit: int = 5000, offset: int = 0
+    ) -> list[FollowMonitorFollower]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM follow_monitor_followers
+                WHERE owner_id = ?
+                ORDER BY LOWER(login)
+                LIMIT ? OFFSET ?
+                """,
+                (owner_id, max(1, limit), max(0, offset)),
+            ).fetchall()
+        return [_row_to_follow_monitor_follower(r) for r in rows]
+
+    def count_follow_monitor_followers(self, owner_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM follow_monitor_followers WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        return int(row["c"] if row else 0)
+
+    def replace_follow_monitor_followers(
+        self,
+        owner_id: int,
+        followers: list[tuple[str, str, str, str]],
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM follow_monitor_followers WHERE owner_id = ?",
+                (owner_id,),
+            )
+            if followers:
+                conn.executemany(
+                    """
+                    INSERT INTO follow_monitor_followers (
+                        owner_id, twitch_user_id, login, display_name, followed_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (owner_id, tid, login, display, followed)
+                        for tid, login, display, followed in followers
+                    ],
+                )
+
+    def list_follow_monitor_events(
+        self,
+        owner_id: int,
+        *,
+        event_type: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[FollowMonitorEvent]:
+        with self._conn() as conn:
+            if event_type:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM follow_monitor_events
+                    WHERE owner_id = ? AND event_type = ?
+                    ORDER BY detected_at DESC, id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (owner_id, event_type, max(1, limit), max(0, offset)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM follow_monitor_events
+                    WHERE owner_id = ?
+                    ORDER BY detected_at DESC, id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (owner_id, max(1, limit), max(0, offset)),
+                ).fetchall()
+        return [_row_to_follow_monitor_event(r) for r in rows]
+
+    def count_follow_monitor_events(
+        self, owner_id: int, *, event_type: str | None = None
+    ) -> int:
+        with self._conn() as conn:
+            if event_type:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM follow_monitor_events
+                    WHERE owner_id = ? AND event_type = ?
+                    """,
+                    (owner_id, event_type),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM follow_monitor_events
+                    WHERE owner_id = ?
+                    """,
+                    (owner_id,),
+                ).fetchone()
+        return int(row["c"] if row else 0)
+
+    def add_follow_monitor_events(
+        self,
+        owner_id: int,
+        events: list[tuple[str, str, str, str]],
+        *,
+        detected_at: str,
+    ) -> None:
+        if not events:
+            return
+        with self._conn() as conn:
+            conn.executemany(
+                """
+                INSERT INTO follow_monitor_events (
+                    owner_id, event_type, twitch_user_id, login,
+                    display_name, detected_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (owner_id, etype, tid, login, display, detected_at)
+                    for etype, tid, login, display in events
+                ],
+            )
+
+    def search_follow_monitor(
+        self, owner_id: int, query: str, *, limit: int = 50
+    ) -> list[dict[str, str]]:
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+        like = f"%{q}%"
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT 'current' AS source, twitch_user_id, login, display_name,
+                       followed_at AS at
+                FROM follow_monitor_followers
+                WHERE owner_id = ?
+                  AND (LOWER(login) LIKE ? OR LOWER(display_name) LIKE ?)
+                UNION ALL
+                SELECT event_type AS source, twitch_user_id, login, display_name,
+                       detected_at AS at
+                FROM follow_monitor_events
+                WHERE owner_id = ?
+                  AND (LOWER(login) LIKE ? OR LOWER(display_name) LIKE ?)
+                ORDER BY at DESC
+                LIMIT ?
+                """,
+                (owner_id, like, like, owner_id, like, like, max(1, limit)),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "source": str(r["source"] or ""),
+                "twitch_user_id": str(r["twitch_user_id"] or ""),
+                "login": str(r["login"] or ""),
+                "display_name": str(r["display_name"] or ""),
+                "at": str(r["at"] or ""),
+            }
+            for r in rows
+        ]
 
     def get_chat_auth(self, owner_id: int) -> ChatAuth | None:
         from token_crypto import decrypt_secret

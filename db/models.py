@@ -531,6 +531,41 @@ class DropsAuth:
     access_expires_at: int = 0
 
 
+@dataclass
+class FollowMonitor:
+    owner_id: int
+    enabled: bool
+    twitch_user_id: str
+    twitch_login: str
+    refresh_token: str
+    next_sync_at: str | None
+    last_sync_at: str | None
+    needs_reauth: bool = False
+    baseline_done: bool = False
+    notify_follow: bool = False
+    notify_unfollow: bool = False
+
+
+@dataclass
+class FollowMonitorFollower:
+    owner_id: int
+    twitch_user_id: str
+    login: str
+    display_name: str
+    followed_at: str
+
+
+@dataclass
+class FollowMonitorEvent:
+    id: int
+    owner_id: int
+    event_type: str
+    twitch_user_id: str
+    login: str
+    display_name: str
+    detected_at: str
+
+
 def _scheduled_broadcast_from_row(row: Any) -> ScheduledBroadcast:
     scheduled_at = row["scheduled_at"]
     if scheduled_at is not None and not isinstance(scheduled_at, str):
@@ -602,6 +637,58 @@ def _row_to_chat_auth(row: Any) -> ChatAuth:
         twitch_user_id=str(row["twitch_user_id"] or ""),
         twitch_login=str(row["twitch_login"] or ""),
         refresh_token=str(row["refresh_token"] or ""),
+    )
+
+
+def _row_to_follow_monitor(row: Any) -> FollowMonitor:
+    next_at = row["next_sync_at"] if "next_sync_at" in row.keys() else None
+    last = row["last_sync_at"] if "last_sync_at" in row.keys() else None
+    if next_at is not None and not isinstance(next_at, str):
+        next_at = next_at.isoformat()
+    if last is not None and not isinstance(last, str):
+        last = last.isoformat()
+    return FollowMonitor(
+        owner_id=int(row["owner_id"]),
+        enabled=bool(row["enabled"]),
+        twitch_user_id=str(row["twitch_user_id"] or ""),
+        twitch_login=str(row["twitch_login"] or ""),
+        refresh_token=str(row["refresh_token"] or ""),
+        next_sync_at=str(next_at) if next_at else None,
+        last_sync_at=str(last) if last else None,
+        needs_reauth=bool(row["needs_reauth"]) if "needs_reauth" in row.keys() else False,
+        baseline_done=bool(row["baseline_done"]) if "baseline_done" in row.keys() else False,
+        notify_follow=bool(row["notify_follow"]) if "notify_follow" in row.keys() else False,
+        notify_unfollow=(
+            bool(row["notify_unfollow"]) if "notify_unfollow" in row.keys() else False
+        ),
+    )
+
+
+def _row_to_follow_monitor_follower(row: Any) -> FollowMonitorFollower:
+    followed = row["followed_at"]
+    if followed is not None and not isinstance(followed, str):
+        followed = followed.isoformat()
+    return FollowMonitorFollower(
+        owner_id=int(row["owner_id"]),
+        twitch_user_id=str(row["twitch_user_id"] or ""),
+        login=str(row["login"] or ""),
+        display_name=str(row["display_name"] or ""),
+        followed_at=str(followed or ""),
+    )
+
+
+def _row_to_follow_monitor_event(row: Any) -> FollowMonitorEvent:
+    detected = row["detected_at"]
+    if detected is not None and not isinstance(detected, str):
+        detected = detected.isoformat()
+    return FollowMonitorEvent(
+        id=int(row["id"]),
+        owner_id=int(row["owner_id"]),
+        event_type=str(row["event_type"] or ""),
+        twitch_user_id=str(row["twitch_user_id"] or ""),
+        login=str(row["login"] or ""),
+        display_name=str(row["display_name"] or ""),
+        detected_at=str(detected or ""),
     )
 
 

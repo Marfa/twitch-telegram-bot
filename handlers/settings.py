@@ -418,6 +418,15 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         from handlers.drops import maybe_clear_drops_digest_after_beta_exit
 
         await maybe_clear_drops_digest_after_beta_exit(context.bot, db, user_id)
+    if feature_id == "follow-monitor" and not new_state:
+        from handlers.follow_monitor import maybe_stop_follow_monitor_after_beta_exit
+
+        await maybe_stop_follow_monitor_after_beta_exit(
+            context.bot,
+            db,
+            user_id,
+            job_queue=context.application.job_queue,
+        )
     if feature_id == "stream-chat":
         await sync_stream_chat_menu_button(context.bot, db, user_id)
         chat_id = reply_chat_id(update)

@@ -1422,6 +1422,94 @@ def check_handlers() -> None:
     assert not is_menu_button("not a menu button")
 
     assert "stream_chat" in FEATURE_IDS
+    assert "follow_monitor" in FEATURE_IDS
+    assert "follow_monitor" not in prem.purchasable_feature_ids()
+    assert prem.premium_feature_in_unreleased_beta("follow_monitor")
+    fm_feat = beta_mod.get_feature("follow-monitor")
+    assert fm_feat is not None and fm_feat.premium_feature_id == "follow_monitor"
+    assert fm_feat.stage == "beta"
+    assert tr("premium_feat_follow_monitor", "ru")
+    assert tr("beta_feat_follow_monitor", "en")
+    from handlers.follow_monitor import _sync_owner_blocking
+
+    with tempfile.TemporaryDirectory() as _fmd:
+        fmdb = SqliteDatabase(Path(_fmd) / "fm.db")
+        fmdb.upsert_user(31)
+        _now = datetime.now(timezone.utc).isoformat()
+        fmdb.upsert_follow_monitor(
+            31,
+            enabled=True,
+            twitch_user_id="b",
+            twitch_login="b",
+            refresh_token="r",
+            next_sync_at=_now,
+            baseline_done=False,
+        )
+
+        class _FakeFollowTwitch:
+            def __init__(self) -> None:
+                self.rows: list[dict] = [
+                    {
+                        "user_id": "1",
+                        "user_login": "a",
+                        "user_name": "A",
+                        "followed_at": _now,
+                    },
+                    {
+                        "user_id": "2",
+                        "user_login": "b",
+                        "user_name": "B",
+                        "followed_at": _now,
+                    },
+                ]
+
+            def refresh_user_token(self, rt: str) -> dict:
+                return {"access_token": "a", "refresh_token": rt or "r"}
+
+            def token_has_scope(self, access: str, scope: str) -> bool:
+                return True
+
+            def get_channel_followers(self, access: str, bid: str) -> list:
+                return self.rows
+
+        _ftw = _FakeFollowTwitch()
+        _mon = fmdb.get_follow_monitor(31)
+        events, ok = _sync_owner_blocking(fmdb, _ftw, _mon)
+        assert ok and events == []
+        assert fmdb.count_follow_monitor_followers(31) == 2
+        assert fmdb.count_follow_monitor_events(31) == 0
+        _mon = fmdb.get_follow_monitor(31)
+        assert _mon and _mon.baseline_done
+        _ftw.rows = [
+            {
+                "user_id": "2",
+                "user_login": "b",
+                "user_name": "B",
+                "followed_at": _now,
+            },
+            {
+                "user_id": "3",
+                "user_login": "c",
+                "user_name": "C",
+                "followed_at": _now,
+            },
+        ]
+        events, ok = _sync_owner_blocking(fmdb, _ftw, _mon)
+        assert ok
+        assert sum(1 for e in events if e[0] == "follow") == 1
+        assert sum(1 for e in events if e[0] == "unfollow") == 1
+        assert fmdb.count_follow_monitor_events(31, event_type="follow") == 1
+        assert fmdb.count_follow_monitor_events(31, event_type="unfollow") == 1
+        from handlers.follow_monitor import _build_digest_text
+
+        digest = _build_digest_text(
+            "ru", events, notify_follow=True, notify_unfollow=True
+        )
+        assert digest is not None
+        assert "carol" in digest.lower() or "Carol" in digest or "@c" in digest.lower()
+        assert _build_digest_text(
+            "ru", events, notify_follow=False, notify_unfollow=False
+        ) is None
     assert "stream-chat" not in {f.id for f in beta_mod.list_features()}
     assert "deleted-subscriptions-cart" not in {f.id for f in beta_mod.list_features()}
     sc_feat = beta_mod.get_feature("stream-chat")

@@ -318,6 +318,21 @@ def check_core() -> None:
     assert "user%3Aread%3Afollows" in auth_url or "user:read:follows" in auth_url
     assert "offline_access" not in auth_url
     assert "state=abc" in auth_url
+    assert "force_verify" not in auth_url
+    from twitch import FOLLOWERS_SCOPE
+
+    forced = t.build_authorize_url(
+        redirect_uri="https://example.com/oauth/twitch/callback",
+        state="abc",
+        scopes=FOLLOWERS_SCOPE,
+        force_verify=True,
+    )
+    assert "force_verify=true" in forced
+    assert (
+        "moderator%3Aread%3Afollowers" in forced
+        or "moderator:read:followers" in forced
+    )
+    assert FOLLOWERS_SCOPE == "moderator:read:followers"
     state = create_oauth_state(42, "ru")
     assert pop_oauth_state(state) == (42, "ru", "import")
     assert pop_oauth_state(state) is None
@@ -632,9 +647,9 @@ def check_core() -> None:
         ]
         other_kb = other_menu(loc).keyboard
         assert [[b.text for b in row] for row in other_kb] == [
-            [btn("whisper_alerts", loc), btn("create_schedule", loc)],
-            [btn("watch", loc), btn("chat", loc)],
-            [btn("back", loc)],
+            [btn("follow_monitor", loc), btn("whisper_alerts", loc)],
+            [btn("create_schedule", loc), btn("watch", loc)],
+            [btn("chat", loc), btn("back", loc)],
         ]
         for i, row in enumerate(other_kb):
             if i == len(other_kb) - 1 and len(row) == 1:
@@ -1121,6 +1136,7 @@ def check_core() -> None:
         assert btn("alert_history", loc) in help_txt
         assert btn("other", loc) in help_txt
         assert btn("whisper_alerts", loc) in help_txt
+        assert btn("follow_monitor", loc) in help_txt
         assert btn("new", loc)
         assert btn("watch", loc)
         assert btn("settings", loc)
