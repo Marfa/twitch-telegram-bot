@@ -2051,7 +2051,7 @@ def check_handlers() -> None:
             reason="r",
             until="x",
         )
-        assert tr("lucky_premium_reason_nth", "ru", n=200)
+        assert tr("lucky_premium_reason_nth", "ru", n=lucky.LUCKY_NTH_EVERY)
         assert tr("lucky_premium_reason_monthly", "ru", month="2026-10")
 
         _check_category_watch_digest_and_legacy()

@@ -695,7 +695,7 @@ async def grant_and_announce_lucky_nth(
         db,
         user_id=user_id,
         reason_key="lucky_premium_reason_nth",
-        reason_kwargs={"n": int(user_count)},
+        reason_kwargs={"n": lucky.LUCKY_NTH_EVERY},
         until_unix=until,
     )
     return True
