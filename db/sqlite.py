@@ -939,6 +939,15 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS stream_poll_snapshot (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS premium_channels (
                 twitch_user_id TEXT PRIMARY KEY,
                 twitch_login TEXT NOT NULL,
@@ -5628,6 +5637,36 @@ class SqliteDatabase:
             "synced_at": int(row["synced_at"] or 0),
             "row_count": int(row["row_count"] or 0),
         }
+
+    def get_stream_poll_snapshot(self) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT payload FROM stream_poll_snapshot WHERE id = 1"
+            ).fetchone()
+        if not row:
+            return None
+        raw = row["payload"]
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def set_stream_poll_snapshot(self, payload: dict[str, Any]) -> None:
+        blob = json.dumps(payload if isinstance(payload, dict) else {})
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO stream_poll_snapshot (id, payload, updated_at)
+                VALUES (1, ?, datetime('now'))
+                ON CONFLICT(id) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = datetime('now')
+                """,
+                (blob,),
+            )
 
     def igdb_search_by_name(
         self, table: str, query: str, *, limit: int = 5

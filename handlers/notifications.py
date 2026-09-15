@@ -344,8 +344,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     last_streams: dict[str, dict] = context.application.bot_data.setdefault(
         "last_streams", {}
     )
-    # After restart memory is empty; first successful poll only seeds state so
-    # already-live streams are not treated as fresh starts.
+    # Seed-only when no DB snapshot yet; restored snapshot sets primed=True so
+    # downtime transitions still fire without re-alerting already-live channels.
     primed = bool(context.application.bot_data.get("last_live_primed"))
 
     user_ids = db.get_unique_twitch_user_ids()
@@ -365,14 +365,36 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             went_live, went_offline = live_transitions(
                 last_live, user_ids, live_streams, primed=primed
             )
+            # New Helix stream id while still "live" (missed offline gap / downtime).
+            stream_restarts = stream_id_restart_uids(
+                primed=primed,
+                live_streams=live_streams,
+                last_stream_ids=last_stream_ids,
+                went_live=went_live,
+            )
+            ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            restart_end_streams: dict[str, dict | None] = {}
+            restart_old_sids: dict[str, str] = {}
+            for uid in stream_restarts:
+                restart_old_sids[uid] = last_stream_ids.get(uid, "")
+                end_stream = _offline_end_stream(
+                    uid,
+                    last_streams=last_streams,
+                    last_games=last_games,
+                    last_game_names=last_game_names,
+                )
+                if end_stream and end_stream.get("started_at"):
+                    end_stream = dict(end_stream)
+                    end_stream["ended_at"] = ended_at
+                restart_end_streams[uid] = end_stream
             for uid, stream in live_streams.items():
                 snap = stream_end_snapshot(stream)
                 if snap:
                     last_streams[uid] = accumulate_viewer_stats(
-                        last_streams.get(uid), snap
+                        last_streams.get(uid) if uid not in stream_restarts else None,
+                        snap,
                     )
             # Snapshot before category_change_events clears offline uids from last_*.
-            ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             offline_end_streams: dict[str, dict | None] = {}
             for uid in went_offline:
                 end_stream = _offline_end_stream(
@@ -385,13 +407,17 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     end_stream = dict(end_stream)
                     end_stream["ended_at"] = ended_at
                 offline_end_streams[uid] = end_stream
-            category_changed = category_change_events(
-                last_games,
-                user_ids,
-                live_streams,
-                primed=primed,
-                last_game_names=last_game_names,
-            )
+            category_changed = [
+                uid
+                for uid in category_change_events(
+                    last_games,
+                    user_ids,
+                    live_streams,
+                    primed=primed,
+                    last_game_names=last_game_names,
+                )
+                if uid not in stream_restarts
+            ]
             offline_stream_ids = {
                 uid: last_stream_ids.get(uid, "") for uid in went_offline
             }
@@ -401,7 +427,56 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     last_stream_ids[uid] = sid
             context.application.bot_data["last_live_primed"] = True
 
-            for uid in went_live:
+            # End alerts for stream-id restarts (old broadcast), then live for new id.
+            for uid in stream_restarts:
+                stream_id = restart_old_sids.get(uid, "")
+                end_stream = restart_end_streams.get(uid)
+                for sub in db.get_enabled_by_twitch_user_id(uid):
+                    if is_category_watch_sub(sub):
+                        continue
+                    if not sub.notify_on_end:
+                        continue
+                    if is_on_notify_cooldown(sub):
+                        continue
+                    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                    username, game, title, extra = _end_alert_template_args(
+                        sub, end_stream, lang
+                    )
+                    if sub.delay_minutes > 0:
+                        delay_data: dict = {
+                            "sub_id": sub.id,
+                            "stream_id": stream_id,
+                        }
+                        if end_stream:
+                            delay_data["stream_snapshot"] = dict(end_stream)
+                        context.job_queue.run_once(
+                            _send_delayed_end_notification,
+                            when=sub.delay_minutes * 60,
+                            data=delay_data,
+                            name=f"delay_end_{sub.id}",
+                        )
+                        continue
+                    text = _render_sub_template(
+                        sub,
+                        username,
+                        game,
+                        title,
+                        twitch=twitch,
+                        stream=end_stream,
+                        extra=extra,
+                    )
+                    await _send_notification(
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="end",
+                        stream=end_stream,
+                        stream_id=stream_id,
+                        twitch=twitch,
+                    )
+
+            for uid in list(went_live) + stream_restarts:
                 stream = live_streams[uid]
                 username = stream.get("user_login", stream.get("user_name", ""))
                 game = stream.get("game_name", "")
@@ -467,7 +542,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         sub, end_stream, lang
                     )
                     if sub.delay_minutes > 0:
-                        delay_data: dict = {
+                        delay_data = {
                             "sub_id": sub.id,
                             "stream_id": stream_id,
                         }
@@ -546,6 +621,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         vod_offset_seconds=_vod_offset_seconds(stream),
                         twitch=twitch,
                     )
+            persist_stream_poll_snapshot(db, context.application.bot_data)
 
     if category_watch_subs:
         await _check_category_watch_alerts(context, category_watch_subs)
@@ -772,6 +848,104 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
 def needs_live_game_recheck(game: str, delay_minutes: int) -> bool:
     """True when live alert should wait briefly for Helix to fill game_name."""
     return int(delay_minutes or 0) <= 0 and not (game or "").strip()
+
+
+def build_stream_poll_snapshot(bot_data: dict) -> dict:
+    """JSON-serializable poll maps for restart recovery."""
+    last_live = bot_data.get("last_live") or {}
+    last_stream_ids = bot_data.get("last_stream_ids") or {}
+    last_games = bot_data.get("last_games") or {}
+    last_game_names = bot_data.get("last_game_names") or {}
+    last_streams = bot_data.get("last_streams") or {}
+    return {
+        "last_live": {str(k): bool(v) for k, v in last_live.items()},
+        "last_stream_ids": {str(k): str(v or "") for k, v in last_stream_ids.items()},
+        "last_games": {str(k): str(v or "") for k, v in last_games.items()},
+        "last_game_names": {str(k): str(v or "") for k, v in last_game_names.items()},
+        "last_streams": {
+            str(k): dict(v) for k, v in last_streams.items() if isinstance(v, dict)
+        },
+    }
+
+
+def apply_stream_poll_snapshot(bot_data: dict, payload: dict | None) -> bool:
+    """Restore poll maps from DB. Returns True when primed (non-empty restore)."""
+    if not isinstance(payload, dict) or not payload:
+        bot_data["last_live"] = {}
+        bot_data["last_stream_ids"] = {}
+        bot_data["last_games"] = {}
+        bot_data["last_game_names"] = {}
+        bot_data["last_streams"] = {}
+        bot_data["last_live_primed"] = False
+        return False
+    raw_live = payload.get("last_live")
+    last_live = (
+        {str(k): bool(v) for k, v in raw_live.items()}
+        if isinstance(raw_live, dict)
+        else {}
+    )
+    raw_sids = payload.get("last_stream_ids")
+    last_stream_ids = (
+        {str(k): str(v or "") for k, v in raw_sids.items()}
+        if isinstance(raw_sids, dict)
+        else {}
+    )
+    raw_games = payload.get("last_games")
+    last_games = (
+        {str(k): str(v or "") for k, v in raw_games.items()}
+        if isinstance(raw_games, dict)
+        else {}
+    )
+    raw_names = payload.get("last_game_names")
+    last_game_names = (
+        {str(k): str(v or "") for k, v in raw_names.items()}
+        if isinstance(raw_names, dict)
+        else {}
+    )
+    raw_streams = payload.get("last_streams")
+    last_streams = (
+        {
+            str(k): dict(v)
+            for k, v in raw_streams.items()
+            if isinstance(v, dict)
+        }
+        if isinstance(raw_streams, dict)
+        else {}
+    )
+    bot_data["last_live"] = last_live
+    bot_data["last_stream_ids"] = last_stream_ids
+    bot_data["last_games"] = last_games
+    bot_data["last_game_names"] = last_game_names
+    bot_data["last_streams"] = last_streams
+    primed = bool(last_live or last_stream_ids or last_games or last_streams)
+    bot_data["last_live_primed"] = primed
+    return primed
+
+
+def persist_stream_poll_snapshot(db: Database, bot_data: dict) -> None:
+    db.set_stream_poll_snapshot(build_stream_poll_snapshot(bot_data))
+
+
+def stream_id_restart_uids(
+    *,
+    primed: bool,
+    live_streams: dict[str, dict],
+    last_stream_ids: dict[str, str],
+    went_live: list[str],
+) -> list[str]:
+    """Live channels whose Helix stream id changed without an offline gap."""
+    if not primed:
+        return []
+    went = set(went_live)
+    out: list[str] = []
+    for uid, stream in live_streams.items():
+        if uid in went:
+            continue
+        old_sid = str(last_stream_ids.get(uid) or "")
+        new_sid = str(stream.get("id") or "")
+        if old_sid and new_sid and old_sid != new_sid:
+            out.append(uid)
+    return out
 
 
 def live_transitions(

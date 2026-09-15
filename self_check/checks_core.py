@@ -849,6 +849,60 @@ def check_core() -> None:
     assert live_transitions(state, ["1"], {}, primed=True) == ([], ["1"])
     assert state["1"] is False
 
+    from handlers.notifications import (
+        apply_stream_poll_snapshot,
+        build_stream_poll_snapshot,
+        stream_id_restart_uids,
+    )
+
+    # Restored primed state: already-live stays quiet (no spam after deploy).
+    restored: dict = {}
+    assert apply_stream_poll_snapshot(
+        restored,
+        {
+            "last_live": {"1": True, "2": False},
+            "last_stream_ids": {"1": "sid-a"},
+            "last_games": {"1": "509658"},
+            "last_game_names": {"1": "Just Chatting"},
+            "last_streams": {"1": {"id": "sid-a", "user_login": "a"}},
+        },
+    )
+    assert restored["last_live_primed"] is True
+    assert live_transitions(
+        restored["last_live"], ["1", "2"], {"1": {"id": "sid-a"}}, primed=True
+    ) == ([], [])
+    assert stream_id_restart_uids(
+        primed=True,
+        live_streams={"1": {"id": "sid-b"}},
+        last_stream_ids=restored["last_stream_ids"],
+        went_live=[],
+    ) == ["1"]
+    assert stream_id_restart_uids(
+        primed=True,
+        live_streams={"1": {"id": "sid-a"}},
+        last_stream_ids={"1": "sid-a"},
+        went_live=[],
+    ) == []
+    # Offline → live after restore: went_live fires (stream during downtime).
+    assert live_transitions(
+        restored["last_live"], ["2"], {"2": {"id": "new"}}, primed=True
+    ) == (["2"], [])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        from db import open_database
+
+        snap_db = open_database(Path(tmp) / "poll_snap.db", None)
+        payload = build_stream_poll_snapshot(restored)
+        snap_db.set_stream_poll_snapshot(payload)
+        loaded = snap_db.get_stream_poll_snapshot()
+        assert loaded is not None
+        roundtrip: dict = {}
+        assert apply_stream_poll_snapshot(roundtrip, loaded)
+        assert roundtrip["last_live"] == restored["last_live"]
+        assert roundtrip["last_stream_ids"] == restored["last_stream_ids"]
+        assert roundtrip["last_streams"]["1"]["user_login"] == "a"
+        assert apply_stream_poll_snapshot({}, None) is False
+
     assert needs_live_game_recheck("", 0) is True
     assert needs_live_game_recheck("   ", 0) is True
     assert needs_live_game_recheck("Just Chatting", 0) is False

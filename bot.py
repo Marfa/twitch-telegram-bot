@@ -284,6 +284,7 @@ from handlers.notifications import (
     _send_delayed_category_notification,
     _send_delayed_end_notification,
     _send_delayed_notification,
+    apply_stream_poll_snapshot,
     category_change_events,
     check_schedule_reminders,
     check_streams,
@@ -2019,8 +2020,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["db"] = db
     app.bot_data["twitch"] = twitch
     twitch.bind_igdb_db(db)
-    app.bot_data["last_live"] = {}
-    app.bot_data["last_live_primed"] = False
+    apply_stream_poll_snapshot(app.bot_data, db.get_stream_poll_snapshot())
     app.bot_data["twitch_status_fingerprint"] = None
     app.bot_data["sending_broadcasts"] = set()
     app.add_error_handler(error_handler)
