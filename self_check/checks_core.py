@@ -1106,6 +1106,10 @@ def check_core() -> None:
         db.upsert_user(42)
         assert "games" in needed_endpoints(db)
         assert "covers" in needed_endpoints(db)
+        assert "companies" in needed_endpoints(db)
+        assert "genres" in needed_endpoints(db)
+        assert "game_modes" in needed_endpoints(db)
+        assert "involved_companies" in needed_endpoints(db)
         db.igdb_replace_rows(
             "igdb_genres",
             ("id", "name"),

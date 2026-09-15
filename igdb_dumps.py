@@ -65,19 +65,31 @@ def igdb_image_url(image_id: str, *, size: str = "cover_big_2x") -> str:
 def needed_endpoints(db: Any) -> set[str]:
     """Dump endpoints to keep fresh for currently active features."""
     out: set[str] = set()
+    user_count = 0
     try:
-        if int(db.count_users() or 0) > 0:
-            # «Мне повезёт» is available to everyone with an account.
-            out |= set(_PACK_LUCKY)
+        user_count = int(db.count_users() or 0)
     except Exception:
         logger.exception("igdb needed: count_users failed")
+    if user_count > 0:
+        # «Мне повезёт» + game covers are available to accounts in general.
+        out |= set(_PACK_LUCKY)
     try:
         if db.has_any_game_cover_subs():
             out |= set(_PACK_COVERS)
     except Exception:
         logger.exception("igdb needed: game_cover check failed")
     try:
-        if db.has_any_igdb_ignore_users():
+        # Ignore search must work for admins (default beta enroll) and new beta
+        # opt-ins before they have saved entries — keep ref tables ready while
+        # the feature is live.
+        from beta import get_feature
+        from twitch import IGNORE_IGDB_BETA_ID
+
+        feat = get_feature(IGNORE_IGDB_BETA_ID)
+        ignore_live = bool(feat and feat.stage in {"alpha", "beta", "ga"})
+        if ignore_live and user_count > 0:
+            out |= set(_PACK_IGNORE)
+        elif db.has_any_igdb_ignore_users():
             out |= set(_PACK_IGNORE)
     except Exception:
         logger.exception("igdb needed: ignore check failed")

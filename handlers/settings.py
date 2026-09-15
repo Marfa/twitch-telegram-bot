@@ -575,6 +575,18 @@ async def start_ignore_igdb(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return await _resume_after_ignore_igdb(
             update, context, user_id=user_id, lang=lang, db=db, via_callback=True
         )
+    from handlers.background_jobs import sync_optional_jobs
+    from igdb_dumps import sync_needed
+
+    sync_optional_jobs(context.application.job_queue, db)
+    # Admins get the UI without beta enrollment; ensure ignore dump tables exist.
+    if db.igdb_table_count("igdb_companies") <= 0:
+
+        async def _kick_ignore_dumps() -> None:
+            twitch = context.application.bot_data["twitch"]
+            await asyncio.to_thread(sync_needed, db, twitch, force=False)
+
+        asyncio.create_task(_kick_ignore_dumps())
     context.user_data.pop("ignore_igdb_candidates", None)
     await query.edit_message_text(
         t("ignore_igdb_prompt", lang),

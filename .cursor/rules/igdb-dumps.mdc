@@ -17,12 +17,12 @@ Local sync lives in [`igdb_dumps.py`](igdb_dumps.py) → DB tables `igdb_*`, ref
 4. **Live IGDB API** only when dumps clearly cannot cover the need (write path, real-time-only field, etc.) — say so explicitly.
 5. **Attribution** — user-facing IGDB data still needs credit to [IGDB.com](https://www.igdb.com) (Help /feedback, feature prompts, README/guide as appropriate). See [`api-license-compliance.mdc`](api-license-compliance.mdc).
 
-## Already on dumps
+# Already on dumps when feature is live / users exist
 
 | Surface | Local endpoints |
 |---|---|
-| «Мне повезёт» / lucky | games, external_games (+ covers/artworks pack with users) |
-| Ignore genres/publishers | companies, genres, game_modes, involved, games, external |
+| «Мне повезёт» / lucky | games, external_games, covers, artworks |
+| Ignore genres/publishers (search + match) | companies, genres, game_modes, involved (+ games/external); synced while beta/GA is live, not only after first saved entry |
 | Alert game cover image | covers → artworks via Twitch uid map |
 | `{game_description}` in alerts | games (`summary`) + external_games via Twitch uid |
 
