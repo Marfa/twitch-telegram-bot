@@ -877,6 +877,21 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            DELETE FROM igdb_involved
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid) FROM igdb_involved
+                GROUP BY game_id, company_id
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_igdb_involved_uniq
+            ON igdb_involved(game_id, company_id)
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS igdb_covers (
                 id INTEGER PRIMARY KEY,
                 game_id INTEGER,
@@ -5535,6 +5550,18 @@ class SqliteDatabase:
         "igdb_release_dates",
         "igdb_platforms",
     })
+    _IGDB_PK: dict[str, tuple[str, ...]] = {
+        "igdb_games": ("id",),
+        "igdb_companies": ("id",),
+        "igdb_genres": ("id",),
+        "igdb_game_modes": ("id",),
+        "igdb_external_twitch": ("twitch_uid",),
+        "igdb_involved": ("game_id", "company_id"),
+        "igdb_covers": ("id",),
+        "igdb_artworks": ("id",),
+        "igdb_release_dates": ("id",),
+        "igdb_platforms": ("id",),
+    }
 
     def has_any_igdb_ignore_users(self) -> bool:
         from twitch import IGNORE_IGDB_BETA_ID
@@ -5578,24 +5605,95 @@ class SqliteDatabase:
         columns: tuple[str, ...],
         row_batches,
     ) -> int:
-        """Delete table and insert batches in one transaction. Returns row count."""
+        """Merge dump batches: upsert by PK, delete rows missing from the dump."""
         if table not in self._IGDB_TABLES:
             raise ValueError(table)
+        pk = self._IGDB_PK[table]
+        if any(c not in columns for c in pk):
+            raise ValueError(f"pk {pk} not in columns for {table}")
         placeholders = ", ".join("?" for _ in columns)
         cols = ", ".join(columns)
-        if table == "igdb_involved":
-            sql = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
+        pk_list = ", ".join(pk)
+        non_pk = [c for c in columns if c not in pk]
+        if non_pk:
+            set_clause = ", ".join(f"{c} = excluded.{c}" for c in non_pk)
+            upsert_sql = (
+                f"INSERT INTO {table} ({cols}) VALUES ({placeholders}) "
+                f"ON CONFLICT ({pk_list}) DO UPDATE SET {set_clause}"
+            )
         else:
-            sql = f"INSERT OR REPLACE INTO {table} ({cols}) VALUES ({placeholders})"
-        total = 0
+            upsert_sql = (
+                f"INSERT INTO {table} ({cols}) VALUES ({placeholders}) "
+                f"ON CONFLICT ({pk_list}) DO NOTHING"
+            )
+        if len(pk) == 1:
+            pk0 = pk[0]
+            pk_type = "TEXT" if pk0 == "twitch_uid" else "INTEGER"
+            temp_ddl = (
+                f"CREATE TEMP TABLE _igdb_dump_ids ({pk0} {pk_type} PRIMARY KEY)"
+            )
+            temp_ins = (
+                f"INSERT OR IGNORE INTO _igdb_dump_ids ({pk0}) VALUES (?)"
+            )
+            delete_sql = (
+                f"DELETE FROM {table} WHERE {pk0} NOT IN "
+                f"(SELECT {pk0} FROM _igdb_dump_ids)"
+            )
+            pk_idx = columns.index(pk0)
+
+            def pk_tuples(batch: list[tuple]) -> list[tuple]:
+                return [(row[pk_idx],) for row in batch]
+
+        else:
+            temp_ddl = (
+                "CREATE TEMP TABLE _igdb_dump_ids ("
+                "game_id INTEGER NOT NULL, company_id INTEGER NOT NULL, "
+                "PRIMARY KEY (game_id, company_id))"
+            )
+            temp_ins = (
+                "INSERT OR IGNORE INTO _igdb_dump_ids (game_id, company_id) "
+                "VALUES (?, ?)"
+            )
+            delete_sql = (
+                f"DELETE FROM {table} WHERE NOT EXISTS ("
+                "SELECT 1 FROM _igdb_dump_ids d "
+                f"WHERE d.game_id = {table}.game_id "
+                f"AND d.company_id = {table}.company_id)"
+            )
+            gi, ci = columns.index("game_id"), columns.index("company_id")
+
+            def pk_tuples(batch: list[tuple]) -> list[tuple]:
+                return [(row[gi], row[ci]) for row in batch]
+
+        seen = 0
         with self._conn() as conn:
-            conn.execute(f"DELETE FROM {table}")
+            before = int(
+                conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+                or 0
+            )
+            conn.execute("DROP TABLE IF EXISTS _igdb_dump_ids")
+            conn.execute(temp_ddl)
             for batch in row_batches:
                 if not batch:
                     continue
-                conn.executemany(sql, batch)
-                total += len(batch)
-        return total
+                conn.executemany(upsert_sql, batch)
+                conn.executemany(temp_ins, pk_tuples(batch))
+                seen += len(batch)
+            cur = conn.execute(delete_sql)
+            deleted = cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
+            after = int(
+                conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+                or 0
+            )
+        logger.info(
+            "IGDB merge table=%s seen=%s before=%s after=%s deleted~=%s",
+            table,
+            seen,
+            before,
+            after,
+            deleted,
+        )
+        return after
 
     def igdb_set_dump_state(
         self, endpoint: str, dump_updated_at: int, row_count: int

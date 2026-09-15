@@ -762,7 +762,9 @@ class Database(Protocol):
 
     def igdb_replace_rows(
         self, table: str, columns: tuple[str, ...], row_batches
-    ) -> int: ...
+    ) -> int:
+        """Merge dump batches (upsert + delete missing). Returns final row count."""
+        ...
 
     def igdb_set_dump_state(
         self, endpoint: str, dump_updated_at: int, row_count: int

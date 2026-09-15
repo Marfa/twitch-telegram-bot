@@ -244,7 +244,7 @@ def _iter_csv_rows(path: str) -> Iterable[dict[str, str]]:
 
 
 def sync_endpoint(db: Any, twitch: Any, endpoint: str) -> int:
-    """Download one dump and replace the local table. Returns inserted rows."""
+    """Download one dump and merge into the local table. Returns row count."""
     if endpoint not in _ENDPOINT_TABLE:
         raise ValueError(f"unsupported igdb dump endpoint: {endpoint}")
     headers = _auth_headers(twitch)
@@ -256,6 +256,23 @@ def sync_endpoint(db: Any, twitch: Any, endpoint: str) -> int:
     parser = _ROW_PARSERS[endpoint]
     table = _ENDPOINT_TABLE[endpoint]
     columns = _TABLE_COLUMNS[table]
+
+    state = db.igdb_get_dump_state(endpoint)
+    if (
+        state
+        and int(state.get("dump_updated_at") or 0) == dump_updated
+        and dump_updated > 0
+        and db.igdb_table_count(table) > 0
+    ):
+        rows = int(state.get("row_count") or 0) or db.igdb_table_count(table)
+        db.igdb_set_dump_state(endpoint, dump_updated, rows)
+        logger.info(
+            "IGDB dump unchanged endpoint=%s rows=%s dump_updated_at=%s",
+            endpoint,
+            rows,
+            dump_updated,
+        )
+        return rows
 
     fd, path = tempfile.mkstemp(prefix=f"igdb_{endpoint}_", suffix=".csv")
     os.close(fd)

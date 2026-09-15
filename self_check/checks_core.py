@@ -1124,6 +1124,8 @@ def check_core() -> None:
     # check_streams on the asyncio loop → missed APScheduler ticks).
     assert "_bulk_conn" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
     assert "_bulk_conn" in inspect.getsource(PostgresDatabase)
+    assert "ON CONFLICT" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
+    assert "DELETE FROM" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
 
     assert _parse_long_array("{5,12}") == "5,12"
     assert _parse_long_array("{}") == ""
@@ -1268,6 +1270,49 @@ def check_core() -> None:
         assert (
             fix_placeholder_typos("{game_descriotion}") == "{game_description}"
         )
+
+        # Merge: update existing, add new, delete missing (no full wipe).
+        db.igdb_replace_rows(
+            "igdb_genres",
+            ("id", "name"),
+            [[(12, "Role-playing (RPG)"), (5, "Shooter")]],
+        )
+        assert db.igdb_table_count("igdb_genres") == 2
+        db.igdb_replace_rows(
+            "igdb_genres",
+            ("id", "name"),
+            [[(12, "RPG"), (9, "Puzzle")]],
+        )
+        assert db.igdb_table_count("igdb_genres") == 2
+        hit_rpg = db.igdb_search_by_name("igdb_genres", "RPG", limit=5)
+        assert any(h["id"] == 12 and h["name"] == "RPG" for h in hit_rpg)
+        hit_puzzle = db.igdb_search_by_name("igdb_genres", "Puzzle", limit=5)
+        assert any(h["id"] == 9 for h in hit_puzzle)
+        hit_shooter = db.igdb_search_by_name("igdb_genres", "Shooter", limit=5)
+        assert not any(h["id"] == 5 for h in hit_shooter)
+
+        # Unchanged dump_updated_at → skip download/merge.
+        from igdb_dumps import sync_endpoint
+        from unittest.mock import MagicMock, patch
+
+        db.igdb_set_dump_state("genres", 1_700_000_000, db.igdb_table_count("igdb_genres"))
+        before_genres = db.igdb_table_count("igdb_genres")
+        twitch_mock = MagicMock()
+        twitch_mock._igdb_headers.return_value = {
+            "Client-ID": "x",
+            "Authorization": "Bearer y",
+        }
+        with patch(
+            "igdb_dumps._http_json",
+            return_value={
+                "s3_url": "https://example.invalid/genres.csv",
+                "updated_at": 1_700_000_000,
+            },
+        ), patch("igdb_dumps._download") as download_mock:
+            rows = sync_endpoint(db, twitch_mock, "genres")
+            download_mock.assert_not_called()
+        assert rows == before_genres
+        assert db.igdb_table_count("igdb_genres") == before_genres
 
     assert _parse_watch_viewers("100") == (100, None)
     assert _parse_watch_viewers("100-500") == (100, 500)
