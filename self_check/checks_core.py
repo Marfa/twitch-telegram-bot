@@ -1062,6 +1062,14 @@ def check_core() -> None:
         igdb_image_url,
         needed_endpoints,
     )
+    import inspect
+
+    from db.postgres import PostgresDatabase
+
+    # Bulk IGDB loads must not hold the shared pooled connection lock (stalls
+    # check_streams on the asyncio loop → missed APScheduler ticks).
+    assert "_bulk_conn" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
+    assert "_bulk_conn" in inspect.getsource(PostgresDatabase)
 
     assert _parse_long_array("{5,12}") == "5,12"
     assert _parse_long_array("{}") == ""

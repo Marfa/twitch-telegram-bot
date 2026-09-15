@@ -274,10 +274,30 @@ async def _send_delayed_category_notification(
 
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
+    import time as _time
+
     import premium as prem
     from bot import _render_sub_template
     from bot_helpers import _user_lang
     from config import CHECK_INTERVAL
+
+    started = _time.monotonic()
+
+    def _log_duration() -> None:
+        elapsed = _time.monotonic() - started
+        # WARN when a tick approaches/exceeds the schedule so PostHog logs catch backlog.
+        if elapsed >= float(CHECK_INTERVAL):
+            logger.warning(
+                "check_streams took %.1fs (interval=%ss)",
+                elapsed,
+                CHECK_INTERVAL,
+            )
+        elif elapsed >= float(CHECK_INTERVAL) * 0.5:
+            logger.info(
+                "check_streams took %.1fs (interval=%ss)",
+                elapsed,
+                CHECK_INTERVAL,
+            )
 
     db: Database = context.application.bot_data["db"]
     expired_trials = prem.expire_due_trials(db)
@@ -331,6 +351,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     user_ids = db.get_unique_twitch_user_ids()
     category_watch_subs = db.get_enabled_category_watch_subscriptions()
     if not user_ids and not category_watch_subs:
+        _log_duration()
         return
 
     live_streams: dict[str, dict] = {}
@@ -528,6 +549,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if category_watch_subs:
         await _check_category_watch_alerts(context, category_watch_subs)
+    _log_duration()
 
 
 def _parse_category_watch_live_ids(raw: str | None) -> set[str]:

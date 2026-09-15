@@ -259,6 +259,7 @@ def sync_endpoint(db: Any, twitch: Any, endpoint: str) -> int:
 
     fd, path = tempfile.mkstemp(prefix=f"igdb_{endpoint}_", suffix=".csv")
     os.close(fd)
+    started = time.monotonic()
     try:
         _download(s3_url, path)
 
@@ -277,7 +278,12 @@ def sync_endpoint(db: Any, twitch: Any, endpoint: str) -> int:
 
         total = db.igdb_replace_rows(table, columns, batches())
         db.igdb_set_dump_state(endpoint, dump_updated, total)
-        logger.info("IGDB dump synced endpoint=%s rows=%s", endpoint, total)
+        logger.info(
+            "IGDB dump synced endpoint=%s rows=%s took=%.1fs",
+            endpoint,
+            total,
+            time.monotonic() - started,
+        )
         return total
     finally:
         try:
@@ -317,12 +323,18 @@ def sync_needed(db: Any, twitch: Any, *, force: bool = False) -> dict[str, int]:
         return {}
     _syncing = True
     out: dict[str, int] = {}
+    started = time.monotonic()
     try:
         for ep in due:
             try:
                 out[ep] = sync_endpoint(db, twitch, ep)
             except Exception:
                 logger.exception("IGDB dump sync failed endpoint=%s", ep)
+        logger.info(
+            "IGDB dump sync done endpoints=%s took=%.1fs",
+            len(out),
+            time.monotonic() - started,
+        )
         return out
     finally:
         _syncing = False
