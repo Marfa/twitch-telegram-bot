@@ -81,18 +81,38 @@ def _platform_label(row: dict[str, Any], lang: str) -> str:
 
 
 def release_game_pick_keyboard(
-    games: list[dict[str, Any]], lang: str
+    games: list[dict[str, Any]],
+    lang: str,
+    *,
+    developers: dict[int, str] | None = None,
 ) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(
-                str(g.get("name") or "")[:64],
-                callback_data=f"rel:pick:{int(g['id'])}",
-            )
-        ]
+    from collections import Counter
+
+    name_counts = Counter(
+        str(g.get("name") or "").strip().casefold()
         for g in games
         if g.get("id") is not None and str(g.get("name") or "").strip()
-    ]
+    )
+    rows: list[list[InlineKeyboardButton]] = []
+    for g in games:
+        if g.get("id") is None:
+            continue
+        name = str(g.get("name") or "").strip()
+        if not name:
+            continue
+        label = name
+        if name_counts[name.casefold()] > 1:
+            dev = (developers or {}).get(int(g["id"]))
+            if dev:
+                label = f"{name} ({dev})"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    label[:64],
+                    callback_data=f"rel:pick:{int(g['id'])}",
+                )
+            ]
+        )
     rows.append(
         [InlineKeyboardButton(btn("wizard_cancel", lang), callback_data="rel:cancel")]
     )
@@ -158,12 +178,16 @@ async def _send_game_card(
     game_name: str,
     summary: str,
     body_html: str,
+    lang: str = DEFAULT_LOCALE,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
+    from twitch import localize_igdb_summary
+
     cover_mid = db.igdb_cover_image_id_for_game(game_id)
     caption = body_html
-    if summary:
-        cap_sum = html.escape(summary[:800])
+    localized = localize_igdb_summary(summary, lang) if summary else ""
+    if localized:
+        cap_sum = html.escape(localized[:800])
         caption = f"{body_html}\n\n{cap_sum}"
     caption = f"{caption}\n\n{_IGDB_ATTR}"
     if len(caption) > 1024:
@@ -237,9 +261,12 @@ async def receive_release_game_text(
     if not query:
         await update.effective_message.reply_text(t("release_game_prompt", lang))
         return _wz()["RELEASE_SEARCH"]
+    status = await update.effective_message.reply_text(
+        t("release_game_searching", lang)
+    )
     games = db.igdb_search_games_by_name(query, limit=5)
     if not games:
-        await update.effective_message.reply_text(
+        await status.edit_text(
             t("release_game_not_found", lang),
             reply_markup=InlineKeyboardMarkup(
                 [
@@ -253,9 +280,12 @@ async def receive_release_game_text(
         )
         return _wz()["RELEASE_SEARCH"]
     context.user_data["release_search_hits"] = games
-    await update.effective_message.reply_text(
+    developers = db.igdb_developer_names_for_games([int(g["id"]) for g in games])
+    await status.edit_text(
         t("release_game_pick", lang),
-        reply_markup=release_game_pick_keyboard(games, lang),
+        reply_markup=release_game_pick_keyboard(
+            games, lang, developers=developers
+        ),
     )
     return _wz()["RELEASE_PICK"]
 
@@ -329,6 +359,7 @@ async def receive_release_pick(
             game_name=name,
             summary=summary,
             body_html=body,
+            lang=lang,
             reply_markup=None,
         )
         await context.bot.send_message(
@@ -873,6 +904,7 @@ async def _send_release_notify(
             game_name=prefs.game_name,
             summary=summary,
             body_html=body,
+            lang=lang,
         )
     except Exception:
         logger.exception(

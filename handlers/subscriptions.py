@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from telegram import (
@@ -393,13 +394,19 @@ def _format_sub_line(
             if prefs.date_unknown or not prefs.platforms:
                 settings.append(t("sub_list_release_date_unknown", lang))
             else:
-                plats = ", ".join(p.platform_name for p in prefs.platforms[:5])
-                if plats:
+                from handlers.release_watch import _format_release_date
+
+                date_bits = []
+                for p in prefs.platforms[:5]:
+                    date_s = _format_release_date(int(p.date), lang)
+                    pname = html.escape(p.platform_name or "—")
+                    date_bits.append(f"{date_s} · {pname}")
+                if date_bits:
                     settings.append(
                         t(
-                            "sub_list_release_platforms",
+                            "sub_list_release_dates",
                             lang,
-                            platforms=html.escape(plats),
+                            dates=", ".join(date_bits),
                         )
                     )
     elif is_category_watch_sub(sub):
@@ -915,10 +922,6 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        # Drops / game / release alerts: no share.
-        drops_locked = is_drops_sub(s)
-        game = is_category_watch_sub(s)
-        release = is_release_watch_sub(s)
         row1 = [
             InlineKeyboardButton(
                 _inline_btn_label(toggle_label),
@@ -936,7 +939,7 @@ def _subs_toggle_keyboard(
                 callback_data=f"list_del:{s.id}",
             )
         ]
-        if show_share and not drops_locked and not game and not release:
+        if show_share:
             row2.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_share_short', lang)} {tag}"),
@@ -4622,6 +4625,8 @@ def _share_alert_type_label(payload: dict, lang: str) -> str:
         "upcoming": "alert_type_upcoming",
         "end": "alert_type_end",
         "drops": "alert_type_drops",
+        "release": "alert_type_release",
+        "game": "alert_type_game",
     }.get(kind, "alert_type_live")
     return t(key, lang)
 
@@ -4677,6 +4682,50 @@ def _existing_sub_for_twitch(
     )
 
 
+def _existing_share_dup(
+    db: Database, owner_id: int, snapshot: dict
+) -> Subscription | None:
+    """Match an existing sub that would collide with this share snapshot."""
+    kind = alert_type_from_payload(snapshot)
+    if kind == "release":
+        from db.models import parse_release_watch_prefs
+
+        prefs = parse_release_watch_prefs(
+            str(snapshot.get("release_watch_prefs") or "")
+        )
+        if not prefs:
+            return None
+        for s in _subs_for_owner(db, owner_id):
+            if not is_release_watch_sub(s):
+                continue
+            other = parse_release_watch_prefs(s.release_watch_prefs)
+            if other and other.igdb_game_id == prefs.igdb_game_id:
+                return s
+        return None
+    if kind == "drops":
+        gid = str(snapshot.get("drops_game_id") or "").strip()
+        if not gid:
+            return None
+        for s in _subs_for_owner(db, owner_id):
+            if is_drops_sub(s) and str(s.drops_game_id or "").strip() == gid:
+                return s
+        return None
+    if kind == "game":
+        prefs_raw = str(snapshot.get("category_watch_prefs") or "").strip()
+        if not prefs_raw:
+            return None
+        for s in _subs_for_owner(db, owner_id):
+            if (
+                is_category_watch_sub(s)
+                and str(s.category_watch_prefs or "").strip() == prefs_raw
+            ):
+                return s
+        return None
+    return _existing_sub_for_twitch(
+        db, owner_id, str(snapshot.get("twitch_user_id") or "")
+    )
+
+
 def _share_clone_snapshot(snapshot: dict, user_id: int) -> dict:
     out = dict(snapshot)
     out["dest_type"] = "dm"
@@ -4685,6 +4734,14 @@ def _share_clone_snapshot(snapshot: dict, user_id: int) -> dict:
     out["from_twitch_sync"] = False
     out["from_watch_suggest"] = False
     out["is_demo"] = False
+    kind = alert_type_from_payload(out)
+    if kind == "release":
+        out["twitch_user_id"] = f"rel:{user_id}:{secrets.token_hex(4)}"
+    elif kind == "drops":
+        out["twitch_user_id"] = f"drops:{user_id}:{secrets.token_hex(4)}"
+    elif kind == "game":
+        out["twitch_user_id"] = f"cw:{user_id}:{secrets.token_hex(4)}"
+        out["from_watch_suggest"] = True
     return out
 
 
@@ -4705,32 +4762,54 @@ async def _create_shared_subscription(
     login = str(snapshot.get("twitch_username") or "").strip().lower()
     clone = _share_clone_snapshot(snapshot, user_id)
     clone["twitch_username"] = login
-    type_ok = await prem.alert_type_entitled(
-        context.bot,
-        db,
-        user_id,
-        SimpleNamespace(
-            notify_on_live=bool(clone.get("notify_on_live", True)),
-            notify_on_end=bool(clone.get("notify_on_end")),
-            notify_on_category_change=bool(clone.get("notify_on_category_change")),
-            schedule_reminder_configured=bool(
-                clone.get("schedule_reminder_configured")
+    kind = alert_type_from_payload(clone)
+    if kind == "release":
+        from handlers.release_watch import release_feature_available
+
+        if not release_feature_available(db, user_id):
+            raise ValueError("release_beta_required")
+        type_ok = True
+    elif kind == "drops":
+        from handlers.drops import drops_feature_available
+
+        if not drops_feature_available(db, user_id):
+            raise ValueError("drops_beta_required")
+        type_ok = True
+    else:
+        type_ok = await prem.alert_type_entitled(
+            context.bot,
+            db,
+            user_id,
+            SimpleNamespace(
+                notify_on_live=bool(clone.get("notify_on_live", True)),
+                notify_on_end=bool(clone.get("notify_on_end")),
+                notify_on_category_change=bool(clone.get("notify_on_category_change")),
+                schedule_reminder_configured=bool(
+                    clone.get("schedule_reminder_configured")
+                ),
+                twitch_username=login,
+                notify_on_drops=bool(clone.get("notify_on_drops")),
+                release_watch_prefs=str(clone.get("release_watch_prefs") or ""),
             ),
-            twitch_username=login,
-        ),
-    )
+        )
     enabled = type_ok and await prem.may_enable_subscription_async(
         context.bot, db, user_id, twitch_username=login
     )
     clone["enabled"] = enabled
     sub_id = _add_subscription_from_snapshot(db, user_id, clone, enabled=enabled)
+    # Preserve display labels for non-channel alerts (add_subscription lowercases login).
+    display = str(snapshot.get("twitch_username") or "").strip()
+    if kind in ("release", "drops", "game") and display:
+        db.update_subscription(
+            sub_id, user_id, twitch_username=display, mark_sync_edited=False
+        )
     analytics.capture(
         user_id,
         "alert_share_accepted",
-        {"sub_id": sub_id, "enabled": enabled, "channel": login},
+        {"sub_id": sub_id, "enabled": enabled, "channel": login, "kind": kind},
     )
     sub_num = _owner_sub_number(db, user_id, sub_id)
-    text = t("share_created", lang, sub_id=sub_num, username=login or "—")
+    text = t("share_created", lang, sub_id=sub_num, username=display or login or "—")
     if not enabled:
         if not type_ok:
             text += "\n" + t(
@@ -4763,9 +4842,6 @@ async def on_share_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     sub = db.get_subscription(sub_id, user_id)
     if sub is None or not _sub_in_current_mode(sub, user_id):
         await query.answer(t("sub_not_found", lang), show_alert=True)
-        return
-    if is_drops_sub(sub):
-        await query.answer(t("drops_share_unsupported", lang), show_alert=True)
         return
     bot_username = await _bot_username(context.bot, context.application.bot_data)
     link = _share_link_for_sub(db, user_id, sub, bot_username)
@@ -4817,8 +4893,7 @@ async def on_share_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text(t("share_invalid", lang))
         return
 
-    twitch_uid = str(snapshot.get("twitch_user_id") or "")
-    existing = _existing_sub_for_twitch(db, user_id, twitch_uid)
+    existing = _existing_share_dup(db, user_id, snapshot)
     if existing:
         await query.edit_message_text(
             t("channel_dup_prompt", lang),
@@ -4832,7 +4907,11 @@ async def on_share_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         _sub_id, text = await _create_shared_subscription(
             context, db, user_id, lang, snapshot
         )
-    except ValueError:
+    except ValueError as exc:
+        code = str(exc)
+        if code in ("release_beta_required", "drops_beta_required"):
+            await query.edit_message_text(t(code, lang))
+            return
         await query.edit_message_text(
             t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
         )
@@ -4912,7 +4991,11 @@ async def on_share_dup_continue(
         _sub_id, text = await _create_shared_subscription(
             context, db, user_id, lang, snapshot
         )
-    except ValueError:
+    except ValueError as exc:
+        code = str(exc)
+        if code in ("release_beta_required", "drops_beta_required"):
+            await query.edit_message_text(t(code, lang))
+            return
         await query.edit_message_text(
             t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
         )

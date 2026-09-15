@@ -62,6 +62,23 @@ def _check_release_prefs_roundtrip() -> None:
     assert uback.platforms == []
 
 
+def _check_release_pick_disambiguates() -> None:
+    from handlers.release_watch import release_game_pick_keyboard
+
+    games = [
+        {"id": 1, "name": "The CUBE"},
+        {"id": 2, "name": "The CUBE"},
+        {"id": 3, "name": "Other"},
+    ]
+    kb = release_game_pick_keyboard(
+        games, "en", developers={1: "Studio A", 2: "Studio B"}
+    )
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert "The CUBE (Studio A)" in labels
+    assert "The CUBE (Studio B)" in labels
+    assert "Other" in labels
+
+
 def _check_release_keyboard() -> None:
     hidden = alert_type_keyboard("en")
     assert not any(
@@ -78,6 +95,10 @@ def _check_release_keyboard() -> None:
     assert t("release_date_unknown", "ru")
     assert t("release_subscribed_unknown_date", "en")
     assert t("sub_list_release_date_unknown", "ru")
+    assert "выход релизов" in t("alert_type_prompt", "ru").lower()
+    assert "release alerts" in t("alert_type_prompt", "en").lower()
+    assert t("release_game_searching", "ru")
+    assert t("sub_list_release_dates", "en", dates="x")
 
 
 def _check_release_date_backfill() -> None:
@@ -160,6 +181,7 @@ def _check_release_active_cap() -> None:
 
 def run() -> None:
     _check_release_prefs_roundtrip()
+    _check_release_pick_disambiguates()
     _check_release_keyboard()
     _check_release_date_backfill()
     _check_release_active_cap()

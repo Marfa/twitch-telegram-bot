@@ -299,7 +299,7 @@
   "premium_channel_badge": "⭐",
   "premium_channel_failed": "Could not verify the Twitch channel. Try again.",
   "new_sub_prompt": "Enter a Twitch channel: link, mobile link, or username.",
-  "alert_type_prompt": "Here you can set up different Twitch stream alerts. Choose which alert type to configure:\n- when a stream starts\n- when the stream category changes (no start alert; every change until the stream ends)\n- for an upcoming stream, if the streamer has a schedule\n- when a stream ends\n- new Twitch Drops for a game\n- game alert (new streams in selected categories)",
+  "alert_type_prompt": "Here you can set up different Twitch stream alerts. Choose which alert type to configure:\n- when a stream starts\n- when the stream category changes (no start alert; every change until the stream ends)\n- for an upcoming stream, if the streamer has a schedule\n- when a stream ends\n- new Twitch Drops for a game\n- game alert (new streams in selected categories)\n- release alerts (when a game ships on selected platforms)",
   "new_sub_other_prompt": "Other bot features are available here too. Choose:\n- Follow/Unfollow for your channel (monitoring and alerts — Premium)\n- Twitch whisper alerts\n- stream schedule management\n- stream picks («What to watch?»)\n- stream chat",
   "alert_type_live": "Stream start",
   "alert_type_category": "Category change ⭐",
@@ -1003,7 +1003,6 @@
   "drops_subscribed_paused": "Subscription for game «{game}» to get {drop} created paused (active limit). Default update frequency is one hour. You can change it in the alert settings.",
   "drops_already_subscribed": "Alerts for game «{game}» to get {drop} already exist.",
   "drops_edit_unsupported": "Editing Drops subscriptions is not available yet.",
-  "drops_share_unsupported": "Sharing a Drops subscription is not supported.",
   "sub_list_alert_drops": "• Alert: Twitch Drops",
   "drops_beta_required": "Drops is in beta. Enable it in Settings → Beta mode.",
   "drops_need_premium": "Premium «Alert types beyond live start» (or a full plan) is required.",
@@ -1059,5 +1058,7 @@
   "beta_feat_release_alerts_desc": "Notify when a game releases (IGDB). Search a game, pick dates/platforms, set days before.",
   "release_date_unknown": "Release date for <b>{game}</b> is unknown so far. You can still create an alert — when the date appears in the database, it will be attached automatically.",
   "release_subscribed_unknown_date": "Release alert created. Date is unknown for now — we will fill it in when it appears in IGDB.",
-  "sub_list_release_date_unknown": "• Release date: unknown"
+  "sub_list_release_date_unknown": "• Release date: unknown",
+  "release_game_searching": "Searching games…",
+  "sub_list_release_dates": "• Dates: {dates}"
 }

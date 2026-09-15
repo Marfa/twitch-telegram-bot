@@ -6022,6 +6022,34 @@ class SqliteDatabase:
             for r in rows
         ]
 
+    def igdb_developer_names_for_games(
+        self, game_ids: list[int]
+    ) -> dict[int, str]:
+        """First developer company name per game (for disambiguating search hits)."""
+        ids = sorted({int(g) for g in game_ids if int(g or 0) > 0})
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT i.game_id, c.name
+                FROM igdb_involved i
+                JOIN igdb_companies c ON c.id = i.company_id
+                WHERE i.game_id IN ({placeholders})
+                  AND i.is_developer = 1
+                  AND TRIM(c.name) != ''
+                ORDER BY i.game_id ASC, c.name COLLATE NOCASE ASC
+                """,
+                ids,
+            ).fetchall()
+        out: dict[int, str] = {}
+        for r in rows:
+            gid = int(r["game_id"])
+            if gid not in out:
+                out[gid] = str(r["name"]).strip()
+        return out
+
     def igdb_game_by_id(self, game_id: int) -> dict[str, Any] | None:
         gid = int(game_id or 0)
         if gid <= 0:
