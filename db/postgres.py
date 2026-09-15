@@ -97,6 +97,26 @@ class PostgresDatabase:
                     self._pooled = None
                 raise
 
+    @contextmanager
+    def _bulk_conn(self) -> Iterator[Any]:
+        # A separate short-lived connection for long bulk loads, held OUTSIDE
+        # self._lock. The pooled connection serialises every query through one
+        # lock, so a multi-minute write (IGDB dumps) would otherwise hold it and
+        # stall every other query — including the event-loop stream-check reads,
+        # which freezes the scheduler and makes check_streams miss ticks.
+        conn = self._psycopg.connect(self._dsn, connect_timeout=30)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
     def _cursor(self, conn: Any) -> Any:
         from psycopg.rows import dict_row  # noqa: PLC0415
 
@@ -6069,7 +6089,7 @@ class PostgresDatabase:
         cols = ", ".join(columns)
         sql = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
         total = 0
-        with self._conn() as conn:
+        with self._bulk_conn() as conn:
             cur = self._cursor(conn)
             cur.execute(f"DELETE FROM {table}")
             for batch in row_batches:
