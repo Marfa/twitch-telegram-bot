@@ -419,17 +419,19 @@ def check_handlers() -> None:
         assert "stream_chat" in toggle_ids
         assert "deleted_subscriptions_cart" in toggle_ids
         db.upsert_user(2)
-        assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
         from unittest.mock import patch
 
+        # Gift Premium is GA: free-chat still gets a gift-only keyboard.
+        kb_gift = _premium_markup(db, 2, "ru", free_chat=True, force_free=False)
+        assert kb_gift is not None
+        assert kb_gift.inline_keyboard[-1][0].callback_data == "premium:gift"
         with patch(
-            "handlers.premium_gift.gift_enabled", return_value=True
+            "handlers.premium_gift.gift_enabled", return_value=False
         ):
-            kb_gift = _premium_markup(
-                db, 2, "ru", free_chat=True, force_free=False
+            assert (
+                _premium_markup(db, 2, "ru", free_chat=True, force_free=False)
+                is None
             )
-            assert kb_gift is not None
-            assert kb_gift.inline_keyboard[-1][0].callback_data == "premium:gift"
         from i18n import premium_gift_keyboard
 
         gkb = premium_gift_keyboard("ru", user_id=2)
@@ -522,7 +524,9 @@ def check_handlers() -> None:
         from premium_handlers import _premium_markup
 
         assert _premium_markup(db, 2, "ru", free_chat=False, force_free=False) is not None
-        assert _premium_markup(db, 2, "ru", free_chat=True, force_free=False) is None
+        kb_fc = _premium_markup(db, 2, "ru", free_chat=True, force_free=False)
+        assert kb_fc is not None
+        assert kb_fc.inline_keyboard[-1][0].callback_data == "premium:gift"
         assert _premium_markup(db, 1, "ru", free_chat=False, force_free=True) is not None
         import demo_mode as dm
         from premium_handlers import (
