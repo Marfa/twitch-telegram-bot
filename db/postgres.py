@@ -293,6 +293,13 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS release_watch_prefs
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS delete_other_alerts
                 BOOLEAN NOT NULL DEFAULT FALSE
                 """
@@ -1027,6 +1034,34 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS igdb_platforms (
+                    id BIGINT PRIMARY KEY,
+                    name TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_igdb_platforms_name_lower ON igdb_platforms (LOWER(name))"
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS igdb_release_dates (
+                    id BIGINT PRIMARY KEY,
+                    game_id BIGINT NOT NULL,
+                    platform_id BIGINT NOT NULL DEFAULT 0,
+                    date BIGINT NOT NULL,
+                    human TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_igdb_release_dates_game ON igdb_release_dates(game_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_igdb_release_dates_date ON igdb_release_dates(date)"
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS igdb_dump_state (
                     endpoint TEXT PRIMARY KEY,
                     dump_updated_at BIGINT NOT NULL DEFAULT 0,
@@ -1164,6 +1199,7 @@ class PostgresDatabase:
         from_twitch_sync: bool = False,
         from_watch_suggest: bool = False,
         category_watch_prefs: str = "",
+        release_watch_prefs: str = "",
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
@@ -1185,11 +1221,11 @@ class PostgresDatabase:
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
-                    from_watch_suggest, category_watch_prefs,
+                    from_watch_suggest, category_watch_prefs, release_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
                     delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1219,6 +1255,7 @@ class PostgresDatabase:
                     from_twitch_sync,
                     bool(from_watch_suggest),
                     str(category_watch_prefs or ""),
+                    str(release_watch_prefs or ""),
                     bool(notify_on_live),
                     bool(notify_on_end),
                     bool(notify_on_category_change),
@@ -1508,6 +1545,7 @@ class PostgresDatabase:
                     schedule_reminder_configured=bool(
                         payload.get("schedule_reminder_configured")
                     ),
+                    release_watch_prefs=str(payload.get("release_watch_prefs") or ""),
                     twitch_username=login,
                 ),
             )
@@ -1556,6 +1594,7 @@ class PostgresDatabase:
                     "from_twitch_sync",
                     "from_watch_suggest",
                     "category_watch_prefs",
+                    "release_watch_prefs",
                     "notify_on_live",
                     "notify_on_end",
                     "notify_on_category_change",
@@ -1640,6 +1679,7 @@ class PostgresDatabase:
             "twitch_username",
             "twitch_user_id",
             "category_watch_prefs",
+            "release_watch_prefs",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1675,6 +1715,7 @@ class PostgresDatabase:
                 "twitch_username",
                 "twitch_user_id",
                 "category_watch_prefs",
+                "release_watch_prefs",
             ):
                 values.append(str(value or ""))
             elif key == "image_file_id":
@@ -1750,8 +1791,10 @@ class PostgresDatabase:
                 FROM subscriptions
                 WHERE enabled = TRUE
                   AND COALESCE(category_watch_prefs, '') = ''
+                  AND COALESCE(release_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%'
                   AND twitch_user_id NOT LIKE 'drops:%'
+                  AND twitch_user_id NOT LIKE 'rel:%'
                   AND COALESCE(notify_on_drops, FALSE) = FALSE
                   AND (
                     notify_on_live = TRUE
@@ -5970,6 +6013,8 @@ class PostgresDatabase:
         "igdb_involved",
         "igdb_covers",
         "igdb_artworks",
+        "igdb_release_dates",
+        "igdb_platforms",
     })
 
     def has_any_igdb_ignore_users(self) -> bool:
@@ -6328,3 +6373,161 @@ class PostgresDatabase:
             return None
         text = str(game["summary"] or "").strip()
         return text or None
+
+    def igdb_search_games_by_name(
+        self, query: str, *, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        lim = max(1, min(20, int(limit)))
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, name, first_release_date, cover_id, summary
+                FROM igdb_games
+                WHERE name ILIKE %s
+                ORDER BY LENGTH(name) ASC, name ASC
+                LIMIT %s
+                """,
+                (f"%{q}%", lim),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "id": int(r["id"]),
+                "name": str(r["name"]),
+                "first_release_date": (
+                    int(r["first_release_date"])
+                    if r["first_release_date"] is not None
+                    else None
+                ),
+                "cover_id": int(r["cover_id"]) if r["cover_id"] is not None else None,
+                "summary": str(r["summary"] or "").strip(),
+            }
+            for r in rows
+        ]
+
+    def igdb_game_by_id(self, game_id: int) -> dict[str, Any] | None:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, name, first_release_date, cover_id, summary
+                FROM igdb_games WHERE id = %s
+                """,
+                (gid,),
+            )
+            r = cur.fetchone()
+        if not r:
+            return None
+        return {
+            "id": int(r["id"]),
+            "name": str(r["name"]),
+            "first_release_date": (
+                int(r["first_release_date"])
+                if r["first_release_date"] is not None
+                else None
+            ),
+            "cover_id": int(r["cover_id"]) if r["cover_id"] is not None else None,
+            "summary": str(r["summary"] or "").strip(),
+        }
+
+    def igdb_cover_image_id_for_game(self, game_id: int) -> str | None:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT cover_id FROM igdb_games WHERE id = %s",
+                (gid,),
+            )
+            game = cur.fetchone()
+            cover_id = (
+                int(game["cover_id"]) if game and game["cover_id"] is not None else None
+            )
+            if cover_id:
+                cur.execute(
+                    "SELECT image_id FROM igdb_covers WHERE id = %s",
+                    (cover_id,),
+                )
+                row = cur.fetchone()
+                if row and row["image_id"]:
+                    return str(row["image_id"]).strip() or None
+            cur.execute(
+                """
+                SELECT image_id FROM igdb_covers
+                WHERE game_id = %s AND BTRIM(image_id) != ''
+                LIMIT 1
+                """,
+                (gid,),
+            )
+            row = cur.fetchone()
+            if row and row["image_id"]:
+                return str(row["image_id"]).strip() or None
+            cur.execute(
+                """
+                SELECT image_id FROM igdb_artworks
+                WHERE game_id = %s AND BTRIM(image_id) != ''
+                LIMIT 1
+                """,
+                (gid,),
+            )
+            row = cur.fetchone()
+            if row and row["image_id"]:
+                return str(row["image_id"]).strip() or None
+        return None
+
+    def igdb_release_dates_for_game(self, game_id: int) -> list[dict[str, Any]]:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return []
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT rd.id, rd.game_id, rd.platform_id, rd.date, rd.human,
+                       COALESCE(p.name, '') AS platform_name
+                FROM igdb_release_dates rd
+                LEFT JOIN igdb_platforms p ON p.id = rd.platform_id
+                WHERE rd.game_id = %s AND rd.date IS NOT NULL
+                ORDER BY rd.date ASC, platform_name ASC
+                """,
+                (gid,),
+            )
+            rows = cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            pid = int(r["platform_id"] or 0)
+            pname = str(r["platform_name"] or "").strip()
+            if not pname and pid:
+                pname = f"#{pid}"
+            out.append(
+                {
+                    "id": int(r["id"]),
+                    "game_id": int(r["game_id"]),
+                    "platform_id": pid,
+                    "platform_name": pname or "—",
+                    "date": int(r["date"]),
+                    "human": str(r["human"] or "").strip(),
+                }
+            )
+        return out
+
+    def get_release_watch_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE COALESCE(release_watch_prefs, '') != ''
+                ORDER BY id
+                """
+            )
+            rows = cur.fetchall()
+        return [_row_to_sub(r) for r in rows]

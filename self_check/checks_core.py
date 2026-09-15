@@ -1111,6 +1111,8 @@ def check_core() -> None:
             "involved_companies",
             "covers",
             "artworks",
+            "release_dates",
+            "platforms",
         }
         db.upsert_user(42)
         assert "games" in needed_endpoints(db)

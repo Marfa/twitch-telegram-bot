@@ -35,6 +35,8 @@ _ENDPOINT_TABLE = {
     "involved_companies": "igdb_involved",
     "covers": "igdb_covers",
     "artworks": "igdb_artworks",
+    "release_dates": "igdb_release_dates",
+    "platforms": "igdb_platforms",
 }
 
 # All dump endpoints the bot uses — synced daily regardless of feature gates.
@@ -184,6 +186,17 @@ def _row_image(row: dict[str, str]) -> tuple | None:
     return (iid, game_id, image_id)
 
 
+def _row_release_dates(row: dict[str, str]) -> tuple | None:
+    rid = _parse_int(row.get("id") or "")
+    game_id = _parse_int(row.get("game") or "")
+    date = _parse_ts(row.get("date") or "")
+    if rid is None or rid <= 0 or game_id is None or game_id <= 0 or date is None:
+        return None
+    platform_id = _parse_int(row.get("platform") or "") or 0
+    human = (row.get("human") or "").strip()
+    return (rid, game_id, platform_id, date, human)
+
+
 _ROW_PARSERS: dict[str, Callable[[dict[str, str]], tuple | None]] = {
     "games": _row_games,
     "companies": _row_named,
@@ -193,6 +206,8 @@ _ROW_PARSERS: dict[str, Callable[[dict[str, str]], tuple | None]] = {
     "involved_companies": _row_involved,
     "covers": _row_image,
     "artworks": _row_image,
+    "release_dates": _row_release_dates,
+    "platforms": _row_named,
 }
 
 _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -214,6 +229,8 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "igdb_involved": ("game_id", "company_id", "is_developer", "is_publisher"),
     "igdb_covers": ("id", "game_id", "image_id"),
     "igdb_artworks": ("id", "game_id", "image_id"),
+    "igdb_release_dates": ("id", "game_id", "platform_id", "date", "human"),
+    "igdb_platforms": ("id", "name"),
 }
 
 

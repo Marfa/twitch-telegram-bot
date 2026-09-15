@@ -19,11 +19,12 @@
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
-| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops (beta) · game alert |
+| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops (beta) · game alert · release alerts (beta, IGDB) |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): saved filters; live → else VOD; catch new streams by filter; own category in **📋 My subscriptions** |
+| 📅 Release alerts | Beta: **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses when all selected platforms have shipped |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Image | Optional alert image — caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |

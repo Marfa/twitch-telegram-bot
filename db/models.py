@@ -198,6 +198,108 @@ def parse_category_watch_prefs(raw: str | None) -> WatchPrefs | None:
     return _parse_watch_prefs_dict(data)
 
 
+@dataclass
+class ReleasePlatformPref:
+    platform_id: int
+    platform_name: str
+    date: int
+    human: str = ""
+
+
+@dataclass
+class ReleaseWatchPrefs:
+    igdb_game_id: int
+    game_name: str
+    days_before: int = 0
+    platforms: list[ReleasePlatformPref] = field(default_factory=list)
+    notified_keys: list[str] = field(default_factory=list)
+    date_unknown: bool = False
+
+
+def release_platform_key(platform_id: int, date: int) -> str:
+    return f"{int(platform_id)}:{int(date)}"
+
+
+def dump_release_watch_prefs(prefs: ReleaseWatchPrefs) -> str:
+    return json.dumps(
+        {
+            "igdb_game_id": int(prefs.igdb_game_id),
+            "game_name": prefs.game_name,
+            "days_before": max(0, int(prefs.days_before)),
+            "platforms": [
+                {
+                    "platform_id": int(p.platform_id),
+                    "platform_name": p.platform_name,
+                    "date": int(p.date),
+                    "human": p.human or "",
+                }
+                for p in prefs.platforms
+            ],
+            "notified_keys": list(prefs.notified_keys),
+            "date_unknown": bool(prefs.date_unknown),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def parse_release_watch_prefs(raw: str | None) -> ReleaseWatchPrefs | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    gid = int(data.get("igdb_game_id") or 0)
+    name = str(data.get("game_name") or "").strip()
+    if gid <= 0 or not name:
+        return None
+    date_unknown = bool(data.get("date_unknown"))
+    platforms: list[ReleasePlatformPref] = []
+    for item in data.get("platforms") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            date = int(item.get("date") or 0)
+            pid = int(item.get("platform_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if date <= 0:
+            continue
+        platforms.append(
+            ReleasePlatformPref(
+                platform_id=pid,
+                platform_name=str(item.get("platform_name") or "").strip() or "—",
+                date=date,
+                human=str(item.get("human") or "").strip(),
+            )
+        )
+    if not platforms and not date_unknown:
+        return None
+    keys_raw = data.get("notified_keys") or []
+    notified: list[str] = []
+    if isinstance(keys_raw, list):
+        for k in keys_raw:
+            s = str(k or "").strip()
+            if s and s not in notified:
+                notified.append(s)
+    try:
+        days = max(0, int(data.get("days_before") or 0))
+    except (TypeError, ValueError):
+        days = 0
+    return ReleaseWatchPrefs(
+        igdb_game_id=gid,
+        game_name=name,
+        days_before=days,
+        platforms=platforms,
+        notified_keys=notified,
+        date_unknown=date_unknown or not platforms,
+    )
+
+
 def dump_watch_filters(filters: list[WatchFilter]) -> str:
     payload = {
         "filters": [
@@ -252,6 +354,7 @@ class Subscription:
     category_watch_prefs: str = ""
     category_watch_live_ids: str = ""
     category_watch_primed: bool = False
+    release_watch_prefs: str = ""
     delete_other_alerts: bool = False
     is_demo: bool = False
     trial_paused: bool = False
@@ -320,6 +423,8 @@ class PremiumGift:
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
     if payload.get("notify_on_drops"):
         return "drops"
+    if str(payload.get("release_watch_prefs") or "").strip():
+        return "release"
     if str(payload.get("category_watch_prefs") or "").strip():
         return "game"
     if payload.get("notify_on_category_change"):
@@ -427,6 +532,10 @@ def is_category_watch_sub(sub: Subscription) -> bool:
     return bool((getattr(sub, "category_watch_prefs", "") or "").strip())
 
 
+def is_release_watch_sub(sub: Subscription) -> bool:
+    return bool((getattr(sub, "release_watch_prefs", "") or "").strip())
+
+
 def is_drops_sub(sub: Subscription) -> bool:
     return bool(getattr(sub, "notify_on_drops", False)) and bool(
         (getattr(sub, "drops_game_id", "") or "").strip()
@@ -465,6 +574,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "from_twitch_sync": bool(sub.from_twitch_sync),
         "from_watch_suggest": bool(sub.from_watch_suggest),
         "category_watch_prefs": sub.category_watch_prefs or "",
+        "release_watch_prefs": sub.release_watch_prefs or "",
         "notify_on_live": bool(sub.notify_on_live),
         "notify_on_end": bool(sub.notify_on_end),
         "notify_on_category_change": bool(sub.notify_on_category_change),
@@ -825,6 +935,9 @@ def _row_to_sub(row: Any) -> Subscription:
         category_watch_primed=bool(row["category_watch_primed"])
         if "category_watch_primed" in keys
         else False,
+        release_watch_prefs=str(row["release_watch_prefs"] or "")
+        if "release_watch_prefs" in keys
+        else "",
         delete_other_alerts=bool(row["delete_other_alerts"])
         if "delete_other_alerts" in keys
         else False,
