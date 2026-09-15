@@ -37,6 +37,7 @@ from db import (
     TwitchSync,
     is_category_watch_sub,
     is_drops_sub,
+    is_release_watch_sub,
 )
 from db.models import (
     WatchPrefs,
@@ -380,6 +381,27 @@ def _format_sub_line(
             settings.append(t("sub_list_game_cooldown_off", lang))
         else:
             settings.append(t("sub_list_game_cooldown", lang, minutes=cd))
+    elif is_release_watch_sub(sub):
+        settings.append(t("sub_list_alert_release", lang))
+        from db.models import parse_release_watch_prefs
+
+        prefs = parse_release_watch_prefs(sub.release_watch_prefs)
+        if prefs is not None:
+            settings.append(
+                t("sub_list_release_days", lang, days=prefs.days_before)
+            )
+            if prefs.date_unknown or not prefs.platforms:
+                settings.append(t("sub_list_release_date_unknown", lang))
+            else:
+                plats = ", ".join(p.platform_name for p in prefs.platforms[:5])
+                if plats:
+                    settings.append(
+                        t(
+                            "sub_list_release_platforms",
+                            lang,
+                            platforms=html.escape(plats),
+                        )
+                    )
     elif is_category_watch_sub(sub):
         settings.append(t("sub_list_alert_game", lang))
         from handlers.notifications import category_watch_cooldown_minutes
@@ -528,6 +550,8 @@ def _share_link_for_sub(
 def _alert_type_from_sub(sub: Subscription) -> str:
     if getattr(sub, "notify_on_drops", False):
         return "drops"
+    if (getattr(sub, "release_watch_prefs", "") or "").strip():
+        return "release"
     if (getattr(sub, "category_watch_prefs", "") or "").strip():
         return "game"
     if sub.notify_on_category_change:
@@ -891,9 +915,10 @@ def _subs_toggle_keyboard(
         toggle_label = (
             f"{t('toggle_off', lang) if s.enabled else t('toggle_on', lang)} {tag}"
         )
-        # Drops / game alerts: edit = cooldown minutes (no share).
+        # Drops / game / release alerts: no share.
         drops_locked = is_drops_sub(s)
         game = is_category_watch_sub(s)
+        release = is_release_watch_sub(s)
         row1 = [
             InlineKeyboardButton(
                 _inline_btn_label(toggle_label),
@@ -911,7 +936,7 @@ def _subs_toggle_keyboard(
                 callback_data=f"list_del:{s.id}",
             )
         ]
-        if show_share and not drops_locked and not game:
+        if show_share and not drops_locked and not game and not release:
             row2.append(
                 InlineKeyboardButton(
                     _inline_btn_label(f"{t('sub_list_share_short', lang)} {tag}"),
@@ -1123,7 +1148,15 @@ async def on_list_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-_EDIT_ALERT_TYPE_ORDER = ("live", "category", "upcoming", "end", "drops", "game")
+_EDIT_ALERT_TYPE_ORDER = (
+    "live",
+    "category",
+    "upcoming",
+    "end",
+    "drops",
+    "game",
+    "release",
+)
 
 
 def _edit_present_types(subs: list[Subscription]) -> list[str]:
@@ -2218,6 +2251,31 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             reply_markup=_wizard(lang, back=False),
         )
         return _sub_states()["EDIT_REPEAT"]
+    if is_release_watch_sub(sub):
+        from handlers.release_watch import (
+            edit_release_options_keyboard,
+            release_feature_available,
+        )
+        from db.models import parse_release_watch_prefs
+
+        if not release_feature_available(db, query.from_user.id):
+            await query.edit_message_text(t("release_beta_required", lang))
+            return ConversationHandler.END
+        prefs = parse_release_watch_prefs(sub.release_watch_prefs)
+        if not prefs:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        await query.edit_message_text(
+            t(
+                "edit_release_menu",
+                lang,
+                game=html.escape(prefs.game_name),
+                days=prefs.days_before,
+            ),
+            reply_markup=edit_release_options_keyboard(sub_id, lang),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
     if is_category_watch_sub(sub):
         context.user_data.clear()
         prefs = parse_category_watch_prefs(sub.category_watch_prefs)
@@ -4189,11 +4247,11 @@ def _alert_type_label(kind: str, lang: str) -> str:
 
 
 def _other_alert_types(current: str) -> list[str]:
-    # Drops / game need a game id — change/copy type cannot create them.
+    # Drops / game / release need a game id — change/copy type cannot create them.
     return [
         kind
         for kind in _EDIT_ALERT_TYPE_ORDER
-        if kind != current and kind not in ("drops", "game")
+        if kind != current and kind not in ("drops", "game", "release")
     ]
 
 
@@ -4264,6 +4322,8 @@ async def _alert_type_allowed(
         return "drops_type"
     if new_type == "game" or _alert_type_from_sub(sub) == "game":
         return "game_type"
+    if new_type == "release" or _alert_type_from_sub(sub) == "release":
+        return "release_type"
     feature = "alert_types"
     if not await prem.has_feature(
         bot, db, owner_id, feature, channel=sub.twitch_username
@@ -4316,6 +4376,7 @@ def _add_subscription_from_snapshot(
         from_twitch_sync=bool(snapshot.get("from_twitch_sync")),
         from_watch_suggest=bool(snapshot.get("from_watch_suggest")),
         category_watch_prefs=str(snapshot.get("category_watch_prefs") or ""),
+        release_watch_prefs=str(snapshot.get("release_watch_prefs") or ""),
         notify_on_live=bool(snapshot.get("notify_on_live", True)),
         notify_on_end=bool(snapshot.get("notify_on_end")),
         notify_on_category_change=bool(snapshot.get("notify_on_category_change")),
@@ -4486,6 +4547,9 @@ async def on_edit_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if block == "game_type":
         await query.edit_message_text(t("game_type_change_unsupported", lang))
+        return
+    if block == "release_type":
+        await query.edit_message_text(t("release_type_change_unsupported", lang))
         return
 
     snapshot = migrate_sub_fields_for_alert_type(

@@ -259,6 +259,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN drops_game_id "
                 "TEXT NOT NULL DEFAULT ''"
             )
+        if "release_watch_prefs" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN release_watch_prefs "
+                "TEXT NOT NULL DEFAULT ''"
+            )
         drops_auth_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(drops_auth)")
         }
@@ -896,6 +901,34 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS igdb_platforms (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_platforms_name ON igdb_platforms(name COLLATE NOCASE)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_release_dates (
+                id INTEGER PRIMARY KEY,
+                game_id INTEGER NOT NULL,
+                platform_id INTEGER NOT NULL DEFAULT 0,
+                date INTEGER NOT NULL,
+                human TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_release_dates_game ON igdb_release_dates(game_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_release_dates_date ON igdb_release_dates(date)"
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS igdb_dump_state (
                 endpoint TEXT PRIMARY KEY,
                 dump_updated_at INTEGER NOT NULL DEFAULT 0,
@@ -1036,6 +1069,7 @@ class SqliteDatabase:
         from_twitch_sync: bool = False,
         from_watch_suggest: bool = False,
         category_watch_prefs: str = "",
+        release_watch_prefs: str = "",
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
@@ -1056,11 +1090,11 @@ class SqliteDatabase:
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
-                    from_watch_suggest, category_watch_prefs,
+                    from_watch_suggest, category_watch_prefs, release_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
                     delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1089,6 +1123,7 @@ class SqliteDatabase:
                     int(from_twitch_sync),
                     int(bool(from_watch_suggest)),
                     str(category_watch_prefs or ""),
+                    str(release_watch_prefs or ""),
                     int(bool(notify_on_live)),
                     int(bool(notify_on_end)),
                     int(bool(notify_on_category_change)),
@@ -1357,6 +1392,9 @@ class SqliteDatabase:
                         schedule_reminder_configured=bool(
                             payload.get("schedule_reminder_configured")
                         ),
+                        release_watch_prefs=str(
+                            payload.get("release_watch_prefs") or ""
+                        ),
                         twitch_username=login,
                     ),
                 )
@@ -1386,12 +1424,12 @@ class SqliteDatabase:
                         ignore_keywords, use_global_ignore,
                         image_file_id, image_position, enabled,
                         from_twitch_sync, from_watch_suggest,
-                        category_watch_prefs,
+                        category_watch_prefs, release_watch_prefs,
                         notify_on_live, notify_on_end, notify_on_category_change,
                         notify_on_drops, drops_game_id,
                         delete_other_alerts, is_demo
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1421,6 +1459,7 @@ class SqliteDatabase:
                         int(bool(payload.get("from_twitch_sync"))),
                         int(bool(payload.get("from_watch_suggest"))),
                         payload.get("category_watch_prefs") or "",
+                        payload.get("release_watch_prefs") or "",
                         int(bool(payload.get("notify_on_live"))),
                         int(bool(payload.get("notify_on_end"))),
                         int(bool(payload.get("notify_on_category_change"))),
@@ -1495,6 +1534,7 @@ class SqliteDatabase:
             "twitch_username",
             "twitch_user_id",
             "category_watch_prefs",
+            "release_watch_prefs",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1530,6 +1570,7 @@ class SqliteDatabase:
                 "twitch_username",
                 "twitch_user_id",
                 "category_watch_prefs",
+                "release_watch_prefs",
             ):
                 values.append(str(value or ""))
             elif key == "image_file_id":
@@ -1599,8 +1640,10 @@ class SqliteDatabase:
                 FROM subscriptions
                 WHERE enabled = 1
                   AND COALESCE(category_watch_prefs, '') = ''
+                  AND COALESCE(release_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%'
                   AND twitch_user_id NOT LIKE 'drops:%'
+                  AND twitch_user_id NOT LIKE 'rel:%'
                   AND COALESCE(notify_on_drops, 0) = 0
                   AND (
                     notify_on_live = 1
@@ -5480,6 +5523,8 @@ class SqliteDatabase:
         "igdb_involved",
         "igdb_covers",
         "igdb_artworks",
+        "igdb_release_dates",
+        "igdb_platforms",
     })
 
     def has_any_igdb_ignore_users(self) -> bool:
@@ -5806,3 +5851,148 @@ class SqliteDatabase:
             return None
         text = str(game["summary"] or "").strip()
         return text or None
+
+    def igdb_search_games_by_name(
+        self, query: str, *, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        lim = max(1, min(20, int(limit)))
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, name, first_release_date, cover_id, summary
+                FROM igdb_games
+                WHERE name LIKE ? COLLATE NOCASE
+                ORDER BY LENGTH(name) ASC, name COLLATE NOCASE ASC
+                LIMIT ?
+                """,
+                (f"%{q}%", lim),
+            ).fetchall()
+        return [
+            {
+                "id": int(r["id"]),
+                "name": str(r["name"]),
+                "first_release_date": (
+                    int(r["first_release_date"])
+                    if r["first_release_date"] is not None
+                    else None
+                ),
+                "cover_id": int(r["cover_id"]) if r["cover_id"] is not None else None,
+                "summary": str(r["summary"] or "").strip(),
+            }
+            for r in rows
+        ]
+
+    def igdb_game_by_id(self, game_id: int) -> dict[str, Any] | None:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return None
+        with self._conn() as conn:
+            r = conn.execute(
+                """
+                SELECT id, name, first_release_date, cover_id, summary
+                FROM igdb_games WHERE id = ?
+                """,
+                (gid,),
+            ).fetchone()
+        if not r:
+            return None
+        return {
+            "id": int(r["id"]),
+            "name": str(r["name"]),
+            "first_release_date": (
+                int(r["first_release_date"])
+                if r["first_release_date"] is not None
+                else None
+            ),
+            "cover_id": int(r["cover_id"]) if r["cover_id"] is not None else None,
+            "summary": str(r["summary"] or "").strip(),
+        }
+
+    def igdb_cover_image_id_for_game(self, game_id: int) -> str | None:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return None
+        with self._conn() as conn:
+            game = conn.execute(
+                "SELECT cover_id FROM igdb_games WHERE id = ?",
+                (gid,),
+            ).fetchone()
+            cover_id = (
+                int(game["cover_id"]) if game and game["cover_id"] is not None else None
+            )
+            if cover_id:
+                row = conn.execute(
+                    "SELECT image_id FROM igdb_covers WHERE id = ?",
+                    (cover_id,),
+                ).fetchone()
+                if row and row["image_id"]:
+                    return str(row["image_id"]).strip() or None
+            row = conn.execute(
+                """
+                SELECT image_id FROM igdb_covers
+                WHERE game_id = ? AND TRIM(image_id) != ''
+                LIMIT 1
+                """,
+                (gid,),
+            ).fetchone()
+            if row and row["image_id"]:
+                return str(row["image_id"]).strip() or None
+            row = conn.execute(
+                """
+                SELECT image_id FROM igdb_artworks
+                WHERE game_id = ? AND TRIM(image_id) != ''
+                LIMIT 1
+                """,
+                (gid,),
+            ).fetchone()
+            if row and row["image_id"]:
+                return str(row["image_id"]).strip() or None
+        return None
+
+    def igdb_release_dates_for_game(self, game_id: int) -> list[dict[str, Any]]:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT rd.id, rd.game_id, rd.platform_id, rd.date, rd.human,
+                       COALESCE(p.name, '') AS platform_name
+                FROM igdb_release_dates rd
+                LEFT JOIN igdb_platforms p ON p.id = rd.platform_id
+                WHERE rd.game_id = ? AND rd.date IS NOT NULL
+                ORDER BY rd.date ASC, platform_name COLLATE NOCASE ASC
+                """,
+                (gid,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            pid = int(r["platform_id"] or 0)
+            pname = str(r["platform_name"] or "").strip()
+            if not pname and pid:
+                pname = f"#{pid}"
+            out.append(
+                {
+                    "id": int(r["id"]),
+                    "game_id": int(r["game_id"]),
+                    "platform_id": pid,
+                    "platform_name": pname or "—",
+                    "date": int(r["date"]),
+                    "human": str(r["human"] or "").strip(),
+                }
+            )
+        return out
+
+    def get_release_watch_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE COALESCE(release_watch_prefs, '') != ''
+                ORDER BY id
+                """
+            ).fetchall()
+        return [_row_to_sub(r) for r in rows]

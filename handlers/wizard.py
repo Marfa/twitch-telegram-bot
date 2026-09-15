@@ -718,13 +718,17 @@ async def _go_alert_type_prompt(
 ) -> int:
     import beta as beta_features
     from handlers.drops import DROPS_BETA_ID
+    from handlers.release_watch import RELEASE_BETA_ID
 
     chat_id = reply_chat_id(update)
     user_id = update.effective_user.id
     db: Database = context.application.bot_data["db"]
     show_drops = beta_features.is_enabled(db, user_id, DROPS_BETA_ID)
+    show_release = beta_features.is_enabled(db, user_id, RELEASE_BETA_ID)
     text = t("alert_type_prompt", lang)
-    markup = alert_type_keyboard(lang, show_drops=show_drops)
+    markup = alert_type_keyboard(
+        lang, show_drops=show_drops, show_release=show_release
+    )
     parse_mode = ParseMode.HTML if "<b>" in text else None
     if update.callback_query:
         await context.bot.send_message(
@@ -772,9 +776,16 @@ async def receive_new_sub_other(
     action = (query.data or "").split(":", 1)[-1]
     if action == "back":
         db: Database = context.application.bot_data["db"]
+        from handlers.release_watch import RELEASE_BETA_ID
+
         show_drops = beta_features.is_enabled(db, query.from_user.id, DROPS_BETA_ID)
+        show_release = beta_features.is_enabled(
+            db, query.from_user.id, RELEASE_BETA_ID
+        )
         text = t("alert_type_prompt", lang)
-        markup = alert_type_keyboard(lang, show_drops=show_drops)
+        markup = alert_type_keyboard(
+            lang, show_drops=show_drops, show_release=show_release
+        )
         parse_mode = ParseMode.HTML if "<b>" in text else None
         await query.edit_message_text(text, reply_markup=markup, parse_mode=parse_mode)
         return _wz()["ALERT_TYPE"]
@@ -1693,13 +1704,17 @@ async def receive_alert_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     kind = query.data.split(":", 1)[1]
-    if kind not in ("live", "category", "upcoming", "end", "drops", "game"):
+    if kind not in ("live", "category", "upcoming", "end", "drops", "game", "release"):
         return _wz()["ALERT_TYPE"]
     if kind == "game":
         await query.edit_message_text("✓")
         from handlers.watch import start_what_to_watch
 
         return await start_what_to_watch(update, context)
+    if kind == "release":
+        from handlers.release_watch import start_release_wizard
+
+        return await start_release_wizard(update, context)
     if kind == "drops":
         from handlers.drops import drops_feature_available
 

@@ -1580,7 +1580,7 @@ def schedule_reminder_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 
 def alert_type_keyboard(
-    lang: str, *, show_drops: bool = False
+    lang: str, *, show_drops: bool = False, show_release: bool = False
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [
@@ -1626,6 +1626,15 @@ def alert_type_keyboard(
             )
         ]
     )
+    if show_release:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("alert_type_release", lang),
+                    callback_data="alert_type:release",
+                )
+            ]
+        )
     rows.append(
         [
             InlineKeyboardButton(

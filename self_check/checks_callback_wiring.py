@@ -166,6 +166,12 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("edit_f", f"edit_f:{_SAMPLE_SUB}:template"),
     ("edit_g_tags", f"edit_g:{_SAMPLE_SUB}:tags"),
     ("edit_g_mature", f"edit_g:{_SAMPLE_SUB}:mature"),
+    ("edit_r_days", f"edit_r:{_SAMPLE_SUB}:days"),
+    ("edit_r_platforms", f"edit_r:{_SAMPLE_SUB}:platforms"),
+    ("rel_pick", "rel:pick:1"),
+    ("rel_toggle", "rel:toggle:0"),
+    ("rel_create", "rel:create"),
+    ("rel_cancel", "rel:cancel"),
     ("edit_change_type", f"edit_f:{_SAMPLE_SUB}:change_type"),
     ("edit_copy", f"edit_f:{_SAMPLE_SUB}:copy"),
     ("edit_copy_change", f"edit_f:{_SAMPLE_SUB}:copy_change"),
@@ -215,6 +221,11 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
     fix_dates = [today, today + timedelta(days=1)]
     samples: list[tuple[str, Any, dict[str, Any]]] = [
         ("alert_type", alert_type_keyboard, {"lang": loc, "show_drops": True}),
+        (
+            "alert_type_release",
+            alert_type_keyboard,
+            {"lang": loc, "show_drops": True, "show_release": True},
+        ),
         ("new_sub_other", new_sub_other_keyboard, {"lang": loc}),
         (
             "drops_catalog",

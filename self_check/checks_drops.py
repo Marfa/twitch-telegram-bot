@@ -38,6 +38,13 @@ def _check_drops_alert_type_keyboard_last() -> None:
     assert callbacks[-3] == "alert_type:game"
     assert callbacks[-2] == "alert_type:other"
     assert callbacks[-1] == "alert_type:cancel"
+    with_rel = alert_type_keyboard("en", show_drops=True, show_release=True)
+    cbs = [b.callback_data for r in with_rel.inline_keyboard for b in r]
+    assert cbs[-5] == "alert_type:drops"
+    assert cbs[-4] == "alert_type:game"
+    assert cbs[-3] == "alert_type:release"
+    assert cbs[-2] == "alert_type:other"
+    assert cbs[-1] == "alert_type:cancel"
 
 
 def _check_drops_payload_and_migrate() -> None:

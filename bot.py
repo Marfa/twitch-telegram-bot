@@ -452,6 +452,17 @@ from handlers.watch import (
     start_watch_change,
     start_watch_lucky,
 )
+from handlers.release_watch import (
+    cancel_release_callback,
+    check_release_watch_alerts,
+    receive_release_dates_callback,
+    receive_release_days,
+    receive_release_game_text,
+    receive_release_pick,
+    start_edit_release_days,
+    start_edit_release_platforms,
+    start_release_wizard,
+)
 
 from handlers.wizard import (
     _GATE_FEATURE_LABEL,
@@ -753,7 +764,11 @@ logger = logging.getLogger(__name__)
     ADMIN_REFUND_CHARGE,
     STREAM_SCHEDULE_VACATION,
     STREAM_SCHEDULE_VACATION_AUTO,
-) = range(69)
+    RELEASE_SEARCH,
+    RELEASE_PICK,
+    RELEASE_DATES,
+    RELEASE_DAYS,
+) = range(73)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2575,6 +2590,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 pattern=r"^edit_g:\d+:(tags|viewers|language|cooldown)$",
             ),
             CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_release_days),
+                pattern=r"^edit_r:\d+:days$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_release_platforms),
+                pattern=r"^edit_r:\d+:platforms$",
+            ),
+            CallbackQueryHandler(
                 dm_only_conv_entry(start_watch_change), pattern=r"^watch:change$"
             ),
         ],
@@ -2595,7 +2618,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,
-                    pattern=r"^alert_type:(live|category|upcoming|end|drops|game)$",
+                    pattern=r"^alert_type:(live|category|upcoming|end|drops|game|release)$",
                 ),
             ],
             PREMIUM_GATE: [
@@ -3079,6 +3102,30 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     filters.TEXT & ~filters.COMMAND, admin_refund_receive
                 ),
             ],
+            RELEASE_SEARCH: [
+                _wiz_cancel,
+                CallbackQueryHandler(cancel_release_callback, pattern=r"^rel:cancel$"),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_release_game_text
+                ),
+            ],
+            RELEASE_PICK: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_release_pick, pattern=r"^rel:(pick:\d+|cancel)$"
+                ),
+            ],
+            RELEASE_DATES: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_release_dates_callback,
+                    pattern=r"^rel:(toggle:\d+|create|cancel)$",
+                ),
+            ],
+            RELEASE_DAYS: [
+                _wiz_cancel,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_release_days),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
@@ -3283,6 +3330,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
+    app.job_queue.run_repeating(
+        check_release_watch_alerts, interval=24 * 3600, first=120
+    )
     app.job_queue.run_repeating(
         announce_new_beta_features, interval=3600, first=90
     )

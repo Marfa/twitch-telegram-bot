@@ -86,6 +86,9 @@ def main() -> None:
     from .checks_drops import run as check_drops
 
     check_drops()
+    from .checks_release import run as check_release
+
+    check_release()
     print("ok")
 
 
