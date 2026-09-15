@@ -1212,6 +1212,9 @@ async def _save_edit_template(
             t("edit_updated", lang, sub_id=sub_num),
             reply_markup=_menu(lang, owner_id),
         )
+    # Conversation ends before group=2 offer_twitch_link_wizard; skip that same update.
+    if update.update_id is not None:
+        context.chat_data["_skip_twitch_link_offer_update_id"] = update.update_id
     context.user_data.clear()
     return ConversationHandler.END
 

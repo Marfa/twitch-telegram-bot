@@ -1759,6 +1759,31 @@ async def _scenario_twitch_link_wizard_offer(db) -> None:
     await on_twitch_link_decline(update, ctx)
     query.edit_message_text.assert_awaited()
 
+    # Template text that only *contains* a Twitch URL must not offer.
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(
+        _FREE_UID, "Стрим: https://twitch.tv/shroud — заходите!", cap
+    )
+    update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
+    ctx = _ctx(application)
+    await offer_twitch_link_wizard(update, ctx)
+    update.effective_message.reply_text.assert_not_awaited()
+
+    # Same update after edit-template save (ConversationHandler.END) — skip flag.
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "https://twitch.tv/shroud", cap)
+    update.update_id = 4242
+    update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
+    ctx = _ctx(application)
+    ctx.chat_data["_skip_twitch_link_offer_update_id"] = 4242
+    await offer_twitch_link_wizard(update, ctx)
+    update.effective_message.reply_text.assert_not_awaited()
+    assert "_skip_twitch_link_offer_update_id" not in ctx.chat_data
+
     # Mid-wizard: same URL must not offer again.
     application, bot = _app(db, twitch=twitch)
     conv = MagicMock()

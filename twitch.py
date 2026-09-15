@@ -210,6 +210,12 @@ class TwitchClient:
     def is_twitch_url(text: str) -> bool:
         return bool(TWITCH_URL_RE.search((text or "").strip()))
 
+    @staticmethod
+    def is_standalone_twitch_url(text: str) -> bool:
+        """True if the whole message is a channel URL (not embedded in other text)."""
+        text = (text or "").strip().rstrip("/")
+        return bool(text) and TWITCH_URL_RE.fullmatch(text) is not None
+
     def _ensure_token(self) -> str:
         if self._token and time.time() < self._token_expires - 60:
             return self._token

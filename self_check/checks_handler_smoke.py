@@ -926,6 +926,7 @@ async def _smoke_subscriptions(db) -> None:
         update, ctx, "ru", "new {username}\nhttps://twitch.tv/{username}"
     )
     assert state == ConversationHandler.END
+    assert ctx.chat_data.get("_skip_twitch_link_offer_update_id") == update.update_id
     saved = db.get_subscription(sub_id, _FREE_UID)
     assert saved is not None
     assert saved.message_template.startswith("new ")

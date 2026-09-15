@@ -1623,12 +1623,17 @@ async def offer_twitch_link_wizard(
     """Outside create/edit (and other) wizards: offer to start alert creation."""
     if not is_private_chat(update):
         return
+    # Same update just finished edit/create (ConversationHandler.END) — do not re-offer.
+    if context.chat_data.get("_skip_twitch_link_offer_update_id") == update.update_id:
+        context.chat_data.pop("_skip_twitch_link_offer_update_id", None)
+        return
     text = (update.effective_message.text or "").strip()
     if not text or is_menu_button(text) or text in all_wizard_nav_buttons():
         return
     if context.user_data.get("sb_edit_mode"):
         return
-    if not TwitchClient.is_twitch_url(text):
+    # Paste a bare Twitch URL → offer; a template that *contains* a URL must not.
+    if not TwitchClient.is_standalone_twitch_url(text):
         return
     if _in_main_conversation(update, context):
         return

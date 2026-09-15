@@ -184,8 +184,15 @@ def check_core() -> None:
     assert t.is_twitch_url("https://www.twitch.tv/marfapr")
     assert t.is_twitch_url("https://m.twitch.tv/marfapr")
     assert t.is_twitch_url("twitch.tv/marfapr")
+    assert t.is_twitch_url("see https://twitch.tv/marfapr now")
     assert not t.is_twitch_url("marfapr")
     assert not t.is_twitch_url("@marfapr")
+    assert t.is_standalone_twitch_url("https://www.twitch.tv/marfapr")
+    assert t.is_standalone_twitch_url("https://twitch.tv/marfapr/")
+    assert t.is_standalone_twitch_url("twitch.tv/marfapr")
+    assert not t.is_standalone_twitch_url("Live https://twitch.tv/marfapr")
+    assert not t.is_standalone_twitch_url("{username} https://twitch.tv/marfapr")
+    assert not t.is_standalone_twitch_url("marfapr")
     # Synthetic category-watch / drops ids must not hit Helix /videos (400).
     assert t.get_videos_by_user("cw:150697169:1e3af59a") == []
     assert t.get_videos_by_user("drops:1:abcd") == []
