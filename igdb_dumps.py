@@ -154,6 +154,7 @@ def _row_games(row: dict[str, str]) -> tuple | None:
     name = (row.get("name") or "").strip()
     if gid is None or gid <= 0 or not name:
         return None
+    summary = (row.get("summary") or "").strip()
     return (
         gid,
         name,
@@ -163,6 +164,7 @@ def _row_games(row: dict[str, str]) -> tuple | None:
         _parse_long_array(row.get("genres") or ""),
         _parse_long_array(row.get("game_modes") or ""),
         _parse_int(row.get("cover") or ""),
+        summary,
     )
 
 
@@ -231,6 +233,7 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "genres",
         "game_modes",
         "cover_id",
+        "summary",
     ),
     "igdb_companies": ("id", "name"),
     "igdb_genres": ("id", "name"),

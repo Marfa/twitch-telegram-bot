@@ -310,9 +310,19 @@ def _render_sub_template(
     twitch: TwitchClient | None = None,
     stream: dict | None = None,
     extra: dict[str, str] | None = None,
+    lang: str | None = None,
 ) -> str:
+    from i18n import DEFAULT_LOCALE
     from twitch import template_uses_html
 
+    locale = lang
+    if locale is None and twitch is not None:
+        db = getattr(twitch, "_igdb_db", None)
+        if db is not None:
+            try:
+                locale = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+            except Exception:
+                locale = DEFAULT_LOCALE
     return render_template(
         sub.message_template,
         username,
@@ -323,6 +333,7 @@ def _render_sub_template(
         strip_name_mentions=bool(sub.strip_name_mentions),
         twitch=twitch,
         escape_html=template_uses_html(sub.message_template or ""),
+        lang=locale or DEFAULT_LOCALE,
     )
 
 async def _prompt_repeat_step(

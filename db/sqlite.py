@@ -790,10 +790,20 @@ class SqliteDatabase:
                 total_rating_count INTEGER NOT NULL DEFAULT 0,
                 genres TEXT NOT NULL DEFAULT '',
                 game_modes TEXT NOT NULL DEFAULT '',
-                cover_id INTEGER
+                cover_id INTEGER,
+                summary TEXT NOT NULL DEFAULT ''
             )
             """
         )
+        igdb_game_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(igdb_games)")
+        }
+        if "summary" not in igdb_game_cols:
+            conn.execute(
+                "ALTER TABLE igdb_games ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
+            )
+            # Force games dump re-import so summaries fill after schema bump.
+            conn.execute("DELETE FROM igdb_dump_state WHERE endpoint = 'games'")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_igdb_games_name ON igdb_games(name COLLATE NOCASE)"
         )
@@ -5776,3 +5786,23 @@ class SqliteDatabase:
             if row and row["image_id"]:
                 return str(row["image_id"]).strip() or None
         return None
+
+    def igdb_summary_for_twitch(self, twitch_uid: str) -> str | None:
+        uid = str(twitch_uid or "").strip()
+        if not uid:
+            return None
+        with self._conn() as conn:
+            ext = conn.execute(
+                "SELECT game_id FROM igdb_external_twitch WHERE twitch_uid = ?",
+                (uid,),
+            ).fetchone()
+            if not ext:
+                return None
+            game = conn.execute(
+                "SELECT summary FROM igdb_games WHERE id = ?",
+                (int(ext["game_id"]),),
+            ).fetchone()
+        if not game:
+            return None
+        text = str(game["summary"] or "").strip()
+        return text or None

@@ -1576,6 +1576,53 @@ class TwitchClient:
         _igdb_twitch_meta_cache[gid] = (now, meta)
         return meta
 
+    def resolve_game_description(
+        self, twitch_game_id: str | int | None, *, lang: str = "en"
+    ) -> str:
+        """Helix category id → IGDB summary, localized to bot UI language."""
+        gid = str(twitch_game_id or "").strip()
+        if not gid or self._igdb_db is None:
+            return "—"
+        try:
+            summary = self._igdb_db.igdb_summary_for_twitch(gid)
+        except Exception as exc:
+            logger.warning("IGDB summary lookup failed for %s (%s)", gid, exc)
+            return "—"
+        if not summary:
+            return "—"
+        return localize_igdb_summary(summary, lang)
+
+
+
+def localize_igdb_summary(summary: str, lang: str) -> str:
+    """IGDB summaries are US English; translate for non-en bot locales when DeepL is set."""
+    text = (summary or "").strip()
+    if not text:
+        return "—"
+    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
+
+    locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    if locale == "en":
+        return text
+    from config import DEEPL_API_KEY
+
+    if not DEEPL_API_KEY:
+        return text
+    cache_key = (text, locale)
+    cached = _IGDB_SUMMARY_TR_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        from translate import translate_text
+
+        out = translate_text(text, target_lang=locale, source_lang="en").strip() or text
+    except Exception:
+        logger.exception("IGDB summary translate failed lang=%s", locale)
+        return text
+    if len(_IGDB_SUMMARY_TR_CACHE) >= _IGDB_SUMMARY_TR_CACHE_MAX:
+        _IGDB_SUMMARY_TR_CACHE.clear()
+    _IGDB_SUMMARY_TR_CACHE[cache_key] = out
+    return out
 
 
 def preview_stream_title(locale: str, game: str) -> str:
@@ -1661,6 +1708,7 @@ def render_template(
     strip_name_mentions: bool = False,
     twitch: "TwitchClient | None" = None,
     escape_html: bool = False,
+    lang: str | None = None,
 ) -> str:
     """Fill template placeholders from channel + optional Helix stream payload.
 
@@ -1670,8 +1718,18 @@ def render_template(
     if strip_name_mentions and "{name}" in template:
         name = strip_name_mentions_and_commands(name, twitch)
     values = _template_values(username, game, name, stream)
+    provided_extra = set(extra or ())
     if extra:
         values.update(extra)
+    if (
+        "{game_description}" in (template or "")
+        and "game_description" not in provided_extra
+        and twitch is not None
+    ):
+        values["game_description"] = twitch.resolve_game_description(
+            (stream or {}).get("game_id"),
+            lang=lang or "en",
+        )
     if escape_html:
         import html as _html
 
@@ -1706,6 +1764,7 @@ def _template_values(
         "type": "—",
         "minutes": "—",
         "duration": "—",
+        "game_description": "—",
     }
     if not stream:
         return values
@@ -1763,6 +1822,7 @@ _TEMPLATE_PLACEHOLDERS = (
     "type",
     "minutes",
     "duration",
+    "game_description",
 )
 _STREAM_SNAPSHOT_KEYS = (
     "user_login",
@@ -1817,6 +1877,10 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "length": "duration",
     "streamid": "id",
     "stream_id": "id",
+    "gamedescription": "game_description",
+    "game_desc": "game_description",
+    "game_descriotion": "game_description",
+    "igdb_summary": "game_description",
 }
 # Telegram may linkify these even without a scheme; used to decide link-preview UI.
 _TEMPLATE_LINK_RE = re.compile(
@@ -1979,6 +2043,9 @@ def stream_duration_minutes(stream: dict[str, Any] | None) -> str:
 # ponytail: Twitch category → IGDB meta TTL; ceiling = process memory / stale genres.
 _igdb_twitch_meta_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
 _IGDB_TWITCH_META_TTL_SEC = 6 * 3600
+# ponytail: process-local DeepL cache for IGDB summaries; clear on size cap.
+_IGDB_SUMMARY_TR_CACHE: dict[tuple[str, str], str] = {}
+_IGDB_SUMMARY_TR_CACHE_MAX = 512
 IGNORE_IGDB_KINDS = frozenset({"developer", "publisher", "genre", "game_mode"})
 IGNORE_IGDB_MAX = 20
 IGNORE_IGDB_BETA_ID = "ignore-igdb-categories"

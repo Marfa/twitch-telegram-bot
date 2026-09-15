@@ -24,5 +24,6 @@ Local sync lives in [`igdb_dumps.py`](igdb_dumps.py) → DB tables `igdb_*`, ref
 | «Мне повезёт» / lucky | games, external_games (+ covers/artworks pack with users) |
 | Ignore genres/publishers | companies, genres, game_modes, involved, games, external |
 | Alert game cover image | covers → artworks via Twitch uid map |
+| `{game_description}` in alerts | games (`summary`) + external_games via Twitch uid |
 
 Twitch Helix (category search, live streams by `game_id`) is separate — not replaced by IGDB dumps.

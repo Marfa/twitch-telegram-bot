@@ -916,10 +916,25 @@ class PostgresDatabase:
                     total_rating_count INTEGER NOT NULL DEFAULT 0,
                     genres TEXT NOT NULL DEFAULT '',
                     game_modes TEXT NOT NULL DEFAULT '',
-                    cover_id BIGINT
+                    cover_id BIGINT,
+                    summary TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            cur.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'igdb_games'
+                  AND column_name = 'summary'
+                """
+            )
+            if cur.fetchone() is None:
+                cur.execute(
+                    "ALTER TABLE igdb_games ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
+                )
+                # Force games dump re-import so summaries fill after schema bump.
+                cur.execute("DELETE FROM igdb_dump_state WHERE endpoint = 'games'")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_igdb_games_name_lower ON igdb_games (LOWER(name))"
             )
@@ -6290,3 +6305,26 @@ class PostgresDatabase:
             if row and row["image_id"]:
                 return str(row["image_id"]).strip() or None
         return None
+
+    def igdb_summary_for_twitch(self, twitch_uid: str) -> str | None:
+        uid = str(twitch_uid or "").strip()
+        if not uid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT game_id FROM igdb_external_twitch WHERE twitch_uid = %s",
+                (uid,),
+            )
+            ext = cur.fetchone()
+            if not ext:
+                return None
+            cur.execute(
+                "SELECT summary FROM igdb_games WHERE id = %s",
+                (int(ext["game_id"]),),
+            )
+            game = cur.fetchone()
+        if not game:
+            return None
+        text = str(game["summary"] or "").strip()
+        return text or None

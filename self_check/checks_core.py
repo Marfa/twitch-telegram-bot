@@ -1068,8 +1068,9 @@ def check_core() -> None:
             "genres": "{12}",
             "game_modes": "{2}",
             "cover": "9",
+            "summary": "A test game.",
         }
-    ) == (1, "Test", None, None, 3, "12", "2", 9)
+    ) == (1, "Test", None, None, 3, "12", "2", 9, "A test game.")
     assert _row_external_twitch(
         {
             "uid": "509658",
@@ -1136,8 +1137,23 @@ def check_core() -> None:
                 "genres",
                 "game_modes",
                 "cover_id",
+                "summary",
             ),
-            [[(99, "Just Chatting", None, None, 0, "12", "2", 1)]],
+            [
+                [
+                    (
+                        99,
+                        "Just Chatting",
+                        None,
+                        None,
+                        0,
+                        "12",
+                        "2",
+                        1,
+                        "Hang out and get lost with close friends in a big world.",
+                    )
+                ]
+            ],
         )
         db.igdb_replace_rows(
             "igdb_covers",
@@ -1153,6 +1169,21 @@ def check_core() -> None:
         assert meta and 12 in meta["genres"] and 7 in meta["developers"]
         assert db.igdb_cover_image_id_for_twitch("509658") == "co_test"
         assert "co_test" in (client.resolve_box_art_url(game_id="509658") or "")
+        assert "Hang out" in (db.igdb_summary_for_twitch("509658") or "")
+        desc = render_template(
+            "{game_description}",
+            "x",
+            stream={"game_id": "509658"},
+            twitch=client,
+            lang="en",
+        )
+        assert "Hang out" in desc
+        assert find_placeholder_typos("{game_descriotion}") == [
+            ("{game_descriotion}", "{game_description}")
+        ]
+        assert (
+            fix_placeholder_typos("{game_descriotion}") == "{game_description}"
+        )
 
     assert _parse_watch_viewers("100") == (100, None)
     assert _parse_watch_viewers("100-500") == (100, 500)
@@ -1275,6 +1306,7 @@ def check_core() -> None:
         assert "{duration}" in tr("placeholders_page_body", loc)
         assert "{viewer_avg}" in tr("placeholders_page_body", loc)
         assert "{viewer_peak}" in tr("placeholders_page_body", loc)
+        assert "{game_description}" in tr("placeholders_page_body", loc)
         assert tr("duration_n_unit", loc, n=2, unit=tr("duration_unit_hour_few", loc))
         assert tr("watch_cats_prompt", loc)
         assert tr("watch_cats_lucky", loc)
