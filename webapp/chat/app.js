@@ -33,9 +33,6 @@
         "No login token. Close this window, tap /start in the bot, then open «Chat» from the keyboard.",
       simple: "Simple",
       embed: "Embed",
-      info: "Info",
-      infoEmpty: "No About page link.",
-      infoLoadFail: "Could not load channel info.",
       quota: "{n} messages left today",
       unlimited: "Unlimited sends",
       limitHit: "Daily limit reached. Premium unlocks unlimited chat.",
@@ -52,9 +49,8 @@
       homeAdded: "On Home Screen",
       statusLive: "Live",
       statusOffline: "Offline",
-      openTwitch: "Twitch",
       embedHint:
-        "Twitch login and Drops inside embed do not work in Telegram — use «Twitch».",
+        "Twitch login and Drops inside the embedded chat do not work in Telegram.",
     },
     ru: {
       live: "Сейчас в эфире",
@@ -78,9 +74,6 @@
         "Нет токена входа. Закройте окно, нажмите /start в боте, затем «Чат» на клавиатуре.",
       simple: "Простой",
       embed: "Embed",
-      info: "Информация",
-      infoEmpty: "Нет ссылки на страницу «О канале».",
-      infoLoadFail: "Не удалось загрузить информацию о канале.",
       quota: "Осталось сообщений сегодня: {n}",
       unlimited: "Безлимитная отправка",
       limitHit: "Дневной лимит. Premium снимает ограничение.",
@@ -97,9 +90,8 @@
       homeAdded: "Уже на «Домой»",
       statusLive: "В эфире",
       statusOffline: "Оффлайн",
-      openTwitch: "Twitch",
       embedHint:
-        "Вход и Drops во встроенном чате в Telegram не работают — откройте «Twitch».",
+        "Вход и Drops во встроенном чате в Telegram не работают.",
     },
   };
 
@@ -113,7 +105,6 @@
   let ircStatusEl = null;
   let appToken = "";
   let urlLang = "";
-  let infoCache = null;
   const SECURE_TOKEN_KEY = "chat_t";
   const DEVICE_MODE_KEY = "chat_mode"; // "simple" | "embed"
 
@@ -127,10 +118,6 @@
     el("search-form").querySelector('button[type="submit"]').textContent = t.go;
     el("btn-login").textContent = t.login;
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
-    const infoBtn = el("btn-info");
-    if (infoBtn) infoBtn.textContent = t.info;
-    const twitchBtn = el("btn-twitch");
-    if (twitchBtn) twitchBtn.textContent = t.openTwitch;
     const embedHint = el("embed-hint");
     if (embedHint) embedHint.textContent = t.embedHint;
     const sendInput = el("send-input");
@@ -449,85 +436,7 @@
       .replace(/"/g, "&quot;");
   }
 
-  function hideInfoPanel() {
-    el("info-panel").classList.add("hidden");
-  }
 
-  function renderInfoLinks(links) {
-    el("info-loading").classList.add("hidden");
-    el("info-empty").classList.add("hidden");
-    const list = el("info-links");
-    list.innerHTML = "";
-    if (!links.length) {
-      el("info-empty").textContent = t.infoEmpty;
-      el("info-empty").classList.remove("hidden");
-      return;
-    }
-    links.forEach((item) => {
-      const li = document.createElement("li");
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "info-link-btn";
-      if (item.image_url) {
-        const img = document.createElement("img");
-        img.className = "info-thumb";
-        img.alt = "";
-        img.loading = "lazy";
-        img.src = item.image_url;
-        btn.appendChild(img);
-      }
-      const body = document.createElement("div");
-      body.className = "info-link-body";
-      const label = document.createElement("strong");
-      label.textContent = item.label || item.url;
-      body.appendChild(label);
-      btn.appendChild(body);
-      btn.addEventListener("click", () => openExternal(item.url));
-      li.appendChild(btn);
-      list.appendChild(li);
-    });
-  }
-
-  function openExternal(url) {
-    if (tg && tg.openLink) tg.openLink(url);
-    else window.open(url, "_blank", "noopener,noreferrer");
-  }
-
-  async function toggleInfoPanel() {
-    const panel = el("info-panel");
-    if (!current) return;
-    if (!panel.classList.contains("hidden")) {
-      hideInfoPanel();
-      return;
-    }
-    panel.classList.remove("hidden");
-    if (infoCache && infoCache.login === current.login) {
-      renderInfoLinks(infoCache.links);
-      return;
-    }
-    el("info-empty").classList.add("hidden");
-    el("info-links").innerHTML = "";
-    el("info-loading").textContent = t.loading;
-    el("info-loading").classList.remove("hidden");
-    try {
-      const { body } = await api(
-        "/app/chat/api/info?q=" + encodeURIComponent(current.login)
-      );
-      if (!body.ok) {
-        el("info-loading").classList.add("hidden");
-        el("info-empty").textContent = t.infoLoadFail;
-        el("info-empty").classList.remove("hidden");
-        return;
-      }
-      const links = body.links || [];
-      infoCache = { login: current.login, links: links };
-      renderInfoLinks(links);
-    } catch (_) {
-      el("info-loading").classList.add("hidden");
-      el("info-empty").textContent = t.infoLoadFail;
-      el("info-empty").classList.remove("hidden");
-    }
-  }
 
   function streamIsOnline(stream) {
     if (!stream) return false;
@@ -572,16 +481,12 @@
 
   function openChat(stream) {
     current = stream;
-    infoCache = null;
-    hideInfoPanel();
     el("view-home").classList.add("hidden");
     el("view-chat").classList.remove("hidden");
     el("chat-title").textContent = stream.display_name || stream.login;
     el("chat-sub").textContent = stream.title || "";
     updateChatStatus(stream);
     el("btn-fallback").classList.remove("hidden");
-    el("btn-info").classList.remove("hidden");
-    el("btn-twitch").classList.remove("hidden");
     setLang(lang);
     applyChatMode();
     updateQuota();
@@ -590,14 +495,10 @@
   function closeChat() {
     stopIrc();
     current = null;
-    infoCache = null;
-    hideInfoPanel();
     updateChatStatus(null);
     el("embed-frame").src = "about:blank";
     el("view-chat").classList.add("hidden");
     el("view-home").classList.remove("hidden");
-    el("btn-info").classList.add("hidden");
-    el("btn-twitch").classList.add("hidden");
     el("embed-hint").classList.add("hidden");
   }
 
@@ -840,13 +741,6 @@
   });
 
   el("btn-back").addEventListener("click", closeChat);
-  el("btn-info").addEventListener("click", () => {
-    toggleInfoPanel();
-  });
-  el("btn-twitch").addEventListener("click", () => {
-    if (!current || !current.login) return;
-    openExternal("https://www.twitch.tv/" + encodeURIComponent(current.login));
-  });
   el("btn-fallback").addEventListener("click", () => {
     useFallback = !useFallback;
     persistChatMode(useFallback);

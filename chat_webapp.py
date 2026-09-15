@@ -447,43 +447,6 @@ def api_resolve(
         return _err(502, "twitch_error")
 
 
-def api_info(
-    *, init_data: str = "", token: str = "", query: str = ""
-) -> tuple[int, dict[str, Any]]:
-    user, err, token_lang = _require_user(init_data=init_data, token=token)
-    if err or user is None:
-        code = 401 if (err or "").startswith("unauthorized") else 403
-        return _err(code, err or "unauthorized")
-    if _twitch is None:
-        return _err(503, "unavailable")
-    login = _twitch.parse_username(query or "")
-    if not login:
-        return _err(400, "bad_query")
-    try:
-        profile = _twitch.get_user(login)
-        if not profile:
-            return _err(404, "not_found")
-        links = _twitch.get_channel_about_links(login)
-        if links:
-            from i18n import DEFAULT_LOCALE, t as _t
-
-            user_id = int(user["id"])
-            lang = token_lang or (
-                _db.get_user_locale(user_id) if _db is not None else None
-            ) or DEFAULT_LOCALE
-            links = [{**links[0], "label": _t("chat_about_on_twitch", lang)}]
-        return 200, {
-            "ok": True,
-            "login": str(profile.get("login") or login).lower(),
-            "display_name": profile.get("display_name") or profile.get("login") or login,
-            "profile_image_url": _profile_image_url(profile),
-            "links": links,
-        }
-    except Exception:
-        logger.exception("chat api_info failed login=%s", login)
-        return _err(502, "twitch_error")
-
-
 def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
     from config import twitch_oauth_redirect_uri
     from health import create_oauth_state

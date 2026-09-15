@@ -13,7 +13,6 @@ from twitch import (
     FOLLOWS_SCOPE,
     SCHEDULE_SCOPE,
     WHISPERS_SCOPE,
-    TwitchClient,
     filter_streams_for_watch,
     find_placeholder_typos,
     normalize_ignore_keywords,
@@ -1541,12 +1540,13 @@ def check_handlers() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=14' in (WEBAPP_DIR / "index.html").read_text(
+    assert '/app/chat/app.js?v=15' in (WEBAPP_DIR / "index.html").read_text(
         encoding="utf-8"
     )
-    assert 'id="btn-twitch"' in (WEBAPP_DIR / "index.html").read_text(
-        encoding="utf-8"
-    )
+    html = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+    assert 'id="btn-twitch"' not in html
+    assert 'id="btn-info"' not in html
+    assert 'id="info-panel"' not in html
     assert "embedHint" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
     assert "SecureStorage" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
     assert "DeviceStorage" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
@@ -1768,7 +1768,6 @@ def check_handlers() -> None:
         group_chat_btn = group_chat_kb.inline_keyboard[0][0]
         assert priv_chat_btn.web_app is not None and priv_chat_btn.url is None
         assert group_chat_btn.url and group_chat_btn.web_app is None
-        assert TwitchClient._about_link_key("https://VK.com/stopgameru/") == "https://vk.com/stopgameru"
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
         cdb.upsert_user(777)

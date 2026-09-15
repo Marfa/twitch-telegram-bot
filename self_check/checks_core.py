@@ -139,15 +139,6 @@ def check_core() -> None:
 
     CHANNEL = "marfapr"
     t = TwitchClient()
-    assert t.get_channel_about_links("marfapr") == [
-        {
-            "url": "https://www.twitch.tv/marfapr/about",
-            "label": "About",
-            "image_url": "",
-            "kind": "about",
-        }
-    ]
-    assert t.get_channel_about_links("") == []
     # 429 backoff: Retry-After respected once, then success.
     from unittest.mock import MagicMock, patch
     from twitch import _install_rate_limit_backoff, _retry_after_seconds

@@ -33,4 +33,4 @@ Authority: [Twitch Developer Services Agreement](https://legal.twitch.com/legal/
 - Respect rate limits — `TwitchClient` session retries HTTP 429 using `Retry-After` / `Ratelimit-Reset`
 - Attribute / link back to Twitch content when displaying Program Materials; show `twitch_not_affiliated` + OAuth privacy (`/privacy`, `with_oauth_legal`)
 - Do not sell or redistribute Helix metadata as a dataset
-- Do **not** use unofficial `gql.twitch.tv` — Chat Mini App Info links to `twitch.tv/{login}/about` instead
+- Do **not** use unofficial `gql.twitch.tv` — Chat Mini App has no About/panels Info UI (Helix has no panels API)

@@ -275,29 +275,6 @@ class TwitchClient:
         return out
 
     @staticmethod
-    def _about_link_key(url: str) -> str:
-        parsed = urlparse((url or "").strip().lower().rstrip("/"))
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            return ""
-        path = parsed.path.rstrip("/")
-        return f"{parsed.scheme}://{parsed.netloc}{path}"
-
-    def get_channel_about_links(self, login: str) -> list[dict[str, str]]:
-        """Single link to Twitch About — no unofficial GQL (Helix has no panels API)."""
-        login = (login or "").strip().lower()
-        if not login or not USERNAME_RE.match(login):
-            return []
-        return [
-            {
-                "url": f"https://www.twitch.tv/{login}/about",
-                "label": "About",
-                "image_url": "",
-                "kind": "about",
-            }
-        ]
-
-
-    @staticmethod
     def matched_drops_tag(stream: dict[str, Any]) -> str | None:
         """Return the stream's Drops tag as stored (EN or RU), if any."""
         tags = stream.get("tags") or []
