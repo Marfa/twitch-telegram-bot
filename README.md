@@ -406,10 +406,6 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue+Report webhook.
 
-## Заимствования
-
-Изучены [twitchrise](https://github.com/driftywinds/twitchrise), [lajujabot](https://github.com/ria4/lajujabot), [twitch-telegram-bot](https://github.com/mehdizebhi/twitch-telegram-bot). **Их код не копировался** — только идеи (polling API, подписки, отправка в канал/группу).
-
 ## Лицензия
 
 **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**
