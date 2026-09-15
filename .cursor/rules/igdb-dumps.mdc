@@ -7,23 +7,22 @@ alwaysApply: true
 
 Partner dumps: [IGDB Data Dumps](https://api-docs.igdb.com/#data-dumps) (`GET /v4/dumps`, then `/v4/dumps/{endpoint}`).
 
-Local sync lives in [`igdb_dumps.py`](igdb_dumps.py) → DB tables `igdb_*`, refreshed ~daily only while a product feature needs those endpoints (`needed_endpoints`).
+Local sync lives in [`igdb_dumps.py`](igdb_dumps.py) → DB tables `igdb_*`. Job `igdb_dumps_sync` refreshes **all used endpoints** about once a day (`USED_ENDPOINTS` / `_ENDPOINT_TABLE`).
 
 ## When designing or extending a feature
 
 1. **Check the dump catalog** — does the needed entity exist as a dump endpoint (games, companies, genres, game_modes, covers, artworks, external_games, involved_companies, …)?
 2. **Prefer local dumps** — propose storing/querying via `igdb_dumps` + DB instead of new live Apicalypse calls to `api.igdb.com`.
-3. **Reuse existing tables** when possible; if a new endpoint is required, add it to `_ENDPOINT_TABLE` / feature packs in `igdb_dumps.py` and gate sync with `needed_endpoints`.
+3. **Reuse existing tables** when possible; if a new endpoint is required, add it to `_ENDPOINT_TABLE` in `igdb_dumps.py` (it joins the daily sync automatically).
 4. **Live IGDB API** only when dumps clearly cannot cover the need (write path, real-time-only field, etc.) — say so explicitly.
 5. **Attribution** — user-facing IGDB data still needs credit to [IGDB.com](https://www.igdb.com) (Help /feedback, feature prompts, README/guide as appropriate). See [`api-license-compliance.mdc`](api-license-compliance.mdc).
 
-# Already on dumps when feature is live / users exist
+## Already on daily dumps
 
 | Surface | Local endpoints |
 |---|---|
 | «Мне повезёт» / lucky | games, external_games, covers, artworks |
-| Ignore genres/publishers (search + match) | companies, genres, game_modes, involved (+ games/external); synced while beta/GA is live, not only after first saved entry |
-| Alert game cover image | covers → artworks via Twitch uid map |
-| `{game_description}` in alerts | games (`summary`) + external_games via Twitch uid |
+| Ignore genres/publishers | companies, genres, game_modes, involved (+ games/external) |
+| Alert game cover / `{game_description}` | covers, artworks, games summaries |
 
 Twitch Helix (category search, live streams by `game_id`) is separate — not replaced by IGDB dumps.

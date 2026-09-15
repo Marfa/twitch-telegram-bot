@@ -1102,7 +1102,16 @@ def check_core() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         db = open_database(Path(tmp) / "igdb_test.db", None)
-        assert needed_endpoints(db) == set()
+        assert needed_endpoints(db) == {
+            "games",
+            "companies",
+            "genres",
+            "game_modes",
+            "external_games",
+            "involved_companies",
+            "covers",
+            "artworks",
+        }
         db.upsert_user(42)
         assert "games" in needed_endpoints(db)
         assert "covers" in needed_endpoints(db)

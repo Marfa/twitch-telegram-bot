@@ -1,6 +1,6 @@
 """IGDB CSV data dumps → local DB (partner feature).
 
-Syncs only endpoints required by active product features, about once a day.
+Syncs every used dump endpoint about once a day.
 Live Apicalypse calls for those datasets are replaced by local queries.
 """
 from __future__ import annotations
@@ -37,19 +37,8 @@ _ENDPOINT_TABLE = {
     "artworks": "igdb_artworks",
 }
 
-# Feature packs: which dump endpoints each product surface needs.
-_PACK_LUCKY = frozenset({"games", "external_games", "covers", "artworks"})
-_PACK_COVERS = frozenset({"games", "external_games", "covers", "artworks"})
-_PACK_IGNORE = frozenset(
-    {
-        "games",
-        "external_games",
-        "companies",
-        "genres",
-        "game_modes",
-        "involved_companies",
-    }
-)
+# All dump endpoints the bot uses — synced daily regardless of feature gates.
+USED_ENDPOINTS = frozenset(_ENDPOINT_TABLE)
 
 _ARRAY_RE = re.compile(r"[{}\s]")
 _JOB_NAME = "igdb_dumps_sync"
@@ -62,38 +51,9 @@ def igdb_image_url(image_id: str, *, size: str = "cover_big_2x") -> str:
     return f"https://images.igdb.com/igdb/image/upload/t_{size}/{mid}.jpg"
 
 
-def needed_endpoints(db: Any) -> set[str]:
-    """Dump endpoints to keep fresh for currently active features."""
-    out: set[str] = set()
-    user_count = 0
-    try:
-        user_count = int(db.count_users() or 0)
-    except Exception:
-        logger.exception("igdb needed: count_users failed")
-    if user_count > 0:
-        # «Мне повезёт» + game covers are available to accounts in general.
-        out |= set(_PACK_LUCKY)
-    try:
-        if db.has_any_game_cover_subs():
-            out |= set(_PACK_COVERS)
-    except Exception:
-        logger.exception("igdb needed: game_cover check failed")
-    try:
-        # Ignore search must work for admins (default beta enroll) and new beta
-        # opt-ins before they have saved entries — keep ref tables ready while
-        # the feature is live.
-        from beta import get_feature
-        from twitch import IGNORE_IGDB_BETA_ID
-
-        feat = get_feature(IGNORE_IGDB_BETA_ID)
-        ignore_live = bool(feat and feat.stage in {"alpha", "beta", "ga"})
-        if ignore_live and user_count > 0:
-            out |= set(_PACK_IGNORE)
-        elif db.has_any_igdb_ignore_users():
-            out |= set(_PACK_IGNORE)
-    except Exception:
-        logger.exception("igdb needed: ignore check failed")
-    return out
+def needed_endpoints(db: Any = None) -> set[str]:
+    """All IGDB dump endpoints we keep locally (db ignored; kept for call sites)."""
+    return set(USED_ENDPOINTS)
 
 
 def _parse_long_array(raw: str) -> str:
@@ -329,11 +289,9 @@ def endpoints_due(db: Any, endpoints: set[str]) -> list[str]:
 
 
 def sync_needed(db: Any, twitch: Any, *, force: bool = False) -> dict[str, int]:
-    """Sync all feature-needed dumps that are due. Returns {endpoint: rows}."""
+    """Sync all used dumps that are due (or all if force). Returns {endpoint: rows}."""
     global _syncing
-    needed = needed_endpoints(db)
-    if not needed:
-        return {}
+    needed = needed_endpoints()
     due = sorted(needed) if force else endpoints_due(db, needed)
     if not due:
         return {}
@@ -357,8 +315,6 @@ def sync_needed(db: Any, twitch: Any, *, force: bool = False) -> dict[str, int]:
 async def sync_igdb_dumps_job(context: Any) -> None:
     db = context.application.bot_data["db"]
     twitch = context.application.bot_data["twitch"]
-    if not needed_endpoints(db):
-        return
 
     def _run() -> dict[str, int]:
         return sync_needed(db, twitch)
@@ -373,18 +329,14 @@ async def sync_igdb_dumps_job(context: Any) -> None:
 def ensure_igdb_dump_job(job_queue: Any, db: Any) -> None:
     from handlers.background_jobs import ensure_repeating_job
 
-    enabled = bool(needed_endpoints(db))
-    # First run soon so empty DBs fill after deploy / first user.
-    first = 90.0
-    if enabled:
-        due = endpoints_due(db, needed_endpoints(db))
-        if due:
-            first = 45.0
+    # Always on: refresh every used dump table about once a day.
+    due = endpoints_due(db, needed_endpoints())
+    first = 45.0 if due else 90.0
     ensure_repeating_job(
         job_queue,
         name=_JOB_NAME,
         callback=sync_igdb_dumps_job,
         interval=24 * 3600,
         first=first,
-        enabled=enabled,
+        enabled=True,
     )
