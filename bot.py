@@ -2000,6 +2000,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.bot_data["db"] = db
     app.bot_data["twitch"] = twitch
+    twitch.bind_igdb_db(db)
     app.bot_data["last_live"] = {}
     app.bot_data["last_live_primed"] = False
     app.bot_data["twitch_status_fingerprint"] = None

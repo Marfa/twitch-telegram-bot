@@ -428,6 +428,9 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_id,
             job_queue=context.application.job_queue,
         )
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(context.application.job_queue, db)
     if feature_id == "stream-chat":
         await sync_stream_chat_menu_button(context.bot, db, user_id)
         chat_id = reply_chat_id(update)

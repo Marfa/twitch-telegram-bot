@@ -778,6 +778,122 @@ class SqliteDatabase:
             )
             """
         )
+
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_games (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                version_parent INTEGER,
+                first_release_date INTEGER,
+                total_rating_count INTEGER NOT NULL DEFAULT 0,
+                genres TEXT NOT NULL DEFAULT '',
+                game_modes TEXT NOT NULL DEFAULT '',
+                cover_id INTEGER
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_games_name ON igdb_games(name COLLATE NOCASE)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_games_release ON igdb_games(first_release_date)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_games_rating ON igdb_games(total_rating_count)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_companies (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_companies_name ON igdb_companies(name COLLATE NOCASE)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_genres (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_genres_name ON igdb_genres(name COLLATE NOCASE)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_game_modes (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_game_modes_name ON igdb_game_modes(name COLLATE NOCASE)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_external_twitch (
+                twitch_uid TEXT PRIMARY KEY,
+                game_id INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_ext_twitch_game ON igdb_external_twitch(game_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_involved (
+                game_id INTEGER NOT NULL,
+                company_id INTEGER NOT NULL,
+                is_developer INTEGER NOT NULL DEFAULT 0,
+                is_publisher INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_involved_game ON igdb_involved(game_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_covers (
+                id INTEGER PRIMARY KEY,
+                game_id INTEGER,
+                image_id TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_covers_game ON igdb_covers(game_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_artworks (
+                id INTEGER PRIMARY KEY,
+                game_id INTEGER,
+                image_id TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_artworks_game ON igdb_artworks(game_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_dump_state (
+                endpoint TEXT PRIMARY KEY,
+                dump_updated_at INTEGER NOT NULL DEFAULT 0,
+                synced_at INTEGER NOT NULL DEFAULT 0,
+                row_count INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS premium_channels (
@@ -5343,3 +5459,320 @@ class SqliteDatabase:
         except Exception:
             return None
         return data if isinstance(data, dict) else None
+
+
+    _IGDB_TABLES = frozenset({
+        "igdb_games",
+        "igdb_companies",
+        "igdb_genres",
+        "igdb_game_modes",
+        "igdb_external_twitch",
+        "igdb_involved",
+        "igdb_covers",
+        "igdb_artworks",
+    })
+
+    def has_any_igdb_ignore_users(self) -> bool:
+        from twitch import IGNORE_IGDB_BETA_ID
+
+        if self.list_beta_enrolled_user_ids([IGNORE_IGDB_BETA_ID]):
+            return True
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 AS ok FROM users
+                WHERE COALESCE(global_ignore_igdb, '[]') NOT IN ('', '[]')
+                LIMIT 1
+                """
+            ).fetchone()
+        return bool(row)
+
+    def has_any_game_cover_subs(self) -> bool:
+        from twitch import GAME_COVER_IMAGE_ID
+
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 AS ok FROM subscriptions
+                WHERE image_file_id = ?
+                LIMIT 1
+                """,
+                (GAME_COVER_IMAGE_ID,),
+            ).fetchone()
+        return bool(row)
+
+    def igdb_table_count(self, table: str) -> int:
+        if table not in self._IGDB_TABLES:
+            raise ValueError(table)
+        with self._conn() as conn:
+            row = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+        return int(row["n"] or 0)
+
+    def igdb_replace_rows(
+        self,
+        table: str,
+        columns: tuple[str, ...],
+        row_batches,
+    ) -> int:
+        """Delete table and insert batches in one transaction. Returns row count."""
+        if table not in self._IGDB_TABLES:
+            raise ValueError(table)
+        placeholders = ", ".join("?" for _ in columns)
+        cols = ", ".join(columns)
+        if table == "igdb_involved":
+            sql = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
+        else:
+            sql = f"INSERT OR REPLACE INTO {table} ({cols}) VALUES ({placeholders})"
+        total = 0
+        with self._conn() as conn:
+            conn.execute(f"DELETE FROM {table}")
+            for batch in row_batches:
+                if not batch:
+                    continue
+                conn.executemany(sql, batch)
+                total += len(batch)
+        return total
+
+    def igdb_set_dump_state(
+        self, endpoint: str, dump_updated_at: int, row_count: int
+    ) -> None:
+        import time as _time
+
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO igdb_dump_state
+                    (endpoint, dump_updated_at, synced_at, row_count)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(endpoint) DO UPDATE SET
+                    dump_updated_at = excluded.dump_updated_at,
+                    synced_at = excluded.synced_at,
+                    row_count = excluded.row_count
+                """,
+                (
+                    str(endpoint),
+                    int(dump_updated_at or 0),
+                    int(_time.time()),
+                    int(row_count or 0),
+                ),
+            )
+
+    def igdb_get_dump_state(self, endpoint: str) -> dict[str, int] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT dump_updated_at, synced_at, row_count
+                FROM igdb_dump_state WHERE endpoint = ?
+                """,
+                (str(endpoint),),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "dump_updated_at": int(row["dump_updated_at"] or 0),
+            "synced_at": int(row["synced_at"] or 0),
+            "row_count": int(row["row_count"] or 0),
+        }
+
+    def igdb_search_by_name(
+        self, table: str, query: str, *, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        allowed = {
+            "igdb_companies",
+            "igdb_genres",
+            "igdb_game_modes",
+        }
+        if table not in allowed:
+            raise ValueError(table)
+        q = (query or "").strip()
+        if not q:
+            return []
+        lim = max(1, min(20, int(limit)))
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, name FROM {table}
+                WHERE name LIKE ? COLLATE NOCASE
+                ORDER BY LENGTH(name) ASC, name COLLATE NOCASE ASC
+                LIMIT ?
+                """,
+                (f"%{q}%", lim),
+            ).fetchall()
+        return [{"id": int(r["id"]), "name": str(r["name"])} for r in rows]
+
+    def igdb_game_meta_for_twitch(self, twitch_uid: str) -> dict[str, Any] | None:
+        uid = str(twitch_uid or "").strip()
+        if not uid:
+            return None
+        with self._conn() as conn:
+            ext = conn.execute(
+                "SELECT game_id FROM igdb_external_twitch WHERE twitch_uid = ?",
+                (uid,),
+            ).fetchone()
+            if not ext:
+                return None
+            game_id = int(ext["game_id"])
+            game = conn.execute(
+                "SELECT genres, game_modes FROM igdb_games WHERE id = ?",
+                (game_id,),
+            ).fetchone()
+            if not game:
+                return None
+            inv = conn.execute(
+                """
+                SELECT company_id, is_developer, is_publisher
+                FROM igdb_involved WHERE game_id = ?
+                """,
+                (game_id,),
+            ).fetchall()
+
+        def _ids(raw: str) -> list[int]:
+            return [int(x) for x in str(raw or "").split(",") if x.isdigit()]
+
+        developers: list[int] = []
+        publishers: list[int] = []
+        for row in inv:
+            cid = int(row["company_id"])
+            if int(row["is_developer"] or 0):
+                developers.append(cid)
+            if int(row["is_publisher"] or 0):
+                publishers.append(cid)
+        return {
+            "genres": _ids(game["genres"]),
+            "game_modes": _ids(game["game_modes"]),
+            "developers": developers,
+            "publishers": publishers,
+        }
+
+    def _igdb_twitch_game_rows(self, sql: str, params: tuple, n: int) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            name = str(r["name"] or "").strip()
+            uid = str(r["twitch_uid"] or "").strip()
+            if not name or not uid:
+                continue
+            out.append(
+                {
+                    "id": int(r["id"]),
+                    "name": name,
+                    "twitch_uid": uid,
+                    "external_games": [
+                        {
+                            "uid": uid,
+                            "external_game_source": 14,
+                            "category": 14,
+                        }
+                    ],
+                }
+            )
+            if len(out) >= n:
+                break
+        return out
+
+    def igdb_random_twitch_games(self, n: int = 5) -> list[dict[str, Any]]:
+        want = max(1, min(20, int(n)))
+        return self._igdb_twitch_game_rows(
+            """
+            SELECT g.id, g.name, e.twitch_uid
+            FROM igdb_games g
+            JOIN igdb_external_twitch e ON e.game_id = g.id
+            WHERE g.version_parent IS NULL AND TRIM(g.name) != ''
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (want,),
+            want,
+        )
+
+    def igdb_recent_twitch_games(
+        self, n: int = 5, *, window: int = 50
+    ) -> list[dict[str, Any]]:
+        import random as _random
+
+        want = max(1, min(20, int(n)))
+        pool_n = max(want, min(100, int(window)))
+        rows = self._igdb_twitch_game_rows(
+            """
+            SELECT g.id, g.name, e.twitch_uid
+            FROM igdb_games g
+            JOIN igdb_external_twitch e ON e.game_id = g.id
+            WHERE g.version_parent IS NULL
+              AND TRIM(g.name) != ''
+              AND g.first_release_date IS NOT NULL
+            ORDER BY g.first_release_date DESC
+            LIMIT ?
+            """,
+            (pool_n,),
+            pool_n,
+        )
+        if len(rows) <= want:
+            return rows
+        return _random.sample(rows, want)
+
+    def igdb_top_twitch_games(self, n: int = 5) -> list[dict[str, Any]]:
+        import random as _random
+
+        want = max(1, min(20, int(n)))
+        rows = self._igdb_twitch_game_rows(
+            """
+            SELECT g.id, g.name, e.twitch_uid
+            FROM igdb_games g
+            JOIN igdb_external_twitch e ON e.game_id = g.id
+            WHERE g.version_parent IS NULL AND TRIM(g.name) != ''
+            ORDER BY g.total_rating_count DESC
+            LIMIT 100
+            """,
+            (),
+            100,
+        )
+        if len(rows) <= want:
+            return rows
+        return _random.sample(rows, want)
+
+    def igdb_cover_image_id_for_twitch(self, twitch_uid: str) -> str | None:
+        uid = str(twitch_uid or "").strip()
+        if not uid:
+            return None
+        with self._conn() as conn:
+            ext = conn.execute(
+                "SELECT game_id FROM igdb_external_twitch WHERE twitch_uid = ?",
+                (uid,),
+            ).fetchone()
+            if not ext:
+                return None
+            game_id = int(ext["game_id"])
+            game = conn.execute(
+                "SELECT cover_id FROM igdb_games WHERE id = ?",
+                (game_id,),
+            ).fetchone()
+            cover_id = int(game["cover_id"]) if game and game["cover_id"] is not None else None
+            if cover_id:
+                row = conn.execute(
+                    "SELECT image_id FROM igdb_covers WHERE id = ?",
+                    (cover_id,),
+                ).fetchone()
+                if row and row["image_id"]:
+                    return str(row["image_id"]).strip() or None
+            row = conn.execute(
+                """
+                SELECT image_id FROM igdb_covers
+                WHERE game_id = ? AND TRIM(image_id) != ''
+                LIMIT 1
+                """,
+                (game_id,),
+            ).fetchone()
+            if row and row["image_id"]:
+                return str(row["image_id"]).strip() or None
+            row = conn.execute(
+                """
+                SELECT image_id FROM igdb_artworks
+                WHERE game_id = ? AND TRIM(image_id) != ''
+                LIMIT 1
+                """,
+                (game_id,),
+            ).fetchone()
+            if row and row["image_id"]:
+                return str(row["image_id"]).strip() or None
+        return None

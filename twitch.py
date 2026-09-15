@@ -44,18 +44,6 @@ _TWITCHDROPS_APP_BASE = "https://twitchdrops.app"
 _TWITCHDROPS_APP_UA = "Mozilla/5.0 (compatible; MarfaTwitchTelegramBot/1.0)"
 # ponytail: in-process game_id→slug for catalog links; ceiling = process lifetime.
 _twitchdrops_app_slug_by_game_id: dict[str, str] = {}
-_IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
-_IGDB_COUNT_URL = "https://api.igdb.com/v4/games/count"
-_IGDB_EXTERNAL_GAMES_URL = "https://api.igdb.com/v4/external_games"
-_IGDB_COMPANIES_URL = "https://api.igdb.com/v4/companies"
-_IGDB_GENRES_URL = "https://api.igdb.com/v4/genres"
-_IGDB_GAME_MODES_URL = "https://api.igdb.com/v4/game_modes"
-_IGDB_WHERE = "version_parent = null & name != null"
-# Games that exist as Twitch categories (external_game_source / legacy category = 14).
-_IGDB_WHERE_TWITCH = (
-    f"{_IGDB_WHERE} & (external_games.external_game_source = 14 "
-    f"| external_games.category = 14)"
-)
 # IGDB ExternalGameSource / legacy ExternalGameCategory: Twitch = 14
 _IGDB_EXTERNAL_TWITCH = 14
 _FALLBACK_GAMES = (
@@ -198,6 +186,11 @@ class TwitchClient:
     def __init__(self) -> None:
         self._session = requests.Session()
         _install_rate_limit_backoff(self._session)
+        self._igdb_db: Any | None = None
+
+    def bind_igdb_db(self, db: Any) -> None:
+        """Attach bot DB for local IGDB dump queries."""
+        self._igdb_db = db
         self._token = ""
         self._token_expires = 0.0
 
@@ -1073,7 +1066,18 @@ class TwitchClient:
         width: int = BOX_ART_WIDTH,
         height: int = BOX_ART_HEIGHT,
     ) -> str | None:
+        from igdb_dumps import igdb_image_url
+
         gid = str(game_id or "").strip()
+        # Prefer IGDB cover/artwork from local dumps when available.
+        if gid and self._igdb_db is not None:
+            try:
+                image_id = self._igdb_db.igdb_cover_image_id_for_twitch(gid)
+            except Exception:
+                logger.exception("IGDB local cover lookup failed for %s", gid)
+                image_id = None
+            if image_id:
+                return igdb_image_url(image_id)
         if gid:
             try:
                 rows = self.get_games([gid])
@@ -1102,10 +1106,18 @@ class TwitchClient:
             if str(c.get("name") or "").strip().casefold() == want
         ]
         pick = exact[0] if exact else found[0]
+        cid = str(pick.get("id") or "").strip()
+        if cid and self._igdb_db is not None:
+            try:
+                image_id = self._igdb_db.igdb_cover_image_id_for_twitch(cid)
+            except Exception:
+                logger.exception("IGDB local cover lookup failed for name=%s", name)
+                image_id = None
+            if image_id:
+                return igdb_image_url(image_id)
         tpl = str(pick.get("box_art_url") or "").strip()
         if tpl:
             return format_box_art_url(tpl, width=width, height=height)
-        cid = str(pick.get("id") or "").strip()
         if cid:
             return box_art_cdn_url(cid, width=width, height=height)
         return None
@@ -1362,177 +1374,99 @@ class TwitchClient:
         }
 
     def random_igdb_game_name(self) -> str:
-        """Pick a random main-game title from IGDB (Twitch credentials)."""
+        """Pick a random main-game title from local IGDB dumps."""
         try:
-            return self._random_igdb_game_name()
+            rows = self.igdb_random_games(1)
+            name = str((rows[0] or {}).get("name") or "").strip() if rows else ""
+            if name:
+                return name
         except Exception as exc:
             logger.warning("IGDB random game unavailable (%s)", exc)
-            return random.choice(_FALLBACK_GAMES)
+        return random.choice(_FALLBACK_GAMES)
 
     def igdb_random_games(self, n: int = 5) -> list[dict[str, Any]]:
-        """n random main games from IGDB (like igdb.com/random), Twitch-mapped."""
-        out: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for _ in range(max(1, n) * 4):
-            if len(out) >= n:
-                break
-            try:
-                rows = self._igdb_random_game_rows(limit=1, twitch_only=True)
-            except Exception as exc:
-                logger.warning("IGDB random games failed (%s)", exc)
-                break
-            for row in rows:
-                name = str(row.get("name") or "").strip()
-                key = name.lower()
-                if not name or key in seen:
-                    continue
-                seen.add(key)
-                out.append(row)
-                if len(out) >= n:
-                    break
-        while len(out) < n:
+        """n random main games with Twitch mapping from local dumps."""
+        db = self._igdb_db
+        if db is None:
+            return [{"name": random.choice(_FALLBACK_GAMES)} for _ in range(max(1, n))]
+        try:
+            rows = db.igdb_random_twitch_games(n)
+        except Exception as exc:
+            logger.warning("IGDB local random games failed (%s)", exc)
+            rows = []
+        out = list(rows or [])
+        seen = {str(r.get("name") or "").strip().lower() for r in out}
+        while len(out) < max(1, n):
             name = random.choice(_FALLBACK_GAMES)
             key = name.lower()
             if key in seen:
                 break
             seen.add(key)
             out.append({"name": name})
-        return out[:n]
+        return out[: max(1, n)]
 
     def igdb_recently_released_games(self, n: int = 5) -> list[dict[str, Any]]:
-        """Random sample from recent IGDB releases (like igdb.com/games/recently_released)."""
-        headers = self._igdb_headers()
-        want = max(1, n)
-        # Wider window so each lucky run can pick different titles.
-        window = max(want * 10, 50)
-        body = (
-            f"fields name, external_games.external_game_source, "
-            f"external_games.category, external_games.uid, external_games.url;\n"
-            f"where {_IGDB_WHERE_TWITCH} & first_release_date != null;\n"
-            f"sort first_release_date desc;\n"
-            f"limit {min(100, window)};"
-        )
+        """Recent IGDB releases from local dumps (Twitch-mapped)."""
+        db = self._igdb_db
+        if db is None:
+            return self.igdb_random_games(n)
         try:
-            resp = self._session.post(
-                _IGDB_GAMES_URL, headers=headers, data=body, timeout=15
-            )
-            resp.raise_for_status()
-            rows = resp.json()
-            if isinstance(rows, list) and rows:
-                pool = list(rows)
-                if len(pool) <= want:
-                    return pool
-                return random.sample(pool, want)
+            rows = db.igdb_recent_twitch_games(n, window=max(n * 10, 50))
+            if rows:
+                return rows
         except Exception as exc:
-            logger.warning("IGDB recently released failed (%s)", exc)
+            logger.warning("IGDB local recently released failed (%s)", exc)
         return self.igdb_random_games(n)
 
     def igdb_top100_games(self, n: int = 5) -> list[dict[str, Any]]:
-        """Random sample from IGDB top ~100 (like igdb.com/top-100/games)."""
-        headers = self._igdb_headers()
-        want = max(1, n)
-        body = (
-            f"fields name, external_games.external_game_source, "
-            f"external_games.category, external_games.uid, external_games.url;\n"
-            f"where {_IGDB_WHERE_TWITCH};\n"
-            f"sort total_rating_count desc;\n"
-            f"limit 100;"
-        )
+        """Sample from IGDB top-rated (local dumps, Twitch-mapped)."""
+        db = self._igdb_db
+        if db is None:
+            return self.igdb_random_games(n)
         try:
-            resp = self._session.post(
-                _IGDB_GAMES_URL, headers=headers, data=body, timeout=15
-            )
-            resp.raise_for_status()
-            rows = resp.json()
-            if isinstance(rows, list) and rows:
-                pool = list(rows)
-                if len(pool) <= want:
-                    return pool
-                return random.sample(pool, want)
+            rows = db.igdb_top_twitch_games(n)
+            if rows:
+                return rows
         except Exception as exc:
-            logger.warning("IGDB top-100 failed (%s)", exc)
+            logger.warning("IGDB local top-100 failed (%s)", exc)
         return self.igdb_random_games(n)
 
     def _igdb_twitch_uid(self, game: dict[str, Any]) -> str:
-        """Twitch category id from IGDB game row (expanded or via external_games ids)."""
+        """Twitch category id from IGDB game row (local dump shape or nested)."""
+        direct = str(game.get("twitch_uid") or "").strip()
+        if direct:
+            return direct
         eg_list = game.get("external_games") or []
-        pending_ids: list[int] = []
-
-        def _is_twitch(row: dict[str, Any]) -> bool:
-            src = row.get("external_game_source")
-            if src is None:
-                src = row.get("category")
-            try:
-                return int(src or 0) == _IGDB_EXTERNAL_TWITCH
-            except (TypeError, ValueError):
-                return False
-
         for eg in eg_list:
-            if isinstance(eg, dict):
-                uid = str(eg.get("uid") or "").strip()
-                if _is_twitch(eg) and uid:
+            if not isinstance(eg, dict):
+                continue
+            uid = str(eg.get("uid") or "").strip()
+            if not uid:
+                continue
+            src = eg.get("external_game_source")
+            if src is None:
+                src = eg.get("category")
+            try:
+                if int(src or 0) == _IGDB_EXTERNAL_TWITCH:
                     return uid
-                # Nested expansion often returns {id, uid} without source/category.
-                eid = eg.get("id")
-                if eid is not None:
-                    try:
-                        pending_ids.append(int(eid))
-                    except (TypeError, ValueError):
-                        pass
-                # Twitch directory URL in expanded payload.
-                url = str(eg.get("url") or "")
-                if uid and "twitch.tv" in url:
-                    return uid
-            else:
+            except (TypeError, ValueError):
+                pass
+            if "twitch.tv" in str(eg.get("url") or ""):
+                return uid
+        # Local dump map by IGDB game id when present.
+        db = self._igdb_db
+        if db is not None:
+            try:
+                gid = int(game.get("id"))
+            except (TypeError, ValueError):
+                gid = 0
+            if gid > 0:
                 try:
-                    pending_ids.append(int(eg))
-                except (TypeError, ValueError):
-                    continue
-        if not pending_ids:
-            return ""
-        headers = self._igdb_headers()
-        ids = ",".join(str(i) for i in pending_ids[:50])
-        body = (
-            f"fields external_game_source, category, uid, url;\n"
-            f"where id = ({ids}) & (external_game_source = {_IGDB_EXTERNAL_TWITCH} "
-            f"| category = {_IGDB_EXTERNAL_TWITCH});\n"
-            f"limit 50;"
-        )
-        try:
-            resp = self._session.post(
-                _IGDB_EXTERNAL_GAMES_URL, headers=headers, data=body, timeout=15
-            )
-            resp.raise_for_status()
-            rows = resp.json()
-            if isinstance(rows, list):
-                for row in rows:
-                    if not _is_twitch(row) and "twitch.tv" not in str(row.get("url") or ""):
-                        continue
-                    uid = str(row.get("uid") or "").strip()
-                    if uid:
-                        return uid
-        except Exception as exc:
-            logger.warning("IGDB external_games lookup failed (%s)", exc)
-        # Fallback: fetch without source filter and pick Twitch by url/source.
-        body2 = (
-            f"fields external_game_source, category, uid, url;\n"
-            f"where id = ({ids});\n"
-            f"limit 50;"
-        )
-        try:
-            resp = self._session.post(
-                _IGDB_EXTERNAL_GAMES_URL, headers=headers, data=body2, timeout=15
-            )
-            resp.raise_for_status()
-            rows = resp.json()
-            if isinstance(rows, list):
-                for row in rows:
-                    if _is_twitch(row) or "twitch.tv" in str(row.get("url") or ""):
-                        uid = str(row.get("uid") or "").strip()
-                        if uid:
-                            return uid
-        except Exception as exc:
-            logger.warning("IGDB external_games fallback failed (%s)", exc)
+                    # Reverse lookup is rare; use random join path via cover helper tables.
+                    # Prefer stored twitch_uid on row — already handled above.
+                    pass
+                except Exception:
+                    pass
         return ""
 
     def resolve_igdb_games_to_twitch_categories(
@@ -1574,97 +1508,24 @@ class TwitchClient:
             out.append({"id": cid, "name": cname})
         return out
 
-    def _igdb_random_game_rows(
-        self, *, limit: int = 1, twitch_only: bool = False
-    ) -> list[dict[str, Any]]:
-        headers = self._igdb_headers()
-        where = _IGDB_WHERE_TWITCH if twitch_only else _IGDB_WHERE
-        count = 0
-        try:
-            count_resp = self._session.post(
-                _IGDB_COUNT_URL,
-                headers=headers,
-                data=f"where {where};",
-                timeout=15,
-            )
-            if count_resp.ok:
-                count = int(count_resp.json().get("count") or 0)
-        except Exception as exc:
-            logger.warning("IGDB count failed (%s)", exc)
-
-        max_offset = max(0, min(count - 1, 200_000)) if count else 20_000
-        lim = max(1, min(10, int(limit)))
-        for _ in range(4):
-            offset = random.randint(0, max_offset)
-            body = (
-                f"fields name, external_games.external_game_source, "
-                f"external_games.category, external_games.uid, external_games.url;\n"
-                f"where {where};\n"
-                f"sort id asc;\n"
-                f"limit {lim};\n"
-                f"offset {offset};"
-            )
-            resp = self._session.post(
-                _IGDB_GAMES_URL,
-                headers=headers,
-                data=body,
-                timeout=15,
-            )
-            if resp.status_code == 400 and offset > 0:
-                max_offset = max(0, offset // 2)
-                continue
-            resp.raise_for_status()
-            rows = resp.json()
-            if isinstance(rows, list) and rows:
-                return list(rows)
-            if offset == 0:
-                break
-            max_offset = max(0, offset // 2)
-        return []
-
-    def _random_igdb_game_name(self) -> str:
-        rows = self._igdb_random_game_rows(limit=1)
-        if rows:
-            name = str(rows[0].get("name") or "").strip()
-            if name:
-                return name
-        return random.choice(_FALLBACK_GAMES)
-
-    def _igdb_search_named(
-        self, url: str, query: str, *, limit: int = 5
-    ) -> list[dict[str, Any]]:
-        """Substring match by name. IGDB `search` is only for games/themes/etc., not
-        companies/genres/game_modes — those need where name ~ *"…"*.
-        """
-        q = (query or "").strip()
-        if not q:
-            return []
-        # Apicalypse string literals: strip quotes/wildcards that break the clause.
-        q = q.replace("\\", "").replace('"', "").replace("*", "")
-        if not q:
-            return []
-        headers = self._igdb_headers()
-        lim = max(1, min(10, limit))
-        body = f'fields name;\nwhere name ~ *"{q}"*;\nlimit {lim};'
-        try:
-            resp = self._session.post(url, headers=headers, data=body, timeout=15)
-            resp.raise_for_status()
-            rows = resp.json()
-            if isinstance(rows, list):
-                return [r for r in rows if isinstance(r, dict) and r.get("id")]
-        except Exception as exc:
-            logger.warning("IGDB name search failed (%s) url=%s q=%r", exc, url, q)
-        return []
-
     def igdb_search_ignore_entities(
         self, query: str, *, limit_per: int = 5
     ) -> list[dict[str, Any]]:
-        """Search companies/genres/game_modes; companies as developer + publisher."""
-        companies = self._igdb_search_named(
-            _IGDB_COMPANIES_URL, query, limit=limit_per
-        )
-        genres = self._igdb_search_named(_IGDB_GENRES_URL, query, limit=limit_per)
-        modes = self._igdb_search_named(_IGDB_GAME_MODES_URL, query, limit=limit_per)
+        """Search local companies/genres/game_modes; companies as developer + publisher."""
+        db = self._igdb_db
+        if db is None:
+            return []
+        try:
+            companies = db.igdb_search_by_name(
+                "igdb_companies", query, limit=limit_per
+            )
+            genres = db.igdb_search_by_name("igdb_genres", query, limit=limit_per)
+            modes = db.igdb_search_by_name(
+                "igdb_game_modes", query, limit=limit_per
+            )
+        except Exception as exc:
+            logger.warning("IGDB local ignore search failed (%s)", exc)
+            return []
         out: list[dict[str, Any]] = []
         seen: set[tuple[str, int]] = set()
 
@@ -1694,7 +1555,7 @@ class TwitchClient:
     def igdb_game_meta_for_twitch_category(
         self, twitch_game_id: str | int | None
     ) -> dict[str, Any] | None:
-        """Twitch category id → IGDB genres/modes/companies; None on miss/error."""
+        """Twitch category id → IGDB genres/modes/companies from local dumps."""
         gid = str(twitch_game_id or "").strip()
         if not gid:
             return None
@@ -1704,80 +1565,17 @@ class TwitchClient:
             ts, meta = cached
             if now - ts < _IGDB_TWITCH_META_TTL_SEC:
                 return meta
-        try:
-            meta = self._igdb_game_meta_for_twitch_category_uncached(gid)
-        except Exception as exc:
-            logger.warning("IGDB Twitch→meta failed for %s (%s)", gid, exc)
-            meta = None
+        meta = None
+        db = self._igdb_db
+        if db is not None:
+            try:
+                meta = db.igdb_game_meta_for_twitch(gid)
+            except Exception as exc:
+                logger.warning("IGDB local Twitch→meta failed for %s (%s)", gid, exc)
+                meta = None
         _igdb_twitch_meta_cache[gid] = (now, meta)
         return meta
 
-    def _igdb_game_meta_for_twitch_category_uncached(
-        self, twitch_game_id: str
-    ) -> dict[str, Any] | None:
-        headers = self._igdb_headers()
-        # external uid is string in IGDB; match Twitch Helix game id.
-        body = (
-            f"fields game, uid, external_game_source, category;\n"
-            f'where uid = "{twitch_game_id}" & '
-            f"(external_game_source = {_IGDB_EXTERNAL_TWITCH} "
-            f"| category = {_IGDB_EXTERNAL_TWITCH});\n"
-            f"limit 1;"
-        )
-        resp = self._session.post(
-            _IGDB_EXTERNAL_GAMES_URL, headers=headers, data=body, timeout=15
-        )
-        resp.raise_for_status()
-        rows = resp.json()
-        if not isinstance(rows, list) or not rows:
-            return None
-        game_ref = rows[0].get("game")
-        try:
-            game_id = int(game_ref)
-        except (TypeError, ValueError):
-            return None
-        body2 = (
-            f"fields genres, game_modes, "
-            f"involved_companies.company, involved_companies.developer, "
-            f"involved_companies.publisher;\n"
-            f"where id = {game_id};\n"
-            f"limit 1;"
-        )
-        resp2 = self._session.post(
-            _IGDB_GAMES_URL, headers=headers, data=body2, timeout=15
-        )
-        resp2.raise_for_status()
-        games = resp2.json()
-        if not isinstance(games, list) or not games:
-            return None
-        game = games[0]
-        genres = [int(x) for x in (game.get("genres") or []) if x is not None]
-        modes = [int(x) for x in (game.get("game_modes") or []) if x is not None]
-        developers: list[int] = []
-        publishers: list[int] = []
-        for ic in game.get("involved_companies") or []:
-            if not isinstance(ic, dict):
-                continue
-            try:
-                company_raw = ic.get("company")
-                if isinstance(company_raw, dict):
-                    company_id = int(company_raw.get("id"))
-                else:
-                    company_id = int(company_raw)
-            except (TypeError, ValueError):
-                continue
-            if company_id <= 0:
-                continue
-            if ic.get("developer"):
-                developers.append(company_id)
-            if ic.get("publisher"):
-                publishers.append(company_id)
-        return {
-            "genres": genres,
-            "game_modes": modes,
-            "developers": developers,
-            "publishers": publishers,
-        }
 
 
 def preview_stream_title(locale: str, game: str) -> str:

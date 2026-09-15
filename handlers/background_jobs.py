@@ -45,8 +45,10 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
         process_vacation_auto_exits,
     )
     from handlers.subscriptions import sync_twitch_follows
+    from igdb_dumps import ensure_igdb_dump_job
     from premium_handlers import refresh_premium_twitch_job
 
+    ensure_igdb_dump_job(job_queue, db)
     ensure_repeating_job(
         job_queue,
         name=JOB_TWITCH_SYNC,

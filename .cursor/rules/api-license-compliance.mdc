@@ -34,3 +34,7 @@ Authority: [Twitch Developer Services Agreement](https://legal.twitch.com/legal/
 - Attribute / link back to Twitch content when displaying Program Materials; show `twitch_not_affiliated` + OAuth privacy (`/privacy`, `with_oauth_legal`)
 - Do not sell or redistribute Helix metadata as a dataset
 - Do **not** use unofficial `gql.twitch.tv` — Chat Mini App has no About/panels Info UI (Helix has no panels API)
+
+## IGDB
+
+Prefer partner [CSV data dumps](https://api-docs.igdb.com/#data-dumps) over live Apicalypse for new game-metadata features — see [`igdb-dumps.mdc`](igdb-dumps.mdc). Keep user-facing attribution to IGDB.com.

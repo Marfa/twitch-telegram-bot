@@ -1047,30 +1047,112 @@ def check_core() -> None:
         {"genres": [12], "game_modes": [], "developers": [], "publishers": []},
         [],
     )
-    # IGDB companies/genres/modes have no full-text search — must use where name ~.
-    from unittest.mock import MagicMock
-
-    client = TwitchClient.__new__(TwitchClient)
-    client._session = MagicMock()
-    posted: list[str] = []
-
-    def _post(url, headers=None, data=None, timeout=None):
-        posted.append(str(data or ""))
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        resp.json = MagicMock(
-            return_value=[{"id": 1, "name": "Role-playing (RPG)"}]
-        )
-        return resp
-
-    client._session.post = _post
-    client._igdb_headers = MagicMock(return_value={})  # type: ignore[method-assign]
-    hit = client._igdb_search_named(
-        "https://api.igdb.com/v4/genres", "RPG", limit=5
+    # Local IGDB dumps: search + parsers (no live Apicalypse for companies/genres).
+    from igdb_dumps import (
+        _parse_long_array,
+        _row_external_twitch,
+        _row_games,
+        igdb_image_url,
+        needed_endpoints,
     )
-    assert hit and hit[0]["name"] == "Role-playing (RPG)"
-    assert posted and "where name ~ *\"RPG\"*" in posted[0]
-    assert "search " not in posted[0]
+
+    assert _parse_long_array("{5,12}") == "5,12"
+    assert _parse_long_array("{}") == ""
+    assert _row_games(
+        {
+            "id": "1",
+            "name": "Test",
+            "version_parent": "",
+            "first_release_date": "",
+            "total_rating_count": "3",
+            "genres": "{12}",
+            "game_modes": "{2}",
+            "cover": "9",
+        }
+    ) == (1, "Test", None, None, 3, "12", "2", 9)
+    assert _row_external_twitch(
+        {
+            "uid": "509658",
+            "game": "123",
+            "external_game_source": "14",
+            "category": "",
+            "url": "",
+        }
+    ) == ("509658", 123)
+    assert _row_external_twitch(
+        {
+            "uid": "1",
+            "game": "2",
+            "external_game_source": "1",
+            "category": "1",
+            "url": "",
+        }
+    ) is None
+    assert "cover_big" in igdb_image_url("co9l15")
+
+    from db import open_database
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "igdb_test.db", None)
+        assert needed_endpoints(db) == set()
+        db.upsert_user(42)
+        assert "games" in needed_endpoints(db)
+        assert "covers" in needed_endpoints(db)
+        db.igdb_replace_rows(
+            "igdb_genres",
+            ("id", "name"),
+            [[(12, "Role-playing (RPG)"), (5, "Shooter")]],
+        )
+        db.igdb_replace_rows(
+            "igdb_companies",
+            ("id", "name"),
+            [[(7, "Nintendo")]],
+        )
+        db.igdb_replace_rows(
+            "igdb_game_modes",
+            ("id", "name"),
+            [[(2, "Multiplayer")]],
+        )
+        hit = db.igdb_search_by_name("igdb_genres", "RPG", limit=5)
+        assert hit and hit[0]["name"] == "Role-playing (RPG)"
+        client = TwitchClient()
+        client.bind_igdb_db(db)
+        found = client.igdb_search_ignore_entities("Nintendo")
+        kinds = {x["kind"] for x in found}
+        assert "developer" in kinds and "publisher" in kinds
+        db.igdb_replace_rows(
+            "igdb_external_twitch",
+            ("twitch_uid", "game_id"),
+            [[("509658", 99)]],
+        )
+        db.igdb_replace_rows(
+            "igdb_games",
+            (
+                "id",
+                "name",
+                "version_parent",
+                "first_release_date",
+                "total_rating_count",
+                "genres",
+                "game_modes",
+                "cover_id",
+            ),
+            [[(99, "Just Chatting", None, None, 0, "12", "2", 1)]],
+        )
+        db.igdb_replace_rows(
+            "igdb_covers",
+            ("id", "game_id", "image_id"),
+            [[(1, 99, "co_test")]],
+        )
+        db.igdb_replace_rows(
+            "igdb_involved",
+            ("game_id", "company_id", "is_developer", "is_publisher"),
+            [[(99, 7, 1, 0)]],
+        )
+        meta = client.igdb_game_meta_for_twitch_category("509658")
+        assert meta and 12 in meta["genres"] and 7 in meta["developers"]
+        assert db.igdb_cover_image_id_for_twitch("509658") == "co_test"
+        assert "co_test" in (client.resolve_box_art_url(game_id="509658") or "")
 
     assert _parse_watch_viewers("100") == (100, None)
     assert _parse_watch_viewers("100-500") == (100, 500)

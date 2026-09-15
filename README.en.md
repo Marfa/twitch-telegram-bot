@@ -414,7 +414,7 @@ Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram p
 
 This bot is **not affiliated with**, endorsed by, or sponsored by Twitch Interactive, Inc. Helix data is used only to power bot features (alerts, import, schedule, chat, etc.) and is not sold as a dataset. OAuth prompts include a short privacy notice; details: [`/privacy`](https://bot.themarfa.name/privacy?lang=en).
 
-Game data (lucky pick, ignore genres/publishers, etc.) is provided by [IGDB.com](https://www.igdb.com).
+Game data (lucky pick, ignore genres/publishers, covers) is provided by [IGDB.com](https://www.igdb.com); the bot keeps the needed CSV dumps locally and refreshes them about once a day.
 
 ---
 

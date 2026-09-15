@@ -233,6 +233,9 @@ async def _persist_edit_image_fields(
     if file_id:
         fields["disable_link_preview"] = True
     db.update_subscription(sub_id, owner_id, **fields)
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(context.application.job_queue, db)
 
 
 async def _save_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, template: str) -> int:

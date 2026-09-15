@@ -601,7 +601,7 @@
   "sub_list_image_no": "• Изображение: нет",
   "sub_list_image_game_cover": "• Изображение: обложка игры",
   "image_no_note": "Изображение: нет",
-  "image_game_cover_note": "Изображение: обложка игры (1920×2560)",
+  "image_game_cover_note": "Изображение: обложка игры (IGDB cover / artwork)",
   "image_before_note": "Изображение: в начале",
   "image_after_note": "Изображение: в конце",
   "dest_prompt": "Куда отправлять уведомления?",

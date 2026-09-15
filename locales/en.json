@@ -601,7 +601,7 @@
   "sub_list_image_no": "• Image: none",
   "sub_list_image_game_cover": "• Image: game cover",
   "image_no_note": "Image: none",
-  "image_game_cover_note": "Image: game cover (1920×2560)",
+  "image_game_cover_note": "Image: game cover (IGDB cover / artwork)",
   "image_before_note": "Image: at the beginning",
   "image_after_note": "Image: at the end",
   "dest_prompt": "Where should notifications be sent?",
