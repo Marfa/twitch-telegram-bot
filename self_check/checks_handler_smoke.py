@@ -985,8 +985,9 @@ async def _smoke_premium_and_menus(db) -> None:
     await precheckout_premium(update, ctx)
     pq.answer.assert_awaited()
 
-    for kind in ("month", "year", "life"):
-        uid = _FREE_UID + hash(kind) % 1000
+    for i, kind in enumerate(("month", "year", "life")):
+        # Stable uids — do not use hash(): PYTHONHASHSEED can collide with _FREE_UID.
+        uid = _FREE_UID + 50 + i
         db.upsert_user(uid)
         db.set_user_locale(uid, "ru")
         payload = prem.invoice_payload(uid, kind)
