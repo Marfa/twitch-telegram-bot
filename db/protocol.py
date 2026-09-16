@@ -794,6 +794,10 @@ class Database(Protocol):
 
     def igdb_summary_for_twitch(self, twitch_uid: str) -> str | None: ...
 
+    def igdb_store_links_for_twitch(
+        self, twitch_uid: str
+    ) -> dict[str, str | None]: ...
+
     def igdb_search_games_by_name(
         self, query: str, *, limit: int = 5
     ) -> list[dict[str, Any]]: ...

@@ -796,7 +796,8 @@ class SqliteDatabase:
                 genres TEXT NOT NULL DEFAULT '',
                 game_modes TEXT NOT NULL DEFAULT '',
                 cover_id INTEGER,
-                summary TEXT NOT NULL DEFAULT ''
+                summary TEXT NOT NULL DEFAULT '',
+                slug TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -808,6 +809,11 @@ class SqliteDatabase:
                 "ALTER TABLE igdb_games ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
             )
             # Force games dump re-import so summaries fill after schema bump.
+            conn.execute("DELETE FROM igdb_dump_state WHERE endpoint = 'games'")
+        if "slug" not in igdb_game_cols:
+            conn.execute(
+                "ALTER TABLE igdb_games ADD COLUMN slug TEXT NOT NULL DEFAULT ''"
+            )
             conn.execute("DELETE FROM igdb_dump_state WHERE endpoint = 'games'")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_igdb_games_name ON igdb_games(name COLLATE NOCASE)"
@@ -861,6 +867,17 @@ class SqliteDatabase:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_igdb_ext_twitch_game ON igdb_external_twitch(game_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS igdb_external_steam (
+                steam_uid TEXT PRIMARY KEY,
+                game_id INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_igdb_ext_steam_game ON igdb_external_steam(game_id)"
         )
         conn.execute(
             """
@@ -952,6 +969,11 @@ class SqliteDatabase:
             )
             """
         )
+        steam_n = conn.execute("SELECT COUNT(*) AS n FROM igdb_external_steam").fetchone()
+        if int((steam_n["n"] if steam_n else 0) or 0) <= 0:
+            conn.execute(
+                "DELETE FROM igdb_dump_state WHERE endpoint = 'external_games'"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS stream_poll_snapshot (
@@ -5544,6 +5566,7 @@ class SqliteDatabase:
         "igdb_genres",
         "igdb_game_modes",
         "igdb_external_twitch",
+        "igdb_external_steam",
         "igdb_involved",
         "igdb_covers",
         "igdb_artworks",
@@ -5556,6 +5579,7 @@ class SqliteDatabase:
         "igdb_genres": ("id",),
         "igdb_game_modes": ("id",),
         "igdb_external_twitch": ("twitch_uid",),
+        "igdb_external_steam": ("steam_uid",),
         "igdb_involved": ("game_id", "company_id"),
         "igdb_covers": ("id",),
         "igdb_artworks": ("id",),
@@ -5993,6 +6017,43 @@ class SqliteDatabase:
             return None
         text = str(game["summary"] or "").strip()
         return text or None
+
+    def igdb_store_links_for_twitch(self, twitch_uid: str) -> dict[str, str | None]:
+        """Helix category id → IGDB slug + Steam app id (local dumps)."""
+        uid = str(twitch_uid or "").strip()
+        out: dict[str, str | None] = {"slug": None, "steam_app_id": None}
+        if not uid:
+            return out
+        with self._conn() as conn:
+            ext = conn.execute(
+                "SELECT game_id FROM igdb_external_twitch WHERE twitch_uid = ?",
+                (uid,),
+            ).fetchone()
+            if not ext:
+                return out
+            game_id = int(ext["game_id"])
+            game = conn.execute(
+                "SELECT slug FROM igdb_games WHERE id = ?",
+                (game_id,),
+            ).fetchone()
+            if game:
+                slug = str(game["slug"] or "").strip().lower()
+                if slug:
+                    out["slug"] = slug
+            steam = conn.execute(
+                """
+                SELECT steam_uid FROM igdb_external_steam
+                WHERE game_id = ?
+                ORDER BY LENGTH(steam_uid) ASC, steam_uid ASC
+                LIMIT 1
+                """,
+                (game_id,),
+            ).fetchone()
+            if steam:
+                app_id = str(steam["steam_uid"] or "").strip()
+                if app_id.isdigit():
+                    out["steam_app_id"] = app_id
+        return out
 
     @staticmethod
     def _igdb_game_row(r: Any) -> dict[str, Any]:

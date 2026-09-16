@@ -218,6 +218,8 @@ def check_core() -> None:
     assert is_game_cover_image(GAME_COVER_IMAGE_ID)
     assert not is_game_cover_image("AgAC_test")
     assert template_has_game_placeholder("{username} {game}")
+    assert template_has_game_placeholder("{game_igdb}")
+    assert template_has_game_placeholder("{game_steam}")
     assert not template_has_game_placeholder("{username} only")
     from i18n import image_ask_keyboard, image_edit_keyboard
     from i18n import t as i18n_image_t
@@ -1140,8 +1142,9 @@ def check_core() -> None:
             "game_modes": "{2}",
             "cover": "9",
             "summary": "A test game.",
+            "slug": "test",
         }
-    ) == (1, "Test", None, None, 3, "12", "2", 9, "A test game.")
+    ) == (1, "Test", None, None, 3, "12", "2", 9, "A test game.", "test")
     assert _row_external_twitch(
         {
             "uid": "509658",
@@ -1157,6 +1160,26 @@ def check_core() -> None:
             "game": "2",
             "external_game_source": "1",
             "category": "1",
+            "url": "",
+        }
+    ) is None
+    from igdb_dumps import _row_external_steam
+
+    assert _row_external_steam(
+        {
+            "uid": "570",
+            "game": "123",
+            "external_game_source": "1",
+            "category": "",
+            "url": "",
+        }
+    ) == ("570", 123)
+    assert _row_external_steam(
+        {
+            "uid": "509658",
+            "game": "123",
+            "external_game_source": "14",
+            "category": "14",
             "url": "",
         }
     ) is None
@@ -1224,6 +1247,7 @@ def check_core() -> None:
                 "game_modes",
                 "cover_id",
                 "summary",
+                "slug",
             ),
             [
                 [
@@ -1237,9 +1261,15 @@ def check_core() -> None:
                         "2",
                         1,
                         "Hang out and get lost with close friends in a big world.",
+                        "just-chatting",
                     )
                 ]
             ],
+        )
+        db.igdb_replace_rows(
+            "igdb_external_steam",
+            ("steam_uid", "game_id"),
+            [[("570", 99)]],
         )
         db.igdb_replace_rows(
             "igdb_covers",
@@ -1256,6 +1286,8 @@ def check_core() -> None:
         assert db.igdb_cover_image_id_for_twitch("509658") == "co_test"
         assert "co_test" in (client.resolve_box_art_url(game_id="509658") or "")
         assert "Hang out" in (db.igdb_summary_for_twitch("509658") or "")
+        links = db.igdb_store_links_for_twitch("509658")
+        assert links["slug"] == "just-chatting" and links["steam_app_id"] == "570"
         desc = render_template(
             "{game_description}",
             "x",
@@ -1264,12 +1296,29 @@ def check_core() -> None:
             lang="en",
         )
         assert "Hang out" in desc
+        linked = render_template(
+            "{game_igdb} / {game_steam}",
+            "x",
+            game="Just Chatting",
+            stream={"game_id": "509658"},
+            twitch=client,
+            escape_html=True,
+        )
+        assert 'href="https://www.igdb.com/games/just-chatting"' in linked
+        assert 'href="https://store.steampowered.com/app/570"' in linked
+        assert "Just Chatting" in linked
+        assert template_uses_html("{game_igdb}")
+        assert template_uses_html("{game_steam}")
         assert find_placeholder_typos("{game_descriotion}") == [
             ("{game_descriotion}", "{game_description}")
         ]
         assert (
             fix_placeholder_typos("{game_descriotion}") == "{game_description}"
         )
+        assert find_placeholder_typos("{gameigdb}") == [("{gameigdb}", "{game_igdb}")]
+        assert find_placeholder_typos("{gamesteam}") == [
+            ("{gamesteam}", "{game_steam}")
+        ]
 
         # Merge: update existing, add new, delete missing (no full wipe).
         db.igdb_replace_rows(
@@ -1436,6 +1485,8 @@ def check_core() -> None:
         assert "{viewer_avg}" in tr("placeholders_page_body", loc)
         assert "{viewer_peak}" in tr("placeholders_page_body", loc)
         assert "{game_description}" in tr("placeholders_page_body", loc)
+        assert "{game_igdb}" in tr("placeholders_page_body", loc)
+        assert "{game_steam}" in tr("placeholders_page_body", loc)
         assert tr("duration_n_unit", loc, n=2, unit=tr("duration_unit_hour_few", loc))
         assert tr("watch_cats_prompt", loc)
         assert tr("watch_cats_lucky", loc)

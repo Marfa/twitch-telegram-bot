@@ -70,7 +70,12 @@ def is_game_cover_image(image_file_id: str | None) -> bool:
 
 
 def template_has_game_placeholder(template: str) -> bool:
-    return "{game}" in (template or "")
+    text = template or ""
+    return (
+        "{game}" in text
+        or "{game_igdb}" in text
+        or "{game_steam}" in text
+    )
 
 
 def format_box_art_url(
@@ -1603,6 +1608,26 @@ class TwitchClient:
             return "—"
         return localize_igdb_summary(summary, lang)
 
+    def resolve_game_store_links(
+        self, twitch_game_id: str | int | None
+    ) -> dict[str, str | None]:
+        """Helix category id → IGDB slug + Steam app id from local dumps."""
+        empty: dict[str, str | None] = {"slug": None, "steam_app_id": None}
+        gid = str(twitch_game_id or "").strip()
+        if not gid or self._igdb_db is None:
+            return empty
+        try:
+            links = self._igdb_db.igdb_store_links_for_twitch(gid)
+        except Exception as exc:
+            logger.warning("IGDB store-link lookup failed for %s (%s)", gid, exc)
+            return empty
+        if not isinstance(links, dict):
+            return empty
+        return {
+            "slug": (str(links.get("slug") or "").strip() or None),
+            "steam_app_id": (str(links.get("steam_app_id") or "").strip() or None),
+        }
+
 
 
 def localize_igdb_summary(summary: str, lang: str) -> str:
@@ -1705,7 +1730,38 @@ _TEMPLATE_HTML_RE = re.compile(
 
 def template_uses_html(template: str) -> bool:
     """True when the template includes Telegram HTML formatting tags."""
-    return bool(_TEMPLATE_HTML_RE.search(template or ""))
+    text = template or ""
+    if _TEMPLATE_HTML_RE.search(text):
+        return True
+    # These placeholders expand to <a href="…">…</a>.
+    return "{game_igdb}" in text or "{game_steam}" in text
+
+
+_IGDB_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def igdb_game_page_url(slug: str | None) -> str | None:
+    s = (slug or "").strip().lower()
+    if not s or not _IGDB_SLUG_RE.fullmatch(s):
+        return None
+    return f"https://www.igdb.com/games/{s}"
+
+
+def steam_store_app_url(app_id: str | None) -> str | None:
+    aid = (app_id or "").strip()
+    if not aid.isdigit():
+        return None
+    return f"https://store.steampowered.com/app/{aid}"
+
+
+def _game_name_anchor(label: str, url: str | None, *, label_escaped: bool) -> str:
+    """Game name as Telegram HTML link, or plain label when url is missing."""
+    import html as _html
+
+    text = label if label_escaped else _html.escape(label or "—")
+    if not url:
+        return text
+    return f'<a href="{_html.escape(url, quote=True)}">{text}</a>'
 
 
 def render_template(
@@ -1732,19 +1788,47 @@ def render_template(
     provided_extra = set(extra or ())
     if extra:
         values.update(extra)
-    if (
-        "{game_description}" in (template or "")
-        and "game_description" not in provided_extra
-        and twitch is not None
-    ):
+    text = template or ""
+    need_description = (
+        "{game_description}" in text and "game_description" not in provided_extra
+    )
+    need_igdb = "{game_igdb}" in text and "game_igdb" not in provided_extra
+    need_steam = "{game_steam}" in text and "game_steam" not in provided_extra
+    twitch_game_id = (stream or {}).get("game_id")
+    if need_description and twitch is not None:
         values["game_description"] = twitch.resolve_game_description(
-            (stream or {}).get("game_id"),
+            twitch_game_id,
             lang=lang or "en",
         )
+    igdb_url: str | None = None
+    steam_url: str | None = None
+    if (need_igdb or need_steam) and twitch is not None:
+        links = twitch.resolve_game_store_links(twitch_game_id)
+        if need_igdb:
+            igdb_url = igdb_game_page_url(links.get("slug"))
+        if need_steam:
+            steam_url = steam_store_app_url(links.get("steam_app_id"))
+    # Plain fallbacks before HTML wrap (same visible text as {game}).
+    if need_igdb:
+        values["game_igdb"] = values.get("game") or "—"
+    if need_steam:
+        values["game_steam"] = values.get("game") or "—"
     if escape_html:
         import html as _html
 
         values = {k: _html.escape(v) for k, v in values.items()}
+    if need_igdb:
+        values["game_igdb"] = _game_name_anchor(
+            values.get("game_igdb") or "—",
+            igdb_url,
+            label_escaped=escape_html,
+        )
+    if need_steam:
+        values["game_steam"] = _game_name_anchor(
+            values.get("game_steam") or "—",
+            steam_url,
+            label_escaped=escape_html,
+        )
     out = template
     # Longer keys first so {game_id} is not partially eaten by {game}.
     for key in sorted(values, key=len, reverse=True):
@@ -1776,6 +1860,8 @@ def _template_values(
         "minutes": "—",
         "duration": "—",
         "game_description": "—",
+        "game_igdb": "—",
+        "game_steam": "—",
     }
     if not stream:
         return values
@@ -1834,6 +1920,8 @@ _TEMPLATE_PLACEHOLDERS = (
     "minutes",
     "duration",
     "game_description",
+    "game_igdb",
+    "game_steam",
 )
 _STREAM_SNAPSHOT_KEYS = (
     "user_login",
@@ -1892,6 +1980,12 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "game_desc": "game_description",
     "game_descriotion": "game_description",
     "igdb_summary": "game_description",
+    "gameigdb": "game_igdb",
+    "igdb_game": "game_igdb",
+    "game_igdb_link": "game_igdb",
+    "gamesteam": "game_steam",
+    "steam_game": "game_steam",
+    "game_steam_link": "game_steam",
 }
 # Telegram may linkify these even without a scheme; used to decide link-preview UI.
 _TEMPLATE_LINK_RE = re.compile(

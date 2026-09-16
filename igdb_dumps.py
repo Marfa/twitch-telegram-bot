@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 _IGDB_DUMPS_URL = "https://api.igdb.com/v4/dumps"
+_IGDB_EXTERNAL_STEAM = 1
 _IGDB_EXTERNAL_TWITCH = 14
 _SYNC_STALE_SEC = 20 * 3600
 _BATCH = 2000
@@ -38,6 +39,8 @@ _ENDPOINT_TABLE = {
     "release_dates": "igdb_release_dates",
     "platforms": "igdb_platforms",
 }
+# external_games dump also fills Steam mappings (same CSV pass).
+_EXTERNAL_GAMES_STEAM_TABLE = "igdb_external_steam"
 
 # All dump endpoints the bot uses — synced daily regardless of feature gates.
 USED_ENDPOINTS = frozenset(_ENDPOINT_TABLE)
@@ -129,6 +132,7 @@ def _row_games(row: dict[str, str]) -> tuple | None:
     if gid is None or gid <= 0 or not name:
         return None
     summary = (row.get("summary") or "").strip()
+    slug = (row.get("slug") or "").strip().lower()
     return (
         gid,
         name,
@@ -139,6 +143,7 @@ def _row_games(row: dict[str, str]) -> tuple | None:
         _parse_long_array(row.get("game_modes") or ""),
         _parse_int(row.get("cover") or ""),
         summary,
+        slug,
     )
 
 
@@ -150,6 +155,14 @@ def _row_named(row: dict[str, str]) -> tuple | None:
     return (gid, name)
 
 
+def _external_uid_game(row: dict[str, str]) -> tuple[str, int] | None:
+    uid = (row.get("uid") or "").strip()
+    game_id = _parse_int(row.get("game") or "")
+    if not uid or game_id is None or game_id <= 0:
+        return None
+    return (uid, game_id)
+
+
 def _row_external_twitch(row: dict[str, str]) -> tuple | None:
     src = _parse_int(row.get("external_game_source") or "")
     cat = _parse_int(row.get("category") or "")
@@ -157,9 +170,22 @@ def _row_external_twitch(row: dict[str, str]) -> tuple | None:
         url = (row.get("url") or "").lower()
         if "twitch.tv" not in url:
             return None
-    uid = (row.get("uid") or "").strip()
-    game_id = _parse_int(row.get("game") or "")
-    if not uid or game_id is None or game_id <= 0:
+    return _external_uid_game(row)
+
+
+def _row_external_steam(row: dict[str, str]) -> tuple | None:
+    src = _parse_int(row.get("external_game_source") or "")
+    cat = _parse_int(row.get("category") or "")
+    if src != _IGDB_EXTERNAL_STEAM and cat != _IGDB_EXTERNAL_STEAM:
+        url = (row.get("url") or "").lower()
+        if "store.steampowered.com" not in url and "steamcommunity.com" not in url:
+            return None
+    parsed = _external_uid_game(row)
+    if parsed is None:
+        return None
+    uid, game_id = parsed
+    # Steam app ids are numeric; skip store package/bundle noise.
+    if not uid.isdigit():
         return None
     return (uid, game_id)
 
@@ -221,11 +247,13 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "game_modes",
         "cover_id",
         "summary",
+        "slug",
     ),
     "igdb_companies": ("id", "name"),
     "igdb_genres": ("id", "name"),
     "igdb_game_modes": ("id", "name"),
     "igdb_external_twitch": ("twitch_uid", "game_id"),
+    "igdb_external_steam": ("steam_uid", "game_id"),
     "igdb_involved": ("game_id", "company_id", "is_developer", "is_publisher"),
     "igdb_covers": ("id", "game_id", "image_id"),
     "igdb_artworks": ("id", "game_id", "image_id"),
@@ -253,16 +281,22 @@ def sync_endpoint(db: Any, twitch: Any, endpoint: str) -> int:
         raise RuntimeError(f"igdb dump meta missing s3_url for {endpoint}")
     s3_url = str(meta["s3_url"])
     dump_updated = int(meta.get("updated_at") or 0)
-    parser = _ROW_PARSERS[endpoint]
     table = _ENDPOINT_TABLE[endpoint]
     columns = _TABLE_COLUMNS[table]
 
     state = db.igdb_get_dump_state(endpoint)
+    steam_ok = True
+    if endpoint == "external_games":
+        try:
+            steam_ok = db.igdb_table_count(_EXTERNAL_GAMES_STEAM_TABLE) > 0
+        except Exception:
+            steam_ok = False
     if (
         state
         and int(state.get("dump_updated_at") or 0) == dump_updated
         and dump_updated > 0
         and db.igdb_table_count(table) > 0
+        and steam_ok
     ):
         rows = int(state.get("row_count") or 0) or db.igdb_table_count(table)
         db.igdb_set_dump_state(endpoint, dump_updated, rows)
@@ -280,20 +314,26 @@ def sync_endpoint(db: Any, twitch: Any, endpoint: str) -> int:
     try:
         _download(s3_url, path)
 
-        def batches() -> Iterable[list[tuple]]:
-            batch: list[tuple] = []
-            for raw in _iter_csv_rows(path):
-                parsed = parser(raw)
-                if parsed is None:
-                    continue
-                batch.append(parsed)
-                if len(batch) >= _BATCH:
-                    yield batch
-                    batch = []
-            if batch:
-                yield batch
+        if endpoint == "external_games":
+            total = _sync_external_games(db, path)
+        else:
+            parser = _ROW_PARSERS[endpoint]
 
-        total = db.igdb_replace_rows(table, columns, batches())
+            def batches() -> Iterable[list[tuple]]:
+                batch: list[tuple] = []
+                for raw in _iter_csv_rows(path):
+                    parsed = parser(raw)
+                    if parsed is None:
+                        continue
+                    batch.append(parsed)
+                    if len(batch) >= _BATCH:
+                        yield batch
+                        batch = []
+                if batch:
+                    yield batch
+
+            total = db.igdb_replace_rows(table, columns, batches())
+
         db.igdb_set_dump_state(endpoint, dump_updated, total)
         logger.info(
             "IGDB dump synced endpoint=%s rows=%s took=%.1fs",
@@ -307,6 +347,41 @@ def sync_endpoint(db: Any, twitch: Any, endpoint: str) -> int:
             os.unlink(path)
         except OSError:
             pass
+
+
+def _sync_external_games(db: Any, path: str) -> int:
+    """Fill Twitch + Steam external maps from one external_games CSV."""
+    twitch_cols = _TABLE_COLUMNS["igdb_external_twitch"]
+    steam_cols = _TABLE_COLUMNS[_EXTERNAL_GAMES_STEAM_TABLE]
+
+    def _split_batches(
+        parser: Callable[[dict[str, str]], tuple | None],
+    ) -> Iterable[list[tuple]]:
+        batch: list[tuple] = []
+        for raw in _iter_csv_rows(path):
+            parsed = parser(raw)
+            if parsed is None:
+                continue
+            batch.append(parsed)
+            if len(batch) >= _BATCH:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+
+    # Two passes over the same file — dump is large but avoids buffering both.
+    twitch_n = db.igdb_replace_rows(
+        "igdb_external_twitch", twitch_cols, _split_batches(_row_external_twitch)
+    )
+    steam_n = db.igdb_replace_rows(
+        _EXTERNAL_GAMES_STEAM_TABLE, steam_cols, _split_batches(_row_external_steam)
+    )
+    logger.info(
+        "IGDB external_games maps twitch=%s steam=%s",
+        twitch_n,
+        steam_n,
+    )
+    return twitch_n
 
 
 def endpoints_due(db: Any, endpoints: set[str]) -> list[str]:
@@ -325,8 +400,14 @@ def endpoints_due(db: Any, endpoints: set[str]) -> list[str]:
         table = _ENDPOINT_TABLE[ep]
         if db.igdb_table_count(table) <= 0:
             due.append(ep)
+            continue
+        if ep == "external_games":
+            try:
+                if db.igdb_table_count(_EXTERNAL_GAMES_STEAM_TABLE) <= 0:
+                    due.append(ep)
+            except Exception:
+                due.append(ep)
     return due
-
 
 def sync_needed(db: Any, twitch: Any, *, force: bool = False) -> dict[str, int]:
     """Sync all used dumps that are due (or all if force). Returns {endpoint: rows}."""

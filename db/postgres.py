@@ -942,23 +942,30 @@ class PostgresDatabase:
                     genres TEXT NOT NULL DEFAULT '',
                     game_modes TEXT NOT NULL DEFAULT '',
                     cover_id BIGINT,
-                    summary TEXT NOT NULL DEFAULT ''
+                    summary TEXT NOT NULL DEFAULT '',
+                    slug TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
             cur.execute(
                 """
-                SELECT 1 FROM information_schema.columns
+                SELECT column_name FROM information_schema.columns
                 WHERE table_schema = current_schema()
                   AND table_name = 'igdb_games'
-                  AND column_name = 'summary'
+                  AND column_name IN ('summary', 'slug')
                 """
             )
-            if cur.fetchone() is None:
+            igdb_game_cols = {str(r["column_name"]) for r in cur.fetchall()}
+            if "summary" not in igdb_game_cols:
                 cur.execute(
                     "ALTER TABLE igdb_games ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
                 )
                 # Force games dump re-import so summaries fill after schema bump.
+                cur.execute("DELETE FROM igdb_dump_state WHERE endpoint = 'games'")
+            if "slug" not in igdb_game_cols:
+                cur.execute(
+                    "ALTER TABLE igdb_games ADD COLUMN slug TEXT NOT NULL DEFAULT ''"
+                )
                 cur.execute("DELETE FROM igdb_dump_state WHERE endpoint = 'games'")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_igdb_games_name_lower ON igdb_games (LOWER(name))"
@@ -1012,6 +1019,17 @@ class PostgresDatabase:
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_igdb_ext_twitch_game ON igdb_external_twitch(game_id)"
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS igdb_external_steam (
+                    steam_uid TEXT PRIMARY KEY,
+                    game_id BIGINT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_igdb_ext_steam_game ON igdb_external_steam(game_id)"
             )
             cur.execute(
                 """
@@ -1104,6 +1122,12 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute("SELECT COUNT(*) AS n FROM igdb_external_steam")
+            steam_n = cur.fetchone()
+            if int((steam_n["n"] if steam_n else 0) or 0) <= 0:
+                cur.execute(
+                    "DELETE FROM igdb_dump_state WHERE endpoint = 'external_games'"
+                )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS stream_poll_snapshot (
@@ -6053,6 +6077,7 @@ class PostgresDatabase:
         "igdb_genres",
         "igdb_game_modes",
         "igdb_external_twitch",
+        "igdb_external_steam",
         "igdb_involved",
         "igdb_covers",
         "igdb_artworks",
@@ -6065,6 +6090,7 @@ class PostgresDatabase:
         "igdb_genres": ("id",),
         "igdb_game_modes": ("id",),
         "igdb_external_twitch": ("twitch_uid",),
+        "igdb_external_steam": ("steam_uid",),
         "igdb_involved": ("game_id", "company_id"),
         "igdb_covers": ("id",),
         "igdb_artworks": ("id",),
@@ -6539,6 +6565,47 @@ class PostgresDatabase:
             return None
         text = str(game["summary"] or "").strip()
         return text or None
+
+    def igdb_store_links_for_twitch(self, twitch_uid: str) -> dict[str, str | None]:
+        """Helix category id → IGDB slug + Steam app id (local dumps)."""
+        uid = str(twitch_uid or "").strip()
+        out: dict[str, str | None] = {"slug": None, "steam_app_id": None}
+        if not uid:
+            return out
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT game_id FROM igdb_external_twitch WHERE twitch_uid = %s",
+                (uid,),
+            )
+            ext = cur.fetchone()
+            if not ext:
+                return out
+            game_id = int(ext["game_id"])
+            cur.execute(
+                "SELECT slug FROM igdb_games WHERE id = %s",
+                (game_id,),
+            )
+            game = cur.fetchone()
+            if game:
+                slug = str(game["slug"] or "").strip().lower()
+                if slug:
+                    out["slug"] = slug
+            cur.execute(
+                """
+                SELECT steam_uid FROM igdb_external_steam
+                WHERE game_id = %s
+                ORDER BY LENGTH(steam_uid) ASC, steam_uid ASC
+                LIMIT 1
+                """,
+                (game_id,),
+            )
+            steam = cur.fetchone()
+            if steam:
+                app_id = str(steam["steam_uid"] or "").strip()
+                if app_id.isdigit():
+                    out["steam_app_id"] = app_id
+        return out
 
     @staticmethod
     def _igdb_game_row(r: Any) -> dict[str, Any]:
