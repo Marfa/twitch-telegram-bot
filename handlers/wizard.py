@@ -115,8 +115,6 @@ def _wz() -> dict[str, int]:
         SCHEDULE_REMINDER_MINUTES,
         TEMPLATE,
         TEMPLATE_TYPO_CONFIRM,
-        WATCH_DELETE,
-        WATCH_SAVE,
         ADVANCED_OPTIONS,
     )
 
@@ -154,8 +152,6 @@ def _wz() -> dict[str, int]:
         "SCHEDULE_REMINDER_MINUTES": SCHEDULE_REMINDER_MINUTES,
         "TEMPLATE": TEMPLATE,
         "TEMPLATE_TYPO_CONFIRM": TEMPLATE_TYPO_CONFIRM,
-        "WATCH_DELETE": WATCH_DELETE,
-        "WATCH_SAVE": WATCH_SAVE,
     }
 
 
@@ -1507,8 +1503,6 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, _wz()["ADMIN_MSG_TEXT"])
         return _wz()["ADMIN_MSG_TEXT"]
-    if state in (_wz()["WATCH_DELETE"], _wz()["WATCH_SAVE"]):
-        return await _go_watch_categories_prompt(update, context, lang)
     if context.user_data.get("sb_edit_mode") in ("text", "schedule"):
         context.user_data.clear()
         await update.effective_message.reply_text(
