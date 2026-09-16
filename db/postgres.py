@@ -5334,6 +5334,10 @@ class PostgresDatabase:
         *,
         is_demo: bool = False,
     ) -> list[dict[str, str]]:
+        """Real streamers not in follows that still have manual stream alerts.
+
+        Excludes synthetic rows (game/category watch, Drops, release alerts).
+        """
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -5341,7 +5345,10 @@ class PostgresDatabase:
                 SELECT twitch_user_id, twitch_username FROM subscriptions
                 WHERE owner_id = %s AND is_demo = %s
                   AND COALESCE(category_watch_prefs, '') = ''
+                  AND COALESCE(release_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%%'
+                  AND twitch_user_id NOT LIKE 'drops:%%'
+                  AND twitch_user_id NOT LIKE 'rel:%%'
                 """,
                 (owner_id, bool(is_demo)),
             )

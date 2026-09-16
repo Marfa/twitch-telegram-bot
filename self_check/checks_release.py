@@ -584,6 +584,57 @@ def _check_alert_dup_edit_opens_type_menu() -> None:
         asyncio.run(_run())
 
 
+def _check_sync_unfollow_skips_release_and_drops() -> None:
+    """Follow sync unfollow-ask must not treat release/Drops rows as streamers."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "unfollow.db")
+        uid = 920_001
+        db.upsert_user(uid)
+        prefs = ReleaseWatchPrefs(
+            igdb_game_id=7,
+            game_name="Grand Theft Auto VI",
+            days_before=3,
+            platforms=[],
+            date_unknown=True,
+        )
+        db.add_subscription(
+            owner_id=uid,
+            twitch_username="Grand Theft Auto VI",
+            twitch_user_id=f"rel:{uid}:abcd",
+            message_template="t",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            release_watch_prefs=dump_release_watch_prefs(prefs),
+        )
+        db.add_subscription(
+            owner_id=uid,
+            twitch_username="Some Drop Game",
+            twitch_user_id=f"drops:{uid}:ef01",
+            message_template="t",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            notify_on_drops=True,
+        )
+        db.add_subscription(
+            owner_id=uid,
+            twitch_username="realstreamer",
+            twitch_user_id="12345",
+            message_template="t",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            notify_on_live=True,
+        )
+        asked = db.get_unfollowed_manual_alert_streamers(uid, keep_twitch_user_ids=set())
+        assert [a["user_login"] for a in asked] == ["realstreamer"]
+        asked_kept = db.get_unfollowed_manual_alert_streamers(
+            uid, keep_twitch_user_ids={"12345"}
+        )
+        assert asked_kept == []
+
+
 def run() -> None:
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
@@ -596,3 +647,4 @@ def run() -> None:
     _check_game_alert_dedup_by_category()
     _check_game_alert_early_dup_after_category()
     _check_alert_dup_edit_opens_type_menu()
+    _check_sync_unfollow_skips_release_and_drops()

@@ -4888,14 +4888,20 @@ class SqliteDatabase:
         *,
         is_demo: bool = False,
     ) -> list[dict[str, str]]:
-        """Streamers not in follows that still have non-category-watch alerts."""
+        """Real streamers not in follows that still have manual stream alerts.
+
+        Excludes synthetic rows (game/category watch, Drops, release alerts).
+        """
         with self._conn() as conn:
             rows = conn.execute(
                 """
                 SELECT twitch_user_id, twitch_username FROM subscriptions
                 WHERE owner_id = ? AND is_demo = ?
                   AND COALESCE(category_watch_prefs, '') = ''
+                  AND COALESCE(release_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%'
+                  AND twitch_user_id NOT LIKE 'drops:%'
+                  AND twitch_user_id NOT LIKE 'rel:%'
                 """,
                 (owner_id, int(bool(is_demo))),
             ).fetchall()
