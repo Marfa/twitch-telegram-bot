@@ -23,7 +23,7 @@
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
-| 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or create a category alert immediately; live → else VOD; filters in the editor; own category in **📋 My subscriptions** |
+| 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+); live → else VOD; own category in **📋 My subscriptions** |
 | 📅 Release alerts | Beta: **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses when all selected platforms have shipped |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Image | Optional alert image — caption above or below; link preview then off |
@@ -156,12 +156,12 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 
 | Mode | What it does |
 |---|---|
-| Search streams by game | Category → live suggestions (else recent VODs); no alert created |
-| Game alerts | Category → creates the alert immediately + same suggestions |
+| Search streams by game | Category → filters → live suggestions (else recent VODs); no alert created |
+| Game alerts | Category → filters → creates the alert + suggestions (duplicate → warning only) |
 
-Created alerts appear in **📋 My subscriptions** under “Game alert”. Tags / viewers / language / exclude 18+ / frequency (minutes, default 60) — in the **✏️** editor.
+Filters: checkboxes for tags / viewers / language / exclude 18+; value prompts for checked items. Frequency (minutes, default 60) — in the **✏️** editor.
 
-After suggestions: **Suggest again** or start search / create again.
+After suggestions: **Suggest again** (no “Filters / new search”).
 
 The bot polls live streams by `game_id` and notifies when a **new** matching stream appears (using the alert’s filters).
 

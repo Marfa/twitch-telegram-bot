@@ -144,7 +144,6 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("ignore_igdb_del_sel", "ignore_igdb_del:sel:0"),
     ("ignored_words_igdb", "ignored_words:igdb"),
     ("watch_again", "watch:again"),
-    ("watch_change", "watch:change"),
     ("watch_cat", "watch_cat:lucky"),
     ("watch_mode", "watch_mode:alert"),
     ("watch_nav", "watch_nav:cancel"),

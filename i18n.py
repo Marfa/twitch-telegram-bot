@@ -864,6 +864,38 @@ def drops_catalog_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def watch_filters_keyboard(
+    lang: str,
+    *,
+    want_tags: bool,
+    want_viewers: bool,
+    want_language: bool,
+    want_mature: bool,
+) -> InlineKeyboardMarkup:
+    def _row(flag: bool, label_key: str, key: str) -> list[InlineKeyboardButton]:
+        mark = "✅ " if flag else "⬜️ "
+        return [
+            InlineKeyboardButton(
+                mark + t(label_key, lang),
+                callback_data=f"watch_filt:toggle:{key}",
+            )
+        ]
+
+    rows = [
+        _row(want_tags, "watch_filt_tags", "tags"),
+        _row(want_viewers, "watch_filt_viewers", "viewers"),
+        _row(want_language, "watch_filt_language", "language"),
+        _row(want_mature, "watch_filt_mature", "mature"),
+        [
+            InlineKeyboardButton(
+                t("watch_filt_next", lang), callback_data="watch_filt:next"
+            )
+        ],
+        _watch_nav_row(lang),
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
 def watch_viewers_keyboard(lang: str, *, show_nav: bool = True) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t("watch_viewers_any", lang), callback_data="watch_viewers:any")],
@@ -954,9 +986,6 @@ def watch_suggest_keyboard(
         )
     rows.append(
         [InlineKeyboardButton(t("watch_again", lang), callback_data="watch:again")]
-    )
-    rows.append(
-        [InlineKeyboardButton(t("watch_change", lang), callback_data="watch:change")]
     )
     return InlineKeyboardMarkup(rows)
 

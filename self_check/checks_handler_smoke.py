@@ -484,7 +484,10 @@ async def _smoke_settings_oauth(db) -> None:
 
 
 async def _smoke_watch(db) -> None:
+    from telegram.ext import ConversationHandler
+
     from handlers.watch import (
+        _go_watch_filters_prompt,
         _ws,
         _start_watch_wizard,
         receive_watch_category_callback,
@@ -534,6 +537,22 @@ async def _smoke_watch(db) -> None:
     state = await _start_watch_wizard(update, ctx, "en")
     assert state == _ws()["WATCH_CATEGORIES"]
     assert ctx.user_data["watch_exclude_mature"] is True
+
+    ctx = _ctx(
+        application,
+        {
+            "watch_create_alert": False,
+            "watch_categories": [{"id": "1", "name": "Game"}],
+        },
+    )
+    update = _msg_update(_FREE_UID)
+    with patch(
+        "handlers.watch._finalize_watch_wizard",
+        new=AsyncMock(return_value=ConversationHandler.END),
+    ) as finalize:
+        state = await _go_watch_filters_prompt(update, ctx, "en")
+    assert state == _ws()["WATCH_FILTERS"]
+    finalize.assert_not_awaited()
 
 
 async def _smoke_wizard(db) -> None:
