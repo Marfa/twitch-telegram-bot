@@ -394,6 +394,149 @@ def _check_game_alert_early_dup_after_category() -> None:
         asyncio.run(_run())
 
 
+def _check_alert_dup_edit_opens_type_menu() -> None:
+    """Dup → Edit must open game/release/drops editor, not full stream options."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from db.models import (
+        ReleaseWatchPrefs,
+        WatchPrefs,
+        dump_category_watch_prefs,
+        dump_release_watch_prefs,
+    )
+    from handlers.subscriptions import on_share_dup_edit
+    from i18n import t as _t
+
+    uid = 910_010
+
+    def _inline_cbs(bot: AsyncMock) -> set[str]:
+        out: set[str] = set()
+        for call in bot.send_message.await_args_list:
+            markup = call.kwargs.get("reply_markup")
+            if markup is None or not hasattr(markup, "inline_keyboard"):
+                continue
+            for row in markup.inline_keyboard:
+                for btn in row:
+                    if btn.callback_data:
+                        out.add(btn.callback_data)
+        return out
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "dup_edit.db")
+        db.upsert_user(uid)
+        db.set_user_locale(uid, "en")
+
+        game_prefs = WatchPrefs(
+            categories=[{"id": "123", "name": "DupEdit"}],
+            tags=[],
+            min_viewers=0,
+            max_viewers=None,
+            language=None,
+            exclude_mature=False,
+        )
+        game_id = db.add_subscription(
+            owner_id=uid,
+            twitch_username="dupedit",
+            twitch_user_id="cw_123",
+            message_template="x",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            category_watch_prefs=dump_category_watch_prefs(game_prefs),
+            from_watch_suggest=True,
+        )
+        rel_prefs = ReleaseWatchPrefs(
+            igdb_game_id=77,
+            game_name="Rel Dup",
+            days_before=2,
+            platforms=[],
+            date_unknown=True,
+        )
+        import beta as beta_features
+        from handlers.release_watch import RELEASE_BETA_ID
+
+        db.set_beta_enrollment(uid, RELEASE_BETA_ID, True)
+        assert beta_features.is_enabled(db, uid, RELEASE_BETA_ID)
+        rel_id = db.add_subscription(
+            owner_id=uid,
+            twitch_username="reldup",
+            twitch_user_id="rw_77",
+            message_template="x",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            release_watch_prefs=dump_release_watch_prefs(rel_prefs),
+        )
+        drops_id = db.add_subscription(
+            owner_id=uid,
+            twitch_username="dropdup",
+            twitch_user_id="dg_1",
+            message_template="x",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            notify_on_live=False,
+            notify_on_drops=True,
+            drops_game_id="1",
+        )
+
+        async def _run() -> None:
+            bot = AsyncMock()
+            app = MagicMock()
+            app.bot_data = {"db": db, "main_conv": None}
+            app.bot = bot
+
+            def _make(sub_id: int):
+                update = MagicMock()
+                query = AsyncMock()
+                query.data = f"alert_dup:edit:{sub_id}"
+                query.from_user = SimpleNamespace(id=uid)
+                query.message = MagicMock(chat_id=uid)
+                update.callback_query = query
+                update.effective_chat = SimpleNamespace(id=uid)
+                update.effective_user = SimpleNamespace(id=uid)
+                ctx = MagicMock()
+                ctx.application = app
+                ctx.bot = bot
+                ctx.user_data = {}
+                return update, ctx
+
+            update, ctx = _make(game_id)
+            await on_share_dup_edit(update, ctx)
+            game_cbs = _inline_cbs(bot)
+            assert any(c.startswith(f"edit_g:{game_id}:") for c in game_cbs)
+            assert not any(c.startswith(f"edit_f:{game_id}:") for c in game_cbs)
+
+            bot.send_message.reset_mock()
+            update, ctx = _make(rel_id)
+            await on_share_dup_edit(update, ctx)
+            rel_cbs = _inline_cbs(bot)
+            assert f"edit_r:{rel_id}:days" in rel_cbs
+            assert not any(c.startswith(f"edit_f:{rel_id}:") for c in rel_cbs)
+
+            bot.send_message.reset_mock()
+            update, ctx = _make(drops_id)
+            with patch(
+                "handlers.drops.drops_configure_block_reason",
+                new=AsyncMock(return_value=None),
+            ):
+                await on_share_dup_edit(update, ctx)
+            assert ctx.user_data.get("edit_game_cooldown") is True
+            assert ctx.user_data.get("edit_sub_id") == drops_id
+            sent = " ".join(
+                str(c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or "")
+                for c in bot.send_message.await_args_list
+            )
+            assert _t("edit_game_cooldown_prompt", "en") in sent
+            assert not any(
+                c.startswith(f"edit_f:{drops_id}:") for c in _inline_cbs(bot)
+            )
+
+        asyncio.run(_run())
+
+
 def run() -> None:
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
@@ -404,3 +547,4 @@ def run() -> None:
     _check_release_early_dup_stops_wizard()
     _check_game_alert_dedup_by_category()
     _check_game_alert_early_dup_after_category()
+    _check_alert_dup_edit_opens_type_menu()

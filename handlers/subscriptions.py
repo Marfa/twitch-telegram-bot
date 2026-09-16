@@ -4929,7 +4929,23 @@ async def on_share_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         pass
 
 
+def _force_main_conv_state(
+    context: ContextTypes.DEFAULT_TYPE, update: Update, state: int
+) -> None:
+    """ponytail: group=0 dup-edit cannot return EDIT_REPEAT; set state for next text."""
+    conv = context.application.bot_data.get("main_conv")
+    if conv is None:
+        return
+    try:
+        key = conv._get_key(update)
+    except Exception:
+        return
+    if key is not None:
+        conv._conversations[key] = state
+
+
 async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Open the same editor as edit:<id> (game/drops/release ≠ stream options)."""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -4943,6 +4959,90 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not sub or not _sub_in_current_mode(sub, user_id):
         await query.edit_message_text(t("sub_not_found", lang))
         return
+
+    chat_id = reply_chat_id(update)
+
+    if is_drops_sub(sub):
+        from handlers.drops import drops_configure_block_reason
+
+        block = await drops_configure_block_reason(context.bot, db, user_id)
+        if block:
+            await query.edit_message_text(t(block, lang))
+            return
+        context.user_data.clear()
+        context.user_data["edit_sub_id"] = sub_id
+        context.user_data["edit_game_cooldown"] = True
+        context.user_data["wizard_edit"] = True
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
+        await context.bot.send_message(
+            chat_id,
+            t("edit_game_cooldown_prompt", lang),
+            reply_markup=_wizard(lang, back=False),
+        )
+        _force_main_conv_state(context, update, _sub_states()["EDIT_REPEAT"])
+        return
+
+    if is_release_watch_sub(sub):
+        from handlers.release_watch import (
+            edit_release_options_keyboard,
+            release_feature_available,
+        )
+        from db.models import parse_release_watch_prefs
+
+        if not release_feature_available(db, user_id):
+            await query.edit_message_text(t("release_beta_required", lang))
+            return
+        prefs = parse_release_watch_prefs(sub.release_watch_prefs)
+        if not prefs:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return
+        await context.bot.send_message(
+            chat_id,
+            t("menu_subs", lang),
+            reply_markup=_subs_kb(lang, db, user_id),
+        )
+        await context.bot.send_message(
+            chat_id,
+            t(
+                "edit_release_menu",
+                lang,
+                game=html.escape(prefs.game_name),
+                days=prefs.days_before,
+            ),
+            reply_markup=edit_release_options_keyboard(sub_id, lang),
+            parse_mode=ParseMode.HTML,
+        )
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
+        return
+
+    if is_category_watch_sub(sub):
+        prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+        if not prefs:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return
+        await context.bot.send_message(
+            chat_id,
+            t("menu_subs", lang),
+            reply_markup=_subs_kb(lang, db, user_id),
+        )
+        await context.bot.send_message(
+            chat_id,
+            _edit_game_menu_text(lang, db, user_id, sub, prefs),
+            reply_markup=_edit_game_options_for_sub(sub, lang, prefs),
+            parse_mode=ParseMode.HTML,
+        )
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
+        return
+
     sub_num = _owner_sub_number(db, user_id, sub_id)
     show_adv = await prem.advanced_mode_on(
         context.bot, db, user_id, channel=sub.twitch_username
@@ -4955,12 +5055,12 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
     edit_markup = _edit_options_for_sub(sub, lang, show_advanced=show_adv, db=db)
     await context.bot.send_message(
-        user_id,
+        chat_id,
         t("menu_subs", lang),
         reply_markup=_subs_kb(lang, db, user_id),
     )
     await context.bot.send_message(
-        user_id,
+        chat_id,
         edit_text,
         reply_markup=edit_markup,
         parse_mode=ParseMode.HTML,
