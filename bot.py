@@ -123,10 +123,6 @@ from i18n import (
     watch_cats_nav_keyboard,
     watch_cats_pick_keyboard,
     watch_lang_keyboard,
-    watch_mature_keyboard,
-    watch_pick_keyboard,
-    watch_delete_pick_keyboard,
-    watch_save_keyboard,
     watch_suggest_keyboard,
     watch_tags_keyboard,
     watch_viewers_keyboard,
@@ -397,7 +393,6 @@ from handlers.watch import (
     _WATCH_VIEWERS_RE,
     _add_watch_category,
     _bot_lang_to_twitch,
-    _complete_watch_wizard,
     _fetch_lucky_watch_suggestions,
     _fetch_recommended_promo_streams,
     _fetch_watch_suggestions,
@@ -405,12 +400,6 @@ from handlers.watch import (
     _format_watch_suggestions,
     _format_watch_vod_suggestions,
     _go_watch_categories_prompt,
-    _go_watch_language_prompt,
-    _go_watch_mature_prompt,
-    _go_watch_pick_prompt,
-    _go_watch_save_prompt,
-    _go_watch_tags_prompt,
-    _go_watch_viewers_prompt,
     _live_promo_streams,
     _lucky_streams_from_igdb,
     _parse_watch_viewers,
@@ -430,26 +419,11 @@ from handlers.watch import (
     _watch_prefs_from_user_data,
     _watch_prefs_summary,
     _watch_recommended_mode,
-    _watch_viewers_label,
     on_watch_again,
     on_watch_create_alerts,
     receive_watch_category_callback,
     receive_watch_category_text,
-    receive_watch_del_back,
-    receive_watch_del_clear,
-    receive_watch_del_go,
-    receive_watch_del_sel,
-    receive_watch_filters_callback,
-    receive_watch_language_callback,
-    receive_watch_language_text,
-    receive_watch_mature_callback,
-    receive_watch_nav_back,
-    receive_watch_pick_callback,
-    receive_watch_save_callback,
-    receive_watch_tags_callback,
-    receive_watch_tags_text,
-    receive_watch_viewers_callback,
-    receive_watch_viewers_text,
+    receive_watch_mode_callback,
     start_watch_change,
     start_watch_lucky,
 )
@@ -744,14 +718,7 @@ logger = logging.getLogger(__name__)
     SYNC_DAYS,
     PREMIUM_GATE,
     WATCH_PICK,
-    WATCH_DELETE,
     WATCH_CATEGORIES,
-    WATCH_FILTERS,
-    WATCH_TAGS,
-    WATCH_VIEWERS,
-    WATCH_LANGUAGE,
-    WATCH_MATURE,
-    WATCH_SAVE,
     DELETE_SIBLING_ALERTS,
     GLOBAL_IGNORE_KEYWORDS,
     GLOBAL_IGNORE_IGDB,
@@ -772,7 +739,7 @@ logger = logging.getLogger(__name__)
     RELEASE_PICK,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(73)
+) = range(66)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -3020,22 +2987,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
             WATCH_PICK: [
                 _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
                 CallbackQueryHandler(
-                    receive_watch_pick_callback, pattern=r"^watch_pick:"
-                ),
-            ],
-            WATCH_DELETE: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(
-                    receive_watch_del_sel, pattern=r"^watch_del_sel:"
-                ),
-                CallbackQueryHandler(receive_watch_del_go, pattern=r"^watch_del_go$"),
-                CallbackQueryHandler(
-                    receive_watch_del_clear, pattern=r"^watch_del_clear$"
-                ),
-                CallbackQueryHandler(
-                    receive_watch_del_back, pattern=r"^watch_del_back$"
+                    receive_watch_mode_callback, pattern=r"^watch_mode:"
                 ),
             ],
             WATCH_CATEGORIES: [
@@ -3045,63 +2999,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     receive_watch_category_callback, pattern=r"^watch_cat:"
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_category_text),
-            ],
-            WATCH_FILTERS: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
-                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
-                CallbackQueryHandler(
-                    receive_watch_filters_callback, pattern=r"^watch_filt:"
-                ),
-            ],
-            WATCH_TAGS: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
-                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
-                CallbackQueryHandler(
-                    receive_watch_tags_callback, pattern=r"^watch_tags:"
-                ),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_tags_text),
-            ],
-            WATCH_VIEWERS: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
-                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
-                CallbackQueryHandler(
-                    receive_watch_viewers_callback, pattern=r"^watch_viewers:"
-                ),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_viewers_text),
-            ],
-            WATCH_LANGUAGE: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
-                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
-                CallbackQueryHandler(
-                    receive_watch_language_callback, pattern=r"^watch_lang:"
-                ),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_language_text),
-            ],
-            WATCH_MATURE: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
-                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
-                CallbackQueryHandler(
-                    receive_watch_mature_callback, pattern=r"^watch_mature:"
-                ),
-            ],
-            WATCH_SAVE: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
-                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
-                CallbackQueryHandler(
-                    receive_watch_save_callback, pattern=r"^watch_save:"
-                ),
             ],
             PAUSE_ALERTS_DAYS: [
                 MessageHandler(

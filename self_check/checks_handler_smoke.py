@@ -486,33 +486,17 @@ async def _smoke_settings_oauth(db) -> None:
 async def _smoke_watch(db) -> None:
     from handlers.watch import (
         _ws,
+        _start_watch_wizard,
         receive_watch_category_callback,
-        receive_watch_filters_callback,
-        receive_watch_nav_back,
-        receive_watch_save_callback,
-        receive_watch_tags_callback,
+        receive_watch_mode_callback,
         start_what_to_watch,
     )
 
     application, bot = _app(db)
     update = _msg_update(_FREE_UID)
     ctx = _ctx(application)
-    with patch(
-        "handlers.watch._start_watch_wizard",
-        new=AsyncMock(return_value=_ws()["WATCH_CATEGORIES"]),
-    ) as start_wiz:
-        state = await start_what_to_watch(update, ctx)
-    start_wiz.assert_awaited()
-    assert state == _ws()["WATCH_CATEGORIES"]
-
-    update, _query = _cb_update(_FREE_UID, "wizard:back")
-    ctx = _ctx(application)
-    with patch(
-        "handlers.wizard.wizard_back", new=AsyncMock(return_value=42)
-    ) as wizard_back:
-        state = await receive_watch_nav_back(update, ctx)
-    assert state == 42
-    wizard_back.assert_awaited()
+    state = await start_what_to_watch(update, ctx)
+    assert state == _ws()["WATCH_PICK"]
 
     update, _query = _cb_update(_FREE_UID, "watch_cat:lucky")
     ctx = _ctx(application, {"watch_categories": []})
@@ -523,60 +507,33 @@ async def _smoke_watch(db) -> None:
         state = await receive_watch_category_callback(update, ctx)
     assert state == _ws()["WATCH_CATEGORIES"]
 
-    update, _query = _cb_update(_FREE_UID, "watch_filt:toggle:tags")
-    ctx = _ctx(application, {"watch_want_tags": False})
-    state = await receive_watch_filters_callback(update, ctx)
-    assert state == _ws()["WATCH_FILTERS"]
-    assert ctx.user_data["watch_want_tags"] is True
-
-    update, _query = _cb_update(_FREE_UID, "watch_filt:next")
-    ctx = _ctx(
-        application,
-        {
-            "watch_want_tags": True,
-            "watch_want_viewers": False,
-            "watch_want_language": False,
-            "watch_want_mature": True,
-        },
-    )
+    update, _query = _cb_update(_FREE_UID, "watch_mode:search")
+    ctx = _ctx(application)
     with patch(
-        "handlers.watch._go_watch_tags_prompt",
-        new=AsyncMock(return_value=_ws()["WATCH_TAGS"]),
-    ):
-        state = await receive_watch_filters_callback(update, ctx)
-    assert state == _ws()["WATCH_TAGS"]
+        "handlers.watch._start_watch_wizard",
+        new=AsyncMock(return_value=_ws()["WATCH_CATEGORIES"]),
+    ) as start_wiz:
+        state = await receive_watch_mode_callback(update, ctx)
+    start_wiz.assert_awaited()
+    assert state == _ws()["WATCH_CATEGORIES"]
+    assert ctx.user_data["watch_create_alert"] is False
+
+    update, _query = _cb_update(_FREE_UID, "watch_mode:alert")
+    ctx = _ctx(application)
+    with patch(
+        "handlers.watch._start_watch_wizard",
+        new=AsyncMock(return_value=_ws()["WATCH_CATEGORIES"]),
+    ) as start_wiz:
+        state = await receive_watch_mode_callback(update, ctx)
+    start_wiz.assert_awaited()
+    assert state == _ws()["WATCH_CATEGORIES"]
+    assert ctx.user_data["watch_create_alert"] is True
+
+    update = _msg_update(_FREE_UID)
+    ctx = _ctx(application, {"watch_create_alert": True})
+    state = await _start_watch_wizard(update, ctx, "en")
+    assert state == _ws()["WATCH_CATEGORIES"]
     assert ctx.user_data["watch_exclude_mature"] is True
-    assert ctx.user_data["watch_detail_queue"] == []
-
-    update, _query = _cb_update(_FREE_UID, "watch_tags:skip")
-    ctx = _ctx(application, {"watch_detail_queue": []})
-    with patch(
-        "handlers.watch._go_watch_save_prompt",
-        new=AsyncMock(return_value=_ws()["WATCH_SAVE"]),
-    ):
-        state = await receive_watch_tags_callback(update, ctx)
-    assert state == _ws()["WATCH_SAVE"]
-    assert ctx.user_data["watch_tags"] == []
-
-    update, _query = _cb_update(_FREE_UID, "watch_save:0")
-    ctx = _ctx(
-        application,
-        {
-            "watch_categories": [{"id": "1", "name": "JC"}],
-            "watch_tags": [],
-            "watch_min_viewers": 0,
-            "watch_max_viewers": None,
-            "watch_language": None,
-            "watch_exclude_mature": True,
-        },
-    )
-    with patch(
-        "handlers.watch._complete_watch_wizard",
-        new=AsyncMock(return_value=ConversationHandler.END),
-    ) as complete:
-        state = await receive_watch_save_callback(update, ctx)
-    complete.assert_awaited()
-    assert state == ConversationHandler.END
 
 
 async def _smoke_wizard(db) -> None:

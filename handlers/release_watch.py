@@ -318,6 +318,21 @@ async def receive_release_pick(
     if not game:
         await query.edit_message_text(t("release_game_not_found", lang))
         return _wz()["RELEASE_SEARCH"]
+    exists = next(
+        (
+            s
+            for s in db.get_subscriptions_by_owner(user_id)
+            if is_release_watch_sub(s)
+            and (parsed := parse_release_watch_prefs(s.release_watch_prefs))
+            and parsed.igdb_game_id == game_id
+        ),
+        None,
+    )
+    if exists:
+        await context.bot.send_message(
+            chat_id,
+            t("release_already_subscribed", lang),
+        )
     now = int(time.time())
     all_dates = db.igdb_release_dates_for_game(game_id)
     future = [r for r in all_dates if int(r["date"]) > now]

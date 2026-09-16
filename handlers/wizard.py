@@ -27,10 +27,6 @@ from bot_helpers import (
 from db import Database, Subscription
 from handlers.watch import (
     _go_watch_categories_prompt,
-    _go_watch_filters_prompt,
-    _go_watch_pick_prompt,
-    _go_watch_tags_prompt,
-    _go_watch_viewers_prompt,
 )
 from i18n import (
     admin_other_audience_keyboard,
@@ -120,12 +116,7 @@ def _wz() -> dict[str, int]:
         TEMPLATE,
         TEMPLATE_TYPO_CONFIRM,
         WATCH_DELETE,
-        WATCH_FILTERS,
-        WATCH_LANGUAGE,
-        WATCH_MATURE,
         WATCH_SAVE,
-        WATCH_TAGS,
-        WATCH_VIEWERS,
         ADVANCED_OPTIONS,
     )
 
@@ -164,12 +155,7 @@ def _wz() -> dict[str, int]:
         "TEMPLATE": TEMPLATE,
         "TEMPLATE_TYPO_CONFIRM": TEMPLATE_TYPO_CONFIRM,
         "WATCH_DELETE": WATCH_DELETE,
-        "WATCH_FILTERS": WATCH_FILTERS,
-        "WATCH_LANGUAGE": WATCH_LANGUAGE,
-        "WATCH_MATURE": WATCH_MATURE,
         "WATCH_SAVE": WATCH_SAVE,
-        "WATCH_TAGS": WATCH_TAGS,
-        "WATCH_VIEWERS": WATCH_VIEWERS,
     }
 
 
@@ -1521,26 +1507,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, _wz()["ADMIN_MSG_TEXT"])
         return _wz()["ADMIN_MSG_TEXT"]
-    if state == _wz()["WATCH_DELETE"]:
-        return await _go_watch_pick_prompt(update, context, lang)
-    if state == _wz()["WATCH_FILTERS"]:
+    if state in (_wz()["WATCH_DELETE"], _wz()["WATCH_SAVE"]):
         return await _go_watch_categories_prompt(update, context, lang)
-    if state == _wz()["WATCH_TAGS"]:
-        return await _go_watch_filters_prompt(update, context, lang)
-    if state == _wz()["WATCH_VIEWERS"]:
-        if context.user_data.get("watch_want_tags"):
-            return await _go_watch_tags_prompt(update, context, lang)
-        return await _go_watch_filters_prompt(update, context, lang)
-    if state == _wz()["WATCH_LANGUAGE"]:
-        if context.user_data.get("watch_want_viewers"):
-            return await _go_watch_viewers_prompt(update, context, lang)
-        if context.user_data.get("watch_want_tags"):
-            return await _go_watch_tags_prompt(update, context, lang)
-        return await _go_watch_filters_prompt(update, context, lang)
-    if state == _wz()["WATCH_MATURE"]:
-        return await _go_watch_filters_prompt(update, context, lang)
-    if state == _wz()["WATCH_SAVE"]:
-        return await _go_watch_filters_prompt(update, context, lang)
     if context.user_data.get("sb_edit_mode") in ("text", "schedule"):
         context.user_data.clear()
         await update.effective_message.reply_text(

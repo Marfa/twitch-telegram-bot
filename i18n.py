@@ -727,9 +727,6 @@ def watch_cats_nav_keyboard(
         )
     if has_cats:
         rows.append(
-            [InlineKeyboardButton(t("watch_cats_done", lang), callback_data="watch_cat:done")]
-        )
-        rows.append(
             [InlineKeyboardButton(t("watch_cats_clear", lang), callback_data="watch_cat:clear")]
         )
     rows.append(
@@ -867,38 +864,6 @@ def drops_catalog_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def watch_filters_keyboard(
-    lang: str,
-    *,
-    want_tags: bool,
-    want_viewers: bool,
-    want_language: bool,
-    want_mature: bool,
-) -> InlineKeyboardMarkup:
-    def _row(flag: bool, label_key: str, key: str) -> list[InlineKeyboardButton]:
-        mark = "✅ " if flag else "⬜️ "
-        return [
-            InlineKeyboardButton(
-                mark + t(label_key, lang),
-                callback_data=f"watch_filt:toggle:{key}",
-            )
-        ]
-
-    rows = [
-        _row(want_tags, "watch_filt_tags", "tags"),
-        _row(want_viewers, "watch_filt_viewers", "viewers"),
-        _row(want_language, "watch_filt_language", "language"),
-        _row(want_mature, "watch_filt_mature", "mature"),
-        [
-            InlineKeyboardButton(
-                t("watch_filt_next", lang), callback_data="watch_filt:next"
-            )
-        ],
-        _watch_nav_row(lang),
-    ]
-    return InlineKeyboardMarkup(rows)
-
-
 def watch_viewers_keyboard(lang: str, *, show_nav: bool = True) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t("watch_viewers_any", lang), callback_data="watch_viewers:any")],
@@ -949,81 +914,29 @@ def watch_tags_keyboard(lang: str, *, show_nav: bool = True) -> InlineKeyboardMa
     return InlineKeyboardMarkup(rows)
 
 
-def watch_save_keyboard(lang: str, *, show_nav: bool = True) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(t("watch_save_yes", lang), callback_data="watch_save:1")],
-        [InlineKeyboardButton(t("watch_save_no", lang), callback_data="watch_save:0")],
-    ]
-    if show_nav:
-        rows.append(_watch_nav_row(lang))
-    return InlineKeyboardMarkup(rows)
-
-
-def watch_pick_keyboard(lang: str, filters: list) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    for f in filters:
-        name = str(getattr(f, "name", "") or "?")[:64]
-        fid = str(getattr(f, "id", ""))
-        rows.append(
-            [InlineKeyboardButton(name, callback_data=f"watch_pick:{fid}")]
-        )
-    rows.append(
-        [InlineKeyboardButton(t("watch_pick_new", lang), callback_data="watch_pick:new")]
-    )
-    if filters:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("watch_pick_delete_btn", lang),
-                    callback_data="watch_pick:delete",
-                )
-            ]
-        )
-    return InlineKeyboardMarkup(rows)
-
-
-def watch_delete_pick_keyboard(
-    lang: str, filters: list, selected: set[str]
-) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    for i, f in enumerate(filters, 1):
-        fid = str(getattr(f, "id", ""))
-        name = str(getattr(f, "name", "") or "?")[:48]
-        mark = "✅ " if fid in selected else ""
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"{mark}🗑 #{i} {name}",
-                    callback_data=f"watch_del_sel:{fid}",
-                )
-            ]
-        )
-    rows.append(
+def watch_mode_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton(
-                t("watch_delete_go", lang, count=len(selected)),
-                callback_data="watch_del_go",
-            )
+            [
+                InlineKeyboardButton(
+                    t("watch_mode_search", lang),
+                    callback_data="watch_mode:search",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("watch_mode_alert", lang),
+                    callback_data="watch_mode:alert",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang),
+                    callback_data="watch_nav:cancel",
+                )
+            ],
         ]
     )
-    if selected:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    t("watch_delete_clear", lang),
-                    callback_data="watch_del_clear",
-                )
-            ]
-        )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                t("watch_delete_back", lang),
-                callback_data="watch_del_back",
-            )
-        ]
-    )
-    return InlineKeyboardMarkup(rows)
 
 
 def watch_suggest_keyboard(

@@ -18,7 +18,6 @@ import premium as prem
 from bot_helpers import _menu, _user_lang
 from handlers.alert_history import _twitch_vod_url
 from db import (
-    WATCH_MAX_FILTERS,
     Database,
     Subscription,
     WatchPrefs,
@@ -30,20 +29,12 @@ from i18n import (
     t,
     watch_cats_nav_keyboard,
     watch_cats_pick_keyboard,
-    watch_delete_pick_keyboard,
-    watch_filters_keyboard,
-    watch_lang_keyboard,
-    watch_mature_keyboard,
-    watch_pick_keyboard,
-    watch_save_keyboard,
+    watch_mode_keyboard,
     watch_suggest_keyboard,
-    watch_tags_keyboard,
-    watch_viewers_keyboard,
 )
 from twitch import (
     TwitchClient,
     filter_streams_for_watch,
-    normalize_watch_tags,
     pick_random_streams,
 )
 
@@ -53,26 +44,12 @@ logger = logging.getLogger(__name__)
 def _ws() -> dict[str, int]:
     from bot import (
         WATCH_CATEGORIES,
-        WATCH_DELETE,
-        WATCH_FILTERS,
-        WATCH_LANGUAGE,
-        WATCH_MATURE,
         WATCH_PICK,
-        WATCH_SAVE,
-        WATCH_TAGS,
-        WATCH_VIEWERS,
     )
 
     return {
         "WATCH_CATEGORIES": WATCH_CATEGORIES,
-        "WATCH_DELETE": WATCH_DELETE,
-        "WATCH_FILTERS": WATCH_FILTERS,
-        "WATCH_LANGUAGE": WATCH_LANGUAGE,
-        "WATCH_MATURE": WATCH_MATURE,
         "WATCH_PICK": WATCH_PICK,
-        "WATCH_SAVE": WATCH_SAVE,
-        "WATCH_TAGS": WATCH_TAGS,
-        "WATCH_VIEWERS": WATCH_VIEWERS,
     }
 
 
@@ -90,6 +67,7 @@ def _set_wizard_back(context: ContextTypes.DEFAULT_TYPE, state: int) -> None:
 
 _WATCH_MAX_CATS = 1
 _WATCH_SUGGEST_N = 5
+# Kept for compatibility with existing imports in other modules/self-checks.
 _WATCH_MAX_TAGS = 10
 
 _WATCH_VIEWERS_RE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+))?\s*$")
@@ -629,6 +607,7 @@ async def _send_watch_suggestions(
     streams: list[dict] | None = None,
     vods: list[dict] | None = None,
     allow_vod: bool = True,
+    offer_create_alerts: bool = False,
 ) -> None:
     lang = _user_lang(context, user_id)
     context.application.bot_data.setdefault("watch_last_prefs", {})[user_id] = prefs
@@ -641,7 +620,7 @@ async def _send_watch_suggestions(
     except Exception:
         logger.exception("watch suggestions failed")
         text = t("watch_suggest_error", lang)
-        markup = watch_suggest_keyboard(lang, offer_create_alerts=True)
+        markup = watch_suggest_keyboard(lang, offer_create_alerts=offer_create_alerts)
         if edit_message is not None:
             try:
                 await edit_message.edit_text(text, reply_markup=markup)
@@ -676,7 +655,7 @@ async def _send_watch_suggestions(
             )
     else:
         text = t("watch_lucky_empty", lang)
-    markup = watch_suggest_keyboard(lang, offer_create_alerts=True)
+    markup = watch_suggest_keyboard(lang, offer_create_alerts=offer_create_alerts)
     if edit_message is not None:
         try:
             await edit_message.edit_text(
@@ -729,35 +708,35 @@ def _resolve_watch_prefs(
 async def _start_watch_wizard(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    create_alert = bool(context.user_data.get("watch_create_alert"))
     context.user_data.clear()
+    context.user_data["watch_create_alert"] = create_alert
     context.user_data["watch_categories"] = []
     context.user_data["watch_tags"] = []
+    context.user_data["watch_min_viewers"] = 0
+    context.user_data["watch_max_viewers"] = None
+    context.user_data["watch_language"] = None
+    context.user_data["watch_exclude_mature"] = True
     return await _go_watch_categories_prompt(update, context, lang)
 
 
-async def _go_watch_pick_prompt(
+async def _go_watch_mode_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    db: Database = context.application.bot_data["db"]
-    user_id = update.effective_user.id
-    filters = db.get_watch_filters(user_id)
-    if not filters:
-        await update.effective_message.reply_text(t("watch_pick_empty", lang))
-        return await _start_watch_wizard(update, context, lang)
     msg = update.effective_message
     if update.callback_query and update.callback_query.message:
         try:
             await update.callback_query.edit_message_text(
-                t("watch_pick_prompt", lang),
-                reply_markup=watch_pick_keyboard(lang, filters),
+                t("watch_mode_prompt", lang),
+                reply_markup=watch_mode_keyboard(lang),
             )
             _set_wizard_back(context, _ws()["WATCH_PICK"])
             return _ws()["WATCH_PICK"]
         except BadRequest:
             pass
     await msg.reply_text(
-        t("watch_pick_prompt", lang),
-        reply_markup=watch_pick_keyboard(lang, filters),
+        t("watch_mode_prompt", lang),
+        reply_markup=watch_mode_keyboard(lang),
     )
     _set_wizard_back(context, _ws()["WATCH_PICK"])
     return _ws()["WATCH_PICK"]
@@ -790,153 +769,6 @@ async def _go_watch_categories_prompt(
     return _ws()["WATCH_CATEGORIES"]
 
 
-async def _go_watch_filters_prompt(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    context.user_data.setdefault("watch_want_tags", False)
-    context.user_data.setdefault("watch_want_viewers", False)
-    context.user_data.setdefault("watch_want_language", False)
-    context.user_data.setdefault("watch_want_mature", False)
-    text = t("watch_filt_prompt", lang)
-    markup = watch_filters_keyboard(
-        lang,
-        want_tags=bool(context.user_data.get("watch_want_tags")),
-        want_viewers=bool(context.user_data.get("watch_want_viewers")),
-        want_language=bool(context.user_data.get("watch_want_language")),
-        want_mature=bool(context.user_data.get("watch_want_mature")),
-    )
-    query = update.callback_query
-    if query:
-        try:
-            await query.edit_message_text(text, reply_markup=markup)
-        except BadRequest:
-            await context.bot.send_message(
-                query.message.chat_id, text, reply_markup=markup
-            )
-    else:
-        await update.effective_message.reply_text(text, reply_markup=markup)
-    _set_wizard_back(context, _ws()["WATCH_FILTERS"])
-    return _ws()["WATCH_FILTERS"]
-
-
-def _watch_detail_queue(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
-    q: list[str] = []
-    if context.user_data.get("watch_want_tags"):
-        q.append("tags")
-    if context.user_data.get("watch_want_viewers"):
-        q.append("viewers")
-    if context.user_data.get("watch_want_language"):
-        q.append("language")
-    return q
-
-
-async def _go_watch_next_detail(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    queue = list(context.user_data.get("watch_detail_queue") or [])
-    if not queue:
-        return await _go_watch_save_prompt(update, context, lang)
-    step = queue.pop(0)
-    context.user_data["watch_detail_queue"] = queue
-    if step == "tags":
-        return await _go_watch_tags_prompt(update, context, lang)
-    if step == "viewers":
-        return await _go_watch_viewers_prompt(update, context, lang)
-    if step == "language":
-        return await _go_watch_language_prompt(update, context, lang)
-    return await _go_watch_save_prompt(update, context, lang)
-
-
-async def _go_watch_tags_prompt(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    await update.effective_message.reply_text(
-        t("watch_tags_prompt", lang),
-        reply_markup=watch_tags_keyboard(lang),
-        parse_mode=ParseMode.HTML,
-    )
-    _set_wizard_back(context, _ws()["WATCH_TAGS"])
-    return _ws()["WATCH_TAGS"]
-
-
-async def _go_watch_viewers_prompt(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    await update.effective_message.reply_text(
-        t("watch_viewers_prompt", lang),
-        reply_markup=watch_viewers_keyboard(lang),
-        parse_mode=ParseMode.HTML,
-    )
-    _set_wizard_back(context, _ws()["WATCH_VIEWERS"])
-    return _ws()["WATCH_VIEWERS"]
-
-
-async def _go_watch_language_prompt(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    context.user_data.pop("watch_lang_await_other", None)
-    await update.effective_message.reply_text(
-        t("watch_lang_prompt", lang),
-        reply_markup=watch_lang_keyboard(lang),
-    )
-    _set_wizard_back(context, _ws()["WATCH_LANGUAGE"])
-    return _ws()["WATCH_LANGUAGE"]
-
-
-async def _go_watch_mature_prompt(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    await update.effective_message.reply_text(
-        t("watch_mature_prompt", lang),
-        reply_markup=watch_mature_keyboard(lang),
-    )
-    _set_wizard_back(context, _ws()["WATCH_MATURE"])
-    return _ws()["WATCH_MATURE"]
-
-
-async def _go_watch_save_prompt(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    prefs = _watch_prefs_from_user_data(context)
-    await update.effective_message.reply_text(
-        t(
-            "watch_save_prompt",
-            lang,
-            max=WATCH_MAX_FILTERS,
-            summary=_watch_prefs_summary(prefs, lang),
-        ),
-        reply_markup=watch_save_keyboard(lang),
-        parse_mode=ParseMode.HTML,
-    )
-    _set_wizard_back(context, _ws()["WATCH_SAVE"])
-    return _ws()["WATCH_SAVE"]
-
-
-async def _complete_watch_wizard(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, *, save: bool
-) -> int:
-    user_id = update.effective_user.id
-    db: Database = context.application.bot_data["db"]
-    prefs = _watch_prefs_from_user_data(context)
-    if save:
-        db.add_watch_filter(user_id, prefs)
-    context.user_data.clear()
-    _set_watch_lucky_mode(context, user_id, enabled=False)
-    chat_id = update.effective_chat.id
-    if update.callback_query:
-        try:
-            await update.callback_query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-    await _send_watch_suggestions(
-        bot=context.bot,
-        chat_id=chat_id,
-        user_id=user_id,
-        context=context,
-        prefs=prefs,
-    )
-    return ConversationHandler.END
-
 
 async def start_what_to_watch(
     update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -945,18 +777,15 @@ async def start_what_to_watch(
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
-    filters = db.get_watch_filters(user_id)
     context.user_data.clear()
     _set_watch_lucky_mode(context, user_id, enabled=False)
     _set_watch_recommended_mode(context, user_id, enabled=False)
     analytics.capture(
         user_id,
         "watch_opened",
-        {"has_saved_filters": bool(filters)},
+        {"has_saved_filters": False},
     )
-    if filters:
-        return await _go_watch_pick_prompt(update, context, lang)
-    return await _start_watch_wizard(update, context, lang)
+    return await _go_watch_mode_prompt(update, context, lang)
 
 
 async def start_watch_lucky(
@@ -989,6 +818,23 @@ async def start_watch_change(
     query = update.callback_query
     await query.answer()
     return await start_what_to_watch(update, context)
+
+
+async def receive_watch_mode_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    if data not in ("watch_mode:search", "watch_mode:alert"):
+        return _ws()["WATCH_PICK"]
+    context.user_data["watch_create_alert"] = data == "watch_mode:alert"
+    lang = _user_lang(context, query.from_user.id)
+    try:
+        await query.edit_message_reply_markup(None)
+    except BadRequest:
+        pass
+    return await _start_watch_wizard(update, context, lang)
 
 
 async def _run_watch_lucky(
@@ -1251,140 +1097,6 @@ async def on_watch_create_alerts(
     await query.edit_message_text(text, parse_mode=ParseMode.HTML)
 
 
-async def receive_watch_pick_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    data = query.data or ""
-    if data == "watch_pick:new":
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        return await _start_watch_wizard(update, context, lang)
-    if data == "watch_pick:delete":
-        filters = db.get_watch_filters(user_id)
-        if not filters:
-            return await _go_watch_pick_prompt(update, context, lang)
-        context.user_data["watch_delete_selected"] = set()
-        await query.edit_message_text(
-            t("watch_delete_pick", lang),
-            reply_markup=watch_delete_pick_keyboard(lang, filters, set()),
-        )
-        _set_wizard_back(context, _ws()["WATCH_DELETE"])
-        return _ws()["WATCH_DELETE"]
-    if data.startswith("watch_pick:"):
-        fid = data.split(":", 1)[1]
-        filters = db.get_watch_filters(user_id)
-        match = next((f for f in filters if f.id == fid), None)
-        if not match:
-            return await _go_watch_pick_prompt(update, context, lang)
-        context.user_data.clear()
-        _set_watch_lucky_mode(context, user_id, enabled=False)
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        await _send_watch_suggestions(
-            bot=context.bot,
-            chat_id=query.message.chat_id,
-            user_id=user_id,
-            context=context,
-            prefs=match.prefs,
-        )
-        return ConversationHandler.END
-    return _ws()["WATCH_PICK"]
-
-
-async def receive_watch_del_sel(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    fid = (query.data or "").split(":", 1)[-1]
-    selected: set[str] = context.user_data.setdefault("watch_delete_selected", set())
-    if fid in selected:
-        selected.discard(fid)
-    else:
-        selected.add(fid)
-    db: Database = context.application.bot_data["db"]
-    filters = db.get_watch_filters(user_id)
-    await query.edit_message_reply_markup(
-        reply_markup=watch_delete_pick_keyboard(lang, filters, selected)
-    )
-    return _ws()["WATCH_DELETE"]
-
-
-async def receive_watch_del_clear(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    context.user_data["watch_delete_selected"] = set()
-    db: Database = context.application.bot_data["db"]
-    filters = db.get_watch_filters(user_id)
-    await query.edit_message_reply_markup(
-        reply_markup=watch_delete_pick_keyboard(lang, filters, set())
-    )
-    return _ws()["WATCH_DELETE"]
-
-
-async def receive_watch_del_go(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    selected: set[str] = set(context.user_data.get("watch_delete_selected") or ())
-    if not selected:
-        await query.answer(t("watch_delete_none", lang), show_alert=True)
-        return _ws()["WATCH_DELETE"]
-    await query.answer()
-    db: Database = context.application.bot_data["db"]
-    deleted = 0
-    for fid in list(selected):
-        if db.delete_watch_filter(user_id, fid):
-            deleted += 1
-    context.user_data["watch_delete_selected"] = set()
-    filters = db.get_watch_filters(user_id)
-    try:
-        await query.edit_message_text(t("watch_deleted", lang, count=deleted))
-    except BadRequest:
-        pass
-    if not filters:
-        await context.bot.send_message(
-            query.message.chat_id,
-            t("watch_pick_empty", lang),
-            reply_markup=_menu(lang, user_id),
-        )
-        return await _start_watch_wizard(update, context, lang)
-    await context.bot.send_message(
-        query.message.chat_id,
-        t("watch_pick_prompt", lang),
-        reply_markup=watch_pick_keyboard(lang, filters),
-    )
-    _set_wizard_back(context, _ws()["WATCH_PICK"])
-    return _ws()["WATCH_PICK"]
-
-
-async def receive_watch_del_back(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    context.user_data.pop("watch_delete_selected", None)
-    return await _go_watch_pick_prompt(update, context, lang)
-
-
 async def receive_watch_category_text(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -1442,7 +1154,7 @@ async def _add_watch_category(
         cats.append(entry)
     context.user_data.pop("watch_cat_candidates", None)
     if len(cats) >= _WATCH_MAX_CATS:
-        return await _go_watch_filters_prompt(update, context, lang)
+        return await _finalize_watch_after_category(update, context, lang)
     await update.effective_message.reply_text(
         t(
             "watch_cats_added",
@@ -1455,6 +1167,54 @@ async def _add_watch_category(
         reply_markup=_watch_cats_keyboard(context, lang, has_cats=True),
     )
     return _ws()["WATCH_CATEGORIES"]
+
+
+async def _finalize_watch_after_category(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    db: Database = context.application.bot_data["db"]
+    prefs = _watch_prefs_from_user_data(context)
+    create_alert = bool(context.user_data.get("watch_create_alert"))
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+    if create_alert:
+        text, sub, status = await create_category_watch_subscription(
+            context.bot, db, user_id, lang, prefs
+        )
+        if status == "watch_create_alerts_dup" and sub is not None:
+            from i18n import alert_dup_keyboard
+
+            context.user_data["alert_dup_force"] = {
+                "kind": "game",
+                "prefs": dump_category_watch_prefs(prefs),
+            }
+            await context.bot.send_message(
+                chat_id,
+                text,
+                reply_markup=alert_dup_keyboard(lang, sub.id),
+            )
+        else:
+            await context.bot.send_message(
+                chat_id,
+                text,
+                parse_mode=ParseMode.HTML,
+            )
+    context.user_data.clear()
+    _set_watch_lucky_mode(context, user_id, enabled=False)
+    await _send_watch_suggestions(
+        bot=context.bot,
+        chat_id=chat_id,
+        user_id=user_id,
+        context=context,
+        prefs=prefs,
+        offer_create_alerts=False,
+    )
+    return ConversationHandler.END
 
 
 async def receive_watch_category_callback(
@@ -1516,16 +1276,6 @@ async def receive_watch_category_callback(
             edit_message=query.message,
         )
         return ConversationHandler.END
-    if data == "watch_cat:done":
-        cats = context.user_data.get("watch_categories") or []
-        if not cats:
-            await query.edit_message_text(t("watch_cats_need_one", lang))
-            return _ws()["WATCH_CATEGORIES"]
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        return await _go_watch_filters_prompt(update, context, lang)
     if data == "watch_cat:clear":
         context.user_data["watch_categories"] = []
         await query.edit_message_text(
@@ -1550,204 +1300,5 @@ async def receive_watch_category_callback(
     return _ws()["WATCH_CATEGORIES"]
 
 
-async def receive_watch_viewers_text(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    lang = _user_lang(context, update.effective_user.id)
-    parsed = _parse_watch_viewers(update.effective_message.text or "")
-    if parsed is None:
-        await update.effective_message.reply_text(
-            t("watch_viewers_bad", lang),
-            reply_markup=watch_viewers_keyboard(lang),
-            parse_mode=ParseMode.HTML,
-        )
-        return _ws()["WATCH_VIEWERS"]
-    lo, hi = parsed
-    context.user_data["watch_min_viewers"] = lo
-    context.user_data["watch_max_viewers"] = hi
-    return await _go_watch_next_detail(update, context, lang)
-
-
-async def receive_watch_viewers_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    if query.data == "watch_viewers:any":
-        context.user_data["watch_min_viewers"] = 0
-        context.user_data["watch_max_viewers"] = None
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        return await _go_watch_next_detail(update, context, lang)
-    return _ws()["WATCH_VIEWERS"]
-
-
-async def receive_watch_language_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    data = query.data or ""
-    if data == "watch_lang:any":
-        context.user_data["watch_language"] = None
-        context.user_data.pop("watch_lang_await_other", None)
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        return await _go_watch_next_detail(update, context, lang)
-    if data in ("watch_lang:ru", "watch_lang:en"):
-        context.user_data["watch_language"] = data.rsplit(":", 1)[1]
-        context.user_data.pop("watch_lang_await_other", None)
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        return await _go_watch_next_detail(update, context, lang)
-    if data == "watch_lang:other":
-        context.user_data["watch_lang_await_other"] = True
-        await query.edit_message_text(t("watch_lang_other_prompt", lang))
-        return _ws()["WATCH_LANGUAGE"]
-    return _ws()["WATCH_LANGUAGE"]
-
-
-async def receive_watch_language_text(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    lang = _user_lang(context, update.effective_user.id)
-    if not context.user_data.get("watch_lang_await_other"):
-        await update.effective_message.reply_text(
-            t("watch_lang_prompt", lang),
-            reply_markup=watch_lang_keyboard(lang),
-        )
-        return _ws()["WATCH_LANGUAGE"]
-    code = (update.effective_message.text or "").strip().lower()
-    if not _WATCH_LANG_RE.match(code):
-        await update.effective_message.reply_text(t("watch_lang_bad", lang))
-        return _ws()["WATCH_LANGUAGE"]
-    context.user_data["watch_language"] = code
-    context.user_data.pop("watch_lang_await_other", None)
-    return await _go_watch_next_detail(update, context, lang)
-
-
-async def receive_watch_nav_back(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    # Lazy: handlers.wizard imports this module at top level.
-    from handlers.wizard import wizard_back
-
-    query = update.callback_query
-    await query.answer()
-    return await wizard_back(update, context)
-
-
-async def receive_watch_filters_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    data = query.data or ""
-    if data.startswith("watch_filt:toggle:"):
-        key = data.rsplit(":", 1)[-1]
-        flag_key = {
-            "tags": "watch_want_tags",
-            "viewers": "watch_want_viewers",
-            "language": "watch_want_language",
-            "mature": "watch_want_mature",
-        }.get(key)
-        if not flag_key:
-            return _ws()["WATCH_FILTERS"]
-        context.user_data[flag_key] = not bool(context.user_data.get(flag_key))
-        await query.edit_message_reply_markup(
-            watch_filters_keyboard(
-                lang,
-                want_tags=bool(context.user_data.get("watch_want_tags")),
-                want_viewers=bool(context.user_data.get("watch_want_viewers")),
-                want_language=bool(context.user_data.get("watch_want_language")),
-                want_mature=bool(context.user_data.get("watch_want_mature")),
-            )
-        )
-        return _ws()["WATCH_FILTERS"]
-    if data == "watch_filt:next":
-        if not context.user_data.get("watch_want_tags"):
-            context.user_data["watch_tags"] = []
-        if not context.user_data.get("watch_want_viewers"):
-            context.user_data["watch_min_viewers"] = 0
-            context.user_data["watch_max_viewers"] = None
-        if not context.user_data.get("watch_want_language"):
-            context.user_data["watch_language"] = None
-        context.user_data["watch_exclude_mature"] = bool(
-            context.user_data.get("watch_want_mature")
-        )
-        context.user_data["watch_detail_queue"] = _watch_detail_queue(context)
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        return await _go_watch_next_detail(update, context, lang)
-    return _ws()["WATCH_FILTERS"]
-
-
-async def receive_watch_tags_text(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    lang = _user_lang(context, update.effective_user.id)
-    tags = normalize_watch_tags(
-        update.effective_message.text or "", limit=_WATCH_MAX_TAGS
-    )
-    if not tags:
-        await update.effective_message.reply_text(
-            t("watch_tags_bad", lang),
-            reply_markup=watch_tags_keyboard(lang),
-            parse_mode=ParseMode.HTML,
-        )
-        return _ws()["WATCH_TAGS"]
-    context.user_data["watch_tags"] = tags
-    return await _go_watch_next_detail(update, context, lang)
-
-
-async def receive_watch_tags_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    if query.data == "watch_tags:skip":
-        context.user_data["watch_tags"] = []
-        try:
-            await query.edit_message_reply_markup(None)
-        except BadRequest:
-            pass
-        return await _go_watch_next_detail(update, context, lang)
-    return _ws()["WATCH_TAGS"]
-
-
-async def receive_watch_mature_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    data = query.data or ""
-    context.user_data["watch_exclude_mature"] = data == "watch_mature:1"
-    try:
-        await query.edit_message_reply_markup(None)
-    except BadRequest:
-        pass
-    return await _go_watch_save_prompt(update, context, lang)
-
-
-async def receive_watch_save_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    save = (query.data or "") == "watch_save:1"
-    return await _complete_watch_wizard(update, context, save=save)
 
 

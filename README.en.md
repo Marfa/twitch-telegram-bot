@@ -23,7 +23,7 @@
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
-| 🎲 Game alert | In **➕ New subscription** (under Drops): saved filters; live → else VOD; catch new streams by filter; own category in **📋 My subscriptions** |
+| 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or create a category alert immediately; live → else VOD; filters in the editor; own category in **📋 My subscriptions** |
 | 📅 Release alerts | Beta: **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses when all selected platforms have shipped |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Image | Optional alert image — caption above or below; link preview then off |
@@ -152,32 +152,18 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 
 **🎲 What to watch?** (**📦 Other**) — feeling lucky immediately (random games → live).
 
-**🎲 Game alert** (**➕ New subscription**, under Drops) — filter wizard without feeling lucky. If none are live — recent VODs. Created alerts appear in **📋 My subscriptions** under “Game alert”.
+**🎲 Game alert** (**➕ New subscription**, under Drops) — no feeling lucky. First pick a mode:
 
-If you have saved filters, the bot offers:
-
-| Action | How |
+| Mode | What it does |
 |---|---|
-| Pick a filter | Tap the name → get several streams |
-| New search | Filter wizard from scratch |
-| Delete filters | Separate button → multi-select (same pattern as subscription delete) → delete selected |
+| Search streams by game | Category → live suggestions (else recent VODs); no alert created |
+| Game alerts | Category → creates the alert immediately + same suggestions |
 
-New search wizard:
+Created alerts appear in **📋 My subscriptions** under “Game alert”. Tags / viewers / language / exclude 18+ / frequency (minutes, default 60) — in the **✏️** editor.
 
-1. Twitch categories (one) — no feeling lucky here (that lives in **📦 Other** → What to watch?); then filters immediately
-2. Checkboxes for extra filters: tags / viewers / language / exclude mature (unchecked = any)
-3. Value prompts only for checked items (tags, viewer range, language)
-4. Save filter for later (up to 5) or just this once
+After suggestions: **Suggest again** or start search / create again.
 
-After suggestions (or an empty result):
-
-| Button | Action |
-|---|---|
-| **Watch new streams by this filter?** | Game alert: 1 category → filters next; up to 5 new streams in one message; **✏️** — tags / viewers / language / exclude 18+ / frequency in **minutes** (default 60, 0 = off); toggle and delete |
-| **Suggest again** | Another random set |
-| **Filters / new search** | Pick again / wizard |
-
-The bot polls live streams by `game_id` and notifies when a **new** matching stream appears.
+The bot polls live streams by `game_id` and notifies when a **new** matching stream appears (using the alert’s filters).
 
 ### Import from Twitch
 
@@ -260,7 +246,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | 📦 Other | Follow/Unfollow (beta; settings Premium), whisper alerts, schedule, what to watch (feeling lucky), chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
-| ↳ 🎲 What to watch? | Feeling lucky immediately; again / filters |
+| ↳ 🎲 What to watch? | Feeling lucky immediately; suggest again |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
 | ⚙️ Settings | Premium, sync, ignored words (🧪 IGDB categories in beta), system alerts, language, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |

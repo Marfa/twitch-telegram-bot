@@ -51,7 +51,6 @@ from i18n import (
     sys_notifications_keyboard,
     template_strip_keyboard,
     watch_cats_nav_keyboard,
-    watch_filters_keyboard,
     whisper_alerts_keyboard,
     follow_monitor_keyboard,
 )
@@ -147,8 +146,8 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("watch_again", "watch:again"),
     ("watch_change", "watch:change"),
     ("watch_cat", "watch_cat:lucky"),
-    ("watch_filt", "watch_filt:next"),
-    ("watch_nav", "watch_nav:back"),
+    ("watch_mode", "watch_mode:alert"),
+    ("watch_nav", "watch_nav:cancel"),
     ("alert_history_page", "alert_history:page:1"),
     ("alert_history_more", "alert_history:more"),
     ("alert_history_menu", "alert_history:menu"),
@@ -345,17 +344,6 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             {"lang": loc, "dates": fix_dates},
         ),
         ("watch_cats_nav", watch_cats_nav_keyboard, {"lang": loc, "has_cats": False}),
-        (
-            "watch_filters",
-            watch_filters_keyboard,
-            {
-                "lang": loc,
-                "want_tags": False,
-                "want_viewers": False,
-                "want_language": False,
-                "want_mature": False,
-            },
-        ),
         (
             "edit_game_options",
             edit_game_options_keyboard,

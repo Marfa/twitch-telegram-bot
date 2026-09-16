@@ -261,25 +261,9 @@ def check_alert_setting_order() -> None:
     assert "edit_f:1:repeat" in live_labels
     assert not live_labels["edit_f:1:repeat"].startswith(("✅ ", "⬜️ "))
 
-    from i18n import edit_game_options_keyboard, watch_filters_keyboard
+    from i18n import edit_game_options_keyboard
 
-    # Exclude 18+ is a checkbox on create filters and game editor — no follow-up step.
-    filt = watch_filters_keyboard(
-        "en",
-        want_tags=False,
-        want_viewers=False,
-        want_language=False,
-        want_mature=True,
-    )
-    filt_cbs = {
-        (btn.callback_data or ""): btn.text
-        for row in filt.inline_keyboard
-        for btn in row
-    }
-    assert filt_cbs.get("watch_filt:toggle:mature", "").startswith("✅ ")
-    assert "watch_mature:1" not in filt_cbs
-    assert "watch_mature:0" not in filt_cbs
-
+    # Exclude 18+ is a checkbox in the game editor — no follow-up step.
     game_edit = edit_game_options_keyboard(
         1,
         "en",
