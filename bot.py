@@ -1720,8 +1720,20 @@ async def _enter_demo_mode(
     login = prem.twitch_channel_login() or "marfapr"
     user = await asyncio.to_thread(twitch.get_user, login)
     if user:
+        import custom_buttons as cbtn
+        from twitch import GAME_COVER_IMAGE_ID
+
         uid = str(user["id"])
         uname = str(user.get("login") or login).lower()
+        # Match admin sub #1 layout; stream button URL expands {username} at delivery.
+        stream_buttons = cbtn.dump_custom_buttons(
+            [
+                {
+                    "text": t("demo_seed_stream_btn", lang),
+                    "url": "https://www.twitch.tv/{username}",
+                }
+            ]
+        )
         for template_key in ("demo_seed_template", "demo_seed_template_2"):
             db.add_subscription(
                 owner_id=user_id,
@@ -1732,6 +1744,11 @@ async def _enter_demo_mode(
                 chat_id=user_id,
                 thread_id=None,
                 disable_link_preview=True,
+                strip_name_mentions=True,
+                attach_chat_button=True,
+                custom_buttons=stream_buttons,
+                image_file_id=GAME_COVER_IMAGE_ID,
+                image_position="before",
                 enabled=True,
                 notify_on_live=True,
                 notify_on_end=False,

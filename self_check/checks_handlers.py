@@ -802,6 +802,15 @@ def check_handlers() -> None:
             [{"text": "Go", "url": "https://example.com"}, {"text": "x", "url": "bad"}]
         )
         assert len(parse_custom_buttons(dumped)) == 1
+        # Demo stream button stores {username}; delivery expands it.
+        assert parse_custom_buttons(
+            dump_custom_buttons(
+                [{"text": "К стриму!", "url": "https://www.twitch.tv/{username}"}]
+            )
+        )
+        assert "{game_description}" in tr("demo_seed_template", "ru")
+        assert "{name}" in tr("demo_seed_template", "ru")
+        assert tr("demo_seed_stream_btn", "ru") == "К стриму!"
         packed = chunk_buttons(list(range(5)), per_row=2)
         assert packed == [[0, 1], [2, 3], [4]]
         assert chunk_buttons([1], per_row=2) == [[1]]
@@ -1691,6 +1700,8 @@ def check_handlers() -> None:
                 dest_type="dm",
                 twitch_username="SomeStreamer",
                 owner_id=42,
+                custom_buttons="[]",
+                attach_live_remind_button=False,
             ),
             "ru",
         )
@@ -1703,12 +1714,31 @@ def check_handlers() -> None:
                 dest_type="group",
                 twitch_username="SomeStreamer",
                 owner_id=42,
+                custom_buttons="[]",
+                attach_live_remind_button=False,
             ),
             "ru",
         )
         assert group_markup is not None
         group_btn = group_markup.inline_keyboard[0][0]
         assert group_btn.url and group_btn.web_app is None
+        stream_btn_markup = _alert_chat_button_markup(
+            SimpleNamespace(
+                attach_chat_button=False,
+                dest_type="dm",
+                twitch_username="wes_play",
+                owner_id=42,
+                custom_buttons=(
+                    '[{"text":"К стриму!","url":"https://www.twitch.tv/{username}"}]'
+                ),
+                attach_live_remind_button=False,
+            ),
+            "ru",
+        )
+        assert stream_btn_markup is not None
+        stream_btn = stream_btn_markup.inline_keyboard[0][0]
+        assert stream_btn.text == "К стриму!"
+        assert stream_btn.url == "https://www.twitch.tv/wes_play"
 
         from handlers.delivery import (
             _alert_chat_button_markup as _delivery_alert_markup,

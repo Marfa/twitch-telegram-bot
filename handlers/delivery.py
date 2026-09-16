@@ -252,11 +252,15 @@ def _alert_chat_button_markup(
     import custom_buttons as cbtn
 
     buttons: list[InlineKeyboardButton] = []
+    login = (sub.twitch_username or "").strip().lstrip("@").lower()
     for btn_def in cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None)):
+        url = str(btn_def.get("url") or "")
+        if login and "{username}" in url:
+            url = url.replace("{username}", login)
         buttons.append(
             InlineKeyboardButton(
                 str(btn_def.get("text") or "")[:64],
-                url=str(btn_def.get("url") or ""),
+                url=url,
             )
         )
     if sub.attach_chat_button:
