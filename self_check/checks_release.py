@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import premium as prem
 from db import open_database
@@ -203,6 +204,122 @@ def _check_release_active_cap() -> None:
         asyncio.run(_run())
 
 
+def _check_release_early_dup_stops_wizard() -> None:
+    """Existing release alert: show edit/continue, do not advance to days."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from db.models import ReleaseWatchPrefs, dump_release_watch_prefs
+    from handlers.release_watch import _wz, receive_release_pick
+
+    uid = 910_001
+    game_id = 4242
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(os.path.join(tmp, "rel_dup.db"))
+        db.upsert_user(uid)
+        prefs = ReleaseWatchPrefs(
+            igdb_game_id=game_id,
+            game_name="Dup Game",
+            days_before=3,
+            platforms=[],
+            date_unknown=True,
+        )
+        db.add_subscription(
+            owner_id=uid,
+            twitch_username="dupgame",
+            twitch_user_id=f"rel:{uid}:x",
+            message_template="t",
+            dest_type="dm",
+            chat_id=uid,
+            release_watch_prefs=dump_release_watch_prefs(prefs),
+        )
+        game = {"id": game_id, "name": "Dup Game", "summary": ""}
+        db.igdb_game_by_id = MagicMock(return_value=game)
+
+        async def _run() -> None:
+            bot = AsyncMock()
+            application = MagicMock()
+            application.bot_data = {"db": db}
+            query = AsyncMock()
+            query.data = f"rel:pick:{game_id}"
+            query.from_user = SimpleNamespace(id=uid)
+            query.message = SimpleNamespace(chat_id=uid)
+            query.edit_message_text = AsyncMock()
+            query.answer = AsyncMock()
+            update = MagicMock()
+            update.callback_query = query
+            update.effective_user = SimpleNamespace(id=uid)
+            update.effective_chat = SimpleNamespace(id=uid)
+            ctx = MagicMock()
+            ctx.application = application
+            ctx.bot = bot
+            ctx.user_data = {}
+            state = await receive_release_pick(update, ctx)
+            assert state == _wz()["RELEASE_DUP"]
+            assert ctx.user_data.get("alert_dup_force", {}).get("kind") == "release_wizard"
+            query.edit_message_text.assert_awaited()
+            markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+            assert markup is not None
+            cbs = {
+                (b.callback_data or "")
+                for row in markup.inline_keyboard
+                for b in row
+            }
+            assert any(c.startswith("alert_dup:edit:") for c in cbs)
+            assert "alert_dup:continue" in cbs
+            bot.send_message.assert_not_awaited()
+
+        asyncio.run(_run())
+
+
+def _check_game_alert_dedup_by_category() -> None:
+    """Same Twitch category → dup even if filters differ."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from db.models import WatchPrefs
+    from handlers.watch import create_category_watch_subscription
+
+    uid = 910_002
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(os.path.join(tmp, "game_dup.db"))
+        db.upsert_user(uid)
+
+        async def _run() -> None:
+            bot = AsyncMock()
+            first = WatchPrefs(
+                categories=[{"id": "509658", "name": "Just Chatting"}],
+                min_viewers=0,
+                max_viewers=None,
+                language=None,
+                tags=[],
+                exclude_mature=True,
+            )
+            _text, sub, status = await create_category_watch_subscription(
+                bot, db, uid, "en", first
+            )
+            assert status == "watch_create_alerts_ok"
+            assert sub is not None
+            second = WatchPrefs(
+                categories=[{"id": "509658", "name": "Just Chatting"}],
+                min_viewers=100,
+                max_viewers=None,
+                language="ru",
+                tags=["fps"],
+                exclude_mature=False,
+            )
+            _text2, existing, status2 = await create_category_watch_subscription(
+                bot, db, uid, "en", second
+            )
+            assert status2 == "watch_create_alerts_dup"
+            assert existing is not None
+            assert existing.id == sub.id
+
+        asyncio.run(_run())
+
+
 def run() -> None:
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
@@ -210,3 +327,5 @@ def run() -> None:
     _check_release_keyboard()
     _check_release_date_backfill()
     _check_release_active_cap()
+    _check_release_early_dup_stops_wizard()
+    _check_game_alert_dedup_by_category()

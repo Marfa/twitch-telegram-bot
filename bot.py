@@ -440,6 +440,7 @@ from handlers.release_watch import (
     on_release_find_streams,
     receive_release_dates_callback,
     receive_release_days,
+    receive_release_dup_callback,
     receive_release_game_text,
     receive_release_pick,
     start_edit_release_days,
@@ -748,9 +749,10 @@ logger = logging.getLogger(__name__)
     STREAM_SCHEDULE_VACATION_AUTO,
     RELEASE_SEARCH,
     RELEASE_PICK,
+    RELEASE_DUP,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(70)
+) = range(71)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -3072,6 +3074,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 CallbackQueryHandler(
                     receive_release_pick, pattern=r"^rel:(pick:\d+|cancel)$"
+                ),
+            ],
+            RELEASE_DUP: [
+                _wiz_cancel,
+                CallbackQueryHandler(cancel_release_callback, pattern=r"^rel:cancel$"),
+                CallbackQueryHandler(
+                    receive_release_dup_callback,
+                    pattern=r"^alert_dup:(edit:\d+|continue)$",
                 ),
             ],
             RELEASE_DATES: [

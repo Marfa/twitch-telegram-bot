@@ -116,7 +116,7 @@
   "watch_create_alerts": "Watch new streams by this filter?",
   "watch_create_alerts_ok": "Category alert created: <b>{name}</b>\n\n{summary}{paused_note}\n\nI'll notify you when new streams matching the filter go live. Default update frequency is one hour. You can change it in the alert settings.",
   "watch_create_alerts_none": "No filter to watch. Run «Game alert» again first.",
-  "watch_create_alerts_dup": "A game alert with this filter already exists.",
+  "watch_create_alerts_dup": "A game alert for this category already exists.",
   "edit_watch_locked": "This game alert watches streams by category/filter.\nEditing changes how often digests are sent.",
   "edit_game_menu": "Game alert #{sub_id} — {username}\n\n{summary}\n\nWhat to change?",
   "edit_game_cooldown": "Alert frequency",

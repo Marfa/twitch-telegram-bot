@@ -22,6 +22,8 @@ from db import (
     Subscription,
     WatchPrefs,
     dump_category_watch_prefs,
+    is_category_watch_sub,
+    parse_category_watch_prefs,
     watch_filter_auto_name,
 )
 from i18n import (
@@ -70,6 +72,16 @@ def _subs_for_owner(db: Database, owner_id: int):
     from bot import _subs_for_owner as _impl
 
     return _impl(db, owner_id)
+
+
+def _category_ids(prefs: WatchPrefs) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            str(c.get("id") or "")
+            for c in (prefs.categories or [])
+            if str(c.get("id") or "").strip()
+        )
+    )
 
 
 def _set_wizard_back(context: ContextTypes.DEFAULT_TYPE, state: int) -> None:
@@ -1161,10 +1173,14 @@ async def create_category_watch_subscription(
     from handlers.notifications import CATEGORY_WATCH_COOLDOWN_MINUTES
 
     prefs_json = dump_category_watch_prefs(prefs)
+    want_ids = _category_ids(prefs)
     existing_subs = _subs_for_owner(db, user_id)
-    if not allow_duplicate:
+    if not allow_duplicate and want_ids:
         for sub in existing_subs:
-            if (sub.category_watch_prefs or "").strip() == prefs_json:
+            if not is_category_watch_sub(sub):
+                continue
+            existing = parse_category_watch_prefs(sub.category_watch_prefs)
+            if existing and _category_ids(existing) == want_ids:
                 return t("watch_create_alerts_dup", lang), sub, "watch_create_alerts_dup"
     if len(existing_subs) >= MAX_SUBSCRIPTIONS_PER_OWNER:
         return (

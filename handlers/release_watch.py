@@ -29,7 +29,7 @@ from db import (
     parse_release_watch_prefs,
 )
 from db.models import ReleasePlatformPref, ReleaseWatchPrefs, release_platform_key
-from i18n import DEFAULT_LOCALE, btn, t
+from i18n import DEFAULT_LOCALE, alert_dup_keyboard, btn, t
 from igdb_dumps import igdb_image_url
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,7 @@ def _wz() -> dict[str, int]:
     from bot import (
         RELEASE_DATES,
         RELEASE_DAYS,
+        RELEASE_DUP,
         RELEASE_PICK,
         RELEASE_SEARCH,
     )
@@ -57,6 +58,7 @@ def _wz() -> dict[str, int]:
     return {
         "RELEASE_SEARCH": RELEASE_SEARCH,
         "RELEASE_PICK": RELEASE_PICK,
+        "RELEASE_DUP": RELEASE_DUP,
         "RELEASE_DATES": RELEASE_DATES,
         "RELEASE_DAYS": RELEASE_DAYS,
     }
@@ -328,11 +330,71 @@ async def receive_release_pick(
         ),
         None,
     )
-    if exists:
-        await context.bot.send_message(
-            chat_id,
-            t("release_already_subscribed", lang),
-        )
+    if exists and not context.user_data.get("release_allow_duplicate"):
+        context.user_data["release_game"] = game
+        context.user_data["alert_dup_force"] = {
+            "kind": "release_wizard",
+            "sub_id": exists.id,
+        }
+        try:
+            await query.edit_message_text(
+                t("release_already_subscribed", lang),
+                reply_markup=alert_dup_keyboard(lang, exists.id),
+            )
+        except BadRequest:
+            await context.bot.send_message(
+                chat_id,
+                t("release_already_subscribed", lang),
+                reply_markup=alert_dup_keyboard(lang, exists.id),
+            )
+        return _wz()["RELEASE_DUP"]
+    return await _continue_release_with_game(update, context, lang, game)
+
+
+async def receive_release_dup_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Edit existing release alert or continue wizard to create another."""
+    query = update.callback_query
+    await query.answer()
+    db: Database = context.application.bot_data["db"]
+    user_id = query.from_user.id
+    lang = _user_lang(db, user_id)
+    data = query.data or ""
+    if data.startswith("alert_dup:edit:"):
+        context.user_data.pop("alert_dup_force", None)
+        from handlers.subscriptions import on_share_dup_edit
+
+        await on_share_dup_edit(update, context)
+        context.user_data.clear()
+        return ConversationHandler.END
+    if data == "alert_dup:continue":
+        context.user_data.pop("alert_dup_force", None)
+        context.user_data["release_allow_duplicate"] = True
+        game = context.user_data.get("release_game")
+        if not isinstance(game, dict) or not game.get("id"):
+            await query.edit_message_text(t("release_game_not_found", lang))
+            context.user_data.clear()
+            return ConversationHandler.END
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
+        return await _continue_release_with_game(update, context, lang, game)
+    return _wz()["RELEASE_DUP"]
+
+
+async def _continue_release_with_game(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    game: dict[str, Any],
+) -> int:
+    query = update.callback_query
+    db: Database = context.application.bot_data["db"]
+    chat_id = reply_chat_id(update)
+    user_id = update.effective_user.id
+    game_id = int(game["id"])
     now = int(time.time())
     all_dates = db.igdb_release_dates_for_game(game_id)
     future = [r for r in all_dates if int(r["date"]) > now]
@@ -344,17 +406,16 @@ async def receive_release_pick(
         context.user_data["release_date_unknown"] = True
         context.user_data["release_dates"] = []
         context.user_data["release_selected"] = set()
-        try:
-            await query.edit_message_text(
-                t("release_date_unknown", lang, game=html.escape(name)),
-                parse_mode=ParseMode.HTML,
-            )
-        except BadRequest:
-            await context.bot.send_message(
-                chat_id,
-                t("release_date_unknown", lang, game=html.escape(name)),
-                parse_mode=ParseMode.HTML,
-            )
+        text = t("release_date_unknown", lang, game=html.escape(name))
+        if query:
+            try:
+                await query.edit_message_text(text, parse_mode=ParseMode.HTML)
+            except BadRequest:
+                await context.bot.send_message(
+                    chat_id, text, parse_mode=ParseMode.HTML
+                )
+        else:
+            await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)
         await context.bot.send_message(chat_id, t("release_days_prompt", lang))
         return _wz()["RELEASE_DAYS"]
     if not future:
@@ -363,10 +424,11 @@ async def receive_release_pick(
             lang,
             game=html.escape(name),
         )
-        try:
-            await query.edit_message_text("✓")
-        except BadRequest:
-            pass
+        if query:
+            try:
+                await query.edit_message_text("✓")
+            except BadRequest:
+                pass
         find_kb = InlineKeyboardMarkup(
             [
                 [
@@ -393,7 +455,6 @@ async def receive_release_pick(
         )
         context.user_data.clear()
         return ConversationHandler.END
-    # Deduplicate by platform_id+date for checkbox keys
     context.user_data["release_game"] = game
     context.user_data["release_date_unknown"] = False
     context.user_data["release_dates"] = future
@@ -406,18 +467,27 @@ async def receive_release_pick(
         context.user_data["release_selected"] = set()
     selected: set[str] = context.user_data["release_selected"]
     text = t("release_planned_dates", lang, game=html.escape(name))
-    try:
-        await query.edit_message_text(
-            text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=release_dates_keyboard(future, selected, lang),
-        )
-    except BadRequest:
+    markup = release_dates_keyboard(future, selected, lang)
+    if query:
+        try:
+            await query.edit_message_text(
+                text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
+        except BadRequest:
+            await context.bot.send_message(
+                chat_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
+    else:
         await context.bot.send_message(
             chat_id,
             text,
             parse_mode=ParseMode.HTML,
-            reply_markup=release_dates_keyboard(future, selected, lang),
+            reply_markup=markup,
         )
     return _wz()["RELEASE_DATES"]
 
@@ -611,7 +681,12 @@ async def receive_release_days(
         date_unknown=date_unknown,
     )
     sub, status = await create_release_subscription(
-        context.bot, db, user_id, lang, prefs=prefs
+        context.bot,
+        db,
+        user_id,
+        lang,
+        prefs=prefs,
+        allow_duplicate=bool(context.user_data.get("release_allow_duplicate")),
     )
     markup = _menu(lang, user_id)
     if status == "sub_limit":
