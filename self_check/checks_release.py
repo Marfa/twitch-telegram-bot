@@ -320,6 +320,80 @@ def _check_game_alert_dedup_by_category() -> None:
         asyncio.run(_run())
 
 
+def _check_game_alert_early_dup_after_category() -> None:
+    """Alert mode: dup right after category pick, before filters."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from db.models import WatchPrefs, dump_category_watch_prefs
+    from handlers.watch import _add_watch_category, _ws
+
+    uid = 910_003
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "game_early.db")
+        db.upsert_user(uid)
+        prefs = WatchPrefs(
+            categories=[{"id": "509658", "name": "Just Chatting"}],
+            min_viewers=0,
+            max_viewers=None,
+            language=None,
+            tags=[],
+            exclude_mature=True,
+        )
+        db.add_subscription(
+            owner_id=uid,
+            twitch_username="jc",
+            twitch_user_id=f"cw:{uid}:x",
+            message_template="t",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            category_watch_prefs=dump_category_watch_prefs(prefs),
+            from_watch_suggest=True,
+        )
+
+        async def _run() -> None:
+            bot = AsyncMock()
+            application = MagicMock()
+            application.bot_data = {"db": db}
+            update = MagicMock()
+            update.callback_query = None
+            update.effective_user = SimpleNamespace(id=uid)
+            update.effective_message = MagicMock()
+            update.effective_message.reply_text = AsyncMock()
+            update.effective_message.chat_id = uid
+            ctx = MagicMock()
+            ctx.application = application
+            ctx.bot = bot
+            ctx.user_data = {
+                "watch_create_alert": True,
+                "watch_categories": [],
+            }
+            state = await _add_watch_category(
+                update,
+                ctx,
+                "en",
+                {"id": "509658", "name": "Just Chatting"},
+            )
+            assert state == _ws()["WATCH_DUP"]
+            assert ctx.user_data.get("alert_dup_force", {}).get("kind") == "game_wizard"
+            update.effective_message.reply_text.assert_awaited()
+            markup = update.effective_message.reply_text.await_args.kwargs.get(
+                "reply_markup"
+            )
+            assert markup is not None
+            cbs = {
+                (b.callback_data or "")
+                for row in markup.inline_keyboard
+                for b in row
+            }
+            assert any(c.startswith("alert_dup:edit:") for c in cbs)
+            assert "alert_dup:continue" in cbs
+
+        asyncio.run(_run())
+
+
 def run() -> None:
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
@@ -329,3 +403,4 @@ def run() -> None:
     _check_release_active_cap()
     _check_release_early_dup_stops_wizard()
     _check_game_alert_dedup_by_category()
+    _check_game_alert_early_dup_after_category()

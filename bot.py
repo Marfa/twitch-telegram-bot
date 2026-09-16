@@ -423,6 +423,7 @@ from handlers.watch import (
     on_watch_create_alerts,
     receive_watch_category_callback,
     receive_watch_category_text,
+    receive_watch_dup_callback,
     receive_watch_filters_callback,
     receive_watch_language_callback,
     receive_watch_language_text,
@@ -727,6 +728,7 @@ logger = logging.getLogger(__name__)
     PREMIUM_GATE,
     WATCH_PICK,
     WATCH_CATEGORIES,
+    WATCH_DUP,
     WATCH_FILTERS,
     WATCH_TAGS,
     WATCH_VIEWERS,
@@ -752,7 +754,7 @@ logger = logging.getLogger(__name__)
     RELEASE_DUP,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(71)
+) = range(72)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -3009,6 +3011,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     receive_watch_category_callback, pattern=r"^watch_cat:"
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_watch_category_text),
+            ],
+            WATCH_DUP: [
+                _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
+                CallbackQueryHandler(
+                    receive_watch_dup_callback,
+                    pattern=r"^alert_dup:(edit:\d+|continue)$",
+                ),
             ],
             WATCH_FILTERS: [
                 _wiz_cancel,

@@ -5024,8 +5024,11 @@ async def on_share_decline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def on_alert_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Open editor for an existing drops/game/release alert after a create-time dup."""
     force = context.user_data.get("alert_dup_force")
-    # Release wizard early-dup stays in conversation (RELEASE_DUP).
-    if isinstance(force, dict) and force.get("kind") == "release_wizard":
+    # Release / game wizard early-dup stays in conversation.
+    if isinstance(force, dict) and force.get("kind") in (
+        "release_wizard",
+        "game_wizard",
+    ):
         return
     context.user_data.pop("alert_dup_force", None)
     await on_share_dup_edit(update, context)
@@ -5036,7 +5039,10 @@ async def on_alert_dup_continue(
 ) -> None:
     """Continue creating another alert despite an existing match (like stream CHANNEL_DUP)."""
     force_peek = context.user_data.get("alert_dup_force")
-    if isinstance(force_peek, dict) and force_peek.get("kind") == "release_wizard":
+    if isinstance(force_peek, dict) and force_peek.get("kind") in (
+        "release_wizard",
+        "game_wizard",
+    ):
         return
     query = update.callback_query
     await query.answer()

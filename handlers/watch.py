@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 def _ws() -> dict[str, int]:
     from bot import (
         WATCH_CATEGORIES,
+        WATCH_DUP,
         WATCH_FILTERS,
         WATCH_LANGUAGE,
         WATCH_PICK,
@@ -60,6 +61,7 @@ def _ws() -> dict[str, int]:
 
     return {
         "WATCH_CATEGORIES": WATCH_CATEGORIES,
+        "WATCH_DUP": WATCH_DUP,
         "WATCH_FILTERS": WATCH_FILTERS,
         "WATCH_LANGUAGE": WATCH_LANGUAGE,
         "WATCH_PICK": WATCH_PICK,
@@ -82,6 +84,30 @@ def _category_ids(prefs: WatchPrefs) -> tuple[str, ...]:
             if str(c.get("id") or "").strip()
         )
     )
+
+
+def _category_ids_from_cats(cats: list[dict[str, str]]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            str(c.get("id") or "")
+            for c in (cats or [])
+            if str(c.get("id") or "").strip()
+        )
+    )
+
+
+def _find_category_watch_by_ids(
+    db: Database, user_id: int, want_ids: tuple[str, ...]
+) -> Subscription | None:
+    if not want_ids:
+        return None
+    for sub in _subs_for_owner(db, user_id):
+        if not is_category_watch_sub(sub):
+            continue
+        existing = parse_category_watch_prefs(sub.category_watch_prefs)
+        if existing and _category_ids(existing) == want_ids:
+            return sub
+    return None
 
 
 def _set_wizard_back(context: ContextTypes.DEFAULT_TYPE, state: int) -> None:
@@ -906,7 +932,12 @@ async def _finalize_watch_wizard(
             pass
     if create_alert:
         text, sub, status = await create_category_watch_subscription(
-            context.bot, db, user_id, lang, prefs
+            context.bot,
+            db,
+            user_id,
+            lang,
+            prefs,
+            allow_duplicate=bool(context.user_data.get("watch_allow_duplicate")),
         )
         if status == "watch_create_alerts_dup" and sub is not None:
             from i18n import alert_dup_keyboard
@@ -1176,12 +1207,9 @@ async def create_category_watch_subscription(
     want_ids = _category_ids(prefs)
     existing_subs = _subs_for_owner(db, user_id)
     if not allow_duplicate and want_ids:
-        for sub in existing_subs:
-            if not is_category_watch_sub(sub):
-                continue
-            existing = parse_category_watch_prefs(sub.category_watch_prefs)
-            if existing and _category_ids(existing) == want_ids:
-                return t("watch_create_alerts_dup", lang), sub, "watch_create_alerts_dup"
+        existing = _find_category_watch_by_ids(db, user_id, want_ids)
+        if existing is not None:
+            return t("watch_create_alerts_dup", lang), existing, "watch_create_alerts_dup"
     if len(existing_subs) >= MAX_SUBSCRIPTIONS_PER_OWNER:
         return (
             t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
@@ -1320,20 +1348,77 @@ async def _add_watch_category(
     elif not any(c["id"] == entry["id"] for c in cats):
         cats.append(entry)
     context.user_data.pop("watch_cat_candidates", None)
-    if len(cats) >= _WATCH_MAX_CATS:
+    if len(cats) < _WATCH_MAX_CATS:
+        await update.effective_message.reply_text(
+            t(
+                "watch_cats_added",
+                lang,
+                name=entry["name"],
+                count=len(cats),
+                max=_WATCH_MAX_CATS,
+                list=", ".join(c["name"] for c in cats),
+            ),
+            reply_markup=_watch_cats_keyboard(context, lang, has_cats=True),
+        )
+        return _ws()["WATCH_CATEGORIES"]
+    if (
+        context.user_data.get("watch_create_alert")
+        and not context.user_data.get("watch_allow_duplicate")
+    ):
+        db: Database = context.application.bot_data["db"]
+        user_id = update.effective_user.id
+        existing = _find_category_watch_by_ids(
+            db, user_id, _category_ids_from_cats(cats)
+        )
+        if existing is not None:
+            from i18n import alert_dup_keyboard
+
+            context.user_data["alert_dup_force"] = {
+                "kind": "game_wizard",
+                "sub_id": existing.id,
+            }
+            text = t("watch_create_alerts_dup", lang)
+            markup = alert_dup_keyboard(lang, existing.id)
+            msg = update.effective_message
+            if update.callback_query:
+                try:
+                    await update.callback_query.edit_message_text(
+                        text, reply_markup=markup
+                    )
+                except BadRequest:
+                    await context.bot.send_message(
+                        msg.chat_id, text, reply_markup=markup
+                    )
+            else:
+                await msg.reply_text(text, reply_markup=markup)
+            return _ws()["WATCH_DUP"]
+    return await _go_watch_filters_prompt(update, context, lang)
+
+
+async def receive_watch_dup_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Edit existing game alert or continue wizard to create another."""
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = query.data or ""
+    if data.startswith("alert_dup:edit:"):
+        context.user_data.pop("alert_dup_force", None)
+        from handlers.subscriptions import on_share_dup_edit
+
+        await on_share_dup_edit(update, context)
+        context.user_data.clear()
+        return ConversationHandler.END
+    if data == "alert_dup:continue":
+        context.user_data.pop("alert_dup_force", None)
+        context.user_data["watch_allow_duplicate"] = True
+        try:
+            await query.edit_message_reply_markup(None)
+        except BadRequest:
+            pass
         return await _go_watch_filters_prompt(update, context, lang)
-    await update.effective_message.reply_text(
-        t(
-            "watch_cats_added",
-            lang,
-            name=entry["name"],
-            count=len(cats),
-            max=_WATCH_MAX_CATS,
-            list=", ".join(c["name"] for c in cats),
-        ),
-        reply_markup=_watch_cats_keyboard(context, lang, has_cats=True),
-    )
-    return _ws()["WATCH_CATEGORIES"]
+    return _ws()["WATCH_DUP"]
 
 
 async def receive_watch_viewers_text(
