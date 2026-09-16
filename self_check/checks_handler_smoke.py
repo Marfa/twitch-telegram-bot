@@ -1170,6 +1170,65 @@ async def _smoke_delivery_and_helpers(db) -> None:
     # empty due set — should return without crash
     await check_schedule_reminders(ctx)
 
+    # Upcoming reminder must pass schedule category game_id into render
+    # so {game_description} resolves (not left as "—").
+    from datetime import datetime, timedelta, timezone
+
+    sched_uid = _FREE_UID + 40
+    db.upsert_user(sched_uid)
+    db.set_user_locale(sched_uid, "en")
+    remind_sub_id = db.add_subscription(
+        sched_uid,
+        "marfapr",
+        "tw_sched_desc",
+        "Through {minutes}\n{game}\n{game_description}",
+        "dm",
+        sched_uid,
+        None,
+    )
+    assert db.update_subscription(
+        remind_sub_id,
+        sched_uid,
+        notify_on_live=False,
+        schedule_reminder_minutes=60,
+        schedule_reminder_configured=True,
+    )
+    start_iso = (
+        datetime.now(timezone.utc) + timedelta(minutes=28)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    twitch_sched = MagicMock()
+    twitch_sched.get_channel_schedule = MagicMock(
+        return_value={
+            "vacation": None,
+            "segments": [
+                {
+                    "id": "seg-atom",
+                    "title": "stream",
+                    "start_time": start_iso,
+                    "canceled_until": None,
+                    "category": {"id": "493057", "name": "ATOM RPG"},
+                }
+            ],
+        }
+    )
+    twitch_sched.vacation_active = MagicMock(return_value=False)
+    twitch_sched.resolve_game_description = MagicMock(
+        return_value="Post-apocalyptic RPG set in the Soviet Union."
+    )
+    twitch_sched._igdb_db = db
+    application.bot_data["twitch"] = twitch_sched
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=42))
+    bot.send_photo = AsyncMock()
+    ctx = _ctx(application)
+    ctx.job = None
+    await check_schedule_reminders(ctx)
+    twitch_sched.resolve_game_description.assert_called()
+    assert twitch_sched.resolve_game_description.call_args.args[0] == "493057"
+    sent = bot.send_message.await_args.kwargs.get("text") or ""
+    assert "ATOM RPG" in sent
+    assert "Post-apocalyptic RPG" in sent
+    assert "—" not in sent
+
     # error_handler: blocked-user Forbidden is expected noise (not PostHog).
     from bot import error_handler
 

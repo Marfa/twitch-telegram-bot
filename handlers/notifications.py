@@ -808,15 +808,8 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 template = (sub.message_template or "").strip()
                 if not template:
                     continue
-                text = _render_sub_template(
-                    sub,
-                    username,
-                    game,
-                    title,
-                    twitch=twitch,
-                    extra={"minutes": str(max(1, minutes_left))},
-                )
-                # Map schedule category → stream-shaped fields for game-cover resolve.
+                # Schedule category → stream-shaped fields for {game_description}/
+                # {game_igdb}/{game_steam} and game-cover resolve.
                 cover_stream = {
                     "game_id": (
                         str(category.get("id") or "")
@@ -826,6 +819,15 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     "game_name": game,
                     "category": category if isinstance(category, dict) else {},
                 }
+                text = _render_sub_template(
+                    sub,
+                    username,
+                    game,
+                    title,
+                    twitch=twitch,
+                    stream=cover_stream,
+                    extra={"minutes": str(max(1, minutes_left))},
+                )
                 ok = await _send_notification(
                     context.bot,
                     db,
