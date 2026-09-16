@@ -1632,6 +1632,8 @@ class TwitchClient:
 
 def localize_igdb_summary(summary: str, lang: str) -> str:
     """IGDB summaries are US English; translate for non-en bot locales when DeepL is set."""
+    import html as _html
+
     text = (summary or "").strip()
     if not text:
         return "—"
@@ -1639,11 +1641,11 @@ def localize_igdb_summary(summary: str, lang: str) -> str:
 
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     if locale == "en":
-        return text
+        return _html.unescape(text)
     from config import DEEPL_API_KEY
 
     if not DEEPL_API_KEY:
-        return text
+        return _html.unescape(text)
     cache_key = (text, locale)
     cached = _IGDB_SUMMARY_TR_CACHE.get(cache_key)
     if cached is not None:
@@ -1651,10 +1653,20 @@ def localize_igdb_summary(summary: str, lang: str) -> str:
     try:
         from translate import translate_text
 
-        out = translate_text(text, target_lang=locale, source_lang="en").strip() or text
+        # Plain prose — never DeepL HTML mode (avoids Baldur&#x27;s in alerts).
+        out = (
+            translate_text(
+                text,
+                target_lang=locale,
+                source_lang="en",
+                preserve_html=False,
+            ).strip()
+            or text
+        )
+        out = _html.unescape(out)
     except Exception:
         logger.exception("IGDB summary translate failed lang=%s", locale)
-        return text
+        return _html.unescape(text)
     if len(_IGDB_SUMMARY_TR_CACHE) >= _IGDB_SUMMARY_TR_CACHE_MAX:
         _IGDB_SUMMARY_TR_CACHE.clear()
     _IGDB_SUMMARY_TR_CACHE[cache_key] = out

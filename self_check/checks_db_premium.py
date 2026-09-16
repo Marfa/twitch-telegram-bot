@@ -1057,6 +1057,37 @@ def check_db_premium() -> None:
     from translate import markdown_to_telegram_html
 
     assert translate_text("hello", target_lang="en", source_lang="en") == "hello"
+    # Plain text must not force DeepL HTML mode (avoids &#x27; in alerts).
+    from unittest.mock import MagicMock, patch
+
+    with patch("translate.DEEPL_API_KEY", "test-key"), patch(
+        "translate.requests.post"
+    ) as post:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"translations": [{"text": "привет"}]}
+        post.return_value = mock_resp
+        assert translate_text("hello", target_lang="ru", source_lang="en") == "привет"
+        sent = post.call_args.kwargs["data"]
+        assert "tag_handling" not in sent
+        assert (
+            translate_text(
+                "<b>hi</b>", target_lang="ru", source_lang="en"
+            )
+            == "привет"
+        )
+        sent_html = post.call_args.kwargs["data"]
+        assert sent_html.get("tag_handling") == "html"
+    from twitch import localize_igdb_summary
+
+    with patch("config.DEEPL_API_KEY", "x"), patch(
+        "translate.translate_text",
+        return_value="Baldur&#x27;s Gate и другие",
+    ):
+        assert (
+            localize_igdb_summary("Baldur's Gate and others", "ru")
+            == "Baldur's Gate и другие"
+        )
     assert (
         markdown_to_telegram_html("**Доказательства**\n\n- item")
         == "<b>Доказательства</b>\n\n- item"

@@ -61,7 +61,13 @@ def _normalize_locale(locale: str | None) -> str:
     return DEFAULT_LOCALE
 
 
-def translate_text(text: str, *, target_lang: str, source_lang: str | None = None) -> str:
+def translate_text(
+    text: str,
+    *,
+    target_lang: str,
+    source_lang: str | None = None,
+    preserve_html: bool | None = None,
+) -> str:
     target = _normalize_locale(target_lang)
     source = _normalize_locale(source_lang) if source_lang else None
     if source and target == source:
@@ -72,12 +78,19 @@ def translate_text(text: str, *, target_lang: str, source_lang: str | None = Non
     if not api_key:
         return text
 
+    # HTML mode preserves <b>/<a>/… for Telegram; on plain text DeepL emits
+    # entities like &#x27; which show literally when parse_mode is off.
+    use_html = (
+        preserve_html
+        if preserve_html is not None
+        else ("<" in text and ">" in text)
+    )
     payload: dict[str, object] = {
         "text": [text],
         "target_lang": _DEEPL_TARGET[target],
-        # Preserve Telegram HTML from message.text_html (bold/italic/links).
-        "tag_handling": "html",
     }
+    if use_html:
+        payload["tag_handling"] = "html"
     if source:
         payload["source_lang"] = _DEEPL_SOURCE[source]
 
