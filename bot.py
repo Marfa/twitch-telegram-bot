@@ -3083,7 +3083,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             RELEASE_PICK: [
                 _wiz_cancel,
                 CallbackQueryHandler(
-                    receive_release_pick, pattern=r"^rel:(pick:\d+|cancel)$"
+                    receive_release_pick,
+                    pattern=r"^rel:(pick:\d+|page:\d+|page:noop|cancel)$",
                 ),
             ],
             RELEASE_DUP: [

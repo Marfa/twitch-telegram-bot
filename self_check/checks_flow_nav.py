@@ -1085,6 +1085,72 @@ async def _scenario_wizard_release_alert(db) -> None:
     cap.assert_turn("wizard_release_alert_search")
 
 
+async def _scenario_wizard_release_pick_pages(db) -> None:
+    """§6.3 Release game pick — pages keep Cancel; › flips markup."""
+    from handlers.release_watch import (
+        RELEASE_BETA_ID,
+        _wz,
+        receive_release_game_text,
+        receive_release_pick,
+    )
+
+    with db._conn() as conn:
+        for i in range(12):
+            conn.execute(
+                """
+                INSERT INTO igdb_games
+                    (id, name, summary, first_release_date, total_rating_count)
+                VALUES (?, ?, '', ?, 0)
+                """,
+                (1000 + i, f"PageGame {i}", 1_800_000_000 - i),
+            )
+        conn.commit()
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+
+    async def _reply_text(*args, **kwargs):
+        cap.markups.extend(markups_from_call(kwargs))
+        status = MagicMock()
+
+        async def _edit_text(*a, **kw):
+            cap.markups.extend(markups_from_call(kw))
+            return None
+
+        status.edit_text = AsyncMock(side_effect=_edit_text)
+        return status
+
+    update = _msg_update(_FREE_UID, "PageGame", cap)
+    update.effective_message.reply_text = AsyncMock(side_effect=_reply_text)
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
+    db.set_beta_enrollment(_FREE_UID, RELEASE_BETA_ID, True)
+    state = await receive_release_game_text(update, ctx)
+    assert state == _wz()["RELEASE_PICK"]
+    hits = ctx.user_data.get("release_search_hits") or []
+    assert len(hits) > 5
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any((b.callback_data or "") == "rel:cancel" for row in m.inline_keyboard for b in row)
+        and any((b.callback_data or "") == "rel:page:1" for row in m.inline_keyboard for b in row)
+        for m in cap.markups
+    )
+    cap.assert_turn("wizard_release_pick_page0")
+
+    update, query = _cb_update(_FREE_UID, "rel:page:1", cap)
+    state = await receive_release_pick(update, ctx)
+    assert state == _wz()["RELEASE_PICK"]
+    query.edit_message_reply_markup.assert_awaited()
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any((b.callback_data or "") == "rel:cancel" for row in m.inline_keyboard for b in row)
+        and any((b.callback_data or "") == "rel:page:0" for row in m.inline_keyboard for b in row)
+        for m in cap.markups
+    )
+    cap.assert_turn("wizard_release_pick_page1")
+
+
 async def _scenario_wizard_alert_type_other(db) -> None:
     """§2.1 Other — inline Other features; Back returns to alert type."""
     from handlers.wizard import _wz, alert_type_open_other, receive_new_sub_other
@@ -2230,6 +2296,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_drops_game(db)
         await _scenario_wizard_game_alert(db)
         await _scenario_wizard_release_alert(db)
+        await _scenario_wizard_release_pick_pages(db)
         await _scenario_wizard_alert_type_other(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_image_ask(db)

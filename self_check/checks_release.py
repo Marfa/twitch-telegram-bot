@@ -93,6 +93,47 @@ def _check_release_pick_disambiguates() -> None:
     assert "The CUBE" in labels2
 
 
+def _check_release_pick_pagination() -> None:
+    from handlers.release_watch import release_game_pick_keyboard
+
+    games = [{"id": i, "name": f"Game {i}"} for i in range(12)]
+    kb0 = release_game_pick_keyboard(games, "en", page=0)
+    texts0 = [b.text for row in kb0.inline_keyboard for b in row]
+    cbs0 = [b.callback_data for row in kb0.inline_keyboard for b in row]
+    assert "Game 0" in texts0
+    assert "Game 4" in texts0
+    assert "Game 5" not in texts0
+    assert "1/3" in texts0
+    assert "rel:page:1" in cbs0
+    assert "rel:page:noop" in cbs0
+    kb1 = release_game_pick_keyboard(games, "en", page=1)
+    texts1 = [b.text for row in kb1.inline_keyboard for b in row]
+    cbs1 = [b.callback_data for row in kb1.inline_keyboard for b in row]
+    assert "Game 5" in texts1
+    assert "Game 9" in texts1
+    assert "2/3" in texts1
+    assert "rel:page:0" in cbs1
+    assert "rel:page:2" in cbs1
+    # Duplicate names across pages still get company labels.
+    dupes = (
+        [{"id": 1, "name": "The Cube"}]
+        + [{"id": i, "name": f"Other {i}"} for i in range(2, 7)]
+        + [{"id": 99, "name": "The Cube"}]
+    )
+    kb_dup = release_game_pick_keyboard(
+        dupes, "en", companies={1: "A", 99: "B"}, page=0
+    )
+    assert any(
+        b.text == "The Cube (A)" for row in kb_dup.inline_keyboard for b in row
+    )
+    kb_dup2 = release_game_pick_keyboard(
+        dupes, "en", companies={1: "A", 99: "B"}, page=1
+    )
+    assert any(
+        b.text == "The Cube (B)" for row in kb_dup2.inline_keyboard for b in row
+    )
+
+
 def _check_release_search_punct() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         db = open_database(Path(tmp) / "bot.db")
@@ -104,6 +145,67 @@ def _check_release_search_punct() -> None:
             conn.commit()
         hits = db.igdb_search_games_by_name("Worms: Galactic Tactics", limit=5)
         assert any(h["id"] == 9 for h in hits)
+
+
+def _check_release_search_control_prefix() -> None:
+    """'Control' prefers Control* titles (newest first), not Air Control."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        with db._conn() as conn:
+            for gid, name, released, rating in (
+                (1, "Air Control", 1_700_000_000, 50),
+                (2, "Control", 1_566_864_000, 966),
+                (3, "Control Craft 2", 1_455_494_400, 1),
+                (4, "Control Resonant", 1_790_208_000, 0),
+                (5, "Remote Control", 1_800_000_000, 10),
+                (6, "Control Room", 1_780_000_000, 0),
+                (7, "Control Over", 1_760_000_000, 0),
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO igdb_games
+                        (id, name, summary, first_release_date, total_rating_count)
+                    VALUES (?, ?, '', ?, ?)
+                    """,
+                    (gid, name, released, rating),
+                )
+            conn.commit()
+        hits = db.igdb_search_games_by_name("Control", limit=5)
+        names = [h["name"] for h in hits]
+        assert names[0] == "Control"
+        assert "Control Resonant" in names
+        assert names.index("Control Resonant") == 1  # newest Control*
+        assert "Air Control" not in names
+        assert "Remote Control" not in names
+
+
+def _check_release_search_gta_alias() -> None:
+    """GTA / GTA 6 / GTA VI resolve to Grand Theft Auto VI via acronym + numerals."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        with db._conn() as conn:
+            for gid, name, released, rating in (
+                (10, "GTA Long Night", 1_700_000_000, 8),
+                (11, "Grand Theft Auto: Vice City", 1_000_000_000, 3157),
+                (12, "Grand Theft Auto VI", 1_795_046_400, 0),
+                (13, "Grand Theft Auto V", 1_400_000_000, 5000),
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO igdb_games
+                        (id, name, summary, first_release_date, total_rating_count)
+                    VALUES (?, ?, '', ?, ?)
+                    """,
+                    (gid, name, released, rating),
+                )
+            conn.commit()
+        for q in ("GTA", "GTA 6", "GTA VI"):
+            hits = db.igdb_search_games_by_name(q, limit=5)
+            names = [h["name"] for h in hits]
+            assert "Grand Theft Auto VI" in names, q
+        # Numeral query should not pull Vice City (vi ⊂ vice).
+        hits6 = db.igdb_search_games_by_name("GTA VI", limit=5)
+        assert all("Vice" not in h["name"] for h in hits6)
 
 
 def _check_release_search_exact_duplicates() -> None:
@@ -638,7 +740,10 @@ def _check_sync_unfollow_skips_release_and_drops() -> None:
 def run() -> None:
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
+    _check_release_pick_pagination()
     _check_release_search_punct()
+    _check_release_search_control_prefix()
+    _check_release_search_gta_alias()
     _check_release_search_exact_duplicates()
     _check_release_keyboard()
     _check_release_date_backfill()

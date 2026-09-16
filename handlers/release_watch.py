@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 RELEASE_BETA_ID = "release-alerts"
 _IGDB_ATTR = '<a href="https://www.igdb.com">IGDB.com</a>'
+_RELEASE_PICK_PAGE_SIZE = 5
+_RELEASE_SEARCH_LIMIT = 100
 
 
 def release_feature_available(db: Database, user_id: int) -> bool:
@@ -88,21 +90,27 @@ def release_game_pick_keyboard(
     lang: str,
     *,
     companies: dict[int, str] | None = None,
+    page: int = 0,
+    page_size: int = _RELEASE_PICK_PAGE_SIZE,
 ) -> InlineKeyboardMarkup:
     from collections import Counter
 
-    name_counts = Counter(
-        str(g.get("name") or "").strip().casefold()
+    usable = [
+        g
         for g in games
         if g.get("id") is not None and str(g.get("name") or "").strip()
+    ]
+    size = max(1, int(page_size))
+    total_pages = max(1, (len(usable) + size - 1) // size) if usable else 1
+    page = max(0, min(int(page), total_pages - 1))
+    chunk = usable[page * size : (page + 1) * size]
+    # Counts over the full hit list so duplicates stay labeled across pages.
+    name_counts = Counter(
+        str(g.get("name") or "").strip().casefold() for g in usable
     )
     rows: list[list[InlineKeyboardButton]] = []
-    for g in games:
-        if g.get("id") is None:
-            continue
+    for g in chunk:
         name = str(g.get("name") or "").strip()
-        if not name:
-            continue
         label = name
         if name_counts[name.casefold()] > 1:
             company = (companies or {}).get(int(g["id"]))
@@ -116,6 +124,22 @@ def release_game_pick_keyboard(
                 )
             ]
         )
+    if total_pages > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton("‹", callback_data=f"rel:page:{page - 1}")
+            )
+        nav.append(
+            InlineKeyboardButton(
+                f"{page + 1}/{total_pages}", callback_data="rel:page:noop"
+            )
+        )
+        if page < total_pages - 1:
+            nav.append(
+                InlineKeyboardButton("›", callback_data=f"rel:page:{page + 1}")
+            )
+        rows.append(nav)
     rows.append(
         [InlineKeyboardButton(btn("wizard_cancel", lang), callback_data="rel:cancel")]
     )
@@ -267,7 +291,7 @@ async def receive_release_game_text(
     status = await update.effective_message.reply_text(
         t("release_game_searching", lang)
     )
-    games = db.igdb_search_games_by_name(query, limit=5)
+    games = db.igdb_search_games_by_name(query, limit=_RELEASE_SEARCH_LIMIT)
     if not games:
         await status.edit_text(
             t("release_game_not_found", lang),
@@ -282,12 +306,14 @@ async def receive_release_game_text(
             ),
         )
         return _wz()["RELEASE_SEARCH"]
-    context.user_data["release_search_hits"] = games
     companies = db.igdb_company_labels_for_games([int(g["id"]) for g in games])
+    context.user_data["release_search_hits"] = games
+    context.user_data["release_search_companies"] = companies
+    context.user_data["release_search_page"] = 0
     await status.edit_text(
         t("release_game_pick", lang),
         reply_markup=release_game_pick_keyboard(
-            games, lang, companies=companies
+            games, lang, companies=companies, page=0
         ),
     )
     return _wz()["RELEASE_PICK"]
@@ -310,6 +336,31 @@ async def receive_release_pick(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
         return ConversationHandler.END
+    if data == "rel:page:noop":
+        return _wz()["RELEASE_PICK"]
+    if data.startswith("rel:page:"):
+        try:
+            page = int(data.rsplit(":", 1)[1])
+        except ValueError:
+            return _wz()["RELEASE_PICK"]
+        games = context.user_data.get("release_search_hits") or []
+        if not isinstance(games, list) or not games:
+            await query.edit_message_text(t("release_game_not_found", lang))
+            return _wz()["RELEASE_SEARCH"]
+        companies = context.user_data.get("release_search_companies") or {}
+        if not isinstance(companies, dict):
+            companies = {}
+        context.user_data["release_search_page"] = page
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=release_game_pick_keyboard(
+                    games, lang, companies=companies, page=page
+                )
+            )
+        except BadRequest as exc:
+            if "not modified" not in str(exc).lower():
+                raise
+        return _wz()["RELEASE_PICK"]
     if not data.startswith("rel:pick:"):
         return _wz()["RELEASE_PICK"]
     try:

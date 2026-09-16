@@ -6631,20 +6631,26 @@ class PostgresDatabase:
     def igdb_search_games_by_name(
         self, query: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
-        from search_normalize import search_tokens
+        from search_normalize import (
+            expand_search_token_sets,
+            name_matches_any_token_set,
+            rank_igdb_game_hit,
+        )
 
-        tokens = search_tokens(query)
-        if not tokens:
+        token_sets = expand_search_token_sets(query)
+        if not token_sets:
             return []
-        lim = max(1, min(20, int(limit)))
+        lim = max(1, min(100, int(limit)))
         q_exact = (query or "").strip()
+        pool_cap = max(120, lim)
         with self._conn() as conn:
             cur = self._cursor(conn)
             # Exact title hits first (all of them, up to 20) so duplicate names
             # like several "The Cube" are not truncated by LIMIT before Mundfish.
             cur.execute(
                 """
-                SELECT id, name, first_release_date, cover_id, summary
+                SELECT id, name, first_release_date, cover_id, summary,
+                       total_rating_count
                 FROM igdb_games
                 WHERE lower(name) = lower(%s)
                 ORDER BY lower(name) ASC, id ASC
@@ -6656,25 +6662,45 @@ class PostgresDatabase:
             if len(exact) >= lim:
                 return exact
             exclude = {int(g["id"]) for g in exact}
-            where = " AND ".join(["name ILIKE %s"] * len(tokens))
-            params: list[Any] = [f"%{t}%" for t in tokens]
-            if exclude:
-                where += f" AND id NOT IN ({','.join(['%s'] * len(exclude))})"
-                params.extend(sorted(exclude))
-            params.append(lim - len(exact))
-            cur.execute(
-                f"""
-                SELECT id, name, first_release_date, cover_id, summary
-                FROM igdb_games
-                WHERE {where}
-                ORDER BY lower(name) ASC, id ASC
-                LIMIT %s
-                """,
-                params,
-            )
-            fuzzy = [self._igdb_game_row(r) for r in cur.fetchall()]
-        out = exact + fuzzy
-        out.sort(key=lambda g: (str(g["name"]).casefold(), int(g["id"])))
+            by_id: dict[int, dict[str, Any]] = {}
+            for tokens in token_sets:
+                where = " AND ".join(["name ILIKE %s"] * len(tokens))
+                params: list[Any] = [f"%{t}%" for t in tokens]
+                if exclude:
+                    where += f" AND id NOT IN ({','.join(['%s'] * len(exclude))})"
+                    params.extend(sorted(exclude))
+                params.append(pool_cap)
+                cur.execute(
+                    f"""
+                    SELECT id, name, first_release_date, cover_id, summary,
+                           total_rating_count
+                    FROM igdb_games
+                    WHERE {where}
+                    LIMIT %s
+                    """,
+                    params,
+                )
+                for r in cur.fetchall():
+                    gid = int(r["id"])
+                    if gid in by_id or gid in exclude:
+                        continue
+                    name = str(r["name"] or "")
+                    if not name_matches_any_token_set(name, token_sets):
+                        continue
+                    by_id[gid] = {
+                        **self._igdb_game_row(r),
+                        "total_rating_count": int(r["total_rating_count"] or 0),
+                        "first_release_date": (
+                            int(r["first_release_date"])
+                            if r["first_release_date"] is not None
+                            else None
+                        ),
+                    }
+        fuzzy = list(by_id.values())
+        fuzzy.sort(key=lambda g: rank_igdb_game_hit(g, query=q_exact, token_sets=token_sets))
+        out = exact + fuzzy[: max(0, lim - len(exact))]
+        for g in out:
+            g.pop("total_rating_count", None)
         return out
 
     def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]:
