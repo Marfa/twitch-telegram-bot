@@ -232,6 +232,7 @@ def _check_release_early_dup_stops_wizard() -> None:
             message_template="t",
             dest_type="dm",
             chat_id=uid,
+            thread_id=None,
             release_watch_prefs=dump_release_watch_prefs(prefs),
         )
         game = {"id": game_id, "name": "Dup Game", "summary": ""}
