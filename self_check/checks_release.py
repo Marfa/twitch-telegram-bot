@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import premium as prem
 from db import open_database
@@ -217,7 +216,7 @@ def _check_release_early_dup_stops_wizard() -> None:
     game_id = 4242
 
     with tempfile.TemporaryDirectory() as tmp:
-        db = open_database(os.path.join(tmp, "rel_dup.db"))
+        db = open_database(Path(tmp) / "rel_dup.db")
         db.upsert_user(uid)
         prefs = ReleaseWatchPrefs(
             igdb_game_id=game_id,
@@ -284,7 +283,7 @@ def _check_game_alert_dedup_by_category() -> None:
 
     uid = 910_002
     with tempfile.TemporaryDirectory() as tmp:
-        db = open_database(os.path.join(tmp, "game_dup.db"))
+        db = open_database(Path(tmp) / "game_dup.db")
         db.upsert_user(uid)
 
         async def _run() -> None:
