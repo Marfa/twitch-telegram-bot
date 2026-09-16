@@ -1808,7 +1808,7 @@ async def _apply_drops_game(
         return _wz()["CHANNEL"]
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    _sub, key = await create_drops_game_subscription(
+    sub, key = await create_drops_game_subscription(
         context.bot,
         db,
         user_id,
@@ -1820,6 +1820,30 @@ async def _apply_drops_game(
         campaign=game,
     )
     drop = campaign_name or game_name
+    from i18n import alert_dup_keyboard
+
+    markup = _menu(lang, user_id)
+    if key == "drops_already_subscribed" and sub is not None:
+        context.user_data.clear()
+        context.user_data["alert_dup_force"] = {
+            "kind": "drops",
+            "game_id": game_id,
+            "game_name": game_name,
+            "campaign_name": campaign_name,
+            "campaign": game,
+        }
+        markup = alert_dup_keyboard(lang, sub.id)
+        await update.effective_message.reply_text(
+            t(
+                key,
+                lang,
+                game=game_name or drop,
+                drop=drop or game_name,
+                limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+            ),
+            reply_markup=markup,
+        )
+        return ConversationHandler.END
     await update.effective_message.reply_text(
         t(
             key,
@@ -1828,7 +1852,7 @@ async def _apply_drops_game(
             drop=drop or game_name,
             limit=MAX_SUBSCRIPTIONS_PER_OWNER,
         ),
-        reply_markup=_menu(lang, user_id),
+        reply_markup=markup,
     )
     context.user_data.clear()
     return ConversationHandler.END

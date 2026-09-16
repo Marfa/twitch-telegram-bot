@@ -5020,3 +5020,100 @@ async def on_share_decline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop("pending_share_token", None)
     await query.edit_message_text(t("share_declined", lang))
 
+
+async def on_alert_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Open editor for an existing drops/game/release alert after a create-time dup."""
+    context.user_data.pop("alert_dup_force", None)
+    await on_share_dup_edit(update, context)
+
+
+async def on_alert_dup_continue(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Continue creating another alert despite an existing match (like stream CHANNEL_DUP)."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    force = context.user_data.pop("alert_dup_force", None)
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    if not isinstance(force, dict):
+        return
+    kind = str(force.get("kind") or "")
+    from config import MAX_SUBSCRIPTIONS_PER_OWNER
+
+    try:
+        if kind == "release":
+            from db.models import parse_release_watch_prefs
+            from handlers.release_watch import create_release_subscription
+
+            prefs = parse_release_watch_prefs(str(force.get("prefs") or ""))
+            if not prefs:
+                return
+            _sub, status = await create_release_subscription(
+                context.bot,
+                db,
+                user_id,
+                lang,
+                prefs=prefs,
+                allow_duplicate=True,
+            )
+            note = t(status, lang) if status != "sub_limit" else t(
+                "sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER
+            )
+            if status == "release_subscribed_ok" and prefs.date_unknown:
+                note = t("release_subscribed_unknown_date", lang)
+            await context.bot.send_message(
+                user_id, note, reply_markup=_menu(lang, user_id)
+            )
+        elif kind == "drops":
+            from handlers.drops import create_drops_game_subscription
+
+            _sub, status = await create_drops_game_subscription(
+                context.bot,
+                db,
+                user_id,
+                lang,
+                game_id=str(force.get("game_id") or ""),
+                game_name=str(force.get("game_name") or ""),
+                campaign_name=str(force.get("campaign_name") or ""),
+                twitch=context.application.bot_data.get("twitch"),
+                campaign=force.get("campaign")
+                if isinstance(force.get("campaign"), dict)
+                else None,
+                allow_duplicate=True,
+            )
+            await context.bot.send_message(
+                user_id,
+                t(
+                    status,
+                    lang,
+                    game=str(force.get("game_name") or ""),
+                    drop=str(force.get("campaign_name") or force.get("game_name") or ""),
+                    limit=MAX_SUBSCRIPTIONS_PER_OWNER,
+                ),
+                reply_markup=_menu(lang, user_id),
+            )
+        elif kind == "game":
+            from db.models import parse_category_watch_prefs
+            from handlers.watch import create_category_watch_subscription
+
+            prefs = parse_category_watch_prefs(str(force.get("prefs") or ""))
+            if not prefs:
+                return
+            text, _sub, _status = await create_category_watch_subscription(
+                context.bot, db, user_id, lang, prefs, allow_duplicate=True
+            )
+            await context.bot.send_message(
+                user_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=_menu(lang, user_id),
+            )
+    except Exception:
+        logger.exception("alert_dup continue failed kind=%s user=%s", kind, user_id)
+

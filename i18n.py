@@ -115,6 +115,26 @@ def channel_dup_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def alert_dup_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
+    """Edit/continue for drops, game, and release create-time duplicates."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("channel_dup_edit", lang),
+                    callback_data=f"alert_dup:edit:{sub_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("channel_dup_continue", lang),
+                    callback_data="alert_dup:continue",
+                )
+            ],
+        ]
+    )
+
+
 def btn(key: str, lang: str) -> str:
     return t(f"btn_{key}", lang)
 

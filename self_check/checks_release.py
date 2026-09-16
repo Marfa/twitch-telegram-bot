@@ -64,7 +64,16 @@ def _check_release_prefs_roundtrip() -> None:
 
 def _check_release_pick_disambiguates() -> None:
     from handlers.release_watch import release_game_pick_keyboard
+    from search_normalize import normalize_search_query, search_tokens
 
+    assert search_tokens("Worms: Galactic Tactics") == [
+        "worms",
+        "galactic",
+        "tactics",
+    ]
+    assert normalize_search_query("Worms: Galactic Tactics") == (
+        "worms galactic tactics"
+    )
     games = [
         {"id": 1, "name": "The CUBE"},
         {"id": 2, "name": "The CUBE"},
@@ -77,6 +86,19 @@ def _check_release_pick_disambiguates() -> None:
     assert "The CUBE (Studio A)" in labels
     assert "The CUBE (Studio B)" in labels
     assert "Other" in labels
+
+
+def _check_release_search_punct() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        with db._conn() as conn:
+            conn.execute(
+                "INSERT INTO igdb_games (id, name, summary) VALUES (?, ?, ?)",
+                (9, "Worms Galactic Tactics", ""),
+            )
+            conn.commit()
+        hits = db.igdb_search_games_by_name("Worms: Galactic Tactics", limit=5)
+        assert any(h["id"] == 9 for h in hits)
 
 
 def _check_release_keyboard() -> None:
@@ -99,6 +121,8 @@ def _check_release_keyboard() -> None:
     assert "release alerts" in t("alert_type_prompt", "en").lower()
     assert t("release_game_searching", "ru")
     assert t("sub_list_release_dates", "en", dates="x")
+    assert t("release_find_streams", "ru")
+    assert t("release_find_streams_none", "en", game="X")
 
 
 def _check_release_date_backfill() -> None:
@@ -182,6 +206,7 @@ def _check_release_active_cap() -> None:
 def run() -> None:
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
+    _check_release_search_punct()
     _check_release_keyboard()
     _check_release_date_backfill()
     _check_release_active_cap()

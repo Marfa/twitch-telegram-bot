@@ -453,6 +453,7 @@ async def create_drops_game_subscription(
     campaign_name: str = "",
     twitch: TwitchClient | None = None,
     campaign: dict[str, Any] | None = None,
+    allow_duplicate: bool = False,
 ) -> tuple[Subscription | None, str]:
     """One-tap private-chat drops subscription. Returns (sub, status_key)."""
     from handlers.notifications import CATEGORY_WATCH_COOLDOWN_MINUTES
@@ -468,7 +469,7 @@ async def create_drops_game_subscription(
         for s in db.get_subscriptions_by_owner(user_id)
         if is_drops_sub(s) and (s.drops_game_id or "") == game_id
     ]
-    if existing:
+    if existing and not allow_duplicate:
         game_display = (game_name or "").strip() or game_id
         drop_display = (campaign_name or "").strip()
         label = _drops_list_label(
@@ -644,7 +645,8 @@ async def create_drops_from_campaign_payload(
     camp: dict[str, Any],
     *,
     twitch: TwitchClient | None = None,
-) -> str:
+) -> tuple[str, Subscription | None, str]:
+    """Returns (message_text, sub_or_none, status_key)."""
     sub, key = await create_drops_game_subscription(
         bot,
         db,
@@ -656,18 +658,18 @@ async def create_drops_from_campaign_payload(
         twitch=twitch,
         campaign=camp,
     )
-    del sub
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
 
     game = str(camp.get("game_name") or "")
     drop = str(camp.get("name") or game)
-    return t(
+    text = t(
         key,
         lang,
         game=game or drop,
         drop=drop or game,
         limit=MAX_SUBSCRIPTIONS_PER_OWNER,
     )
+    return text, sub, key
 
 
 async def on_drops_get_alerts(
@@ -698,7 +700,7 @@ async def on_drops_get_alerts(
     if camp is None:
         await context.bot.send_message(user_id, t("drops_catalog_fetch_failed", lang))
         return
-    text = await create_drops_from_campaign_payload(
+    text, sub, key = await create_drops_from_campaign_payload(
         context.bot,
         db,
         user_id,
@@ -707,9 +709,20 @@ async def on_drops_get_alerts(
         twitch=context.application.bot_data["twitch"],
     )
     from handlers.background_jobs import sync_optional_jobs
+    from i18n import alert_dup_keyboard
 
     sync_optional_jobs(context.application.job_queue, db)
-    await context.bot.send_message(user_id, text, reply_markup=_menu(lang, user_id))
+    markup = _menu(lang, user_id)
+    if key == "drops_already_subscribed" and sub is not None:
+        context.user_data["alert_dup_force"] = {
+            "kind": "drops",
+            "game_id": str(camp.get("game_id") or ""),
+            "game_name": str(camp.get("game_name") or ""),
+            "campaign_name": str(camp.get("name") or ""),
+            "campaign": camp,
+        }
+        markup = alert_dup_keyboard(lang, sub.id)
+    await context.bot.send_message(user_id, text, reply_markup=markup)
 
 
 async def check_drops(context: ContextTypes.DEFAULT_TYPE) -> None:

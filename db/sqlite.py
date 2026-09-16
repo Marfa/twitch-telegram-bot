@@ -5769,6 +5769,8 @@ class SqliteDatabase:
     def igdb_search_by_name(
         self, table: str, query: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
+        from search_normalize import search_tokens
+
         allowed = {
             "igdb_companies",
             "igdb_genres",
@@ -5776,19 +5778,22 @@ class SqliteDatabase:
         }
         if table not in allowed:
             raise ValueError(table)
-        q = (query or "").strip()
-        if not q:
+        tokens = search_tokens(query)
+        if not tokens:
             return []
         lim = max(1, min(20, int(limit)))
+        where = " AND ".join(["name LIKE ? COLLATE NOCASE"] * len(tokens))
+        params: list[Any] = [f"%{t}%" for t in tokens]
+        params.append(lim)
         with self._conn() as conn:
             rows = conn.execute(
                 f"""
                 SELECT id, name FROM {table}
-                WHERE name LIKE ? COLLATE NOCASE
+                WHERE {where}
                 ORDER BY LENGTH(name) ASC, name COLLATE NOCASE ASC
                 LIMIT ?
                 """,
-                (f"%{q}%", lim),
+                params,
             ).fetchall()
         return [{"id": int(r["id"]), "name": str(r["name"])} for r in rows]
 
@@ -5992,20 +5997,25 @@ class SqliteDatabase:
     def igdb_search_games_by_name(
         self, query: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
-        q = (query or "").strip()
-        if not q:
+        from search_normalize import search_tokens
+
+        tokens = search_tokens(query)
+        if not tokens:
             return []
         lim = max(1, min(20, int(limit)))
+        where = " AND ".join(["name LIKE ? COLLATE NOCASE"] * len(tokens))
+        params: list[Any] = [f"%{t}%" for t in tokens]
+        params.append(lim)
         with self._conn() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT id, name, first_release_date, cover_id, summary
                 FROM igdb_games
-                WHERE name LIKE ? COLLATE NOCASE
+                WHERE {where}
                 ORDER BY LENGTH(name) ASC, name COLLATE NOCASE ASC
                 LIMIT ?
                 """,
-                (f"%{q}%", lim),
+                params,
             ).fetchall()
         return [
             {
@@ -6021,6 +6031,21 @@ class SqliteDatabase:
             }
             for r in rows
         ]
+
+    def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT twitch_uid FROM igdb_external_twitch
+                WHERE game_id = ?
+                ORDER BY twitch_uid
+                """,
+                (gid,),
+            ).fetchall()
+        return [str(r["twitch_uid"]).strip() for r in rows if str(r["twitch_uid"] or "").strip()]
 
     def igdb_developer_names_for_games(
         self, game_ids: list[int]

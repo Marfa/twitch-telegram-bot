@@ -5,6 +5,7 @@ import html
 import logging
 import re
 import secrets
+from typing import Any
 
 from telegram import InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -19,6 +20,7 @@ from handlers.alert_history import _twitch_vod_url
 from db import (
     WATCH_MAX_FILTERS,
     Database,
+    Subscription,
     WatchPrefs,
     dump_category_watch_prefs,
     watch_filter_auto_name,
@@ -1148,38 +1150,35 @@ async def on_watch_again(
     )
 
 
-async def on_watch_create_alerts(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    lang = _user_lang(context, user_id)
-    prefs = _resolve_watch_prefs(context, user_id)
-    if not prefs or not prefs.categories:
-        await query.edit_message_text(t("watch_create_alerts_none", lang))
-        return
-
+async def create_category_watch_subscription(
+    bot: Any,
+    db: Database,
+    user_id: int,
+    lang: str,
+    prefs: WatchPrefs,
+    *,
+    allow_duplicate: bool = False,
+) -> tuple[str, Subscription | None, str]:
+    """Create a category-watch alert. Returns (html_text, sub_or_none, status)."""
     from config import MAX_SUBSCRIPTIONS_PER_OWNER
-
-    db: Database = context.application.bot_data["db"]
-    prefs_json = dump_category_watch_prefs(prefs)
-    existing_subs = _subs_for_owner(db, user_id)
-    for sub in existing_subs:
-        if (sub.category_watch_prefs or "").strip() == prefs_json:
-            await query.edit_message_text(t("watch_create_alerts_dup", lang))
-            return
-    if len(existing_subs) >= MAX_SUBSCRIPTIONS_PER_OWNER:
-        await query.edit_message_text(
-            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
-        )
-        return
-
     from handlers.notifications import CATEGORY_WATCH_COOLDOWN_MINUTES
 
-    enabled = await prem.can_enable_more_async(context.bot, db, user_id)
+    prefs_json = dump_category_watch_prefs(prefs)
+    existing_subs = _subs_for_owner(db, user_id)
+    if not allow_duplicate:
+        for sub in existing_subs:
+            if (sub.category_watch_prefs or "").strip() == prefs_json:
+                return t("watch_create_alerts_dup", lang), sub, "watch_create_alerts_dup"
+    if len(existing_subs) >= MAX_SUBSCRIPTIONS_PER_OWNER:
+        return (
+            t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER),
+            None,
+            "sub_limit",
+        )
+
+    enabled = await prem.can_enable_more_async(bot, db, user_id)
     label = watch_filter_auto_name(prefs)
-    db.add_subscription(
+    sub_id = db.add_subscription(
         owner_id=user_id,
         twitch_username=label,
         twitch_user_id=f"cw:{user_id}:{secrets.token_hex(4)}",
@@ -1218,6 +1217,37 @@ async def on_watch_create_alerts(
         "watch_create_category_alert",
         {"categories": len(prefs.categories), "enabled": enabled},
     )
+    created = db.get_subscription(sub_id, user_id)
+    return text, created, "watch_create_alerts_ok"
+
+
+async def on_watch_create_alerts(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    prefs = _resolve_watch_prefs(context, user_id)
+    if not prefs or not prefs.categories:
+        await query.edit_message_text(t("watch_create_alerts_none", lang))
+        return
+
+    db: Database = context.application.bot_data["db"]
+    text, sub, status = await create_category_watch_subscription(
+        context.bot, db, user_id, lang, prefs
+    )
+    if status == "watch_create_alerts_dup" and sub is not None:
+        from i18n import alert_dup_keyboard
+
+        context.user_data["alert_dup_force"] = {
+            "kind": "game",
+            "prefs": dump_category_watch_prefs(prefs),
+        }
+        await query.edit_message_text(
+            text, reply_markup=alert_dup_keyboard(lang, sub.id)
+        )
+        return
     await query.edit_message_text(text, parse_mode=ParseMode.HTML)
 
 

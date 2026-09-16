@@ -1060,5 +1060,7 @@
   "release_subscribed_unknown_date": "Оповещение о релизе создано. Дата пока неизвестна — подтянем её, когда появится в IGDB.",
   "sub_list_release_date_unknown": "• Дата релиза: неизвестна",
   "release_game_searching": "Ищем игры…",
-  "sub_list_release_dates": "• Даты: {dates}"
+  "sub_list_release_dates": "• Даты: {dates}",
+  "release_find_streams": "Найти стримы по игре",
+  "release_find_streams_none": "Не нашёл категорию Twitch для <b>{game}</b> — стримы поискать не удалось."
 }

@@ -456,6 +456,7 @@ from handlers.watch import (
 from handlers.release_watch import (
     cancel_release_callback,
     check_release_watch_alerts,
+    on_release_find_streams,
     receive_release_dates_callback,
     receive_release_days,
     receive_release_game_text,
@@ -659,6 +660,8 @@ from handlers.subscriptions import (
     on_share_dup_continue,
     on_share_dup_edit,
     on_share_show,
+    on_alert_dup_continue,
+    on_alert_dup_edit,
     offer_shared_alert,
     on_sync_change_period,
     on_sync_disable,
@@ -2438,6 +2441,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_share_decline, pattern=r"^share_decline$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(on_alert_dup_edit, pattern=r"^alert_dup:edit:\d+$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_alert_dup_continue, pattern=r"^alert_dup:continue$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_release_find_streams, pattern=r"^rel:streams:\d+$"),
+        group=0,
+    )
     app.add_handler(
         CallbackQueryHandler(on_twitch_link_decline, pattern=r"^twitch_link:decline$"),
         group=0,

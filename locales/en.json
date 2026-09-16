@@ -1060,5 +1060,7 @@
   "release_subscribed_unknown_date": "Release alert created. Date is unknown for now — we will fill it in when it appears in IGDB.",
   "sub_list_release_date_unknown": "• Release date: unknown",
   "release_game_searching": "Searching games…",
-  "sub_list_release_dates": "• Dates: {dates}"
+  "sub_list_release_dates": "• Dates: {dates}",
+  "release_find_streams": "Find streams for this game",
+  "release_find_streams_none": "No Twitch category found for <b>{game}</b> — could not search streams."
 }

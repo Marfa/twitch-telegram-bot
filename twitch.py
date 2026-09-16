@@ -1042,10 +1042,15 @@ class TwitchClient:
 
     def search_categories(self, query: str, *, first: int = 1) -> list[dict[str, Any]]:
         """Search Twitch categories/games by name. Returns list of {id, name, ...}."""
+        from search_normalize import normalize_search_query
+
+        q = normalize_search_query(query) or (query or "").strip()
+        if not q:
+            return []
         resp = self._session.get(
             "https://api.twitch.tv/helix/search/categories",
             headers=self._headers(),
-            params={"query": query, "first": max(1, min(20, first))},
+            params={"query": q, "first": max(1, min(20, first))},
             timeout=15,
         )
         resp.raise_for_status()

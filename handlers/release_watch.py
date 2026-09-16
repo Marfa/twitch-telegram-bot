@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -351,6 +352,16 @@ async def receive_release_pick(
             await query.edit_message_text("✓")
         except BadRequest:
             pass
+        find_kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("release_find_streams", lang),
+                        callback_data=f"rel:streams:{game_id}",
+                    )
+                ]
+            ]
+        )
         await _send_game_card(
             context.bot,
             chat_id,
@@ -360,7 +371,7 @@ async def receive_release_pick(
             summary=summary,
             body_html=body,
             lang=lang,
-            reply_markup=None,
+            reply_markup=find_kb,
         )
         await context.bot.send_message(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
@@ -587,6 +598,7 @@ async def receive_release_days(
     sub, status = await create_release_subscription(
         context.bot, db, user_id, lang, prefs=prefs
     )
+    markup = _menu(lang, user_id)
     if status == "sub_limit":
         note = t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
     elif status == "release_subscribed_paused":
@@ -601,11 +613,24 @@ async def receive_release_days(
                 limit=PREMIUM_FREE_ACTIVE_LIMIT,
             )
         )
+    elif status == "release_already_subscribed" and sub is not None:
+        from i18n import alert_dup_keyboard
+
+        note = t("release_already_subscribed", lang)
+        markup = alert_dup_keyboard(lang, sub.id)
+        pending = {
+            "kind": "release",
+            "prefs": dump_release_watch_prefs(prefs),
+        }
+        context.user_data.clear()
+        context.user_data["alert_dup_force"] = pending
+        await update.effective_message.reply_text(note, reply_markup=markup)
+        return ConversationHandler.END
     elif status == "release_subscribed_ok" and date_unknown:
         note = t("release_subscribed_unknown_date", lang)
     else:
         note = t(status, lang)
-    await update.effective_message.reply_text(note, reply_markup=_menu(lang, user_id))
+    await update.effective_message.reply_text(note, reply_markup=markup)
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -617,6 +642,7 @@ async def create_release_subscription(
     lang: str,
     *,
     prefs: ReleaseWatchPrefs,
+    allow_duplicate: bool = False,
 ) -> tuple[Subscription | None, str]:
     if not release_feature_available(db, user_id):
         return None, "release_beta_required"
@@ -628,7 +654,7 @@ async def create_release_subscription(
         and parse_release_watch_prefs(s.release_watch_prefs).igdb_game_id
         == prefs.igdb_game_id
     ]
-    if existing:
+    if existing and not allow_duplicate:
         return existing[0], "release_already_subscribed"
     if len(db.get_subscriptions_by_owner(user_id)) >= MAX_SUBSCRIPTIONS_PER_OWNER:
         return None, "sub_limit"
@@ -940,3 +966,73 @@ async def cancel_release_callback(
         chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
     )
     return ConversationHandler.END
+
+
+async def on_release_find_streams(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Already-out card CTA: live streams for this IGDB game with default WatchPrefs."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    lang = _user_lang(db, user_id)
+    try:
+        game_id = int((query.data or "").split(":")[-1])
+    except (TypeError, ValueError):
+        return
+    game = db.igdb_game_by_id(game_id) or {}
+    game_name = str(game.get("name") or "").strip() or f"#{game_id}"
+    twitch = context.application.bot_data.get("twitch")
+    uids = db.igdb_twitch_uids_for_game(game_id)
+    cat_id = uids[0] if uids else ""
+    cat_name = game_name
+    if not cat_id and twitch is not None:
+        from search_normalize import normalize_search_query
+
+        try:
+            found = await asyncio.to_thread(
+                twitch.search_categories,
+                normalize_search_query(game_name) or game_name,
+                first=10,
+            )
+        except Exception:
+            logger.exception("release find-streams Helix search failed game=%s", game_id)
+            found = []
+        want = game_name.casefold()
+        exact = next(
+            (c for c in found if str(c.get("name") or "").casefold() == want),
+            None,
+        )
+        pick = exact or (found[0] if found else None)
+        if pick:
+            cat_id = str(pick.get("id") or "").strip()
+            cat_name = str(pick.get("name") or game_name).strip() or game_name
+    if not cat_id:
+        await context.bot.send_message(
+            user_id,
+            t("release_find_streams_none", lang, game=html.escape(game_name)),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_menu(lang, user_id),
+        )
+        return
+    from db.models import WatchPrefs
+    from handlers.watch import _send_watch_suggestions
+
+    prefs = WatchPrefs(
+        categories=[{"id": cat_id, "name": cat_name}],
+        min_viewers=0,
+        max_viewers=None,
+        language=None,
+        tags=[],
+        exclude_mature=True,
+    )
+    await _send_watch_suggestions(
+        bot=context.bot,
+        chat_id=user_id,
+        user_id=user_id,
+        context=context,
+        prefs=prefs,
+    )
