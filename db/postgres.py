@@ -6540,6 +6540,20 @@ class PostgresDatabase:
         text = str(game["summary"] or "").strip()
         return text or None
 
+    @staticmethod
+    def _igdb_game_row(r: Any) -> dict[str, Any]:
+        return {
+            "id": int(r["id"]),
+            "name": str(r["name"]),
+            "first_release_date": (
+                int(r["first_release_date"])
+                if r["first_release_date"] is not None
+                else None
+            ),
+            "cover_id": int(r["cover_id"]) if r["cover_id"] is not None else None,
+            "summary": str(r["summary"] or "").strip(),
+        }
+
     def igdb_search_games_by_name(
         self, query: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
@@ -6549,36 +6563,45 @@ class PostgresDatabase:
         if not tokens:
             return []
         lim = max(1, min(20, int(limit)))
-        where = " AND ".join(["name ILIKE %s"] * len(tokens))
-        params: list[Any] = [f"%{t}%" for t in tokens]
-        params.append(lim)
+        q_exact = (query or "").strip()
         with self._conn() as conn:
             cur = self._cursor(conn)
+            # Exact title hits first (all of them, up to 20) so duplicate names
+            # like several "The Cube" are not truncated by LIMIT before Mundfish.
+            cur.execute(
+                """
+                SELECT id, name, first_release_date, cover_id, summary
+                FROM igdb_games
+                WHERE lower(name) = lower(%s)
+                ORDER BY lower(name) ASC, id ASC
+                LIMIT 20
+                """,
+                (q_exact,),
+            )
+            exact = [self._igdb_game_row(r) for r in cur.fetchall()]
+            if len(exact) >= lim:
+                return exact
+            exclude = {int(g["id"]) for g in exact}
+            where = " AND ".join(["name ILIKE %s"] * len(tokens))
+            params: list[Any] = [f"%{t}%" for t in tokens]
+            if exclude:
+                where += f" AND id NOT IN ({','.join(['%s'] * len(exclude))})"
+                params.extend(sorted(exclude))
+            params.append(lim - len(exact))
             cur.execute(
                 f"""
                 SELECT id, name, first_release_date, cover_id, summary
                 FROM igdb_games
                 WHERE {where}
-                ORDER BY LENGTH(name) ASC, name ASC
+                ORDER BY lower(name) ASC, id ASC
                 LIMIT %s
                 """,
                 params,
             )
-            rows = cur.fetchall()
-        return [
-            {
-                "id": int(r["id"]),
-                "name": str(r["name"]),
-                "first_release_date": (
-                    int(r["first_release_date"])
-                    if r["first_release_date"] is not None
-                    else None
-                ),
-                "cover_id": int(r["cover_id"]) if r["cover_id"] is not None else None,
-                "summary": str(r["summary"] or "").strip(),
-            }
-            for r in rows
-        ]
+            fuzzy = [self._igdb_game_row(r) for r in cur.fetchall()]
+        out = exact + fuzzy
+        out.sort(key=lambda g: (str(g["name"]).casefold(), int(g["id"])))
+        return out
 
     def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]:
         gid = int(game_id or 0)
@@ -6601,10 +6624,10 @@ class PostgresDatabase:
             if str(r["twitch_uid"] or "").strip()
         ]
 
-    def igdb_developer_names_for_games(
+    def igdb_company_labels_for_games(
         self, game_ids: list[int]
     ) -> dict[int, str]:
-        """First developer company name per game (for disambiguating search hits)."""
+        """Publisher name per game, else developer (search-hit disambiguation)."""
         ids = sorted({int(g) for g in game_ids if int(g or 0) > 0})
         if not ids:
             return {}
@@ -6613,13 +6636,15 @@ class PostgresDatabase:
             cur = self._cursor(conn)
             cur.execute(
                 f"""
-                SELECT i.game_id, c.name
+                SELECT i.game_id, c.name, i.is_publisher, i.is_developer
                 FROM igdb_involved i
                 JOIN igdb_companies c ON c.id = i.company_id
                 WHERE i.game_id IN ({placeholders})
-                  AND i.is_developer IS TRUE
+                  AND (i.is_publisher IS TRUE OR i.is_developer IS TRUE)
                   AND TRIM(c.name) != ''
-                ORDER BY i.game_id ASC, LOWER(c.name) ASC
+                ORDER BY i.game_id ASC,
+                         i.is_publisher DESC,
+                         LOWER(c.name) ASC
                 """,
                 ids,
             )
@@ -6629,6 +6654,39 @@ class PostgresDatabase:
             gid = int(r["game_id"])
             if gid not in out:
                 out[gid] = str(r["name"]).strip()
+        return out
+
+    def igdb_company_labels_for_twitch_uids(
+        self, twitch_uids: list[str]
+    ) -> dict[str, str]:
+        """Publisher (else developer) label keyed by Twitch category id."""
+        uids = sorted({str(u).strip() for u in twitch_uids if str(u or "").strip()})
+        if not uids:
+            return {}
+        placeholders = ",".join(["%s"] * len(uids))
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                f"""
+                SELECT e.twitch_uid, c.name, i.is_publisher, i.is_developer
+                FROM igdb_external_twitch e
+                JOIN igdb_involved i ON i.game_id = e.game_id
+                JOIN igdb_companies c ON c.id = i.company_id
+                WHERE e.twitch_uid IN ({placeholders})
+                  AND (i.is_publisher IS TRUE OR i.is_developer IS TRUE)
+                  AND TRIM(c.name) != ''
+                ORDER BY e.twitch_uid ASC,
+                         i.is_publisher DESC,
+                         LOWER(c.name) ASC
+                """,
+                uids,
+            )
+            rows = cur.fetchall()
+        out: dict[str, str] = {}
+        for r in rows:
+            uid = str(r["twitch_uid"]).strip()
+            if uid and uid not in out:
+                out[uid] = str(r["name"]).strip()
         return out
 
     def igdb_game_by_id(self, game_id: int) -> dict[str, Any] | None:

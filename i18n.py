@@ -773,17 +773,34 @@ def _watch_nav_row(lang: str) -> list[InlineKeyboardButton]:
 
 
 def watch_cats_pick_keyboard(
-    lang: str, cats: list[dict[str, str]]
+    lang: str,
+    cats: list[dict[str, str]],
+    *,
+    companies: dict[str, str] | None = None,
 ) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(
-                (c.get("name") or "?")[:64],
-                callback_data=f"watch_cat:pick:{i}",
-            )
-        ]
-        for i, c in enumerate(cats)
-    ]
+    from collections import Counter
+
+    name_counts = Counter(
+        str(c.get("name") or "").strip().casefold()
+        for c in cats
+        if str(c.get("name") or "").strip()
+    )
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, c in enumerate(cats):
+        name = str(c.get("name") or "?").strip() or "?"
+        label = name
+        if name_counts[name.casefold()] > 1:
+            company = (companies or {}).get(str(c.get("id") or ""))
+            if company:
+                label = f"{name} ({company})"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    label[:64],
+                    callback_data=f"watch_cat:pick:{i}",
+                )
+            ]
+        )
     return InlineKeyboardMarkup(rows)
 
 

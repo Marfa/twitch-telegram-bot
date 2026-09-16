@@ -800,9 +800,13 @@ class Database(Protocol):
 
     def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]: ...
 
-    def igdb_developer_names_for_games(
+    def igdb_company_labels_for_games(
         self, game_ids: list[int]
     ) -> dict[int, str]: ...
+
+    def igdb_company_labels_for_twitch_uids(
+        self, twitch_uids: list[str]
+    ) -> dict[str, str]: ...
 
     def igdb_game_by_id(self, game_id: int) -> dict[str, Any] | None: ...
 

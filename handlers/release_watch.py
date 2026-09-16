@@ -87,7 +87,7 @@ def release_game_pick_keyboard(
     games: list[dict[str, Any]],
     lang: str,
     *,
-    developers: dict[int, str] | None = None,
+    companies: dict[int, str] | None = None,
 ) -> InlineKeyboardMarkup:
     from collections import Counter
 
@@ -105,9 +105,9 @@ def release_game_pick_keyboard(
             continue
         label = name
         if name_counts[name.casefold()] > 1:
-            dev = (developers or {}).get(int(g["id"]))
-            if dev:
-                label = f"{name} ({dev})"
+            company = (companies or {}).get(int(g["id"]))
+            if company:
+                label = f"{name} ({company})"
         rows.append(
             [
                 InlineKeyboardButton(
@@ -283,11 +283,11 @@ async def receive_release_game_text(
         )
         return _wz()["RELEASE_SEARCH"]
     context.user_data["release_search_hits"] = games
-    developers = db.igdb_developer_names_for_games([int(g["id"]) for g in games])
+    companies = db.igdb_company_labels_for_games([int(g["id"]) for g in games])
     await status.edit_text(
         t("release_game_pick", lang),
         reply_markup=release_game_pick_keyboard(
-            games, lang, developers=developers
+            games, lang, companies=companies
         ),
     )
     return _wz()["RELEASE_PICK"]

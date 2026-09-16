@@ -1309,7 +1309,7 @@ async def receive_watch_category_text(
         return _ws()["WATCH_CATEGORIES"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     try:
-        found = await asyncio.to_thread(twitch.search_categories, query, first=5)
+        found = await asyncio.to_thread(twitch.search_categories, query, first=20)
     except Exception:
         logger.exception("watch category search failed")
         await update.effective_message.reply_text(
@@ -1321,15 +1321,39 @@ async def receive_watch_category_text(
             t("watch_cats_not_found", lang, query=query),
         )
         return _ws()["WATCH_CATEGORIES"]
+    want = query.strip().casefold()
+    exact = [
+        c
+        for c in found
+        if str(c.get("name") or "").strip().casefold() == want
+    ]
+    rest = [
+        c
+        for c in found
+        if str(c.get("name") or "").strip().casefold() != want
+    ]
+    exact.sort(key=lambda c: str(c.get("name") or "").casefold())
+    rest.sort(key=lambda c: str(c.get("name") or "").casefold())
+    # Keep all exact title hits for disambiguation; fill remaining slots alphabetically.
+    if len(exact) >= 5:
+        found = exact[:20]
+    else:
+        found = exact + rest[: max(0, 5 - len(exact))]
+    found.sort(key=lambda c: (str(c.get("name") or "").casefold(), str(c.get("id") or "")))
     if len(found) == 1:
         return await _add_watch_category(update, context, lang, found[0])
-    context.user_data["watch_cat_candidates"] = [
+    candidates = [
         {"id": str(c["id"]), "name": str(c.get("name") or "")} for c in found
     ]
+    context.user_data["watch_cat_candidates"] = candidates
+    db: Database = context.application.bot_data["db"]
+    companies = db.igdb_company_labels_for_twitch_uids(
+        [c["id"] for c in candidates]
+    )
     await update.effective_message.reply_text(
         t("watch_cats_pick", lang),
         reply_markup=watch_cats_pick_keyboard(
-            lang, context.user_data["watch_cat_candidates"]
+            lang, candidates, companies=companies
         ),
     )
     return _ws()["WATCH_CATEGORIES"]

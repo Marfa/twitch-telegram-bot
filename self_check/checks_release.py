@@ -80,12 +80,17 @@ def _check_release_pick_disambiguates() -> None:
         {"id": 3, "name": "Other"},
     ]
     kb = release_game_pick_keyboard(
-        games, "en", developers={1: "Studio A", 2: "Studio B"}
+        games, "en", companies={1: "Studio A", 2: "Studio B"}
     )
     labels = [b.text for row in kb.inline_keyboard for b in row]
     assert "The CUBE (Studio A)" in labels
     assert "The CUBE (Studio B)" in labels
     assert "Other" in labels
+    # No company → plain name even when duplicated.
+    kb2 = release_game_pick_keyboard(games, "en", companies={1: "Studio A"})
+    labels2 = [b.text for row in kb2.inline_keyboard for b in row]
+    assert "The CUBE (Studio A)" in labels2
+    assert "The CUBE" in labels2
 
 
 def _check_release_search_punct() -> None:
@@ -99,6 +104,48 @@ def _check_release_search_punct() -> None:
             conn.commit()
         hits = db.igdb_search_games_by_name("Worms: Galactic Tactics", limit=5)
         assert any(h["id"] == 9 for h in hits)
+
+
+def _check_release_search_exact_duplicates() -> None:
+    """Exact-title duplicates are all returned (Mundfish The Cube case)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        with db._conn() as conn:
+            for gid, name in (
+                (1, "The Cube"),
+                (2, "The Cube"),
+                (3, "The Cube"),
+                (4, "The Cube"),
+                (5, "The Cube"),
+                (347640, "The Cube"),
+                (99, "Into the Cube"),
+            ):
+                conn.execute(
+                    "INSERT INTO igdb_games (id, name, summary) VALUES (?, ?, ?)",
+                    (gid, name, ""),
+                )
+            conn.execute(
+                "INSERT INTO igdb_companies (id, name) VALUES (1, ?), (2, ?)",
+                ("Other Co", "Mundfish"),
+            )
+            conn.execute(
+                """
+                INSERT INTO igdb_involved
+                    (game_id, company_id, is_developer, is_publisher)
+                VALUES (1, 1, 1, 0), (347640, 2, 1, 1)
+                """
+            )
+            conn.commit()
+        hits = db.igdb_search_games_by_name("The Cube", limit=5)
+        ids = {h["id"] for h in hits}
+        assert 347640 in ids
+        assert all(h["name"].casefold() == "the cube" for h in hits)
+        assert 99 not in ids  # exact hits fill the list; no fuzzy padding
+        labels = db.igdb_company_labels_for_games([1, 347640])
+        assert labels[347640] == "Mundfish"
+        assert labels[1] == "Other Co"  # developer fallback when no publisher
+        names = [h["name"] for h in hits]
+        assert names == sorted(names, key=str.casefold)
 
 
 def _check_release_keyboard() -> None:
@@ -541,6 +588,7 @@ def run() -> None:
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
     _check_release_search_punct()
+    _check_release_search_exact_duplicates()
     _check_release_keyboard()
     _check_release_date_backfill()
     _check_release_active_cap()
