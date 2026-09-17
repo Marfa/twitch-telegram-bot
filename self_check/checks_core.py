@@ -208,15 +208,23 @@ def check_core() -> None:
     from twitch import (
         box_art_cdn_url,
         format_box_art_url,
+        format_stream_thumbnail_url,
+        is_dynamic_alert_image,
         is_game_cover_image,
+        is_stream_preview_image,
         resolve_sub_image_photo,
         strip_name_mentions_and_commands,
         template_has_game_placeholder,
         GAME_COVER_IMAGE_ID,
+        STREAM_PREVIEW_IMAGE_ID,
     )
 
     assert is_game_cover_image(GAME_COVER_IMAGE_ID)
     assert not is_game_cover_image("AgAC_test")
+    assert is_stream_preview_image(STREAM_PREVIEW_IMAGE_ID)
+    assert is_dynamic_alert_image(STREAM_PREVIEW_IMAGE_ID)
+    assert is_dynamic_alert_image(GAME_COVER_IMAGE_ID)
+    assert not is_dynamic_alert_image("AgAC_test")
     assert template_has_game_placeholder("{username} {game}")
     assert template_has_game_placeholder("{game_igdb}")
     assert template_has_game_placeholder("{game_steam}")
@@ -226,19 +234,32 @@ def check_core() -> None:
 
     assert "своё" in i18n_image_t("image_add", "ru").lower()
     assert "own" in i18n_image_t("image_add", "en").lower()
-    ask_kb = image_ask_keyboard("ru", game_cover_on=False)
+    ask_kb = image_ask_keyboard("ru", game_cover_on=False, stream_preview_on=False)
     ask_labels = [b.text for row in ask_kb.inline_keyboard for b in row]
+    assert any("превью" in lab.lower() for lab in ask_labels)
     assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in ask_labels)
     assert any("своё" in lab.lower() for lab in ask_labels)
-    on_kb = image_ask_keyboard("ru", game_cover_on=True)
+    on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
     on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)
-    edit_kb = image_edit_keyboard("ru", has_image=True, game_cover_on=True)
+    preview_kb = image_ask_keyboard("ru", stream_preview_on=True)
+    preview_labels = [b.text for row in preview_kb.inline_keyboard for b in row]
+    assert any(lab.startswith("✅ ") and "превью" in lab.lower() for lab in preview_labels)
+    edit_kb = image_edit_keyboard(
+        "ru", has_image=True, game_cover_on=True, stream_preview_on=False
+    )
     edit_labels = [b.text for row in edit_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in edit_labels)
+    assert any("превью" in lab.lower() for lab in edit_labels)
     assert format_box_art_url(
         "https://cdn.example/{width}x{height}.jpg", width=1920, height=2560
     ) == "https://cdn.example/1920x2560.jpg"
+    assert (
+        format_stream_thumbnail_url(
+            "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-{width}x{height}.jpg"
+        )
+        == "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1280x720.jpg"
+    )
     assert (
         box_art_cdn_url("509658", width=1920, height=2560)
         == "https://static-cdn.jtvnw.net/ttv-boxart/509658-1920x2560.jpg"
@@ -269,6 +290,18 @@ def check_core() -> None:
         == "https://cdn.example/516575.jpg"
     )
     assert resolve_sub_image_photo(cover_sub, {}, _CoverTwitch()) is None
+    preview_sub = type("S", (), {"image_file_id": STREAM_PREVIEW_IMAGE_ID})()
+    assert (
+        resolve_sub_image_photo(
+            preview_sub,
+            {
+                "thumbnail_url": "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-{width}x{height}.jpg"
+            },
+            None,
+        )
+        == "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1280x720.jpg"
+    )
+    assert resolve_sub_image_photo(preview_sub, {}, None) is None
     assert (
         resolve_sub_image_photo(
             type("S", (), {"image_file_id": "AgAC_custom"})(),
@@ -1545,6 +1578,9 @@ def check_core() -> None:
         assert tr("sync_unfollow_no", loc)
         assert tr("image_ask", loc)
         assert tr("image_add", loc)
+        assert tr("image_stream_preview", loc)
+        assert tr("image_stream_preview_note", loc)
+        assert tr("sub_list_image_stream_preview", loc)
         assert tr("image_game_cover", loc)
         assert tr("image_game_cover_note", loc)
         assert tr("sub_list_image_game_cover", loc)

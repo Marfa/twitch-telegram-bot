@@ -69,10 +69,13 @@ from links import (
 )
 from twitch import (
     GAME_COVER_IMAGE_ID,
+    STREAM_PREVIEW_IMAGE_ID,
     TwitchClient,
     find_placeholder_typos,
     fix_placeholder_typos,
+    is_dynamic_alert_image,
     is_game_cover_image,
+    is_stream_preview_image,
     merge_ignore_keywords,
     normalize_ignore_keywords,
     preview_stream_title,
@@ -845,9 +848,12 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.get("edit_sub_id") and context.user_data.get("edit_has_image")
     )
     prompt = t("edit_image_prompt", lang) if has_image else t("image_ask", lang)
-    game_cover_on = is_game_cover_image(context.user_data.get("image_file_id"))
+    fid = context.user_data.get("image_file_id")
     markup = image_edit_keyboard(
-        lang, has_image=has_image, game_cover_on=game_cover_on
+        lang,
+        has_image=has_image,
+        game_cover_on=is_game_cover_image(fid),
+        stream_preview_on=is_stream_preview_image(fid),
     )
     if update.callback_query:
         await context.bot.send_message(
@@ -2212,8 +2218,8 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return await _go_after_image_step(update, context, lang)
 
     if action == "skip":
-        # Game-cover checkbox stays selected until Skip/Next; only clear when unchecked.
-        if not is_game_cover_image(context.user_data.get("image_file_id")):
+        # Dynamic image checkboxes stay selected until Skip/Next; only clear when unchecked.
+        if not is_dynamic_alert_image(context.user_data.get("image_file_id")):
             context.user_data["image_file_id"] = None
             context.user_data["image_position"] = ""
         await query.edit_message_text("✓")
@@ -2221,10 +2227,14 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await _save_edit_image(update, context, lang)
         return await _go_after_image_step(update, context, lang)
 
-    if action == "game_cover":
-        if is_game_cover_image(context.user_data.get("image_file_id")):
+    if action in ("game_cover", "stream_preview"):
+        sentinel = (
+            GAME_COVER_IMAGE_ID if action == "game_cover" else STREAM_PREVIEW_IMAGE_ID
+        )
+        current = context.user_data.get("image_file_id")
+        if current == sentinel:
             backup = context.user_data.get("image_backup_file_id")
-            if backup and not is_game_cover_image(backup):
+            if backup and not is_dynamic_alert_image(backup):
                 context.user_data["image_file_id"] = backup
                 context.user_data["image_position"] = str(
                     context.user_data.get("image_backup_position") or ""
@@ -2237,26 +2247,29 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         else:
             if "image_backup_file_id" not in context.user_data:
                 prev = context.user_data.get("image_file_id")
-                if prev and not is_game_cover_image(prev):
+                if prev and not is_dynamic_alert_image(prev):
                     context.user_data["image_backup_file_id"] = prev
                     context.user_data["image_backup_position"] = context.user_data.get(
                         "image_position"
                     )
-            context.user_data["image_file_id"] = GAME_COVER_IMAGE_ID
+            context.user_data["image_file_id"] = sentinel
             context.user_data["image_position"] = "before"
             context.user_data["edit_has_image"] = True
         if is_edit:
             await _persist_edit_image_fields(update, context)
         has_image = bool(is_edit and context.user_data.get("image_file_id"))
-        game_cover_on = is_game_cover_image(context.user_data.get("image_file_id"))
+        fid = context.user_data.get("image_file_id")
         await query.edit_message_reply_markup(
             reply_markup=image_edit_keyboard(
-                lang, has_image=has_image, game_cover_on=game_cover_on
+                lang,
+                has_image=has_image,
+                game_cover_on=is_game_cover_image(fid),
+                stream_preview_on=is_stream_preview_image(fid),
             )
         )
         return _wz()["IMAGE_ASK"]
 
-    # Add own image — leave game-cover checkbox; upload replaces it on success.
+    # Add own image — leave dynamic checkbox; upload replaces it on success.
     await query.edit_message_text("✓")
     await context.bot.send_message(
         reply_chat_id(update),
@@ -3336,7 +3349,9 @@ async def _finish_subscription(
             t("preview_off", lang) if preview_disabled else t("preview_on", lang)
         )
         if has_image:
-            if is_game_cover_image(data.get("image_file_id")):
+            if is_stream_preview_image(data.get("image_file_id")):
+                image_note = t("image_stream_preview_note", lang)
+            elif is_game_cover_image(data.get("image_file_id")):
                 image_note = t("image_game_cover_note", lang)
             else:
                 pos = str(data.get("image_position") or "")

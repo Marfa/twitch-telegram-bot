@@ -135,7 +135,9 @@ from twitch import (
     fetch_twitch_status_summary,
     filter_streams_for_watch,
     find_placeholder_typos,
+    is_dynamic_alert_image,
     is_game_cover_image,
+    is_stream_preview_image,
     normalize_ignore_keywords,
     merge_ignore_keywords,
     normalize_watch_tags,
@@ -1137,16 +1139,18 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if has_image:
         context.user_data["image_file_id"] = sub.image_file_id
         context.user_data["image_position"] = sub.image_position or ""
-        if not is_game_cover_image(sub.image_file_id):
+        if not is_dynamic_alert_image(sub.image_file_id):
             context.user_data["image_backup_file_id"] = sub.image_file_id
             context.user_data["image_backup_position"] = sub.image_position or ""
     await query.edit_message_text("✓")
-    game_cover_on = is_game_cover_image(sub.image_file_id)
     await context.bot.send_message(
         query.from_user.id,
         t("edit_image_prompt", lang) if has_image else t("image_ask", lang),
         reply_markup=image_edit_keyboard(
-            lang, has_image=has_image, game_cover_on=game_cover_on
+            lang,
+            has_image=has_image,
+            game_cover_on=is_game_cover_image(sub.image_file_id),
+            stream_preview_on=is_stream_preview_image(sub.image_file_id),
         ),
     )
     return IMAGE_ASK
@@ -2677,7 +2681,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(
-                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep|game_cover)$"
+                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep|game_cover|stream_preview)$"
                 ),
             ],
             IMAGE_UPLOAD: [

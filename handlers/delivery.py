@@ -21,7 +21,7 @@ from twitch import (
     TwitchClient,
     find_placeholder_typos,
     fix_placeholder_typos,
-    is_game_cover_image,
+    is_dynamic_alert_image,
     resolve_sub_image_photo,
 )
 
@@ -36,8 +36,8 @@ def _effective_image_position(sub: Subscription) -> str:
     position = (sub.image_position or "").strip()
     if position in ("before", "after"):
         return position
-    # Game cover always stores "before" in the wizard; recover if position was lost.
-    if is_game_cover_image(sub.image_file_id):
+    # Dynamic images always store "before" in the wizard; recover if position was lost.
+    if is_dynamic_alert_image(sub.image_file_id):
         return "before"
     return ""
 
@@ -915,11 +915,12 @@ async def _send_notification(
         image_photo = await asyncio.to_thread(
             resolve_sub_image_photo, sub, stream, twitch
         )
-        if is_game_cover_image(sub.image_file_id) and not image_photo:
+        if is_dynamic_alert_image(sub.image_file_id) and not image_photo:
             logger.warning(
-                "Game cover unresolved for sub %s (alert_type=%s); sending text only",
+                "Dynamic image unresolved for sub %s (alert_type=%s image=%s); sending text only",
                 sub.id,
                 alert_type,
+                sub.image_file_id,
             )
         msg = await _deliver_alert_content(
             bot,

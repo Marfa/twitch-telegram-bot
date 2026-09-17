@@ -1503,10 +1503,15 @@ async def _scenario_subscriptions_edit_button_style(db) -> None:
 
 
 async def _scenario_wizard_image_ask(db) -> None:
-    """§2.6 Image step — game cover checkbox always shown; Skip / wizard nav escape."""
+    """§2.6 Image step — stream preview / game cover checkboxes; Skip / wizard nav escape."""
     from handlers.wizard import _go_image_ask_prompt, receive_image_ask, _wz
     from telegram.ext import ConversationHandler
-    from twitch import GAME_COVER_IMAGE_ID, is_game_cover_image
+    from twitch import (
+        GAME_COVER_IMAGE_ID,
+        STREAM_PREVIEW_IMAGE_ID,
+        is_game_cover_image,
+        is_stream_preview_image,
+    )
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -1525,9 +1530,17 @@ async def _scenario_wizard_image_ask(db) -> None:
         for row in m.inline_keyboard
         for b in row
     ]
+    assert any(lab.startswith("⬜️ ") and "превью" in lab.lower() for lab in labels)
     assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in labels)
     assert any("своё" in lab.lower() for lab in labels)
     cap.assert_turn("wizard_image_ask")
+
+    update, _query = _cb_update(_FREE_UID, "image_ask:stream_preview", cap)
+    cap.wrap(bot)
+    state = await receive_image_ask(update, ctx)
+    assert state == _wz()["IMAGE_ASK"]
+    assert is_stream_preview_image(ctx.user_data.get("image_file_id"))
+    assert ctx.user_data.get("image_file_id") == STREAM_PREVIEW_IMAGE_ID
 
     update, _query = _cb_update(_FREE_UID, "image_ask:game_cover", cap)
     cap.wrap(bot)

@@ -198,6 +198,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("import_oauth_manual", "import_oauth:manual"),
     ("sched_save_token", "sched_save_token:1"),
     ("image_ask_game_cover", "image_ask:game_cover"),
+    ("image_ask_stream_preview", "image_ask:stream_preview"),
 )
 
 

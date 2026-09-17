@@ -61,12 +61,36 @@ _FALLBACK_GAMES = (
 
 
 GAME_COVER_IMAGE_ID = "__game_cover__"
+STREAM_PREVIEW_IMAGE_ID = "__stream_preview__"
 BOX_ART_WIDTH = 1920
 BOX_ART_HEIGHT = 2560
+STREAM_THUMB_WIDTH = 1280
+STREAM_THUMB_HEIGHT = 720
 
 
 def is_game_cover_image(image_file_id: str | None) -> bool:
     return (image_file_id or "") == GAME_COVER_IMAGE_ID
+
+
+def is_stream_preview_image(image_file_id: str | None) -> bool:
+    return (image_file_id or "") == STREAM_PREVIEW_IMAGE_ID
+
+
+def is_dynamic_alert_image(image_file_id: str | None) -> bool:
+    """Sentinel ids resolved at send time (not a Telegram file_id)."""
+    return is_game_cover_image(image_file_id) or is_stream_preview_image(image_file_id)
+
+
+def format_stream_thumbnail_url(
+    thumbnail_template: str,
+    *,
+    width: int = STREAM_THUMB_WIDTH,
+    height: int = STREAM_THUMB_HEIGHT,
+) -> str | None:
+    thumb = str(thumbnail_template or "").strip()
+    if not thumb:
+        return None
+    return thumb.replace("{width}", str(width)).replace("{height}", str(height))
 
 
 def template_has_game_placeholder(template: str) -> bool:
@@ -126,6 +150,8 @@ def resolve_sub_image_photo(
     fid = sub.image_file_id
     if not fid:
         return None
+    if is_stream_preview_image(fid):
+        return format_stream_thumbnail_url(str((stream or {}).get("thumbnail_url") or ""))
     if is_game_cover_image(fid):
         if twitch is None:
             return None

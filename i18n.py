@@ -2075,13 +2075,25 @@ def template_strip_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def image_ask_keyboard(lang: str, *, game_cover_on: bool = False) -> InlineKeyboardMarkup:
-    mark = "✅ " if game_cover_on else "⬜️ "
+def image_ask_keyboard(
+    lang: str,
+    *,
+    game_cover_on: bool = False,
+    stream_preview_on: bool = False,
+) -> InlineKeyboardMarkup:
+    preview_mark = "✅ " if stream_preview_on else "⬜️ "
+    cover_mark = "✅ " if game_cover_on else "⬜️ "
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    mark + t("image_game_cover", lang),
+                    preview_mark + t("image_stream_preview", lang),
+                    callback_data="image_ask:stream_preview",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    cover_mark + t("image_game_cover", lang),
                     callback_data="image_ask:game_cover",
                 )
             ],
@@ -2092,18 +2104,30 @@ def image_ask_keyboard(lang: str, *, game_cover_on: bool = False) -> InlineKeybo
 
 
 def image_edit_keyboard(
-    lang: str, *, has_image: bool, game_cover_on: bool = False
+    lang: str,
+    *,
+    has_image: bool,
+    game_cover_on: bool = False,
+    stream_preview_on: bool = False,
 ) -> InlineKeyboardMarkup:
-    mark = "✅ " if game_cover_on else "⬜️ "
+    preview_mark = "✅ " if stream_preview_on else "⬜️ "
+    cover_mark = "✅ " if game_cover_on else "⬜️ "
+    preview_row = [
+        InlineKeyboardButton(
+            preview_mark + t("image_stream_preview", lang),
+            callback_data="image_ask:stream_preview",
+        )
+    ]
     cover_row = [
         InlineKeyboardButton(
-            mark + t("image_game_cover", lang),
+            cover_mark + t("image_game_cover", lang),
             callback_data="image_ask:game_cover",
         )
     ]
     if has_image:
         return InlineKeyboardMarkup(
             [
+                preview_row,
                 cover_row,
                 [
                     InlineKeyboardButton(
@@ -2125,7 +2149,9 @@ def image_edit_keyboard(
                 ],
             ]
         )
-    return image_ask_keyboard(lang, game_cover_on=game_cover_on)
+    return image_ask_keyboard(
+        lang, game_cover_on=game_cover_on, stream_preview_on=stream_preview_on
+    )
 
 
 def image_position_keyboard(lang: str) -> InlineKeyboardMarkup:
