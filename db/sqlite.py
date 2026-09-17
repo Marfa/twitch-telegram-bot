@@ -5658,7 +5658,8 @@ class SqliteDatabase:
             )
         if len(pk) == 1:
             pk0 = pk[0]
-            pk_type = "TEXT" if pk0 == "twitch_uid" else "INTEGER"
+            # twitch_uid / steam_uid are TEXT PKs; numeric ids are INTEGER.
+            pk_type = "TEXT" if pk0 in ("twitch_uid", "steam_uid") else "INTEGER"
             temp_ddl = (
                 f"CREATE TEMP TABLE _igdb_dump_ids ({pk0} {pk_type} PRIMARY KEY)"
             )

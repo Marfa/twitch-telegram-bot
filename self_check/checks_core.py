@@ -1128,6 +1128,14 @@ def check_core() -> None:
     assert "_bulk_conn" in inspect.getsource(PostgresDatabase)
     assert "ON CONFLICT" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
     assert "DELETE FROM" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
+    # steam_uid is TEXT (like twitch_uid); BIGINT temp PK caused Postgres
+    # "bigint = text" on DELETE during external_games sync.
+    _pg_replace = inspect.getsource(PostgresDatabase.igdb_replace_rows)
+    assert 'pk0 in ("twitch_uid", "steam_uid")' in _pg_replace
+    from db.sqlite import SqliteDatabase
+
+    _sq_replace = inspect.getsource(SqliteDatabase.igdb_replace_rows)
+    assert 'pk0 in ("twitch_uid", "steam_uid")' in _sq_replace
 
     assert _parse_long_array("{5,12}") == "5,12"
     assert _parse_long_array("{}") == ""

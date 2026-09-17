@@ -6178,7 +6178,8 @@ class PostgresDatabase:
             )
         if len(pk) == 1:
             pk0 = pk[0]
-            pk_type = "TEXT" if pk0 == "twitch_uid" else "BIGINT"
+            # twitch_uid / steam_uid are TEXT PKs; numeric ids are BIGINT.
+            pk_type = "TEXT" if pk0 in ("twitch_uid", "steam_uid") else "BIGINT"
             temp_ddl = (
                 f"CREATE TEMP TABLE _igdb_dump_ids "
                 f"({pk0} {pk_type} PRIMARY KEY) ON COMMIT DROP"
