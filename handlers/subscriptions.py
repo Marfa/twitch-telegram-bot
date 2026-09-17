@@ -482,6 +482,22 @@ def _format_sub_line(
     if getattr(sub, "attach_live_remind_button", False):
         settings.append(t("sub_list_live_remind_yes", lang))
     if (
+        custom_btns
+        or sub.attach_chat_button
+        or getattr(sub, "attach_live_remind_button", False)
+    ):
+        from custom_buttons import BUTTON_STYLE_LABEL_KEYS, button_style_choice_id
+
+        style_id = button_style_choice_id(getattr(sub, "button_style", None))
+        if style_id != "default":
+            settings.append(
+                t(
+                    "sub_list_button_style",
+                    lang,
+                    style=t(BUTTON_STYLE_LABEL_KEYS[style_id], lang),
+                )
+            )
+    if (
         not sub.image_file_id
         and sub.disable_link_preview
         and template_has_link(sub.message_template or "")
@@ -2988,7 +3004,16 @@ async def receive_edit_custom_buttons_callback(
 
     def _persist(_ctx: ContextTypes.DEFAULT_TYPE) -> None:
         dump = cbtn.dump_custom_buttons(_ud_buttons(_ctx))
-        db.update_subscription(sub_id, owner_id, custom_buttons=dump)
+        kwargs: dict = {"custom_buttons": dump}
+        sub_now = db.get_subscription(sub_id, owner_id)
+        if (
+            dump == "[]"
+            and sub_now
+            and not sub_now.attach_chat_button
+            and not getattr(sub_now, "attach_live_remind_button", False)
+        ):
+            kwargs["button_style"] = ""
+        db.update_subscription(sub_id, owner_id, **kwargs)
         _set_ud_buttons(_ctx, cbtn.parse_custom_buttons(dump))
 
     async def _done(upd, ctx, lang_done):
@@ -3047,7 +3072,16 @@ async def receive_edit_custom_buttons_text(
 
     def _persist(_ctx: ContextTypes.DEFAULT_TYPE) -> None:
         dump = cbtn.dump_custom_buttons(_ud_buttons(_ctx))
-        db.update_subscription(sub_id, owner_id, custom_buttons=dump)
+        kwargs: dict = {"custom_buttons": dump}
+        sub_now = db.get_subscription(sub_id, owner_id)
+        if (
+            dump == "[]"
+            and sub_now
+            and not sub_now.attach_chat_button
+            and not getattr(sub_now, "attach_live_remind_button", False)
+        ):
+            kwargs["button_style"] = ""
+        db.update_subscription(sub_id, owner_id, **kwargs)
         _set_ud_buttons(_ctx, cbtn.parse_custom_buttons(dump))
 
     return await receive_custom_buttons_text(
@@ -3228,6 +3262,21 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             parse_mode=ParseMode.HTML,
         )
 
+    if field == "button_style":
+        from i18n import edit_button_style_keyboard
+
+        await query.answer()
+        await query.edit_message_text(
+            t("edit_button_style_prompt", lang),
+            reply_markup=edit_button_style_keyboard(
+                sub_id, lang, current=getattr(sub, "button_style", "") or ""
+            ),
+        )
+        return
+    if field == "button_style_back":
+        await query.answer()
+        await _reshow_edit_menu(sub)
+        return
     if field == "strip":
         await query.answer()
         enabled = not bool(sub.strip_name_mentions)
@@ -3241,6 +3290,13 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         kwargs: dict = {"attach_chat_button": enabled}
         if enabled:
             kwargs["disable_link_preview"] = True
+        else:
+            from custom_buttons import parse_custom_buttons
+
+            if not parse_custom_buttons(
+                getattr(sub, "custom_buttons", None)
+            ) and not getattr(sub, "attach_live_remind_button", False):
+                kwargs["button_style"] = ""
         db.update_subscription(sub_id, query.from_user.id, **kwargs)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
@@ -3253,9 +3309,15 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         await query.answer()
         enabled = not bool(sub.attach_live_remind_button)
-        db.update_subscription(
-            sub_id, query.from_user.id, attach_live_remind_button=enabled
-        )
+        kwargs = {"attach_live_remind_button": enabled}
+        if not enabled:
+            from custom_buttons import parse_custom_buttons
+
+            if not parse_custom_buttons(
+                getattr(sub, "custom_buttons", None)
+            ) and not sub.attach_chat_button:
+                kwargs["button_style"] = ""
+        db.update_subscription(sub_id, query.from_user.id, **kwargs)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
@@ -3431,12 +3493,37 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     parts = query.data.split(":")
     sub_id = int(parts[1])
     field = parts[2]
-    value = parts[3] == "1"
     db: Database = context.application.bot_data["db"]
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub:
         await query.edit_message_text(t("sub_not_found", lang))
         return
+
+    async def _reshow_edit_menu(current: Subscription) -> None:
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=current.twitch_username
+        )
+        await query.edit_message_text(
+            _edit_menu_text(
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=current.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(current, lang, show_advanced=show_adv, db=db),
+            parse_mode=ParseMode.HTML,
+        )
+
+    if field == "button_style":
+        from custom_buttons import button_style_from_choice
+
+        style = button_style_from_choice(parts[3] if len(parts) > 3 else "")
+        db.update_subscription(sub_id, query.from_user.id, button_style=style)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+
+    value = parts[3] == "1"
     if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
         await query.edit_message_text(t("sub_not_found", lang))
         return
@@ -4407,6 +4494,7 @@ def _add_subscription_from_snapshot(
         attach_chat_button=bool(snapshot.get("attach_chat_button")),
         attach_live_remind_button=bool(snapshot.get("attach_live_remind_button")),
         custom_buttons=str(snapshot.get("custom_buttons") or "[]"),
+        button_style=str(snapshot.get("button_style") or ""),
         delay_minutes=int(snapshot.get("delay_minutes") or 0),
         suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),
         schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),

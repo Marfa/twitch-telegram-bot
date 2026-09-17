@@ -78,11 +78,15 @@ def main() -> None:
     check_handler_smoke()
     from .checks_callback_wiring import check_callback_wiring
     from .checks_flow_nav import check_flow_nav
-    from .checks_alert_settings import check_alert_setting_order
+    from .checks_alert_settings import (
+        check_alert_setting_order,
+        check_button_style_options,
+    )
 
     check_flow_nav()
     check_callback_wiring()
     check_alert_setting_order()
+    check_button_style_options()
     from .checks_drops import run as check_drops
 
     check_drops()

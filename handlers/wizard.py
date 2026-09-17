@@ -965,6 +965,7 @@ async def _advanced_options_markup(
         want_chat=bool(context.user_data.get("adv_want_chat")),
         want_live_remind=bool(context.user_data.get("adv_want_live_remind")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
+        button_style=str(context.user_data.get("button_style") or ""),
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
         show_preview=show_preview,
@@ -1008,6 +1009,7 @@ def _advanced_options_prompt_text(
         db, user_id, "live-remind-button"
     ):
         lines.append(t("advanced_options_hint_live_remind", lang))
+    lines.append(t("advanced_options_hint_button_style", lang))
     if template_has_link(str(context.user_data.get("message_template") or "")):
         lines.append(t("advanced_options_hint_preview", lang))
     return "\n".join(lines)
@@ -1027,6 +1029,7 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_pin", False)
     context.user_data.setdefault("adv_want_buttons", False)
     context.user_data.setdefault("adv_want_chat", False)
+    context.user_data.setdefault("button_style", "")
     if context.user_data.get("alert_type") == "upcoming":
         context.user_data.setdefault("adv_want_live_remind", False)
     else:
@@ -1118,7 +1121,36 @@ async def receive_advanced_options_toggle(
             return _wz()["ADVANCED_OPTIONS"]
     await query.answer()
     context.user_data[key] = turning_on
+    if not (
+        context.user_data.get("adv_want_buttons")
+        or context.user_data.get("adv_want_chat")
+        or context.user_data.get("adv_want_live_remind")
+    ):
+        context.user_data["button_style"] = ""
     _sync_adv_preview_conflict(context)
+    await query.edit_message_reply_markup(
+        reply_markup=await _advanced_options_markup(context, lang, query.from_user.id)
+    )
+    return _wz()["ADVANCED_OPTIONS"]
+
+
+async def receive_advanced_options_style(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    lang = _user_lang(context, query.from_user.id)
+    choice = query.data.rsplit(":", 1)[-1]
+    from custom_buttons import button_style_from_choice
+
+    if not (
+        context.user_data.get("adv_want_buttons")
+        or context.user_data.get("adv_want_chat")
+        or context.user_data.get("adv_want_live_remind")
+    ):
+        await query.answer()
+        return _wz()["ADVANCED_OPTIONS"]
+    await query.answer()
+    context.user_data["button_style"] = button_style_from_choice(choice)
     await query.edit_message_reply_markup(
         reply_markup=await _advanced_options_markup(context, lang, query.from_user.id)
     )
@@ -1169,6 +1201,12 @@ async def receive_advanced_options_next(
         )
     else:
         context.user_data["attach_live_remind_button"] = False
+    if not (
+        context.user_data.get("adv_want_buttons")
+        or want_chat
+        or context.user_data.get("attach_live_remind_button")
+    ):
+        context.user_data["button_style"] = ""
     _sync_adv_preview_conflict(context)
     has_link = template_has_link(
         str(context.user_data.get("message_template") or "")
@@ -3052,6 +3090,7 @@ async def _finish_subscription(
                 attach_chat_button=bool(data.get("attach_chat_button")),
                 attach_live_remind_button=False,
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
+                button_style=str(data.get("button_style") or ""),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
@@ -3146,6 +3185,7 @@ async def _finish_subscription(
                     else False
                 ),
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
+                button_style=str(data.get("button_style") or ""),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=(
                     0

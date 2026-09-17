@@ -4,10 +4,62 @@ from __future__ import annotations
 import json
 from urllib.parse import urlparse
 
+from telegram import InlineKeyboardButton, WebAppInfo
+
 CUSTOM_BUTTONS_MAX = 10
 CUSTOM_BUTTON_TEXT_MAX = 64
 BETA_FEATURE_ID = "custom-buttons"
 FEATURE_ID = "custom_buttons"
+
+# Bot API style values (empty = client default). Callback ids use "default" for empty.
+BUTTON_STYLE_API = ("", "primary", "success", "danger")
+BUTTON_STYLE_CHOICES = ("default", "primary", "success", "danger")
+BUTTON_STYLE_LABEL_KEYS = {
+    "default": "button_style_default",
+    "primary": "button_style_primary",
+    "success": "button_style_success",
+    "danger": "button_style_danger",
+}
+
+
+def normalize_button_style(raw: str | None) -> str:
+    """Return Bot API style ('primary'|'success'|'danger') or '' for default."""
+    v = (raw or "").strip().lower()
+    if v in ("primary", "success", "danger"):
+        return v
+    return ""
+
+
+def button_style_choice_id(raw: str | None) -> str:
+    style = normalize_button_style(raw)
+    return style if style else "default"
+
+
+def button_style_from_choice(choice: str | None) -> str:
+    v = (choice or "").strip().lower()
+    if v in ("primary", "success", "danger"):
+        return v
+    return ""
+
+
+def styled_inline_button(
+    text: str,
+    *,
+    url: str | None = None,
+    web_app: WebAppInfo | None = None,
+    style: str = "",
+) -> InlineKeyboardButton:
+    """Build an InlineKeyboardButton with optional Bot API 9.4 style."""
+    kwargs: dict = {"text": text}
+    if url is not None:
+        kwargs["url"] = url
+    if web_app is not None:
+        kwargs["web_app"] = web_app
+    api_style = normalize_button_style(style)
+    if api_style:
+        # api_kwargs works on PTB 21+; first-class style= arrived later.
+        kwargs["api_kwargs"] = {"style": api_style}
+    return InlineKeyboardButton(**kwargs)
 
 
 def parse_custom_buttons(raw: str | None) -> list[dict[str, str]]:

@@ -109,6 +109,112 @@ def _sample_sub(**overrides: object) -> Subscription:
     return Subscription(**base)  # type: ignore[arg-type]
 
 
+def check_button_style_options() -> None:
+    """Color picker appears in Extras/edit when any button option is on."""
+    from custom_buttons import (
+        BUTTON_STYLE_CHOICES,
+        normalize_button_style,
+        styled_inline_button,
+    )
+
+    assert normalize_button_style("primary") == "primary"
+    assert normalize_button_style("BLUE") == ""
+    assert normalize_button_style("default") == ""
+    assert normalize_button_style(None) == ""
+
+    btn = styled_inline_button("Go", url="https://example.com", style="danger")
+    assert (btn.api_kwargs or {}).get("style") == "danger"
+    plain = styled_inline_button("Go", url="https://example.com")
+    assert not plain.api_kwargs
+
+    adv_off = advanced_options_keyboard(
+        "en",
+        want_image=False,
+        want_strip=False,
+        want_ignore=False,
+        want_delay=False,
+        want_repeat=False,
+        want_delete=False,
+        want_pin=False,
+        want_chat=False,
+        want_buttons=False,
+        want_live_remind=False,
+        show_buttons=True,
+        show_live_remind=True,
+    )
+    style_cbs = [
+        (b.callback_data or "")
+        for row in adv_off.inline_keyboard
+        for b in row
+        if (b.callback_data or "").startswith("advopt:style:")
+    ]
+    assert style_cbs == []
+
+    adv_on = advanced_options_keyboard(
+        "en",
+        want_image=False,
+        want_strip=False,
+        want_ignore=False,
+        want_delay=False,
+        want_repeat=False,
+        want_delete=False,
+        want_pin=False,
+        want_chat=True,
+        want_buttons=False,
+        button_style="success",
+        show_buttons=True,
+    )
+    style_cbs = [
+        (b.callback_data or "")
+        for row in adv_on.inline_keyboard
+        for b in row
+        if (b.callback_data or "").startswith("advopt:style:")
+    ]
+    assert style_cbs == [f"advopt:style:{c}" for c in BUTTON_STYLE_CHOICES]
+    marked = [
+        b.text
+        for row in adv_on.inline_keyboard
+        for b in row
+        if (b.callback_data or "") == "advopt:style:success"
+    ]
+    assert marked and marked[0].startswith("✅")
+
+    edit = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="dm",
+        attach_chat_button=True,
+        show_advanced=True,
+        button_style="primary",
+    )
+    assert any(
+        (b.callback_data or "") == "edit_f:1:button_style"
+        for row in edit.inline_keyboard
+        for b in row
+    )
+    edit_off = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="dm",
+        attach_chat_button=False,
+        show_advanced=True,
+    )
+    assert not any(
+        (b.callback_data or "") == "edit_f:1:button_style"
+        for row in edit_off.inline_keyboard
+        for b in row
+    )
+
+    for loc in ("en", "ru"):
+        assert t("button_style_default", loc)
+        assert t("button_style_primary", loc)
+        assert t("button_style_success", loc)
+        assert t("button_style_danger", loc)
+        assert t("advanced_options_hint_button_style", loc)
+        assert t("edit_button_style", loc, style="x")
+        assert t("sub_list_button_style", loc, style="x")
+
+
 def check_alert_setting_order() -> None:
     assert ALERT_SETTING_ORDER == (
         "image",

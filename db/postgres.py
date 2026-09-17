@@ -377,6 +377,13 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS button_style
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS pin_message
                 BOOLEAN NOT NULL DEFAULT FALSE
                 """
@@ -1267,6 +1274,7 @@ class PostgresDatabase:
         attach_chat_button: bool = False,
         attach_live_remind_button: bool = False,
         custom_buttons: str = "[]",
+        button_style: str = "",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -1298,7 +1306,7 @@ class PostgresDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     strip_name_mentions, attach_chat_button, attach_live_remind_button,
-                    custom_buttons,
+                    custom_buttons, button_style,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
@@ -1306,7 +1314,7 @@ class PostgresDatabase:
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
                     delete_other_alerts, pin_message, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1324,6 +1332,12 @@ class PostgresDatabase:
                     bool(attach_chat_button),
                     bool(attach_live_remind_button),
                     custom_buttons if str(custom_buttons or "").strip() else "[]",
+                    (
+                        str(button_style or "").strip().lower()
+                        if str(button_style or "").strip().lower()
+                        in ("primary", "success", "danger")
+                        else ""
+                    ),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -1676,6 +1690,7 @@ class PostgresDatabase:
                     "attach_chat_button",
                     "attach_live_remind_button",
                     "custom_buttons",
+                    "button_style",
                     "delay_minutes",
                     "suppress_repeat_minutes",
                     "schedule_reminder_minutes",
@@ -1757,6 +1772,7 @@ class PostgresDatabase:
             "attach_chat_button",
             "attach_live_remind_button",
             "custom_buttons",
+            "button_style",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -1813,8 +1829,15 @@ class PostgresDatabase:
                 "twitch_user_id",
                 "category_watch_prefs",
                 "release_watch_prefs",
+                "custom_buttons",
+                "button_style",
             ):
-                values.append(str(value or ""))
+                if key == "button_style":
+                    from custom_buttons import normalize_button_style
+
+                    values.append(normalize_button_style(str(value or "")))
+                else:
+                    values.append(str(value or ""))
             elif key == "image_file_id":
                 values.append(str(value) if value else None)
             elif key == "image_position":

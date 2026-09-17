@@ -42,6 +42,7 @@ class Database(Protocol):
         attach_chat_button: bool = False,
         attach_live_remind_button: bool = False,
         custom_buttons: str = "[]",
+        button_style: str = "",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,

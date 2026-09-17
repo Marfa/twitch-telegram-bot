@@ -361,6 +361,8 @@ class Subscription:
     is_demo: bool = False
     trial_paused: bool = False
     delivery_paused: bool = False
+    # Bot API button style: "" | primary | success | danger
+    button_style: str = ""
 
 
 @dataclass(frozen=True)
@@ -565,6 +567,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "attach_chat_button": bool(sub.attach_chat_button),
         "attach_live_remind_button": bool(sub.attach_live_remind_button),
         "custom_buttons": sub.custom_buttons or "[]",
+        "button_style": str(getattr(sub, "button_style", "") or ""),
         "delay_minutes": int(sub.delay_minutes),
         "suppress_repeat_minutes": int(sub.suppress_repeat_minutes),
         "schedule_reminder_minutes": int(sub.schedule_reminder_minutes),
@@ -887,6 +890,9 @@ def _row_to_sub(row: Any) -> Subscription:
         custom_buttons=str(row["custom_buttons"] or "[]")
         if "custom_buttons" in keys
         else "[]",
+        button_style=str(row["button_style"] or "")
+        if "button_style" in keys
+        else "",
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
         schedule_reminder_minutes=int(row["schedule_reminder_minutes"] or 0)

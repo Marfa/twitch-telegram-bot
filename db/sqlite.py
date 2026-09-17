@@ -249,6 +249,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN custom_buttons "
                 "TEXT NOT NULL DEFAULT '[]'"
             )
+        if "button_style" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN button_style "
+                "TEXT NOT NULL DEFAULT ''"
+            )
         if "pin_message" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN pin_message "
@@ -1112,6 +1117,7 @@ class SqliteDatabase:
         attach_chat_button: bool = False,
         attach_live_remind_button: bool = False,
         custom_buttons: str = "[]",
+        button_style: str = "",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
         schedule_reminder_minutes: int = 0,
@@ -1142,7 +1148,7 @@ class SqliteDatabase:
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     strip_name_mentions, attach_chat_button, attach_live_remind_button,
-                    custom_buttons,
+                    custom_buttons, button_style,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
@@ -1150,7 +1156,7 @@ class SqliteDatabase:
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
                     delete_other_alerts, pin_message, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1167,6 +1173,10 @@ class SqliteDatabase:
                     int(bool(attach_chat_button)),
                     int(bool(attach_live_remind_button)),
                     custom_buttons if str(custom_buttons or "").strip() else "[]",
+                    str(button_style or "").strip().lower()
+                    if str(button_style or "").strip().lower()
+                    in ("primary", "success", "danger")
+                    else "",
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
                     max(0, int(schedule_reminder_minutes)),
@@ -1486,7 +1496,7 @@ class SqliteDatabase:
                         message_template, dest_type, chat_id, thread_id,
                         delete_previous, notify_delete_fail, disable_link_preview,
                         strip_name_mentions, attach_chat_button, attach_live_remind_button,
-                        custom_buttons,
+                        custom_buttons, button_style,
                         delay_minutes, suppress_repeat_minutes,
                         schedule_reminder_minutes, schedule_reminder_configured,
                         ignore_keywords, use_global_ignore,
@@ -1497,7 +1507,7 @@ class SqliteDatabase:
                         notify_on_drops, drops_game_id,
                         delete_other_alerts, pin_message, is_demo
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1515,6 +1525,12 @@ class SqliteDatabase:
                         int(bool(payload.get("attach_chat_button"))),
                         int(bool(payload.get("attach_live_remind_button"))),
                         payload.get("custom_buttons") or "[]",
+                        (
+                            str(payload.get("button_style") or "").strip().lower()
+                            if str(payload.get("button_style") or "").strip().lower()
+                            in ("primary", "success", "danger")
+                            else ""
+                        ),
                         int(payload.get("delay_minutes") or 0),
                         int(payload.get("suppress_repeat_minutes") or 0),
                         int(payload.get("schedule_reminder_minutes") or 0),
@@ -1586,6 +1602,7 @@ class SqliteDatabase:
             "attach_chat_button",
             "attach_live_remind_button",
             "custom_buttons",
+            "button_style",
             "delay_minutes",
             "suppress_repeat_minutes",
             "schedule_reminder_minutes",
@@ -1642,8 +1659,15 @@ class SqliteDatabase:
                 "twitch_user_id",
                 "category_watch_prefs",
                 "release_watch_prefs",
+                "custom_buttons",
+                "button_style",
             ):
-                values.append(str(value or ""))
+                if key == "button_style":
+                    from custom_buttons import normalize_button_style
+
+                    values.append(normalize_button_style(str(value or "")))
+                else:
+                    values.append(str(value or ""))
             elif key == "image_file_id":
                 values.append(str(value) if value else None)
             elif key == "image_position":

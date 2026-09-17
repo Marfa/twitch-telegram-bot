@@ -492,6 +492,7 @@ from handlers.wizard import (
     on_premium_gate,
     receive_alert_type,
     receive_advanced_options_next,
+    receive_advanced_options_style,
     receive_advanced_options_toggle,
     receive_channel,
     receive_channel_dup,
@@ -1586,6 +1587,10 @@ def _edit_options_for_sub(
         show_advanced=show_advanced,
         show_custom_buttons=show_custom_buttons,
         show_live_remind=show_live_remind,
+        button_style=str(getattr(sub, "button_style", "") or ""),
+        custom_buttons_count=len(
+            cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None))
+        ),
     )
 
 
@@ -2504,7 +2509,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|pin_message|preview|chat_button|strip|live_remind)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back)$",
         ),
         group=0,
     )
@@ -2515,7 +2520,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_set,
-            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview|chat_button):[01]$",
+            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview|chat_button):[01]$|^edit_set:\d+:button_style:(default|primary|success|danger)$",
         ),
         group=0,
     )
@@ -2692,6 +2697,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
                     pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|preview)$",
+                ),
+                CallbackQueryHandler(
+                    receive_advanced_options_style,
+                    pattern=r"^advopt:style:(default|primary|success|danger)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"

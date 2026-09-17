@@ -253,14 +253,16 @@ def _alert_chat_button_markup(
 
     buttons: list[InlineKeyboardButton] = []
     login = (sub.twitch_username or "").strip().lstrip("@").lower()
+    style = cbtn.normalize_button_style(getattr(sub, "button_style", None))
     for btn_def in cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None)):
         url = str(btn_def.get("url") or "")
         if login and "{username}" in url:
             url = url.replace("{username}", login)
         buttons.append(
-            InlineKeyboardButton(
+            cbtn.styled_inline_button(
                 str(btn_def.get("text") or "")[:64],
                 url=url,
+                style=style,
             )
         )
     if sub.attach_chat_button:
@@ -276,21 +278,27 @@ def _alert_chat_button_markup(
             # Groups/channels get a URL button (same Mini App page) — otherwise Button_type_invalid.
             if sub.dest_type == "dm":
                 buttons.append(
-                    InlineKeyboardButton(
+                    cbtn.styled_inline_button(
                         t("alert_chat_button", lang),
                         web_app=WebAppInfo(url=url),
+                        style=style,
                     )
                 )
             else:
                 buttons.append(
-                    InlineKeyboardButton(t("alert_chat_button", lang), url=url)
+                    cbtn.styled_inline_button(
+                        t("alert_chat_button", lang),
+                        url=url,
+                        style=style,
+                    )
                 )
     remind_url = _live_remind_button_url(sub, lang, db=db, bot_username=bot_username)
     if remind_url:
         buttons.append(
-            InlineKeyboardButton(
+            cbtn.styled_inline_button(
                 t("alert_live_remind_button", lang),
                 url=remind_url,
+                style=style,
             )
         )
     if not buttons:

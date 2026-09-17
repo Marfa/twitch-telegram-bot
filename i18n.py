@@ -1030,6 +1030,7 @@ def advanced_options_keyboard(
     want_buttons: bool = False,
     want_pin: bool = False,
     want_live_remind: bool = False,
+    button_style: str = "",
     show_delay: bool = True,
     show_repeat: bool = True,
     show_preview: bool = False,
@@ -1038,6 +1039,11 @@ def advanced_options_keyboard(
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER
+    from custom_buttons import (
+        BUTTON_STYLE_CHOICES,
+        BUTTON_STYLE_LABEL_KEYS,
+        button_style_choice_id,
+    )
 
     locked = frozenset(locked or ())
     want = {
@@ -1078,6 +1084,22 @@ def advanced_options_keyboard(
         if sid in show and not show[sid]:
             continue
         rows.append(_row(want[sid], ADVOPT_LABEL_KEY[sid], sid))
+    if want_buttons or want_chat or want_live_remind:
+        current = button_style_choice_id(button_style)
+        style_row: list[InlineKeyboardButton] = []
+        for choice in BUTTON_STYLE_CHOICES:
+            mark = "✅ " if choice == current else "⬜️ "
+            style_row.append(
+                InlineKeyboardButton(
+                    mark + t(BUTTON_STYLE_LABEL_KEYS[choice], lang),
+                    callback_data=f"advopt:style:{choice}",
+                )
+            )
+            if len(style_row) == 2:
+                rows.append(style_row)
+                style_row = []
+        if style_row:
+            rows.append(style_row)
     rows.append(
         [
             InlineKeyboardButton(
@@ -2485,6 +2507,8 @@ def edit_options_keyboard(
     show_advanced: bool = True,
     show_custom_buttons: bool = False,
     show_live_remind: bool = False,
+    button_style: str = "",
+    custom_buttons_count: int = 0,
 ) -> InlineKeyboardMarkup:
     # Shared block order: alert_settings.ALERT_SETTING_ORDER. Edit-only around it:
     # template, image_del, delete_fail/other, schedule, dest, type/copy.
@@ -2644,6 +2668,29 @@ def edit_options_keyboard(
                 )
             continue
         if sid == "preview":
+            has_any_buttons = (
+                custom_buttons_count > 0
+                or attach_chat_button
+                or attach_live_remind_button
+            )
+            if show_advanced and has_any_buttons:
+                from custom_buttons import (
+                    BUTTON_STYLE_LABEL_KEYS,
+                    button_style_choice_id,
+                )
+
+                style_label = t(
+                    BUTTON_STYLE_LABEL_KEYS[button_style_choice_id(button_style)],
+                    lang,
+                )
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t("edit_button_style", lang, style=style_label),
+                            callback_data=f"edit_f:{sub_id}:button_style",
+                        )
+                    ]
+                )
             if show_link_preview:
                 preview_on = not disable_link_preview
                 preview_mark = "✅ " if preview_on else "⬜️ "
@@ -2689,6 +2736,42 @@ def edit_options_keyboard(
                     callback_data=f"edit_f:{sub_id}:copy_change",
                 )
             ],
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def edit_button_style_keyboard(
+    sub_id: int, lang: str, *, current: str = ""
+) -> InlineKeyboardMarkup:
+    from custom_buttons import (
+        BUTTON_STYLE_CHOICES,
+        BUTTON_STYLE_LABEL_KEYS,
+        button_style_choice_id,
+    )
+
+    selected = button_style_choice_id(current)
+    rows: list[list[InlineKeyboardButton]] = []
+    style_row: list[InlineKeyboardButton] = []
+    for choice in BUTTON_STYLE_CHOICES:
+        mark = "✅ " if choice == selected else "⬜️ "
+        style_row.append(
+            InlineKeyboardButton(
+                mark + t(BUTTON_STYLE_LABEL_KEYS[choice], lang),
+                callback_data=f"edit_set:{sub_id}:button_style:{choice}",
+            )
+        )
+        if len(style_row) == 2:
+            rows.append(style_row)
+            style_row = []
+    if style_row:
+        rows.append(style_row)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("wizard_back", lang),
+                callback_data=f"edit_f:{sub_id}:button_style_back",
+            )
         ]
     )
     return InlineKeyboardMarkup(rows)

@@ -36,6 +36,7 @@ from i18n import (
     stream_schedule_vacation_auto_keyboard,
     stored_typo_fix_keyboard,
     template_typo_keyboard,
+    edit_button_style_keyboard,
     subscriptions_menu,
     watch_cats_nav_keyboard,
     watch_filters_keyboard,
@@ -259,6 +260,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("delete_all_confirm", delete_all_confirm_keyboard(loc)),
             ("template_typo", template_typo_keyboard(loc)),
             ("stored_typo_fix", stored_typo_fix_keyboard(loc)),
+            ("edit_button_style", edit_button_style_keyboard(1, loc, current="primary")),
             ("watch_cats_nav", watch_cats_nav_keyboard(loc, has_cats=False)),
             ("watch_filters", watch_filters_keyboard(
                 loc,
@@ -1346,6 +1348,160 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
     cap.assert_turn("wizard_pin_from_extras")
     assert state == _wz()["IGNORE_KEYWORDS"]
 
+
+async def _scenario_wizard_button_style(db) -> None:
+    """§2 Extras — button color options appear when a button option is on; pick persists."""
+    from handlers.wizard import (
+        _go_advanced_options_prompt,
+        receive_advanced_options_style,
+        receive_advanced_options_toggle,
+        _wz,
+    )
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "hi",
+            "alert_type": "live",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    style_before = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+        if (b.callback_data or "").startswith("advopt:style:")
+    ]
+    assert style_before == []
+    cap.assert_turn("wizard_extras_no_button_style")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:toggle:chat", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        await receive_advanced_options_toggle(update, ctx)
+    assert ctx.user_data.get("adv_want_chat") is True
+    style_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+        if (b.callback_data or "").startswith("advopt:style:")
+    ]
+    assert "advopt:style:default" in style_cbs
+    assert "advopt:style:danger" in style_cbs
+    # Extras only edits inline markup; wizard Reply Cancel stays from the prior screen.
+    cap.note_pulse()
+    cap.assert_turn("wizard_extras_button_style_shown")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:style:danger", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        await receive_advanced_options_style(update, ctx)
+    assert ctx.user_data.get("button_style") == "danger"
+    marked = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+        if (b.callback_data or "") == "advopt:style:danger"
+    ]
+    assert marked and marked[0].startswith("✅")
+    cap.note_pulse()
+    cap.assert_turn("wizard_extras_button_style_picked")
+
+
+async def _scenario_subscriptions_edit_button_style(db) -> None:
+    """§3/§4 edit — button color picker has Back; selection saves and returns to menu."""
+    from handlers.subscriptions import edit_menu, on_edit_bool_menu, on_edit_pick, on_edit_set
+
+    sub_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="streamer",
+        twitch_user_id="100",
+        message_template="hi",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        attach_chat_button=True,
+        button_style="",
+    )
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("edit", "ru"), cap)
+    ctx = _ctx(application)
+    await edit_menu(update, ctx)
+    update, _query = _cb_update(_FREE_UID, f"edit:{sub_id}", cap)
+    with patch(
+        "handlers.subscriptions.prem.advanced_mode_on",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_edit_pick(update, ctx)
+    assert any(
+        (b.callback_data or "") == f"edit_f:{sub_id}:button_style"
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    )
+    cap.assert_turn("subscriptions_edit_button_style_row")
+
+    update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:button_style", cap)
+    with patch(
+        "handlers.subscriptions.prem.advanced_mode_on",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_edit_bool_menu(update, ctx)
+    pick_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert f"edit_set:{sub_id}:button_style:primary" in pick_cbs
+    assert f"edit_f:{sub_id}:button_style_back" in pick_cbs
+    cap.assert_turn("subscriptions_edit_button_style_picker")
+
+    update, _query = _cb_update(
+        _FREE_UID, f"edit_set:{sub_id}:button_style:primary", cap
+    )
+    with patch(
+        "handlers.subscriptions.prem.advanced_mode_on",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_edit_set(update, ctx)
+    sub = db.get_subscription(sub_id, _FREE_UID)
+    assert sub is not None
+    assert sub.button_style == "primary"
+    assert any(
+        (b.callback_data or "") == f"edit_f:{sub_id}:button_style"
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    )
+    # Edit menu is inline-only after save; subscriptions Reply stays from edit_menu.
+    cap.note_pulse()
+    cap.assert_turn("subscriptions_edit_button_style_saved")
+
+
 async def _scenario_wizard_image_ask(db) -> None:
     """§2.6 Image step — game cover checkbox always shown; Skip / wizard nav escape."""
     from handlers.wizard import _go_image_ask_prompt, receive_image_ask, _wz
@@ -2334,6 +2490,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_release_pick_pages(db)
         await _scenario_wizard_alert_type_other(db)
         await _scenario_wizard_extras_checkboxes(db)
+        await _scenario_wizard_button_style(db)
         await _scenario_wizard_image_ask(db)
         await _scenario_import(db)
         await _scenario_alert_history(db)
@@ -2341,6 +2498,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_subscriptions_edit_game_alert(db)
         await _scenario_subscriptions_edit_type_copy(db)
         await _scenario_subscriptions_edit_checkboxes(db)
+        await _scenario_subscriptions_edit_button_style(db)
         await _scenario_subscriptions_delete(db)
         await _scenario_share_alert_offer(db)
         await _scenario_premium_gift(db)
