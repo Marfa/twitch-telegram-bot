@@ -347,6 +347,7 @@ class Subscription:
     image_position: str = ""
     notify_cooldown_until: str | None = None
     last_message_id: int | None = None
+    pinned_message_id: int | None = None
     last_schedule_reminder_segment_id: str | None = None
     from_twitch_sync: bool = False
     from_watch_suggest: bool = False
@@ -356,6 +357,7 @@ class Subscription:
     category_watch_primed: bool = False
     release_watch_prefs: str = ""
     delete_other_alerts: bool = False
+    pin_message: bool = False
     is_demo: bool = False
     trial_paused: bool = False
     delivery_paused: bool = False
@@ -503,6 +505,7 @@ def migrate_sub_fields_for_alert_type(
         out["delete_previous"] = False
         out["notify_delete_fail"] = False
         out["delete_other_alerts"] = False
+        out["pin_message"] = False
     if not out.get("delete_previous"):
         out["notify_delete_fail"] = False
     if not out.get("notify_on_category_change") or not out.get("delete_previous"):
@@ -581,6 +584,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "notify_on_drops": bool(sub.notify_on_drops),
         "drops_game_id": sub.drops_game_id or "",
         "delete_other_alerts": bool(sub.delete_other_alerts),
+        "pin_message": bool(sub.pin_message),
         "is_demo": bool(sub.is_demo),
     }
 
@@ -911,6 +915,11 @@ def _row_to_sub(row: Any) -> Subscription:
             else row["notify_cooldown_until"]
         ),
         last_message_id=row["last_message_id"],
+        pinned_message_id=(
+            int(row["pinned_message_id"])
+            if "pinned_message_id" in keys and row["pinned_message_id"] is not None
+            else None
+        ),
         last_schedule_reminder_segment_id=(
             str(row["last_schedule_reminder_segment_id"])
             if "last_schedule_reminder_segment_id" in keys
@@ -941,6 +950,7 @@ def _row_to_sub(row: Any) -> Subscription:
         delete_other_alerts=bool(row["delete_other_alerts"])
         if "delete_other_alerts" in keys
         else False,
+        pin_message=bool(row["pin_message"]) if "pin_message" in keys else False,
         is_demo=bool(row["is_demo"]) if "is_demo" in keys else False,
         trial_paused=bool(row["trial_paused"]) if "trial_paused" in keys else False,
         delivery_paused=bool(row["delivery_paused"])

@@ -249,6 +249,15 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN custom_buttons "
                 "TEXT NOT NULL DEFAULT '[]'"
             )
+        if "pin_message" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN pin_message "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "pinned_message_id" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN pinned_message_id INTEGER"
+            )
         if "notify_on_drops" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN notify_on_drops "
@@ -1122,6 +1131,7 @@ class SqliteDatabase:
         notify_on_drops: bool = False,
         drops_game_id: str = "",
         delete_other_alerts: bool = False,
+        pin_message: bool = False,
         is_demo: bool = False,
     ) -> int:
         with self._conn() as conn:
@@ -1139,8 +1149,8 @@ class SqliteDatabase:
                     from_watch_suggest, category_watch_prefs, release_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
-                    delete_other_alerts, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delete_other_alerts, pin_message, is_demo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1176,6 +1186,7 @@ class SqliteDatabase:
                     int(bool(notify_on_drops)),
                     str(drops_game_id or ""),
                     int(bool(delete_other_alerts)),
+                    int(bool(pin_message)),
                     int(bool(is_demo)),
                 ),
             )
@@ -1210,6 +1221,17 @@ class SqliteDatabase:
                     """,
                     (message_id, now_iso, sub_id),
                 )
+
+    def set_pinned_message_id(self, sub_id: int, message_id: int | None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET pinned_message_id = ?
+                WHERE id = ?
+                """,
+                (message_id, sub_id),
+            )
 
     def get_subs_due_previous_message_purge(
         self, older_than: datetime
@@ -1473,9 +1495,9 @@ class SqliteDatabase:
                         category_watch_prefs, release_watch_prefs,
                         notify_on_live, notify_on_end, notify_on_category_change,
                         notify_on_drops, drops_game_id,
-                        delete_other_alerts, is_demo
+                        delete_other_alerts, pin_message, is_demo
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1512,6 +1534,7 @@ class SqliteDatabase:
                         int(bool(payload.get("notify_on_drops"))),
                         payload.get("drops_game_id") or "",
                         int(bool(payload.get("delete_other_alerts"))),
+                        int(bool(payload.get("pin_message"))),
                         int(bool(payload.get("is_demo"))),
                     ),
                 )
@@ -1573,6 +1596,7 @@ class SqliteDatabase:
             "notify_on_drops",
             "drops_game_id",
             "delete_other_alerts",
+            "pin_message",
             "ignore_keywords",
             "use_global_ignore",
             "image_file_id",
@@ -1601,6 +1625,7 @@ class SqliteDatabase:
                 "notify_on_category_change",
                 "notify_on_drops",
                 "delete_other_alerts",
+                "pin_message",
                 "use_global_ignore",
             ):
                 values.append(int(bool(value)))
@@ -2841,6 +2866,7 @@ class SqliteDatabase:
                     OR COALESCE(delay_minutes, 0) > 0
                     OR COALESCE(suppress_repeat_minutes, 0) > 0
                     OR COALESCE(delete_previous, 0) != 0
+                    OR COALESCE(pin_message, 0) != 0
                   )
                 LIMIT 1
                 """,

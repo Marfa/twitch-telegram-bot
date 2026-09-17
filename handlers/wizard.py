@@ -917,6 +917,7 @@ _ADVOPT_FEATURE = {
     "delay": "delay",
     "repeat": "repeat",
     "delete": "delete_prev",
+    "pin": "pin_message",
     "buttons": "custom_buttons",
 }
 
@@ -959,6 +960,7 @@ async def _advanced_options_markup(
         want_delay=bool(context.user_data.get("adv_want_delay")),
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
         want_delete=bool(context.user_data.get("adv_want_delete")),
+        want_pin=bool(context.user_data.get("adv_want_pin")),
         want_buttons=bool(context.user_data.get("adv_want_buttons")),
         want_chat=bool(context.user_data.get("adv_want_chat")),
         want_live_remind=bool(context.user_data.get("adv_want_live_remind")),
@@ -997,6 +999,7 @@ def _advanced_options_prompt_text(
     if alert == "live" or not alert:
         lines.append(t("advanced_options_hint_repeat", lang))
     lines.append(t("advanced_options_hint_delete", lang))
+    lines.append(t("advanced_options_hint_pin", lang))
     db: Database = context.application.bot_data["db"]
     if beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID):
         lines.append(t("advanced_options_hint_buttons", lang))
@@ -1021,6 +1024,7 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
     context.user_data.setdefault("adv_want_delete", False)
+    context.user_data.setdefault("adv_want_pin", False)
     context.user_data.setdefault("adv_want_buttons", False)
     context.user_data.setdefault("adv_want_chat", False)
     if context.user_data.get("alert_type") == "upcoming":
@@ -1062,6 +1066,7 @@ async def receive_advanced_options_toggle(
         "delay": "adv_want_delay",
         "repeat": "adv_want_repeat",
         "delete": "adv_want_delete",
+        "pin": "adv_want_pin",
         "buttons": "adv_want_buttons",
         "chat": "adv_want_chat",
         "live_remind": "adv_want_live_remind",
@@ -1132,6 +1137,7 @@ async def receive_advanced_options_next(
         ("delay", "adv_want_delay"),
         ("repeat", "adv_want_repeat"),
         ("delete", "adv_want_delete"),
+        ("pin", "adv_want_pin"),
         ("buttons", "adv_want_buttons"),
     ):
         if toggle in locked:
@@ -1148,6 +1154,10 @@ async def receive_advanced_options_next(
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
+    if not context.user_data.get("adv_want_pin"):
+        context.user_data["pin_message"] = False
+    else:
+        context.user_data["pin_message"] = True
     if not context.user_data.get("adv_want_buttons"):
         context.user_data["custom_buttons"] = "[]"
         context.user_data["custom_buttons_list"] = []
@@ -1312,6 +1322,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_delay",
             "adv_want_repeat",
             "adv_want_delete",
+            "adv_want_pin",
             "adv_want_buttons",
             "adv_want_chat",
             "adv_want_live_remind",
@@ -1332,6 +1343,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "after_delay_state",
             "dest_type",
             "delete_previous",
+            "pin_message",
             "notify_delete_fail",
             "delete_other_alerts",
             "delete_sibling_asked",
@@ -2518,6 +2530,7 @@ _LIVE_ADDON_CLEAR_KEYS = (
     "suppress_repeat_minutes",
     "dest_type",
     "delete_previous",
+    "pin_message",
     "notify_delete_fail",
     "pending_chat_id",
     "pending_thread_id",
@@ -2608,6 +2621,7 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data["pending_thread_id"] = None
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
+        context.user_data["pin_message"] = False
         return await _finish_subscription(
             update,
             context,
@@ -2764,6 +2778,7 @@ async def _prompt_delete_old(
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
+        context.user_data["pin_message"] = False
         chat_id = context.user_data.get("pending_chat_id", user_id)
         thread_id = context.user_data.get("pending_thread_id")
         return await _finish_subscription(
@@ -2973,6 +2988,10 @@ async def _finish_subscription(
         return ConversationHandler.END
     delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
     notify_delete_fail = bool(data.get("notify_delete_fail", False)) and delete_previous
+    pin_message = (
+        bool(data.get("pin_message", False) or data.get("adv_want_pin", False))
+        and dest_type != "dm"
+    )
     alert_type = str(data.get("alert_type") or "")
     notify_on_end = bool(data.get("notify_on_end", False)) or alert_type == "end"
     notify_on_category_change = (
@@ -3025,6 +3044,7 @@ async def _finish_subscription(
                 thread_id=thread_id,
                 delete_previous=delete_previous,
                 notify_delete_fail=notify_delete_fail,
+                pin_message=pin_message,
                 disable_link_preview=bool(data.get("disable_link_preview", False))
                 or bool(data.get("image_file_id"))
                 or bool(data.get("attach_chat_button")),
@@ -3059,6 +3079,7 @@ async def _finish_subscription(
                 delete_previous=delete_previous,
                 notify_delete_fail=notify_delete_fail,
                 delete_other_alerts=delete_other_alerts,
+                pin_message=pin_message,
             )
             if not ok:
                 await context.bot.send_message(
@@ -3113,6 +3134,7 @@ async def _finish_subscription(
                 thread_id=thread_id,
                 delete_previous=delete_previous,
                 notify_delete_fail=notify_delete_fail,
+                pin_message=pin_message,
                 disable_link_preview=bool(data.get("disable_link_preview", False))
                 or bool(data.get("image_file_id"))
                 or bool(data.get("attach_chat_button")),
@@ -3267,6 +3289,7 @@ async def _finish_subscription(
                     else t("delete_fail_no_note", lang)
                 )
             )
+        pin_note = t("pin_yes", lang) if pin_message else t("pin_no", lang)
         has_image = bool(data.get("image_file_id"))
         preview_disabled = bool(data.get("disable_link_preview", False)) or has_image
         preview_note = (
@@ -3332,6 +3355,7 @@ async def _finish_subscription(
             thread_note=thread_note,
             delete_note=delete_note,
             delete_fail_note=delete_fail_note,
+            pin_note=pin_note,
             preview_note=preview_note,
             image_note=image_note,
             ignore_keywords_note=ignore_keywords_note,

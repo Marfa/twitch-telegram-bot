@@ -17,7 +17,7 @@ from db import (
     parse_category_watch_prefs,
 )
 from handlers.alert_history import _vod_offset_seconds
-from handlers.delivery import _send_notification
+from handlers.delivery import _send_notification, unpin_stream_alert_messages
 from i18n import DEFAULT_LOCALE, format_duration_hm, t
 from twitch import (
     TwitchClient,
@@ -429,6 +429,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             # End alerts for stream-id restarts (old broadcast), then live for new id.
             for uid in stream_restarts:
+                await unpin_stream_alert_messages(context.bot, db, uid)
                 stream_id = restart_old_sids.get(uid, "")
                 end_stream = restart_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):
@@ -528,6 +529,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     )
 
             for uid in went_offline:
+                await unpin_stream_alert_messages(context.bot, db, uid)
                 stream_id = offline_stream_ids.get(uid, "")
                 end_stream = offline_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):

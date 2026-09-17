@@ -1201,11 +1201,12 @@ async def _scenario_wizard_alert_type_other(db) -> None:
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:
-    """§2 Extras checkbox values apply without a second Yes/No (delete/delay/repeat)."""
+    """§2 Extras checkbox values apply without a second Yes/No (delete/delay/repeat/pin)."""
     from handlers.wizard import (
         _go_delay_prompt,
         _prompt_delete_old,
         _prompt_repeat_step,
+        receive_advanced_options_next,
         _wz,
     )
     from telegram.ext import ConversationHandler
@@ -1310,6 +1311,40 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
     cap.assert_turn("wizard_repeat_from_extras")
     assert ConversationHandler.END != state
 
+    # §2.5 pin — Extras checkbox sets pin_message without a second Yes/No.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update, _query = _cb_update(_FREE_UID, "advopt:next", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "adv_want_pin": True,
+            "adv_want_image": False,
+            "adv_want_strip": False,
+            "adv_want_ignore": False,
+            "adv_want_delay": False,
+            "adv_want_repeat": False,
+            "adv_want_delete": False,
+            "adv_want_buttons": False,
+            "adv_want_chat": False,
+            "message_template": "hi",
+            "alert_type": "live",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch(
+        "handlers.wizard._go_ignore_keywords_prompt",
+        new=AsyncMock(return_value=_wz()["IGNORE_KEYWORDS"]),
+    ):
+        state = await receive_advanced_options_next(update, ctx)
+    assert ctx.user_data.get("pin_message") is True
+    assert ctx.user_data.get("advanced_options_done") is True
+    cap.assert_turn("wizard_pin_from_extras")
+    assert state == _wz()["IGNORE_KEYWORDS"]
 
 async def _scenario_wizard_image_ask(db) -> None:
     """§2.6 Image step — game cover checkbox always shown; Skip / wizard nav escape."""
@@ -1394,7 +1429,7 @@ async def _scenario_subscriptions_edit_checkboxes(db) -> None:
     ):
         await on_edit_pick(update, ctx)
 
-    for field in ("strip", "chat_button", "preview", "delete_old"):
+    for field in ("strip", "chat_button", "preview", "delete_old", "pin_message"):
         update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:{field}", cap)
         with patch(
             "handlers.subscriptions.prem.advanced_mode_on",
@@ -1438,8 +1473,8 @@ async def _scenario_subscriptions_edit_checkboxes(db) -> None:
     assert sub.disable_link_preview is True
     assert sub.delete_previous is True
     assert sub.notify_delete_fail is True
+    assert sub.pin_message is True
     cap.assert_turn("subscriptions_edit_checkboxes")
-
 
 async def _scenario_subscriptions_delete(db) -> None:
     """§4 delete flow — pick, delete-all confirm, No returns to pick."""

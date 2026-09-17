@@ -1028,6 +1028,7 @@ def advanced_options_keyboard(
     want_chat: bool,
     want_preview: bool = False,
     want_buttons: bool = False,
+    want_pin: bool = False,
     want_live_remind: bool = False,
     show_delay: bool = True,
     show_repeat: bool = True,
@@ -1046,6 +1047,7 @@ def advanced_options_keyboard(
         "delay": want_delay,
         "repeat": want_repeat,
         "delete": want_delete,
+        "pin": want_pin,
         "buttons": want_buttons,
         "chat": want_chat,
         "live_remind": want_live_remind,
@@ -2466,6 +2468,7 @@ def edit_options_keyboard(
     *,
     dest_type: str = "dm",
     delete_previous: bool = False,
+    pin_message: bool = False,
     notify_delete_fail: bool = False,
     delete_other_alerts: bool = False,
     has_image: bool = False,
@@ -2592,6 +2595,18 @@ def edit_options_keyboard(
                                 )
                             ]
                         )
+            continue
+        if sid == "pin":
+            if show_advanced and dest_type != "dm":
+                pin_mark = "✅ " if pin_message else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            pin_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
             continue
         if sid == "buttons":
             if show_advanced and show_custom_buttons:

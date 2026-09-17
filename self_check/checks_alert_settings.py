@@ -47,6 +47,7 @@ def _list_markers(lang: str) -> dict[str, str]:
         "delay": t_bullet("delay_yes_note", lang, minutes=5),
         "repeat": t("sub_list_repeat_mute", lang, minutes=10),
         "delete": t("sub_list_delete_yes", lang),
+        "pin": t("sub_list_pin_yes", lang),
         "buttons": t("sub_list_custom_buttons", lang, count=1),
         "chat": t("sub_list_chat_button_yes", lang),
         "live_remind": t("sub_list_live_remind_yes", lang),
@@ -99,6 +100,7 @@ def _sample_sub(**overrides: object) -> Subscription:
         "category_watch_live_ids": "[]",
         "category_watch_primed": False,
         "delete_other_alerts": False,
+        "pin_message": True,
         "is_demo": False,
         "trial_paused": False,
         "delivery_paused": False,
@@ -115,6 +117,7 @@ def check_alert_setting_order() -> None:
         "delay",
         "repeat",
         "delete",
+        "pin",
         "buttons",
         "chat",
         "live_remind",
@@ -130,6 +133,7 @@ def check_alert_setting_order() -> None:
         want_delay=False,
         want_repeat=False,
         want_delete=False,
+        want_pin=False,
         want_chat=False,
         want_buttons=False,
         want_live_remind=False,
@@ -147,6 +151,7 @@ def check_alert_setting_order() -> None:
         "en",
         dest_type="channel",
         delete_previous=True,
+        pin_message=True,
         has_image=True,
         strip_name_mentions=True,
         attach_chat_button=True,
@@ -168,6 +173,7 @@ def check_alert_setting_order() -> None:
     assert labels["edit_f:1:chat_button"].startswith("✅ ")
     assert labels["edit_f:1:preview"].startswith("⬜️ ")
     assert labels["edit_f:1:delete_old"].startswith("✅ ")
+    assert labels["edit_f:1:pin_message"].startswith("✅ ")
     assert labels["edit_f:1:delete_fail"].startswith("⬜️ ")
     assert not labels["edit_f:1:repeat"].startswith(("✅ ", "⬜️ "))
 
@@ -183,7 +189,7 @@ def check_alert_setting_order() -> None:
     assert _edit_setting_ids(upcoming_edit) == [
         sid
         for sid in ALERT_SETTING_ORDER
-        if sid not in ("delay", "repeat", "delete", "buttons")
+        if sid not in ("delay", "repeat", "delete", "pin", "buttons")
     ]
     upcoming_labels = {
         (btn.callback_data or ""): btn.text

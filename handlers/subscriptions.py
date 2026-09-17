@@ -472,6 +472,8 @@ def _format_sub_line(
             settings.append(t_bullet("delete_fail_yes_note", lang))
         if sub.notify_on_category_change and sub.delete_other_alerts:
             settings.append(t("sub_list_delete_other_yes", lang))
+    if sub.dest_type != "dm" and getattr(sub, "pin_message", False):
+        settings.append(t("sub_list_pin_yes", lang))
     custom_btns = parse_custom_buttons(getattr(sub, "custom_buttons", None))
     if custom_btns:
         settings.append(t("sub_list_custom_buttons", lang, count=len(custom_btns)))
@@ -2310,6 +2312,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             "delete_previous": False,
             "notify_delete_fail": False,
             "delete_other_alerts": False,
+            "pin_message": False,
         }
         needs_reset = (
             bool(sub.ignore_keywords.strip())
@@ -2322,6 +2325,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             or sub.delete_previous
             or sub.notify_delete_fail
             or sub.delete_other_alerts
+            or bool(getattr(sub, "pin_message", False))
         )
         if needs_reset:
             db.update_subscription(sub_id, query.from_user.id, **reset_fields)
@@ -3287,6 +3291,41 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             kwargs["notify_delete_fail"] = False
             kwargs["delete_other_alerts"] = False
         db.update_subscription(sub_id, query.from_user.id, **kwargs)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    if field == "pin_message":
+        if sub.dest_type == "dm":
+            await query.answer()
+            await _reshow_edit_menu(sub)
+            return
+        if not await prem.has_feature(
+            context.bot,
+            db,
+            query.from_user.id,
+            "pin_message",
+            channel=sub.twitch_username,
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.answer()
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_field",
+                feature="pin_message",
+            )
+            return
+        await query.answer()
+        enabled = not bool(getattr(sub, "pin_message", False))
+        db.update_subscription(sub_id, query.from_user.id, pin_message=enabled)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
@@ -4303,6 +4342,7 @@ _TYPE_MIGRATION_KEYS = (
     "notify_on_drops",
     "drops_game_id",
     "delete_other_alerts",
+    "pin_message",
 )
 
 
@@ -4386,6 +4426,7 @@ def _add_subscription_from_snapshot(
         notify_on_drops=bool(snapshot.get("notify_on_drops")),
         drops_game_id=str(snapshot.get("drops_game_id") or ""),
         delete_other_alerts=bool(snapshot.get("delete_other_alerts")),
+        pin_message=bool(snapshot.get("pin_message")),
         is_demo=bool(snapshot.get("is_demo")),
     )
 
@@ -4731,6 +4772,10 @@ def _share_clone_snapshot(snapshot: dict, user_id: int) -> dict:
     out["dest_type"] = "dm"
     out["chat_id"] = user_id
     out["thread_id"] = None
+    out["delete_previous"] = False
+    out["notify_delete_fail"] = False
+    out["delete_other_alerts"] = False
+    out["pin_message"] = False
     out["from_twitch_sync"] = False
     out["from_watch_suggest"] = False
     out["is_demo"] = False

@@ -1650,9 +1650,15 @@ def check_core() -> None:
             thread_note="",
             delete_note="",
             delete_fail_note="",
+            pin_note="",
             alert_note="ALERT_NOTE_OK",
         )
         assert "ALERT_NOTE_OK" in done
+        assert tr("pin_yes", loc)
+        assert tr("pin_no", loc)
+        assert tr("sub_list_pin_yes", loc)
+        assert tr("advanced_options_pin", loc)
+        assert tr("premium_feat_pin_message", loc)
         assert tr("edit_schedule_reminder", loc)
         assert tr("edit_schedule_reminder_no_schedule", loc)
         assert tr("channel_dup_prompt", loc)

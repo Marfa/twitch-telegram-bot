@@ -376,6 +376,19 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS pin_message
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS receive_bot_updates BOOLEAN NOT NULL DEFAULT TRUE
                 """
@@ -1273,6 +1286,7 @@ class PostgresDatabase:
         notify_on_drops: bool = False,
         drops_game_id: str = "",
         delete_other_alerts: bool = False,
+        pin_message: bool = False,
         is_demo: bool = False,
     ) -> int:
         with self._conn() as conn:
@@ -1291,8 +1305,8 @@ class PostgresDatabase:
                     from_watch_suggest, category_watch_prefs, release_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
-                    delete_other_alerts, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delete_other_alerts, pin_message, is_demo
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1329,6 +1343,7 @@ class PostgresDatabase:
                     bool(notify_on_drops),
                     str(drops_game_id or ""),
                     bool(delete_other_alerts),
+                    bool(pin_message),
                     bool(is_demo),
                 ),
             )
@@ -1366,6 +1381,18 @@ class PostgresDatabase:
                     """,
                     (message_id, sub_id),
                 )
+
+    def set_pinned_message_id(self, sub_id: int, message_id: int | None) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE subscriptions
+                SET pinned_message_id = %s
+                WHERE id = %s
+                """,
+                (message_id, sub_id),
+            )
 
     def get_subs_due_previous_message_purge(
         self, older_than: datetime
@@ -1668,6 +1695,7 @@ class PostgresDatabase:
                     "notify_on_drops",
                     "drops_game_id",
                     "delete_other_alerts",
+                    "pin_message",
                     "is_demo",
                 )
                 if k in payload
@@ -1739,6 +1767,7 @@ class PostgresDatabase:
             "notify_on_drops",
             "drops_game_id",
             "delete_other_alerts",
+            "pin_message",
             "ignore_keywords",
             "use_global_ignore",
             "image_file_id",
@@ -1767,6 +1796,7 @@ class PostgresDatabase:
                 "notify_on_category_change",
                 "notify_on_drops",
                 "delete_other_alerts",
+                "pin_message",
                 "use_global_ignore",
             ):
                 values.append(bool(value))
@@ -3120,6 +3150,7 @@ class PostgresDatabase:
                     OR COALESCE(delay_minutes, 0) > 0
                     OR COALESCE(suppress_repeat_minutes, 0) > 0
                     OR COALESCE(delete_previous, FALSE)
+                    OR COALESCE(pin_message, FALSE)
                   )
                 LIMIT 1
                 """,

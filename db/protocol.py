@@ -61,10 +61,13 @@ class Database(Protocol):
         notify_on_drops: bool = False,
         drops_game_id: str = "",
         delete_other_alerts: bool = False,
+        pin_message: bool = False,
         is_demo: bool = False,
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None: ...
+
+    def set_pinned_message_id(self, sub_id: int, message_id: int | None) -> None: ...
 
     def get_subs_due_previous_message_purge(
         self, older_than: datetime

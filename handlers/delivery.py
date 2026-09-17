@@ -763,6 +763,68 @@ async def _delete_previous_before_send(bot, db: Database, sub: Subscription) -> 
         )
         if ok and owner_sub_id != sub.id:
             db.set_last_message_id(owner_sub_id, None)
+            sibling = db.get_subscription_by_id(owner_sub_id)
+            if (
+                sibling
+                and sibling.pinned_message_id
+                and sibling.pinned_message_id == message_id
+            ):
+                db.set_pinned_message_id(owner_sub_id, None)
+    if (
+        sub.pinned_message_id
+        and sub.pinned_message_id in seen_msg
+    ):
+        db.set_pinned_message_id(sub.id, None)
+
+
+async def _unpin_one_message(bot, *, chat_id: int, message_id: int) -> None:
+    try:
+        await bot.unpin_chat_message(chat_id=chat_id, message_id=message_id)
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot unpin message %s in %s: %s",
+            message_id,
+            chat_id,
+            exc,
+        )
+
+
+async def _pin_after_send(
+    bot, db: Database, sub: Subscription, message_id: int
+) -> None:
+    old_pin = getattr(sub, "pinned_message_id", None)
+    if old_pin and old_pin != message_id:
+        await _unpin_one_message(bot, chat_id=sub.chat_id, message_id=old_pin)
+    try:
+        await bot.pin_chat_message(
+            chat_id=sub.chat_id,
+            message_id=message_id,
+            disable_notification=True,
+        )
+        db.set_pinned_message_id(sub.id, message_id)
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot pin message %s in %s: %s",
+            message_id,
+            sub.chat_id,
+            exc,
+        )
+
+
+async def unpin_stream_alert_messages(
+    bot, db: Database, twitch_user_id: str
+) -> None:
+    """Unpin bot alerts for a streamer when the stream ends (any pin-enabled sub)."""
+    for sub in db.get_enabled_by_twitch_user_id(twitch_user_id):
+        if not getattr(sub, "pin_message", False):
+            continue
+        if sub.dest_type == "dm":
+            continue
+        pinned_id = getattr(sub, "pinned_message_id", None)
+        if not pinned_id:
+            continue
+        await _unpin_one_message(bot, chat_id=sub.chat_id, message_id=pinned_id)
+        db.set_pinned_message_id(sub.id, None)
 
 
 async def purge_stale_previous_messages(context) -> None:
@@ -893,6 +955,13 @@ async def _send_notification(
         clear_user_blocked(db, sub.chat_id)
     if msg and sub.delete_previous and sub.dest_type != "dm":
         db.set_last_message_id(sub.id, msg.message_id)
+    if (
+        msg
+        and getattr(sub, "pin_message", False)
+        and sub.dest_type != "dm"
+        and alert_type != "end"
+    ):
+        await _pin_after_send(bot, db, sub, msg.message_id)
     if sub.suppress_repeat_minutes > 0:
         db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
     # History is for the user's DM inbox only — skip channel/group destinations.

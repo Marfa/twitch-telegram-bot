@@ -1568,6 +1568,7 @@ def _edit_options_for_sub(
         lang,
         dest_type=sub.dest_type,
         delete_previous=sub.delete_previous,
+        pin_message=bool(getattr(sub, "pin_message", False)),
         notify_delete_fail=bool(sub.notify_delete_fail),
         delete_other_alerts=bool(sub.delete_other_alerts),
         has_image=bool(sub.image_file_id),
@@ -2503,7 +2504,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|preview|chat_button|strip|live_remind)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|pin_message|preview|chat_button|strip|live_remind)$",
         ),
         group=0,
     )
@@ -2690,7 +2691,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|buttons|chat|live_remind|preview)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|preview)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"

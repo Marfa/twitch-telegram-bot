@@ -31,7 +31,7 @@
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks and “viewed all below” |
-| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), link preview (if URL in template; off with image/chat button) |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), link preview (if URL in template; off with image/chat button) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
@@ -64,7 +64,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | More than 5 active alerts | Removes the free-plan cap of 5 active alerts |
 | Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (beta: JSON catalog from twitchdrops.app with attribution, hourly digest, stream alerts up to 5 live with Drops-tag priority, description + game page link) |
 | Twitch follow auto-sync | Periodic import of new follows / removal of unfollows |
-| Advanced alert options | Ignore keywords, delayed send, repeat mute, delete previous |
+| Advanced alert options | Ignore keywords, delayed send, repeat mute, delete previous, pin until stream ends |
 | Twitch schedule tools | Publish slots, fix a day, vacation mode on Twitch |
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
@@ -117,7 +117,7 @@ Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
-3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Reminder button” (upcoming), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
+3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, pin message until stream ends ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Reminder button” (upcoming), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
 4. Image (if checked) — `⬜️/✅ Use game cover` (always; category from Twitch) or your own image and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
@@ -142,7 +142,7 @@ Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscripti
 - group ID (`-100…`)
 - forwarded message from the group (“Forwarded from: …”)
 
-Bot permissions in a group: **send messages** (admin is not required for alerts). Also needs permission to **delete its own messages**. During setup the bot must be an **administrator** so Telegram allows checking that you are an admin too; after binding, admin is optional if send/delete rights remain.
+Bot permissions in a group: **send messages** (admin is not required for alerts). Also needs permission to **delete its own messages** (if “delete previous” is on) and **pin messages** (if “pin message” is on). During setup the bot must be an **administrator** so Telegram allows checking that you are an admin too; after binding, admin is optional if the needed rights remain.
 
 With “delete old” enabled, the bot removes the previous alert before a new one and also auto-deletes it after about 47 hours (Telegram’s ~48-hour limit), without waiting for the next stream.
 
@@ -275,7 +275,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report (Mon 10:00 MSK): total users (parentheses = change vs the previous mailing), new users and Stars payers for the week, active trials. On the 1st at 10:00 MSK — the same for the previous calendar month.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / chat button / 🧪 remind about stream (upcoming) / link preview / schedule reminders, repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / pin message / chat button / 🧪 remind about stream (upcoming) / link preview / schedule reminders, repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

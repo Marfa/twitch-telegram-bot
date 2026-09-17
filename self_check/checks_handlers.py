@@ -574,7 +574,7 @@ def check_handlers() -> None:
         # Full plan unlocks every FEATURE_IDS entry (not only is_premium).
         for fid in prem.FEATURE_IDS:
             assert prem.has_feature_sync(db, 50, fid), fid
-        for fid in ("ignore_keywords", "delay", "repeat", "delete_prev", "custom_buttons"):
+        for fid in ("ignore_keywords", "delay", "repeat", "delete_prev", "pin_message", "custom_buttons"):
             assert prem.has_feature_sync(db, 50, fid), fid
         assert prem.active_subscription_slots(db, 50).unlimited is True
         ok2, reason2 = start_trial(db, 50)
@@ -780,8 +780,10 @@ def check_handlers() -> None:
         assert "delay" not in FEATURE_IDS
         assert "repeat" not in FEATURE_IDS
         assert "delete_prev" not in FEATURE_IDS
+        assert "pin_message" not in FEATURE_IDS
         assert "custom_buttons" not in FEATURE_IDS
         assert "custom_buttons" in prem.ADVANCED_MODE_FEATURE_IDS
+        assert "pin_message" in prem.ADVANCED_MODE_FEATURE_IDS
         assert tr("premium_feat_advanced_mode", "ru") == "Продвинутые опции оповещений"
         assert tr("premium_feat_custom_buttons", "ru")
         assert tr("advanced_options_buttons", "ru")
@@ -836,11 +838,12 @@ def check_handlers() -> None:
             "advanced_options_delay",
             "advanced_options_repeat",
             "advanced_options_delete",
+            "advanced_options_pin",
             "advanced_options_chat",
         ):
             label = tr(key, "ru")
             assert any(label in text for text in edit_labels), key
-        # Shared block order: image → strip → ignore → delay → repeat → delete → chat
+        # Shared block order: image → strip → ignore → delay → repeat → delete → pin → chat
         # (+ preview when template has a link — tested separately below)
         idx = {tr(k, "ru"): None for k in (
             "advanced_options_image",
@@ -849,6 +852,7 @@ def check_handlers() -> None:
             "advanced_options_delay",
             "advanced_options_repeat",
             "advanced_options_delete",
+            "advanced_options_pin",
             "advanced_options_chat",
         )}
         for i, text in enumerate(edit_labels):
