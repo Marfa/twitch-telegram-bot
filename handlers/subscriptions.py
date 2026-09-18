@@ -487,6 +487,10 @@ def _format_sub_line(
         settings.append(t("sub_list_chat_button_yes", lang))
     if getattr(sub, "attach_live_remind_button", False):
         settings.append(t("sub_list_live_remind_yes", lang))
+    if getattr(sub, "notify_on_schedule_cancel", False) and (
+        getattr(sub, "schedule_cancel_template", "") or ""
+    ).strip():
+        settings.append(t("sub_list_schedule_cancel_yes", lang))
     if (
         custom_btns
         or sub.attach_chat_button
@@ -2330,6 +2334,8 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             "suppress_repeat_minutes": 0,
             "attach_chat_button": False,
             "attach_live_remind_button": False,
+            "notify_on_schedule_cancel": False,
+            "schedule_cancel_template": "",
             "custom_buttons": "[]",
             "delete_previous": False,
             "notify_delete_fail": False,
@@ -2343,6 +2349,10 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             or sub.suppress_repeat_minutes > 0
             or sub.attach_chat_button
             or bool(getattr(sub, "attach_live_remind_button", False))
+            or (
+                bool(getattr(sub, "notify_on_schedule_cancel", False))
+                and bool((getattr(sub, "schedule_cancel_template", "") or "").strip())
+            )
             or bool(parse_custom_buttons(getattr(sub, "custom_buttons", None)))
             or sub.delete_previous
             or sub.notify_delete_fail
@@ -4445,6 +4455,8 @@ _TYPE_MIGRATION_KEYS = (
     "drops_game_id",
     "delete_other_alerts",
     "pin_message",
+    "notify_on_schedule_cancel",
+    "schedule_cancel_template",
 )
 
 
@@ -4531,6 +4543,8 @@ def _add_subscription_from_snapshot(
         delete_other_alerts=bool(snapshot.get("delete_other_alerts")),
         pin_message=bool(snapshot.get("pin_message")),
         is_demo=bool(snapshot.get("is_demo")),
+        notify_on_schedule_cancel=bool(snapshot.get("notify_on_schedule_cancel")),
+        schedule_cancel_template=str(snapshot.get("schedule_cancel_template") or ""),
     )
 
 

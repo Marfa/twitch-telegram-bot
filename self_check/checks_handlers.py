@@ -785,8 +785,11 @@ def check_handlers() -> None:
         assert "custom_buttons" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "pin_message" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "stream_video_preview" in prem.ADVANCED_MODE_FEATURE_IDS
+        assert "schedule_cancel" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "stream_video_preview" not in FEATURE_IDS
+        assert "schedule_cancel" not in FEATURE_IDS
         assert tr("premium_feat_advanced_mode", "ru") == "Продвинутые опции оповещений"
+        assert tr("premium_feat_schedule_cancel", "ru")
         assert tr("premium_feat_custom_buttons", "ru")
         assert tr("advanced_options_buttons", "ru")
         assert "⭐" in tr("advanced_options_hint_buttons", "ru")
@@ -871,11 +874,17 @@ def check_handlers() -> None:
             show_advanced=True,
             is_upcoming=True,
             show_live_remind=True,
+            show_schedule_cancel=True,
             attach_live_remind_button=True,
+            notify_on_schedule_cancel=True,
         )
         upcoming_labels = [btn.text for row in upcoming_kb.inline_keyboard for btn in row]
         assert any(
             tr("advanced_options_live_remind", "ru") in text for text in upcoming_labels
+        )
+        assert any(
+            tr("advanced_options_schedule_cancel", "ru") in text
+            for text in upcoming_labels
         )
         assert not any(
             tr("advanced_options_delay", "ru") in text for text in upcoming_labels
@@ -883,7 +892,12 @@ def check_handlers() -> None:
         assert tr("advanced_options_preview", "ru")
         assert tr("advanced_options_hint_preview", "ru")
         assert tr("advanced_options_hint_live_remind", "ru")
+        assert tr("advanced_options_hint_schedule_cancel", "ru")
         assert tr("alert_live_remind_button", "ru")
+        assert tr("schedule_cancel_template_prompt", "ru", placeholders_link="x")
+        assert tr("edit_schedule_cancel_prompt", "ru", sub_id=1, current="x", placeholders_link="x")
+        assert tr("sub_list_schedule_cancel_yes", "ru")
+        assert tr("alert_history_type_schedule_cancel", "ru")
         from handlers.wizard import _sync_adv_preview_conflict
         from unittest.mock import MagicMock
 

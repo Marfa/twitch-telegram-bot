@@ -33,6 +33,7 @@ def _alert_history_type_label(alert_type: str, lang: str) -> str:
         "end": "alert_history_type_end",
         "category": "alert_history_type_category",
         "schedule": "alert_history_type_schedule",
+        "schedule_cancel": "alert_history_type_schedule_cancel",
     }.get(alert_type)
     return t(key, lang) if key else alert_type
 

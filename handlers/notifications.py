@@ -786,6 +786,10 @@ def _parse_segment_start(segment: dict) -> datetime | None:
 
 async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _render_sub_template
+    from schedule_cancel import (
+        build_schedule_day_map,
+        find_emptied_schedule_days,
+    )
 
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
@@ -803,9 +807,85 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.exception("Twitch schedule poll failed for %s", uid)
             continue
         if TwitchClient.vacation_active(schedule.get("vacation"), now=now):
+            # Keep day baseline fresh so vacation exit does not look like cancels.
+            try:
+                current_days = build_schedule_day_map(
+                    schedule.get("segments") or [],
+                    now=now,
+                    tz_name=str(schedule.get("broadcaster_timezone") or "") or "UTC",
+                )
+                db.set_schedule_day_snapshot(uid, current_days)
+            except Exception:
+                logger.exception(
+                    "Schedule day snapshot update failed during vacation for %s", uid
+                )
             continue
         segments = schedule.get("segments") or []
+        tz_name = str(schedule.get("broadcaster_timezone") or "") or "UTC"
+        current_days = build_schedule_day_map(
+            segments, now=now, tz_name=tz_name
+        )
+        previous_days = db.get_schedule_day_snapshot(uid)
+        emptied = find_emptied_schedule_days(
+            previous_days, current_days, now=now
+        )
+        db.set_schedule_day_snapshot(uid, current_days)
+
         for sub in db.get_enabled_by_twitch_user_id(uid):
+            if (
+                emptied
+                and getattr(sub, "notify_on_schedule_cancel", False)
+                and (getattr(sub, "schedule_cancel_template", "") or "").strip()
+            ):
+                try:
+                    notified = json.loads(
+                        getattr(sub, "schedule_cancel_notified_days", None) or "[]"
+                    )
+                except (TypeError, json.JSONDecodeError):
+                    notified = []
+                if not isinstance(notified, list):
+                    notified = []
+                notified_set = {str(x) for x in notified}
+                for day, prev_segs in emptied:
+                    if day in notified_set:
+                        continue
+                    first = prev_segs[0] if prev_segs else {}
+                    template = (sub.schedule_cancel_template or "").strip()
+                    if not template:
+                        continue
+                    from types import SimpleNamespace
+
+                    cancel_sub = SimpleNamespace(**{**sub.__dict__})
+                    cancel_sub.message_template = template
+                    game = str(first.get("game") or "")
+                    title = str(first.get("title") or "—")
+                    cover_stream = {
+                        "game_id": "",
+                        "game_name": game,
+                        "category": {"name": game} if game else {},
+                    }
+                    text = _render_sub_template(
+                        cancel_sub,
+                        sub.twitch_username,
+                        game,
+                        title,
+                        twitch=twitch,
+                        stream=cover_stream,
+                        extra={"date": day, "minutes": ""},
+                    )
+                    ok = await _send_notification(
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="schedule_cancel",
+                        stream=cover_stream,
+                        twitch=twitch,
+                    )
+                    if ok:
+                        db.mark_schedule_cancel_notified(sub.id, day)
+                        notified_set.add(day)
+
             remind_before = int(sub.schedule_reminder_minutes or 0)
             if remind_before <= 0:
                 continue

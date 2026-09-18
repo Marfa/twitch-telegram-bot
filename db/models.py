@@ -363,6 +363,9 @@ class Subscription:
     delivery_paused: bool = False
     # Bot API button style: "" | primary | success | danger
     button_style: str = ""
+    notify_on_schedule_cancel: bool = False
+    schedule_cancel_template: str = ""
+    schedule_cancel_notified_days: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -499,6 +502,8 @@ def migrate_sub_fields_for_alert_type(
         out["schedule_reminder_minutes"] = 0
         out["schedule_reminder_configured"] = False
         out["attach_live_remind_button"] = False
+        out["notify_on_schedule_cancel"] = False
+        out["schedule_cancel_template"] = ""
         out["category_watch_prefs"] = ""
     else:
         return out
@@ -514,6 +519,8 @@ def migrate_sub_fields_for_alert_type(
         out["delete_other_alerts"] = False
     if new_type != "upcoming":
         out["attach_live_remind_button"] = False
+        out["notify_on_schedule_cancel"] = False
+        out["schedule_cancel_template"] = ""
     return out
 
 
@@ -572,6 +579,12 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "suppress_repeat_minutes": int(sub.suppress_repeat_minutes),
         "schedule_reminder_minutes": int(sub.schedule_reminder_minutes),
         "schedule_reminder_configured": bool(sub.schedule_reminder_configured),
+        "notify_on_schedule_cancel": bool(
+            getattr(sub, "notify_on_schedule_cancel", False)
+        ),
+        "schedule_cancel_template": str(
+            getattr(sub, "schedule_cancel_template", "") or ""
+        ),
         "ignore_keywords": sub.ignore_keywords or "",
         "use_global_ignore": bool(sub.use_global_ignore),
         "image_file_id": sub.image_file_id,
@@ -962,6 +975,17 @@ def _row_to_sub(row: Any) -> Subscription:
         delivery_paused=bool(row["delivery_paused"])
         if "delivery_paused" in keys
         else False,
+        notify_on_schedule_cancel=bool(row["notify_on_schedule_cancel"])
+        if "notify_on_schedule_cancel" in keys
+        else False,
+        schedule_cancel_template=str(row["schedule_cancel_template"] or "")
+        if "schedule_cancel_template" in keys
+        else "",
+        schedule_cancel_notified_days=str(
+            row["schedule_cancel_notified_days"] or "[]"
+        )
+        if "schedule_cancel_notified_days" in keys
+        else "[]",
     )
 
 

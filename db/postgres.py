@@ -370,6 +370,27 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS notify_on_schedule_cancel
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS schedule_cancel_template
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS schedule_cancel_notified_days
+                TEXT NOT NULL DEFAULT '[]'
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS custom_buttons
                 TEXT NOT NULL DEFAULT '[]'
                 """
@@ -1159,6 +1180,15 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS schedule_day_snapshot (
+                    twitch_user_id TEXT PRIMARY KEY,
+                    days_json TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS premium_channels (
                     twitch_user_id TEXT PRIMARY KEY,
                     twitch_login TEXT NOT NULL,
@@ -1296,6 +1326,8 @@ class PostgresDatabase:
         delete_other_alerts: bool = False,
         pin_message: bool = False,
         is_demo: bool = False,
+        notify_on_schedule_cancel: bool = False,
+        schedule_cancel_template: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -1313,8 +1345,9 @@ class PostgresDatabase:
                     from_watch_suggest, category_watch_prefs, release_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
-                    delete_other_alerts, pin_message, is_demo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delete_other_alerts, pin_message, is_demo,
+                    notify_on_schedule_cancel, schedule_cancel_template
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1359,6 +1392,8 @@ class PostgresDatabase:
                     bool(delete_other_alerts),
                     bool(pin_message),
                     bool(is_demo),
+                    bool(notify_on_schedule_cancel),
+                    str(schedule_cancel_template or ""),
                 ),
             )
             row = cur.fetchone()
@@ -1712,6 +1747,8 @@ class PostgresDatabase:
                     "delete_other_alerts",
                     "pin_message",
                     "is_demo",
+                    "notify_on_schedule_cancel",
+                    "schedule_cancel_template",
                 )
                 if k in payload
             })
@@ -1792,6 +1829,9 @@ class PostgresDatabase:
             "twitch_user_id",
             "category_watch_prefs",
             "release_watch_prefs",
+            "notify_on_schedule_cancel",
+            "schedule_cancel_template",
+            "schedule_cancel_notified_days",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1814,6 +1854,7 @@ class PostgresDatabase:
                 "delete_other_alerts",
                 "pin_message",
                 "use_global_ignore",
+                "notify_on_schedule_cancel",
             ):
                 values.append(bool(value))
             elif key in (
@@ -1831,6 +1872,8 @@ class PostgresDatabase:
                 "release_watch_prefs",
                 "custom_buttons",
                 "button_style",
+                "schedule_cancel_template",
+                "schedule_cancel_notified_days",
             ):
                 if key == "button_style":
                     from custom_buttons import normalize_button_style
@@ -6401,6 +6444,86 @@ class PostgresDatabase:
                     updated_at = NOW()
                 """,
                 (blob,),
+            )
+
+    def get_schedule_day_snapshot(
+        self, twitch_user_id: str
+    ) -> dict[str, list[dict[str, str]]] | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT days_json FROM schedule_day_snapshot WHERE twitch_user_id = %s",
+                (str(twitch_user_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row["days_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        out: dict[str, list[dict[str, str]]] = {}
+        for day, segs in data.items():
+            if not isinstance(segs, list):
+                continue
+            cleaned: list[dict[str, str]] = []
+            for seg in segs:
+                if isinstance(seg, dict) and seg.get("id"):
+                    cleaned.append(
+                        {
+                            "id": str(seg.get("id") or ""),
+                            "start": str(seg.get("start") or ""),
+                            "title": str(seg.get("title") or ""),
+                            "game": str(seg.get("game") or ""),
+                        }
+                    )
+            out[str(day)] = cleaned
+        return out
+
+    def set_schedule_day_snapshot(
+        self, twitch_user_id: str, days: dict[str, list[dict[str, str]]]
+    ) -> None:
+        blob = json.dumps(days if isinstance(days, dict) else {})
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO schedule_day_snapshot (twitch_user_id, days_json, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (twitch_user_id) DO UPDATE SET
+                    days_json = EXCLUDED.days_json,
+                    updated_at = NOW()
+                """,
+                (str(twitch_user_id), blob),
+            )
+
+    def mark_schedule_cancel_notified(self, sub_id: int, day: str) -> None:
+        from datetime import date, timedelta
+
+        from schedule_cancel import prune_notified_days
+
+        sub = self.get_subscription_by_id(sub_id)
+        if not sub:
+            return
+        try:
+            current = json.loads(sub.schedule_cancel_notified_days or "[]")
+        except (TypeError, json.JSONDecodeError):
+            current = []
+        if not isinstance(current, list):
+            current = []
+        days = [str(x) for x in current if str(x or "").strip()]
+        key = str(day or "").strip()
+        if key and key not in days:
+            days.append(key)
+        keep_after = date.today() - timedelta(days=14)
+        days = prune_notified_days(days, keep_after=keep_after)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE subscriptions SET schedule_cancel_notified_days = %s WHERE id = %s",
+                (json.dumps(days), sub_id),
             )
 
     def igdb_search_by_name(

@@ -244,6 +244,21 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN attach_live_remind_button "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "notify_on_schedule_cancel" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN notify_on_schedule_cancel "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "schedule_cancel_template" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN schedule_cancel_template "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        if "schedule_cancel_notified_days" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN schedule_cancel_notified_days "
+                "TEXT NOT NULL DEFAULT '[]'"
+            )
         if "custom_buttons" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN custom_buttons "
@@ -999,6 +1014,15 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS schedule_day_snapshot (
+                twitch_user_id TEXT PRIMARY KEY,
+                days_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS premium_channels (
                 twitch_user_id TEXT PRIMARY KEY,
                 twitch_login TEXT NOT NULL,
@@ -1139,6 +1163,8 @@ class SqliteDatabase:
         delete_other_alerts: bool = False,
         pin_message: bool = False,
         is_demo: bool = False,
+        notify_on_schedule_cancel: bool = False,
+        schedule_cancel_template: str = "",
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -1155,8 +1181,9 @@ class SqliteDatabase:
                     from_watch_suggest, category_watch_prefs, release_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
-                    delete_other_alerts, pin_message, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delete_other_alerts, pin_message, is_demo,
+                    notify_on_schedule_cancel, schedule_cancel_template
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1198,6 +1225,8 @@ class SqliteDatabase:
                     int(bool(delete_other_alerts)),
                     int(bool(pin_message)),
                     int(bool(is_demo)),
+                    int(bool(notify_on_schedule_cancel)),
+                    str(schedule_cancel_template or ""),
                 ),
             )
             return int(cur.lastrowid)
@@ -1505,9 +1534,10 @@ class SqliteDatabase:
                         category_watch_prefs, release_watch_prefs,
                         notify_on_live, notify_on_end, notify_on_category_change,
                         notify_on_drops, drops_game_id,
-                        delete_other_alerts, pin_message, is_demo
+                        delete_other_alerts, pin_message, is_demo,
+                        notify_on_schedule_cancel, schedule_cancel_template
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1552,6 +1582,8 @@ class SqliteDatabase:
                         int(bool(payload.get("delete_other_alerts"))),
                         int(bool(payload.get("pin_message"))),
                         int(bool(payload.get("is_demo"))),
+                        int(bool(payload.get("notify_on_schedule_cancel"))),
+                        str(payload.get("schedule_cancel_template") or ""),
                     ),
                 )
                 sub_id = int(
@@ -1622,6 +1654,9 @@ class SqliteDatabase:
             "twitch_user_id",
             "category_watch_prefs",
             "release_watch_prefs",
+            "notify_on_schedule_cancel",
+            "schedule_cancel_template",
+            "schedule_cancel_notified_days",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1644,6 +1679,7 @@ class SqliteDatabase:
                 "delete_other_alerts",
                 "pin_message",
                 "use_global_ignore",
+                "notify_on_schedule_cancel",
             ):
                 values.append(int(bool(value)))
             elif key in (
@@ -1661,6 +1697,8 @@ class SqliteDatabase:
                 "release_watch_prefs",
                 "custom_buttons",
                 "button_style",
+                "schedule_cancel_template",
+                "schedule_cancel_notified_days",
             ):
                 if key == "button_style":
                     from custom_buttons import normalize_button_style
@@ -5869,6 +5907,82 @@ class SqliteDatabase:
                     updated_at = datetime('now')
                 """,
                 (blob,),
+            )
+
+    def get_schedule_day_snapshot(
+        self, twitch_user_id: str
+    ) -> dict[str, list[dict[str, str]]] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT days_json FROM schedule_day_snapshot WHERE twitch_user_id = ?",
+                (str(twitch_user_id),),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row["days_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        out: dict[str, list[dict[str, str]]] = {}
+        for day, segs in data.items():
+            if not isinstance(segs, list):
+                continue
+            cleaned: list[dict[str, str]] = []
+            for seg in segs:
+                if isinstance(seg, dict) and seg.get("id"):
+                    cleaned.append(
+                        {
+                            "id": str(seg.get("id") or ""),
+                            "start": str(seg.get("start") or ""),
+                            "title": str(seg.get("title") or ""),
+                            "game": str(seg.get("game") or ""),
+                        }
+                    )
+            out[str(day)] = cleaned
+        return out
+
+    def set_schedule_day_snapshot(
+        self, twitch_user_id: str, days: dict[str, list[dict[str, str]]]
+    ) -> None:
+        blob = json.dumps(days if isinstance(days, dict) else {})
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO schedule_day_snapshot (twitch_user_id, days_json, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(twitch_user_id) DO UPDATE SET
+                    days_json = excluded.days_json,
+                    updated_at = datetime('now')
+                """,
+                (str(twitch_user_id), blob),
+            )
+
+    def mark_schedule_cancel_notified(self, sub_id: int, day: str) -> None:
+        from datetime import date, timedelta
+
+        from schedule_cancel import prune_notified_days
+
+        sub = self.get_subscription_by_id(sub_id)
+        if not sub:
+            return
+        try:
+            current = json.loads(sub.schedule_cancel_notified_days or "[]")
+        except (TypeError, json.JSONDecodeError):
+            current = []
+        if not isinstance(current, list):
+            current = []
+        days = [str(x) for x in current if str(x or "").strip()]
+        key = str(day or "").strip()
+        if key and key not in days:
+            days.append(key)
+        keep_after = date.today() - timedelta(days=14)
+        days = prune_notified_days(days, keep_after=keep_after)
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE subscriptions SET schedule_cancel_notified_days = ? WHERE id = ?",
+                (json.dumps(days), sub_id),
             )
 
     def igdb_search_by_name(

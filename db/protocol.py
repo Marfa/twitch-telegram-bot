@@ -64,6 +64,8 @@ class Database(Protocol):
         delete_other_alerts: bool = False,
         pin_message: bool = False,
         is_demo: bool = False,
+        notify_on_schedule_cancel: bool = False,
+        schedule_cancel_template: str = "",
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None: ...
@@ -783,6 +785,16 @@ class Database(Protocol):
     def get_stream_poll_snapshot(self) -> dict[str, Any] | None: ...
 
     def set_stream_poll_snapshot(self, payload: dict[str, Any]) -> None: ...
+
+    def get_schedule_day_snapshot(
+        self, twitch_user_id: str
+    ) -> dict[str, list[dict[str, str]]] | None: ...
+
+    def set_schedule_day_snapshot(
+        self, twitch_user_id: str, days: dict[str, list[dict[str, str]]]
+    ) -> None: ...
+
+    def mark_schedule_cancel_notified(self, sub_id: int, day: str) -> None: ...
 
     def igdb_search_by_name(
         self, table: str, query: str, *, limit: int = 5

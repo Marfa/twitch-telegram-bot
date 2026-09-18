@@ -122,6 +122,7 @@ def _wz() -> dict[str, int]:
         SCHEDULE_LIVE_ASK,
         SCHEDULE_REMINDER_ASK,
         SCHEDULE_REMINDER_MINUTES,
+        SCHEDULE_CANCEL_TEMPLATE,
         TEMPLATE,
         TEMPLATE_TYPO_CONFIRM,
         WATCH_FILTERS,
@@ -163,6 +164,7 @@ def _wz() -> dict[str, int]:
         "SCHEDULE_LIVE_ASK": SCHEDULE_LIVE_ASK,
         "SCHEDULE_REMINDER_ASK": SCHEDULE_REMINDER_ASK,
         "SCHEDULE_REMINDER_MINUTES": SCHEDULE_REMINDER_MINUTES,
+        "SCHEDULE_CANCEL_TEMPLATE": SCHEDULE_CANCEL_TEMPLATE,
         "TEMPLATE": TEMPLATE,
         "TEMPLATE_TYPO_CONFIRM": TEMPLATE_TYPO_CONFIRM,
         "WATCH_FILTERS": WATCH_FILTERS,
@@ -929,6 +931,7 @@ _ADVOPT_FEATURE = {
     "delete": "delete_prev",
     "pin": "pin_message",
     "buttons": "custom_buttons",
+    "schedule_cancel": "schedule_cancel",
 }
 
 
@@ -961,6 +964,7 @@ async def _advanced_options_markup(
     show_live_remind = alert == "upcoming" and beta_features.is_enabled(
         db, user_id, "live-remind-button"
     )
+    show_schedule_cancel = alert == "upcoming"
     _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
@@ -974,6 +978,7 @@ async def _advanced_options_markup(
         want_buttons=bool(context.user_data.get("adv_want_buttons")),
         want_chat=bool(context.user_data.get("adv_want_chat")),
         want_live_remind=bool(context.user_data.get("adv_want_live_remind")),
+        want_schedule_cancel=bool(context.user_data.get("adv_want_schedule_cancel")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
         button_style=str(context.user_data.get("button_style") or ""),
         show_delay=alert != "upcoming",
@@ -981,6 +986,7 @@ async def _advanced_options_markup(
         show_preview=show_preview,
         show_buttons=show_buttons,
         show_live_remind=show_live_remind,
+        show_schedule_cancel=show_schedule_cancel,
         locked=await _advopt_locked(context, user_id),
     )
 
@@ -1019,6 +1025,8 @@ def _advanced_options_prompt_text(
         db, user_id, "live-remind-button"
     ):
         lines.append(t("advanced_options_hint_live_remind", lang))
+    if alert == "upcoming":
+        lines.append(t("advanced_options_hint_schedule_cancel", lang))
     lines.append(t("advanced_options_hint_button_style", lang))
     if template_has_link(str(context.user_data.get("message_template") or "")):
         lines.append(t("advanced_options_hint_preview", lang))
@@ -1042,8 +1050,10 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("button_style", "")
     if context.user_data.get("alert_type") == "upcoming":
         context.user_data.setdefault("adv_want_live_remind", False)
+        context.user_data.setdefault("adv_want_schedule_cancel", False)
     else:
         context.user_data.pop("adv_want_live_remind", None)
+        context.user_data.pop("adv_want_schedule_cancel", None)
     has_link = template_has_link(
         str(context.user_data.get("message_template") or "")
     )
@@ -1084,6 +1094,7 @@ async def receive_advanced_options_toggle(
         "chat": "adv_want_chat",
         "live_remind": "adv_want_live_remind",
         "preview": "adv_want_preview",
+        "schedule_cancel": "adv_want_schedule_cancel",
     }.get(flag)
     if not key:
         await query.answer()
@@ -1097,6 +1108,10 @@ async def receive_advanced_options_toggle(
             query.from_user.id,
             "live-remind-button",
         ):
+            await query.answer()
+            return _wz()["ADVANCED_OPTIONS"]
+    if flag == "schedule_cancel":
+        if context.user_data.get("alert_type") != "upcoming":
             await query.answer()
             return _wz()["ADVANCED_OPTIONS"]
     if flag == "preview" and not template_has_link(
@@ -1181,6 +1196,7 @@ async def receive_advanced_options_next(
         ("delete", "adv_want_delete"),
         ("pin", "adv_want_pin"),
         ("buttons", "adv_want_buttons"),
+        ("schedule_cancel", "adv_want_schedule_cancel"),
     ):
         if toggle in locked:
             context.user_data[ud_key] = False
@@ -1209,8 +1225,14 @@ async def receive_advanced_options_next(
         context.user_data["attach_live_remind_button"] = bool(
             context.user_data.get("adv_want_live_remind")
         )
+        want_cancel = bool(context.user_data.get("adv_want_schedule_cancel"))
+        context.user_data["notify_on_schedule_cancel"] = want_cancel
+        if not want_cancel:
+            context.user_data["schedule_cancel_template"] = ""
     else:
         context.user_data["attach_live_remind_button"] = False
+        context.user_data["notify_on_schedule_cancel"] = False
+        context.user_data["schedule_cancel_template"] = ""
     if not (
         context.user_data.get("adv_want_buttons")
         or want_chat
@@ -1374,7 +1396,10 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_buttons",
             "adv_want_chat",
             "adv_want_live_remind",
+            "adv_want_schedule_cancel",
             "adv_want_preview",
+            "notify_on_schedule_cancel",
+            "schedule_cancel_template",
             "disable_link_preview",
             "strip_name_mentions",
             "attach_chat_button",
@@ -1488,6 +1513,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 return await _go_ignore_keywords_prompt(update, context, lang)
             return await _go_link_preview_prompt(update, context, lang)
         return await _go_schedule_reminder_ask(update, context, lang)
+    if state == _wz()["SCHEDULE_CANCEL_TEMPLATE"]:
+        return await _go_schedule_reminder_minutes(update, context, lang)
     if state == _wz()["CUSTOM_BUTTONS"]:
         return await _wizard_back_before_dest(update, context, lang)
     if state == _wz()["DEST_TYPE"]:
@@ -2590,7 +2617,71 @@ async def receive_schedule_reminder_minutes(
         return _wz()["SCHEDULE_REMINDER_MINUTES"]
     context.user_data["schedule_reminder_minutes"] = int(raw)
     context.user_data["schedule_reminder_configured"] = True
+    return await _go_after_schedule_minutes(update, context, lang)
+
+
+async def _go_after_schedule_minutes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    if context.user_data.get("alert_type") == "upcoming" and (
+        context.user_data.get("adv_want_schedule_cancel")
+        or context.user_data.get("notify_on_schedule_cancel")
+    ):
+        if not (context.user_data.get("schedule_cancel_template") or "").strip():
+            return await _go_schedule_cancel_template_prompt(update, context, lang)
+        context.user_data["notify_on_schedule_cancel"] = True
+    else:
+        context.user_data["notify_on_schedule_cancel"] = False
+        context.user_data["schedule_cancel_template"] = ""
     return await _go_before_dest_step(update, context, lang)
+
+
+async def _go_schedule_cancel_template_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    text = t(
+        "schedule_cancel_template_prompt",
+        lang,
+        placeholders_link=placeholders_link_html(lang),
+    )
+    chat_id = reply_chat_id(update)
+    markup = _wizard(lang)
+    if update.callback_query:
+        await context.bot.send_message(
+            chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
+    else:
+        await update.effective_message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
+    _set_wizard_back(context, _wz()["SCHEDULE_CANCEL_TEMPLATE"])
+    return _wz()["SCHEDULE_CANCEL_TEMPLATE"]
+
+
+async def receive_schedule_cancel_template(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw):
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _wz()["SCHEDULE_CANCEL_TEMPLATE"]
+    if not raw:
+        await update.effective_message.reply_text(
+            t(
+                "schedule_cancel_template_prompt",
+                lang,
+                placeholders_link=placeholders_link_html(lang),
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_wizard(lang),
+        )
+        return _wz()["SCHEDULE_CANCEL_TEMPLATE"]
+    context.user_data["schedule_cancel_template"] = raw
+    context.user_data["notify_on_schedule_cancel"] = True
+    context.user_data["adv_want_schedule_cancel"] = True
+    return await _go_before_dest_step(update, context, lang)
+
 
 _LIVE_ADDON_CLEAR_KEYS = (
     "message_template",
@@ -3129,6 +3220,8 @@ async def _finish_subscription(
                 strip_name_mentions=bool(data.get("strip_name_mentions")),
                 attach_chat_button=bool(data.get("attach_chat_button")),
                 attach_live_remind_button=False,
+                notify_on_schedule_cancel=False,
+                schedule_cancel_template="",
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
                 button_style=str(data.get("button_style") or ""),
                 delay_minutes=int(data.get("delay_minutes", 0)),
@@ -3223,6 +3316,18 @@ async def _finish_subscription(
                     bool(data.get("attach_live_remind_button"))
                     if alert_type == "upcoming"
                     else False
+                ),
+                notify_on_schedule_cancel=(
+                    bool(data.get("notify_on_schedule_cancel"))
+                    and bool(str(data.get("schedule_cancel_template") or "").strip())
+                    if alert_type == "upcoming"
+                    else False
+                ),
+                schedule_cancel_template=(
+                    str(data.get("schedule_cancel_template") or "")
+                    if alert_type == "upcoming"
+                    and bool(data.get("notify_on_schedule_cancel"))
+                    else ""
                 ),
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
                 button_style=str(data.get("button_style") or ""),

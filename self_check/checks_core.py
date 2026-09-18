@@ -1857,8 +1857,12 @@ def check_core() -> None:
     assert upcoming["suppress_repeat_minutes"] == 0
     with_remind = dict(base)
     with_remind["attach_live_remind_button"] = True
+    with_remind["notify_on_schedule_cancel"] = True
+    with_remind["schedule_cancel_template"] = "cancelled {date}"
     live_clears = migrate_sub_fields_for_alert_type(with_remind, "live")
     assert live_clears["attach_live_remind_button"] is False
+    assert live_clears["notify_on_schedule_cancel"] is False
+    assert live_clears["schedule_cancel_template"] == ""
 
 
     # message_fx: typing + draft stream with classic fallback

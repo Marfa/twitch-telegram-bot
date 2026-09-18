@@ -1030,12 +1030,15 @@ def advanced_options_keyboard(
     want_buttons: bool = False,
     want_pin: bool = False,
     want_live_remind: bool = False,
+    want_schedule_cancel: bool = False,
     button_style: str = "",
     show_delay: bool = True,
     show_repeat: bool = True,
     show_preview: bool = False,
     show_buttons: bool = False,
     show_live_remind: bool = False,
+    show_schedule_remind: bool = False,
+    show_schedule_cancel: bool = False,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER
@@ -1058,6 +1061,8 @@ def advanced_options_keyboard(
         "chat": want_chat,
         "live_remind": want_live_remind,
         "preview": want_preview,
+        "schedule_remind": False,
+        "schedule_cancel": want_schedule_cancel,
     }
     show = {
         "delay": show_delay,
@@ -1065,6 +1070,8 @@ def advanced_options_keyboard(
         "buttons": show_buttons,
         "live_remind": show_live_remind,
         "preview": show_preview,
+        "schedule_remind": show_schedule_remind,
+        "schedule_cancel": show_schedule_cancel,
     }
 
     def _row(flag: bool, label_key: str, toggle: str) -> list[InlineKeyboardButton]:
@@ -2553,6 +2560,8 @@ def edit_options_keyboard(
     show_advanced: bool = True,
     show_custom_buttons: bool = False,
     show_live_remind: bool = False,
+    notify_on_schedule_cancel: bool = False,
+    show_schedule_cancel: bool = False,
     button_style: str = "",
     custom_buttons_count: int = 0,
 ) -> InlineKeyboardMarkup:
@@ -2713,6 +2722,30 @@ def edit_options_keyboard(
                     ]
                 )
             continue
+        if sid == "schedule_remind":
+            if schedule_reminder_configured:
+                remind_mark = "✅ " if schedule_reminder_minutes > 0 else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            remind_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
+        if sid == "schedule_cancel":
+            if show_advanced and show_schedule_cancel:
+                cancel_mark = "✅ " if notify_on_schedule_cancel else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            cancel_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
         if sid == "preview":
             has_any_buttons = (
                 custom_buttons_count > 0
@@ -2749,16 +2782,6 @@ def edit_options_keyboard(
                     ]
                 )
             continue
-    if schedule_reminder_configured:
-        remind_mark = "✅ " if schedule_reminder_minutes > 0 else "⬜️ "
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    remind_mark + t("edit_schedule_reminder", lang),
-                    callback_data=f"edit_f:{sub_id}:sched_remind",
-                )
-            ]
-        )
     rows.append(
         [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")]
     )

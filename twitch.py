@@ -589,14 +589,19 @@ class TwitchClient:
             timeout=15,
         )
         if resp.status_code == 404:
-            return {"segments": [], "vacation": None}
+            return {"segments": [], "vacation": None, "broadcaster_timezone": "UTC"}
         resp.raise_for_status()
         data = resp.json().get("data") or {}
         segments = [s for s in (data.get("segments") or []) if isinstance(s, dict)]
         vacation = data.get("vacation")
         if not isinstance(vacation, dict):
             vacation = None
-        return {"segments": segments, "vacation": vacation}
+        tz = str(data.get("broadcaster_timezone") or "").strip() or "UTC"
+        return {
+            "segments": segments,
+            "vacation": vacation,
+            "broadcaster_timezone": tz,
+        }
 
     def get_schedule_segments(
         self, broadcaster_id: str, *, first: int = 20, start_time: str | None = None

@@ -52,6 +52,7 @@ def _list_markers(lang: str) -> dict[str, str]:
         "chat": t("sub_list_chat_button_yes", lang),
         "live_remind": t("sub_list_live_remind_yes", lang),
         "preview": t_bullet("preview_off", lang),
+        "schedule_cancel": t("sub_list_schedule_cancel_yes", lang),
     }
 
 
@@ -228,6 +229,8 @@ def check_alert_setting_order() -> None:
         "chat",
         "live_remind",
         "preview",
+        "schedule_remind",
+        "schedule_cancel",
     )
     assert set(EDIT_FIELD) == set(ALERT_SETTING_ORDER)
 
@@ -244,13 +247,18 @@ def check_alert_setting_order() -> None:
         want_buttons=False,
         want_live_remind=False,
         want_preview=False,
+        want_schedule_cancel=False,
         show_delay=True,
         show_repeat=True,
         show_buttons=True,
         show_live_remind=True,
         show_preview=True,
+        show_schedule_remind=False,
+        show_schedule_cancel=True,
     )
-    assert _advopt_ids(adv) == list(ALERT_SETTING_ORDER)
+    assert _advopt_ids(adv) == [
+        sid for sid in ALERT_SETTING_ORDER if sid != "schedule_remind"
+    ]
 
     edit = edit_options_keyboard(
         1,
@@ -268,7 +276,9 @@ def check_alert_setting_order() -> None:
         is_upcoming=False,
     )
     assert _edit_setting_ids(edit) == [
-        sid for sid in ALERT_SETTING_ORDER if sid != "live_remind"
+        sid
+        for sid in ALERT_SETTING_ORDER
+        if sid not in ("live_remind", "schedule_remind", "schedule_cancel")
     ]
     labels = {
         (btn.callback_data or ""): btn.text
@@ -290,7 +300,11 @@ def check_alert_setting_order() -> None:
         show_advanced=True,
         is_upcoming=True,
         show_live_remind=True,
+        show_schedule_cancel=True,
         attach_live_remind_button=True,
+        notify_on_schedule_cancel=True,
+        schedule_reminder_configured=True,
+        schedule_reminder_minutes=15,
     )
     assert _edit_setting_ids(upcoming_edit) == [
         sid
@@ -303,6 +317,12 @@ def check_alert_setting_order() -> None:
         for btn in row
     }
     assert upcoming_labels["edit_f:1:live_remind"].startswith("✅ ")
+    assert upcoming_labels["edit_f:1:sched_remind"].startswith("✅ ")
+    assert upcoming_labels["edit_f:1:schedule_cancel"].startswith("✅ ")
+    # Cancel stays last among shared setting rows.
+    setting_ids = _edit_setting_ids(upcoming_edit)
+    assert setting_ids[-1] == "schedule_cancel"
+    assert setting_ids[-2] == "schedule_remind"
     assert "edit_f:1:delay" not in upcoming_labels
     assert "edit_f:1:repeat" not in upcoming_labels
 

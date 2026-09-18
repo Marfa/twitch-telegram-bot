@@ -523,6 +523,7 @@ from handlers.wizard import (
     receive_schedule_live_add,
     receive_schedule_reminder_ask,
     receive_schedule_reminder_minutes,
+    receive_schedule_cancel_template,
     receive_strip_name_toggle,
     receive_template,
     receive_template_typo_confirm,
@@ -704,6 +705,7 @@ logger = logging.getLogger(__name__)
     REPEAT_MUTE_MINUTES,
     SCHEDULE_REMINDER_ASK,
     SCHEDULE_REMINDER_MINUTES,
+    SCHEDULE_CANCEL_TEMPLATE,
     CUSTOM_BUTTONS,
     CHAT_BUTTON_ASK,
     DEST_TYPE,
@@ -716,6 +718,7 @@ logger = logging.getLogger(__name__)
     EDIT_DELAY,
     EDIT_REPEAT,
     EDIT_SCHEDULE_REMINDER,
+    EDIT_SCHEDULE_CANCEL,
     EDIT_CUSTOM_BUTTONS,
     ADMIN_MSG_TYPE,
     ADMIN_MSG_TEXT,
@@ -758,7 +761,7 @@ logger = logging.getLogger(__name__)
     RELEASE_DUP,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(72)
+) = range(74)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -1464,6 +1467,140 @@ async def receive_edit_schedule_reminder(
     return ConversationHandler.END
 
 
+async def start_edit_schedule_cancel(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub or _alert_type_from_sub(sub) != "upcoming":
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+
+    async def _reshow(current: Subscription) -> None:
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=current.twitch_username
+        )
+        await query.edit_message_text(
+            _edit_menu_text(
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=current.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(
+                current, lang, show_advanced=show_adv, db=db
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+
+    # Checkbox on → turn off; off → ask for cancel template (Premium).
+    if getattr(sub, "notify_on_schedule_cancel", False) and (
+        getattr(sub, "schedule_cancel_template", "") or ""
+    ).strip():
+        db.update_subscription(
+            sub_id,
+            query.from_user.id,
+            notify_on_schedule_cancel=False,
+            schedule_cancel_template="",
+        )
+        current = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow(current)
+        return ConversationHandler.END
+
+    if not await prem.has_feature(
+        context.bot,
+        db,
+        query.from_user.id,
+        "schedule_cancel",
+        channel=sub.twitch_username,
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(
+            context.bot,
+            query.from_user.id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="edit_field",
+            feature="schedule_cancel",
+        )
+        return ConversationHandler.END
+
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    current_label = (
+        t("edit_schedule_cancel_current_on", lang)
+        if getattr(sub, "notify_on_schedule_cancel", False)
+        and (getattr(sub, "schedule_cancel_template", "") or "").strip()
+        else t("edit_schedule_cancel_current_off", lang)
+    )
+    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        reply_chat_id(update),
+        t(
+            "edit_schedule_cancel_prompt",
+            lang,
+            sub_id=sub_num,
+            current=current_label,
+            placeholders_link=placeholders_link_html(lang),
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_wizard(lang, back=False),
+    )
+    return EDIT_SCHEDULE_CANCEL
+
+
+async def receive_edit_schedule_cancel(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw):
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return EDIT_SCHEDULE_CANCEL
+
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
+    if not raw or raw == "0":
+        ok = db.update_subscription(
+            sub_id,
+            owner_id,
+            notify_on_schedule_cancel=False,
+            schedule_cancel_template="",
+        )
+    else:
+        ok = db.update_subscription(
+            sub_id,
+            owner_id,
+            notify_on_schedule_cancel=True,
+            schedule_cancel_template=raw,
+        )
+    if not ok:
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
 async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
@@ -1593,6 +1730,11 @@ def _edit_options_for_sub(
         show_advanced=show_advanced,
         show_custom_buttons=show_custom_buttons,
         show_live_remind=show_live_remind,
+        notify_on_schedule_cancel=bool(
+            getattr(sub, "notify_on_schedule_cancel", False)
+        )
+        and bool((getattr(sub, "schedule_cancel_template", "") or "").strip()),
+        show_schedule_cancel=alert_type == "upcoming",
         button_style=str(getattr(sub, "button_style", "") or ""),
         custom_buttons_count=len(
             cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None))
@@ -2605,6 +2747,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 pattern=r"^edit_f:\d+:sched_remind$",
             ),
             CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_schedule_cancel),
+                pattern=r"^edit_f:\d+:schedule_cancel$",
+            ),
+            CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_repeat_mute),
                 pattern=r"^edit_f:\d+:repeat$",
             ),
@@ -2702,7 +2848,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|preview)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|preview|schedule_cancel)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_style,
@@ -2808,6 +2954,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     filters.TEXT & ~filters.COMMAND, receive_schedule_reminder_minutes
                 ),
             ],
+            SCHEDULE_CANCEL_TEMPLATE: [
+                _wiz_cancel,
+                _wiz_back,
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_schedule_cancel_template
+                ),
+            ],
             EDIT_TEMPLATE: [
                 _wiz_cancel,
                 CallbackQueryHandler(
@@ -2854,6 +3007,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_edit_schedule_reminder
+                ),
+            ],
+            EDIT_SCHEDULE_CANCEL: [
+                _wiz_cancel,
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_edit_schedule_cancel
                 ),
             ],
             EDIT_CUSTOM_BUTTONS: [
