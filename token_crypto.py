@@ -45,7 +45,13 @@ def encrypt_secret(plaintext: str) -> str:
     return _PREFIX + token
 
 
-def decrypt_secret(stored: str) -> str:
+def try_decrypt_secret(stored: str) -> str | None:
+    """Decrypt at-rest secret.
+
+    Returns plaintext, legacy plaintext as-is, or '' for empty input.
+    Returns None when ciphertext cannot be decrypted (wrong key / corrupt) —
+    callers should treat that as needs_reauth, not crash the job.
+    """
     if not stored:
         return ""
     if not stored.startswith(_PREFIX):
@@ -58,4 +64,10 @@ def decrypt_secret(stored: str) -> str:
         logger.error(
             "Failed to decrypt Twitch token — check TOKEN_ENCRYPTION_KEY / bot token"
         )
-        raise
+        return None
+
+
+def decrypt_secret(stored: str) -> str:
+    """Decrypt; undecryptable ciphertext becomes '' (does not raise)."""
+    plain = try_decrypt_secret(stored)
+    return "" if plain is None else plain

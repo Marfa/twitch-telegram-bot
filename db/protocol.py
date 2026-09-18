@@ -8,6 +8,7 @@ from .models import (
     BotStats,
     ChatAuth,
     DeletedSubscriptionCartItem,
+    DonationAlertsAuth,
     DropsAuth,
     FollowMonitor,
     FollowMonitorEvent,
@@ -64,6 +65,8 @@ class Database(Protocol):
         drops_game_id: str = "",
         delete_other_alerts: bool = False,
         pin_message: bool = False,
+        top_donations: bool = False,
+        top_donations_template: str = "",
         is_demo: bool = False,
         notify_on_schedule_cancel: bool = False,
         schedule_cancel_template: str = "",
@@ -687,6 +690,30 @@ class Database(Protocol):
     ) -> None: ...
 
     def delete_drops_auth(self, owner_id: int) -> None: ...
+
+    def get_donationalerts_auth(self, owner_id: int) -> DonationAlertsAuth | None: ...
+
+    def upsert_donationalerts_auth(
+        self,
+        owner_id: int,
+        *,
+        da_user_id: str,
+        da_code: str,
+        refresh_token: str,
+        access_token: str = "",
+        access_expires_at: int = 0,
+    ) -> None: ...
+
+    def update_donationalerts_auth_tokens(
+        self,
+        owner_id: int,
+        *,
+        refresh_token: str | None = None,
+        access_token: str | None = None,
+        access_expires_at: int | None = None,
+    ) -> None: ...
+
+    def delete_donationalerts_auth(self, owner_id: int) -> None: ...
 
     def has_seen_drop_campaign(
         self, owner_id: int, campaign_id: str, subscription_id: int

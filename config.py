@@ -89,6 +89,11 @@ def twitch_oauth_redirect_uri() -> str:
     return f"{PUBLIC_BASE_URL}/oauth/twitch/callback"
 
 
+# DonationAlerts OAuth app (https://www.donationalerts.com/application/clients)
+DONATIONALERTS_CLIENT_ID = os.getenv("DONATIONALERTS_CLIENT_ID", "").strip()
+DONATIONALERTS_CLIENT_SECRET = os.getenv("DONATIONALERTS_CLIENT_SECRET", "").strip()
+
+
 def twitch_eventsub_callback_url() -> str:
     if not PUBLIC_BASE_URL:
         return ""

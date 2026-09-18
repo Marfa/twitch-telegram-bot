@@ -497,6 +497,8 @@ from handlers.wizard import (
     receive_advanced_options_next,
     receive_advanced_options_style,
     receive_advanced_options_toggle,
+    receive_top_donations_template,
+    complete_donationalerts_oauth,
     receive_channel,
     receive_channel_dup,
     receive_chat_button_ask,
@@ -677,6 +679,7 @@ from handlers.subscriptions import (
     start_edit_multistream,
     start_edit_repeat_mute,
     start_edit_template,
+    start_edit_top_donations,
     start_pause_notifications,
     start_twitch_import,
     cancel_twitch_import,
@@ -713,6 +716,7 @@ logger = logging.getLogger(__name__)
     SCHEDULE_CANCEL_TEMPLATE,
     CUSTOM_BUTTONS,
     MULTISTREAM,
+    TOP_DONATIONS_TEMPLATE,
     CHAT_BUTTON_ASK,
     DEST_TYPE,
     DEST_CHAT,
@@ -768,7 +772,7 @@ logger = logging.getLogger(__name__)
     RELEASE_DUP,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(76)
+) = range(77)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -1622,6 +1626,25 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
         await update.effective_message.reply_text(t("template_empty", lang))
         return EDIT_TEMPLATE
 
+    if context.user_data.get("editing_top_donations_template"):
+        db: Database = context.application.bot_data["db"]
+        owner_id = update.effective_user.id
+        sub_num = _owner_sub_number(db, owner_id, sub_id)
+        if not db.update_subscription(
+            sub_id,
+            owner_id,
+            top_donations=True,
+            top_donations_template=template,
+        ):
+            await update.effective_message.reply_text(t("sub_not_found", lang))
+        else:
+            await update.effective_message.reply_text(
+                t("edit_updated", lang, sub_id=sub_num),
+                reply_markup=_menu(lang, owner_id),
+            )
+        context.user_data.clear()
+        return ConversationHandler.END
+
     context.user_data["pending_template_preview_disabled"] = _is_link_preview_disabled(
         update.effective_message
     )
@@ -1704,6 +1727,7 @@ def _edit_options_for_sub(
     import beta as beta_features
     import custom_buttons as cbtn
     import multistream as ms
+    import donationalerts as da
 
     alert_type = _alert_type_from_sub(sub)
     show_custom_buttons = bool(
@@ -1714,6 +1738,11 @@ def _edit_options_for_sub(
         alert_type == "upcoming"
         and db is not None
         and beta_features.is_enabled(db, sub.owner_id, "live-remind-button")
+    )
+    show_top_donations = (
+        alert_type == "end"
+        and db is not None
+        and beta_features.is_enabled(db, sub.owner_id, da.BETA_FEATURE_ID)
     )
     return edit_options_keyboard(
         sub.id,
@@ -1727,6 +1756,7 @@ def _edit_options_for_sub(
         strip_name_mentions=bool(sub.strip_name_mentions),
         attach_chat_button=bool(sub.attach_chat_button),
         attach_live_remind_button=bool(sub.attach_live_remind_button),
+        top_donations=bool(getattr(sub, "top_donations", False)),
         disable_link_preview=bool(sub.disable_link_preview),
         schedule_reminder_minutes=int(sub.schedule_reminder_minutes or 0),
         show_link_preview=not bool(sub.image_file_id)
@@ -1744,6 +1774,7 @@ def _edit_options_for_sub(
         and bool((getattr(sub, "schedule_cancel_template", "") or "").strip()),
         show_schedule_cancel=alert_type == "upcoming",
         show_multistream=alert_type == "live",
+        show_top_donations=show_top_donations,
         button_style=str(getattr(sub, "button_style", "") or ""),
         custom_buttons_count=len(
             cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None))
@@ -2123,6 +2154,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             mark_ready,
             register_eventsub_bridge,
             register_oauth_bridge,
+            register_donationalerts_oauth_bridge,
             register_posthog_issue_bridge,
         )
         from stream_capture import purge_stale_on_startup
@@ -2150,6 +2182,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 redirect_uri=redirect_uri,
                 on_complete=on_oauth_complete,
             )
+
+        async def on_donationalerts_oauth_complete(
+            owner_id: int,
+            error: str | None,
+            token_info: dict[str, str] | None = None,
+        ) -> None:
+            await complete_donationalerts_oauth(
+                application, owner_id, error, token_info
+            )
+
+        register_donationalerts_oauth_bridge(
+            loop, on_complete=on_donationalerts_oauth_complete
+        )
         if POSTHOG_ISSUE_WEBHOOK_SECRET:
 
             async def on_posthog_issue(payload: dict[str, str]) -> None:
@@ -2737,6 +2782,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 dm_only_conv_entry(start_edit_template), pattern=r"^edit_f:\d+:template$"
             ),
             CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_top_donations),
+                pattern=r"^edit_f:\d+:top_donations$",
+            ),
+            CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_image), pattern=r"^edit_f:\d+:image$"
             ),
             CallbackQueryHandler(
@@ -2866,7 +2915,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|preview|schedule_cancel|multistream)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_cancel|multistream)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_style,
@@ -2874,6 +2923,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"
+                ),
+            ],
+            TOP_DONATIONS_TEMPLATE: [
+                _wiz_cancel,
+                _wiz_back,
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_top_donations_template
                 ),
             ],
             CUSTOM_BUTTONS: [

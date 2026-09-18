@@ -446,9 +446,33 @@ def check_db_premium() -> None:
         assert db.has_any_enabled_follow_monitor() is True
         db.set_follow_monitor_enabled(21, False)
         assert db.get_follow_monitor(21).enabled is False
-        from token_crypto import encrypt_secret, decrypt_secret
+        from token_crypto import encrypt_secret, decrypt_secret, try_decrypt_secret
 
         assert decrypt_secret(encrypt_secret("secret-token")) == "secret-token"
+        # Undecryptable ciphertext must not raise (would crash sync_twitch_follows).
+        assert try_decrypt_secret("enc:v1:gAAAAABnot-a-valid-fernet-token") is None
+        assert decrypt_secret("enc:v1:gAAAAABnot-a-valid-fernet-token") == ""
+        db.upsert_twitch_sync(
+            owner_id=99,
+            twitch_user_id="tw-bad",
+            refresh_token="good-rt",
+            period_days=7,
+            next_sync_at="2020-01-01T00:00:00+00:00",
+        )
+        with db._conn() as conn:
+            conn.execute(
+                "UPDATE twitch_sync SET refresh_token = ? WHERE owner_id = ?",
+                ("enc:v1:gAAAAABcorrupt-ciphertext-xxxxx", 99),
+            )
+        due_bad = [
+            r
+            for r in db.get_due_twitch_syncs("2020-01-02T00:00:00+00:00")
+            if r.owner_id == 99
+        ]
+        assert len(due_bad) == 1 and due_bad[0].refresh_token == ""
+        bad = db.get_twitch_sync(99)
+        assert bad is not None and bad.needs_reauth is True and bad.refresh_token == ""
+        assert db.delete_twitch_sync(99) is True
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")

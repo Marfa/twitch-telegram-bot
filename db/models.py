@@ -359,6 +359,8 @@ class Subscription:
     release_watch_prefs: str = ""
     delete_other_alerts: bool = False
     pin_message: bool = False
+    top_donations: bool = False
+    top_donations_template: str = ""
     is_demo: bool = False
     trial_paused: bool = False
     delivery_paused: bool = False
@@ -522,6 +524,9 @@ def migrate_sub_fields_for_alert_type(
         out["attach_live_remind_button"] = False
         out["notify_on_schedule_cancel"] = False
         out["schedule_cancel_template"] = ""
+    if new_type != "end":
+        out["top_donations"] = False
+        out["top_donations_template"] = ""
     return out
 
 
@@ -603,6 +608,8 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "drops_game_id": sub.drops_game_id or "",
         "delete_other_alerts": bool(sub.delete_other_alerts),
         "pin_message": bool(sub.pin_message),
+        "top_donations": bool(getattr(sub, "top_donations", False)),
+        "top_donations_template": str(getattr(sub, "top_donations_template", "") or ""),
         "is_demo": bool(sub.is_demo),
     }
 
@@ -659,6 +666,16 @@ class DropsAuth:
     twitch_login: str
     refresh_token: str
     digest_enabled: bool = False
+    access_token: str = ""
+    access_expires_at: int = 0
+
+
+@dataclass
+class DonationAlertsAuth:
+    owner_id: int
+    da_user_id: str
+    da_code: str
+    refresh_token: str
     access_token: str = ""
     access_expires_at: int = 0
 
@@ -975,6 +992,10 @@ def _row_to_sub(row: Any) -> Subscription:
         if "delete_other_alerts" in keys
         else False,
         pin_message=bool(row["pin_message"]) if "pin_message" in keys else False,
+        top_donations=bool(row["top_donations"]) if "top_donations" in keys else False,
+        top_donations_template=str(row["top_donations_template"] or "")
+        if "top_donations_template" in keys
+        else "",
         is_demo=bool(row["is_demo"]) if "is_demo" in keys else False,
         trial_paused=bool(row["trial_paused"]) if "trial_paused" in keys else False,
         delivery_paused=bool(row["delivery_paused"])

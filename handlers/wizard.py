@@ -127,6 +127,7 @@ def _wz() -> dict[str, int]:
         SCHEDULE_CANCEL_TEMPLATE,
         TEMPLATE,
         TEMPLATE_TYPO_CONFIRM,
+        TOP_DONATIONS_TEMPLATE,
         WATCH_FILTERS,
         WATCH_LANGUAGE,
         WATCH_TAGS,
@@ -170,6 +171,7 @@ def _wz() -> dict[str, int]:
         "SCHEDULE_CANCEL_TEMPLATE": SCHEDULE_CANCEL_TEMPLATE,
         "TEMPLATE": TEMPLATE,
         "TEMPLATE_TYPO_CONFIRM": TEMPLATE_TYPO_CONFIRM,
+        "TOP_DONATIONS_TEMPLATE": TOP_DONATIONS_TEMPLATE,
         "WATCH_FILTERS": WATCH_FILTERS,
         "WATCH_LANGUAGE": WATCH_LANGUAGE,
         "WATCH_TAGS": WATCH_TAGS,
@@ -1138,6 +1140,7 @@ async def _advanced_options_markup(
 ):
     import beta as beta_features
     import custom_buttons as cbtn
+    import donationalerts as da
 
     alert = context.user_data.get("alert_type")
     show_preview = template_has_link(
@@ -1150,6 +1153,9 @@ async def _advanced_options_markup(
     )
     show_schedule_cancel = alert == "upcoming"
     show_multistream = alert == "live" or not alert
+    show_top_donations = alert == "end" and beta_features.is_enabled(
+        db, user_id, da.BETA_FEATURE_ID
+    )
     _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
@@ -1165,6 +1171,7 @@ async def _advanced_options_markup(
         want_live_remind=bool(context.user_data.get("adv_want_live_remind")),
         want_schedule_cancel=bool(context.user_data.get("adv_want_schedule_cancel")),
         want_multistream=bool(context.user_data.get("adv_want_multistream")),
+        want_top_donations=bool(context.user_data.get("adv_want_top_donations")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
         button_style=str(context.user_data.get("button_style") or ""),
         show_delay=alert != "upcoming",
@@ -1174,6 +1181,7 @@ async def _advanced_options_markup(
         show_live_remind=show_live_remind,
         show_schedule_cancel=show_schedule_cancel,
         show_multistream=show_multistream,
+        show_top_donations=show_top_donations,
         locked=await _advopt_locked(context, user_id),
     )
 
@@ -1189,6 +1197,7 @@ def _advanced_options_prompt_text(
 ) -> str:
     import beta as beta_features
     import custom_buttons as cbtn
+    import donationalerts as da
 
     alert = context.user_data.get("alert_type")
     lines = [
@@ -1216,6 +1225,8 @@ def _advanced_options_prompt_text(
         lines.append(t("advanced_options_hint_schedule_cancel", lang))
     if alert == "live" or not alert:
         lines.append(t("advanced_options_hint_multistream", lang))
+    if alert == "end" and beta_features.is_enabled(db, user_id, da.BETA_FEATURE_ID):
+        lines.append(t("advanced_options_hint_top_donations", lang))
     lines.append(t("advanced_options_hint_button_style", lang))
     if template_has_link(str(context.user_data.get("message_template") or "")):
         lines.append(t("advanced_options_hint_preview", lang))
@@ -1250,6 +1261,10 @@ async def _go_advanced_options_prompt(
             context.user_data.setdefault("adv_want_multistream", False)
         else:
             context.user_data.pop("adv_want_multistream", None)
+    if context.user_data.get("alert_type") == "end":
+        context.user_data.setdefault("adv_want_top_donations", False)
+    else:
+        context.user_data.pop("adv_want_top_donations", None)
     has_link = template_has_link(
         str(context.user_data.get("message_template") or "")
     )
@@ -1289,6 +1304,7 @@ async def receive_advanced_options_toggle(
         "buttons": "adv_want_buttons",
         "chat": "adv_want_chat",
         "live_remind": "adv_want_live_remind",
+        "top_donations": "adv_want_top_donations",
         "preview": "adv_want_preview",
         "schedule_cancel": "adv_want_schedule_cancel",
         "multistream": "adv_want_multistream",
@@ -1313,6 +1329,18 @@ async def receive_advanced_options_toggle(
             return _wz()["ADVANCED_OPTIONS"]
     if flag == "multistream":
         if context.user_data.get("alert_type") != "live":
+            await query.answer()
+            return _wz()["ADVANCED_OPTIONS"]
+    if flag == "top_donations":
+        import beta as beta_features
+        import donationalerts as da
+
+        db: Database = context.application.bot_data["db"]
+        if context.user_data.get("alert_type") != "end" or not beta_features.is_enabled(
+            db,
+            query.from_user.id,
+            da.BETA_FEATURE_ID,
+        ):
             await query.answer()
             return _wz()["ADVANCED_OPTIONS"]
     if flag == "preview" and not template_has_link(
@@ -1347,6 +1375,10 @@ async def receive_advanced_options_toggle(
             return _wz()["ADVANCED_OPTIONS"]
     await query.answer()
     context.user_data[key] = turning_on
+    if flag == "top_donations" and turning_on:
+        await _maybe_prompt_donationalerts_oauth(
+            context.bot, context.application.bot_data["db"], query.from_user.id, lang
+        )
     if not (
         context.user_data.get("adv_want_buttons")
         or context.user_data.get("adv_want_chat")
@@ -1438,6 +1470,13 @@ async def receive_advanced_options_next(
         context.user_data["attach_live_remind_button"] = False
         context.user_data["notify_on_schedule_cancel"] = False
         context.user_data["schedule_cancel_template"] = ""
+    if context.user_data.get("alert_type") == "end" and context.user_data.get(
+        "adv_want_top_donations"
+    ):
+        context.user_data["top_donations"] = True
+    else:
+        context.user_data["top_donations"] = False
+        context.user_data["top_donations_template"] = ""
     if not (
         context.user_data.get("adv_want_buttons")
         or want_chat
@@ -1458,11 +1497,147 @@ async def receive_advanced_options_next(
         context.user_data.get("adv_want_strip")
     )
     await query.edit_message_text("✓")
+    if context.user_data.get("top_donations") and not str(
+        context.user_data.get("top_donations_template") or ""
+    ).strip():
+        await _maybe_prompt_donationalerts_oauth(
+            context.bot, context.application.bot_data["db"], query.from_user.id, lang
+        )
+        return await _go_top_donations_template_prompt(update, context, lang)
     if context.user_data.get("adv_want_image"):
         return await _go_image_ask_prompt(update, context, lang)
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
     return await _go_ignore_keywords_prompt(update, context, lang)
+
+
+async def _maybe_prompt_donationalerts_oauth(
+    bot, db: Database, user_id: int, lang: str
+) -> None:
+    import donationalerts as da
+    from health import create_oauth_state
+
+    if db.get_donationalerts_auth(user_id) is not None:
+        return
+    if not da.configured():
+        await bot.send_message(user_id, t("top_donations_oauth_unavailable", lang))
+        return
+    try:
+        state = create_oauth_state(user_id, lang, purpose="donationalerts")
+        url = da.build_authorize_url(state=state)
+    except Exception:
+        logger.exception("DonationAlerts OAuth URL failed for user %s", user_id)
+        await bot.send_message(user_id, t("top_donations_oauth_unavailable", lang))
+        return
+    await bot.send_message(
+        user_id,
+        t("top_donations_oauth_prompt", lang),
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("top_donations_oauth_button", lang), url=url
+                    )
+                ]
+            ]
+        ),
+    )
+
+
+async def _go_top_donations_template_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    chat_id = reply_chat_id(update)
+    text = t("top_donations_template_prompt", lang)
+    if update.callback_query:
+        await context.bot.send_message(
+            chat_id, text, reply_markup=_wizard(lang, back=True)
+        )
+    else:
+        await update.effective_message.reply_text(
+            text, reply_markup=_wizard(lang, back=True)
+        )
+    _set_wizard_back(context, _wz()["TOP_DONATIONS_TEMPLATE"])
+    return _wz()["TOP_DONATIONS_TEMPLATE"]
+
+
+async def receive_top_donations_template(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    lang = _user_lang(context, update.effective_user.id)
+    text = (update.effective_message.text or "").strip()
+    if text in all_btn_texts("wizard_cancel"):
+        return await cancel(update, context)
+    if text in all_btn_texts("wizard_back") or text in all_wizard_nav_buttons():
+        return await wizard_back(update, context)
+    if is_menu_button(text):
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _wz()["TOP_DONATIONS_TEMPLATE"]
+    if not text:
+        await update.effective_message.reply_text(t("template_empty", lang))
+        return _wz()["TOP_DONATIONS_TEMPLATE"]
+    context.user_data["top_donations_template"] = text
+    context.user_data["top_donations"] = True
+    if context.user_data.get("adv_want_image"):
+        return await _go_image_ask_prompt(update, context, lang)
+    context.user_data.pop("image_file_id", None)
+    context.user_data["image_position"] = ""
+    return await _go_ignore_keywords_prompt(update, context, lang)
+
+
+async def complete_donationalerts_oauth(
+    application,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+) -> None:
+    from i18n import DEFAULT_LOCALE
+
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    if error:
+        await application.bot.send_message(
+            owner_id,
+            t("top_donations_oauth_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    info = token_info or {}
+    access = str(info.get("access_token") or "")
+    refresh = str(info.get("refresh_token") or "")
+    da_user_id = str(info.get("da_user_id") or "")
+    da_code = str(info.get("da_code") or "")
+    if not access or not refresh or not da_user_id:
+        await application.bot.send_message(
+            owner_id,
+            t("top_donations_oauth_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    try:
+        expires_at = int(info.get("access_expires_at") or 0)
+        db.upsert_donationalerts_auth(
+            owner_id,
+            da_user_id=da_user_id,
+            da_code=da_code,
+            refresh_token=refresh,
+            access_token=access,
+            access_expires_at=expires_at,
+        )
+    except Exception:
+        logger.exception("DonationAlerts auth persist failed for user %s", owner_id)
+        await application.bot.send_message(
+            owner_id,
+            t("top_donations_oauth_failed", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
+    await application.bot.send_message(
+        owner_id,
+        t("top_donations_oauth_done", lang),
+        reply_markup=_menu(lang, owner_id),
+    )
+
 
 async def _go_link_preview_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     chat_id = reply_chat_id(update)
@@ -1603,6 +1778,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_live_remind",
             "adv_want_schedule_cancel",
             "adv_want_multistream",
+            "adv_want_top_donations",
             "adv_want_preview",
             "notify_on_schedule_cancel",
             "schedule_cancel_template",
@@ -1610,6 +1786,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "strip_name_mentions",
             "attach_chat_button",
             "attach_live_remind_button",
+            "top_donations",
+            "top_donations_template",
             "custom_buttons",
             "custom_buttons_list",
             "multistream_channels",
@@ -1653,6 +1831,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 reply_markup=_menu(lang, owner_id),
             )
             return ConversationHandler.END
+        return await _go_advanced_options_prompt(update, context, lang)
+    if state == _wz()["TOP_DONATIONS_TEMPLATE"]:
         return await _go_advanced_options_prompt(update, context, lang)
     if state == _wz()["IMAGE_UPLOAD"]:
         return await _go_image_ask_prompt(update, context, lang)
@@ -2903,6 +3083,8 @@ _LIVE_ADDON_CLEAR_KEYS = (
     "strip_name_mentions",
     "attach_chat_button",
     "attach_live_remind_button",
+    "top_donations",
+    "top_donations_template",
     "delay_minutes",
     "suppress_repeat_minutes",
     "dest_type",
@@ -3536,6 +3718,14 @@ async def _finish_subscription(
                     str(data.get("schedule_cancel_template") or "")
                     if alert_type == "upcoming"
                     and bool(data.get("notify_on_schedule_cancel"))
+                    else ""
+                ),
+                top_donations=(
+                    bool(data.get("top_donations")) if alert_type == "end" else False
+                ),
+                top_donations_template=(
+                    str(data.get("top_donations_template") or "")
+                    if alert_type == "end" and data.get("top_donations")
                     else ""
                 ),
                 custom_buttons=str(data.get("custom_buttons") or "[]"),

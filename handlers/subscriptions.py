@@ -500,6 +500,8 @@ def _format_sub_line(
         getattr(sub, "schedule_cancel_template", "") or ""
     ).strip():
         settings.append(t("sub_list_schedule_cancel_yes", lang))
+    if getattr(sub, "top_donations", False):
+        settings.append(t("sub_list_top_donations_yes", lang))
     if (
         custom_btns
         or sub.attach_chat_button
@@ -2886,6 +2888,89 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
     return _sub_states()["EDIT_TEMPLATE"]
 
 
+async def start_edit_top_donations(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import donationalerts as da
+    from handlers.wizard import _maybe_prompt_donationalerts_oauth
+
+    query = update.callback_query
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.answer()
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if _alert_type_from_sub(sub) != "end" or not beta_features.is_enabled(
+        db, query.from_user.id, da.BETA_FEATURE_ID
+    ):
+        await query.answer(t("top_donations_need_end", lang), show_alert=True)
+        return ConversationHandler.END
+    await query.answer()
+    enabled = not bool(getattr(sub, "top_donations", False))
+    if not enabled:
+        db.update_subscription(
+            sub_id,
+            query.from_user.id,
+            top_donations=False,
+            top_donations_template="",
+        )
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=sub.twitch_username
+        )
+        await query.edit_message_text(
+            _edit_menu_text(
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=sub.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(
+                sub, lang, show_advanced=show_adv, db=db
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+
+    tmpl = str(getattr(sub, "top_donations_template", "") or "").strip()
+    await _maybe_prompt_donationalerts_oauth(
+        context.bot, db, query.from_user.id, lang
+    )
+    if tmpl:
+        db.update_subscription(sub_id, query.from_user.id, top_donations=True)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, query.from_user.id, channel=sub.twitch_username
+        )
+        await query.edit_message_text(
+            _edit_menu_text(
+                lang,
+                sub_id=_owner_sub_number(db, query.from_user.id, sub_id),
+                username=sub.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(
+                sub, lang, show_advanced=show_adv, db=db
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    context.user_data["editing_top_donations_template"] = True
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t("top_donations_template_prompt", lang),
+        reply_markup=_wizard(lang),
+    )
+    return _sub_states()["EDIT_TEMPLATE"]
+
+
 async def start_edit_ignore_keywords(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -4642,6 +4727,8 @@ _TYPE_MIGRATION_KEYS = (
     "strip_name_mentions",
     "attach_chat_button",
     "attach_live_remind_button",
+    "top_donations",
+    "top_donations_template",
     "delay_minutes",
     "suppress_repeat_minutes",
     "schedule_reminder_minutes",
@@ -4718,6 +4805,8 @@ def _add_subscription_from_snapshot(
         strip_name_mentions=bool(snapshot.get("strip_name_mentions")),
         attach_chat_button=bool(snapshot.get("attach_chat_button")),
         attach_live_remind_button=bool(snapshot.get("attach_live_remind_button")),
+        top_donations=bool(snapshot.get("top_donations")),
+        top_donations_template=str(snapshot.get("top_donations_template") or ""),
         custom_buttons=str(snapshot.get("custom_buttons") or "[]"),
         multistream_channels=str(snapshot.get("multistream_channels") or "[]"),
         button_style=str(snapshot.get("button_style") or ""),

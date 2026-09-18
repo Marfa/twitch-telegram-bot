@@ -16,6 +16,7 @@ from .models import (
     BotStats,
     ChatAuth,
     DeletedSubscriptionCartItem,
+    DonationAlertsAuth,
     DropsAuth,
     FollowMonitor,
     FollowMonitorEvent,
@@ -420,6 +421,32 @@ class PostgresDatabase:
                 """
                 ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS top_donations
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS top_donations_template
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS donationalerts_auth (
+                    owner_id BIGINT PRIMARY KEY,
+                    da_user_id TEXT NOT NULL DEFAULT '',
+                    da_code TEXT NOT NULL DEFAULT '',
+                    refresh_token TEXT NOT NULL DEFAULT '',
+                    access_token TEXT NOT NULL DEFAULT '',
+                    access_expires_at BIGINT NOT NULL DEFAULT 0
+                )
                 """
             )
             cur.execute(
@@ -1333,6 +1360,8 @@ class PostgresDatabase:
         drops_game_id: str = "",
         delete_other_alerts: bool = False,
         pin_message: bool = False,
+        top_donations: bool = False,
+        top_donations_template: str = "",
         is_demo: bool = False,
         notify_on_schedule_cancel: bool = False,
         schedule_cancel_template: str = "",
@@ -1353,9 +1382,10 @@ class PostgresDatabase:
                     from_watch_suggest, category_watch_prefs, release_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
-                    delete_other_alerts, pin_message, is_demo,
+                    delete_other_alerts, pin_message,
+                    top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1404,6 +1434,8 @@ class PostgresDatabase:
                     str(drops_game_id or ""),
                     bool(delete_other_alerts),
                     bool(pin_message),
+                    bool(top_donations),
+                    str(top_donations_template or ""),
                     bool(is_demo),
                     bool(notify_on_schedule_cancel),
                     str(schedule_cancel_template or ""),
@@ -1760,6 +1792,8 @@ class PostgresDatabase:
                     "drops_game_id",
                     "delete_other_alerts",
                     "pin_message",
+                    "top_donations",
+                    "top_donations_template",
                     "is_demo",
                     "notify_on_schedule_cancel",
                     "schedule_cancel_template",
@@ -1836,6 +1870,8 @@ class PostgresDatabase:
             "drops_game_id",
             "delete_other_alerts",
             "pin_message",
+            "top_donations",
+            "top_donations_template",
             "ignore_keywords",
             "use_global_ignore",
             "image_file_id",
@@ -1868,6 +1904,7 @@ class PostgresDatabase:
                 "notify_on_drops",
                 "delete_other_alerts",
                 "pin_message",
+                "top_donations",
                 "use_global_ignore",
                 "notify_on_schedule_cancel",
             ):
@@ -1890,6 +1927,7 @@ class PostgresDatabase:
                 "button_style",
                 "schedule_cancel_template",
                 "schedule_cancel_notified_days",
+                "top_donations_template",
             ):
                 if key == "button_style":
                     from custom_buttons import normalize_button_style
@@ -4412,7 +4450,7 @@ class PostgresDatabase:
             )
 
     def get_twitch_sync(self, owner_id: int) -> TwitchSync | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4424,7 +4462,13 @@ class PostgresDatabase:
         if not row:
             return None
         sync = _row_to_twitch_sync(row)
-        sync.refresh_token = decrypt_secret(sync.refresh_token)
+        plain = try_decrypt_secret(sync.refresh_token)
+        if plain is None:
+            self.set_twitch_sync_needs_reauth(owner_id, True)
+            sync.refresh_token = ""
+            sync.needs_reauth = True
+            return sync
+        sync.refresh_token = plain
         return sync
 
     def delete_twitch_sync(self, owner_id: int) -> bool:
@@ -4477,7 +4521,7 @@ class PostgresDatabase:
             )
 
     def get_due_twitch_syncs(self, now_iso: str) -> list[TwitchSync]:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4494,7 +4538,9 @@ class PostgresDatabase:
         out: list[TwitchSync] = []
         for r in rows:
             sync = _row_to_twitch_sync(r)
-            sync.refresh_token = decrypt_secret(sync.refresh_token)
+            plain = try_decrypt_secret(sync.refresh_token)
+            # Undecryptable → empty token; sync job marks needs_reauth + notifies.
+            sync.refresh_token = "" if plain is None else plain
             out.append(sync)
         return out
 
@@ -4840,7 +4886,7 @@ class PostgresDatabase:
             )
 
     def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4859,7 +4905,8 @@ class PostgresDatabase:
         out: list[FollowMonitor] = []
         for row in rows:
             mon = _row_to_follow_monitor(row)
-            mon.refresh_token = decrypt_secret(mon.refresh_token)
+            plain = try_decrypt_secret(mon.refresh_token)
+            mon.refresh_token = "" if plain is None else plain
             out.append(mon)
         return out
 
@@ -5262,6 +5309,110 @@ class PostgresDatabase:
                 SET refresh_token = '', access_token = '', access_expires_at = 0
                 WHERE owner_id = %s
                 """,
+                (owner_id,),
+            )
+
+    def get_donationalerts_auth(self, owner_id: int) -> DonationAlertsAuth | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM donationalerts_auth WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        auth = DonationAlertsAuth(
+            owner_id=int(row["owner_id"]),
+            da_user_id=str(row["da_user_id"] or ""),
+            da_code=str(row["da_code"] or ""),
+            refresh_token=str(row["refresh_token"] or ""),
+            access_token=str(row["access_token"] or ""),
+            access_expires_at=int(row["access_expires_at"] or 0),
+        )
+        auth.refresh_token = decrypt_secret(auth.refresh_token)
+        if auth.access_token:
+            auth.access_token = decrypt_secret(auth.access_token)
+        return auth
+
+    def upsert_donationalerts_auth(
+        self,
+        owner_id: int,
+        *,
+        da_user_id: str,
+        da_code: str,
+        refresh_token: str,
+        access_token: str = "",
+        access_expires_at: int = 0,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        enc_at = encrypt_secret(access_token) if access_token else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO donationalerts_auth (
+                    owner_id, da_user_id, da_code, refresh_token,
+                    access_token, access_expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    da_user_id = EXCLUDED.da_user_id,
+                    da_code = EXCLUDED.da_code,
+                    refresh_token = EXCLUDED.refresh_token,
+                    access_token = EXCLUDED.access_token,
+                    access_expires_at = EXCLUDED.access_expires_at
+                """,
+                (
+                    owner_id,
+                    da_user_id,
+                    da_code,
+                    enc,
+                    enc_at,
+                    int(access_expires_at or 0),
+                ),
+            )
+
+    def update_donationalerts_auth_tokens(
+        self,
+        owner_id: int,
+        *,
+        refresh_token: str | None = None,
+        access_token: str | None = None,
+        access_expires_at: int | None = None,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        updates: list[str] = []
+        values: list[object] = []
+        if refresh_token is not None:
+            updates.append("refresh_token = %s")
+            values.append(encrypt_secret(refresh_token) if refresh_token else "")
+        if access_token is not None:
+            updates.append("access_token = %s")
+            values.append(encrypt_secret(access_token) if access_token else "")
+        if access_expires_at is not None:
+            updates.append("access_expires_at = %s")
+            values.append(int(access_expires_at or 0))
+        if not updates:
+            return
+        values.append(owner_id)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                f"UPDATE donationalerts_auth SET {', '.join(updates)} "
+                "WHERE owner_id = %s",
+                values,
+            )
+
+    def delete_donationalerts_auth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM donationalerts_auth WHERE owner_id = %s",
                 (owner_id,),
             )
 

@@ -35,6 +35,13 @@ _oauth_on_complete: OAuthCompleteHandler | None = None
 _oauth_twitch: Any = None
 _oauth_redirect_uri: str = ""
 
+# DonationAlerts OAuth (separate redirect + token exchange)
+DonationAlertsOAuthCompleteHandler = Callable[
+    [int, Optional[str], Optional[dict[str, str]]],
+    Awaitable[None],
+]
+_da_oauth_on_complete: DonationAlertsOAuthCompleteHandler | None = None
+
 # PostHog error-tracking Issue alerts → Telegram admins
 PosthogIssueHandler = Callable[[dict[str, Any]], Awaitable[None]]
 _posthog_issue_loop: asyncio.AbstractEventLoop | None = None
@@ -111,6 +118,16 @@ def register_oauth_bridge(
     _oauth_on_complete = on_complete
     _oauth_twitch = twitch
     _oauth_redirect_uri = redirect_uri
+
+
+def register_donationalerts_oauth_bridge(
+    loop: asyncio.AbstractEventLoop,
+    *,
+    on_complete: DonationAlertsOAuthCompleteHandler,
+) -> None:
+    global _oauth_loop, _da_oauth_on_complete
+    _oauth_loop = loop
+    _da_oauth_on_complete = on_complete
 
 
 def register_posthog_issue_bridge(
@@ -371,6 +388,30 @@ def _schedule_oauth_complete(
     fut.add_done_callback(_done)
 
 
+def _schedule_donationalerts_oauth_complete(
+    telegram_user_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None = None,
+) -> None:
+    if _oauth_loop is None or _da_oauth_on_complete is None:
+        logger.error("DonationAlerts OAuth complete with no bridge registered")
+        return
+    fut = asyncio.run_coroutine_threadsafe(
+        _da_oauth_on_complete(telegram_user_id, error, token_info),
+        _oauth_loop,
+    )
+
+    def _done(f: Any) -> None:
+        try:
+            f.result()
+        except Exception:
+            logger.exception(
+                "DonationAlerts OAuth on_complete failed for user %s", telegram_user_id
+            )
+
+    fut.add_done_callback(_done)
+
+
 def _premium_channel_tip_page(lang: str) -> bytes:
     from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, t
 
@@ -467,6 +508,77 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
             logger.warning("Premium Twitch sub check failed: %s", exc)
             token_info["twitch_sub_active"] = "0"
     _schedule_oauth_complete(telegram_user_id, followed, None, token_info)
+    body = _html_page(
+        t("oauth_web_done_title", lang),
+        t("oauth_web_done_body", lang),
+    )
+    return 200, body, "text/html; charset=utf-8"
+
+
+def _handle_donationalerts_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
+    import donationalerts as da
+    from i18n import DEFAULT_LOCALE, t
+
+    err = (query.get("error") or [""])[0]
+    state = (query.get("state") or [""])[0]
+    code = (query.get("code") or [""])[0]
+    pending = pop_oauth_state(state) if state else None
+    lang = DEFAULT_LOCALE
+    telegram_user_id: int | None = None
+    purpose = ""
+    if pending:
+        telegram_user_id, lang, purpose = pending
+    if telegram_user_id is None or purpose != "donationalerts":
+        body = _html_page(
+            t("oauth_web_expired_title", lang),
+            t("oauth_web_expired_body", lang),
+        )
+        return 400, body, "text/html; charset=utf-8"
+    if err:
+        _schedule_donationalerts_oauth_complete(telegram_user_id, err)
+        body = _html_page(
+            t("oauth_web_cancelled_title", lang),
+            t("oauth_web_cancelled_body", lang),
+        )
+        return 200, body, "text/html; charset=utf-8"
+    if not code or not da.configured():
+        _schedule_donationalerts_oauth_complete(telegram_user_id, "missing_code")
+        body = _html_page(
+            t("oauth_web_failed_title", lang),
+            t("oauth_web_failed_body", lang),
+        )
+        return 400, body, "text/html; charset=utf-8"
+    try:
+        token_data = da.exchange_code(code)
+        access = str(token_data.get("access_token") or "")
+        refresh = str(token_data.get("refresh_token") or "")
+        expires_in = int(token_data.get("expires_in") or 0)
+        user = da.fetch_user(access)
+        da_user_id = str(user.get("id") or "")
+        da_code = str(user.get("code") or "")
+        if not access or not refresh or not da_user_id:
+            raise RuntimeError("incomplete_token")
+        token_info = {
+            "purpose": "donationalerts",
+            "access_token": access,
+            "refresh_token": refresh,
+            "access_expires_at": str(
+                int(time.time()) + expires_in if expires_in > 0 else 0
+            ),
+            "da_user_id": da_user_id,
+            "da_code": da_code,
+        }
+    except Exception as exc:
+        logger.warning(
+            "DonationAlerts OAuth failed: %s", type(exc).__name__
+        )
+        _schedule_donationalerts_oauth_complete(telegram_user_id, "da_api")
+        body = _html_page(
+            t("oauth_web_failed_title", lang),
+            t("oauth_web_failed_body", lang),
+        )
+        return 400, body, "text/html; charset=utf-8"
+    _schedule_donationalerts_oauth_complete(telegram_user_id, None, token_info)
     body = _html_page(
         t("oauth_web_done_title", lang),
         t("oauth_web_done_body", lang),
@@ -702,6 +814,15 @@ class _HealthHandler(BaseHTTPRequestHandler):
         if path == "/oauth/twitch/callback":
             query = parse_qs(urlparse(self.path).query)
             status, body, content_type = _handle_twitch_oauth(query)
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/oauth/donationalerts/callback":
+            query = parse_qs(urlparse(self.path).query)
+            status, body, content_type = _handle_donationalerts_oauth(query)
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))

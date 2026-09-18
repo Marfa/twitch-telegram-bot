@@ -270,6 +270,7 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
         stream=end_stream,
         extra=extra,
     )
+    text = _with_top_donations_suffix(db, sub, text, end_stream)
     await _send_notification(
         context.bot,
         db,
@@ -548,6 +549,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         stream=end_stream,
                         extra=extra,
                     )
+                    text = _with_top_donations_suffix(db, sub, text, end_stream)
                     await _send_notification(
                         context.bot,
                         db,
@@ -662,6 +664,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         stream=end_stream,
                         extra=extra,
                     )
+                    text = _with_top_donations_suffix(db, sub, text, end_stream)
                     await _send_notification(
                         context.bot,
                         db,
@@ -1213,6 +1216,32 @@ def _end_alert_template_args(
         extra["minutes"] = mins
         extra["duration"] = format_duration_hm(int(mins), lang)
     return username, game, title, extra or None
+
+
+def _with_top_donations_suffix(
+    db: Database,
+    sub: Subscription,
+    text: str,
+    end_stream: dict | None,
+) -> str:
+    if not getattr(sub, "top_donations", False):
+        return text
+    import beta as beta_features
+    import donationalerts as da
+
+    if not beta_features.is_enabled(db, sub.owner_id, da.BETA_FEATURE_ID):
+        return text
+    tmpl = str(getattr(sub, "top_donations_template", "") or "").strip()
+    if not tmpl:
+        return text
+    try:
+        block = da.build_top_donations_suffix(db, sub.owner_id, tmpl, end_stream)
+    except Exception:
+        logger.exception("top donations append failed for sub %s", sub.id)
+        return text
+    if not block:
+        return text
+    return f"{text.rstrip()}\n\n{block}"
 
 
 def category_change_events(

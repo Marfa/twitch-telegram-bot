@@ -1032,6 +1032,7 @@ def advanced_options_keyboard(
     want_live_remind: bool = False,
     want_schedule_cancel: bool = False,
     want_multistream: bool = False,
+    want_top_donations: bool = False,
     button_style: str = "",
     show_delay: bool = True,
     show_repeat: bool = True,
@@ -1041,6 +1042,7 @@ def advanced_options_keyboard(
     show_schedule_remind: bool = False,
     show_schedule_cancel: bool = False,
     show_multistream: bool = False,
+    show_top_donations: bool = False,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER
@@ -1062,6 +1064,7 @@ def advanced_options_keyboard(
         "buttons": want_buttons,
         "chat": want_chat,
         "live_remind": want_live_remind,
+        "top_donations": want_top_donations,
         "preview": want_preview,
         "schedule_remind": False,
         "schedule_cancel": want_schedule_cancel,
@@ -1072,6 +1075,7 @@ def advanced_options_keyboard(
         "repeat": show_repeat,
         "buttons": show_buttons,
         "live_remind": show_live_remind,
+        "top_donations": show_top_donations,
         "preview": show_preview,
         "schedule_remind": show_schedule_remind,
         "schedule_cancel": show_schedule_cancel,
@@ -2578,6 +2582,7 @@ def edit_options_keyboard(
     strip_name_mentions: bool = False,
     attach_chat_button: bool = False,
     attach_live_remind_button: bool = False,
+    top_donations: bool = False,
     disable_link_preview: bool = False,
     schedule_reminder_minutes: int = 0,
     show_link_preview: bool = True,
@@ -2591,6 +2596,7 @@ def edit_options_keyboard(
     notify_on_schedule_cancel: bool = False,
     show_schedule_cancel: bool = False,
     show_multistream: bool = False,
+    show_top_donations: bool = False,
     button_style: str = "",
     custom_buttons_count: int = 0,
     multistream_count: int = 0,
@@ -2783,6 +2789,18 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             ms_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
+        if sid == "top_donations":
+            if show_advanced and show_top_donations:
+                top_mark = "✅ " if top_donations else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            top_mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=f"edit_f:{sub_id}:{field}",
                         )
                     ]

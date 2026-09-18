@@ -1349,6 +1349,126 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
     assert state == _wz()["IGNORE_KEYWORDS"]
 
 
+async def _scenario_wizard_top_donations(db) -> None:
+    """§2 Extras — top donations (end + beta): toggle, OAuth prompt, template step."""
+    from handlers.wizard import (
+        _go_advanced_options_prompt,
+        receive_advanced_options_next,
+        receive_advanced_options_toggle,
+        receive_top_donations_template,
+        _wz,
+    )
+
+    # Live alert: no top-donations row even with beta on.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "bye",
+            "alert_type": "live",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    live_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:toggle:top_donations" not in live_cbs
+    cap.assert_turn("wizard_top_donations_hidden_on_live")
+
+    # End + beta: row visible; toggle on → OAuth link message; Next → template.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "stream ended",
+            "alert_type": "end",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    end_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:toggle:top_donations" in end_cbs
+    cap.assert_turn("wizard_top_donations_shown_on_end")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:toggle:top_donations", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True), patch(
+        "donationalerts.configured", return_value=True
+    ), patch(
+        "donationalerts.build_authorize_url",
+        return_value="https://www.donationalerts.com/oauth/authorize?x=1",
+    ), patch(
+        "health.create_oauth_state", return_value="da-state"
+    ):
+        state = await receive_advanced_options_toggle(update, ctx)
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    assert ctx.user_data.get("adv_want_top_donations") is True
+    oauth_texts = [
+        str(c.kwargs.get("text") or (c.args[1] if len(c.args) > 1 else ""))
+        for c in bot.send_message.await_args_list
+    ]
+    assert any("DonationAlerts" in t or "привяз" in t.lower() for t in oauth_texts) or any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.url or "").startswith("https://www.donationalerts.com/oauth/authorize")
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    # OAuth prompt is URL-button only (no Cancel) — escape hatch is wizard Reply
+    # from the prior Extras screen still in the chat; pulse covers that.
+    cap.note_pulse()
+    cap.assert_turn("wizard_top_donations_oauth_prompt")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:next", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_advanced_options_next(update, ctx)
+    assert state == _wz()["TOP_DONATIONS_TEMPLATE"]
+    assert ctx.user_data.get("top_donations") is True
+    cap.assert_turn("wizard_top_donations_template")
+
+    update = _msg_update(_FREE_UID, "• {donate_user} — {donate_sum}", cap)
+    with patch(
+        "handlers.wizard._go_ignore_keywords_prompt",
+        new=AsyncMock(return_value=_wz()["IGNORE_KEYWORDS"]),
+    ):
+        state = await receive_top_donations_template(update, ctx)
+    assert state == _wz()["IGNORE_KEYWORDS"]
+    assert ctx.user_data.get("top_donations_template") == "• {donate_user} — {donate_sum}"
+    assert ctx.user_data.get("top_donations") is True
+
+
 async def _scenario_wizard_button_style(db) -> None:
     """§2 Extras — button color options appear when a button option is on; pick persists."""
     from handlers.wizard import (
@@ -2503,6 +2623,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_release_pick_pages(db)
         await _scenario_wizard_alert_type_other(db)
         await _scenario_wizard_extras_checkboxes(db)
+        await _scenario_wizard_top_donations(db)
         await _scenario_wizard_button_style(db)
         await _scenario_wizard_image_ask(db)
         await _scenario_import(db)

@@ -51,6 +51,7 @@ def _list_markers(lang: str) -> dict[str, str]:
         "buttons": t("sub_list_custom_buttons", lang, count=1),
         "chat": t("sub_list_chat_button_yes", lang),
         "live_remind": t("sub_list_live_remind_yes", lang),
+        "top_donations": t("sub_list_top_donations_yes", lang),
         "preview": t_bullet("preview_off", lang),
         "schedule_cancel": t("sub_list_schedule_cancel_yes", lang),
         "multistream": t("sub_list_multistream", lang, count=1),
@@ -230,6 +231,7 @@ def check_alert_setting_order() -> None:
         "buttons",
         "chat",
         "live_remind",
+        "top_donations",
         "preview",
         "schedule_remind",
         "schedule_cancel",
@@ -249,6 +251,7 @@ def check_alert_setting_order() -> None:
         want_chat=False,
         want_buttons=False,
         want_live_remind=False,
+        want_top_donations=False,
         want_preview=False,
         want_schedule_cancel=False,
         want_multistream=False,
@@ -256,6 +259,7 @@ def check_alert_setting_order() -> None:
         show_repeat=True,
         show_buttons=True,
         show_live_remind=True,
+        show_top_donations=True,
         show_preview=True,
         show_schedule_remind=False,
         show_schedule_cancel=True,
@@ -284,7 +288,7 @@ def check_alert_setting_order() -> None:
     assert _edit_setting_ids(edit) == [
         sid
         for sid in ALERT_SETTING_ORDER
-        if sid not in ("live_remind", "schedule_remind", "schedule_cancel")
+        if sid not in ("live_remind", "schedule_remind", "schedule_cancel", "top_donations")
     ]
     labels = {
         (btn.callback_data or ""): btn.text
@@ -315,7 +319,7 @@ def check_alert_setting_order() -> None:
     assert _edit_setting_ids(upcoming_edit) == [
         sid
         for sid in ALERT_SETTING_ORDER
-        if sid not in ("delay", "repeat", "delete", "pin", "buttons", "multistream")
+        if sid not in ("delay", "repeat", "delete", "pin", "buttons", "multistream", "top_donations")
     ]
     upcoming_labels = {
         (btn.callback_data or ""): btn.text
@@ -331,6 +335,24 @@ def check_alert_setting_order() -> None:
     assert setting_ids[-2] == "schedule_remind"
     assert "edit_f:1:delay" not in upcoming_labels
     assert "edit_f:1:repeat" not in upcoming_labels
+    assert "edit_f:1:top_donations" not in upcoming_labels
+
+    end_edit = edit_options_keyboard(
+        1,
+        "en",
+        dest_type="dm",
+        show_advanced=True,
+        notify_on_end=True,
+        show_top_donations=True,
+        top_donations=True,
+    )
+    end_labels = {
+        (btn.callback_data or ""): btn.text
+        for row in end_edit.inline_keyboard
+        for btn in row
+    }
+    assert end_labels["edit_f:1:top_donations"].startswith("✅ ")
+    assert "edit_f:1:live_remind" not in end_labels
 
     off = edit_options_keyboard(
         1,

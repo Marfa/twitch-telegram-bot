@@ -98,6 +98,9 @@ def main() -> None:
     check_multistream_dump_roundtrip()
     check_multistream_status_placeholders()
     check_multistream_prompt_i18n_format()
+    from .checks_top_donations import check_top_donations
+
+    check_top_donations()
     from .checks_drops import run as check_drops
 
     check_drops()
