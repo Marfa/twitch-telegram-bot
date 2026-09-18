@@ -1628,8 +1628,12 @@ async def complete_donationalerts_oauth(
             access_token=access,
             access_expires_at=expires_at,
         )
-    except Exception:
-        logger.exception("DonationAlerts auth persist failed for user %s", owner_id)
+    except Exception as exc:
+        # Avoid logger.exception — access/refresh may sit in locals (CodeQL).
+        logger.error(
+            "DonationAlerts auth persist failed (%s)",
+            type(exc).__name__,
+        )
         await application.bot.send_message(
             chat_id=owner_id,
             text=t("top_donations_oauth_failed", lang),

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import hashlib
 import html
 import json
 import logging
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -26,6 +28,8 @@ _OAUTH_TTL_SEC = 600
 # Thread lock + file store so create_oauth_state from a one-shot script in the
 # same container is visible to the bot process that handles the callback.
 _oauth_pending_lock = threading.Lock()
+# Disk keys are SHA-256(state); raw CSRF state never written (CodeQL clear-text).
+_OAUTH_STATE_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _oauth_store_path() -> Path:
@@ -36,6 +40,10 @@ def _oauth_store_path() -> Path:
     if data.is_dir() and os.access(data, os.W_OK):
         return data / "oauth_pending.json"
     return Path(tempfile.gettempdir()) / "twitch_bot_oauth_pending.json"
+
+
+def _oauth_state_key(state: str) -> str:
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()
 
 
 @contextmanager
@@ -60,7 +68,14 @@ def _read_oauth_store() -> dict[str, list[Any]]:
     except (OSError, json.JSONDecodeError):
         logger.exception("Failed to read OAuth pending store %s", path)
         return {}
-    return raw if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    # Drop legacy cleartext state keys from older deploys (TTL ≤10 min).
+    return {
+        k: v
+        for k, v in raw.items()
+        if isinstance(k, str) and _OAUTH_STATE_KEY_RE.match(k)
+    }
 
 
 def _write_oauth_store(store: dict[str, list[Any]]) -> None:
@@ -79,6 +94,7 @@ def _purge_oauth_store(store: dict[str, list[Any]], now: float) -> None:
     ]
     for k in expired:
         del store[k]
+
 
 # on_complete(telegram_user_id, followed, error, token_info)
 # token_info: access_token, refresh_token, twitch_user_id (only on success)
@@ -134,7 +150,7 @@ def create_oauth_state(
     with _oauth_pending_lock, _oauth_file_lock():
         store = _read_oauth_store()
         _purge_oauth_store(store, time.time())
-        store[state] = [telegram_user_id, locale, expires, purpose]
+        store[_oauth_state_key(state)] = [telegram_user_id, locale, expires, purpose]
         _write_oauth_store(store)
     return state
 
@@ -146,7 +162,7 @@ def pop_oauth_state(state: str) -> tuple[int, str, str] | None:
     with _oauth_pending_lock, _oauth_file_lock():
         store = _read_oauth_store()
         _purge_oauth_store(store, now)
-        item = store.pop(state, None)
+        item = store.pop(_oauth_state_key(state), None)
         _write_oauth_store(store)
     if not item or not isinstance(item, list) or len(item) < 3:
         return None
