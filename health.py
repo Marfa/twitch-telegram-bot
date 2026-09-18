@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import html
 import json
 import logging
 import os
 import secrets
+import tempfile
 import threading
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
@@ -20,9 +23,62 @@ _ready = False
 _ready_lock = threading.Lock()
 
 _OAUTH_TTL_SEC = 600
-# state -> (telegram_user_id, lang, expires_at)
-_oauth_pending: dict[str, tuple[int, str, float]] = {}
+# Thread lock + file store so create_oauth_state from a one-shot script in the
+# same container is visible to the bot process that handles the callback.
 _oauth_pending_lock = threading.Lock()
+
+
+def _oauth_store_path() -> Path:
+    override = (os.getenv("OAUTH_PENDING_PATH") or "").strip()
+    if override:
+        return Path(override)
+    data = Path("/data")
+    if data.is_dir() and os.access(data, os.W_OK):
+        return data / "oauth_pending.json"
+    return Path(tempfile.gettempdir()) / "twitch_bot_oauth_pending.json"
+
+
+@contextmanager
+def _oauth_file_lock() -> Iterator[None]:
+    path = _oauth_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with open(lock_path, "a+", encoding="utf-8") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
+def _read_oauth_store() -> dict[str, list[Any]]:
+    path = _oauth_store_path()
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Failed to read OAuth pending store %s", path)
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_oauth_store(store: dict[str, list[Any]]) -> None:
+    path = _oauth_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(store), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _purge_oauth_store(store: dict[str, list[Any]], now: float) -> None:
+    expired = [
+        k
+        for k, v in store.items()
+        if not isinstance(v, list) or len(v) < 3 or float(v[2]) < now
+    ]
+    for k in expired:
+        del store[k]
 
 # on_complete(telegram_user_id, followed, error, token_info)
 # token_info: access_token, refresh_token, twitch_user_id (only on success)
@@ -75,9 +131,11 @@ def create_oauth_state(
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     state = secrets.token_urlsafe(24)
     expires = time.time() + _OAUTH_TTL_SEC
-    with _oauth_pending_lock:
-        _oauth_pending[state] = (telegram_user_id, locale, expires, purpose)
-        _purge_oauth_locked(time.time())
+    with _oauth_pending_lock, _oauth_file_lock():
+        store = _read_oauth_store()
+        _purge_oauth_store(store, time.time())
+        store[state] = [telegram_user_id, locale, expires, purpose]
+        _write_oauth_store(store)
     return state
 
 
@@ -85,25 +143,21 @@ def pop_oauth_state(state: str) -> tuple[int, str, str] | None:
     from i18n import DEFAULT_LOCALE
 
     now = time.time()
-    with _oauth_pending_lock:
-        _purge_oauth_locked(now)
-        item = _oauth_pending.pop(state, None)
-    if not item:
+    with _oauth_pending_lock, _oauth_file_lock():
+        store = _read_oauth_store()
+        _purge_oauth_store(store, now)
+        item = store.pop(state, None)
+        _write_oauth_store(store)
+    if not item or not isinstance(item, list) or len(item) < 3:
         return None
     if len(item) == 3:
         user_id, lang, expires = item
         purpose = "import"
     else:
-        user_id, lang, expires, purpose = item
-    if expires < now:
+        user_id, lang, expires, purpose = item[0], item[1], item[2], item[3]
+    if float(expires) < now:
         return None
-    return user_id, lang or DEFAULT_LOCALE, purpose
-
-
-def _purge_oauth_locked(now: float) -> None:
-    expired = [k for k, v in _oauth_pending.items() if v[2] < now]
-    for k in expired:
-        del _oauth_pending[k]
+    return int(user_id), (lang or DEFAULT_LOCALE), str(purpose or "import")
 
 
 def register_oauth_bridge(
