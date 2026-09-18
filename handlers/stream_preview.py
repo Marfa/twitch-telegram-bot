@@ -235,6 +235,7 @@ async def refresh_live_stream_previews(
                 captured=captured,
                 bot_data=bot_data,
                 twitch=twitch,
+                db=db,
             )
             if ok:
                 refresh_at[sub.id] = now
@@ -246,6 +247,7 @@ async def refresh_live_stream_previews(
                 captured=None,
                 bot_data=bot_data,
                 twitch=twitch,
+                db=db,
             )
             if ok:
                 refresh_at[sub.id] = now
@@ -269,10 +271,12 @@ async def edit_animation_message(
     caption: str | None = None,
     parse_mode: str | None = None,
     show_caption_above_media: bool | None = None,
+    reply_markup=None,
 ) -> None:
     """Replace animation media; local files must use attach:// via InputFile(attach=True).
 
-    Caption must be passed explicitly — omitting it clears the message text on edit.
+    Caption and reply_markup must be passed explicitly — omitting either clears
+    text / inline buttons on editMessageMedia.
     """
     kwargs: dict[str, Any] = {
         "media": animation_input_file(data, attach=True),
@@ -287,11 +291,14 @@ async def edit_animation_message(
         if show_caption_above_media is not None:
             kwargs["show_caption_above_media"] = show_caption_above_media
     media = InputMediaAnimation(**kwargs)
-    await bot.edit_message_media(
-        chat_id=chat_id,
-        message_id=message_id,
-        media=media,
-    )
+    edit_kwargs: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "media": media,
+    }
+    if reply_markup is not None:
+        edit_kwargs["reply_markup"] = reply_markup
+    await bot.edit_message_media(**edit_kwargs)
 
 
 def _preview_caption(
@@ -324,6 +331,23 @@ def _preview_caption(
     return text, parse_mode, position == "after"
 
 
+async def _preview_reply_markup(bot, db: Database | None, sub: Subscription):
+    """Rebuild alert inline keyboard (editMessageMedia drops it if omitted)."""
+    if db is None:
+        return None
+    from handlers.delivery import _alert_chat_button_markup
+    from i18n import DEFAULT_LOCALE
+
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    bot_username = ""
+    if getattr(sub, "attach_live_remind_button", False):
+        me = await bot.get_me()
+        bot_username = (me.username or "").strip()
+    return _alert_chat_button_markup(
+        sub, lang, db=db, bot_username=bot_username
+    )
+
+
 async def _edit_preview_media(
     bot,
     sub: Subscription,
@@ -332,11 +356,13 @@ async def _edit_preview_media(
     captured: CapturedPreview | None,
     bot_data: dict[str, Any] | None = None,
     twitch: TwitchClient | None = None,
+    db: Database | None = None,
 ) -> bool:
     mid = sub.last_message_id
     if not mid:
         return False
     caption, parse_mode, caption_above = _preview_caption(sub, stream, twitch)
+    reply_markup = await _preview_reply_markup(bot, db, sub)
     try:
         if is_stream_video_preview_image(sub.image_file_id):
             # Never fall back to a static photo — that freezes the GIF bubble
@@ -352,6 +378,7 @@ async def _edit_preview_media(
                     caption=caption,
                     parse_mode=parse_mode,
                     show_caption_above_media=caption_above,
+                    reply_markup=reply_markup,
                 )
             except BadRequest as exc:
                 err = str(exc).lower()
@@ -364,6 +391,7 @@ async def _edit_preview_media(
                         caption=caption,
                         parse_mode=None,
                         show_caption_above_media=caption_above,
+                        reply_markup=reply_markup,
                     )
                 else:
                     raise
@@ -381,21 +409,21 @@ async def _edit_preview_media(
             }
             if parse_mode:
                 media_kwargs["parse_mode"] = parse_mode
+            edit_kwargs: dict[str, Any] = {
+                "chat_id": sub.chat_id,
+                "message_id": mid,
+                "media": InputMediaPhoto(**media_kwargs),
+            }
+            if reply_markup is not None:
+                edit_kwargs["reply_markup"] = reply_markup
             try:
-                await bot.edit_message_media(
-                    chat_id=sub.chat_id,
-                    message_id=mid,
-                    media=InputMediaPhoto(**media_kwargs),
-                )
+                await bot.edit_message_media(**edit_kwargs)
             except BadRequest as exc:
                 err = str(exc).lower()
                 if parse_mode and ("parse" in err or "entity" in err or "tag" in err):
                     media_kwargs.pop("parse_mode", None)
-                    await bot.edit_message_media(
-                        chat_id=sub.chat_id,
-                        message_id=mid,
-                        media=InputMediaPhoto(**media_kwargs),
-                    )
+                    edit_kwargs["media"] = InputMediaPhoto(**media_kwargs)
+                    await bot.edit_message_media(**edit_kwargs)
                 else:
                     raise
         logger.info(

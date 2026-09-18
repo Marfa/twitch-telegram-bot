@@ -1,0 +1,79 @@
+name: Restore channel preview buttons
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-edit aipchat + themarfa_gaming previews with markup
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 8m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import asyncio, logging
+            logging.basicConfig(level=logging.INFO)
+            from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN
+            from db import open_database
+            from handlers.stream_preview import build_stream_video_mp4, _edit_preview_media
+            from twitch import TwitchClient, is_stream_video_preview_image
+            from telegram import Bot
+
+            # aipchat mid 222008 = sub 460; themarfa_gaming mid 330 = sub 1
+            SUB_IDS = (460, 1)
+
+            async def main():
+                db = open_database(DATABASE_PATH, DATABASE_URL)
+                tw = TwitchClient()
+                tw.bind_igdb_db(db)
+                bot = Bot(TELEGRAM_BOT_TOKEN)
+                bot_data = {}
+                for sid in SUB_IDS:
+                    sub = db.get_subscription_by_id(sid)
+                    if sub is None:
+                        print("missing sub", sid)
+                        continue
+                    uid = str(sub.twitch_user_id or "")
+                    live = tw.get_live_streams([uid]) if uid else {}
+                    stream = live.get(uid)
+                    if not stream:
+                        print("offline sub", sid, sub.twitch_username)
+                        continue
+                    stream = dict(stream)
+                    stream.setdefault("user_login", sub.twitch_username)
+                    stream.setdefault("user_id", uid)
+                    captured = None
+                    if is_stream_video_preview_image(sub.image_file_id):
+                        captured = await asyncio.to_thread(
+                            build_stream_video_mp4,
+                            login=(sub.twitch_username or "").lower(),
+                            twitch_user_id=uid,
+                            force=True,
+                        )
+                        if captured is None:
+                            print("capture failed", sid)
+                            continue
+                    ok = await _edit_preview_media(
+                        bot, sub, stream,
+                        captured=captured,
+                        bot_data=bot_data,
+                        twitch=tw,
+                        db=db,
+                    )
+                    print(
+                        "sub", sid, "chat", sub.chat_id, "mid", sub.last_message_id,
+                        "login", sub.twitch_username, "ok", ok,
+                    )
+
+            asyncio.run(main())
+            PY
