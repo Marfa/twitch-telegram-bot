@@ -5,7 +5,6 @@ import asyncio
 import logging
 import time
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 
 from telegram import InputFile, InputMediaAnimation, InputMediaPhoto
@@ -185,9 +184,10 @@ async def refresh_live_stream_previews(
             invalidate_shared(uid)
 
 
-def animation_input_file(data: bytes) -> InputFile:
+def animation_input_file(data: bytes, *, attach: bool = False) -> InputFile:
     # Named MP4 helps Telegram accept the upload for send/edit animation.
-    return InputFile(BytesIO(data), filename="preview.mp4")
+    # attach=True is required for InputMedia* (editMessageMedia multipart).
+    return InputFile(BytesIO(data), filename="preview.mp4", attach=attach)
 
 
 async def edit_animation_message(
@@ -197,30 +197,18 @@ async def edit_animation_message(
     message_id: int,
     data: bytes,
 ) -> None:
-    """Upload MP4 via a real file path — BytesIO often yields 'media not found' on edit."""
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-        tmp.write(data)
-        tmp_path = tmp.name
-    try:
-        with open(tmp_path, "rb") as fh:
-            media = InputMediaAnimation(
-                media=InputFile(fh, filename="preview.mp4"),
-                width=_ANIM_WIDTH,
-                height=_ANIM_HEIGHT,
-                duration=_ANIM_DURATION,
-            )
-            await bot.edit_message_media(
-                chat_id=chat_id,
-                message_id=message_id,
-                media=media,
-            )
-    finally:
-        try:
-            Path(tmp_path).unlink(missing_ok=True)
-        except OSError:
-            pass
+    """Replace animation media; local files must use attach:// via InputFile(attach=True)."""
+    media = InputMediaAnimation(
+        media=animation_input_file(data, attach=True),
+        width=_ANIM_WIDTH,
+        height=_ANIM_HEIGHT,
+        duration=_ANIM_DURATION,
+    )
+    await bot.edit_message_media(
+        chat_id=chat_id,
+        message_id=message_id,
+        media=media,
+    )
 
 
 async def _edit_preview_media(
