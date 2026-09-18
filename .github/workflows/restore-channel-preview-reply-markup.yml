@@ -1,0 +1,57 @@
+name: Restore channel preview reply markup
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore inline buttons on known channel alerts
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import asyncio, logging
+            logging.basicConfig(level=logging.INFO)
+            from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN
+            from db import open_database
+            from handlers.stream_preview import _preview_reply_markup
+            from telegram import Bot
+            from telegram.error import BadRequest, Forbidden
+
+            SUB_IDS = (460, 1)
+
+            async def main():
+                db = open_database(DATABASE_PATH, DATABASE_URL)
+                bot = Bot(TELEGRAM_BOT_TOKEN)
+                for sid in SUB_IDS:
+                    sub = db.get_subscription_by_id(sid)
+                    if sub is None or not sub.last_message_id:
+                        print("skip", sid)
+                        continue
+                    markup = await _preview_reply_markup(bot, db, sub)
+                    if markup is None:
+                        print("no buttons configured", sid)
+                        continue
+                    try:
+                        await bot.edit_message_reply_markup(
+                            chat_id=sub.chat_id,
+                            message_id=int(sub.last_message_id),
+                            reply_markup=markup,
+                        )
+                        print("ok", sid, "chat", sub.chat_id, "mid", sub.last_message_id)
+                    except (BadRequest, Forbidden) as exc:
+                        print("fail", sid, exc)
+
+            asyncio.run(main())
+            PY
