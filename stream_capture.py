@@ -3,6 +3,11 @@
 Uses streamlink + ffmpeg (record-forward from live HLS). Not Helix Create Clip.
 ponytail: Twitch ToS / unofficial HLS; upgrade path = Helix Create Clip if Delete Clip
 appears, or an official short preview API.
+
+Connection lifecycle (must not "sit" on the stream):
+- streamlink --stream-url: resolves an HLS playlist URL and exits (no continuous watch).
+- ffmpeg: pulls HLS only for -t seconds, then exits; we kill the process group on
+  timeout/failure so no orphan keeps the CDN session open.
 """
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -216,6 +222,7 @@ def _shared_put(uid: str, path: Path, data: bytes) -> None:
 
 
 def _streamlink_url(login: str) -> str | None:
+    """Resolve HLS URL only — streamlink must exit immediately (no player / no pipe)."""
     cmd = [
         "streamlink",
         "--stream-url",
@@ -223,13 +230,7 @@ def _streamlink_url(login: str) -> str | None:
         _QUALITY,
     ]
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=45,
-            check=False,
-        )
+        proc = _run_killable(cmd, timeout=45.0)
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("streamlink failed for %s: %s", login, exc)
         return None
@@ -249,17 +250,25 @@ def _streamlink_url(login: str) -> str | None:
 
 def _ffmpeg_record(hls_url: str, out_path: Path, *, duration: float) -> bool:
     # Telegram sendAnimation: H.264/MPEG-4 AVC *without sound* for inline autoplay.
-    # Stream-copy from Twitch HLS keeps audio → client shows a loading spinner.
+    # Pull HLS only for `duration` seconds, then exit — never leave a long-lived viewer.
     cmd = [
         "ffmpeg",
         "-y",
         "-hide_banner",
         "-loglevel",
         "error",
+        # Drop stalled HTTP/HLS sooner instead of hanging as a silent viewer.
+        "-rw_timeout",
+        "20000000",
+        "-http_persistent",
+        "0",
         "-i",
         hls_url,
         "-t",
         f"{duration:.1f}",
+        # Explicit video-only map — audio makes Telegram treat the file as Video (download UI).
+        "-map",
+        "0:v:0",
         "-an",
         "-c:v",
         "libx264",
@@ -272,7 +281,13 @@ def _ffmpeg_record(hls_url: str, out_path: Path, *, duration: float) -> bool:
         "-preset",
         "veryfast",
         "-crf",
-        "28",
+        "32",
+        "-maxrate",
+        "800k",
+        "-bufsize",
+        "1600k",
+        "-r",
+        "20",
         "-vf",
         "scale=480:-2",
         "-movflags",
@@ -282,13 +297,7 @@ def _ffmpeg_record(hls_url: str, out_path: Path, *, duration: float) -> bool:
     # Re-encode needs more headroom than stream-copy.
     timeout = float(duration) + 90.0
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        proc = _run_killable(cmd, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("ffmpeg record failed: %s", exc)
         return False
@@ -297,6 +306,51 @@ def _ffmpeg_record(hls_url: str, out_path: Path, *, duration: float) -> bool:
         logger.warning("ffmpeg record failed code=%s: %s", proc.returncode, err)
         return False
     return True
+
+
+def _run_killable(
+    cmd: list[str], *, timeout: float
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess; on timeout/error kill the whole process group (no orphans)."""
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
+            stdout, stderr = proc.communicate(timeout=5)
+        raise
+    except Exception:
+        _kill_process_group(proc)
+        raise
+    return subprocess.CompletedProcess(
+        cmd, int(proc.returncode or 0), stdout or "", stderr or ""
+    )
+
+
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
 
 
 def _safe_unlink(path: Path) -> bool:

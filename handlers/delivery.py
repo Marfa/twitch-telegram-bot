@@ -177,9 +177,13 @@ async def _deliver_alert_content_plain(
         )
 
     async def _animation(**anim_kwargs):
+        # width/height/duration help Telegram treat muted MP4 as inline Animation.
         return await bot.send_animation(
             chat_id=chat_id,
             animation=InputFile(BytesIO(animation_bytes), filename="preview.mp4"),
+            width=480,
+            height=270,
+            duration=30,
             **anim_kwargs,
         )
 

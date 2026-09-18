@@ -28,6 +28,12 @@ from twitch import (
 logger = logging.getLogger(__name__)
 
 _BOT_DATA_REFRESH_KEY = "stream_preview_refresh_at"
+# Subs whose media cannot be edited (e.g. old Video-typed alerts) — skip until stream ends.
+_BOT_DATA_SKIP_KEY = "stream_preview_refresh_skip"
+# Telegram autoplay animations: muted H.264 ~480p.
+_ANIM_WIDTH = 480
+_ANIM_HEIGHT = 270
+_ANIM_DURATION = 30
 
 
 def build_stream_video_mp4(
@@ -68,10 +74,21 @@ def mark_preview_refresh(bot_data: dict[str, Any] | None, sub_id: int) -> None:
 
 def clear_preview_refresh(bot_data: dict[str, Any], sub_ids: list[int]) -> None:
     refresh_at = bot_data.get(_BOT_DATA_REFRESH_KEY)
-    if not isinstance(refresh_at, dict):
-        return
-    for sid in sub_ids:
-        refresh_at.pop(int(sid), None)
+    if isinstance(refresh_at, dict):
+        for sid in sub_ids:
+            refresh_at.pop(int(sid), None)
+    skip = bot_data.get(_BOT_DATA_SKIP_KEY)
+    if isinstance(skip, set):
+        for sid in sub_ids:
+            skip.discard(int(sid))
+
+
+def _preview_skip_set(bot_data: dict[str, Any]) -> set[int]:
+    skip = bot_data.setdefault(_BOT_DATA_SKIP_KEY, set())
+    if not isinstance(skip, set):
+        skip = set()
+        bot_data[_BOT_DATA_SKIP_KEY] = skip
+    return skip
 
 
 async def refresh_live_stream_previews(
@@ -86,6 +103,9 @@ async def refresh_live_stream_previews(
     One MP4 capture per streamer per refresh cycle (shared across all their alerts).
     Missing refresh timestamps (e.g. after deploy) are treated as due so already-sent
     messages keep updating.
+
+    If edit fails for a video preview (e.g. message stored as Video), stop further
+    refresh attempts for that subscription until the stream ends — do not delete/resend.
     """
     from config import STREAM_PREVIEW_REFRESH_SECONDS
     import premium as prem
@@ -93,6 +113,7 @@ async def refresh_live_stream_previews(
     if not live_streams:
         return
     refresh_at: dict[int, float] = bot_data.setdefault(_BOT_DATA_REFRESH_KEY, {})
+    skip = _preview_skip_set(bot_data)
     now = time.time()
     interval = max(60, int(STREAM_PREVIEW_REFRESH_SECONDS))
 
@@ -106,6 +127,8 @@ async def refresh_live_stream_previews(
             if sub.dest_type == "dm":
                 continue
             if not sub.last_message_id:
+                continue
+            if int(sub.id) in skip:
                 continue
             if is_stream_video_preview_image(sub.image_file_id):
                 if not prem.has_feature_sync(db, sub.owner_id, "stream_video_preview"):
@@ -142,17 +165,23 @@ async def refresh_live_stream_previews(
                 )
         for sub in video_subs:
             ok = await _edit_preview_media(
-                bot, sub, stream, captured=captured
+                bot, sub, stream, captured=captured, bot_data=bot_data
             )
             if ok:
                 refresh_at[sub.id] = now
         for sub in photo_subs:
-            ok = await _edit_preview_media(bot, sub, stream, captured=None)
+            ok = await _edit_preview_media(
+                bot, sub, stream, captured=None, bot_data=bot_data
+            )
             if ok:
                 refresh_at[sub.id] = now
         if captured is not None:
             forget_and_unlink(captured.path)
             invalidate_shared(uid)
+
+
+def animation_input_file(data: bytes) -> InputFile:
+    return InputFile(BytesIO(data), filename="preview.mp4")
 
 
 async def _edit_preview_media(
@@ -161,6 +190,7 @@ async def _edit_preview_media(
     stream: dict[str, Any],
     *,
     captured: CapturedPreview | None,
+    bot_data: dict[str, Any] | None = None,
 ) -> bool:
     mid = sub.last_message_id
     if not mid:
@@ -169,9 +199,10 @@ async def _edit_preview_media(
         if is_stream_video_preview_image(sub.image_file_id):
             if captured is not None:
                 media = InputMediaAnimation(
-                    media=InputFile(
-                        BytesIO(captured.data), filename="preview.mp4"
-                    )
+                    media=animation_input_file(captured.data),
+                    width=_ANIM_WIDTH,
+                    height=_ANIM_HEIGHT,
+                    duration=_ANIM_DURATION,
                 )
             else:
                 photo = format_stream_thumbnail_url(
@@ -199,12 +230,22 @@ async def _edit_preview_media(
         await asyncio.sleep(float(exc.retry_after) + 0.5)
         return False
     except (BadRequest, Forbidden) as exc:
-        logger.info(
-            "Stream preview refresh skipped sub=%s chat=%s: %s",
-            sub.id,
-            sub.chat_id,
-            exc,
-        )
+        # Old alerts may be stored as Video — cannot edit into Animation. Stop retrying.
+        if is_stream_video_preview_image(sub.image_file_id) and bot_data is not None:
+            _preview_skip_set(bot_data).add(int(sub.id))
+            logger.info(
+                "Stream preview refresh stopped for sub=%s chat=%s (uneditable media): %s",
+                sub.id,
+                sub.chat_id,
+                exc,
+            )
+        else:
+            logger.info(
+                "Stream preview refresh skipped sub=%s chat=%s: %s",
+                sub.id,
+                sub.chat_id,
+                exc,
+            )
         return False
     except Exception:
         logger.exception(
