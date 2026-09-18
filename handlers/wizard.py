@@ -8,6 +8,7 @@ import secrets
 from types import SimpleNamespace
 from typing import Any
 
+import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden
@@ -2009,7 +2010,17 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.effective_message.reply_text(t("channel_not_parsed", lang))
         return _wz()["CHANNEL"]
 
-    user = await asyncio.to_thread(twitch.get_user, username)
+    try:
+        user = await asyncio.to_thread(twitch.get_user, username)
+    except requests.RequestException as exc:
+        logger.warning("Twitch channel lookup failed for %s: %s", username, exc)
+        analytics.capture(
+            update.effective_user.id,
+            "wizard_channel_lookup_failed",
+            {"twitch_username": username},
+        )
+        await update.effective_message.reply_text(t("channel_lookup_failed", lang))
+        return _wz()["CHANNEL"]
     if not user:
         await update.effective_message.reply_text(
             t("channel_not_found", lang, username=username)

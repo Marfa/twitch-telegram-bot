@@ -163,6 +163,44 @@ def check_core() -> None:
         out = sess.request("GET", "https://api.twitch.tv/helix/users")
     assert out.status_code == 200 and calls["n"] == 2
     sleep_mock.assert_called_once()
+
+    # 401 rejected token: refresh headers once, then retry succeeds.
+    fake401 = MagicMock()
+    fake401.status_code = 401
+    fake401.headers = {}
+    seen_headers: list = []
+
+    def _orig401(method, url, **kwargs):
+        seen_headers.append((kwargs.get("headers") or {}).get("Authorization"))
+        return fake401 if len(seen_headers) == 1 else fake200
+
+    sess401 = MagicMock()
+    sess401.request = _orig401
+
+    def _on_unauthorized(headers):
+        return {**(headers or {}), "Authorization": "Bearer fresh"}
+
+    _install_rate_limit_backoff(sess401, _on_unauthorized)
+    out = sess401.request(
+        "GET",
+        "https://api.twitch.tv/helix/users",
+        headers={"Authorization": "Bearer stale"},
+    )
+    assert out.status_code == 200 and len(seen_headers) == 2
+    assert seen_headers == ["Bearer stale", "Bearer fresh"]
+
+    # _refresh_app_token_headers only touches our own cached app token.
+    client = TwitchClient()
+    client._token = "cached"
+    client._ensure_token = lambda: "renewed"  # type: ignore[method-assign]
+    refreshed = client._refresh_app_token_headers(
+        {"Authorization": "Bearer cached", "Client-ID": "id"}
+    )
+    assert refreshed == {"Authorization": "Bearer renewed", "Client-ID": "id"}
+    assert client._token == ""  # cleared so _ensure_token re-fetches
+    client._token = "cached"
+    assert client._refresh_app_token_headers({"Authorization": "Bearer other"}) is None
+    assert client._refresh_app_token_headers(None) is None
     from bot_helpers import oauth_legal_suffix, with_oauth_legal
     from health import _privacy_page
     from i18n import t as i18n_t
