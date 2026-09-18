@@ -1,0 +1,91 @@
+name: Restore admin preview captions
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh chelovekgleb + stopgame admin DMs with caption
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 8m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import asyncio, logging
+            logging.basicConfig(level=logging.INFO)
+            from config import ADMIN_USER_IDS, DATABASE_PATH, DATABASE_URL
+            from db import open_database
+            from handlers.stream_preview import build_stream_video_mp4, _edit_preview_media
+            from twitch import TwitchClient, is_stream_preview_image, is_stream_video_preview_image
+            from telegram import Bot
+            from config import TELEGRAM_BOT_TOKEN
+
+            LOGINS = ("chelovekgleb", "stopgame")
+
+            async def main():
+                db = open_database(DATABASE_PATH, DATABASE_URL)
+                tw = TwitchClient()
+                tw.bind_igdb_db(db)
+                bot = Bot(TELEGRAM_BOT_TOKEN)
+                admins = {int(x) for x in ADMIN_USER_IDS}
+                users = {}
+                for login in LOGINS:
+                    u = tw.get_user(login)
+                    if u:
+                        users[login] = str(u["id"])
+                live = tw.get_live_streams(list(users.values())) if users else {}
+                print("users", users, "live", list(live))
+                bot_data = {}
+                for login, uid in users.items():
+                    stream = live.get(uid)
+                    if not stream:
+                        print("skip offline", login)
+                        continue
+                    stream = dict(stream)
+                    stream.setdefault("user_login", login)
+                    stream.setdefault("user_id", uid)
+                    captured = None
+                    for admin in admins:
+                        for sub in db.get_subscriptions_by_owner(admin):
+                            if int(sub.chat_id) != admin or sub.dest_type != "dm":
+                                continue
+                            if str(sub.twitch_user_id) != uid:
+                                continue
+                            if not sub.last_message_id:
+                                continue
+                            if is_stream_video_preview_image(sub.image_file_id):
+                                if captured is None:
+                                    captured = await asyncio.to_thread(
+                                        build_stream_video_mp4,
+                                        login=login,
+                                        twitch_user_id=uid,
+                                        force=True,
+                                    )
+                                ok = await _edit_preview_media(
+                                    bot, sub, stream,
+                                    captured=captured,
+                                    bot_data=bot_data,
+                                    twitch=tw,
+                                )
+                                print("video", login, "sub", sub.id, "mid", sub.last_message_id, "ok", ok)
+                            elif is_stream_preview_image(sub.image_file_id):
+                                ok = await _edit_preview_media(
+                                    bot, sub, stream,
+                                    captured=None,
+                                    bot_data=bot_data,
+                                    twitch=tw,
+                                )
+                                print("photo", login, "sub", sub.id, "mid", sub.last_message_id, "ok", ok)
+
+            asyncio.run(main())
+            PY
