@@ -228,14 +228,38 @@ def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
     return min(_RATE_LIMIT_MAX_WAIT_SEC, float(2 ** attempt))
 
 
-def _install_rate_limit_backoff(session: requests.Session) -> None:
-    """Wrap Session.request: retry on 429 with Retry-After / exponential backoff."""
+def _install_rate_limit_backoff(
+    session: requests.Session,
+    on_unauthorized: Any | None = None,
+) -> None:
+    """Wrap Session.request: refresh a rejected token once on 401, then retry on
+    429 with Retry-After / exponential backoff.
+
+    `on_unauthorized` takes the request headers and returns rebuilt headers to
+    retry with (after refreshing the token), or None to leave the 401 as-is.
+    """
     orig = session.request
 
     def request(method: str, url: str, **kwargs: Any) -> requests.Response:
         last: requests.Response | None = None
+        token_refreshed = False
         for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
             last = orig(method, url, **kwargs)
+            if (
+                last.status_code == 401
+                and not token_refreshed
+                and on_unauthorized is not None
+            ):
+                new_headers = on_unauthorized(kwargs.get("headers"))
+                if new_headers is not None:
+                    kwargs["headers"] = new_headers
+                    token_refreshed = True
+                    logger.warning(
+                        "HTTP 401 method=%s url=%s — refreshed token, retrying",
+                        method,
+                        url,
+                    )
+                    continue
             if last.status_code != 429 or attempt >= _RATE_LIMIT_MAX_RETRIES:
                 return last
             wait = _retry_after_seconds(last, attempt)
@@ -257,7 +281,7 @@ def _install_rate_limit_backoff(session: requests.Session) -> None:
 class TwitchClient:
     def __init__(self) -> None:
         self._session = requests.Session()
-        _install_rate_limit_backoff(self._session)
+        _install_rate_limit_backoff(self._session, self._refresh_app_token_headers)
         self._igdb_db: Any | None = None
         self._token = ""
         self._token_expires = 0.0
@@ -268,6 +292,27 @@ class TwitchClient:
     def bind_igdb_db(self, db: Any) -> None:
         """Attach bot DB for local IGDB dump queries."""
         self._igdb_db = db
+
+    def _refresh_app_token_headers(
+        self, headers: Any | None
+    ) -> dict[str, str] | None:
+        """Force a new app token after Twitch rejects the cached one (HTTP 401).
+
+        Returns rebuilt headers to retry with, or None when the request did not
+        carry our cached app token (clips user token, token fetch, IGDB, ...).
+        """
+        if not headers or not self._token:
+            return None
+        if headers.get("Authorization") != f"Bearer {self._token}":
+            return None
+        self._token = ""
+        self._token_expires = 0.0
+        try:
+            token = self._ensure_token()
+        except Exception:
+            logger.exception("Failed to refresh Twitch app token after 401")
+            return None
+        return {**headers, "Authorization": f"Bearer {token}"}
 
     def parse_username(self, text: str) -> str | None:
         text = text.strip()
