@@ -20,5 +20,5 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/twitch-telegram-bot
-            docker compose -f compose.vps.yml exec -T bot \
-              python scripts/send_admin_marfapr_preview.py
+            docker compose -f compose.vps.yml exec -T -e FORCE_NEW=1 bot \
+              python scripts/send_admin_marfapr_preview.py --new

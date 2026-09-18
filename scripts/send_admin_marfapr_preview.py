@@ -3,11 +3,13 @@
 
 Inside VPS bot container:
   python scripts/send_admin_marfapr_preview.py
+  FORCE_NEW=1 python scripts/send_admin_marfapr_preview.py   # always send a new DM
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -47,6 +49,10 @@ async def main() -> int:
     from handlers.wizard import _render_sub_template
     from twitch import STREAM_VIDEO_PREVIEW_IMAGE_ID, TwitchClient
     import premium as prem
+
+    force_new = os.getenv("FORCE_NEW", "").strip() in ("1", "true", "yes") or (
+        "--new" in sys.argv
+    )
 
     if not ADMIN_USER_IDS:
         logger.error("ADMIN_USER_IDS empty")
@@ -126,35 +132,36 @@ async def main() -> int:
             logger.error("No subscription for admin %s", admin_id)
             return 1
 
-        captured = await asyncio.to_thread(
-            build_stream_video_mp4,
-            login=login,
-            twitch_user_id=uid,
-            force=True,
-        )
-        if captured is None:
-            logger.error("Capture failed for %s", login)
-            return 5
-        logger.info("Captured %s bytes", len(captured.data))
+        if not force_new:
+            captured = await asyncio.to_thread(
+                build_stream_video_mp4,
+                login=login,
+                twitch_user_id=uid,
+                force=True,
+            )
+            if captured is None:
+                logger.error("Capture failed for %s", login)
+                return 5
+            logger.info("Captured %s bytes", len(captured.data))
 
-        mid = existing.last_message_id
-        if mid:
-            ok = await _edit_animation(bot, admin_id, int(mid), captured.data)
-            logger.info("Refresh tracked mid=%s ok=%s", mid, ok)
-            # Older one-shot DMs (no / failed last_message_id tracking).
-            for orphan in (int(mid) - 1, int(mid) - 2, int(mid) - 3):
-                if orphan > 0:
-                    o_ok = await _edit_animation(bot, admin_id, orphan, captured.data)
-                    logger.info("Refresh orphan mid=%s ok=%s", orphan, o_ok)
-            if ok:
-                from handlers.stream_preview import mark_preview_refresh
+            mid = existing.last_message_id
+            if mid:
+                ok = await _edit_animation(bot, admin_id, int(mid), captured.data)
+                logger.info("Refresh tracked mid=%s ok=%s", mid, ok)
+                for orphan in (int(mid) - 1, int(mid) - 2, int(mid) - 3):
+                    if orphan > 0:
+                        o_ok = await _edit_animation(
+                            bot, admin_id, orphan, captured.data
+                        )
+                        logger.info("Refresh orphan mid=%s ok=%s", orphan, o_ok)
+                if ok:
+                    from handlers.stream_preview import mark_preview_refresh
+                    from stream_capture import forget_and_unlink
 
-                mark_preview_refresh(bot_data, existing.id)
-                from stream_capture import forget_and_unlink
-
-                forget_and_unlink(captured.path)
-                logger.info("Updated existing DM(s); no new message.")
-                continue
+                    mark_preview_refresh(bot_data, existing.id)
+                    forget_and_unlink(captured.path)
+                    logger.info("Updated existing DM(s); no new message.")
+                    continue
 
         text = _render_sub_template(
             existing,
@@ -177,11 +184,12 @@ async def main() -> int:
         refreshed = db.get_subscription(existing.id, admin_id)
         new_mid = refreshed.last_message_id if refreshed else None
         logger.info(
-            "admin=%s sub=%s ok=%s last_message_id=%s",
+            "admin=%s sub=%s ok=%s last_message_id=%s force_new=%s",
             admin_id,
             existing.id,
             ok,
             new_mid,
+            force_new,
         )
         if not ok or not new_mid:
             return 3
