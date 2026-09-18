@@ -81,3 +81,23 @@ def check_multistream_status_placeholders() -> None:
     # beyond parse; empty needed list early path when template has no tokens:
     empty = status_placeholders(raw, "hello {username}")
     assert empty["goodgame_status"] == "—"
+
+
+def check_multistream_prompt_i18n_format() -> None:
+    """Literal {goodgame_status} in prompts must be escaped for str.format."""
+    from i18n import t
+    from multistream import MULTISTREAM_MAX
+
+    for lang in ("en", "ru"):
+        empty = t("multistream_prompt_empty", lang, max=MULTISTREAM_MAX)
+        assert "{goodgame_status}" in empty
+        assert "{vkplay_status}" in empty
+        assert "{youtube_status}" in empty
+        filled = t(
+            "multistream_prompt",
+            lang,
+            max=MULTISTREAM_MAX,
+            list="• GoodGame: Abver",
+        )
+        assert "Abver" in filled
+        assert "{goodgame_status}" in filled

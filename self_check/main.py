@@ -90,12 +90,14 @@ def main() -> None:
     from .checks_multistream import (
         check_multistream_dump_roundtrip,
         check_multistream_parse_urls,
+        check_multistream_prompt_i18n_format,
         check_multistream_status_placeholders,
     )
 
     check_multistream_parse_urls()
     check_multistream_dump_roundtrip()
     check_multistream_status_placeholders()
+    check_multistream_prompt_i18n_format()
     from .checks_drops import run as check_drops
 
     check_drops()
