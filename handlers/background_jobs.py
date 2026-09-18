@@ -1,15 +1,53 @@
 """Start/stop optional JobQueue timers when nobody needs them."""
 from __future__ import annotations
 
+import logging
+
 from telegram.ext import JobQueue
 
 from db import Database
+
+logger = logging.getLogger(__name__)
 
 JOB_TWITCH_SYNC = "twitch_follows_sync"
 JOB_PREMIUM_TWITCH = "premium_twitch_refresh"
 JOB_DROPS = "drops_check"
 JOB_SCHEDULE_REMINDERS = "schedule_reminders"
 JOB_FOLLOW_MONITOR = "follow_monitor_sync"
+JOB_CHECK_STREAMS = "check_streams"
+JOB_STREAM_PREVIEWS = "check_stream_previews"
+
+
+def install_scheduler_visibility(job_queue: JobQueue | None) -> None:
+    """Log when APScheduler skips/misses jobs (max_instances backlog)."""
+    if job_queue is None:
+        return
+    try:
+        from apscheduler.events import (  # noqa: PLC0415
+            EVENT_JOB_MAX_INSTANCES,
+            EVENT_JOB_MISSED,
+        )
+    except ImportError:
+        return
+
+    def _on_event(event) -> None:
+        job_id = getattr(event, "job_id", None) or "?"
+        code = getattr(event, "code", None)
+        if code == EVENT_JOB_MAX_INSTANCES:
+            logger.warning(
+                "scheduler skipped job=%s reason=max_instances "
+                "(previous run still active — backlog)",
+                job_id,
+            )
+        elif code == EVENT_JOB_MISSED:
+            logger.warning(
+                "scheduler missed job=%s reason=misfire",
+                job_id,
+            )
+
+    job_queue.scheduler.add_listener(
+        _on_event, EVENT_JOB_MAX_INSTANCES | EVENT_JOB_MISSED
+    )
 
 
 def ensure_repeating_job(

@@ -349,7 +349,38 @@ def check_core() -> None:
     _bd: dict = {}
     mark_preview_refresh(_bd, 7)
     assert float(_bd["stream_preview_refresh_at"][7]) > 0
-    from handlers.stream_preview import _preview_caption
+    from handlers.stream_preview import (
+        _preview_caption,
+        live_streams_from_poll_snapshot,
+    )
+    import inspect as _inspect
+
+    from handlers.background_jobs import (
+        JOB_CHECK_STREAMS,
+        JOB_STREAM_PREVIEWS,
+        install_scheduler_visibility,
+    )
+    from handlers import notifications as _notif
+    from handlers import stream_preview as _sp
+
+    # Preview capture must not run inside the 60s check_streams tick.
+    assert "refresh_live_stream_previews" not in _inspect.getsource(
+        _notif.check_streams
+    )
+    assert "check_stream_previews" in _inspect.getsource(_sp)
+    assert live_streams_from_poll_snapshot({}) == {}
+    assert live_streams_from_poll_snapshot(
+        {
+            "last_live": {"u1": True, "u2": False},
+            "last_streams": {"u1": {"user_login": "x", "thumbnail_url": "t"}},
+        }
+    ) == {"u1": {"user_login": "x", "thumbnail_url": "t"}}
+    assert JOB_CHECK_STREAMS == "check_streams"
+    assert JOB_STREAM_PREVIEWS == "check_stream_previews"
+    assert "EVENT_JOB_MAX_INSTANCES" in _inspect.getsource(
+        install_scheduler_visibility
+    )
+    assert "phases:" in _inspect.getsource(_notif.check_streams)
 
     _cap_sub = type(
         "S",

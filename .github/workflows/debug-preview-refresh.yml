@@ -31,9 +31,15 @@ jobs:
               AND image_file_id IN ('__stream_video_preview__', '__stream_preview__')
             ORDER BY id DESC LIMIT 20;
             SQL
+            echo "=== deploy / scheduler fix markers ==="
+            git rev-parse HEAD
+            git log -1 --oneline
+            grep -n '_bulk_conn\|check_stream_previews\|phases:' \
+              db/postgres.py handlers/notifications.py handlers/stream_preview.py \
+              handlers/background_jobs.py 2>/dev/null | head -40 || true
             echo "=== logs ==="
             docker compose -f compose.vps.yml logs --since 2h bot 2>&1 \
-              | grep -iE 'Stream preview|uneditable|stream_capture|ffmpeg|streamlink|check_streams took' \
+              | grep -iE 'Stream preview|uneditable|stream_capture|ffmpeg|streamlink|check_streams took|check_stream_previews took|scheduler skipped|maximum number of running instances' \
               | tail -n 80 || true
             echo "=== mem ==="
             docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.MemPerc}}' | head -20

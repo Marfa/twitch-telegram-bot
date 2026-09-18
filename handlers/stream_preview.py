@@ -91,6 +91,58 @@ def _preview_skip_set(bot_data: dict[str, Any]) -> set[int]:
     return skip
 
 
+def live_streams_from_poll_snapshot(bot_data: dict[str, Any]) -> dict[str, dict]:
+    """Build Helix-shaped live map from the last check_streams poll (no extra Helix call)."""
+    last_live = bot_data.get("last_live") or {}
+    last_streams = bot_data.get("last_streams") or {}
+    if not isinstance(last_live, dict) or not isinstance(last_streams, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for uid, is_live in last_live.items():
+        if not is_live:
+            continue
+        snap = last_streams.get(uid)
+        if isinstance(snap, dict) and snap:
+            out[str(uid)] = snap
+    return out
+
+
+async def check_stream_previews(context) -> None:
+    """JobQueue callback: refresh due stream previews outside the 60s check_streams tick.
+
+    Video MP4 capture alone is ~30s+ per streamer; running it inside check_streams
+    made that job overrun its interval and skip ticks (max_instances=1).
+    """
+    started = time.monotonic()
+    bot_data = context.application.bot_data
+    live_streams = live_streams_from_poll_snapshot(bot_data)
+    if not live_streams:
+        return
+    db: Database = bot_data["db"]
+    twitch: TwitchClient = bot_data["twitch"]
+    try:
+        await refresh_live_stream_previews(
+            context.bot,
+            db,
+            twitch,
+            live_streams,
+            bot_data,
+        )
+    finally:
+        elapsed = time.monotonic() - started
+        # Captures are expected to be long; warn so PostHog still sees backlog here.
+        if elapsed >= 60.0:
+            logger.warning(
+                "check_stream_previews took %.1fs (outside check_streams)",
+                elapsed,
+            )
+        elif elapsed >= 15.0:
+            logger.info(
+                "check_stream_previews took %.1fs (outside check_streams)",
+                elapsed,
+            )
+
+
 async def refresh_live_stream_previews(
     bot,
     db: Database,
@@ -154,6 +206,14 @@ async def refresh_live_stream_previews(
                 photo_subs.append(sub)
         if video_subs or photo_subs:
             due[uid] = (stream, video_subs, photo_subs)
+
+    if due:
+        logger.info(
+            "stream preview refresh due streamers=%s video_subs=%s photo_subs=%s",
+            len(due),
+            sum(len(v) for _, v, _ in due.values()),
+            sum(len(p) for _, _, p in due.values()),
+        )
 
     for uid, (stream, video_subs, photo_subs) in due.items():
         captured: CapturedPreview | None = None

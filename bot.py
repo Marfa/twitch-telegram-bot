@@ -3520,12 +3520,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
 
     from config import CHECK_INTERVAL
-    from handlers.background_jobs import sync_optional_jobs
+    from handlers.background_jobs import (
+        JOB_CHECK_STREAMS,
+        JOB_STREAM_PREVIEWS,
+        install_scheduler_visibility,
+        sync_optional_jobs,
+    )
     from handlers.drops import (
         on_drops_digest_off,
         on_drops_digest_toggle,
         on_drops_get_alerts,
     )
+    from handlers.stream_preview import check_stream_previews
 
     app.add_handler(
         CallbackQueryHandler(on_drops_digest_toggle, pattern=r"^drops_digest:toggle$")
@@ -3537,7 +3543,32 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_drops_get_alerts, pattern=r"^drops_get:")
     )
 
-    app.job_queue.run_repeating(check_streams, interval=CHECK_INTERVAL, first=10)
+    install_scheduler_visibility(app.job_queue)
+    # coalesce + named jobs: skipped overlapping ticks are visible via listener,
+    # and preview captures (~30s+) must not run inside the 60s stream poll.
+    def _stream_job_kwargs(job_id: str) -> dict:
+        return {
+            "id": job_id,
+            "replace_existing": True,
+            "max_instances": 1,
+            "coalesce": True,
+            "misfire_grace_time": max(30, int(CHECK_INTERVAL)),
+        }
+
+    app.job_queue.run_repeating(
+        check_streams,
+        interval=CHECK_INTERVAL,
+        first=10,
+        name=JOB_CHECK_STREAMS,
+        job_kwargs=_stream_job_kwargs(JOB_CHECK_STREAMS),
+    )
+    app.job_queue.run_repeating(
+        check_stream_previews,
+        interval=CHECK_INTERVAL,
+        first=25,
+        name=JOB_STREAM_PREVIEWS,
+        job_kwargs=_stream_job_kwargs(JOB_STREAM_PREVIEWS),
+    )
     app.job_queue.run_repeating(
         check_release_watch_alerts, interval=24 * 3600, first=120
     )

@@ -22,7 +22,7 @@ from handlers.delivery import (
     unpin_orphaned_alert_pins,
     unpin_stream_alert_messages,
 )
-from handlers.stream_preview import clear_preview_refresh, refresh_live_stream_previews
+from handlers.stream_preview import clear_preview_refresh
 from i18n import DEFAULT_LOCALE, format_duration_hm, t
 from twitch import (
     TwitchClient,
@@ -344,21 +344,32 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import CHECK_INTERVAL
 
     started = _time.monotonic()
+    phase_started = started
+    phases: list[tuple[str, float]] = []
+
+    def _phase(name: str) -> None:
+        nonlocal phase_started
+        now = _time.monotonic()
+        phases.append((name, now - phase_started))
+        phase_started = now
 
     def _log_duration() -> None:
         elapsed = _time.monotonic() - started
+        phase_s = " ".join(f"{name}={sec:.1f}s" for name, sec in phases)
         # WARN when a tick approaches/exceeds the schedule so PostHog logs catch backlog.
         if elapsed >= float(CHECK_INTERVAL):
             logger.warning(
-                "check_streams took %.1fs (interval=%ss)",
+                "check_streams took %.1fs (interval=%ss) phases: %s",
                 elapsed,
                 CHECK_INTERVAL,
+                phase_s or "(none)",
             )
         elif elapsed >= float(CHECK_INTERVAL) * 0.5:
             logger.info(
-                "check_streams took %.1fs (interval=%ss)",
+                "check_streams took %.1fs (interval=%ss) phases: %s",
                 elapsed,
                 CHECK_INTERVAL,
+                phase_s or "(none)",
             )
 
     db: Database = context.application.bot_data["db"]
@@ -393,6 +404,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info(
             "Paused %s alert(s) after Premium/feature expiry", paused_unentitled
         )
+    _phase("premium")
 
     twitch: TwitchClient = context.application.bot_data["twitch"]
     last_live: dict[str, bool] = context.application.bot_data.setdefault("last_live", {})
@@ -423,7 +435,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             logger.exception("Twitch poll failed")
             live_streams = {}
+            _phase("helix")
         else:
+            _phase("helix")
             was_primed = primed
             went_live, went_offline = live_transitions(
                 last_live, user_ids, live_streams, primed=primed
@@ -707,17 +721,15 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         twitch=twitch,
                         bot_data=context.application.bot_data,
                     )
-            await refresh_live_stream_previews(
-                context.bot,
-                db,
-                twitch,
-                live_streams,
-                context.application.bot_data,
-            )
+            _phase("alerts")
+            # Stream preview MP4 capture (~30s+) runs in check_stream_previews —
+            # keeping it here overran the 60s interval and skipped ticks.
             persist_stream_poll_snapshot(db, context.application.bot_data)
+            _phase("snapshot")
 
     if category_watch_subs:
         await _check_category_watch_alerts(context, category_watch_subs)
+        _phase("category_watch")
     _log_duration()
 
 
