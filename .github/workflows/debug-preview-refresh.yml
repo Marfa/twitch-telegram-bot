@@ -1,0 +1,39 @@
+name: Debug preview refresh
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 <<'SQL'
+            SELECT user_id, premium_permanent,
+              (premium_stars_until > extract(epoch from now())::bigint) AS stars_active,
+              premium_features
+            FROM users WHERE user_id = 150697169;
+            SELECT id, dest_type, chat_id, last_message_id, image_file_id, enabled
+            FROM subscriptions
+            WHERE twitch_username ILIKE 'marfapr'
+              AND image_file_id IN ('__stream_video_preview__', '__stream_preview__')
+            ORDER BY id DESC LIMIT 20;
+            SQL
+            echo "=== logs ==="
+            docker compose -f compose.vps.yml logs --since 2h bot 2>&1 \
+              | grep -iE 'Stream preview|uneditable|stream_capture|ffmpeg|streamlink|check_streams took' \
+              | tail -n 80 || true
+            echo "=== mem ==="
+            docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.MemPerc}}' | head -20
