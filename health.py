@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
-import hashlib
 import html
 import json
 import logging
 import os
-import re
 import secrets
 import tempfile
 import threading
@@ -27,9 +25,8 @@ _ready_lock = threading.Lock()
 _OAUTH_TTL_SEC = 600
 # Thread lock + file store so create_oauth_state from a one-shot script in the
 # same container is visible to the bot process that handles the callback.
+# File is Fernet-encrypted (token_crypto) so CSRF state is not cleartext on disk.
 _oauth_pending_lock = threading.Lock()
-# Disk keys are SHA-256(state); raw CSRF state never written (CodeQL clear-text).
-_OAUTH_STATE_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _oauth_store_path() -> Path:
@@ -40,10 +37,6 @@ def _oauth_store_path() -> Path:
     if data.is_dir() and os.access(data, os.W_OK):
         return data / "oauth_pending.json"
     return Path(tempfile.gettempdir()) / "twitch_bot_oauth_pending.json"
-
-
-def _oauth_state_key(state: str) -> str:
-    return hashlib.sha256(state.encode("utf-8")).hexdigest()
 
 
 @contextmanager
@@ -64,25 +57,35 @@ def _read_oauth_store() -> dict[str, list[Any]]:
     if not path.is_file():
         return {}
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
         logger.exception("Failed to read OAuth pending store %s", path)
         return {}
-    if not isinstance(raw, dict):
+    if not text:
         return {}
-    # Drop legacy cleartext state keys from older deploys (TTL ≤10 min).
-    return {
-        k: v
-        for k, v in raw.items()
-        if isinstance(k, str) and _OAUTH_STATE_KEY_RE.match(k)
-    }
+    from token_crypto import try_decrypt_secret
+
+    # Legacy cleartext / hashed-key JSON — discard (TTL ≤10 min).
+    if not text.startswith("enc:v1:"):
+        return {}
+    plain = try_decrypt_secret(text)
+    if not plain:
+        return {}
+    try:
+        raw = json.loads(plain)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse OAuth pending store %s", path)
+        return {}
+    return raw if isinstance(raw, dict) else {}
 
 
 def _write_oauth_store(store: dict[str, list[Any]]) -> None:
+    from token_crypto import encrypt_secret
+
     path = _oauth_store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(store), encoding="utf-8")
+    tmp.write_text(encrypt_secret(json.dumps(store)), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -150,7 +153,7 @@ def create_oauth_state(
     with _oauth_pending_lock, _oauth_file_lock():
         store = _read_oauth_store()
         _purge_oauth_store(store, time.time())
-        store[_oauth_state_key(state)] = [telegram_user_id, locale, expires, purpose]
+        store[state] = [telegram_user_id, locale, expires, purpose]
         _write_oauth_store(store)
     return state
 
@@ -162,7 +165,7 @@ def pop_oauth_state(state: str) -> tuple[int, str, str] | None:
     with _oauth_pending_lock, _oauth_file_lock():
         store = _read_oauth_store()
         _purge_oauth_store(store, now)
-        item = store.pop(_oauth_state_key(state), None)
+        item = store.pop(state, None)
         _write_oauth_store(store)
     if not item or not isinstance(item, list) or len(item) < 3:
         return None
