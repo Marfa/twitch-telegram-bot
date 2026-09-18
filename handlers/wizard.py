@@ -1520,18 +1520,22 @@ async def _maybe_prompt_donationalerts_oauth(
     if db.get_donationalerts_auth(user_id) is not None:
         return
     if not da.configured():
-        await bot.send_message(user_id, t("top_donations_oauth_unavailable", lang))
+        await bot.send_message(
+            chat_id=user_id, text=t("top_donations_oauth_unavailable", lang)
+        )
         return
     try:
         state = create_oauth_state(user_id, lang, purpose="donationalerts")
         url = da.build_authorize_url(state=state)
     except Exception:
         logger.exception("DonationAlerts OAuth URL failed for user %s", user_id)
-        await bot.send_message(user_id, t("top_donations_oauth_unavailable", lang))
+        await bot.send_message(
+            chat_id=user_id, text=t("top_donations_oauth_unavailable", lang)
+        )
         return
     await bot.send_message(
-        user_id,
-        t("top_donations_oauth_prompt", lang),
+        chat_id=user_id,
+        text=t("top_donations_oauth_prompt", lang),
         reply_markup=InlineKeyboardMarkup(
             [
                 [
@@ -1597,8 +1601,8 @@ async def complete_donationalerts_oauth(
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     if error:
         await application.bot.send_message(
-            owner_id,
-            t("top_donations_oauth_failed", lang),
+            chat_id=owner_id,
+            text=t("top_donations_oauth_failed", lang),
             reply_markup=_menu(lang, owner_id),
         )
         return
@@ -1609,8 +1613,8 @@ async def complete_donationalerts_oauth(
     da_code = str(info.get("da_code") or "")
     if not access or not refresh or not da_user_id:
         await application.bot.send_message(
-            owner_id,
-            t("top_donations_oauth_failed", lang),
+            chat_id=owner_id,
+            text=t("top_donations_oauth_failed", lang),
             reply_markup=_menu(lang, owner_id),
         )
         return
@@ -1627,14 +1631,14 @@ async def complete_donationalerts_oauth(
     except Exception:
         logger.exception("DonationAlerts auth persist failed for user %s", owner_id)
         await application.bot.send_message(
-            owner_id,
-            t("top_donations_oauth_failed", lang),
+            chat_id=owner_id,
+            text=t("top_donations_oauth_failed", lang),
             reply_markup=_menu(lang, owner_id),
         )
         return
     await application.bot.send_message(
-        owner_id,
-        t("top_donations_oauth_done", lang),
+        chat_id=owner_id,
+        text=t("top_donations_oauth_done", lang),
         reply_markup=_menu(lang, owner_id),
     )
 
