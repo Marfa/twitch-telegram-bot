@@ -842,14 +842,14 @@ async def _send_whisper_oauth_prompt(
     lang: str,
 ) -> None:
     from config import twitch_oauth_redirect_uri
-    from health import create_oauth_state
+    from health import create_pending_login_state
     from twitch import WHISPERS_SCOPE
 
     if not _whisper_alerts_ready():
         await bot.send_message(user_id, t("whisper_alerts_oauth_unavailable", lang))
         return
     redirect = twitch_oauth_redirect_uri()
-    state = create_oauth_state(user_id, lang, purpose="whispers")
+    state = create_pending_login_state(user_id, lang, purpose="whispers")
     url = twitch.build_authorize_url(
         redirect_uri=redirect, state=state, scopes=WHISPERS_SCOPE
     )

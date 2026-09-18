@@ -17,7 +17,7 @@ import analytics
 from bot_helpers import with_oauth_legal
 from config import twitch_oauth_redirect_uri
 from db import Database
-from health import create_oauth_state
+from health import create_pending_login_state
 from i18n import (
     DEFAULT_LOCALE,
     btn,
@@ -851,7 +851,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not redirect:
             await query.edit_message_text(t("import_failed", lang))
             return
-        state = create_oauth_state(user_id, lang, purpose="premium")
+        state = create_pending_login_state(user_id, lang, purpose="premium")
         url = twitch.build_authorize_url(
             redirect_uri=redirect,
             state=state,
@@ -894,7 +894,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not redirect:
             await query.edit_message_text(t("import_failed", lang))
             return
-        state = create_oauth_state(user_id, lang, purpose="premium_channel")
+        state = create_pending_login_state(user_id, lang, purpose="premium_channel")
         url = twitch.build_authorize_url(
             redirect_uri=redirect,
             state=state,
@@ -1319,7 +1319,7 @@ async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None
         redirect = twitch_oauth_redirect_uri()
         markup = None
         if redirect:
-            state = create_oauth_state(uid, lang, purpose="premium")
+            state = create_pending_login_state(uid, lang, purpose="premium")
             url = twitch.build_authorize_url(
                 redirect_uri=redirect,
                 state=state,

@@ -191,13 +191,13 @@ async def _send_oauth_prompt(
     bot: Any, twitch: TwitchClient, user_id: int, lang: str
 ) -> None:
     from config import twitch_oauth_redirect_uri
-    from health import create_oauth_state
+    from health import create_pending_login_state
 
     if not _oauth_ready():
         await bot.send_message(user_id, t("follow_monitor_oauth_unavailable", lang))
         return
     redirect = twitch_oauth_redirect_uri()
-    state = create_oauth_state(user_id, lang, purpose="follow_monitor")
+    state = create_pending_login_state(user_id, lang, purpose="follow_monitor")
     # force_verify: cached Twitch consent without moderator:read:followers must re-prompt.
     url = twitch.build_authorize_url(
         redirect_uri=redirect,

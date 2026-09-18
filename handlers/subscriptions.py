@@ -786,7 +786,7 @@ def _import_oauth_sync_note_suffix(lang: str, sync) -> str:
 
 async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import MAX_SUBSCRIPTIONS_PER_OWNER, twitch_oauth_redirect_uri
-    from health import create_oauth_state
+    from health import create_pending_login_state
 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -817,7 +817,7 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    state = create_oauth_state(user_id, lang)
+    state = create_pending_login_state(user_id, lang)
     url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
     prompt = t("import_oauth_prompt", lang) + _import_oauth_sync_note_suffix(lang, sync)
     await update.effective_message.reply_text(
@@ -845,7 +845,7 @@ async def on_import_oauth_manual(
 ) -> None:
     """One-time follow import using a stored twitch_sync refresh token."""
     from config import twitch_oauth_redirect_uri
-    from health import create_oauth_state
+    from health import create_pending_login_state
 
     query = update.callback_query
     try:
@@ -867,7 +867,7 @@ async def on_import_oauth_manual(
         if not redirect_uri:
             await query.edit_message_text(t("import_oauth_unavailable", lang))
             return
-        state = create_oauth_state(user_id, lang)
+        state = create_pending_login_state(user_id, lang)
         url = twitch.build_authorize_url(redirect_uri=redirect_uri, state=state)
         await query.edit_message_text(
             t("import_oauth_manual_failed", lang),
@@ -1881,12 +1881,12 @@ async def _sync_owner_follows(
         db.set_twitch_sync_needs_reauth(row.owner_id, True)
         try:
             from config import twitch_oauth_redirect_uri
-            from health import create_oauth_state
+            from health import create_pending_login_state
 
             redirect_uri = twitch_oauth_redirect_uri()
             markup = _menu(lang, row.owner_id)
             if redirect_uri:
-                state = create_oauth_state(row.owner_id, lang)
+                state = create_pending_login_state(row.owner_id, lang)
                 url = twitch.build_authorize_url(
                     redirect_uri=redirect_uri, state=state
                 )

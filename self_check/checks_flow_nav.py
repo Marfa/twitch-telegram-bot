@@ -690,7 +690,7 @@ async def _scenario_import(db) -> None:
     with patch(
         "config.twitch_oauth_redirect_uri",
         return_value="https://example.com/oauth/callback",
-    ), patch("health.create_oauth_state", return_value="oauth-state"):
+    ), patch("health.create_pending_login_state", return_value="oauth-state"):
         await start_twitch_import(update, ctx)
     cap.assert_turn("import_oauth_success")
 
@@ -1426,7 +1426,7 @@ async def _scenario_wizard_top_donations(db) -> None:
         "donationalerts.build_authorize_url",
         return_value="https://www.donationalerts.com/oauth/authorize?x=1",
     ), patch(
-        "health.create_oauth_state", return_value="da-state"
+        "health.create_pending_login_state", return_value="da-state"
     ):
         state = await receive_advanced_options_toggle(update, ctx)
     assert state == _wz()["ADVANCED_OPTIONS"]

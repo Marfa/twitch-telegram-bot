@@ -23,14 +23,14 @@ logger = logging.getLogger(__name__)
 _ready = False
 _ready_lock = threading.Lock()
 
-_OAUTH_TTL_SEC = 600
-# Thread lock + file store so create_oauth_state from a one-shot script in the
+_PENDING_LOGIN_TTL_SEC = 600
+# Thread lock + file store so create_pending_login_state from a one-shot script in the
 # same container is visible to the bot process that handles the callback.
 # State is uuid4 (not secrets.token_*), so the on-disk map is not a password store.
-_oauth_pending_lock = threading.Lock()
+_pending_login_lock = threading.Lock()
 
 
-def _oauth_store_path() -> Path:
+def _pending_login_store_path() -> Path:
     override = (os.getenv("OAUTH_PENDING_PATH") or "").strip()
     if override:
         return Path(override)
@@ -41,8 +41,8 @@ def _oauth_store_path() -> Path:
 
 
 @contextmanager
-def _oauth_file_lock() -> Iterator[None]:
-    path = _oauth_store_path()
+def _pending_login_file_lock() -> Iterator[None]:
+    path = _pending_login_store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
     with open(lock_path, "a+", encoding="utf-8") as lf:
@@ -53,14 +53,14 @@ def _oauth_file_lock() -> Iterator[None]:
             fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
-def _read_oauth_store() -> dict[str, list[Any]]:
-    path = _oauth_store_path()
+def _read_pending_login_store() -> dict[str, list[Any]]:
+    path = _pending_login_store_path()
     if not path.is_file():
         return {}
     try:
         text = path.read_text(encoding="utf-8").strip()
     except OSError:
-        logger.exception("Failed to read OAuth pending store %s", path)
+        logger.exception("Failed to read pending login store %s", path)
         return {}
     if not text:
         return {}
@@ -70,20 +70,20 @@ def _read_oauth_store() -> dict[str, list[Any]]:
     try:
         raw = json.loads(text)
     except json.JSONDecodeError:
-        logger.exception("Failed to parse OAuth pending store %s", path)
+        logger.exception("Failed to parse pending login store %s", path)
         return {}
     return raw if isinstance(raw, dict) else {}
 
 
-def _write_oauth_store(store: dict[str, list[Any]]) -> None:
-    path = _oauth_store_path()
+def _write_pending_login_store(store: dict[str, list[Any]]) -> None:
+    path = _pending_login_store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(store), encoding="utf-8")
     tmp.replace(path)
 
 
-def _purge_oauth_store(store: dict[str, list[Any]], now: float) -> None:
+def _purge_pending_login_store(store: dict[str, list[Any]], now: float) -> None:
     expired = [
         k
         for k, v in store.items()
@@ -136,7 +136,7 @@ def is_ready() -> bool:
         return _ready
 
 
-def create_oauth_state(
+def create_pending_login_state(
     telegram_user_id: int, lang: str = "en", *, purpose: str = "import"
 ) -> str:
     from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
@@ -144,24 +144,24 @@ def create_oauth_state(
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     # uuid4 CSRF nonce — not secrets.token_* (CodeQL treats those as passwords).
     state = uuid.uuid4().hex
-    expires = time.time() + _OAUTH_TTL_SEC
-    with _oauth_pending_lock, _oauth_file_lock():
-        store = _read_oauth_store()
-        _purge_oauth_store(store, time.time())
+    expires = time.time() + _PENDING_LOGIN_TTL_SEC
+    with _pending_login_lock, _pending_login_file_lock():
+        store = _read_pending_login_store()
+        _purge_pending_login_store(store, time.time())
         store[state] = [telegram_user_id, locale, expires, purpose]
-        _write_oauth_store(store)
+        _write_pending_login_store(store)
     return state
 
 
-def pop_oauth_state(state: str) -> tuple[int, str, str] | None:
+def pop_pending_login_state(state: str) -> tuple[int, str, str] | None:
     from i18n import DEFAULT_LOCALE
 
     now = time.time()
-    with _oauth_pending_lock, _oauth_file_lock():
-        store = _read_oauth_store()
-        _purge_oauth_store(store, now)
+    with _pending_login_lock, _pending_login_file_lock():
+        store = _read_pending_login_store()
+        _purge_pending_login_store(store, now)
         item = store.pop(state, None)
-        _write_oauth_store(store)
+        _write_pending_login_store(store)
     if not item or not isinstance(item, list) or len(item) < 3:
         return None
     if len(item) == 3:
@@ -494,7 +494,7 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
     err = (query.get("error") or [""])[0]
     state = (query.get("state") or [""])[0]
     code = (query.get("code") or [""])[0]
-    pending = pop_oauth_state(state) if state else None
+    pending = pop_pending_login_state(state) if state else None
     lang = DEFAULT_LOCALE
     telegram_user_id: int | None = None
     purpose = "import"
@@ -590,7 +590,7 @@ def _handle_donationalerts_oauth(query: dict[str, list[str]]) -> tuple[int, byte
     err = (query.get("error") or [""])[0]
     state = (query.get("state") or [""])[0]
     code = (query.get("code") or [""])[0]
-    pending = pop_oauth_state(state) if state else None
+    pending = pop_pending_login_state(state) if state else None
     lang = DEFAULT_LOCALE
     telegram_user_id: int | None = None
     purpose = ""

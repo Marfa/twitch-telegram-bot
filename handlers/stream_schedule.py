@@ -1561,7 +1561,7 @@ async def _start_schedule_publish_auth(
     lang: str,
 ) -> int:
     from config import twitch_oauth_redirect_uri
-    from health import create_oauth_state
+    from health import create_pending_login_state
     from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE, TwitchClient
 
     query = update.callback_query
@@ -1616,7 +1616,7 @@ async def _start_schedule_publish_auth(
         await context.bot.send_message(chat_id, text)
         return ConversationHandler.END
 
-    state = create_oauth_state(user_id, lang, purpose="schedule")
+    state = create_pending_login_state(user_id, lang, purpose="schedule")
     url = twitch.build_authorize_url(
         redirect_uri=redirect_uri, state=state, scopes=SCHEDULE_OAUTH_SCOPES
     )

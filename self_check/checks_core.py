@@ -81,7 +81,7 @@ from db import (
     open_database,
 )
 from i18n import SUPPORTED_LOCALES, btn, format_duration_hm, t as tr
-from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
+from health import create_pending_login_state, parse_posthog_issue_payload, pop_pending_login_state
 from telegram.error import BadRequest
 from premium import FEATURE_IDS
 from telegram import LinkPreviewOptions, Message
@@ -567,13 +567,13 @@ def check_core() -> None:
         or "moderator:read:followers" in forced
     )
     assert FOLLOWERS_SCOPE == "moderator:read:followers"
-    state = create_oauth_state(42, "ru")
-    assert pop_oauth_state(state) == (42, "ru", "import")
-    assert pop_oauth_state(state) is None
-    state2 = create_oauth_state(42, "en", purpose="schedule")
-    assert pop_oauth_state(state2) == (42, "en", "schedule")
-    state3 = create_oauth_state(7, "ru", purpose="whispers")
-    assert pop_oauth_state(state3) == (7, "ru", "whispers")
+    state = create_pending_login_state(42, "ru")
+    assert pop_pending_login_state(state) == (42, "ru", "import")
+    assert pop_pending_login_state(state) is None
+    state2 = create_pending_login_state(42, "en", purpose="schedule")
+    assert pop_pending_login_state(state2) == (42, "en", "schedule")
+    state3 = create_pending_login_state(7, "ru", purpose="whispers")
+    assert pop_pending_login_state(state3) == (7, "ru", "whispers")
     assert WHISPERS_SCOPE == "user:read:whispers"
     import inspect as _inspect
     from eventsub import timestamp_fresh as _ts_fresh

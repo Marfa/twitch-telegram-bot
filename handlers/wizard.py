@@ -1515,7 +1515,7 @@ async def _maybe_prompt_donationalerts_oauth(
     bot, db: Database, user_id: int, lang: str
 ) -> None:
     import donationalerts as da
-    from health import create_oauth_state
+    from health import create_pending_login_state
 
     if db.get_donationalerts_auth(user_id) is not None:
         return
@@ -1525,7 +1525,7 @@ async def _maybe_prompt_donationalerts_oauth(
         )
         return
     try:
-        state = create_oauth_state(user_id, lang, purpose="donationalerts")
+        state = create_pending_login_state(user_id, lang, purpose="donationalerts")
         url = da.build_authorize_url(state=state)
     except Exception:
         logger.exception("DonationAlerts OAuth URL failed for user %s", user_id)

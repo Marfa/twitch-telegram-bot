@@ -449,7 +449,7 @@ def api_resolve(
 
 def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
     from config import twitch_oauth_redirect_uri
-    from health import create_oauth_state
+    from health import create_pending_login_state
     from twitch import CHAT_OAUTH_SCOPES
 
     user, err, token_lang = _require_user(init_data=init_data, token=token)
@@ -463,7 +463,7 @@ def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[st
         return _err(503, "oauth_unavailable")
     user_id = int(user["id"])
     lang = token_lang or _db.get_user_locale(user_id) or "en"
-    state = create_oauth_state(user_id, lang, purpose="chat")
+    state = create_pending_login_state(user_id, lang, purpose="chat")
     url = _twitch.build_authorize_url(
         redirect_uri=redirect, state=state, scopes=CHAT_OAUTH_SCOPES
     )

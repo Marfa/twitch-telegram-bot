@@ -77,7 +77,7 @@ from db import (
     open_database,
 )
 from i18n import SUPPORTED_LOCALES, btn, t as tr
-from health import create_oauth_state, parse_posthog_issue_payload, pop_oauth_state
+from health import create_pending_login_state, parse_posthog_issue_payload, pop_pending_login_state
 from telegram.error import BadRequest
 from premium import FEATURE_IDS
 from telegram import LinkPreviewOptions, Message
