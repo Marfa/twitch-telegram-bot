@@ -1,0 +1,57 @@
+name: Ensure VPS YouTube API key
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set YOUTUBE_API_KEY in VPS .env and recreate bot
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          envs: YOUTUBE_API_KEY
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            test -f .env
+            test -n "${YOUTUBE_API_KEY:-}"
+            python3 - <<'PY'
+            import os
+            import pathlib
+            import re
+
+            key = os.environ["YOUTUBE_API_KEY"].strip()
+            if not key:
+                raise SystemExit("YOUTUBE_API_KEY empty")
+            path = pathlib.Path(".env")
+            text = path.read_text(encoding="utf-8")
+            line = f"YOUTUBE_API_KEY={key}"
+            if re.search(r"^YOUTUBE_API_KEY=", text, flags=re.M):
+                text = re.sub(r"^YOUTUBE_API_KEY=.*$", line, text, count=1, flags=re.M)
+            else:
+                text = text.rstrip("\n") + "\n" + line + "\n"
+            path.write_text(text, encoding="utf-8")
+            print(f"YOUTUBE_API_KEY set (len={len(key)} prefix={key[:4]})")
+            PY
+            docker compose -f compose.vps.yml up -d --no-deps --force-recreate bot
+            for i in $(seq 1 30); do
+              if curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                echo "health ok"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "WARNING: health not ready" >&2
+            docker compose -f compose.vps.yml logs --tail=40 bot || true
+            exit 1
