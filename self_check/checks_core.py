@@ -1284,6 +1284,17 @@ def check_core() -> None:
     # check_streams on the asyncio loop → missed APScheduler ticks).
     assert "_bulk_conn" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
     assert "_bulk_conn" in inspect.getsource(PostgresDatabase)
+
+    # Slow preview media refresh must run off the check_streams tick, else a long
+    # capture/upload pushes a tick past CHECK_INTERVAL and APScheduler skips the
+    # next stream poll.
+    from handlers import notifications as _notif
+
+    _check_src = inspect.getsource(_notif.check_streams)
+    assert "_launch_preview_refresh" in _check_src
+    assert "await refresh_live_stream_previews" not in _check_src
+    _launch_src = inspect.getsource(_notif._launch_preview_refresh)
+    assert "create_task" in _launch_src
     assert "ON CONFLICT" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
     assert "DELETE FROM" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
     # steam_uid is TEXT (like twitch_uid); BIGINT temp PK caused Postgres

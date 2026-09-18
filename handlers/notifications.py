@@ -335,6 +335,42 @@ async def _send_delayed_category_notification(
     )
 
 
+# Guards against a new preview refresh starting while the previous one still runs.
+_PREVIEW_REFRESH_IN_FLIGHT = "stream_preview_refresh_in_flight"
+
+
+def _launch_preview_refresh(
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    twitch: TwitchClient,
+    live_streams: dict[str, dict],
+) -> None:
+    """Run stream preview media refresh off the check_streams tick.
+
+    A refresh captures a ~30s MP4 and uploads media, which can take longer than
+    CHECK_INTERVAL. Awaiting it inline pushed a tick past the interval, so
+    APScheduler skipped the next stream poll and delayed live alerts. Run it as a
+    tracked background task instead, and skip a new run while one is in flight.
+    """
+    if not live_streams:
+        return
+    bot_data = context.application.bot_data
+    if bot_data.get(_PREVIEW_REFRESH_IN_FLIGHT):
+        logger.info("Stream preview refresh still running; skipping this tick")
+        return
+    bot_data[_PREVIEW_REFRESH_IN_FLIGHT] = True
+
+    async def _run() -> None:
+        try:
+            await refresh_live_stream_previews(
+                context.bot, db, twitch, live_streams, bot_data
+            )
+        finally:
+            bot_data[_PREVIEW_REFRESH_IN_FLIGHT] = False
+
+    context.application.create_task(_run())
+
+
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     import time as _time
 
@@ -707,13 +743,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         twitch=twitch,
                         bot_data=context.application.bot_data,
                     )
-            await refresh_live_stream_previews(
-                context.bot,
-                db,
-                twitch,
-                live_streams,
-                context.application.bot_data,
-            )
+            _launch_preview_refresh(context, db, twitch, live_streams)
             persist_stream_poll_snapshot(db, context.application.bot_data)
 
     if category_watch_subs:
