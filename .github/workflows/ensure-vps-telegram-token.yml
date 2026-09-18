@@ -1,0 +1,56 @@
+name: Ensure VPS Telegram bot token
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set TELEGRAM_BOT_TOKEN in VPS .env and recreate bot
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          envs: TELEGRAM_BOT_TOKEN
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            test -f .env
+            test -n "${TELEGRAM_BOT_TOKEN:-}"
+            python3 - <<'PY'
+            import os
+            import pathlib
+            import re
+
+            key = os.environ["TELEGRAM_BOT_TOKEN"].strip()
+            if not key or ":" not in key:
+                raise SystemExit("TELEGRAM_BOT_TOKEN empty or invalid")
+            path = pathlib.Path(".env")
+            text = path.read_text(encoding="utf-8")
+            line = f"TELEGRAM_BOT_TOKEN={key}"
+            if re.search(r"^TELEGRAM_BOT_TOKEN=", text, flags=re.M):
+                text = re.sub(r"^TELEGRAM_BOT_TOKEN=.*$", line, text, count=1, flags=re.M)
+            else:
+                text = text.rstrip("\n") + "\n" + line + "\n"
+            path.write_text(text, encoding="utf-8")
+            print(f"TELEGRAM_BOT_TOKEN set (len={len(key)} id={key.split(':', 1)[0]})")
+            PY
+            docker compose -f compose.vps.yml up -d --no-deps --force-recreate bot
+            for i in $(seq 1 30); do
+              if curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                echo "health ok"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "WARNING: health not ready" >&2
+            docker compose -f compose.vps.yml logs --tail=40 bot || true
+            exit 1

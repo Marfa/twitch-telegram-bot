@@ -176,20 +176,21 @@ async def _deliver_alert_content_plain(
             bot, chat_id=chat_id, photo=file_id, **photo_kwargs
         )
 
-    async def _animation(**anim_kwargs):
-        # width/height/duration help Telegram treat muted MP4 as inline Animation.
-        return await bot.send_animation(
+    async def _video(**video_kwargs):
+        # Muted MP4 as Video (not Animation/GIF). Audio is stripped at capture.
+        return await bot.send_video(
             chat_id=chat_id,
-            animation=InputFile(BytesIO(animation_bytes), filename="preview.mp4"),
+            video=InputFile(BytesIO(animation_bytes), filename="preview.mp4"),
             width=480,
             height=270,
             duration=30,
-            **anim_kwargs,
+            supports_streaming=True,
+            **video_kwargs,
         )
 
     async def _send_media(**media_kwargs):
         if animation_bytes:
-            return await _animation(**media_kwargs)
+            return await _video(**media_kwargs)
         return await _photo(**media_kwargs)
 
     async def _send_text(**extra):
