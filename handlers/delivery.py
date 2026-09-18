@@ -22,7 +22,8 @@ from twitch import (
     find_placeholder_typos,
     fix_placeholder_typos,
     is_dynamic_alert_image,
-    is_stream_video_preview_image,
+    is_stream_file_video_preview_image,
+    is_stream_capture_preview_image,
     resolve_sub_image_photo,
 )
 
@@ -106,6 +107,7 @@ async def _deliver_alert_content(
     image_file_id: str | None = None,
     image_position: str = "",
     animation_bytes: bytes | None = None,
+    video_bytes: bytes | None = None,
     disable_link_preview: bool = False,
     reply_markup=None,
     parse_mode: str | None = None,
@@ -124,6 +126,7 @@ async def _deliver_alert_content(
             image_file_id=image_file_id,
             image_position=image_position,
             animation_bytes=animation_bytes,
+            video_bytes=video_bytes,
             disable_link_preview=disable_link_preview,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
@@ -140,12 +143,13 @@ async def _deliver_alert_content_plain(
     image_file_id: str | None = None,
     image_position: str = "",
     animation_bytes: bytes | None = None,
+    video_bytes: bytes | None = None,
     disable_link_preview: bool = False,
     reply_markup=None,
     parse_mode: str | None = None,
     prefer_media_message_id: bool = False,
 ):
-    """Send alert text, optionally with image/animation above/below. Returns the primary message."""
+    """Send alert text, optionally with image/animation/video above/below. Returns the primary message."""
     thread_kwargs: dict = {}
     if thread_id:
         thread_kwargs["message_thread_id"] = thread_id
@@ -159,7 +163,7 @@ async def _deliver_alert_content_plain(
     file_id = image_file_id
     position = (image_position or "").strip()
     has_media = bool(
-        (file_id or animation_bytes) and position in ("before", "after")
+        (file_id or animation_bytes or video_bytes) and position in ("before", "after")
     )
     # Image posts always disable link preview (caption has no separate preview toggle).
     if has_media:
@@ -187,9 +191,23 @@ async def _deliver_alert_content_plain(
             **anim_kwargs,
         )
 
+    async def _video(**video_kwargs):
+        # Muted H.264 as Video. Autoplay is client-dependent (unlike Animation).
+        return await bot.send_video(
+            chat_id=chat_id,
+            video=InputFile(BytesIO(video_bytes), filename="preview.mp4"),
+            width=640,
+            height=360,
+            duration=30,
+            supports_streaming=True,
+            **video_kwargs,
+        )
+
     async def _send_media(**media_kwargs):
         if animation_bytes:
             return await _animation(**media_kwargs)
+        if video_bytes:
+            return await _video(**media_kwargs)
         return await _photo(**media_kwargs)
 
     async def _send_text(**extra):
@@ -963,6 +981,7 @@ async def _send_notification(
     preview_off = False
     chat_markup = None
     animation_bytes: bytes | None = None
+    video_bytes: bytes | None = None
     captured_preview = None
     prefer_media_id = False
     from twitch import template_uses_html
@@ -990,7 +1009,7 @@ async def _send_notification(
         image_photo = await asyncio.to_thread(
             resolve_sub_image_photo, sub, stream, twitch
         )
-        if is_stream_video_preview_image(sub.image_file_id):
+        if is_stream_capture_preview_image(sub.image_file_id):
             from handlers.stream_preview import (
                 build_stream_video_mp4,
                 preview_login_from_stream,
@@ -1007,8 +1026,16 @@ async def _send_notification(
                     twitch_user_id=uid,
                 )
                 if captured_preview:
-                    animation_bytes = captured_preview.data
-        if is_dynamic_alert_image(sub.image_file_id) and not image_photo and not animation_bytes:
+                    if is_stream_file_video_preview_image(sub.image_file_id):
+                        video_bytes = captured_preview.data
+                    else:
+                        animation_bytes = captured_preview.data
+        if (
+            is_dynamic_alert_image(sub.image_file_id)
+            and not image_photo
+            and not animation_bytes
+            and not video_bytes
+        ):
             logger.warning(
                 "Dynamic image unresolved for sub %s (alert_type=%s image=%s); sending text only",
                 sub.id,
@@ -1021,9 +1048,10 @@ async def _send_notification(
             chat_id=sub.chat_id,
             text=text,
             thread_id=sub.thread_id,
-            image_file_id=None if animation_bytes else image_photo,
+            image_file_id=None if (animation_bytes or video_bytes) else image_photo,
             image_position=image_position,
             animation_bytes=animation_bytes,
+            video_bytes=video_bytes,
             disable_link_preview=preview_off,
             reply_markup=chat_markup,
             parse_mode=alert_parse_mode,
@@ -1037,9 +1065,10 @@ async def _send_notification(
                 chat_id=sub.chat_id,
                 text=text,
                 thread_id=sub.thread_id,
-                image_file_id=None if animation_bytes else image_photo,
+                image_file_id=None if (animation_bytes or video_bytes) else image_photo,
                 image_position=image_position,
                 animation_bytes=animation_bytes,
+                video_bytes=video_bytes,
                 disable_link_preview=preview_off,
                 reply_markup=chat_markup,
                 parse_mode=alert_parse_mode,

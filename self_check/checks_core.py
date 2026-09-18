@@ -251,20 +251,27 @@ def check_core() -> None:
         is_game_cover_image,
         is_stream_preview_image,
         is_stream_video_preview_image,
+        is_stream_file_video_preview_image,
+        is_stream_capture_preview_image,
         resolve_sub_image_photo,
         strip_name_mentions_and_commands,
         template_has_game_placeholder,
         GAME_COVER_IMAGE_ID,
         STREAM_PREVIEW_IMAGE_ID,
         STREAM_VIDEO_PREVIEW_IMAGE_ID,
+        STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID,
     )
 
     assert is_game_cover_image(GAME_COVER_IMAGE_ID)
     assert not is_game_cover_image("AgAC_test")
     assert is_stream_preview_image(STREAM_PREVIEW_IMAGE_ID)
     assert is_stream_video_preview_image(STREAM_VIDEO_PREVIEW_IMAGE_ID)
+    assert is_stream_file_video_preview_image(STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID)
+    assert is_stream_capture_preview_image(STREAM_VIDEO_PREVIEW_IMAGE_ID)
+    assert is_stream_capture_preview_image(STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID)
     assert is_dynamic_alert_image(STREAM_PREVIEW_IMAGE_ID)
     assert is_dynamic_alert_image(STREAM_VIDEO_PREVIEW_IMAGE_ID)
+    assert is_dynamic_alert_image(STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID)
     assert is_dynamic_alert_image(GAME_COVER_IMAGE_ID)
     assert not is_dynamic_alert_image("AgAC_test")
     assert template_has_game_placeholder("{username} {game}")
@@ -284,23 +291,33 @@ def check_core() -> None:
     )
     from handlers.stream_preview import mark_preview_refresh
 
-    assert "своё" in i18n_image_t("image_add", "ru").lower()
-    assert "own" in i18n_image_t("image_add", "en").lower()
+    assert "обложк" in i18n_image_t("image_add", "ru").lower()
+    assert "cover" in i18n_image_t("image_add", "en").lower()
     ask_kb = image_ask_keyboard("ru", game_cover_on=False, stream_preview_on=False)
     ask_labels = [b.text for row in ask_kb.inline_keyboard for b in row]
     assert any("превью" in lab.lower() for lab in ask_labels)
+    assert any("gif" in lab.lower() for lab in ask_labels)
     assert any("видео" in lab.lower() for lab in ask_labels)
     assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in ask_labels)
-    assert any("своё" in lab.lower() for lab in ask_labels)
+    assert any("сво" in lab.lower() for lab in ask_labels)
     on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
     on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)
     preview_kb = image_ask_keyboard("ru", stream_preview_on=True)
     preview_labels = [b.text for row in preview_kb.inline_keyboard for b in row]
-    assert any(lab.startswith("✅ ") and "превью" in lab.lower() and "видео" not in lab.lower() for lab in preview_labels)
+    assert any(
+        lab.startswith("✅ ")
+        and "превью" in lab.lower()
+        and "gif" not in lab.lower()
+        and "видео" not in lab.lower()
+        for lab in preview_labels
+    )
     video_kb = image_ask_keyboard("ru", stream_video_preview_on=True)
     video_labels = [b.text for row in video_kb.inline_keyboard for b in row]
-    assert any(lab.startswith("✅ ") and "видео" in lab.lower() for lab in video_labels)
+    assert any(lab.startswith("✅ ") and "gif" in lab.lower() for lab in video_labels)
+    file_kb = image_ask_keyboard("ru", stream_file_video_preview_on=True)
+    file_labels = [b.text for row in file_kb.inline_keyboard for b in row]
+    assert any(lab.startswith("✅ ") and "видео" in lab.lower() for lab in file_labels)
     edit_kb = image_edit_keyboard(
         "ru", has_image=True, game_cover_on=True, stream_preview_on=False
     )
@@ -1740,6 +1757,9 @@ def check_core() -> None:
         assert tr("image_stream_video_preview", loc)
         assert tr("image_stream_video_preview_note", loc)
         assert tr("sub_list_image_stream_video_preview", loc)
+        assert tr("image_stream_file_video_preview", loc)
+        assert tr("image_stream_file_video_preview_note", loc)
+        assert tr("sub_list_image_stream_file_video_preview", loc)
         assert tr("premium_feat_stream_video_preview", loc)
         assert tr("premium_feat_stream_video_preview_desc", loc)
         assert tr("image_game_cover", loc)

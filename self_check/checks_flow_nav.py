@@ -1623,17 +1623,23 @@ async def _scenario_subscriptions_edit_button_style(db) -> None:
 
 
 async def _scenario_wizard_image_ask(db) -> None:
-    """§2.6 Image step — stream preview / game cover checkboxes; Skip / wizard nav escape."""
+    """§2.6 Cover step — stream preview / GIF / video / game cover; Skip escape."""
     from handlers.wizard import _go_image_ask_prompt, receive_image_ask, _wz
     from telegram.ext import ConversationHandler
     from twitch import (
         GAME_COVER_IMAGE_ID,
+        STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID,
         STREAM_PREVIEW_IMAGE_ID,
+        STREAM_VIDEO_PREVIEW_IMAGE_ID,
         is_game_cover_image,
+        is_stream_file_video_preview_image,
         is_stream_preview_image,
+        is_stream_video_preview_image,
     )
 
     application, bot = _app(db)
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
     cap = _BotCapture()
     cap.wrap(bot)
     await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
@@ -1651,8 +1657,10 @@ async def _scenario_wizard_image_ask(db) -> None:
         for b in row
     ]
     assert any(lab.startswith("⬜️ ") and "превью" in lab.lower() for lab in labels)
+    assert any(lab.startswith("⬜️ ") and "gif" in lab.lower() for lab in labels)
+    assert any(lab.startswith("⬜️ ") and "видео" in lab.lower() for lab in labels)
     assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in labels)
-    assert any("своё" in lab.lower() for lab in labels)
+    assert any("сво" in lab.lower() for lab in labels)
     cap.assert_turn("wizard_image_ask")
 
     update, _query = _cb_update(_FREE_UID, "image_ask:stream_preview", cap)
@@ -1661,6 +1669,28 @@ async def _scenario_wizard_image_ask(db) -> None:
     assert state == _wz()["IMAGE_ASK"]
     assert is_stream_preview_image(ctx.user_data.get("image_file_id"))
     assert ctx.user_data.get("image_file_id") == STREAM_PREVIEW_IMAGE_ID
+
+    # Premium-gated GIF / muted video previews.
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        update, _query = _cb_update(_FREE_UID, "image_ask:stream_video_preview", cap)
+        cap.wrap(bot)
+        state = await receive_image_ask(update, ctx)
+        assert state == _wz()["IMAGE_ASK"]
+        assert is_stream_video_preview_image(ctx.user_data.get("image_file_id"))
+        assert ctx.user_data.get("image_file_id") == STREAM_VIDEO_PREVIEW_IMAGE_ID
+
+        update, _query = _cb_update(
+            _FREE_UID, "image_ask:stream_file_video_preview", cap
+        )
+        cap.wrap(bot)
+        state = await receive_image_ask(update, ctx)
+        assert state == _wz()["IMAGE_ASK"]
+        assert is_stream_file_video_preview_image(ctx.user_data.get("image_file_id"))
+        assert (
+            ctx.user_data.get("image_file_id") == STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID
+        )
 
     update, _query = _cb_update(_FREE_UID, "image_ask:game_cover", cap)
     cap.wrap(bot)
@@ -1675,7 +1705,10 @@ async def _scenario_wizard_image_ask(db) -> None:
         for row in m.inline_keyboard
         for b in row
     ]
-    assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in toggled)
+    assert any(
+        lab.startswith("✅ ") and ("обложк" in lab.lower() or "cover" in lab.lower())
+        for lab in toggled
+    )
 
     update, _query = _cb_update(_FREE_UID, "image_ask:skip", cap)
     cap.wrap(bot)

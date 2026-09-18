@@ -62,7 +62,10 @@ _FALLBACK_GAMES = (
 
 GAME_COVER_IMAGE_ID = "__game_cover__"
 STREAM_PREVIEW_IMAGE_ID = "__stream_preview__"
+# Legacy id: muted MP4 sent as Telegram Animation (GIF-like autoplay).
 STREAM_VIDEO_PREVIEW_IMAGE_ID = "__stream_video_preview__"
+# Muted MP4 sent as Telegram Video (client may autoplay if enabled).
+STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID = "__stream_file_video_preview__"
 BOX_ART_WIDTH = 1920
 BOX_ART_HEIGHT = 2560
 STREAM_THUMB_WIDTH = 1280
@@ -78,7 +81,20 @@ def is_stream_preview_image(image_file_id: str | None) -> bool:
 
 
 def is_stream_video_preview_image(image_file_id: str | None) -> bool:
+    """GIF-like Animation preview (autoplay)."""
     return (image_file_id or "") == STREAM_VIDEO_PREVIEW_IMAGE_ID
+
+
+def is_stream_file_video_preview_image(image_file_id: str | None) -> bool:
+    """Muted Video message preview (not Animation)."""
+    return (image_file_id or "") == STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID
+
+
+def is_stream_capture_preview_image(image_file_id: str | None) -> bool:
+    """Either GIF Animation or muted Video — both need streamlink capture."""
+    return is_stream_video_preview_image(image_file_id) or is_stream_file_video_preview_image(
+        image_file_id
+    )
 
 
 def is_dynamic_alert_image(image_file_id: str | None) -> bool:
@@ -86,7 +102,7 @@ def is_dynamic_alert_image(image_file_id: str | None) -> bool:
     return (
         is_game_cover_image(image_file_id)
         or is_stream_preview_image(image_file_id)
-        or is_stream_video_preview_image(image_file_id)
+        or is_stream_capture_preview_image(image_file_id)
     )
 
 
@@ -164,7 +180,7 @@ def resolve_sub_image_photo(
     fid = sub.image_file_id
     if not fid:
         return None
-    if is_stream_preview_image(fid) or is_stream_video_preview_image(fid):
+    if is_stream_preview_image(fid) or is_stream_capture_preview_image(fid):
         return format_stream_thumbnail_url(
             str((stream or {}).get("thumbnail_url") or ""),
             cache_bust=True,

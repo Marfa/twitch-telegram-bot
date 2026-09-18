@@ -1415,6 +1415,7 @@ def check_db_premium() -> None:
         assert "• Оповещение: начало стрима" in line
         assert "• Кнопка чата: да" in line
         assert "Отложенная отправка" in line or "15" in line
+        assert "Обложка: нет" not in line
         assert "Изображение: нет" not in line
         assert "Игнорировать ключевые слова: нет" not in line
         assert "<a href" not in line

@@ -7,7 +7,7 @@ import time
 from io import BytesIO
 from typing import Any
 
-from telegram import InputFile, InputMediaAnimation, InputMediaPhoto
+from telegram import InputFile, InputMediaAnimation, InputMediaPhoto, InputMediaVideo
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
 from db import Database, Subscription
@@ -23,6 +23,8 @@ from twitch import (
     format_stream_thumbnail_url,
     is_stream_preview_image,
     is_stream_video_preview_image,
+    is_stream_file_video_preview_image,
+    is_stream_capture_preview_image,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,7 +183,7 @@ async def refresh_live_stream_previews(
                 continue
             if int(sub.id) in skip:
                 continue
-            if is_stream_video_preview_image(sub.image_file_id):
+            if is_stream_capture_preview_image(sub.image_file_id):
                 if not prem.has_feature_sync(
                     db,
                     sub.owner_id,
@@ -304,7 +306,43 @@ async def edit_animation_message(
     await bot.edit_message_media(**edit_kwargs)
 
 
-# Back-compat alias.
+async def edit_file_video_message(
+    bot,
+    *,
+    chat_id: int,
+    message_id: int,
+    data: bytes,
+    caption: str | None = None,
+    parse_mode: str | None = None,
+    show_caption_above_media: bool | None = None,
+    reply_markup=None,
+) -> None:
+    """Replace Video media (muted MP4); keep type stable for editMessageMedia."""
+    kwargs: dict[str, Any] = {
+        "media": animation_input_file(data, attach=True),
+        "width": _ANIM_WIDTH,
+        "height": _ANIM_HEIGHT,
+        "duration": _ANIM_DURATION,
+        "supports_streaming": True,
+    }
+    if caption is not None:
+        kwargs["caption"] = caption
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        if show_caption_above_media is not None:
+            kwargs["show_caption_above_media"] = show_caption_above_media
+    media = InputMediaVideo(**kwargs)
+    edit_kwargs: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "media": media,
+    }
+    if reply_markup is not None:
+        edit_kwargs["reply_markup"] = reply_markup
+    await bot.edit_message_media(**edit_kwargs)
+
+
+# Back-compat alias (old name meant Animation).
 edit_video_message = edit_animation_message
 
 
@@ -371,13 +409,14 @@ async def _edit_preview_media(
     caption, parse_mode, caption_above = _preview_caption(sub, stream, twitch)
     reply_markup = await _preview_reply_markup(bot, db, sub)
     try:
-        if is_stream_video_preview_image(sub.image_file_id):
-            # Never fall back to a static photo — keep Animation media type stable
-            # so editMessageMedia can refresh (Animation↔Video edits fail).
+        if is_stream_capture_preview_image(sub.image_file_id):
+            # Keep Animation vs Video media type stable so editMessageMedia works.
             if captured is None:
                 return False
+            as_file_video = is_stream_file_video_preview_image(sub.image_file_id)
+            edit_fn = edit_file_video_message if as_file_video else edit_animation_message
             try:
-                await edit_animation_message(
+                await edit_fn(
                     bot,
                     chat_id=sub.chat_id,
                     message_id=int(mid),
@@ -390,7 +429,7 @@ async def _edit_preview_media(
             except BadRequest as exc:
                 err = str(exc).lower()
                 if parse_mode and ("parse" in err or "entity" in err or "tag" in err):
-                    await edit_animation_message(
+                    await edit_fn(
                         bot,
                         chat_id=sub.chat_id,
                         message_id=int(mid),
@@ -433,20 +472,26 @@ async def _edit_preview_media(
                     await bot.edit_message_media(**edit_kwargs)
                 else:
                     raise
+        if is_stream_file_video_preview_image(sub.image_file_id):
+            kind = "file_video"
+        elif is_stream_video_preview_image(sub.image_file_id):
+            kind = "gif"
+        else:
+            kind = "photo"
         logger.info(
             "Stream preview refreshed sub=%s chat=%s mid=%s kind=%s",
             sub.id,
             sub.chat_id,
             mid,
-            "video" if is_stream_video_preview_image(sub.image_file_id) else "photo",
+            kind,
         )
         return True
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
         return False
     except (BadRequest, Forbidden) as exc:
-        # Old alerts may be stored as Video — cannot edit into Animation. Stop retrying.
-        if is_stream_video_preview_image(sub.image_file_id) and bot_data is not None:
+        # Wrong media type (e.g. Animation↔Video) — stop retrying until stream ends.
+        if is_stream_capture_preview_image(sub.image_file_id) and bot_data is not None:
             _preview_skip_set(bot_data).add(int(sub.id))
             logger.info(
                 "Stream preview refresh stopped for sub=%s chat=%s (uneditable media): %s",

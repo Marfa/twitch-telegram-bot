@@ -2120,9 +2120,11 @@ def image_ask_keyboard(
     game_cover_on: bool = False,
     stream_preview_on: bool = False,
     stream_video_preview_on: bool = False,
+    stream_file_video_preview_on: bool = False,
 ) -> InlineKeyboardMarkup:
     preview_mark = "✅ " if stream_preview_on else "⬜️ "
-    video_mark = "✅ " if stream_video_preview_on else "⬜️ "
+    gif_mark = "✅ " if stream_video_preview_on else "⬜️ "
+    file_video_mark = "✅ " if stream_file_video_preview_on else "⬜️ "
     cover_mark = "✅ " if game_cover_on else "⬜️ "
     return InlineKeyboardMarkup(
         [
@@ -2134,8 +2136,14 @@ def image_ask_keyboard(
             ],
             [
                 InlineKeyboardButton(
-                    video_mark + t("image_stream_video_preview", lang),
+                    gif_mark + t("image_stream_video_preview", lang),
                     callback_data="image_ask:stream_video_preview",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    file_video_mark + t("image_stream_file_video_preview", lang),
+                    callback_data="image_ask:stream_file_video_preview",
                 )
             ],
             [
@@ -2157,9 +2165,11 @@ def image_edit_keyboard(
     game_cover_on: bool = False,
     stream_preview_on: bool = False,
     stream_video_preview_on: bool = False,
+    stream_file_video_preview_on: bool = False,
 ) -> InlineKeyboardMarkup:
     preview_mark = "✅ " if stream_preview_on else "⬜️ "
-    video_mark = "✅ " if stream_video_preview_on else "⬜️ "
+    gif_mark = "✅ " if stream_video_preview_on else "⬜️ "
+    file_video_mark = "✅ " if stream_file_video_preview_on else "⬜️ "
     cover_mark = "✅ " if game_cover_on else "⬜️ "
     preview_row = [
         InlineKeyboardButton(
@@ -2167,10 +2177,16 @@ def image_edit_keyboard(
             callback_data="image_ask:stream_preview",
         )
     ]
-    video_row = [
+    gif_row = [
         InlineKeyboardButton(
-            video_mark + t("image_stream_video_preview", lang),
+            gif_mark + t("image_stream_video_preview", lang),
             callback_data="image_ask:stream_video_preview",
+        )
+    ]
+    file_video_row = [
+        InlineKeyboardButton(
+            file_video_mark + t("image_stream_file_video_preview", lang),
+            callback_data="image_ask:stream_file_video_preview",
         )
     ]
     cover_row = [
@@ -2183,7 +2199,8 @@ def image_edit_keyboard(
         return InlineKeyboardMarkup(
             [
                 preview_row,
-                video_row,
+                gif_row,
+                file_video_row,
                 cover_row,
                 [
                     InlineKeyboardButton(
@@ -2210,6 +2227,7 @@ def image_edit_keyboard(
         game_cover_on=game_cover_on,
         stream_preview_on=stream_preview_on,
         stream_video_preview_on=stream_video_preview_on,
+        stream_file_video_preview_on=stream_file_video_preview_on,
     )
 
 
