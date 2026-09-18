@@ -47,7 +47,7 @@ jobs:
                     raise SystemExit("capture failed")
                 print("captured", len(cap.data))
                 bot = Bot(TELEGRAM_BOT_TOKEN)
-                admin = int(ADMIN_USER_IDS[0])
+                admin = int(next(iter(ADMIN_USER_IDS)))
                 for mid in [int(x) for x in "$MIDS".split(",") if x.strip()]:
                     try:
                         await edit_animation_message(
