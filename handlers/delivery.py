@@ -22,6 +22,7 @@ from twitch import (
     find_placeholder_typos,
     fix_placeholder_typos,
     is_dynamic_alert_image,
+    is_stream_video_preview_image,
     resolve_sub_image_photo,
 )
 
@@ -104,9 +105,11 @@ async def _deliver_alert_content(
     thread_id: int | None = None,
     image_file_id: str | None = None,
     image_position: str = "",
+    animation_bytes: bytes | None = None,
     disable_link_preview: bool = False,
     reply_markup=None,
     parse_mode: str | None = None,
+    prefer_media_message_id: bool = False,
 ):
     """Send alert text, optionally with image above/below. Returns the primary message."""
     from message_fx import message_fx_disabled
@@ -120,9 +123,11 @@ async def _deliver_alert_content(
             thread_id=thread_id,
             image_file_id=image_file_id,
             image_position=image_position,
+            animation_bytes=animation_bytes,
             disable_link_preview=disable_link_preview,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
+            prefer_media_message_id=prefer_media_message_id,
         )
 
 
@@ -134,11 +139,13 @@ async def _deliver_alert_content_plain(
     thread_id: int | None = None,
     image_file_id: str | None = None,
     image_position: str = "",
+    animation_bytes: bytes | None = None,
     disable_link_preview: bool = False,
     reply_markup=None,
     parse_mode: str | None = None,
+    prefer_media_message_id: bool = False,
 ):
-    """Send alert text, optionally with image above/below. Returns the primary message."""
+    """Send alert text, optionally with image/GIF above/below. Returns the primary message."""
     thread_kwargs: dict = {}
     if thread_id:
         thread_kwargs["message_thread_id"] = thread_id
@@ -151,8 +158,11 @@ async def _deliver_alert_content_plain(
 
     file_id = image_file_id
     position = (image_position or "").strip()
+    has_media = bool(
+        (file_id or animation_bytes) and position in ("before", "after")
+    )
     # Image posts always disable link preview (caption has no separate preview toggle).
-    if file_id and position in ("before", "after"):
+    if has_media:
         disable_link_preview = True
 
     def _plain_fallback(body: str) -> str:
@@ -165,6 +175,18 @@ async def _deliver_alert_content_plain(
         return await _send_photo_with_url_fallback(
             bot, chat_id=chat_id, photo=file_id, **photo_kwargs
         )
+
+    async def _animation(**anim_kwargs):
+        return await bot.send_animation(
+            chat_id=chat_id,
+            animation=InputFile(BytesIO(animation_bytes), filename="preview.gif"),
+            **anim_kwargs,
+        )
+
+    async def _send_media(**media_kwargs):
+        if animation_bytes:
+            return await _animation(**media_kwargs)
+        return await _photo(**media_kwargs)
 
     async def _send_text(**extra):
         text_kwargs: dict = {
@@ -187,9 +209,9 @@ async def _deliver_alert_content_plain(
                 return await bot.send_message(**text_kwargs)
             raise
 
-    if file_id and position in ("before", "after") and len(text) <= _TELEGRAM_CAPTION_LIMIT:
+    if has_media and len(text) <= _TELEGRAM_CAPTION_LIMIT:
         try:
-            return await _photo(
+            return await _send_media(
                 caption=text,
                 show_caption_above_media=(position == "after"),
                 **thread_kwargs,
@@ -200,7 +222,7 @@ async def _deliver_alert_content_plain(
             err = str(exc).lower()
             if parse_kwargs and ("parse" in err or "entity" in err or "tag" in err):
                 try:
-                    return await _photo(
+                    return await _send_media(
                         caption=_plain_fallback(text),
                         show_caption_above_media=(position == "after"),
                         **thread_kwargs,
@@ -210,34 +232,37 @@ async def _deliver_alert_content_plain(
                     pass
             else:
                 logger.warning(
-                    "Photo send failed for %s (%s); falling back to text-only",
+                    "Media send failed for %s (%s); falling back to text-only",
                     chat_id,
                     exc,
                 )
 
-    elif file_id and position in ("before", "after"):
+    elif has_media:
         if position == "before":
             try:
-                await _photo(**thread_kwargs)
+                media_msg = await _send_media(**thread_kwargs)
             except BadRequest as exc:
                 logger.warning(
-                    "Photo send failed for %s (%s); falling back to text-only",
+                    "Media send failed for %s (%s); falling back to text-only",
                     chat_id,
                     exc,
                 )
             else:
-                return await _send_text()
+                text_msg = await _send_text()
+                # Dynamic previews need the media message id for editMessageMedia.
+                return media_msg if prefer_media_message_id else text_msg
         else:
             msg = await _send_text()
             try:
-                await _photo(**thread_kwargs)
+                media_msg = await _send_media(**thread_kwargs)
             except BadRequest as exc:
                 logger.warning(
-                    "Photo send failed for %s after text (%s)",
+                    "Media send failed for %s after text (%s)",
                     chat_id,
                     exc,
                 )
-            return msg
+                return msg
+            return media_msg if prefer_media_message_id else msg
 
     return await _send_text()
 
@@ -957,23 +982,37 @@ async def _send_notification(
         image_photo = await asyncio.to_thread(
             resolve_sub_image_photo, sub, stream, twitch
         )
-        if is_dynamic_alert_image(sub.image_file_id) and not image_photo:
+        animation_bytes: bytes | None = None
+        if is_stream_video_preview_image(sub.image_file_id) and twitch is not None:
+            from handlers.stream_preview import build_stream_video_gif_bytes
+
+            bid = str(
+                (stream or {}).get("user_id") or sub.twitch_user_id or ""
+            ).strip()
+            if bid:
+                animation_bytes = await asyncio.to_thread(
+                    build_stream_video_gif_bytes, twitch, broadcaster_id=bid
+                )
+        if is_dynamic_alert_image(sub.image_file_id) and not image_photo and not animation_bytes:
             logger.warning(
                 "Dynamic image unresolved for sub %s (alert_type=%s image=%s); sending text only",
                 sub.id,
                 alert_type,
                 sub.image_file_id,
             )
+        prefer_media_id = is_dynamic_alert_image(sub.image_file_id)
         msg = await _deliver_alert_content(
             bot,
             chat_id=sub.chat_id,
             text=text,
             thread_id=sub.thread_id,
-            image_file_id=image_photo,
+            image_file_id=None if animation_bytes else image_photo,
             image_position=image_position,
+            animation_bytes=animation_bytes,
             disable_link_preview=preview_off,
             reply_markup=chat_markup,
             parse_mode=alert_parse_mode,
+            prefer_media_message_id=prefer_media_id,
         )
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
@@ -983,11 +1022,13 @@ async def _send_notification(
                 chat_id=sub.chat_id,
                 text=text,
                 thread_id=sub.thread_id,
-                image_file_id=image_photo,
+                image_file_id=None if animation_bytes else image_photo,
                 image_position=image_position,
+                animation_bytes=animation_bytes,
                 disable_link_preview=preview_off,
                 reply_markup=chat_markup,
                 parse_mode=alert_parse_mode,
+                prefer_media_message_id=prefer_media_id,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
@@ -1004,7 +1045,9 @@ async def _send_notification(
         clear_chat_unreachable(db, sub.chat_id)
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
         clear_user_blocked(db, sub.chat_id)
-    if msg and sub.delete_previous and sub.dest_type != "dm":
+    if msg and sub.dest_type != "dm" and (
+        sub.delete_previous or is_dynamic_alert_image(sub.image_file_id)
+    ):
         db.set_last_message_id(sub.id, msg.message_id)
     if (
         msg

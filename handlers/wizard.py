@@ -70,12 +70,14 @@ from links import (
 from twitch import (
     GAME_COVER_IMAGE_ID,
     STREAM_PREVIEW_IMAGE_ID,
+    STREAM_VIDEO_PREVIEW_IMAGE_ID,
     TwitchClient,
     find_placeholder_typos,
     fix_placeholder_typos,
     is_dynamic_alert_image,
     is_game_cover_image,
     is_stream_preview_image,
+    is_stream_video_preview_image,
     merge_ignore_keywords,
     normalize_ignore_keywords,
     preview_stream_title,
@@ -854,6 +856,7 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
         has_image=has_image,
         game_cover_on=is_game_cover_image(fid),
         stream_preview_on=is_stream_preview_image(fid),
+        stream_video_preview_on=is_stream_video_preview_image(fid),
     )
     if update.callback_query:
         await context.bot.send_message(
@@ -2227,10 +2230,22 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await _save_edit_image(update, context, lang)
         return await _go_after_image_step(update, context, lang)
 
-    if action in ("game_cover", "stream_preview"):
-        sentinel = (
-            GAME_COVER_IMAGE_ID if action == "game_cover" else STREAM_PREVIEW_IMAGE_ID
-        )
+    if action in ("game_cover", "stream_preview", "stream_video_preview"):
+        if action == "stream_video_preview":
+            db: Database = context.application.bot_data["db"]
+            entitled = await prem.has_feature(
+                context.bot, db, query.from_user.id, "stream_video_preview"
+            )
+            if not entitled:
+                await query.answer(
+                    t("advanced_options_premium_only", lang), show_alert=True
+                )
+                return _wz()["IMAGE_ASK"]
+        sentinel = {
+            "game_cover": GAME_COVER_IMAGE_ID,
+            "stream_preview": STREAM_PREVIEW_IMAGE_ID,
+            "stream_video_preview": STREAM_VIDEO_PREVIEW_IMAGE_ID,
+        }[action]
         current = context.user_data.get("image_file_id")
         if current == sentinel:
             backup = context.user_data.get("image_backup_file_id")
@@ -2265,6 +2280,7 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 has_image=has_image,
                 game_cover_on=is_game_cover_image(fid),
                 stream_preview_on=is_stream_preview_image(fid),
+                stream_video_preview_on=is_stream_video_preview_image(fid),
             )
         )
         return _wz()["IMAGE_ASK"]
@@ -3349,7 +3365,9 @@ async def _finish_subscription(
             t("preview_off", lang) if preview_disabled else t("preview_on", lang)
         )
         if has_image:
-            if is_stream_preview_image(data.get("image_file_id")):
+            if is_stream_video_preview_image(data.get("image_file_id")):
+                image_note = t("image_stream_video_preview_note", lang)
+            elif is_stream_preview_image(data.get("image_file_id")):
                 image_note = t("image_stream_preview_note", lang)
             elif is_game_cover_image(data.get("image_file_id")):
                 image_note = t("image_game_cover_note", lang)

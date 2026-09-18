@@ -26,7 +26,7 @@
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+); live → else VOD; own category in **📋 My subscriptions** |
 | 📅 Release alerts | Beta: **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses when all selected platforms have shipped |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
-| Image | Optional alert image — stream preview (live frame), game cover, or your own photo; caption above or below; link preview then off |
+| Image | Optional alert image — stream preview (frame, 30‑min refresh), stream video preview ⭐ (~30s GIF, 30‑min refresh), game cover, or your own photo; caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
@@ -118,7 +118,7 @@ Then the wizard (for stream start / category change / stream end):
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
 3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, pin message until stream ends ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Reminder button” (upcoming), button color (default / blue / green / red — shown when any button option is on), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
-4. Image (if checked) — `⬜️/✅ Stream preview` (live frame via Twitch Helix, not stored in DB), `⬜️/✅ Use game cover` (category from Twitch), or your own image and position: start or end of caption
+4. Image (if checked) — `⬜️/✅ Stream preview` (Helix live frame, refreshed every 30 min), `⬜️/✅ Stream video preview ⭐` (~30s GIF via Create Clip + CloudConvert, refreshed every 30 min; Advanced options), `⬜️/✅ Use game cover`, or your own image and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
 7. Repeat mute (minutes) — if checked; **stream start** only
@@ -334,6 +334,9 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
+| `TWITCH_CLIPS_REFRESH_TOKEN` | (opt.) Twitch user refresh token with `clips:edit` — Create Clip for video preview |
+| `CLOUDCONVERT_API_KEY` | (opt.) CloudConvert — MP4→GIF for video preview (not stored on our disk) |
+| `STREAM_PREVIEW_REFRESH_SECONDS` | Preview/GIF refresh interval while live (default 1800) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |
 | `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Bearer secret for `POST /hooks/posthog-issues` (Issue + Inbox Report → admins) |

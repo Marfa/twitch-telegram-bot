@@ -77,6 +77,7 @@ from twitch import (
     TwitchClient,
     is_game_cover_image,
     is_stream_preview_image,
+    is_stream_video_preview_image,
     normalize_ignore_keywords,
     normalize_watch_tags,
     template_has_link,
@@ -428,7 +429,9 @@ def _format_sub_line(
     else:
         settings.append(t("sub_list_alert_live", lang))
     if sub.image_file_id:
-        if is_stream_preview_image(sub.image_file_id):
+        if is_stream_video_preview_image(sub.image_file_id):
+            settings.append(t("sub_list_image_stream_video_preview", lang))
+        elif is_stream_preview_image(sub.image_file_id):
             settings.append(t("sub_list_image_stream_preview", lang))
         elif is_game_cover_image(sub.image_file_id):
             settings.append(t("sub_list_image_game_cover", lang))

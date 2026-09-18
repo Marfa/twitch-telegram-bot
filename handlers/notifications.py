@@ -22,6 +22,7 @@ from handlers.delivery import (
     unpin_orphaned_alert_pins,
     unpin_stream_alert_messages,
 )
+from handlers.stream_preview import clear_preview_refresh, refresh_live_stream_previews
 from i18n import DEFAULT_LOCALE, format_duration_hm, t
 from twitch import (
     TwitchClient,
@@ -540,6 +541,10 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             for uid in went_offline:
                 await unpin_stream_alert_messages(context.bot, db, uid)
+                clear_preview_refresh(
+                    context.application.bot_data,
+                    [s.id for s in db.get_enabled_by_twitch_user_id(uid)],
+                )
                 stream_id = offline_stream_ids.get(uid, "")
                 end_stream = offline_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):
@@ -633,6 +638,13 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         vod_offset_seconds=_vod_offset_seconds(stream),
                         twitch=twitch,
                     )
+            await refresh_live_stream_previews(
+                context.bot,
+                db,
+                twitch,
+                live_streams,
+                context.application.bot_data,
+            )
             persist_stream_poll_snapshot(db, context.application.bot_data)
 
     if category_watch_subs:

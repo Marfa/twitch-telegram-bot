@@ -110,6 +110,12 @@ ADMIN_USER_IDS = parse_admin_user_ids()
 # Delete all rows for a user this many days after they block the bot (clock resets on re-block).
 BLOCKED_USER_RETENTION_DAYS = int(os.getenv("BLOCKED_USER_RETENTION_DAYS", "365"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
+# Optional: Twitch user refresh token with clips:edit — Create Clip for stream video previews.
+TWITCH_CLIPS_REFRESH_TOKEN = os.getenv("TWITCH_CLIPS_REFRESH_TOKEN", "").strip()
+# Optional: CloudConvert API key — MP4 clip → GIF for video stream preview (no local storage).
+CLOUDCONVERT_API_KEY = os.getenv("CLOUDCONVERT_API_KEY", "").strip()
+# How often to refresh stream preview photo / video GIF while live (seconds).
+STREAM_PREVIEW_REFRESH_SECONDS = int(os.getenv("STREAM_PREVIEW_REFRESH_SECONDS", "1800"))
 BOT_VERSION = (os.getenv("BOT_VERSION") or "dev").strip() or "dev"
 POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", "").strip()
 # US default; EU projects: https://eu.i.posthog.com

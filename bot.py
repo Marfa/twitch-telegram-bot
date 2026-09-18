@@ -138,6 +138,7 @@ from twitch import (
     is_dynamic_alert_image,
     is_game_cover_image,
     is_stream_preview_image,
+    is_stream_video_preview_image,
     normalize_ignore_keywords,
     merge_ignore_keywords,
     normalize_watch_tags,
@@ -1151,6 +1152,7 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             has_image=has_image,
             game_cover_on=is_game_cover_image(sub.image_file_id),
             stream_preview_on=is_stream_preview_image(sub.image_file_id),
+            stream_video_preview_on=is_stream_video_preview_image(sub.image_file_id),
         ),
     )
     return IMAGE_ASK
@@ -2681,7 +2683,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(
-                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep|game_cover|stream_preview)$"
+                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep|game_cover|stream_preview|stream_video_preview)$"
                 ),
             ],
             IMAGE_UPLOAD: [

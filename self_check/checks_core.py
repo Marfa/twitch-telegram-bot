@@ -212,17 +212,21 @@ def check_core() -> None:
         is_dynamic_alert_image,
         is_game_cover_image,
         is_stream_preview_image,
+        is_stream_video_preview_image,
         resolve_sub_image_photo,
         strip_name_mentions_and_commands,
         template_has_game_placeholder,
         GAME_COVER_IMAGE_ID,
         STREAM_PREVIEW_IMAGE_ID,
+        STREAM_VIDEO_PREVIEW_IMAGE_ID,
     )
 
     assert is_game_cover_image(GAME_COVER_IMAGE_ID)
     assert not is_game_cover_image("AgAC_test")
     assert is_stream_preview_image(STREAM_PREVIEW_IMAGE_ID)
+    assert is_stream_video_preview_image(STREAM_VIDEO_PREVIEW_IMAGE_ID)
     assert is_dynamic_alert_image(STREAM_PREVIEW_IMAGE_ID)
+    assert is_dynamic_alert_image(STREAM_VIDEO_PREVIEW_IMAGE_ID)
     assert is_dynamic_alert_image(GAME_COVER_IMAGE_ID)
     assert not is_dynamic_alert_image("AgAC_test")
     assert template_has_game_placeholder("{username} {game}")
@@ -231,12 +235,14 @@ def check_core() -> None:
     assert not template_has_game_placeholder("{username} only")
     from i18n import image_ask_keyboard, image_edit_keyboard
     from i18n import t as i18n_image_t
+    from twitch import clip_mp4_url_from_thumbnail
 
     assert "своё" in i18n_image_t("image_add", "ru").lower()
     assert "own" in i18n_image_t("image_add", "en").lower()
     ask_kb = image_ask_keyboard("ru", game_cover_on=False, stream_preview_on=False)
     ask_labels = [b.text for row in ask_kb.inline_keyboard for b in row]
     assert any("превью" in lab.lower() for lab in ask_labels)
+    assert any("видео" in lab.lower() for lab in ask_labels)
     assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in ask_labels)
     assert any("своё" in lab.lower() for lab in ask_labels)
     on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
@@ -244,7 +250,10 @@ def check_core() -> None:
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)
     preview_kb = image_ask_keyboard("ru", stream_preview_on=True)
     preview_labels = [b.text for row in preview_kb.inline_keyboard for b in row]
-    assert any(lab.startswith("✅ ") and "превью" in lab.lower() for lab in preview_labels)
+    assert any(lab.startswith("✅ ") and "превью" in lab.lower() and "видео" not in lab.lower() for lab in preview_labels)
+    video_kb = image_ask_keyboard("ru", stream_video_preview_on=True)
+    video_labels = [b.text for row in video_kb.inline_keyboard for b in row]
+    assert any(lab.startswith("✅ ") and "видео" in lab.lower() for lab in video_labels)
     edit_kb = image_edit_keyboard(
         "ru", has_image=True, game_cover_on=True, stream_preview_on=False
     )
@@ -260,6 +269,9 @@ def check_core() -> None:
         )
         == "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1280x720.jpg"
     )
+    assert clip_mp4_url_from_thumbnail(
+        "https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg"
+    ) == "https://clips-media-assets2.twitch.tv/foo.mp4"
     assert (
         box_art_cdn_url("509658", width=1920, height=2560)
         == "https://static-cdn.jtvnw.net/ttv-boxart/509658-1920x2560.jpg"
@@ -291,17 +303,28 @@ def check_core() -> None:
     )
     assert resolve_sub_image_photo(cover_sub, {}, _CoverTwitch()) is None
     preview_sub = type("S", (), {"image_file_id": STREAM_PREVIEW_IMAGE_ID})()
-    assert (
-        resolve_sub_image_photo(
-            preview_sub,
-            {
-                "thumbnail_url": "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-{width}x{height}.jpg"
-            },
-            None,
-        )
-        == "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1280x720.jpg"
+    preview_url = resolve_sub_image_photo(
+        preview_sub,
+        {
+            "thumbnail_url": "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-{width}x{height}.jpg"
+        },
+        None,
+    )
+    assert preview_url is not None
+    assert preview_url.startswith(
+        "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1280x720.jpg"
     )
     assert resolve_sub_image_photo(preview_sub, {}, None) is None
+    video_sub = type("S", (), {"image_file_id": STREAM_VIDEO_PREVIEW_IMAGE_ID})()
+    video_thumb = resolve_sub_image_photo(
+        video_sub,
+        {
+            "thumbnail_url": "https://static-cdn.jtvnw.net/previews-ttv/live_user_y-{width}x{height}.jpg"
+        },
+        None,
+    )
+    assert video_thumb is not None
+    assert "live_user_y-1280x720.jpg" in video_thumb
     assert (
         resolve_sub_image_photo(
             type("S", (), {"image_file_id": "AgAC_custom"})(),
@@ -1581,6 +1604,11 @@ def check_core() -> None:
         assert tr("image_stream_preview", loc)
         assert tr("image_stream_preview_note", loc)
         assert tr("sub_list_image_stream_preview", loc)
+        assert tr("image_stream_video_preview", loc)
+        assert tr("image_stream_video_preview_note", loc)
+        assert tr("sub_list_image_stream_video_preview", loc)
+        assert tr("premium_feat_stream_video_preview", loc)
+        assert tr("premium_feat_stream_video_preview_desc", loc)
         assert tr("image_game_cover", loc)
         assert tr("image_game_cover_note", loc)
         assert tr("sub_list_image_game_cover", loc)
