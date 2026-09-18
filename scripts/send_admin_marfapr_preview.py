@@ -129,15 +129,21 @@ async def main() -> int:
             bot_data=bot_data,
         )
         refreshed = db.get_subscription(existing.id, admin_id)
+        mid = refreshed.last_message_id if refreshed else None
         logger.info(
             "admin=%s sub=%s ok=%s last_message_id=%s",
             admin_id,
             existing.id,
             ok,
-            refreshed.last_message_id if refreshed else None,
+            mid,
         )
         if not ok:
             return 3
+        if not mid:
+            logger.error(
+                "Sent but last_message_id empty — preview refresh will not run"
+            )
+            return 4
 
     logger.info("Sent. DM preview refresh runs with check_streams.")
     return 0

@@ -1068,11 +1068,13 @@ async def _send_notification(
         clear_chat_unreachable(db, sub.chat_id)
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
         clear_user_blocked(db, sub.chat_id)
-    if msg and sub.dest_type != "dm" and (
-        sub.delete_previous or is_dynamic_alert_image(sub.image_file_id)
-    ):
+    # Track message id for delete_previous (channels/groups) and for live
+    # stream photo/video preview refresh — including DM, so editMessageMedia works.
+    track_preview = bool(msg) and is_dynamic_alert_image(sub.image_file_id)
+    track_delete_prev = bool(msg) and sub.dest_type != "dm" and bool(sub.delete_previous)
+    if track_preview or track_delete_prev:
         db.set_last_message_id(sub.id, msg.message_id)
-        if is_dynamic_alert_image(sub.image_file_id):
+        if track_preview:
             from handlers.stream_preview import mark_preview_refresh
 
             mark_preview_refresh(bot_data, sub.id)
