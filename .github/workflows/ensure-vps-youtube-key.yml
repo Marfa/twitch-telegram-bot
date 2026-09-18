@@ -19,7 +19,6 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
           envs: YOUTUBE_API_KEY
-          script_stop: true
           command_timeout: 10m
           script: |
             set -euo pipefail
