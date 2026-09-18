@@ -5,6 +5,7 @@ from __future__ import annotations
 from multistream import (
     MultistreamChannel,
     dump_multistream_channels,
+    error_line_looks_like_youtube,
     parse_multistream_channels,
     parse_multistream_url,
 )
@@ -28,6 +29,11 @@ def check_multistream_parse_urls() -> None:
 
     assert parse_multistream_url("https://example.com/nope") is None
     assert parse_multistream_url("https://youtu.be/dQw4w9WgXcQ") is None
+
+    assert error_line_looks_like_youtube("https://www.youtube.com/@someone")
+    assert error_line_looks_like_youtube("youtu.be/dQw4w9WgXcQ")
+    assert not error_line_looks_like_youtube("https://evil.com/youtube.com/phish")
+    assert not error_line_looks_like_youtube("https://goodgame.ru/x")
 
 
 def check_multistream_dump_roundtrip() -> None:
