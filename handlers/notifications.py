@@ -604,6 +604,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     context.application.bot_data,
                     [s.id for s in db.get_enabled_by_twitch_user_id(uid)],
                 )
+                from stream_capture import purge_for_streamer
+
+                purge_for_streamer(uid)
                 stream_id = offline_stream_ids.get(uid, "")
                 end_stream = offline_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):

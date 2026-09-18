@@ -273,7 +273,14 @@ def check_core() -> None:
     assert not template_has_game_placeholder("{username} only")
     from i18n import image_ask_keyboard, image_edit_keyboard
     from i18n import t as i18n_image_t
-    from twitch import clip_mp4_url_from_thumbnail
+    from stream_capture import (
+        forget_and_unlink,
+        preview_dir,
+        purge_for_streamer,
+        purge_stale_on_startup,
+        register_pending,
+        video_preview_ready,
+    )
 
     assert "своё" in i18n_image_t("image_add", "ru").lower()
     assert "own" in i18n_image_t("image_add", "en").lower()
@@ -307,9 +314,25 @@ def check_core() -> None:
         )
         == "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1280x720.jpg"
     )
-    assert clip_mp4_url_from_thumbnail(
-        "https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg"
-    ) == "https://clips-media-assets2.twitch.tv/foo.mp4"
+    assert isinstance(video_preview_ready(), bool)
+    assert preview_dir().name == "stream_preview"
+    _prev = preview_dir()
+    _prev.mkdir(parents=True, exist_ok=True)
+    _f1 = _prev / "preview_selfcheck_a.mp4"
+    _f2 = _prev / "preview_selfcheck_b.mp4"
+    _f1.write_bytes(b"a")
+    _f2.write_bytes(b"b")
+    register_pending(_f1, "111")
+    register_pending(_f2, "222")
+    assert purge_for_streamer("111") == 1
+    assert not _f1.exists()
+    assert _f2.exists()
+    forget_and_unlink(_f2)
+    assert not _f2.exists()
+    _f3 = _prev / "preview_selfcheck_stale.mp4"
+    _f3.write_bytes(b"c")
+    assert purge_stale_on_startup() >= 1
+    assert not _f3.exists()
     assert (
         box_art_cdn_url("509658", width=1920, height=2560)
         == "https://static-cdn.jtvnw.net/ttv-boxart/509658-1920x2560.jpg"

@@ -1,4 +1,4 @@
-"""Live stream preview refresh (photo / GIF) while the channel is online."""
+"""Live stream preview refresh (photo / MP4) while the channel is online."""
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +10,13 @@ from typing import Any
 from telegram import InputFile, InputMediaAnimation, InputMediaPhoto
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
-from cloudconvert_gif import cloudconvert_configured, mp4_url_to_gif_bytes
 from db import Database, Subscription
+from stream_capture import (
+    CapturedPreview,
+    capture_live_preview_mp4,
+    forget_and_unlink,
+    video_preview_ready,
+)
 from twitch import (
     TwitchClient,
     format_stream_thumbnail_url,
@@ -24,25 +29,28 @@ logger = logging.getLogger(__name__)
 _BOT_DATA_REFRESH_KEY = "stream_preview_refresh_at"
 
 
-def video_preview_ready() -> bool:
-    """True when Create Clip + CloudConvert are configured."""
-    from config import TWITCH_CLIPS_REFRESH_TOKEN
-
-    return bool(TWITCH_CLIPS_REFRESH_TOKEN) and cloudconvert_configured()
-
-
-def build_stream_video_gif_bytes(
-    twitch: TwitchClient,
+def build_stream_video_mp4(
     *,
-    broadcaster_id: str,
-) -> bytes | None:
-    """Create a ~30s clip, convert to GIF via CloudConvert; nothing stored on disk."""
+    login: str,
+    twitch_user_id: str,
+    duration: float = 30.0,
+) -> CapturedPreview | None:
+    """Record ~30s live MP4; file stays pending until forget_and_unlink / purge."""
     if not video_preview_ready():
         return None
-    mp4_url = twitch.create_live_clip_mp4_url(broadcaster_id, duration=30.0)
-    if not mp4_url:
-        return None
-    return mp4_url_to_gif_bytes(mp4_url)
+    return capture_live_preview_mp4(
+        login, twitch_user_id=twitch_user_id, duration=duration
+    )
+
+
+def preview_login_from_stream(
+    stream: dict[str, Any] | None,
+    sub: Subscription | None = None,
+) -> str:
+    login = str((stream or {}).get("user_login") or "").strip()
+    if not login and sub is not None:
+        login = str(getattr(sub, "twitch_username", None) or "").strip()
+    return login.lstrip("@").lower()
 
 
 async def refresh_live_stream_previews(
@@ -52,7 +60,7 @@ async def refresh_live_stream_previews(
     live_streams: dict[str, dict],
     bot_data: dict[str, Any],
 ) -> None:
-    """Every ~30 min: editMessageMedia for stream photo / video GIF previews."""
+    """Every ~30 min: editMessageMedia for stream photo / video MP4 previews."""
     from config import STREAM_PREVIEW_REFRESH_SECONDS
     import premium as prem
 
@@ -104,14 +112,19 @@ async def _refresh_one(
     mid = sub.last_message_id
     if not mid:
         return False
+    captured: CapturedPreview | None = None
     try:
         if is_stream_video_preview_image(sub.image_file_id):
-            bid = str(stream.get("user_id") or sub.twitch_user_id or "").strip()
-            gif = await asyncio.to_thread(
-                build_stream_video_gif_bytes, twitch, broadcaster_id=bid
-            )
-            if not gif:
-                # Fall back to fresh frame if clip/GIF path fails.
+            login = preview_login_from_stream(stream, sub)
+            uid = str(stream.get("user_id") or sub.twitch_user_id or "").strip()
+            if login and uid:
+                captured = await asyncio.to_thread(
+                    build_stream_video_mp4,
+                    login=login,
+                    twitch_user_id=uid,
+                )
+            if not captured:
+                # Fall back to fresh frame if capture fails.
                 photo = format_stream_thumbnail_url(
                     str(stream.get("thumbnail_url") or ""),
                     cache_bust=True,
@@ -121,7 +134,9 @@ async def _refresh_one(
                 media = InputMediaPhoto(media=photo)
             else:
                 media = InputMediaAnimation(
-                    media=InputFile(BytesIO(gif), filename="preview.gif")
+                    media=InputFile(
+                        BytesIO(captured.data), filename="preview.mp4"
+                    )
                 )
         else:
             photo = format_stream_thumbnail_url(
@@ -136,6 +151,9 @@ async def _refresh_one(
             message_id=mid,
             media=media,
         )
+        if captured:
+            forget_and_unlink(captured.path)
+            captured = None
         return True
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
@@ -153,3 +171,4 @@ async def _refresh_one(
             "Stream preview refresh failed sub=%s chat=%s", sub.id, sub.chat_id
         )
         return False
+    # On failure leave captured file pending for purge_for_streamer on offline.

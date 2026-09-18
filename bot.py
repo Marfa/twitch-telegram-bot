@@ -2125,7 +2125,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             register_oauth_bridge,
             register_posthog_issue_bridge,
         )
+        from stream_capture import purge_stale_on_startup
 
+        purge_stale_on_startup()
         await _restore_broadcast_jobs(application)
         loop = asyncio.get_running_loop()
         register_chat_webapp(db=db, twitch=twitch)

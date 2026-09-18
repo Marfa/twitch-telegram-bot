@@ -145,7 +145,7 @@ async def _deliver_alert_content_plain(
     parse_mode: str | None = None,
     prefer_media_message_id: bool = False,
 ):
-    """Send alert text, optionally with image/GIF above/below. Returns the primary message."""
+    """Send alert text, optionally with image/animation above/below. Returns the primary message."""
     thread_kwargs: dict = {}
     if thread_id:
         thread_kwargs["message_thread_id"] = thread_id
@@ -179,7 +179,7 @@ async def _deliver_alert_content_plain(
     async def _animation(**anim_kwargs):
         return await bot.send_animation(
             chat_id=chat_id,
-            animation=InputFile(BytesIO(animation_bytes), filename="preview.gif"),
+            animation=InputFile(BytesIO(animation_bytes), filename="preview.mp4"),
             **anim_kwargs,
         )
 
@@ -957,6 +957,9 @@ async def _send_notification(
     image_position = _effective_image_position(sub)
     preview_off = False
     chat_markup = None
+    animation_bytes: bytes | None = None
+    captured_preview = None
+    prefer_media_id = False
     from twitch import template_uses_html
 
     if parse_mode is None:
@@ -982,17 +985,24 @@ async def _send_notification(
         image_photo = await asyncio.to_thread(
             resolve_sub_image_photo, sub, stream, twitch
         )
-        animation_bytes: bytes | None = None
-        if is_stream_video_preview_image(sub.image_file_id) and twitch is not None:
-            from handlers.stream_preview import build_stream_video_gif_bytes
+        if is_stream_video_preview_image(sub.image_file_id):
+            from handlers.stream_preview import (
+                build_stream_video_mp4,
+                preview_login_from_stream,
+            )
 
-            bid = str(
+            login = preview_login_from_stream(stream, sub)
+            uid = str(
                 (stream or {}).get("user_id") or sub.twitch_user_id or ""
             ).strip()
-            if bid:
-                animation_bytes = await asyncio.to_thread(
-                    build_stream_video_gif_bytes, twitch, broadcaster_id=bid
+            if login and uid:
+                captured_preview = await asyncio.to_thread(
+                    build_stream_video_mp4,
+                    login=login,
+                    twitch_user_id=uid,
                 )
+                if captured_preview:
+                    animation_bytes = captured_preview.data
         if is_dynamic_alert_image(sub.image_file_id) and not image_photo and not animation_bytes:
             logger.warning(
                 "Dynamic image unresolved for sub %s (alert_type=%s image=%s); sending text only",
@@ -1034,12 +1044,20 @@ async def _send_notification(
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
             _mark_destination_unreachable(db, sub, retry_exc, alert_type=alert_type)
             await _maybe_notify_delivery_failure(bot, db, sub, retry_exc)
+            # Keep captured MP4 pending until stream ends.
             return False
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
         _mark_destination_unreachable(db, sub, exc, alert_type=alert_type)
         await _maybe_notify_delivery_failure(bot, db, sub, exc)
+        # Keep captured MP4 pending until stream ends.
         return False
+
+    if captured_preview is not None:
+        from stream_capture import forget_and_unlink
+
+        forget_and_unlink(captured_preview.path)
+        captured_preview = None
 
     if db.is_chat_unreachable(sub.chat_id):
         clear_chat_unreachable(db, sub.chat_id)

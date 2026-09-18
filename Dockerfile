@@ -2,14 +2,17 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=appuser:appuser . .
 
-RUN mkdir -p /data && chown appuser:appuser /data
+RUN mkdir -p /data/stream_preview && chown -R appuser:appuser /data
 
 USER appuser
 

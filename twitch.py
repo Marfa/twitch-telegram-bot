@@ -15,7 +15,6 @@ import requests
 from config import (
     TWITCH_CLIENT_ID,
     TWITCH_CLIENT_SECRET,
-    TWITCH_CLIPS_REFRESH_TOKEN,
 )
 
 FOLLOWS_SCOPE = "user:read:follows"
@@ -68,7 +67,6 @@ BOX_ART_WIDTH = 1920
 BOX_ART_HEIGHT = 2560
 STREAM_THUMB_WIDTH = 1280
 STREAM_THUMB_HEIGHT = 720
-CLIPS_EDIT_SCOPE = "clips:edit"
 
 
 def is_game_cover_image(image_file_id: str | None) -> bool:
@@ -107,28 +105,6 @@ def format_stream_thumbnail_url(
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}t={int(time.time())}"
     return url
-
-
-def clip_mp4_url_from_thumbnail(thumbnail_url: str) -> str | None:
-    """Best-effort public MP4 URL from Helix clip thumbnail_url.
-
-    Get Clips Download requires channel editor OAuth; for Create Clip by a
-    service account we derive the CDN MP4 from the preview frame path.
-    ponytail: ceiling = Twitch CDN path changes; upgrade = Get Clips Download
-    with editor:manage:clips / broadcaster OAuth.
-    """
-    thumb = str(thumbnail_url or "").strip()
-    if not thumb:
-        return None
-    out = re.sub(
-        r"-preview-\d+x\d+\.(?:jpg|jpeg|png|webp)(?:\?.*)?$",
-        ".mp4",
-        thumb,
-        flags=re.IGNORECASE,
-    )
-    if out == thumb:
-        return None
-    return out
 
 
 def template_has_game_placeholder(template: str) -> bool:
@@ -285,9 +261,6 @@ class TwitchClient:
         self._igdb_db: Any | None = None
         self._token = ""
         self._token_expires = 0.0
-        self._clips_token = ""
-        self._clips_token_expires = 0.0
-        self._clips_user_id = ""
 
     def bind_igdb_db(self, db: Any) -> None:
         """Attach bot DB for local IGDB dump queries."""
@@ -944,115 +917,6 @@ class TwitchClient:
         )
         resp.raise_for_status()
         return resp.json()
-
-    def clips_configured(self) -> bool:
-        return bool(TWITCH_CLIPS_REFRESH_TOKEN)
-
-    def _ensure_clips_token(self) -> str | None:
-        if not TWITCH_CLIPS_REFRESH_TOKEN:
-            return None
-        if self._clips_token and time.time() < self._clips_token_expires - 60:
-            return self._clips_token
-        data = self.refresh_user_token(TWITCH_CLIPS_REFRESH_TOKEN)
-        token = str(data.get("access_token") or "").strip()
-        if not token:
-            return None
-        self._clips_token = token
-        self._clips_token_expires = time.time() + int(data.get("expires_in", 3600))
-        try:
-            info = self.validate_user_token(token)
-            self._clips_user_id = str(info.get("user_id") or "").strip()
-        except Exception:
-            logger.exception("Failed to validate clips user token")
-            self._clips_user_id = ""
-        return self._clips_token
-
-    def create_clip(
-        self,
-        broadcaster_id: str,
-        *,
-        duration: float = 30.0,
-        has_delay: bool = False,
-    ) -> dict[str, Any] | None:
-        """Create a ~30s clip of a live stream (clips:edit user token)."""
-        token = self._ensure_clips_token()
-        if not token:
-            return None
-        bid = str(broadcaster_id or "").strip()
-        if not bid:
-            return None
-        params: dict[str, Any] = {
-            "broadcaster_id": bid,
-            "duration": max(5.0, min(60.0, float(duration))),
-        }
-        if has_delay:
-            params["has_delay"] = "true"
-        resp = self._session.post(
-            "https://api.twitch.tv/helix/clips",
-            headers={
-                "Client-ID": TWITCH_CLIENT_ID,
-                "Authorization": f"Bearer {token}",
-            },
-            params=params,
-            timeout=20,
-        )
-        if resp.status_code not in (200, 202):
-            logger.warning(
-                "Create Clip failed status=%s body=%s",
-                resp.status_code,
-                (resp.text or "")[:300],
-            )
-            return None
-        rows = (resp.json() or {}).get("data") or []
-        return rows[0] if rows else None
-
-    def get_clip(self, clip_id: str) -> dict[str, Any] | None:
-        cid = str(clip_id or "").strip()
-        if not cid:
-            return None
-        resp = self._session.get(
-            "https://api.twitch.tv/helix/clips",
-            headers=self._headers(),
-            params={"id": cid},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            return None
-        rows = (resp.json() or {}).get("data") or []
-        return rows[0] if rows else None
-
-    def wait_for_clip(
-        self,
-        clip_id: str,
-        *,
-        timeout_sec: float = 60.0,
-        poll_sec: float = 2.0,
-    ) -> dict[str, Any] | None:
-        deadline = time.time() + max(5.0, float(timeout_sec))
-        while time.time() < deadline:
-            clip = self.get_clip(clip_id)
-            if clip and clip.get("thumbnail_url"):
-                return clip
-            time.sleep(max(0.5, float(poll_sec)))
-        return None
-
-    def create_live_clip_mp4_url(
-        self,
-        broadcaster_id: str,
-        *,
-        duration: float = 30.0,
-    ) -> str | None:
-        """Create clip and return a downloadable MP4 URL (in-memory only)."""
-        created = self.create_clip(broadcaster_id, duration=duration)
-        if not created:
-            return None
-        clip_id = str(created.get("id") or "").strip()
-        if not clip_id:
-            return None
-        clip = self.wait_for_clip(clip_id)
-        if not clip:
-            return None
-        return clip_mp4_url_from_thumbnail(str(clip.get("thumbnail_url") or ""))
 
     def get_token_user(self, user_access_token: str) -> dict[str, Any] | None:
         resp = self._session.get(

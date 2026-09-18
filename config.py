@@ -113,11 +113,7 @@ DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
 # Optional: YouTube Data API v3 key — multistream live checks for YouTube channels.
 # Create at https://console.cloud.google.com/ (enable YouTube Data API v3 → API key).
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
-# Optional: Twitch user refresh token with clips:edit — Create Clip for stream video previews.
-TWITCH_CLIPS_REFRESH_TOKEN = os.getenv("TWITCH_CLIPS_REFRESH_TOKEN", "").strip()
-# Optional: CloudConvert API key — MP4 clip → GIF for video stream preview (no local storage).
-CLOUDCONVERT_API_KEY = os.getenv("CLOUDCONVERT_API_KEY", "").strip()
-# How often to refresh stream preview photo / video GIF while live (seconds).
+# How often to refresh stream preview photo / video MP4 while live (seconds).
 STREAM_PREVIEW_REFRESH_SECONDS = int(os.getenv("STREAM_PREVIEW_REFRESH_SECONDS", "1800"))
 BOT_VERSION = (os.getenv("BOT_VERSION") or "dev").strip() or "dev"
 POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", "").strip()
