@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DURATION_SEC = 30.0
 # Reuse one capture across many alerts for the same streamer (go-live fan-out).
 SHARED_TTL_SEC = 180.0
-_QUALITY = "360p,480p,worst,best"
+_QUALITY = "360p,480p,worst"
 _LOGIN_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 _LOCK = threading.Lock()
 # path_str -> twitch_user_id
@@ -39,6 +39,8 @@ _SHARED: dict[str, "_SharedEntry"] = {}
 # Reject near-static / truncated captures (Telegram shows them as a frozen GIF).
 _MIN_DURATION_SEC = 4.0
 _MIN_PACKETS = 40
+# Telegram animations stay snappy under ~6–8MB; larger files often fail editMessageMedia.
+_MAX_BYTES = 6_000_000
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,26 @@ def capture_live_preview_mp4(
         )
         _safe_unlink(out_path)
         return None
+    try:
+        size = out_path.stat().st_size
+    except OSError:
+        size = 0
+    if size > _MAX_BYTES:
+        logger.info(
+            "Preview too large (%s bytes), re-encoding lighter login=%s",
+            size,
+            user,
+        )
+        light = out_dir / f"preview_{user}_{int(time.time())}_{os.getpid()}_lite.mp4"
+        if not _ffmpeg_reencode_light(out_path, light):
+            _safe_unlink(out_path)
+            _safe_unlink(light)
+            return None
+        _safe_unlink(out_path)
+        out_path = light
+        if not _mp4_looks_animated(out_path):
+            _safe_unlink(out_path)
+            return None
     try:
         data = out_path.read_bytes()
     except OSError:
@@ -371,6 +393,55 @@ def _ffmpeg_copy_cmd(
         "+faststart",
         str(out_path),
     ]
+
+
+def _ffmpeg_reencode_light(src: Path, dest: Path) -> bool:
+    """Low-RAM H.264 re-encode for Telegram animation size limits."""
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(src),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-profile:v",
+        "baseline",
+        "-level",
+        "3.0",
+        "-preset",
+        "ultrafast",
+        "-threads",
+        "1",
+        "-crf",
+        "32",
+        "-maxrate",
+        "500k",
+        "-bufsize",
+        "1000k",
+        "-vf",
+        "fps=15,scale=480:-2",
+        "-movflags",
+        "+faststart",
+        str(dest),
+    ]
+    try:
+        proc = _run_killable(cmd, timeout=120.0)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("ffmpeg light re-encode failed: %s", exc)
+        return False
+    if proc.returncode != 0 or not dest.is_file() or dest.stat().st_size <= 0:
+        err = (proc.stderr or "")[:400]
+        logger.warning("ffmpeg light re-encode failed code=%s: %s", proc.returncode, err)
+        return False
+    return True
 
 
 def _streamlink_url(login: str) -> str | None:

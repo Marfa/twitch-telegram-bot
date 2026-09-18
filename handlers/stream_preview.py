@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from telegram import InputFile, InputMediaAnimation, InputMediaPhoto
@@ -185,7 +186,41 @@ async def refresh_live_stream_previews(
 
 
 def animation_input_file(data: bytes) -> InputFile:
+    # Named MP4 helps Telegram accept the upload for send/edit animation.
     return InputFile(BytesIO(data), filename="preview.mp4")
+
+
+async def edit_animation_message(
+    bot,
+    *,
+    chat_id: int,
+    message_id: int,
+    data: bytes,
+) -> None:
+    """Upload MP4 via a real file path — BytesIO often yields 'media not found' on edit."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+    try:
+        with open(tmp_path, "rb") as fh:
+            media = InputMediaAnimation(
+                media=InputFile(fh, filename="preview.mp4"),
+                width=_ANIM_WIDTH,
+                height=_ANIM_HEIGHT,
+                duration=_ANIM_DURATION,
+            )
+            await bot.edit_message_media(
+                chat_id=chat_id,
+                message_id=message_id,
+                media=media,
+            )
+    finally:
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 async def _edit_preview_media(
@@ -205,11 +240,11 @@ async def _edit_preview_media(
             # and can make Telegram refuse later Animation edits.
             if captured is None:
                 return False
-            media = InputMediaAnimation(
-                media=animation_input_file(captured.data),
-                width=_ANIM_WIDTH,
-                height=_ANIM_HEIGHT,
-                duration=_ANIM_DURATION,
+            await edit_animation_message(
+                bot,
+                chat_id=sub.chat_id,
+                message_id=int(mid),
+                data=captured.data,
             )
         else:
             photo = format_stream_thumbnail_url(
@@ -219,11 +254,11 @@ async def _edit_preview_media(
             if not photo:
                 return False
             media = InputMediaPhoto(media=photo)
-        await bot.edit_message_media(
-            chat_id=sub.chat_id,
-            message_id=mid,
-            media=media,
-        )
+            await bot.edit_message_media(
+                chat_id=sub.chat_id,
+                message_id=mid,
+                media=media,
+            )
         logger.info(
             "Stream preview refreshed sub=%s chat=%s mid=%s kind=%s",
             sub.id,

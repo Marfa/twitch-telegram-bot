@@ -23,21 +23,13 @@ logger = logging.getLogger("send_admin_marfapr_preview")
 
 
 async def _edit_animation(bot, chat_id: int, message_id: int, data: bytes) -> bool:
-    from telegram import InputMediaAnimation
     from telegram.error import BadRequest, Forbidden
 
-    from handlers.stream_preview import animation_input_file
+    from handlers.stream_preview import edit_animation_message
 
     try:
-        await bot.edit_message_media(
-            chat_id=chat_id,
-            message_id=message_id,
-            media=InputMediaAnimation(
-                media=animation_input_file(data),
-                width=480,
-                height=270,
-                duration=30,
-            ),
+        await edit_animation_message(
+            bot, chat_id=chat_id, message_id=message_id, data=data
         )
         return True
     except (BadRequest, Forbidden) as exc:
@@ -149,11 +141,11 @@ async def main() -> int:
         if mid:
             ok = await _edit_animation(bot, admin_id, int(mid), captured.data)
             logger.info("Refresh tracked mid=%s ok=%s", mid, ok)
-            # Orphan from first one-shot send (no last_message_id stored).
-            orphan = int(mid) - 1
-            if orphan > 0:
-                o_ok = await _edit_animation(bot, admin_id, orphan, captured.data)
-                logger.info("Refresh orphan mid=%s ok=%s", orphan, o_ok)
+            # Older one-shot DMs (no / failed last_message_id tracking).
+            for orphan in (int(mid) - 1, int(mid) - 2, int(mid) - 3):
+                if orphan > 0:
+                    o_ok = await _edit_animation(bot, admin_id, orphan, captured.data)
+                    logger.info("Refresh orphan mid=%s ok=%s", orphan, o_ok)
             if ok:
                 from handlers.stream_preview import mark_preview_refresh
 
