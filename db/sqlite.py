@@ -1812,6 +1812,30 @@ class SqliteDatabase:
             ).fetchall()
         return [_row_to_sub(r) for r in rows]
 
+    def get_subs_with_pinned_message(
+        self, twitch_user_id: str | None = None
+    ) -> list[Subscription]:
+        with self._conn() as conn:
+            if twitch_user_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM subscriptions
+                    WHERE pinned_message_id IS NOT NULL
+                    ORDER BY id
+                    """
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM subscriptions
+                    WHERE twitch_user_id = ?
+                      AND pinned_message_id IS NOT NULL
+                    ORDER BY id
+                    """,
+                    (twitch_user_id,),
+                ).fetchall()
+        return [_row_to_sub(r) for r in rows]
+
     def get_all_owner_ids(self) -> list[int]:
         with self._conn() as conn:
             rows = conn.execute(

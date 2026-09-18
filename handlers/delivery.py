@@ -769,7 +769,9 @@ async def _delete_previous_before_send(bot, db: Database, sub: Subscription) -> 
             owner_id=sub.owner_id,
             notify_delete_fail=sub.notify_delete_fail,
         )
-        if ok and owner_sub_id != sub.id:
+        if not ok:
+            continue
+        if owner_sub_id != sub.id:
             db.set_last_message_id(owner_sub_id, None)
             sibling = db.get_subscription_by_id(owner_sub_id)
             if (
@@ -778,23 +780,37 @@ async def _delete_previous_before_send(bot, db: Database, sub: Subscription) -> 
                 and sibling.pinned_message_id == message_id
             ):
                 db.set_pinned_message_id(owner_sub_id, None)
-    if (
-        sub.pinned_message_id
-        and sub.pinned_message_id in seen_msg
-    ):
-        db.set_pinned_message_id(sub.id, None)
+        elif (
+            sub.pinned_message_id
+            and sub.pinned_message_id == message_id
+        ):
+            db.set_pinned_message_id(sub.id, None)
 
 
-async def _unpin_one_message(bot, *, chat_id: int, message_id: int) -> None:
+async def _unpin_one_message(bot, *, chat_id: int, message_id: int) -> bool:
     try:
         await bot.unpin_chat_message(chat_id=chat_id, message_id=message_id)
+        return True
     except (BadRequest, Forbidden) as exc:
+        err = str(exc).lower()
+        # Already gone / not pinned — treat as cleaned up.
+        if any(
+            token in err
+            for token in (
+                "message to unpin not found",
+                "message can't be unpinned",
+                "message not found",
+                "chat not found",
+            )
+        ):
+            return True
         logger.warning(
             "Cannot unpin message %s in %s: %s",
             message_id,
             chat_id,
             exc,
         )
+        return False
 
 
 async def _pin_after_send(
@@ -822,16 +838,42 @@ async def _pin_after_send(
 async def unpin_stream_alert_messages(
     bot, db: Database, twitch_user_id: str
 ) -> None:
-    """Unpin bot alerts for a streamer when the stream ends (any pin-enabled sub)."""
-    for sub in db.get_enabled_by_twitch_user_id(twitch_user_id):
-        if not getattr(sub, "pin_message", False):
-            continue
+    """Unpin bot alerts for a streamer when the stream ends (any row with a pin id)."""
+    for sub in db.get_subs_with_pinned_message(twitch_user_id):
         if sub.dest_type == "dm":
             continue
         pinned_id = getattr(sub, "pinned_message_id", None)
         if not pinned_id:
             continue
-        await _unpin_one_message(bot, chat_id=sub.chat_id, message_id=pinned_id)
+        if await _unpin_one_message(bot, chat_id=sub.chat_id, message_id=pinned_id):
+            db.set_pinned_message_id(sub.id, None)
+
+
+async def unpin_orphaned_alert_pins(
+    bot, db: Database, *, live_user_ids: set[str]
+) -> None:
+    """Unpin leftover alert pins for streamers who are not live (cold start / missed offline)."""
+    for sub in db.get_subs_with_pinned_message():
+        if sub.dest_type == "dm":
+            continue
+        uid = str(sub.twitch_user_id or "").strip()
+        if not uid or uid in live_user_ids:
+            continue
+        pinned_id = getattr(sub, "pinned_message_id", None)
+        if not pinned_id:
+            continue
+        if await _unpin_one_message(bot, chat_id=sub.chat_id, message_id=pinned_id):
+            db.set_pinned_message_id(sub.id, None)
+
+
+async def unpin_subscription_alert(bot, db: Database, sub: Subscription) -> None:
+    """Unpin one subscription's stored alert pin, if any."""
+    if sub.dest_type == "dm":
+        return
+    pinned_id = getattr(sub, "pinned_message_id", None)
+    if not pinned_id:
+        return
+    if await _unpin_one_message(bot, chat_id=sub.chat_id, message_id=pinned_id):
         db.set_pinned_message_id(sub.id, None)
 
 

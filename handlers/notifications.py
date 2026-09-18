@@ -17,7 +17,11 @@ from db import (
     parse_category_watch_prefs,
 )
 from handlers.alert_history import _vod_offset_seconds
-from handlers.delivery import _send_notification, unpin_stream_alert_messages
+from handlers.delivery import (
+    _send_notification,
+    unpin_orphaned_alert_pins,
+    unpin_stream_alert_messages,
+)
 from i18n import DEFAULT_LOCALE, format_duration_hm, t
 from twitch import (
     TwitchClient,
@@ -362,6 +366,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.exception("Twitch poll failed")
             live_streams = {}
         else:
+            was_primed = primed
             went_live, went_offline = live_transitions(
                 last_live, user_ids, live_streams, primed=primed
             )
@@ -372,6 +377,11 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 last_stream_ids=last_stream_ids,
                 went_live=went_live,
             )
+            # Cold start: no went_offline edges — still drop pins for anyone offline now.
+            if not was_primed:
+                await unpin_orphaned_alert_pins(
+                    context.bot, db, live_user_ids=set(live_streams)
+                )
             ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             restart_end_streams: dict[str, dict | None] = {}
             restart_old_sids: dict[str, str] = {}

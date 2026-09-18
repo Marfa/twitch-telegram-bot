@@ -3390,6 +3390,10 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         await query.answer()
         enabled = not bool(getattr(sub, "pin_message", False))
+        if not enabled and getattr(sub, "pinned_message_id", None):
+            from handlers.delivery import unpin_subscription_alert
+
+            await unpin_subscription_alert(context.bot, db, sub)
         db.update_subscription(sub_id, query.from_user.id, pin_message=enabled)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
@@ -4360,10 +4364,15 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             feature="active_limit",
         )
         return
+    was_enabled = bool(sub.enabled)
     new_state = db.toggle_subscription(sub_id, query.from_user.id)
     if new_state is None:
         await query.edit_message_text(t("sub_not_found", lang))
         return
+    if was_enabled and not new_state and getattr(sub, "pinned_message_id", None):
+        from handlers.delivery import unpin_subscription_alert
+
+        await unpin_subscription_alert(context.bot, db, sub)
     await _refresh_current_subs_list(
         bot=context.bot,
         query=query,
