@@ -1,0 +1,24 @@
+name: Send admin marfapr video preview
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send admin DM preview via bot container
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T bot \
+              python scripts/send_admin_marfapr_preview.py

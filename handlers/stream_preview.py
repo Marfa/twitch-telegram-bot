@@ -124,8 +124,7 @@ async def refresh_live_stream_previews(
         video_subs: list[Subscription] = []
         photo_subs: list[Subscription] = []
         for sub in db.get_enabled_by_twitch_user_id(uid):
-            if sub.dest_type == "dm":
-                continue
+            # Refresh channel/group and DM alerts that use live stream media.
             if not sub.last_message_id:
                 continue
             if int(sub.id) in skip:
