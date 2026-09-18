@@ -231,6 +231,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
         stream=stream,
         stream_id=str(job_data.get("stream_id") or ""),
         twitch=twitch,
+        bot_data=context.application.bot_data,
     )
 
 
@@ -278,6 +279,7 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
         stream=end_stream,
         stream_id=str(job_data.get("stream_id") or ""),
         twitch=twitch,
+        bot_data=context.application.bot_data,
     )
 
 
@@ -329,6 +331,7 @@ async def _send_delayed_category_notification(
         stream_id=str(job_data.get("stream_id") or ""),
         vod_offset_seconds=job_data.get("vod_offset_seconds"),
         twitch=twitch,
+        bot_data=context.application.bot_data,
     )
 
 
@@ -540,6 +543,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         stream=end_stream,
                         stream_id=stream_id,
                         twitch=twitch,
+                        bot_data=context.application.bot_data,
                     )
 
             for uid in list(went_live) + stream_restarts:
@@ -596,6 +600,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         alert_type="live",
                         stream=stream,
                         twitch=twitch,
+                        bot_data=context.application.bot_data,
                     )
 
             for uid in went_offline:
@@ -652,6 +657,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         stream=end_stream,
                         stream_id=stream_id,
                         twitch=twitch,
+                        bot_data=context.application.bot_data,
                     )
             for uid in went_offline:
                 last_streams.pop(uid, None)
@@ -699,6 +705,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         stream_id=stream_id,
                         vod_offset_seconds=_vod_offset_seconds(stream),
                         twitch=twitch,
+                        bot_data=context.application.bot_data,
                     )
             await refresh_live_stream_previews(
                 context.bot,
@@ -822,6 +829,7 @@ async def _check_category_watch_alerts(
                     stream=None,
                     twitch=twitch,
                     parse_mode=ParseMode.HTML,
+                    bot_data=context.application.bot_data,
                 )
                 if ok:
                     apply_category_watch_cooldown(db, sub)
@@ -943,6 +951,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                         alert_type="schedule_cancel",
                         stream=cover_stream,
                         twitch=twitch,
+                        bot_data=context.application.bot_data,
                     )
                     if ok:
                         db.mark_schedule_cancel_notified(sub.id, day)
@@ -1002,6 +1011,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     alert_type="schedule",
                     stream=cover_stream,
                     twitch=twitch,
+                    bot_data=context.application.bot_data,
                 )
                 if not ok:
                     continue

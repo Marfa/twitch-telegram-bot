@@ -942,6 +942,7 @@ async def _send_notification(
     vod_offset_seconds: int | None = None,
     twitch: TwitchClient | None = None,
     parse_mode: str | None = None,
+    bot_data: dict | None = None,
 ) -> bool:
     if _user_notifications_paused(db, sub.owner_id):
         return True
@@ -1067,6 +1068,10 @@ async def _send_notification(
         sub.delete_previous or is_dynamic_alert_image(sub.image_file_id)
     ):
         db.set_last_message_id(sub.id, msg.message_id)
+        if is_dynamic_alert_image(sub.image_file_id):
+            from handlers.stream_preview import mark_preview_refresh
+
+            mark_preview_refresh(bot_data, sub.id)
     if (
         msg
         and getattr(sub, "pin_message", False)

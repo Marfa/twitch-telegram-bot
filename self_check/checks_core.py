@@ -275,12 +275,14 @@ def check_core() -> None:
     from i18n import t as i18n_image_t
     from stream_capture import (
         forget_and_unlink,
+        invalidate_shared,
         preview_dir,
         purge_for_streamer,
         purge_stale_on_startup,
         register_pending,
         video_preview_ready,
     )
+    from handlers.stream_preview import mark_preview_refresh
 
     assert "своё" in i18n_image_t("image_add", "ru").lower()
     assert "own" in i18n_image_t("image_add", "en").lower()
@@ -329,6 +331,24 @@ def check_core() -> None:
     assert _f2.exists()
     forget_and_unlink(_f2)
     assert not _f2.exists()
+    # Shared cache: forget keeps file until invalidate/purge.
+    import stream_capture as _sc
+    import time as _time
+
+    _f_shared = _prev / "preview_selfcheck_shared.mp4"
+    _f_shared.write_bytes(b"shared")
+    with _sc._LOCK:
+        _sc._SHARED["333"] = _sc._SharedEntry(
+            path=_f_shared, data=b"shared", mono=_time.monotonic()
+        )
+        _sc._PENDING[str(_f_shared.resolve())] = "333"
+    forget_and_unlink(_f_shared)
+    assert _f_shared.exists()
+    invalidate_shared("333")
+    assert not _f_shared.exists()
+    _bd: dict = {}
+    mark_preview_refresh(_bd, 7)
+    assert float(_bd["stream_preview_refresh_at"][7]) > 0
     _f3 = _prev / "preview_selfcheck_stale.mp4"
     _f3.write_bytes(b"c")
     assert purge_stale_on_startup() >= 1
