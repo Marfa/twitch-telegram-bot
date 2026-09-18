@@ -1,0 +1,64 @@
+name: Inspect stream preview capture
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture + ffprobe on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            echo "=== sub 753 ==="
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -c \
+              "SELECT id, owner_id, dest_type, chat_id, last_message_id, image_file_id, enabled, twitch_username FROM subscriptions WHERE id=753;"
+            echo "=== recent bot logs preview/refresh ==="
+            docker compose -f compose.vps.yml logs --tail=200 bot 2>&1 \
+              | grep -iE 'preview|refresh|streamlink|ffmpeg|animation|send_admin|uneditable' || true
+            echo "=== capture probe ==="
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import asyncio, subprocess, tempfile, os
+            from pathlib import Path
+            from stream_capture import capture_live_preview_mp4, preview_dir, video_preview_ready
+            from twitch import TwitchClient
+            print("ready", video_preview_ready())
+            print("preview_dir", preview_dir())
+            tw = TwitchClient()
+            u = tw.get_user("marfapr")
+            print("user", u and u.get("id"), u and u.get("login"))
+            live = tw.get_live_streams([str(u["id"])]) if u else {}
+            print("live", bool(live.get(str(u["id"]))))
+            cap = capture_live_preview_mp4("marfapr", twitch_user_id=str(u["id"]), force=True, duration=12.0)
+            if not cap:
+                print("CAPTURE_FAILED")
+                raise SystemExit(1)
+            print("size", len(cap.data), "path", cap.path)
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=nb_frames,duration,r_frame_rate,avg_frame_rate,codec_name,width,height,nb_read_frames",
+                 "-show_entries", "format=duration,size,bit_rate",
+                 "-count_frames", "-of", "json", str(cap.path)],
+                capture_output=True, text=True, timeout=120,
+            )
+            print(probe.stdout)
+            print("ffprobe_err", probe.stderr[:500] if probe.stderr else "")
+            # sample frame variance via ffmpeg signalstats / blackdetect
+            stats = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-count_packets", "-show_entries", "stream=nb_read_packets",
+                 "-of", "csv=p=0", str(cap.path)],
+                capture_output=True, text=True, timeout=60,
+            )
+            print("packets", stats.stdout.strip(), stats.stderr[:200])
+            PY
