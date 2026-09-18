@@ -349,6 +349,27 @@ def check_core() -> None:
     _bd: dict = {}
     mark_preview_refresh(_bd, 7)
     assert float(_bd["stream_preview_refresh_at"][7]) > 0
+    from handlers.stream_preview import _preview_caption
+
+    _cap_sub = type(
+        "S",
+        (),
+        {
+            "message_template": "Live {name} / {game}",
+            "twitch_username": "chelovekgleb",
+            "image_position": "before",
+            "owner_id": 1,
+            "strip_name_mentions": False,
+            "multistream_channels": "[]",
+        },
+    )()
+    _cap_text, _cap_pm, _cap_above = _preview_caption(
+        _cap_sub,
+        {"user_login": "chelovekgleb", "game_name": "Just Chatting", "title": "Hi"},
+        twitch=None,
+    )
+    assert "Just Chatting" in _cap_text and "Hi" in _cap_text
+    assert _cap_above is False
     _f3 = _prev / "preview_selfcheck_stale.mp4"
     _f3.write_bytes(b"c")
     assert purge_stale_on_startup() >= 1

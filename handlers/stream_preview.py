@@ -169,13 +169,23 @@ async def refresh_live_stream_previews(
                 )
         for sub in video_subs:
             ok = await _edit_preview_media(
-                bot, sub, stream, captured=captured, bot_data=bot_data
+                bot,
+                sub,
+                stream,
+                captured=captured,
+                bot_data=bot_data,
+                twitch=twitch,
             )
             if ok:
                 refresh_at[sub.id] = now
         for sub in photo_subs:
             ok = await _edit_preview_media(
-                bot, sub, stream, captured=None, bot_data=bot_data
+                bot,
+                sub,
+                stream,
+                captured=None,
+                bot_data=bot_data,
+                twitch=twitch,
             )
             if ok:
                 refresh_at[sub.id] = now
@@ -196,19 +206,62 @@ async def edit_animation_message(
     chat_id: int,
     message_id: int,
     data: bytes,
+    caption: str | None = None,
+    parse_mode: str | None = None,
+    show_caption_above_media: bool | None = None,
 ) -> None:
-    """Replace animation media; local files must use attach:// via InputFile(attach=True)."""
-    media = InputMediaAnimation(
-        media=animation_input_file(data, attach=True),
-        width=_ANIM_WIDTH,
-        height=_ANIM_HEIGHT,
-        duration=_ANIM_DURATION,
-    )
+    """Replace animation media; local files must use attach:// via InputFile(attach=True).
+
+    Caption must be passed explicitly — omitting it clears the message text on edit.
+    """
+    kwargs: dict[str, Any] = {
+        "media": animation_input_file(data, attach=True),
+        "width": _ANIM_WIDTH,
+        "height": _ANIM_HEIGHT,
+        "duration": _ANIM_DURATION,
+    }
+    if caption is not None:
+        kwargs["caption"] = caption
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        if show_caption_above_media is not None:
+            kwargs["show_caption_above_media"] = show_caption_above_media
+    media = InputMediaAnimation(**kwargs)
     await bot.edit_message_media(
         chat_id=chat_id,
         message_id=message_id,
         media=media,
     )
+
+
+def _preview_caption(
+    sub: Subscription,
+    stream: dict[str, Any],
+    twitch: TwitchClient | None,
+) -> tuple[str, str | None, bool]:
+    """Rebuild alert caption for editMessageMedia (Telegram clears it if omitted)."""
+    from handlers.wizard import _render_sub_template
+    from telegram.constants import ParseMode
+    from twitch import template_uses_html
+
+    login = preview_login_from_stream(stream, sub) or (sub.twitch_username or "")
+    text = _render_sub_template(
+        sub,
+        login,
+        str(stream.get("game_name") or ""),
+        str(stream.get("title") or ""),
+        twitch=twitch,
+        stream=stream,
+    )
+    if len(text) > 1024:
+        text = text[:1020] + "…"
+    parse_mode = (
+        ParseMode.HTML if template_uses_html(sub.message_template or "") else None
+    )
+    position = (sub.image_position or "").strip()
+    if position not in ("before", "after"):
+        position = "before"
+    return text, parse_mode, position == "after"
 
 
 async def _edit_preview_media(
@@ -218,22 +271,42 @@ async def _edit_preview_media(
     *,
     captured: CapturedPreview | None,
     bot_data: dict[str, Any] | None = None,
+    twitch: TwitchClient | None = None,
 ) -> bool:
     mid = sub.last_message_id
     if not mid:
         return False
+    caption, parse_mode, caption_above = _preview_caption(sub, stream, twitch)
     try:
         if is_stream_video_preview_image(sub.image_file_id):
             # Never fall back to a static photo — that freezes the GIF bubble
             # and can make Telegram refuse later Animation edits.
             if captured is None:
                 return False
-            await edit_animation_message(
-                bot,
-                chat_id=sub.chat_id,
-                message_id=int(mid),
-                data=captured.data,
-            )
+            try:
+                await edit_animation_message(
+                    bot,
+                    chat_id=sub.chat_id,
+                    message_id=int(mid),
+                    data=captured.data,
+                    caption=caption,
+                    parse_mode=parse_mode,
+                    show_caption_above_media=caption_above,
+                )
+            except BadRequest as exc:
+                err = str(exc).lower()
+                if parse_mode and ("parse" in err or "entity" in err or "tag" in err):
+                    await edit_animation_message(
+                        bot,
+                        chat_id=sub.chat_id,
+                        message_id=int(mid),
+                        data=captured.data,
+                        caption=caption,
+                        parse_mode=None,
+                        show_caption_above_media=caption_above,
+                    )
+                else:
+                    raise
         else:
             photo = format_stream_thumbnail_url(
                 str(stream.get("thumbnail_url") or ""),
@@ -241,12 +314,30 @@ async def _edit_preview_media(
             )
             if not photo:
                 return False
-            media = InputMediaPhoto(media=photo)
-            await bot.edit_message_media(
-                chat_id=sub.chat_id,
-                message_id=mid,
-                media=media,
-            )
+            media_kwargs: dict[str, Any] = {
+                "media": photo,
+                "caption": caption,
+                "show_caption_above_media": caption_above,
+            }
+            if parse_mode:
+                media_kwargs["parse_mode"] = parse_mode
+            try:
+                await bot.edit_message_media(
+                    chat_id=sub.chat_id,
+                    message_id=mid,
+                    media=InputMediaPhoto(**media_kwargs),
+                )
+            except BadRequest as exc:
+                err = str(exc).lower()
+                if parse_mode and ("parse" in err or "entity" in err or "tag" in err):
+                    media_kwargs.pop("parse_mode", None)
+                    await bot.edit_message_media(
+                        chat_id=sub.chat_id,
+                        message_id=mid,
+                        media=InputMediaPhoto(**media_kwargs),
+                    )
+                else:
+                    raise
         logger.info(
             "Stream preview refreshed sub=%s chat=%s mid=%s kind=%s",
             sub.id,
