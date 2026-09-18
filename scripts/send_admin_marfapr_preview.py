@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send admin DM live alert for marfapr with video preview (refresh-tracked).
+"""Send or refresh admin DM live alert for marfapr with video preview.
 
 Inside VPS bot container:
   python scripts/send_admin_marfapr_preview.py
@@ -22,12 +22,36 @@ logging.basicConfig(
 logger = logging.getLogger("send_admin_marfapr_preview")
 
 
+async def _edit_animation(bot, chat_id: int, message_id: int, data: bytes) -> bool:
+    from telegram import InputMediaAnimation
+    from telegram.error import BadRequest, Forbidden
+
+    from handlers.stream_preview import animation_input_file
+
+    try:
+        await bot.edit_message_media(
+            chat_id=chat_id,
+            message_id=message_id,
+            media=InputMediaAnimation(
+                media=animation_input_file(data),
+                width=480,
+                height=270,
+                duration=30,
+            ),
+        )
+        return True
+    except (BadRequest, Forbidden) as exc:
+        logger.info("edit mid=%s failed: %s", message_id, exc)
+        return False
+
+
 async def main() -> int:
     from telegram import Bot
 
     from config import ADMIN_USER_IDS, DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN
     from db import open_database
     from handlers.delivery import _send_notification
+    from handlers.stream_preview import build_stream_video_mp4
     from handlers.wizard import _render_sub_template
     from twitch import STREAM_VIDEO_PREVIEW_IMAGE_ID, TwitchClient
     import premium as prem
@@ -110,6 +134,36 @@ async def main() -> int:
             logger.error("No subscription for admin %s", admin_id)
             return 1
 
+        captured = await asyncio.to_thread(
+            build_stream_video_mp4,
+            login=login,
+            twitch_user_id=uid,
+            force=True,
+        )
+        if captured is None:
+            logger.error("Capture failed for %s", login)
+            return 5
+        logger.info("Captured %s bytes", len(captured.data))
+
+        mid = existing.last_message_id
+        if mid:
+            ok = await _edit_animation(bot, admin_id, int(mid), captured.data)
+            logger.info("Refresh tracked mid=%s ok=%s", mid, ok)
+            # Orphan from first one-shot send (no last_message_id stored).
+            orphan = int(mid) - 1
+            if orphan > 0:
+                o_ok = await _edit_animation(bot, admin_id, orphan, captured.data)
+                logger.info("Refresh orphan mid=%s ok=%s", orphan, o_ok)
+            if ok:
+                from handlers.stream_preview import mark_preview_refresh
+
+                mark_preview_refresh(bot_data, existing.id)
+                from stream_capture import forget_and_unlink
+
+                forget_and_unlink(captured.path)
+                logger.info("Updated existing DM(s); no new message.")
+                continue
+
         text = _render_sub_template(
             existing,
             stream.get("user_login", login),
@@ -129,23 +183,18 @@ async def main() -> int:
             bot_data=bot_data,
         )
         refreshed = db.get_subscription(existing.id, admin_id)
-        mid = refreshed.last_message_id if refreshed else None
+        new_mid = refreshed.last_message_id if refreshed else None
         logger.info(
             "admin=%s sub=%s ok=%s last_message_id=%s",
             admin_id,
             existing.id,
             ok,
-            mid,
+            new_mid,
         )
-        if not ok:
+        if not ok or not new_mid:
             return 3
-        if not mid:
-            logger.error(
-                "Sent but last_message_id empty — preview refresh will not run"
-            )
-            return 4
 
-    logger.info("Sent. DM preview refresh runs with check_streams.")
+    logger.info("Done. Periodic refresh runs with check_streams.")
     return 0
 
 

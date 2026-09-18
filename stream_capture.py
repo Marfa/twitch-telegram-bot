@@ -5,9 +5,9 @@ ponytail: Twitch ToS / unofficial HLS; upgrade path = Helix Create Clip if Delet
 appears, or an official short preview API.
 
 Connection lifecycle (must not "sit" on the stream):
-- streamlink --stream-url: resolves an HLS playlist URL and exits (no continuous watch).
-- ffmpeg: pulls HLS only for -t seconds, then exits; we kill the process group on
-  timeout/failure so no orphan keeps the CDN session open.
+- Prefer streamlink --stdout (ad-filtered) piped into ffmpeg for ~duration, then exit.
+- Fallback: streamlink --stream-url + ffmpeg -c:v copy (low RAM on 512MiB VPS).
+- Kill process groups on timeout/failure so no orphan keeps the CDN session open.
 """
 from __future__ import annotations
 
@@ -36,6 +36,9 @@ _LOCK = threading.Lock()
 _PENDING: dict[str, str] = {}
 # twitch_user_id -> shared capture (reused until TTL / invalidate / purge)
 _SHARED: dict[str, "_SharedEntry"] = {}
+# Reject near-static / truncated captures (Telegram shows them as a frozen GIF).
+_MIN_DURATION_SEC = 4.0
+_MIN_PACKETS = 40
 
 
 @dataclass(frozen=True)
@@ -96,10 +99,19 @@ def capture_live_preview_mp4(
         logger.exception("Cannot create stream preview dir %s", out_dir)
         return None
     out_path = out_dir / f"preview_{user}_{int(time.time())}_{os.getpid()}.mp4"
-    hls_url = _streamlink_url(user)
-    if not hls_url:
+    ok = _record_streamlink_pipe(user, out_path, duration=dur)
+    if not ok:
+        _safe_unlink(out_path)
+        ok = _record_hls_copy(user, out_path, duration=dur)
+    if not ok:
+        _safe_unlink(out_path)
         return None
-    if not _ffmpeg_record(hls_url, out_path, duration=dur):
+    if not _mp4_looks_animated(out_path):
+        logger.warning(
+            "Rejecting static/short stream preview login=%s path=%s",
+            user,
+            out_path.name,
+        )
         _safe_unlink(out_path)
         return None
     try:
@@ -221,11 +233,152 @@ def _shared_put(uid: str, path: Path, data: bytes) -> None:
         _safe_unlink(prev.path)
 
 
+def _record_streamlink_pipe(login: str, out_path: Path, *, duration: float) -> bool:
+    """Ad-filtered live pipe → MP4 (stream copy, low RAM)."""
+    sl = shutil.which("streamlink")
+    ff = shutil.which("ffmpeg")
+    if not sl or not ff:
+        return False
+    sl_cmd = [
+        sl,
+        "--stdout",
+        "--twitch-disable-ads",
+        f"https://www.twitch.tv/{login}",
+        _QUALITY,
+    ]
+    ff_cmd = _ffmpeg_copy_cmd(out_path, duration=duration, input_arg="pipe:0")
+    timeout = float(duration) + 90.0
+    sl_proc: subprocess.Popen[bytes] | None = None
+    ff_proc: subprocess.Popen[bytes] | None = None
+    try:
+        sl_proc = subprocess.Popen(
+            sl_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        ff_proc = subprocess.Popen(
+            ff_cmd,
+            stdin=sl_proc.stdout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        if sl_proc.stdout is not None:
+            sl_proc.stdout.close()
+        try:
+            _ff_err = ff_proc.communicate(timeout=timeout)[1]
+        except subprocess.TimeoutExpired:
+            _kill_process_group(ff_proc)
+            _kill_process_group(sl_proc)
+            try:
+                ff_proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            logger.warning("streamlink|ffmpeg pipe timed out login=%s", login)
+            return False
+        _kill_process_group(sl_proc)
+        try:
+            sl_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(sl_proc)
+        if ff_proc.returncode != 0 or not out_path.is_file() or out_path.stat().st_size <= 0:
+            err = (_ff_err or b"")[:400].decode("utf-8", errors="replace")
+            logger.warning(
+                "streamlink|ffmpeg pipe failed login=%s code=%s: %s",
+                login,
+                ff_proc.returncode,
+                err,
+            )
+            return False
+        return True
+    except OSError as exc:
+        logger.warning("streamlink|ffmpeg pipe error login=%s: %s", login, exc)
+        return False
+    finally:
+        if ff_proc is not None and ff_proc.poll() is None:
+            _kill_process_group(ff_proc)
+        if sl_proc is not None and sl_proc.poll() is None:
+            _kill_process_group(sl_proc)
+
+
+def _record_hls_copy(login: str, out_path: Path, *, duration: float) -> bool:
+    """Fallback: resolve HLS URL, stream-copy without re-encode."""
+    hls_url = _streamlink_url(login)
+    if not hls_url:
+        return False
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-rw_timeout",
+        "20000000",
+        "-http_persistent",
+        "0",
+        "-i",
+        hls_url,
+        "-t",
+        f"{duration:.1f}",
+        "-map",
+        "0:v:0",
+        "-an",
+        "-c:v",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(out_path),
+    ]
+    timeout = float(duration) + 90.0
+    try:
+        proc = _run_killable(cmd, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("ffmpeg HLS copy failed login=%s: %s", login, exc)
+        return False
+    if proc.returncode != 0 or not out_path.is_file() or out_path.stat().st_size <= 0:
+        err = (proc.stderr or "")[:400]
+        logger.warning(
+            "ffmpeg HLS copy failed login=%s code=%s: %s",
+            login,
+            proc.returncode,
+            err,
+        )
+        return False
+    return True
+
+
+def _ffmpeg_copy_cmd(
+    out_path: Path, *, duration: float, input_arg: str
+) -> list[str]:
+    """Muted H.264 MP4 via stream copy — avoids x264 OOM on 512MiB containers."""
+    return [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        input_arg,
+        "-t",
+        f"{duration:.1f}",
+        "-map",
+        "0:v:0",
+        "-an",
+        "-c:v",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(out_path),
+    ]
+
+
 def _streamlink_url(login: str) -> str | None:
     """Resolve HLS URL only — streamlink must exit immediately (no player / no pipe)."""
     cmd = [
         "streamlink",
         "--stream-url",
+        "--twitch-disable-ads",
         f"https://www.twitch.tv/{login}",
         _QUALITY,
     ]
@@ -248,64 +401,72 @@ def _streamlink_url(login: str) -> str | None:
     return url
 
 
-def _ffmpeg_record(hls_url: str, out_path: Path, *, duration: float) -> bool:
-    # Telegram sendAnimation: H.264/MPEG-4 AVC *without sound* for inline autoplay.
-    # Pull HLS only for `duration` seconds, then exit — never leave a long-lived viewer.
+def _mp4_looks_animated(path: Path) -> bool:
+    """True when the file has enough duration/packets to play as a Telegram GIF."""
+    if not shutil.which("ffprobe"):
+        # No probe — accept non-empty file (Docker image includes ffprobe via ffmpeg).
+        try:
+            return path.is_file() and path.stat().st_size > 50_000
+        except OSError:
+            return False
     cmd = [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel",
+        "ffprobe",
+        "-v",
         "error",
-        # Drop stalled HTTP/HLS sooner instead of hanging as a silent viewer.
-        "-rw_timeout",
-        "20000000",
-        "-http_persistent",
-        "0",
-        "-i",
-        hls_url,
-        "-t",
-        f"{duration:.1f}",
-        # Explicit video-only map — audio makes Telegram treat the file as Video (download UI).
-        "-map",
-        "0:v:0",
-        "-an",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-profile:v",
-        "baseline",
-        "-level",
-        "3.0",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "32",
-        "-maxrate",
-        "800k",
-        "-bufsize",
-        "1600k",
-        "-r",
-        "20",
-        "-vf",
-        "scale=480:-2",
-        "-movflags",
-        "+faststart",
-        str(out_path),
+        "-select_streams",
+        "v:0",
+        "-count_packets",
+        "-show_entries",
+        "stream=nb_read_packets,duration",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        str(path),
     ]
-    # Re-encode needs more headroom than stream-copy.
-    timeout = float(duration) + 90.0
     try:
-        proc = _run_killable(cmd, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("ffmpeg record failed: %s", exc)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return False
-    if proc.returncode != 0 or not out_path.is_file() or out_path.stat().st_size <= 0:
-        err = (proc.stderr or "")[:400]
-        logger.warning("ffmpeg record failed code=%s: %s", proc.returncode, err)
+    if proc.returncode != 0 or not proc.stdout:
         return False
-    return True
+    import json
+
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return False
+    duration = 0.0
+    packets = 0
+    for stream in data.get("streams") or []:
+        try:
+            packets = max(packets, int(stream.get("nb_read_packets") or 0))
+        except (TypeError, ValueError):
+            pass
+        try:
+            duration = max(duration, float(stream.get("duration") or 0))
+        except (TypeError, ValueError):
+            pass
+    fmt = data.get("format") or {}
+    try:
+        duration = max(duration, float(fmt.get("duration") or 0))
+    except (TypeError, ValueError):
+        pass
+    ok = duration >= _MIN_DURATION_SEC and packets >= _MIN_PACKETS
+    if not ok:
+        logger.info(
+            "Preview probe weak duration=%.2f packets=%s file=%s",
+            duration,
+            packets,
+            path.name,
+        )
+    return ok
 
 
 def _run_killable(
@@ -337,7 +498,7 @@ def _run_killable(
     )
 
 
-def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+def _kill_process_group(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
     try:

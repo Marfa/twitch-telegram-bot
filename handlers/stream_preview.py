@@ -130,7 +130,12 @@ async def refresh_live_stream_previews(
             if int(sub.id) in skip:
                 continue
             if is_stream_video_preview_image(sub.image_file_id):
-                if not prem.has_feature_sync(db, sub.owner_id, "stream_video_preview"):
+                if not prem.has_feature_sync(
+                    db,
+                    sub.owner_id,
+                    "stream_video_preview",
+                    channel=sub.twitch_username,
+                ):
                     continue
                 if not video_preview_ready():
                     continue
@@ -196,21 +201,16 @@ async def _edit_preview_media(
         return False
     try:
         if is_stream_video_preview_image(sub.image_file_id):
-            if captured is not None:
-                media = InputMediaAnimation(
-                    media=animation_input_file(captured.data),
-                    width=_ANIM_WIDTH,
-                    height=_ANIM_HEIGHT,
-                    duration=_ANIM_DURATION,
-                )
-            else:
-                photo = format_stream_thumbnail_url(
-                    str(stream.get("thumbnail_url") or ""),
-                    cache_bust=True,
-                )
-                if not photo:
-                    return False
-                media = InputMediaPhoto(media=photo)
+            # Never fall back to a static photo — that freezes the GIF bubble
+            # and can make Telegram refuse later Animation edits.
+            if captured is None:
+                return False
+            media = InputMediaAnimation(
+                media=animation_input_file(captured.data),
+                width=_ANIM_WIDTH,
+                height=_ANIM_HEIGHT,
+                duration=_ANIM_DURATION,
+            )
         else:
             photo = format_stream_thumbnail_url(
                 str(stream.get("thumbnail_url") or ""),
@@ -223,6 +223,13 @@ async def _edit_preview_media(
             chat_id=sub.chat_id,
             message_id=mid,
             media=media,
+        )
+        logger.info(
+            "Stream preview refreshed sub=%s chat=%s mid=%s kind=%s",
+            sub.id,
+            sub.chat_id,
+            mid,
+            "video" if is_stream_video_preview_image(sub.image_file_id) else "photo",
         )
         return True
     except RetryAfter as exc:
