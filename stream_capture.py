@@ -6,7 +6,7 @@ appears, or an official short preview API.
 
 Connection lifecycle (must not "sit" on the stream):
 - Prefer streamlink --stdout (ad-filtered) piped into ffmpeg for ~duration, then exit.
-- Fallback: streamlink --stream-url + ffmpeg -c:v copy (low RAM on 512MiB VPS).
+- Fallback: streamlink --stream-url + ffmpeg -c:v copy (low RAM; bot mem_limit 768m).
 - Kill process groups on timeout/failure so no orphan keeps the CDN session open.
 """
 from __future__ import annotations
@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_DURATION_SEC = 30.0
 # Reuse one capture across many alerts for the same streamer (go-live fan-out).
 SHARED_TTL_SEC = 180.0
-_QUALITY = "360p,480p,worst"
+# Prefer 480p; avoid 720p so stream-copy usually fits under _MAX_BYTES (less re-encode).
+_QUALITY = "480p,360p,worst"
 _LOGIN_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 _LOCK = threading.Lock()
 # path_str -> twitch_user_id
@@ -40,7 +41,7 @@ _SHARED: dict[str, "_SharedEntry"] = {}
 _MIN_DURATION_SEC = 4.0
 _MIN_PACKETS = 40
 # Telegram animations stay snappy under ~6–8MB; larger files often fail editMessageMedia.
-_MAX_BYTES = 6_000_000
+_MAX_BYTES = 8_000_000
 
 
 @dataclass(frozen=True)
@@ -421,13 +422,13 @@ def _ffmpeg_reencode_light(src: Path, dest: Path) -> bool:
         "-threads",
         "1",
         "-crf",
-        "32",
+        "28",
         "-maxrate",
-        "500k",
+        "1200k",
         "-bufsize",
-        "1000k",
+        "2400k",
         "-vf",
-        "fps=15,scale=480:-2",
+        "fps=20,scale=640:-2",
         "-movflags",
         "+faststart",
         str(dest),

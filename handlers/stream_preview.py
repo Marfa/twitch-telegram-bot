@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 _BOT_DATA_REFRESH_KEY = "stream_preview_refresh_at"
 # Subs whose media cannot be edited (e.g. old Video-typed alerts) — skip until stream ends.
 _BOT_DATA_SKIP_KEY = "stream_preview_refresh_skip"
-# Telegram autoplay animations: muted H.264 ~480p.
-_ANIM_WIDTH = 480
-_ANIM_HEIGHT = 270
+# Telegram autoplay animations: muted H.264 ~640p (matches light re-encode).
+_ANIM_WIDTH = 640
+_ANIM_HEIGHT = 360
 _ANIM_DURATION = 30
 
 

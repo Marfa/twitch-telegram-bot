@@ -181,8 +181,8 @@ async def _deliver_alert_content_plain(
         return await bot.send_animation(
             chat_id=chat_id,
             animation=InputFile(BytesIO(animation_bytes), filename="preview.mp4"),
-            width=480,
-            height=270,
+            width=640,
+            height=360,
             duration=30,
             **anim_kwargs,
         )
