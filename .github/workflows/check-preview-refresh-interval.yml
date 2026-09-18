@@ -1,0 +1,35 @@
+name: Check preview refresh interval
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check env + recent refresh logs
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            echo "=== env ==="
+            grep -E '^STREAM_PREVIEW_REFRESH|^CHECK_INTERVAL' .env || echo "(not set in .env → defaults)"
+            echo "=== runtime ==="
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            from config import STREAM_PREVIEW_REFRESH_SECONDS, CHECK_INTERVAL
+            print("STREAM_PREVIEW_REFRESH_SECONDS", STREAM_PREVIEW_REFRESH_SECONDS)
+            print("CHECK_INTERVAL", CHECK_INTERVAL)
+            print("effective_min_interval", max(60, int(STREAM_PREVIEW_REFRESH_SECONDS)))
+            PY
+            echo "=== refresh logs (2h) ==="
+            docker compose -f compose.vps.yml logs --since 2h bot 2>&1 \
+              | grep -iE 'Stream preview refreshed|uneditable|preview refresh' \
+              | tail -n 40 || true
