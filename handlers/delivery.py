@@ -177,7 +177,7 @@ async def _deliver_alert_content_plain(
         )
 
     async def _video(**video_kwargs):
-        # Muted MP4 as Video (not Animation/GIF). Audio is stripped at capture.
+        # Muted-or-with-audio MP4 as Video (not Animation/GIF).
         return await bot.send_video(
             chat_id=chat_id,
             video=InputFile(BytesIO(animation_bytes), filename="preview.mp4"),

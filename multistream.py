@@ -53,6 +53,16 @@ _YT_HOSTS = frozenset(
     }
 )
 
+
+def error_line_looks_like_youtube(line: str) -> bool:
+    """True when a failed multistream line is a YouTube URL (hostname check)."""
+    raw = (line or "").strip()
+    if not raw:
+        return False
+    candidate = raw if "://" in raw else f"https://{raw}"
+    host = (urlparse(candidate).hostname or "").lower()
+    return host in _YT_HOSTS
+
 _SESSION = requests.Session()
 _SESSION.headers.update(
     {

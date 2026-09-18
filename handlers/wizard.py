@@ -812,7 +812,7 @@ async def receive_wizard_multistream_text(
         )
         return _wz()["MULTISTREAM"]
     added, errors = ms.parse_multistream_lines(text)
-    if any("youtube.com" in e.lower() or "youtu.be" in e.lower() for e in errors) and not (
+    if any(ms.error_line_looks_like_youtube(e) for e in errors) and not (
         YOUTUBE_API_KEY or ""
     ).strip():
         await update.effective_message.reply_text(t("multistream_youtube_no_key", lang))

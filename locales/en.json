@@ -210,7 +210,7 @@
   "premium_feat_custom_buttons": "Custom buttons",
   "premium_feat_custom_buttons_desc": "Up to 10 custom URL buttons under the alert (label | link).",
   "premium_feat_stream_video_preview": "Stream video preview",
-  "premium_feat_stream_video_preview_desc": "Attach a muted MP4 video (~30s of the live stream) that refreshes every 30 minutes while live. Included in Advanced alert options.",
+  "premium_feat_stream_video_preview_desc": "Attach an MP4 video with sound (~30s of the live stream) that refreshes every 30 minutes while live. Included in Advanced alert options.",
   "premium_feat_schedule_publish": "Twitch schedule tools",
   "premium_feat_schedule_publish_desc": "Publish slots, fix a day, and vacation mode on your Twitch schedule page.",
   "premium_feat_alert_history": "Alert history for 60 days",
