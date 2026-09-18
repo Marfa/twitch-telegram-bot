@@ -1,0 +1,61 @@
+name: Refresh admin preview mids
+
+on:
+  workflow_dispatch:
+    inputs:
+      mids:
+        description: "Comma-separated message ids"
+        required: true
+        default: "29440,29441"
+
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh specific DMs
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            MIDS='${{ github.event.inputs.mids }}'
+            docker compose -f compose.vps.yml exec -T bot python - <<PY
+            import asyncio, logging
+            logging.basicConfig(level=logging.INFO)
+            from telegram import Bot
+            from config import TELEGRAM_BOT_TOKEN, ADMIN_USER_IDS
+            from handlers.stream_preview import build_stream_video_mp4, edit_animation_message
+            from twitch import TwitchClient
+            import premium as prem
+
+            async def main():
+                login = (prem.twitch_channel_login() or "marfapr").lower()
+                tw = TwitchClient()
+                u = tw.get_user(login)
+                uid = str(u["id"])
+                cap = await asyncio.to_thread(
+                    build_stream_video_mp4, login=login, twitch_user_id=uid, force=True
+                )
+                if not cap:
+                    raise SystemExit("capture failed")
+                print("captured", len(cap.data))
+                bot = Bot(TELEGRAM_BOT_TOKEN)
+                admin = int(ADMIN_USER_IDS[0])
+                for mid in [int(x) for x in "$MIDS".split(",") if x.strip()]:
+                    try:
+                        await edit_animation_message(
+                            bot, chat_id=admin, message_id=mid, data=cap.data
+                        )
+                        print("ok", mid)
+                    except Exception as e:
+                        print("fail", mid, e)
+
+            asyncio.run(main())
+            PY
