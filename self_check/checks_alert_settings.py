@@ -53,6 +53,7 @@ def _list_markers(lang: str) -> dict[str, str]:
         "live_remind": t("sub_list_live_remind_yes", lang),
         "preview": t_bullet("preview_off", lang),
         "schedule_cancel": t("sub_list_schedule_cancel_yes", lang),
+        "multistream": t("sub_list_multistream", lang, count=1),
     }
 
 
@@ -80,6 +81,7 @@ def _sample_sub(**overrides: object) -> Subscription:
         "attach_chat_button": True,
         "attach_live_remind_button": False,
         "custom_buttons": '[{"text":"Go","url":"https://example.com"}]',
+        "multistream_channels": "[]",
         "delay_minutes": 5,
         "suppress_repeat_minutes": 10,
         "schedule_reminder_minutes": 0,
@@ -231,6 +233,7 @@ def check_alert_setting_order() -> None:
         "preview",
         "schedule_remind",
         "schedule_cancel",
+        "multistream",
     )
     assert set(EDIT_FIELD) == set(ALERT_SETTING_ORDER)
 
@@ -248,6 +251,7 @@ def check_alert_setting_order() -> None:
         want_live_remind=False,
         want_preview=False,
         want_schedule_cancel=False,
+        want_multistream=False,
         show_delay=True,
         show_repeat=True,
         show_buttons=True,
@@ -255,6 +259,7 @@ def check_alert_setting_order() -> None:
         show_preview=True,
         show_schedule_remind=False,
         show_schedule_cancel=True,
+        show_multistream=True,
     )
     assert _advopt_ids(adv) == [
         sid for sid in ALERT_SETTING_ORDER if sid != "schedule_remind"
@@ -273,6 +278,7 @@ def check_alert_setting_order() -> None:
         show_link_preview=True,
         show_advanced=True,
         show_custom_buttons=True,
+        show_multistream=True,
         is_upcoming=False,
     )
     assert _edit_setting_ids(edit) == [
@@ -309,7 +315,7 @@ def check_alert_setting_order() -> None:
     assert _edit_setting_ids(upcoming_edit) == [
         sid
         for sid in ALERT_SETTING_ORDER
-        if sid not in ("delay", "repeat", "delete", "pin", "buttons")
+        if sid not in ("delay", "repeat", "delete", "pin", "buttons", "multistream")
     ]
     upcoming_labels = {
         (btn.callback_data or ""): btn.text

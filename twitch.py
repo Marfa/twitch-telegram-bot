@@ -2103,6 +2103,9 @@ def _template_values(
         "game_description": "—",
         "game_igdb": "—",
         "game_steam": "—",
+        "goodgame_status": "—",
+        "vkplay_status": "—",
+        "youtube_status": "—",
     }
     if not stream:
         return values
@@ -2163,6 +2166,9 @@ _TEMPLATE_PLACEHOLDERS = (
     "game_description",
     "game_igdb",
     "game_steam",
+    "goodgame_status",
+    "vkplay_status",
+    "youtube_status",
 )
 _STREAM_SNAPSHOT_KEYS = (
     "user_login",
@@ -2227,6 +2233,9 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "gamesteam": "game_steam",
     "steam_game": "game_steam",
     "game_steam_link": "game_steam",
+    "gg_status": "goodgame_status",
+    "vk_status": "vkplay_status",
+    "yt_status": "youtube_status",
 }
 # Telegram may linkify these even without a scheme; used to decide link-preview UI.
 _TEMPLATE_LINK_RE = re.compile(

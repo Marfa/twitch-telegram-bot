@@ -87,6 +87,15 @@ def main() -> None:
     check_callback_wiring()
     check_alert_setting_order()
     check_button_style_options()
+    from .checks_multistream import (
+        check_multistream_dump_roundtrip,
+        check_multistream_parse_urls,
+        check_multistream_status_placeholders,
+    )
+
+    check_multistream_parse_urls()
+    check_multistream_dump_roundtrip()
+    check_multistream_status_placeholders()
     from .checks_drops import run as check_drops
 
     check_drops()

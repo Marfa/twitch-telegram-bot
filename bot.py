@@ -515,6 +515,8 @@ from handlers.wizard import (
     receive_image_ask,
     receive_wizard_custom_buttons_callback,
     receive_wizard_custom_buttons_text,
+    receive_wizard_multistream_callback,
+    receive_wizard_multistream_text,
     receive_image_position,
     receive_image_upload,
     receive_link_preview,
@@ -672,6 +674,7 @@ from handlers.subscriptions import (
     start_edit_dest,
     start_edit_ignore_keywords,
     start_edit_custom_buttons,
+    start_edit_multistream,
     start_edit_repeat_mute,
     start_edit_template,
     start_pause_notifications,
@@ -682,6 +685,8 @@ from handlers.subscriptions import (
     receive_edit_ignore_keywords_skip,
     receive_edit_custom_buttons_callback,
     receive_edit_custom_buttons_text,
+    receive_edit_multistream_callback,
+    receive_edit_multistream_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -707,6 +712,7 @@ logger = logging.getLogger(__name__)
     SCHEDULE_REMINDER_MINUTES,
     SCHEDULE_CANCEL_TEMPLATE,
     CUSTOM_BUTTONS,
+    MULTISTREAM,
     CHAT_BUTTON_ASK,
     DEST_TYPE,
     DEST_CHAT,
@@ -720,6 +726,7 @@ logger = logging.getLogger(__name__)
     EDIT_SCHEDULE_REMINDER,
     EDIT_SCHEDULE_CANCEL,
     EDIT_CUSTOM_BUTTONS,
+    EDIT_MULTISTREAM,
     ADMIN_MSG_TYPE,
     ADMIN_MSG_TEXT,
     ADMIN_MSG_SCHEDULE,
@@ -761,7 +768,7 @@ logger = logging.getLogger(__name__)
     RELEASE_DUP,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(74)
+) = range(76)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -1696,6 +1703,7 @@ def _edit_options_for_sub(
 ) -> InlineKeyboardMarkup:
     import beta as beta_features
     import custom_buttons as cbtn
+    import multistream as ms
 
     alert_type = _alert_type_from_sub(sub)
     show_custom_buttons = bool(
@@ -1735,9 +1743,13 @@ def _edit_options_for_sub(
         )
         and bool((getattr(sub, "schedule_cancel_template", "") or "").strip()),
         show_schedule_cancel=alert_type == "upcoming",
+        show_multistream=alert_type == "live",
         button_style=str(getattr(sub, "button_style", "") or ""),
         custom_buttons_count=len(
             cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None))
+        ),
+        multistream_count=len(
+            ms.parse_multistream_channels(getattr(sub, "multistream_channels", None))
         ),
     )
 
@@ -2737,6 +2749,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 pattern=r"^edit_f:\d+:custom_buttons$",
             ),
             CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_multistream),
+                pattern=r"^edit_f:\d+:multistream$",
+            ),
+            CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_dest), pattern=r"^edit_f:\d+:dest$"
             ),
             CallbackQueryHandler(
@@ -2848,7 +2864,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|preview|schedule_cancel)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|preview|schedule_cancel|multistream)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_style,
@@ -2865,6 +2881,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_wizard_custom_buttons_text
+                ),
+            ],
+            MULTISTREAM: [
+                CallbackQueryHandler(
+                    receive_wizard_multistream_callback,
+                    pattern=r"^ms:(done|clear|skip)$",
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_wizard_multistream_text
                 ),
             ],
             IGNORE_KEYWORDS: [
@@ -3022,6 +3047,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_edit_custom_buttons_text
+                ),
+            ],
+            EDIT_MULTISTREAM: [
+                CallbackQueryHandler(
+                    receive_edit_multistream_callback,
+                    pattern=r"^ms:(done|clear|skip)$",
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_edit_multistream_text
                 ),
             ],
             CHAT_BUTTON_ASK: [

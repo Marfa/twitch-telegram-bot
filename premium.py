@@ -58,6 +58,7 @@ ADVANCED_MODE_FEATURE_IDS: frozenset[str] = frozenset(
         "custom_buttons",
         "stream_video_preview",
         "schedule_cancel",
+        "multistream",
     }
 )
 _LEGACY_ADVANCED_FEATURE_IDS: tuple[str, ...] = (
@@ -89,6 +90,7 @@ _FEATURE_LABEL_KEYS = {
     "custom_buttons": "premium_feat_custom_buttons",
     "stream_video_preview": "premium_feat_stream_video_preview",
     "schedule_cancel": "premium_feat_schedule_cancel",
+    "multistream": "premium_feat_multistream",
     "schedule_publish": "premium_feat_schedule_publish",
     "alert_history": "premium_feat_alert_history",
     "deleted_subscriptions_cart": "premium_feat_deleted_subscriptions_cart",

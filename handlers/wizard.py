@@ -53,6 +53,7 @@ from i18n import (
     image_edit_keyboard,
     image_position_keyboard,
     is_menu_button,
+    multistream_keyboard,
     link_preview_keyboard,
     placeholders_link_html,
     premium_gate_keyboard,
@@ -102,6 +103,7 @@ def _wz() -> dict[str, int]:
         CHANNEL_DUP,
         CHAT_BUTTON_ASK,
         CUSTOM_BUTTONS,
+        MULTISTREAM,
         DELAY_MINUTES,
         DELAY_SEND,
         DELETE_FAIL_NOTIFY,
@@ -143,6 +145,7 @@ def _wz() -> dict[str, int]:
         "CHANNEL_DUP": CHANNEL_DUP,
         "CHAT_BUTTON_ASK": CHAT_BUTTON_ASK,
         "CUSTOM_BUTTONS": CUSTOM_BUTTONS,
+        "MULTISTREAM": MULTISTREAM,
         "DELAY_MINUTES": DELAY_MINUTES,
         "DELAY_SEND": DELAY_SEND,
         "DELETE_FAIL_NOTIFY": DELETE_FAIL_NOTIFY,
@@ -313,6 +316,7 @@ def _render_sub_template(
     extra: dict[str, str] | None = None,
     lang: str | None = None,
 ) -> str:
+    import multistream as ms
     from i18n import DEFAULT_LOCALE
     from twitch import template_uses_html
 
@@ -324,16 +328,23 @@ def _render_sub_template(
                 locale = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
             except Exception:
                 locale = DEFAULT_LOCALE
+    template = sub.message_template or ""
+    merged = dict(extra or {})
+    if any(f"{{{key}}}" in template for key in ms.STATUS_PLACEHOLDERS):
+        for key, val in ms.status_placeholders(
+            getattr(sub, "multistream_channels", None), template
+        ).items():
+            merged.setdefault(key, val)
     return render_template(
-        sub.message_template,
+        template,
         username,
         game,
         name,
         stream=stream,
-        extra=extra,
+        extra=merged,
         strip_name_mentions=bool(sub.strip_name_mentions),
         twitch=twitch,
-        escape_html=template_uses_html(sub.message_template or ""),
+        escape_html=template_uses_html(template),
         lang=locale or DEFAULT_LOCALE,
     )
 
@@ -600,7 +611,7 @@ async def _go_custom_buttons_step(
     if not want or not entitled:
         context.user_data.setdefault("custom_buttons", "[]")
         context.user_data.setdefault("custom_buttons_list", [])
-        return await _prompt_dest_step(update, context, lang)
+        return await _go_multistream_step(update, context, lang)
 
     if "custom_buttons_list" not in context.user_data:
         _set_ud_buttons(
@@ -625,7 +636,7 @@ async def receive_wizard_custom_buttons_callback(
     from handlers.custom_buttons_ui import receive_custom_buttons_callback
 
     async def _done(upd, ctx, lang):
-        return await _prompt_dest_step(upd, ctx, lang)
+        return await _go_multistream_step(upd, ctx, lang)
 
     async def _back(upd, ctx, lang):
         return await _wizard_back_before_dest(upd, ctx, lang)
@@ -672,6 +683,178 @@ async def receive_wizard_custom_buttons_text(
         state=_wz()["CUSTOM_BUTTONS"],
         show_skip=True,
     )
+
+
+def _multistream_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
+    import multistream as ms
+
+    channels = context.user_data.get("multistream_list")
+    if channels is None:
+        channels = ms.parse_multistream_channels(
+            context.user_data.get("multistream_channels")
+        )
+        context.user_data["multistream_list"] = channels
+    if not channels:
+        return t("multistream_prompt_empty", lang, max=ms.MULTISTREAM_MAX)
+    lines = []
+    for ch in channels:
+        lines.append(
+            t(
+                "multistream_list_item",
+                lang,
+                platform=t(f"platform_{ch.platform}", lang),
+                label=ch.label or ch.channel_id,
+            )
+        )
+    return t(
+        "multistream_prompt",
+        lang,
+        max=ms.MULTISTREAM_MAX,
+        list="\n".join(lines),
+    )
+
+
+async def _go_multistream_step(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """Optional multistream channel list before destination (live + Extras only)."""
+    import multistream as ms
+
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    want = bool(context.user_data.get("adv_want_multistream"))
+    alert = context.user_data.get("alert_type")
+    entitled = await prem.has_feature(
+        context.bot,
+        db,
+        user_id,
+        ms.FEATURE_ID,
+        channel=_wizard_channel(context),
+    )
+    if alert != "live" or not want or not entitled:
+        context.user_data.setdefault("multistream_channels", "[]")
+        context.user_data.setdefault("multistream_list", [])
+        return await _prompt_dest_step(update, context, lang)
+
+    if "multistream_list" not in context.user_data:
+        context.user_data["multistream_list"] = ms.parse_multistream_channels(
+            context.user_data.get("multistream_channels")
+        )
+    channels = context.user_data["multistream_list"]
+    text = _multistream_prompt_text(context, lang)
+    markup = multistream_keyboard(lang, has_channels=bool(channels), show_skip=True)
+    chat_id = reply_chat_id(update)
+    if update.callback_query:
+        await context.bot.send_message(
+            chat_id, text, reply_markup=markup, parse_mode=ParseMode.HTML
+        )
+    else:
+        await update.effective_message.reply_text(
+            text, reply_markup=markup, parse_mode=ParseMode.HTML
+        )
+    _set_wizard_back(context, _wz()["MULTISTREAM"])
+    return _wz()["MULTISTREAM"]
+
+
+async def receive_wizard_multistream_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import multistream as ms
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    action = (query.data or "").split(":")[-1]
+    if action == "skip":
+        context.user_data["multistream_channels"] = "[]"
+        context.user_data["multistream_list"] = []
+        context.user_data["adv_want_multistream"] = False
+        await query.edit_message_text("✓")
+        return await _prompt_dest_step(update, context, lang)
+    if action == "clear":
+        context.user_data["multistream_channels"] = "[]"
+        context.user_data["multistream_list"] = []
+        await query.edit_message_text(t("multistream_cleared", lang))
+        return await _go_multistream_step(update, context, lang)
+    if action == "done":
+        channels = context.user_data.get("multistream_list") or []
+        context.user_data["multistream_channels"] = ms.dump_multistream_channels(
+            channels
+        )
+        if not channels:
+            context.user_data["adv_want_multistream"] = False
+        await query.edit_message_text(
+            t("multistream_saved", lang, count=len(channels))
+            if channels
+            else "✓"
+        )
+        return await _prompt_dest_step(update, context, lang)
+    return _wz()["MULTISTREAM"]
+
+
+async def receive_wizard_multistream_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import multistream as ms
+    from config import YOUTUBE_API_KEY
+
+    lang = _user_lang(context, update.effective_user.id)
+    text = (update.effective_message.text or "").strip()
+    if text in all_btn_texts("wizard_cancel"):
+        return await cancel(update, context)
+    if text in all_btn_texts("wizard_back") or text in all_wizard_nav_buttons():
+        if text in all_btn_texts("wizard_back"):
+            return await _wizard_back_before_dest(update, context, lang)
+    existing = list(context.user_data.get("multistream_list") or [])
+    if len(existing) >= ms.MULTISTREAM_MAX:
+        await update.effective_message.reply_text(
+            t("multistream_full", lang, max=ms.MULTISTREAM_MAX)
+        )
+        return _wz()["MULTISTREAM"]
+    added, errors = ms.parse_multistream_lines(text)
+    if any("youtube.com" in e.lower() or "youtu.be" in e.lower() for e in errors) and not (
+        YOUTUBE_API_KEY or ""
+    ).strip():
+        await update.effective_message.reply_text(t("multistream_youtube_no_key", lang))
+    if errors and not added:
+        await update.effective_message.reply_text(
+            t(
+                "multistream_invalid",
+                lang,
+                lines="\n".join(f"• {html.escape(e)}" for e in errors[:5]),
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return _wz()["MULTISTREAM"]
+    seen = {(c.platform, c.channel_id.lower()) for c in existing}
+    for ch in added:
+        key = (ch.platform, ch.channel_id.lower())
+        if key in seen:
+            continue
+        existing.append(ch)
+        seen.add(key)
+        if len(existing) >= ms.MULTISTREAM_MAX:
+            break
+    context.user_data["multistream_list"] = existing
+    context.user_data["multistream_channels"] = ms.dump_multistream_channels(existing)
+    if errors:
+        await update.effective_message.reply_text(
+            t(
+                "multistream_invalid",
+                lang,
+                lines="\n".join(f"• {html.escape(e)}" for e in errors[:5]),
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+    await update.effective_message.reply_text(
+        _multistream_prompt_text(context, lang),
+        reply_markup=multistream_keyboard(
+            lang, has_channels=bool(existing), show_skip=True
+        ),
+        parse_mode=ParseMode.HTML,
+    )
+    return _wz()["MULTISTREAM"]
+
 
 async def _wizard_back_before_dest(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
@@ -932,6 +1115,7 @@ _ADVOPT_FEATURE = {
     "pin": "pin_message",
     "buttons": "custom_buttons",
     "schedule_cancel": "schedule_cancel",
+    "multistream": "multistream",
 }
 
 
@@ -965,6 +1149,7 @@ async def _advanced_options_markup(
         db, user_id, "live-remind-button"
     )
     show_schedule_cancel = alert == "upcoming"
+    show_multistream = alert == "live" or not alert
     _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
@@ -979,6 +1164,7 @@ async def _advanced_options_markup(
         want_chat=bool(context.user_data.get("adv_want_chat")),
         want_live_remind=bool(context.user_data.get("adv_want_live_remind")),
         want_schedule_cancel=bool(context.user_data.get("adv_want_schedule_cancel")),
+        want_multistream=bool(context.user_data.get("adv_want_multistream")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
         button_style=str(context.user_data.get("button_style") or ""),
         show_delay=alert != "upcoming",
@@ -987,6 +1173,7 @@ async def _advanced_options_markup(
         show_buttons=show_buttons,
         show_live_remind=show_live_remind,
         show_schedule_cancel=show_schedule_cancel,
+        show_multistream=show_multistream,
         locked=await _advopt_locked(context, user_id),
     )
 
@@ -1027,6 +1214,8 @@ def _advanced_options_prompt_text(
         lines.append(t("advanced_options_hint_live_remind", lang))
     if alert == "upcoming":
         lines.append(t("advanced_options_hint_schedule_cancel", lang))
+    if alert == "live" or not alert:
+        lines.append(t("advanced_options_hint_multistream", lang))
     lines.append(t("advanced_options_hint_button_style", lang))
     if template_has_link(str(context.user_data.get("message_template") or "")):
         lines.append(t("advanced_options_hint_preview", lang))
@@ -1051,9 +1240,16 @@ async def _go_advanced_options_prompt(
     if context.user_data.get("alert_type") == "upcoming":
         context.user_data.setdefault("adv_want_live_remind", False)
         context.user_data.setdefault("adv_want_schedule_cancel", False)
+        context.user_data.pop("adv_want_multistream", None)
     else:
         context.user_data.pop("adv_want_live_remind", None)
         context.user_data.pop("adv_want_schedule_cancel", None)
+        if context.user_data.get("alert_type") == "live" or not context.user_data.get(
+            "alert_type"
+        ):
+            context.user_data.setdefault("adv_want_multistream", False)
+        else:
+            context.user_data.pop("adv_want_multistream", None)
     has_link = template_has_link(
         str(context.user_data.get("message_template") or "")
     )
@@ -1095,6 +1291,7 @@ async def receive_advanced_options_toggle(
         "live_remind": "adv_want_live_remind",
         "preview": "adv_want_preview",
         "schedule_cancel": "adv_want_schedule_cancel",
+        "multistream": "adv_want_multistream",
     }.get(flag)
     if not key:
         await query.answer()
@@ -1112,6 +1309,10 @@ async def receive_advanced_options_toggle(
             return _wz()["ADVANCED_OPTIONS"]
     if flag == "schedule_cancel":
         if context.user_data.get("alert_type") != "upcoming":
+            await query.answer()
+            return _wz()["ADVANCED_OPTIONS"]
+    if flag == "multistream":
+        if context.user_data.get("alert_type") != "live":
             await query.answer()
             return _wz()["ADVANCED_OPTIONS"]
     if flag == "preview" and not template_has_link(
@@ -1197,6 +1398,7 @@ async def receive_advanced_options_next(
         ("pin", "adv_want_pin"),
         ("buttons", "adv_want_buttons"),
         ("schedule_cancel", "adv_want_schedule_cancel"),
+        ("multistream", "adv_want_multistream"),
     ):
         if toggle in locked:
             context.user_data[ud_key] = False
@@ -1219,6 +1421,9 @@ async def receive_advanced_options_next(
     if not context.user_data.get("adv_want_buttons"):
         context.user_data["custom_buttons"] = "[]"
         context.user_data["custom_buttons_list"] = []
+    if not context.user_data.get("adv_want_multistream"):
+        context.user_data["multistream_channels"] = "[]"
+        context.user_data["multistream_list"] = []
     want_chat = bool(context.user_data.get("adv_want_chat"))
     context.user_data["attach_chat_button"] = want_chat
     if context.user_data.get("alert_type") == "upcoming":
@@ -1397,6 +1602,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_chat",
             "adv_want_live_remind",
             "adv_want_schedule_cancel",
+            "adv_want_multistream",
             "adv_want_preview",
             "notify_on_schedule_cancel",
             "schedule_cancel_template",
@@ -1406,6 +1612,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "attach_live_remind_button",
             "custom_buttons",
             "custom_buttons_list",
+            "multistream_channels",
+            "multistream_list",
             "cbtn_awaiting",
             "cbtn_edit_index",
             "delay_minutes",
@@ -3223,6 +3431,7 @@ async def _finish_subscription(
                 notify_on_schedule_cancel=False,
                 schedule_cancel_template="",
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
+                multistream_channels=str(data.get("multistream_channels") or "[]"),
                 button_style=str(data.get("button_style") or ""),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
@@ -3330,6 +3539,11 @@ async def _finish_subscription(
                     else ""
                 ),
                 custom_buttons=str(data.get("custom_buttons") or "[]"),
+                multistream_channels=(
+                    str(data.get("multistream_channels") or "[]")
+                    if notify_on_live
+                    else "[]"
+                ),
                 button_style=str(data.get("button_style") or ""),
                 delay_minutes=int(data.get("delay_minutes", 0)),
                 suppress_repeat_minutes=(

@@ -22,6 +22,7 @@ ALERT_SETTING_ORDER: tuple[str, ...] = (
     "preview",
     "schedule_remind",
     "schedule_cancel",
+    "multistream",
 )
 
 # advopt:toggle:<id> — same as ALERT_SETTING_ORDER ids.
@@ -40,6 +41,7 @@ EDIT_FIELD: dict[str, str] = {
     "preview": "preview",
     "schedule_remind": "sched_remind",
     "schedule_cancel": "schedule_cancel",
+    "multistream": "multistream",
 }
 
 ADVOPT_LABEL_KEY: dict[str, str] = {
@@ -56,4 +58,5 @@ ADVOPT_LABEL_KEY: dict[str, str] = {
     "preview": "advanced_options_preview",
     "schedule_remind": "edit_schedule_reminder",
     "schedule_cancel": "advanced_options_schedule_cancel",
+    "multistream": "advanced_options_multistream",
 }

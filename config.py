@@ -110,6 +110,9 @@ ADMIN_USER_IDS = parse_admin_user_ids()
 # Delete all rows for a user this many days after they block the bot (clock resets on re-block).
 BLOCKED_USER_RETENTION_DAYS = int(os.getenv("BLOCKED_USER_RETENTION_DAYS", "365"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
+# Optional: YouTube Data API v3 key — multistream live checks for YouTube channels.
+# Create at https://console.cloud.google.com/ (enable YouTube Data API v3 → API key).
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 # Optional: Twitch user refresh token with clips:edit — Create Clip for stream video previews.
 TWITCH_CLIPS_REFRESH_TOKEN = os.getenv("TWITCH_CLIPS_REFRESH_TOKEN", "").strip()
 # Optional: CloudConvert API key — MP4 clip → GIF for video stream preview (no local storage).

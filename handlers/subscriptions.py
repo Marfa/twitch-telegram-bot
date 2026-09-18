@@ -95,6 +95,7 @@ def _sub_states() -> dict[str, int]:
         DEST_TYPE,
         EDIT_CUSTOM_BUTTONS,
         EDIT_IGNORE_KEYWORDS,
+        EDIT_MULTISTREAM,
         EDIT_REPEAT,
         EDIT_TEMPLATE,
         PAUSE_ALERTS_DAYS,
@@ -105,6 +106,7 @@ def _sub_states() -> dict[str, int]:
         "DEST_TYPE": DEST_TYPE,
         "EDIT_CUSTOM_BUTTONS": EDIT_CUSTOM_BUTTONS,
         "EDIT_IGNORE_KEYWORDS": EDIT_IGNORE_KEYWORDS,
+        "EDIT_MULTISTREAM": EDIT_MULTISTREAM,
         "EDIT_REPEAT": EDIT_REPEAT,
         "EDIT_TEMPLATE": EDIT_TEMPLATE,
         "PAUSE_ALERTS_DAYS": PAUSE_ALERTS_DAYS,
@@ -483,6 +485,13 @@ def _format_sub_line(
     custom_btns = parse_custom_buttons(getattr(sub, "custom_buttons", None))
     if custom_btns:
         settings.append(t("sub_list_custom_buttons", lang, count=len(custom_btns)))
+    import multistream as ms
+
+    ms_channels = ms.parse_multistream_channels(
+        getattr(sub, "multistream_channels", None)
+    )
+    if ms_channels:
+        settings.append(t("sub_list_multistream", lang, count=len(ms_channels)))
     if sub.attach_chat_button:
         settings.append(t("sub_list_chat_button_yes", lang))
     if getattr(sub, "attach_live_remind_button", False):
@@ -3109,6 +3118,195 @@ async def receive_edit_custom_buttons_text(
     )
 
 
+async def start_edit_multistream(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import multistream as ms
+    from handlers.wizard import _multistream_prompt_text
+    from i18n import multistream_keyboard
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if not sub.notify_on_live or sub.notify_on_end or sub.notify_on_category_change:
+        await query.answer()
+        return ConversationHandler.END
+    if not await prem.has_feature(
+        context.bot,
+        db,
+        query.from_user.id,
+        ms.FEATURE_ID,
+        channel=sub.twitch_username,
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(
+            context.bot,
+            query.from_user.id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="edit_multistream",
+            feature=ms.FEATURE_ID,
+        )
+        return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    channels = ms.parse_multistream_channels(getattr(sub, "multistream_channels", None))
+    context.user_data["multistream_list"] = channels
+    context.user_data["multistream_channels"] = ms.dump_multistream_channels(channels)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        _multistream_prompt_text(context, lang),
+        reply_markup=multistream_keyboard(
+            lang, has_channels=bool(channels), show_skip=False
+        ),
+        parse_mode=ParseMode.HTML,
+    )
+    return _sub_states()["EDIT_MULTISTREAM"]
+
+
+async def receive_edit_multistream_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import multistream as ms
+    from handlers.wizard import _multistream_prompt_text, cancel
+    from i18n import multistream_keyboard
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    db: Database = context.application.bot_data["db"]
+    sub_id = int(context.user_data.get("edit_sub_id") or 0)
+    owner_id = query.from_user.id
+    action = (query.data or "").split(":")[-1]
+
+    async def _reshow_edit() -> int:
+        sub = db.get_subscription(sub_id, owner_id)
+        if not sub:
+            await context.bot.send_message(
+                reply_chat_id(update), t("sub_not_found", lang)
+            )
+            return ConversationHandler.END
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, owner_id, channel=sub.twitch_username
+        )
+        await context.bot.send_message(
+            reply_chat_id(update),
+            _edit_menu_text(
+                lang,
+                sub_id=_owner_sub_number(db, owner_id, sub_id),
+                username=sub.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(
+                sub, lang, show_advanced=show_adv, db=db
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+
+    if action == "clear":
+        context.user_data["multistream_list"] = []
+        context.user_data["multistream_channels"] = "[]"
+        db.update_subscription(sub_id, owner_id, multistream_channels="[]")
+        await query.edit_message_text(t("multistream_cleared", lang))
+        await context.bot.send_message(
+            reply_chat_id(update),
+            _multistream_prompt_text(context, lang),
+            reply_markup=multistream_keyboard(
+                lang, has_channels=False, show_skip=False
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return _sub_states()["EDIT_MULTISTREAM"]
+    if action in ("done", "skip"):
+        channels = context.user_data.get("multistream_list") or []
+        dump = ms.dump_multistream_channels(channels)
+        db.update_subscription(sub_id, owner_id, multistream_channels=dump)
+        await query.edit_message_text(
+            t("multistream_saved", lang, count=len(channels))
+            if channels
+            else t("multistream_cleared", lang)
+        )
+        return await _reshow_edit()
+    return _sub_states()["EDIT_MULTISTREAM"]
+
+
+async def receive_edit_multistream_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import multistream as ms
+    from config import YOUTUBE_API_KEY
+    from handlers.wizard import _multistream_prompt_text, cancel
+    from i18n import all_btn_texts, multistream_keyboard
+
+    lang = _user_lang(context, update.effective_user.id)
+    text = (update.effective_message.text or "").strip()
+    if text in all_btn_texts("wizard_cancel"):
+        return await cancel(update, context)
+    existing = list(context.user_data.get("multistream_list") or [])
+    if len(existing) >= ms.MULTISTREAM_MAX:
+        await update.effective_message.reply_text(
+            t("multistream_full", lang, max=ms.MULTISTREAM_MAX)
+        )
+        return _sub_states()["EDIT_MULTISTREAM"]
+    added, errors = ms.parse_multistream_lines(text)
+    if any("youtube.com" in e.lower() or "youtu.be" in e.lower() for e in errors) and not (
+        YOUTUBE_API_KEY or ""
+    ).strip():
+        await update.effective_message.reply_text(t("multistream_youtube_no_key", lang))
+    if errors and not added:
+        await update.effective_message.reply_text(
+            t(
+                "multistream_invalid",
+                lang,
+                lines="\n".join(f"• {html.escape(e)}" for e in errors[:5]),
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return _sub_states()["EDIT_MULTISTREAM"]
+    seen = {(c.platform, c.channel_id.lower()) for c in existing}
+    for ch in added:
+        key = (ch.platform, ch.channel_id.lower())
+        if key in seen:
+            continue
+        existing.append(ch)
+        seen.add(key)
+        if len(existing) >= ms.MULTISTREAM_MAX:
+            break
+    context.user_data["multistream_list"] = existing
+    context.user_data["multistream_channels"] = ms.dump_multistream_channels(existing)
+    if errors:
+        await update.effective_message.reply_text(
+            t(
+                "multistream_invalid",
+                lang,
+                lines="\n".join(f"• {html.escape(e)}" for e in errors[:5]),
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+    await update.effective_message.reply_text(
+        _multistream_prompt_text(context, lang),
+        reply_markup=multistream_keyboard(
+            lang, has_channels=bool(existing), show_skip=False
+        ),
+        parse_mode=ParseMode.HTML,
+    )
+    return _sub_states()["EDIT_MULTISTREAM"]
+
+
 async def receive_edit_ignore_keywords(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -4521,6 +4719,7 @@ def _add_subscription_from_snapshot(
         attach_chat_button=bool(snapshot.get("attach_chat_button")),
         attach_live_remind_button=bool(snapshot.get("attach_live_remind_button")),
         custom_buttons=str(snapshot.get("custom_buttons") or "[]"),
+        multistream_channels=str(snapshot.get("multistream_channels") or "[]"),
         button_style=str(snapshot.get("button_style") or ""),
         delay_minutes=int(snapshot.get("delay_minutes") or 0),
         suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),

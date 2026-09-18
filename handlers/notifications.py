@@ -43,6 +43,8 @@ CATEGORY_WATCH_COOLDOWN_MINUTES = 60
 CATEGORY_WATCH_COOLDOWN_MINUTES_MAX = 24 * 60
 # Helix can omit category right after go-live; wait once, then send with whatever we get.
 LIVE_GAME_RECHECK_SECONDS = 20
+# Multistream: if secondary platforms are offline, wait then send anyway.
+MULTISTREAM_WAIT_SECONDS = 15 * 60
 
 
 async def _should_skip_ignored_alert(
@@ -114,6 +116,52 @@ def apply_category_watch_cooldown(db: Database, sub: Subscription) -> None:
             clear(sub.id)
 
 
+async def _multistream_gate_ok(sub) -> bool:
+    """True if no multistream list, or all listed platforms are live."""
+    import multistream as ms
+
+    channels = ms.parse_multistream_channels(
+        getattr(sub, "multistream_channels", None)
+    )
+    if not channels:
+        return True
+    return await asyncio.to_thread(ms.all_channels_online, channels)
+
+
+def _schedule_multistream_wait(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    sub_id: int,
+    stream_id: str,
+) -> None:
+    """Defer live send until MULTISTREAM_WAIT_SECONDS, then force-send if still live."""
+    name = f"multistream_{sub_id}"
+    jq = context.job_queue
+    if jq is None:
+        return
+    try:
+        for job in jq.get_jobs_by_name(name):
+            job.schedule_removal()
+    except Exception:
+        pass
+    jq.run_once(
+        _send_delayed_notification,
+        when=MULTISTREAM_WAIT_SECONDS,
+        data={
+            "sub_id": sub_id,
+            "stream_id": stream_id,
+            "silent_offline": True,
+            "multistream_force": True,
+        },
+        name=name,
+    )
+    logger.info(
+        "Multistream wait %ss for sub=%s — will send even if platforms stay offline",
+        MULTISTREAM_WAIT_SECONDS,
+        sub_id,
+    )
+
+
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _render_sub_template
 
@@ -164,6 +212,12 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     if await _should_skip_ignored_alert(
         sub, db, twitch, game, title, stream.get("game_id")
     ):
+        return
+    force_ms = bool(job_data.get("multistream_force"))
+    if not force_ms and not await _multistream_gate_ok(sub):
+        _schedule_multistream_wait(
+            context, sub_id=sub_id, stream_id=str(job_data.get("stream_id") or "")
+        )
         return
     text = _render_sub_template(
         sub, username, game, title, twitch=twitch, stream=stream
@@ -524,6 +578,11 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 "stream_id": stream_id,
                             },
                             name=f"live_game_{sub.id}",
+                        )
+                        continue
+                    if not await _multistream_gate_ok(sub):
+                        _schedule_multistream_wait(
+                            context, sub_id=sub.id, stream_id=stream_id
                         )
                         continue
                     text = _render_sub_template(
