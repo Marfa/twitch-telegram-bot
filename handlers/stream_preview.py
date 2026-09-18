@@ -7,7 +7,7 @@ import time
 from io import BytesIO
 from typing import Any
 
-from telegram import InputFile, InputMediaPhoto, InputMediaVideo
+from telegram import InputFile, InputMediaAnimation, InputMediaPhoto
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
 from db import Database, Subscription
@@ -256,16 +256,16 @@ async def refresh_live_stream_previews(
             invalidate_shared(uid)
 
 
-def video_input_file(data: bytes, *, attach: bool = False) -> InputFile:
+def animation_input_file(data: bytes, *, attach: bool = False) -> InputFile:
     # Named MP4; attach=True is required for InputMedia* (editMessageMedia multipart).
     return InputFile(BytesIO(data), filename="preview.mp4", attach=attach)
 
 
-# Back-compat alias for scripts/workflows still importing the old name.
-animation_input_file = video_input_file
+# Back-compat alias.
+video_input_file = animation_input_file
 
 
-async def edit_video_message(
+async def edit_animation_message(
     bot,
     *,
     chat_id: int,
@@ -276,17 +276,16 @@ async def edit_video_message(
     show_caption_above_media: bool | None = None,
     reply_markup=None,
 ) -> None:
-    """Replace video media; local files must use attach:// via InputFile(attach=True).
+    """Replace animation media; local files must use attach:// via InputFile(attach=True).
 
     Caption and reply_markup must be passed explicitly — omitting either clears
     text / inline buttons on editMessageMedia.
     """
     kwargs: dict[str, Any] = {
-        "media": video_input_file(data, attach=True),
+        "media": animation_input_file(data, attach=True),
         "width": _ANIM_WIDTH,
         "height": _ANIM_HEIGHT,
         "duration": _ANIM_DURATION,
-        "supports_streaming": True,
     }
     if caption is not None:
         kwargs["caption"] = caption
@@ -294,7 +293,7 @@ async def edit_video_message(
             kwargs["parse_mode"] = parse_mode
         if show_caption_above_media is not None:
             kwargs["show_caption_above_media"] = show_caption_above_media
-    media = InputMediaVideo(**kwargs)
+    media = InputMediaAnimation(**kwargs)
     edit_kwargs: dict[str, Any] = {
         "chat_id": chat_id,
         "message_id": message_id,
@@ -306,7 +305,7 @@ async def edit_video_message(
 
 
 # Back-compat alias.
-edit_animation_message = edit_video_message
+edit_video_message = edit_animation_message
 
 
 def _preview_caption(
@@ -373,12 +372,12 @@ async def _edit_preview_media(
     reply_markup = await _preview_reply_markup(bot, db, sub)
     try:
         if is_stream_video_preview_image(sub.image_file_id):
-            # Never fall back to a static photo — keep video media type stable
+            # Never fall back to a static photo — keep Animation media type stable
             # so editMessageMedia can refresh (Animation↔Video edits fail).
             if captured is None:
                 return False
             try:
-                await edit_video_message(
+                await edit_animation_message(
                     bot,
                     chat_id=sub.chat_id,
                     message_id=int(mid),
@@ -391,7 +390,7 @@ async def _edit_preview_media(
             except BadRequest as exc:
                 err = str(exc).lower()
                 if parse_mode and ("parse" in err or "entity" in err or "tag" in err):
-                    await edit_video_message(
+                    await edit_animation_message(
                         bot,
                         chat_id=sub.chat_id,
                         message_id=int(mid),
@@ -446,7 +445,7 @@ async def _edit_preview_media(
         await asyncio.sleep(float(exc.retry_after) + 0.5)
         return False
     except (BadRequest, Forbidden) as exc:
-        # Old alerts may be stored as Animation/GIF — cannot edit into Video. Stop retrying.
+        # Old alerts may be stored as Video — cannot edit into Animation. Stop retrying.
         if is_stream_video_preview_image(sub.image_file_id) and bot_data is not None:
             _preview_skip_set(bot_data).add(int(sub.id))
             logger.info(

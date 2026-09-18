@@ -345,16 +345,9 @@ def _record_hls_copy(login: str, out_path: Path, *, duration: float) -> bool:
         f"{duration:.1f}",
         "-map",
         "0:v:0",
-        "-map",
-        "0:a:0?",
+        "-an",
         "-c:v",
         "copy",
-        "-c:a",
-        "aac",
-        "-ac",
-        "2",
-        "-b:a",
-        "96k",
         "-movflags",
         "+faststart",
         str(out_path),
@@ -380,7 +373,7 @@ def _record_hls_copy(login: str, out_path: Path, *, duration: float) -> bool:
 def _ffmpeg_copy_cmd(
     out_path: Path, *, duration: float, input_arg: str
 ) -> list[str]:
-    """H.264(+AAC) MP4 via stream copy — low RAM on 512–768MiB containers."""
+    """Muted H.264 MP4 via stream copy — Telegram Animation autoplay (no audio)."""
     return [
         "ffmpeg",
         "-y",
@@ -393,16 +386,9 @@ def _ffmpeg_copy_cmd(
         f"{duration:.1f}",
         "-map",
         "0:v:0",
-        "-map",
-        "0:a:0?",
+        "-an",
         "-c:v",
         "copy",
-        "-c:a",
-        "aac",
-        "-ac",
-        "2",
-        "-b:a",
-        "96k",
         "-movflags",
         "+faststart",
         str(out_path),
@@ -410,7 +396,7 @@ def _ffmpeg_copy_cmd(
 
 
 def _ffmpeg_reencode_light(src: Path, dest: Path) -> bool:
-    """Low-RAM H.264+AAC re-encode when the stream-copy file is too large."""
+    """Low-RAM muted H.264 re-encode when the stream-copy file is too large."""
     cmd = [
         "ffmpeg",
         "-y",
@@ -421,8 +407,7 @@ def _ffmpeg_reencode_light(src: Path, dest: Path) -> bool:
         str(src),
         "-map",
         "0:v:0",
-        "-map",
-        "0:a:0?",
+        "-an",
         "-c:v",
         "libx264",
         "-pix_fmt",
@@ -443,12 +428,6 @@ def _ffmpeg_reencode_light(src: Path, dest: Path) -> bool:
         "1000k",
         "-vf",
         "fps=15,scale=480:-2",
-        "-c:a",
-        "aac",
-        "-ac",
-        "2",
-        "-b:a",
-        "96k",
         "-movflags",
         "+faststart",
         str(dest),
