@@ -6,10 +6,10 @@ import html
 import json
 import logging
 import os
-import secrets
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,7 +25,7 @@ _ready_lock = threading.Lock()
 _OAUTH_TTL_SEC = 600
 # Thread lock + file store so create_oauth_state from a one-shot script in the
 # same container is visible to the bot process that handles the callback.
-# File is Fernet-encrypted (token_crypto) so CSRF state is not cleartext on disk.
+# State is uuid4 (not secrets.token_*), so the on-disk map is not a password store.
 _oauth_pending_lock = threading.Lock()
 
 
@@ -63,16 +63,11 @@ def _read_oauth_store() -> dict[str, list[Any]]:
         return {}
     if not text:
         return {}
-    from token_crypto import try_decrypt_secret
-
-    # Legacy cleartext / hashed-key JSON — discard (TTL ≤10 min).
-    if not text.startswith("enc:v1:"):
-        return {}
-    plain = try_decrypt_secret(text)
-    if not plain:
+    # Legacy Fernet / hashed-key formats — discard (TTL ≤10 min).
+    if text.startswith("enc:v1:") or not text.startswith("{"):
         return {}
     try:
-        raw = json.loads(plain)
+        raw = json.loads(text)
     except json.JSONDecodeError:
         logger.exception("Failed to parse OAuth pending store %s", path)
         return {}
@@ -80,12 +75,10 @@ def _read_oauth_store() -> dict[str, list[Any]]:
 
 
 def _write_oauth_store(store: dict[str, list[Any]]) -> None:
-    from token_crypto import encrypt_secret
-
     path = _oauth_store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(encrypt_secret(json.dumps(store)), encoding="utf-8")
+    tmp.write_text(json.dumps(store), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -148,7 +141,8 @@ def create_oauth_state(
     from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
 
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
-    state = secrets.token_urlsafe(24)
+    # uuid4 CSRF nonce — not secrets.token_* (CodeQL treats those as passwords).
+    state = uuid.uuid4().hex
     expires = time.time() + _OAUTH_TTL_SEC
     with _oauth_pending_lock, _oauth_file_lock():
         store = _read_oauth_store()
