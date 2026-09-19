@@ -17,6 +17,22 @@ DEFAULT_LOCALE = "en"
 SCHEDULE_TZ = timezone(timedelta(hours=3))
 # IANA name for Twitch Helix schedule API (must not be "UTC+03:00").
 SCHEDULE_TZ_NAME = "Europe/Moscow"
+# Default city TZ when the user has not set schedule_utc_offset_minutes.
+_LOCALE_DEFAULT_TZ = {
+    "ru": "Europe/Moscow",
+    "en": "America/New_York",
+    "uk": "Europe/Kyiv",
+    "it": "Europe/Rome",
+}
+
+
+def default_utc_offset_minutes_for_locale(lang: str) -> int:
+    """UTC offset (minutes) for the locale's default city, including current DST."""
+    from zoneinfo import ZoneInfo
+
+    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    zone = _LOCALE_DEFAULT_TZ.get(loc, _LOCALE_DEFAULT_TZ[DEFAULT_LOCALE])
+    return int(datetime.now(ZoneInfo(zone)).utcoffset().total_seconds() // 60)
 
 
 def _load_strings() -> dict[str, dict[str, str]]:

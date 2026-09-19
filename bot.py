@@ -71,6 +71,7 @@ from i18n import (
     broadcast_menu,
     btn,
     channel_dup_keyboard,
+    default_utc_offset_minutes_for_locale,
     delete_old_keyboard,
     delete_fail_notify_keyboard,
     delivery_fail_notice_keyboard,
@@ -1066,6 +1067,10 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         lang = DEFAULT_LOCALE
     db: Database = context.application.bot_data["db"]
     db.set_user_locale(query.from_user.id, lang)
+    if db.get_schedule_utc_offset_minutes(query.from_user.id) is None:
+        db.set_schedule_utc_offset_minutes(
+            query.from_user.id, default_utc_offset_minutes_for_locale(lang)
+        )
     analytics.capture(
         query.from_user.id,
         "locale_set",

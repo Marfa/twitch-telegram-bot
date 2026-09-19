@@ -1738,6 +1738,16 @@ def check_core() -> None:
     )
     assert _is_link_preview_disabled(no_preview)
 
+    from i18n import default_utc_offset_minutes_for_locale
+
+    locale_tz = {
+        loc: default_utc_offset_minutes_for_locale(loc) for loc in SUPPORTED_LOCALES
+    }
+    assert locale_tz["ru"] == 180
+    assert locale_tz["en"] in (-240, -300)
+    assert locale_tz["uk"] in (120, 180)
+    assert locale_tz["it"] in (60, 120)
+
     for loc in SUPPORTED_LOCALES:
         help_txt = _help_text(loc)
         assert "/schedule" in help_txt
