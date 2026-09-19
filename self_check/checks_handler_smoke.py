@@ -1309,6 +1309,15 @@ async def _smoke_welcome_demo_locale(db) -> None:
     assert skipped is None
     assert db.get_subscriptions_by_owner(uid) == []
 
+    with patch(
+        "bot.prem.may_enable_subscription_async", new=AsyncMock(return_value=True)
+    ):
+        skipped_it = await _ensure_welcome_premium_channel_subscription(
+            application, bot, uid, "it"
+        )
+    assert skipped_it is None
+    assert db.get_subscriptions_by_owner(uid) == []
+
     seeded = await _ensure_welcome_premium_channel_subscription(
         application, bot, uid, "ru"
     )
@@ -1316,6 +1325,14 @@ async def _smoke_welcome_demo_locale(db) -> None:
     sub_id, channel = seeded
     assert channel == (prem.twitch_channel_login() or "marfapr")
     assert any(s.id == sub_id for s in db.get_subscriptions_by_owner(uid))
+
+    uid_uk = uid + 1
+    db.upsert_user(uid_uk)
+    seeded_uk = await _ensure_welcome_premium_channel_subscription(
+        application, bot, uid_uk, "uk"
+    )
+    assert seeded_uk is not None
+    assert seeded_uk[1] == (prem.twitch_channel_login() or "marfapr")
 
 
 async def _run_smoke() -> None:

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guida — Bot Twitch → Telegram</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem 3rem; line-height: 1.55; color: #1a1a1a; }
+    h1 { font-size: 1.6rem; line-height: 1.25; }
+    h2 { font-size: 1.25rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.25rem; }
+    nav { background: #f6f6f6; padding: 1rem 1.1rem; border-radius: 8px; margin: 1.25rem 0; }
+    nav ol { margin: 0.4rem 0 0; padding-left: 1.25rem; }
+    nav a { color: #0b57d0; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    table { border-collapse: collapse; width: 100%; margin: 0.75rem 0 1rem; font-size: 0.95rem; }
+    th, td { border: 1px solid #ddd; padding: 0.45rem 0.55rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+    code { background: #f0f0f0; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+    ul, ol { padding-left: 1.3rem; }
+    .note { background: #fff8e6; border-left: 3px solid #e6a800; padding: 0.65rem 0.85rem; margin: 1rem 0; }
+    .star { color: #b8860b; }
+    footer { margin-top: 2.5rem; font-size: 0.9rem; color: #555; }
+    a { color: #0b57d0; }
+  </style>
+</head>
+<body>
+  <h1>Guida al bot Twitch → Telegram</h1>
+  <p>Il bot invia avvisi sugli stream Twitch dove scegli tu: chat privata, canale o gruppo. Questa pagina spiega tutte le funzioni di uso quotidiano. Configura tutto in una <strong>chat privata</strong> con il bot.</p>
+  <p>Bot attivo: <a href="https://t.me/twitch2telegram_bot">@twitch2telegram_bot</a></p>
+
+  <nav aria-label="Indice">
+    <strong>Indice</strong>
+    <ol>
+      <li><a href="#start">Primo avvio</a></li>
+      <li><a href="#menu">Menu principale</a></li>
+      <li><a href="#new">Nuova iscrizione</a></li>
+      <li><a href="#import">Importa da Twitch</a></li>
+      <li><a href="#subs">Le mie iscrizioni</a></li>
+      <li><a href="#history">Cronologia avvisi</a></li>
+      <li><a href="#other">Altro</a></li>
+      <li><a href="#settings">Impostazioni e Premium</a></li>
+      <li><a href="#commands">Comandi</a></li>
+      <li><a href="#limits">Limiti del piano gratuito</a></li>
+      <li><a href="#help">Aiuto</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="start">1. Primo avvio</h2>
+  <ol>
+    <li>Apri il bot e tocca <strong>Start</strong> oppure invia <code>/start</code>.</li>
+    <li>Scegli una lingua: inglese, russo, ucraino o italiano (puoi cambiarla in seguito nelle Impostazioni).</li>
+    <li>Ricevi un messaggio di benvenuto e i pulsanti del menu principale.</li>
+  </ol>
+  <p>Al primo avvio il bot può creare un avviso demo su un canale Premium casuale, così vedi subito come sono le notifiche. Puoi aprirlo o eliminarlo con i pulsanti sotto quel messaggio.</p>
+  <div class="note">Se invii un link a un canale Twitch in chat privata mentre nessuna procedura guidata è aperta, il bot propone di creare un avviso per quel canale.</div>
+
+  <h2 id="menu">2. Menu principale</h2>
+  <table>
+    <thead><tr><th>Pulsante</th><th>A cosa serve</th></tr></thead>
+    <tbody>
+      <tr><td>➕ Nuova iscrizione</td><td>Crea un avviso per uno streamer</td></tr>
+      <tr><td>⬇️ Importa iscrizioni</td><td>Importa i follow da Twitch</td></tr>
+      <tr><td>📋 Le mie iscrizioni</td><td>Elenco, attiva/disattiva, modifica, elimina</td></tr>
+      <tr><td>📜 Cronologia avvisi</td><td>Cosa ha già inviato il bot</td></tr>
+      <tr><td>📦 Altro</td><td>Follow/Unfollow (beta), whisper, programma, Cosa guardare? (mi sento fortunato), chat</td></tr>
+      <tr><td>⚙️ Impostazioni</td><td>Premium, sync, lingua, partner, …</td></tr>
+      <tr><td>❓ Aiuto</td><td>Contatti e questa guida</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="new">3. Nuova iscrizione</h2>
+  <p>Tocca <strong>➕ Nuova iscrizione</strong>. Per prima cosa scegli un tipo di avviso:</p>
+  <table>
+    <thead><tr><th>Tipo</th><th>Quando ricevi il messaggio</th></tr></thead>
+    <tbody>
+      <tr><td>Inizio stream</td><td>Il canale va in diretta (tutti)</td></tr>
+      <tr><td>Cambio categoria</td><td>Lo streamer cambia gioco/categoria <span class="star">⭐ Premium</span></td></tr>
+      <tr><td>Stream in arrivo</td><td>Promemoria N minuti prima del programma ufficiale Twitch <span class="star">⭐</span></td></tr>
+      <tr><td>Fine stream</td><td>Lo stream è andato offline <span class="star">⭐</span></td></tr>
+      <tr><td>Drops</td><td>Nuove campagne drop per un gioco scelto <span class="star">⭐</span> (beta)</td></tr>
+      <tr><td>Avviso di gioco</td><td>Nuovi stream nelle categorie/filtri selezionati (gratuito)</td></tr>
+      <tr><td>Avvisi di uscita</td><td>Beta: avvisi di uscita di un gioco (IGDB); se la data è sconosciuta — crea subito, completa dopo</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Passaggi della procedura (in breve)</h3>
+  <ol>
+    <li><strong>Canale</strong> — login o link twitch.tv / m.twitch.tv. Se hai già un avviso per quel canale, puoi modificarlo o crearne un altro.</li>
+    <li><strong>Messaggio</strong> — modello con placeholder come <code>{username}</code>, <code>{game}</code>, <code>{name}</code>, <code>{game_description}</code>. Elenco completo: <a href="/placeholders?lang=it">placeholder</a>.</li>
+    <li><strong>Extra</strong> — seleziona ciò che ti serve: immagine, titolo pulito (rimuove @streamer e !comandi), parole da ignorare ⭐, invio ritardato ⭐, silenzia ripetizioni ⭐, elimina messaggi precedenti ⭐, fissa il messaggio fino a fine stream ⭐ (solo canale/gruppo), pulsanti URL personalizzati ⭐/🧪, pulsante chat, 🧪 «Pulsante promemoria» (solo stream in arrivo — pulsante con link a un avviso di inizio stream; attiva in Modalità beta), colore pulsanti (predefinito / blu / verde / rosso quando è attiva un’opzione pulsante), anteprima link. Una spunta attiva subito l’opzione — niente secondo Sì/No.</li>
+    <li>Il bot chiede poi solo i passaggi che richiedono altri dati (copertina: anteprima stream ⬜️/✅, anteprima GIF ⭐, anteprima video ⭐, copertina gioco ⬜️/✅, oppure un tuo upload; minuti di ritardo/silenzio, ecc.).</li>
+    <li><strong>Destinazione</strong> — chat privata o canale/gruppo. Per un canale/gruppo, aggiungi il bot e conferma la chat.</li>
+  </ol>
+  <p>Ogni passaggio ha <strong>« Indietro</strong>, <strong>Annulla</strong> e un modo per tornare al menu. Alla fine ricevi «Configurazione completata» e un messaggio di prova nella chat scelta.</p>
+  <div class="note">Piano gratuito: al massimo <strong>5 avvisi attivi</strong>. Un sesto viene creato in pausa — attivalo dopo l’upgrade o metti in pausa un altro. marfapr e i canali Premium a pagamento degli streamer non contano nel limite.</div>
+
+  <h2 id="import">4. Importa da Twitch</h2>
+  <p><strong>⬇️ Importa iscrizioni</strong> → se Twitch è già autorizzato: <strong>Importa iscrizioni manualmente</strong>; altrimenti OAuth (il bot mostra un breve avviso sulla privacy e il disclaimer Twitch; dettagli su <code>/privacy</code>) → scegli una modalità:</p>
+  <ul>
+    <li><strong>Importazione una tantum</strong> — aggiungi i follow ora; il token non viene salvato.</li>
+    <li><strong>Sincronizzazione</strong> <span class="star">⭐</span> — ogni N giorni aggiunge i nuovi follow e rimuove gli import non più seguiti. Gli avvisi manuali/modificati restano intatti salvo conferma. Il periodo si gestisce nelle Impostazioni.</li>
+  </ul>
+
+  <h2 id="subs">5. Le mie iscrizioni</h2>
+  <p><strong>📋 Le mie iscrizioni</strong> — elenco paginato. Per ogni iscrizione:</p>
+  <ul>
+    <li>attiva / disattiva;</li>
+    <li>modifica (canale, testo, opzioni, destinazione);</li>
+    <li>elimina;</li>
+    <li>condividi un link all’avviso (quando disponibile in modalità beta).</li>
+  </ul>
+  <p>Menu in basso: <strong>cestino</strong> (ripristino eliminati: 10 giorni gratis, 30 Premium) e <strong>metti in pausa tutti gli avvisi</strong>.</p>
+
+  <h2 id="history">6. Cronologia avvisi</h2>
+  <p><strong>📜 Cronologia avvisi</strong> — cosa ha già inviato il bot. Conservata 7 giorni gratis, 60 con Premium. Puoi segnare gli elementi come visti.</p>
+
+  <h2 id="other">7. Altro</h2>
+  <h3>👥 Follow/Unfollow</h3>
+  <p>Monitora nuovi Follow e Unfollow sul tuo canale (🧪 beta, ⭐ Premium). L’attivazione richiede OAuth Twitch; la sync gira una volta al giorno. Elenchi Follow / nuovi Follow / Unfollow e ricerca.</p>
+
+  <h3>💬 Avvisi whisper</h3>
+  <p>Notifiche sui whisper Twitch in arrivo. La prima attivazione richiede OAuth Twitch.</p>
+
+  <h3>📅 Gestisci programma</h3>
+  <p>Crea un programma settimanale come testo (<code>15:30 Deponia</code>, più righe) — disponibile per tutti. Correggere gli slot di un giorno, modalità vacanza e pubblicazione su Twitch sono <span class="star">⭐ Premium</span> («Strumenti programma Twitch»). Fuso orario: UTC. Mentre uno streamer è in vacanza, gli avvisi «Stream in arrivo» non vengono inviati.</p>
+
+  <h3>🎲 Cosa guardare?</h3>
+  <p>In <strong>📦 Altro</strong> — subito «Mi sento fortunato» (giochi casuali → live). «Filtri / nuova ricerca» apre la procedura <strong>Avviso di gioco</strong>.</p>
+
+  <h3>🎲 Avviso di gioco</h3>
+  <p>Ingresso: <strong>➕ Nuova iscrizione</strong> → tipo «Avviso di gioco» (sotto Drops). Una categoria Twitch → subito i filtri (tag, spettatori, lingua, escludi 18+ — casella, senza passo extra). Se non c’è nulla in live — VOD recenti. Salva un filtro e intercetta nuovi stream (fino a 5 in un messaggio); elencato in una categoria propria in Le mie iscrizioni; <strong>✏️</strong> modifica tag / spettatori / lingua / escludi 18+ / frequenza in minuti (predefinito 60, 0 = disattivata).</p>
+
+  <h3>📅 Avvisi di uscita</h3>
+  <p>Beta: <strong>➕ Nuova iscrizione</strong> → «Avvisi di uscita» (sotto Avviso di gioco). Cerca un gioco nel database IGDB locale («Cerco giochi…»), scegli date/piattaforme e quanti giorni prima notificare (0 = il giorno dell’uscita). Se la data di uscita è sconosciuta, l’avviso viene creato comunque e completato quando la data appare nel database. Una iscrizione per gioco; limite gratuito condiviso di 5 attivi con tutti i tipi di avviso; dopo la notifica per ogni piattaforma selezionata l’avviso va in pausa (nota nel messaggio + pulsante «Elimina avviso»). L’editor può cambiare solo giorni e piattaforme. La condivisione (📤) è disponibile quando la beta condivisione-avvisi è attiva. Fonte dati: <a href="https://www.igdb.com">IGDB.com</a>.</p>
+
+  <h3>💬 Chat</h3>
+  <p>Mini App per leggere e scrivere nella chat dello stream Twitch. Gratuito: lettura + fino a 20 messaggi/giorno; illimitato con Premium.</p>
+
+  <h2 id="settings">8. Impostazioni e Premium</h2>
+  <p><strong>⚙️ Impostazioni</strong> in genere include:</p>
+  <ul>
+    <li><strong>⭐ Premium</strong> — prova di 7 giorni (una sola volta), piani Stars (mese / anno / a vita), funzioni à la carte, verifica abbonamento Twitch sul canale dello sviluppatore, canale Premium per streamer. In modalità beta: <strong>compra Premium in regalo</strong> (una tantum) → messaggio e immagine opzionali → link per un amico.</li>
+    <li><strong>Sincronizzazione</strong> — periodo di auto-sync dei follow oppure disattiva.</li>
+    <li><strong>Notifiche di sistema</strong> — aggiornamenti bot, disponibilità, altre comunicazioni; stato Twitch.</li>
+    <li><strong>Lingua</strong>, <strong>modalità avanzata</strong>, <strong>modalità beta</strong> (accesso anticipato).</li>
+    <li><strong>Programma partner</strong> — link referral e una quota del Premium Stars degli invitati.</li>
+    <li><strong>Parole ignorate</strong> — elenco globale per gli avvisi; in beta — ignora generi/publisher/modalità via IGDB (quando «usa elenco globale» è attivo). Senza Premium dopo la fine della beta, l’ignore non si applica.</li>
+  </ul>
+  <p>Dopo un pagamento Stars riuscito il bot dice: «Premium attivato. Grazie!» e sotto — come contattare @immarfa con il tuo user ID se qualcosa non va.</p>
+
+  <h2 id="commands">9. Comandi</h2>
+  <table>
+    <thead><tr><th>Comando</th><th>Azione</th></tr></thead>
+    <tbody>
+      <tr><td><code>/start</code></td><td>Menu principale</td></tr>
+      <tr><td><code>/help</code></td><td>Breve aiuto sul menu</td></tr>
+      <tr><td><code>/cancel</code></td><td>Annulla la procedura corrente</td></tr>
+      <tr><td><code>/schedule</code></td><td>Programma stream</td></tr>
+      <tr><td><code>/when</code> o «Quando lo stream?»</td><td>In un gruppo/canale con un avviso — prossimo slot del programma Twitch (data MSK + gioco). Nessun programma — il bot resta in silenzio</td></tr>
+      <tr><td><code>/feedback</code></td><td>Aiuto e contatti</td></tr>
+      <tr><td><code>/settings</code></td><td>Impostazioni</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="limits">10. Limiti del piano gratuito</h2>
+  <ul>
+    <li>Fino a <strong>5 avvisi attivi</strong> (altri possono restare in pausa).</li>
+    <li>Tipi di avviso diversi da inizio stream — Premium.</li>
+    <li>Opzioni avanzate (ignore, ritardo, ripetizioni, elimina precedenti, fissa messaggio) — Premium.</li>
+    <li>Cronologia 7 giorni, cestino 10 giorni, chat con limite giornaliero di invii.</li>
+  </ul>
+
+  <h2 id="help">11. Aiuto</h2>
+  <p>Nel bot: <strong>❓ Aiuto</strong> o <code>/feedback</code>. Se qualcosa non funziona, hai una domanda sulla fatturazione o vuoi una nuova funzione — scrivi a <a href="https://t.me/immarfa">@immarfa</a> e includi il tuo Telegram user ID (il messaggio di Aiuto lo mostra).</p>
+  <p>Link: <a href="https://www.twitch.tv/marfapr">Twitch</a> · <a href="https://t.me/themarfa">Telegram</a> · <a href="https://blog.themarfa.name/">Sito</a></p>
+  <p>Dati sui giochi forniti da <a href="https://www.igdb.com">IGDB.com</a> (dump locali sul bot).</p>
+
+  <footer>
+    Bot: <a href="https://t.me/twitch2telegram_bot">@twitch2telegram_bot</a>
+  </footer>
+</body>
+</html>

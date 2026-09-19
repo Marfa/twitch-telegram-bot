@@ -4373,6 +4373,20 @@ class PostgresDatabase:
             cur.execute(
                 """
                 SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'uk' AND COALESCE(bot_blocked, FALSE) = FALSE
+                """
+            )
+            locale_uk = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'it' AND COALESCE(bot_blocked, FALSE) = FALSE
+                """
+            )
+            locale_it = int(cur.fetchone()["c"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
                 WHERE (locale IS NULL OR locale = '')
                   AND COALESCE(bot_blocked, FALSE) = FALSE
                 """
@@ -4408,6 +4422,8 @@ class PostgresDatabase:
             blocked_users=blocked_users,
             locale_en=locale_en,
             locale_ru=locale_ru,
+            locale_uk=locale_uk,
+            locale_it=locale_it,
             locale_unset=locale_unset,
         )
 

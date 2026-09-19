@@ -12,7 +12,7 @@ from donationalerts import (
     format_top_donations_block,
     top_donations,
 )
-from i18n import t
+from i18n import SUPPORTED_LOCALES, t
 
 
 def check_top_donations() -> None:
@@ -42,7 +42,7 @@ def check_top_donations() -> None:
     assert format_top_donations_block("", donations) == ""
     assert format_top_donations_block(DEFAULT_TOP_DONATIONS_TEMPLATE, []) == ""
 
-    for loc in ("en", "ru"):
+    for loc in SUPPORTED_LOCALES:
         assert t("advanced_options_top_donations", loc)
         assert t("advanced_options_hint_top_donations", loc)
         assert t("sub_list_top_donations_yes", loc)

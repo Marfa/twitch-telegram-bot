@@ -91,10 +91,10 @@ def check_multistream_status_placeholders() -> None:
 
 def check_multistream_prompt_i18n_format() -> None:
     """Literal {goodgame_status} in prompts must be escaped for str.format."""
-    from i18n import t
+    from i18n import SUPPORTED_LOCALES, t
     from multistream import MULTISTREAM_MAX
 
-    for lang in ("en", "ru"):
+    for lang in SUPPORTED_LOCALES:
         empty = t("multistream_prompt_empty", lang, max=MULTISTREAM_MAX)
         assert "{goodgame_status}" in empty
         assert "{vkplay_status}" in empty

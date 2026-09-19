@@ -18,7 +18,7 @@
 | Feature | How it works |
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
-| Languages | Russian and English — picked on first `/start`, change in **⚙️ Settings** |
+| Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops (beta) · game alert · release alerts (beta, IGDB) |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
@@ -100,7 +100,7 @@ Live checks use **Client Credentials**. Follow import uses user OAuth (`user:rea
 
 ## Usage
 
-On first `/start` the bot asks for a language (Russian or English), then shows the welcome text and **main menu**. On first start (non-share), **ru** also gets a welcome alert on a random Premium channel; for **en**, `PREMIUM_TWITCH_LOGIN` (`marfapr`) is excluded from that demo seed.
+On first `/start` the bot asks for a language (Russian / English / Ukrainian / Italian), then shows the welcome text and **main menu**. On first start (non-share), **ru** (and **uk**) also get a welcome alert on a random Premium channel; for **en**/**it**, `PREMIUM_TWITCH_LOGIN` (`marfapr`) is excluded from that demo seed.
 
 ### New subscription
 
@@ -253,7 +253,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), sync, and new-beta alerts |
-| ↳ 🌐 Language | Russian / English |
+| ↳ 🌐 Language | Russian / English / Ukrainian / Italian |
 | ⚙️ Admin | Broadcast, stats, withdrawals, cancel subscription (refund), demo mode (`ADMIN_USER_IDS` only) |
 | ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, or “Other”; scheduled send (MSK default, per-user UTC offset when set); final stats after all UTC waves; footer with type and how to disable in Settings |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
@@ -384,7 +384,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `db/` | SQLite or PostgreSQL, watch filters, referrals |
 | `self_check/` | Characterization checks + handler smoke (`python -m self_check`; CI: ruff F821) |
 | `analytics.py` | PostHog: usage events, errors, WARNING+ Logs, daily `daily_bot_stats` |
-| `locales/` + `i18n.py` | Strings (ru/en) and keyboards |
+| `locales/` + `i18n.py` | Strings (en/ru/uk/it) and keyboards |
 | `premium.py` / `premium_handlers.py` | Premium (Stars / Twitch), referral credits |
 | `beta.py` | Beta catalog (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |

@@ -43,6 +43,8 @@ def _format_stats(stats: BotStats, lang: str, *, trials: list[tuple[int, int]] |
         blocked_users=stats.blocked_users,
         locale_en=stats.locale_en,
         locale_ru=stats.locale_ru,
+        locale_uk=stats.locale_uk,
+        locale_it=stats.locale_it,
         locale_unset=stats.locale_unset,
     )
 

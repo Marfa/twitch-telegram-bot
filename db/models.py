@@ -22,6 +22,8 @@ class BotStats:
     blocked_users: int
     locale_en: int
     locale_ru: int
+    locale_uk: int
+    locale_it: int
     locale_unset: int
 
 

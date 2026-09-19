@@ -854,8 +854,8 @@ async def _ensure_welcome_premium_channel_subscription(
 ) -> tuple[int, str] | None:
     """First-start demo: random Premium channel (config + paid).
 
-    English locale skips the config promo channel (default marfapr); other
-    paid premium_channels are still eligible.
+    English/Italian locales skip the config promo channel (default marfapr);
+    other paid premium_channels are still eligible.
     """
     db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
@@ -863,7 +863,7 @@ async def _ensure_welcome_premium_channel_subscription(
     if not candidates:
         candidates = [prem.twitch_channel_login() or "marfapr"]
     promo = (prem.twitch_channel_login() or "marfapr").lower()
-    if (lang or "").lower() == "en":
+    if (lang or "").lower() in ("en", "it"):
         candidates = [c for c in candidates if str(c).lower() != promo]
         if not candidates:
             return None
@@ -2849,7 +2849,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         states={
             LANG_SELECT: [
                 CallbackQueryHandler(cancel, pattern=r"^lang:cancel$"),
-                CallbackQueryHandler(receive_language, pattern=r"^lang:(en|ru)$"),
+                CallbackQueryHandler(receive_language, pattern=r"^lang:(en|ru|uk|it)$"),
             ],
             ALERT_TYPE: [
                 _wiz_cancel,

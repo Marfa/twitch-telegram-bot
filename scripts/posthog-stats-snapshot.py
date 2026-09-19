@@ -57,6 +57,8 @@ def _send_backfill(stats: SimpleNamespace, when: datetime) -> None:
             "sys_other": stats.sys_other,
             "locale_en": stats.locale_en,
             "locale_ru": stats.locale_ru,
+            "locale_uk": stats.locale_uk,
+            "locale_it": stats.locale_it,
             "locale_unset": stats.locale_unset,
             "backfill": True,
         },
@@ -142,6 +144,8 @@ def _backfill_postgres(db) -> int:
                      WHERE COALESCE(u.receive_other_updates, TRUE)) AS sys_other,
                   (SELECT COUNT(*) FROM active_users WHERE locale = 'en') AS locale_en,
                   (SELECT COUNT(*) FROM active_users WHERE locale = 'ru') AS locale_ru,
+                  (SELECT COUNT(*) FROM active_users WHERE locale = 'uk') AS locale_uk,
+                  (SELECT COUNT(*) FROM active_users WHERE locale = 'it') AS locale_it,
                   (SELECT COUNT(*) FROM active_users
                      WHERE locale IS NULL OR locale = '') AS locale_unset
                 """,

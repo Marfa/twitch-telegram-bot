@@ -111,6 +111,8 @@ def check_core() -> None:
         sys_other = 1
         locale_en = 0
         locale_ru = 1
+        locale_uk = 0
+        locale_it = 0
         locale_unset = 0
 
     analytics_mod.capture_bot_stats(_Stats())
@@ -921,7 +923,7 @@ def check_core() -> None:
         watch_suggest_keyboard,
     )
 
-    for loc in ("en", "ru"):
+    for loc in SUPPORTED_LOCALES:
         main_kb = main_menu(loc).keyboard
         main_btns = [b.text for row in main_kb for b in row]
         assert btn("other", loc) in main_btns

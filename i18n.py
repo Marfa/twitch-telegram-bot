@@ -12,7 +12,7 @@ from telegram import (
     ReplyKeyboardMarkup,
 )
 
-SUPPORTED_LOCALES = ("en", "ru")
+SUPPORTED_LOCALES = ("en", "ru", "uk", "it")
 DEFAULT_LOCALE = "en"
 SCHEDULE_TZ = timezone(timedelta(hours=3))
 # IANA name for Twitch Helix schedule API (must not be "UTC+03:00").
@@ -44,10 +44,10 @@ def t(key: str, lang: str, **kwargs: object) -> str:
 
 
 def _plural_form(n: int, lang: str) -> str:
-    """Return one|few|many for locale plural rules (en: one vs many; ru: Slavic)."""
+    """Return one|few|many for locale plural rules (en/it: one vs many; ru/uk: Slavic)."""
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     n_abs = abs(int(n))
-    if locale == "ru":
+    if locale in ("ru", "uk"):
         n100 = n_abs % 100
         n10 = n_abs % 10
         if 11 <= n100 <= 14:
@@ -679,8 +679,14 @@ def admin_wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
 
 def language_keyboard(lang: str | None = None) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("English", callback_data="lang:en")],
-        [InlineKeyboardButton("Русский", callback_data="lang:ru")],
+        [
+            InlineKeyboardButton("English", callback_data="lang:en"),
+            InlineKeyboardButton("Русский", callback_data="lang:ru"),
+        ],
+        [
+            InlineKeyboardButton("Українська", callback_data="lang:uk"),
+            InlineKeyboardButton("Italiano", callback_data="lang:it"),
+        ],
     ]
     if lang:
         rows.append(
@@ -1866,15 +1872,21 @@ def sys_notifications_keyboard(
 _WEEKDAYS = {
     "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
     "ru": ["пн", "вт", "ср", "чт", "пт", "сб", "вс"],
+    "uk": ["пн", "вт", "ср", "чт", "пт", "сб", "нд"],
+    "it": ["lun", "mar", "mer", "gio", "ven", "sab", "dom"],
 }
 _MONTHS = {
     "en": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
     "ru": ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+    "uk": ["", "січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"],
+    "it": ["", "gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"],
 }
 # Nominative short names for month picker buttons (genitive _MONTHS is for date phrases).
 _MONTH_BUTTONS = {
     "en": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
     "ru": ["", "Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"],
+    "uk": ["", "Січ", "Лют", "Бер", "Кві", "Тра", "Чер", "Лип", "Сер", "Вер", "Жов", "Лис", "Гру"],
+    "it": ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"],
 }
 SCHEDULE_CALENDAR_MONTHS = 12
 SCHEDULE_MAX_DAY_OFFSET = 366
@@ -1884,7 +1896,7 @@ def _format_schedule_date(d: date, lang: str) -> str:
     loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     wd = _WEEKDAYS[loc][d.weekday()]
     month = _MONTHS[loc][d.month]
-    if loc == "ru":
+    if loc in ("ru", "uk"):
         return f"{wd}, {d.day} {month}"
     return f"{wd}, {month} {d.day}"
 
@@ -1892,7 +1904,7 @@ def _format_schedule_date(d: date, lang: str) -> str:
 def format_stream_schedule_date(d: date, lang: str) -> str:
     loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     month = _MONTHS[loc][d.month]
-    if loc == "ru":
+    if loc in ("ru", "uk"):
         return f"{d.day} {month}"
     return f"{d.day} {month}"
 

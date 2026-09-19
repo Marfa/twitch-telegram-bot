@@ -3998,6 +3998,18 @@ class SqliteDatabase:
                 WHERE locale = 'ru' AND COALESCE(bot_blocked, 0) = 0
                 """
             ).fetchone()["c"]
+            locale_uk = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'uk' AND COALESCE(bot_blocked, 0) = 0
+                """
+            ).fetchone()["c"]
+            locale_it = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM users
+                WHERE locale = 'it' AND COALESCE(bot_blocked, 0) = 0
+                """
+            ).fetchone()["c"]
             locale_unset = conn.execute(
                 """
                 SELECT COUNT(*) AS c FROM users
@@ -4034,6 +4046,8 @@ class SqliteDatabase:
             blocked_users=int(blocked_users),
             locale_en=int(locale_en),
             locale_ru=int(locale_ru),
+            locale_uk=int(locale_uk),
+            locale_it=int(locale_it),
             locale_unset=int(locale_unset),
         )
 

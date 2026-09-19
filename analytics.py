@@ -266,6 +266,8 @@ def capture_bot_stats(stats: Any, *, timestamp: Any | None = None) -> None:
             "sys_other": int(stats.sys_other),
             "locale_en": int(stats.locale_en),
             "locale_ru": int(stats.locale_ru),
+            "locale_uk": int(stats.locale_uk),
+            "locale_it": int(stats.locale_it),
             "locale_unset": int(stats.locale_unset),
         },
         timestamp=timestamp,
@@ -466,6 +468,8 @@ def _self_check() -> None:
         sys_other = 1
         locale_en = 0
         locale_ru = 1
+        locale_uk = 0
+        locale_it = 0
         locale_unset = 0
 
     capture_bot_stats(_Stats())

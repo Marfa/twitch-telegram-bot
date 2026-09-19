@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from config import PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
+from i18n import SUPPORTED_LOCALES
 from premium import (
     CHAT_FREE_DAILY_SEND_LIMIT,
     chat_daily_send_limit,
@@ -52,7 +53,7 @@ def make_webapp_token(
 ) -> str:
     """Short-lived HMAC token so the Mini App works even if initData is empty."""
     exp = int(time.time()) + max(60, int(ttl_sec))
-    locale = lang if lang in ("en", "ru") else ""
+    locale = lang if lang in SUPPORTED_LOCALES else ""
     msg = f"{int(user_id)}:{exp}:{locale}" if locale else f"{int(user_id)}:{exp}"
     sig = hmac.new(
         TELEGRAM_BOT_TOKEN.encode("utf-8"),
@@ -77,7 +78,7 @@ def parse_webapp_token(token: str) -> tuple[int | None, str | None]:
         msg = f"{uid_s}:{exp_s}"
     else:
         locale_raw, sig = parts[2], parts[3]
-        locale = locale_raw if locale_raw in ("en", "ru") else None
+        locale = locale_raw if locale_raw in SUPPORTED_LOCALES else None
         msg = f"{uid_s}:{exp_s}:{locale_raw}" if locale_raw else f"{uid_s}:{exp_s}"
     try:
         user_id = int(uid_s)
@@ -106,7 +107,7 @@ def chat_webapp_url(*, lang: str | None = None, user_id: int | None = None) -> s
         return ""
     base = f"{PUBLIC_BASE_URL}/app/chat/"
     params: dict[str, str] = {}
-    if lang in ("en", "ru"):
+    if lang in SUPPORTED_LOCALES:
         params["lang"] = lang
     if user_id is not None:
         params["t"] = make_webapp_token(int(user_id), lang=lang)
@@ -125,7 +126,7 @@ def alert_chat_button_url(
         return ""
     base = f"{PUBLIC_BASE_URL}/app/chat/"
     params: dict[str, str] = {"login": login, "open": "1"}
-    if lang in ("en", "ru"):
+    if lang in SUPPORTED_LOCALES:
         params["lang"] = lang
     if user_id is not None:
         params["t"] = make_webapp_token(int(user_id), lang=lang)

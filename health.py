@@ -704,6 +704,8 @@ _GUIDE_DIR = Path(__file__).resolve().parent / "webapp" / "guide"
 _GUIDE_FILES = {
     "ru": (_GUIDE_DIR / "ru.html").resolve(),
     "en": (_GUIDE_DIR / "en.html").resolve(),
+    "uk": (_GUIDE_DIR / "uk.html").resolve(),
+    "it": (_GUIDE_DIR / "it.html").resolve(),
 }
 
 

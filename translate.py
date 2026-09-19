@@ -11,8 +11,8 @@ from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
 
 logger = logging.getLogger(__name__)
 
-_DEEPL_SOURCE = {"en": "EN", "ru": "RU"}
-_DEEPL_TARGET = {"en": "EN-US", "ru": "RU"}
+_DEEPL_SOURCE = {"en": "EN", "ru": "RU", "uk": "UK", "it": "IT"}
+_DEEPL_TARGET = {"en": "EN-US", "ru": "RU", "uk": "UK", "it": "IT"}
 _DEEPL_TIMEOUT = 30
 
 

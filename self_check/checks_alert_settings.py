@@ -5,7 +5,15 @@ from __future__ import annotations
 from db.models import Subscription
 from alert_settings import ALERT_SETTING_ORDER, EDIT_FIELD
 from handlers.subscriptions import _format_sub_line
-from i18n import advanced_options_keyboard, edit_options_keyboard, t, t_bullet
+from i18n import (
+    SUPPORTED_LOCALES,
+    advanced_options_keyboard,
+    chat_button_keyboard,
+    edit_bool_keyboard,
+    edit_options_keyboard,
+    t,
+    t_bullet,
+)
 
 
 def _advopt_ids(markup) -> list[str]:
@@ -209,7 +217,7 @@ def check_button_style_options() -> None:
         for b in row
     )
 
-    for loc in ("en", "ru"):
+    for loc in SUPPORTED_LOCALES:
         assert t("button_style_default", loc)
         assert t("button_style_primary", loc)
         assert t("button_style_success", loc)
@@ -460,9 +468,7 @@ def check_alert_setting_order() -> None:
     }
     assert off_cbs["edit_g:1:mature"].startswith("⬜️ ")
 
-    from i18n import chat_button_keyboard, edit_bool_keyboard, t
-
-    for loc in ("en", "ru"):
+    for loc in SUPPORTED_LOCALES:
         chat_kb = chat_button_keyboard(loc)
         assert [b.text for b in chat_kb.inline_keyboard[0]] == [
             t("chat_button_yes", loc)

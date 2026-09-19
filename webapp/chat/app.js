@@ -49,7 +49,7 @@
       homeAdded: "On Home Screen",
       statusLive: "Live",
       statusOffline: "Offline",
-      embedHint:
+        embedHint:
         "Twitch login and Drops inside the embedded chat do not work in Telegram.",
     },
     ru: {
@@ -93,6 +93,88 @@
       embedHint:
         "Вход и Drops во встроенном чате в Telegram не работают.",
     },
+    uk: {
+      live: "Зараз в ефірі",
+      empty: "Немає ефірів серед ваших активних підписок.",
+      emptyNone: "Немає активних підписок.",
+      emptyOffline: "Зараз ніхто не в ефірі ({n} активних підписок).",
+      stats: "В ефірі: {live} · підписок: {n}",
+      searchPh: "Імʼя або посилання twitch.tv / m.twitch.tv",
+      go: "Знайти",
+      login: "Увійти в Twitch",
+      send: "Надіслати",
+      sendPh: "Повідомлення",
+      linked: "Twitch: @{login}",
+      notLinked: "Twitch: не привʼязано (потрібно для надсилання)",
+      offline: "Стрімер офлайн",
+      notFound: "Стрімера не знайдено",
+      badQuery: "Введіть імʼя або посилання Twitch",
+      beta: "Увімкніть «Чат стрімів Twitch» у Налаштування → Режим бета.",
+      authFail: "Відкрийте «Чат» з бота: /start, потім кнопка «Чат».",
+      authEmpty:
+        "Немає токена входу. Закрийте вікно, натисніть /start у боті, потім «Чат» на клавіатурі.",
+      simple: "Простий",
+      embed: "Embed",
+      quota: "Залишилось повідомлень сьогодні: {n}",
+      unlimited: "Безлімітне надсилання",
+      limitHit: "Денний ліміт. Premium знімає обмеження.",
+      needAuth: "Увійдіть у Twitch, щоб писати.",
+      oauthPrivacyHint:
+        "OAuth дає боту обрані права Twitch. Токени зберігаються зашифровано; дані не продаємо. Не афілійовані з Twitch.",
+      sendFail: "Не вдалося надіслати.",
+      loadFail: "Не вдалося завантажити дані ({error}). Закрийте й знову відкрийте «Чат».",
+      connecting: "Підключення до чату…",
+      disconnected: "Чат відключено. Перепідключення…",
+      loading: "Завантаження…",
+      otherStreamers: "Інші стрімери",
+      homeAdd: "На екран «Додому»",
+      homeAdded: "Вже на «Додому»",
+      statusLive: "В ефірі",
+      statusOffline: "Офлайн",
+      embedHint:
+        "Вхід і Drops у вбудованому чаті в Telegram не працюють.",
+    },
+    it: {
+      live: "In diretta ora",
+      empty: "Nessuna diretta tra i tuoi avvisi attivi.",
+      emptyNone: "Nessun avviso attivo.",
+      emptyOffline: "Nessuno è in diretta ({n} avvisi attivi).",
+      stats: "{live} in diretta · {n} avvisi",
+      searchPh: "Nome o link twitch.tv / m.twitch.tv",
+      go: "Vai",
+      login: "Accedi a Twitch",
+      send: "Invia",
+      sendPh: "Messaggio",
+      linked: "Twitch: @{login}",
+      notLinked: "Twitch: non collegato (serve per inviare)",
+      offline: "Streamer offline",
+      notFound: "Streamer non trovato",
+      badQuery: "Inserisci un nome o un link Twitch",
+      beta: "Attiva «Chat stream Twitch» in Impostazioni → Modalità beta.",
+      authFail: "Apri Chat dal bot: /start, poi il pulsante «Chat».",
+      authEmpty:
+        "Nessun token di accesso. Chiudi questa finestra, tocca /start nel bot, poi apri «Chat» dalla tastiera.",
+      simple: "Semplice",
+      embed: "Embed",
+      quota: "{n} messaggi rimasti oggi",
+      unlimited: "Invii illimitati",
+      limitHit: "Limite giornaliero raggiunto. Premium sblocca la chat illimitata.",
+      needAuth: "Accedi con Twitch per inviare messaggi.",
+      oauthPrivacyHint:
+        "OAuth concede al bot gli ambiti Twitch che approvi. I token sono memorizzati crittografati; non vendiamo i tuoi dati. Non affiliati a Twitch.",
+      sendFail: "Impossibile inviare il messaggio.",
+      loadFail: "Impossibile caricare i dati ({error}). Chiudi e riapri Chat.",
+      connecting: "Connessione alla chat…",
+      disconnected: "Chat disconnessa. Riconnessione…",
+      loading: "Caricamento…",
+      otherStreamers: "Altri streamer",
+      homeAdd: "Aggiungi alla schermata Home",
+      homeAdded: "Sulla schermata Home",
+      statusLive: "In diretta",
+      statusOffline: "Offline",
+      embedHint:
+        "Accesso Twitch e Drops nella chat incorporata non funzionano in Telegram.",
+    },
   };
 
   let lang = "en";
@@ -109,8 +191,12 @@
   const DEVICE_MODE_KEY = "chat_mode"; // "simple" | "embed"
 
   function setLang(code) {
-    lang = String(code || "").toLowerCase().startsWith("ru") ? "ru" : "en";
-    t = i18n[lang];
+    const raw = String(code || "").toLowerCase();
+    if (raw.startsWith("ru")) lang = "ru";
+    else if (raw.startsWith("uk")) lang = "uk";
+    else if (raw.startsWith("it")) lang = "it";
+    else lang = "en";
+    t = i18n[lang] || i18n.en;
     document.documentElement.lang = lang;
     el("online-title").textContent = t.live;
     el("online-empty").textContent = t.empty;
