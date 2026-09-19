@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 _BOT_DATA_REFRESH_KEY = "stream_preview_refresh_at"
 # Subs whose media cannot be edited (e.g. old Video-typed alerts) — skip until stream ends.
 _BOT_DATA_SKIP_KEY = "stream_preview_refresh_skip"
+# One ~30s+ ffmpeg capture per tick keeps this job under CHECK_INTERVAL.
+_MAX_VIDEO_CAPTURES_PER_TICK = 1
 # Telegram autoplay animations: muted H.264 ~640p (matches light re-encode).
 _ANIM_WIDTH = 640
 _ANIM_HEIGHT = 360
@@ -45,7 +47,7 @@ def build_stream_video_mp4(
     duration: float = 30.0,
     force: bool = False,
 ) -> CapturedPreview | None:
-    """Record ~30s live MP4; shared per streamer until TTL / force / purge."""
+    """Record ~30s live MP4; shared per streamer until force refresh / stream end."""
     if not video_preview_ready():
         return None
     return capture_live_preview_mp4(
@@ -217,9 +219,14 @@ async def refresh_live_stream_previews(
             sum(len(p) for _, _, p in due.values()),
         )
 
+    video_captures = 0
     for uid, (stream, video_subs, photo_subs) in due.items():
         captured: CapturedPreview | None = None
-        if video_subs:
+        run_video = bool(video_subs) and video_captures < _MAX_VIDEO_CAPTURES_PER_TICK
+        if video_subs and not run_video:
+            # Defer extra MP4 captures; still refresh cheap photo previews.
+            video_subs = []
+        if run_video:
             login = preview_login_from_stream(stream, video_subs[0])
             if login:
                 invalidate_shared(uid)
@@ -229,6 +236,7 @@ async def refresh_live_stream_previews(
                     twitch_user_id=uid,
                     force=True,
                 )
+            video_captures += 1
         for sub in video_subs:
             ok = await _edit_preview_media(
                 bot,
@@ -253,9 +261,10 @@ async def refresh_live_stream_previews(
             )
             if ok:
                 refresh_at[sub.id] = now
+        # Keep the fresh clip in _SHARED for later first-sends (category/end/other
+        # owners) until the next forced refresh or stream end.
         if captured is not None:
             forget_and_unlink(captured.path)
-            invalidate_shared(uid)
 
 
 def animation_input_file(data: bytes, *, attach: bool = False) -> InputFile:

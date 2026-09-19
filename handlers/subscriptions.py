@@ -49,6 +49,7 @@ from db.models import (
     parse_category_watch_prefs,
 )
 from handlers.delivery import _resolve_chat_display_name
+from handlers.monitoring import _is_unchanged_message_edit
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
 from handlers.follow_monitor import complete_follow_monitor_oauth
 from handlers.stream_schedule import _complete_schedule_publish
@@ -1080,7 +1081,19 @@ async def _deliver_subs_list(
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
-    except (BadRequest, Forbidden):
+    except BadRequest as exc:
+        # Double-tap / same page — not an error.
+        if _is_unchanged_message_edit(exc):
+            return
+        logger.exception("Failed to send subscriptions list to %s", owner_id)
+        try:
+            await reply_message.reply_text(
+                title.strip() or "—",
+                reply_markup=markup,
+            )
+        except (BadRequest, Forbidden):
+            pass
+    except Forbidden:
         logger.exception("Failed to send subscriptions list to %s", owner_id)
         try:
             await reply_message.reply_text(

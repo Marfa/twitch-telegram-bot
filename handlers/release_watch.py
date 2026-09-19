@@ -196,6 +196,19 @@ def edit_release_options_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarku
     )
 
 
+def _release_delete_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("delivery_fail_delete_btn", lang),
+                    callback_data=f"rel:del:{sub_id}",
+                )
+            ]
+        ]
+    )
+
+
 async def _send_game_card(
     bot: Any,
     chat_id: int,
@@ -207,6 +220,7 @@ async def _send_game_card(
     body_html: str,
     lang: str = DEFAULT_LOCALE,
     reply_markup: InlineKeyboardMarkup | None = None,
+    footer_html: str = "",
 ) -> None:
     from twitch import localize_igdb_summary
 
@@ -217,6 +231,8 @@ async def _send_game_card(
         cap_sum = html.escape(localized[:800])
         caption = f"{body_html}\n\n{cap_sum}"
     caption = f"{caption}\n\n{_IGDB_ATTR}"
+    if footer_html:
+        caption = f"{caption}\n\n{footer_html}"
     if len(caption) > 1024:
         caption = caption[:1020] + "…"
     if cover_mid:
@@ -969,6 +985,16 @@ def _refresh_platforms_from_db(
     return out
 
 
+def _release_all_platforms_notified(prefs: ReleaseWatchPrefs) -> bool:
+    """True when every selected platform has already been notified (alert done)."""
+    if not prefs.platforms:
+        return False
+    notified = set(prefs.notified_keys)
+    return all(
+        release_platform_key(p.platform_id, p.date) in notified for p in prefs.platforms
+    )
+
+
 async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     bot = context.bot
@@ -978,8 +1004,7 @@ async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None
         prefs = parse_release_watch_prefs(sub.release_watch_prefs)
         if not prefs:
             continue
-        if not release_feature_available(db, sub.owner_id):
-            continue
+        beta_ok = release_feature_available(db, sub.owner_id)
         waiting = prefs.date_unknown or not prefs.platforms
         refreshed = _refresh_platforms_from_db(db, prefs)
         if waiting:
@@ -1000,28 +1025,44 @@ async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None
             prefs.platforms = refreshed
         lang = _user_lang(db, sub.owner_id)
         due: list[ReleasePlatformPref] = []
-        if sub.enabled:
+        # Fire only while beta is on; still pause spent alerts if beta was turned off.
+        if sub.enabled and beta_ok:
             for p in prefs.platforms:
                 key = release_platform_key(p.platform_id, p.date)
                 fire_at = int(p.date) - max(0, int(prefs.days_before)) * 86400
                 if now >= fire_at and key not in prefs.notified_keys:
                     due.append(p)
             if due:
-                await _send_release_notify(bot, db, sub, prefs, due, lang, now=now)
+                pending = set(prefs.notified_keys)
                 for p in due:
-                    key = release_platform_key(p.platform_id, p.date)
-                    if key not in prefs.notified_keys:
-                        prefs.notified_keys.append(key)
-        all_released = (
-            all(int(p.date) <= now for p in prefs.platforms) if prefs.platforms else False
-        )
+                    pending.add(release_platform_key(p.platform_id, p.date))
+                will_complete = bool(prefs.platforms) and all(
+                    release_platform_key(p.platform_id, p.date) in pending
+                    for p in prefs.platforms
+                )
+                sent = await _send_release_notify(
+                    bot,
+                    db,
+                    sub,
+                    prefs,
+                    due,
+                    lang,
+                    now=now,
+                    pausing=will_complete,
+                )
+                if sent:
+                    for p in due:
+                        key = release_platform_key(p.platform_id, p.date)
+                        if key not in prefs.notified_keys:
+                            prefs.notified_keys.append(key)
+        all_done = _release_all_platforms_notified(prefs)
         db.update_subscription(
             sub.id,
             sub.owner_id,
             release_watch_prefs=dump_release_watch_prefs(prefs),
             mark_sync_edited=False,
         )
-        if all_released and sub.enabled:
+        if all_done and sub.enabled:
             db.toggle_subscription(sub.id, sub.owner_id)
             analytics.capture(
                 sub.owner_id,
@@ -1039,7 +1080,8 @@ async def _send_release_notify(
     lang: str,
     *,
     now: int,
-) -> None:
+    pausing: bool = False,
+) -> bool:
     platforms_txt = ", ".join(
         f"{html.escape(p.platform_name)} ({_format_release_date(p.date, lang)})"
         for p in due
@@ -1062,6 +1104,8 @@ async def _send_release_notify(
         )
     game = db.igdb_game_by_id(prefs.igdb_game_id) or {}
     summary = str(game.get("summary") or "")
+    footer = t("release_notify_paused_note", lang) if pausing else ""
+    markup = _release_delete_keyboard(sub.id, lang) if pausing else None
     try:
         await _send_game_card(
             bot,
@@ -1072,12 +1116,14 @@ async def _send_release_notify(
             summary=summary,
             body_html=body,
             lang=lang,
+            reply_markup=markup,
+            footer_html=footer,
         )
     except Exception:
         logger.exception(
             "release notify failed sub=%s owner=%s", sub.id, sub.owner_id
         )
-        return
+        return False
     analytics.capture(
         sub.owner_id,
         "release_watch_notified",
@@ -1085,7 +1131,50 @@ async def _send_release_notify(
             "subscription_id": sub.id,
             "igdb_game_id": prefs.igdb_game_id,
             "platforms": len(due),
+            "paused": pausing,
         },
+    )
+    return True
+
+
+async def on_release_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Delete release alert from the fired-notify «Delete» button."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    lang = _user_lang(db, user_id)
+    try:
+        sub_id = int(query.data.rsplit(":", 1)[-1])
+    except (TypeError, ValueError):
+        return
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not is_release_watch_sub(sub):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+        return
+    to_cart = beta_features.is_enabled(db, user_id, "deleted-subscriptions-cart")
+    if not db.delete_subscription(sub_id, user_id, to_cart=to_cart):
+        return
+    done = t("subs_deleted", lang, count=1)
+    try:
+        if query.message is not None and query.message.photo:
+            await query.edit_message_caption(caption=done, reply_markup=None)
+        else:
+            await query.edit_message_text(done)
+    except BadRequest:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+    analytics.capture(
+        user_id,
+        "release_watch_deleted_from_notify",
+        {"subscription_id": sub_id},
     )
 
 

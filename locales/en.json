@@ -1089,6 +1089,7 @@
   "release_default_template": "Game {game} has been released",
   "release_notify_out": "Game <b>{game}</b> has been released: {platforms}",
   "release_notify_soon": "Game <b>{game}</b> releases soon ({days} day(s) ahead): {platforms}",
+  "release_notify_paused_note": "<b>Alert has been paused</b>",
   "edit_release_days": "Days before notify",
   "edit_release_platforms": "Platforms",
   "edit_release_menu": "Release: <b>{game}</b>\n{days} day(s) before release",

@@ -347,6 +347,14 @@ def check_core() -> None:
         _sc._PENDING[str(_f_shared.resolve())] = "333"
     forget_and_unlink(_f_shared)
     assert _f_shared.exists()
+    # Stream-lifetime: aged mono must still hit (no short TTL).
+    with _sc._LOCK:
+        e = _sc._SHARED["333"]
+        _sc._SHARED["333"] = _sc._SharedEntry(
+            path=e.path, data=e.data, mono=_time.monotonic() - 10_000
+        )
+    assert _sc._shared_get("333") is not None
+    assert not hasattr(_sc, "SHARED_TTL_SEC")
     invalidate_shared("333")
     assert not _f_shared.exists()
     _bd: dict = {}
@@ -355,9 +363,14 @@ def check_core() -> None:
     from handlers.stream_preview import (
         _preview_caption,
         live_streams_from_poll_snapshot,
+        refresh_live_stream_previews,
     )
     import inspect as _inspect
 
+    # After a refresh capture, shared cache must remain for later first-sends.
+    assert _inspect.getsource(refresh_live_stream_previews).count(
+        "invalidate_shared"
+    ) == 1
     from handlers.background_jobs import (
         JOB_CHECK_STREAMS,
         JOB_STREAM_PREVIEWS,
@@ -371,6 +384,65 @@ def check_core() -> None:
         _notif.check_streams
     )
     assert "check_stream_previews" in _inspect.getsource(_sp)
+    assert _sp._MAX_VIDEO_CAPTURES_PER_TICK == 1
+
+    async def _preview_caps_one_video_per_tick() -> None:
+        """Two due video streamers → only one ffmpeg capture this tick."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from types import SimpleNamespace
+
+        from handlers.stream_preview import refresh_live_stream_previews
+        from twitch import STREAM_VIDEO_PREVIEW_IMAGE_ID
+
+        calls: list[str] = []
+
+        def _fake_build(*, login: str, twitch_user_id: str, force: bool = False):
+            calls.append(login)
+            return None
+
+        class _Db:
+            def get_enabled_by_twitch_user_id(self, uid: str):
+                return [
+                    SimpleNamespace(
+                        id=int(uid) * 10,
+                        owner_id=1,
+                        twitch_username=f"u{uid}",
+                        last_message_id=1,
+                        chat_id=1,
+                        image_file_id=STREAM_VIDEO_PREVIEW_IMAGE_ID,
+                    )
+                ]
+
+        live = {
+            "1": {"user_login": "one", "user_name": "One"},
+            "2": {"user_login": "two", "user_name": "Two"},
+        }
+        with (
+            patch(
+                "handlers.stream_preview.build_stream_video_mp4",
+                side_effect=_fake_build,
+            ),
+            patch(
+                "handlers.stream_preview.video_preview_ready",
+                return_value=True,
+            ),
+            patch(
+                "premium.has_feature_sync",
+                return_value=True,
+            ),
+            patch(
+                "handlers.stream_preview._edit_preview_media",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            await refresh_live_stream_previews(
+                MagicMock(), _Db(), MagicMock(), live, {}
+            )
+        assert calls == ["one"], calls
+
+    import asyncio as _asyncio
+
+    _asyncio.run(_preview_caps_one_video_per_tick())
     assert live_streams_from_poll_snapshot({}) == {}
     assert live_streams_from_poll_snapshot(
         {
@@ -380,6 +452,9 @@ def check_core() -> None:
     ) == {"u1": {"user_login": "x", "thumbnail_url": "t"}}
     assert JOB_CHECK_STREAMS == "check_streams"
     assert JOB_STREAM_PREVIEWS == "check_stream_previews"
+    import bot as _bot_mod
+
+    assert "STREAM_PREVIEW_REFRESH_SECONDS" in _inspect.getsource(_bot_mod)
     assert "EVENT_JOB_MAX_INSTANCES" in _inspect.getsource(
         install_scheduler_visibility
     )

@@ -27,16 +27,18 @@ from config import DATABASE_PATH
 logger = logging.getLogger(__name__)
 
 DEFAULT_DURATION_SEC = 30.0
-# Reuse one capture across many alerts for the same streamer (go-live fan-out).
-SHARED_TTL_SEC = 180.0
+# Reuse one capture across all video-preview alerts for the same streamer
+# until the stream ends (purge_for_streamer) or a forced refresh replaces it.
 # Prefer 480p; avoid 720p so stream-copy usually fits under _MAX_BYTES (less re-encode).
 _QUALITY = "480p,360p,worst"
 _LOGIN_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
 _LOCK = threading.Lock()
 # path_str -> twitch_user_id
 _PENDING: dict[str, str] = {}
-# twitch_user_id -> shared capture (reused until TTL / invalidate / purge)
+# twitch_user_id -> shared capture (reused until invalidate / purge)
 _SHARED: dict[str, "_SharedEntry"] = {}
+# twitch_user_id -> Event set when in-flight capture finishes (fan-out coalescing)
+_INFLIGHT: dict[str, threading.Event] = {}
 # Reject near-static / truncated captures (Telegram shows them as a frozen GIF).
 _MIN_DURATION_SEC = 4.0
 _MIN_PACKETS = 40
@@ -75,9 +77,10 @@ def capture_live_preview_mp4(
     duration: float = DEFAULT_DURATION_SEC,
     force: bool = False,
 ) -> CapturedPreview | None:
-    """Record ~duration seconds of live stream; one shared file per streamer (TTL).
+    """Record ~duration seconds of live stream; one shared file per streamer until offline.
 
     force=True bypasses the shared cache (periodic refresh wants a fresh clip).
+    Concurrent force=False callers for the same uid wait on one in-flight capture.
     """
     if not video_preview_ready():
         return None
@@ -94,61 +97,91 @@ def capture_live_preview_mp4(
             return CapturedPreview(
                 path=hit.path, data=hit.data, twitch_user_id=uid
             )
+        wait_ev: threading.Event | None = None
+        start_capture = False
+        with _LOCK:
+            existing = _INFLIGHT.get(uid)
+            if existing is not None:
+                wait_ev = existing
+            else:
+                wait_ev = threading.Event()
+                _INFLIGHT[uid] = wait_ev
+                start_capture = True
+        if not start_capture and wait_ev is not None:
+            wait_ev.wait(timeout=max(90.0, float(duration) + 60.0))
+            hit = _shared_get(uid)
+            if hit is not None:
+                return CapturedPreview(
+                    path=hit.path, data=hit.data, twitch_user_id=uid
+                )
+            return None
     dur = max(5.0, min(60.0, float(duration)))
     out_dir = preview_dir()
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
         logger.exception("Cannot create stream preview dir %s", out_dir)
+        _finish_inflight(uid)
         return None
     out_path = out_dir / f"preview_{user}_{int(time.time())}_{os.getpid()}.mp4"
-    ok = _record_streamlink_pipe(user, out_path, duration=dur)
-    if not ok:
-        _safe_unlink(out_path)
-        ok = _record_hls_copy(user, out_path, duration=dur)
-    if not ok:
-        _safe_unlink(out_path)
-        return None
-    if not _mp4_looks_animated(out_path):
-        logger.warning(
-            "Rejecting static/short stream preview login=%s path=%s",
-            user,
-            out_path.name,
-        )
-        _safe_unlink(out_path)
-        return None
     try:
-        size = out_path.stat().st_size
-    except OSError:
-        size = 0
-    if size > _MAX_BYTES:
-        logger.info(
-            "Preview too large (%s bytes), re-encoding lighter login=%s",
-            size,
-            user,
-        )
-        light = out_dir / f"preview_{user}_{int(time.time())}_{os.getpid()}_lite.mp4"
-        if not _ffmpeg_reencode_light(out_path, light):
+        ok = _record_streamlink_pipe(user, out_path, duration=dur)
+        if not ok:
             _safe_unlink(out_path)
-            _safe_unlink(light)
+            ok = _record_hls_copy(user, out_path, duration=dur)
+        if not ok:
+            _safe_unlink(out_path)
             return None
-        _safe_unlink(out_path)
-        out_path = light
         if not _mp4_looks_animated(out_path):
+            logger.warning(
+                "Rejecting static/short stream preview login=%s path=%s",
+                user,
+                out_path.name,
+            )
             _safe_unlink(out_path)
             return None
-    try:
-        data = out_path.read_bytes()
-    except OSError:
-        logger.exception("Failed to read captured preview %s", out_path)
-        _safe_unlink(out_path)
-        return None
-    if not data:
-        _safe_unlink(out_path)
-        return None
-    register_pending(out_path, uid)
-    _shared_put(uid, out_path, data)
-    return CapturedPreview(path=out_path, data=data, twitch_user_id=uid)
+        try:
+            size = out_path.stat().st_size
+        except OSError:
+            size = 0
+        if size > _MAX_BYTES:
+            logger.info(
+                "Preview too large (%s bytes), re-encoding lighter login=%s",
+                size,
+                user,
+            )
+            light = out_dir / f"preview_{user}_{int(time.time())}_{os.getpid()}_lite.mp4"
+            if not _ffmpeg_reencode_light(out_path, light):
+                _safe_unlink(out_path)
+                _safe_unlink(light)
+                return None
+            _safe_unlink(out_path)
+            out_path = light
+            if not _mp4_looks_animated(out_path):
+                _safe_unlink(out_path)
+                return None
+        try:
+            data = out_path.read_bytes()
+        except OSError:
+            logger.exception("Failed to read captured preview %s", out_path)
+            _safe_unlink(out_path)
+            return None
+        if not data:
+            _safe_unlink(out_path)
+            return None
+        register_pending(out_path, uid)
+        _shared_put(uid, out_path, data)
+        return CapturedPreview(path=out_path, data=data, twitch_user_id=uid)
+    finally:
+        if not force:
+            _finish_inflight(uid)
+
+
+def _finish_inflight(uid: str) -> None:
+    with _LOCK:
+        ev = _INFLIGHT.pop(uid, None)
+    if ev is not None:
+        ev.set()
 
 
 def register_pending(path: Path | str, twitch_user_id: str) -> None:
@@ -180,6 +213,9 @@ def invalidate_shared(twitch_user_id: str) -> None:
         old = _SHARED.pop(uid, None)
         if old is not None:
             _PENDING.pop(str(old.path.resolve()), None)
+        ev = _INFLIGHT.pop(uid, None)
+    if ev is not None:
+        ev.set()
     if old is not None:
         _safe_unlink(old.path)
 
@@ -191,6 +227,7 @@ def purge_for_streamer(twitch_user_id: str) -> int:
         return 0
     with _LOCK:
         shared = _SHARED.pop(uid, None)
+        ev = _INFLIGHT.pop(uid, None)
         victims = [p for p, owner in _PENDING.items() if owner == uid]
         for p in victims:
             _PENDING.pop(p, None)
@@ -198,6 +235,8 @@ def purge_for_streamer(twitch_user_id: str) -> int:
             sp = str(shared.path.resolve())
             if sp not in victims:
                 victims.append(sp)
+    if ev is not None:
+        ev.set()
     n = 0
     for p in victims:
         if _safe_unlink(Path(p)):
@@ -210,6 +249,9 @@ def purge_stale_on_startup() -> int:
     with _LOCK:
         _PENDING.clear()
         _SHARED.clear()
+        for ev in _INFLIGHT.values():
+            ev.set()
+        _INFLIGHT.clear()
     out_dir = preview_dir()
     if not out_dir.is_dir():
         return 0
@@ -226,19 +268,16 @@ def purge_stale_on_startup() -> int:
 
 
 def _shared_get(uid: str) -> _SharedEntry | None:
-    now = time.monotonic()
+    """Return stream-lifetime shared capture; drop only if the file vanished."""
     with _LOCK:
         hit = _SHARED.get(uid)
         if hit is None:
             return None
-        if (now - hit.mono) > SHARED_TTL_SEC or not hit.path.is_file():
+        if not hit.path.is_file():
             _SHARED.pop(uid, None)
             _PENDING.pop(str(hit.path.resolve()), None)
-            stale = hit
-        else:
-            return hit
-    _safe_unlink(stale.path)
-    return None
+            return None
+        return hit
 
 
 def _shared_put(uid: str, path: Path, data: bytes) -> None:

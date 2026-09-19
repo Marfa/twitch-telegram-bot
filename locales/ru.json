@@ -1089,6 +1089,7 @@
   "release_default_template": "Игра {game} вышла в релиз",
   "release_notify_out": "Игра <b>{game}</b> вышла в релиз: {platforms}",
   "release_notify_soon": "Игра <b>{game}</b> скоро выходит в релиз (за {days} дн.): {platforms}",
+  "release_notify_paused_note": "<b>Оповещение поставлено на паузу</b>",
   "edit_release_days": "Дни до оповещения",
   "edit_release_platforms": "Платформы",
   "edit_release_menu": "Релиз: <b>{game}</b>\nЗа {days} дн. до релиза",

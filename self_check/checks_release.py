@@ -272,6 +272,38 @@ def _check_release_keyboard() -> None:
     assert t("sub_list_release_dates", "en", dates="x")
     assert t("release_find_streams", "ru")
     assert t("release_find_streams_none", "en", game="X")
+    assert "паузу" in t("release_notify_paused_note", "ru").lower()
+    assert "paused" in t("release_notify_paused_note", "en").lower()
+
+
+def _check_release_pause_when_all_notified() -> None:
+    """After every platform is notified, pause even if the release date is still future."""
+    from handlers.release_watch import (
+        _release_all_platforms_notified,
+        _release_delete_keyboard,
+    )
+
+    future = int(time.time()) + 7 * 86400
+    prefs = ReleaseWatchPrefs(
+        igdb_game_id=1,
+        game_name="Soon",
+        days_before=3,
+        platforms=[
+            ReleasePlatformPref(
+                platform_id=167,
+                platform_name="PS5",
+                date=future,
+                human="soon",
+            )
+        ],
+        notified_keys=[],
+    )
+    assert not _release_all_platforms_notified(prefs)
+    prefs.notified_keys = [release_platform_key(167, future)]
+    assert _release_all_platforms_notified(prefs)
+    kb = _release_delete_keyboard(42, "ru")
+    assert kb.inline_keyboard[0][0].callback_data == "rel:del:42"
+    assert "Удалить" in kb.inline_keyboard[0][0].text
 
 
 def _check_release_date_backfill() -> None:
@@ -746,6 +778,7 @@ def run() -> None:
     _check_release_search_gta_alias()
     _check_release_search_exact_duplicates()
     _check_release_keyboard()
+    _check_release_pause_when_all_notified()
     _check_release_date_backfill()
     _check_release_active_cap()
     _check_release_early_dup_stops_wizard()

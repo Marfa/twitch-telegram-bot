@@ -1153,6 +1153,61 @@ async def _scenario_wizard_release_pick_pages(db) -> None:
     cap.assert_turn("wizard_release_pick_page1")
 
 
+async def _scenario_release_notify_delete(db) -> None:
+    """§6.3 Fired release notify — Delete button removes the alert."""
+    from db.models import (
+        ReleasePlatformPref,
+        ReleaseWatchPrefs,
+        dump_release_watch_prefs,
+    )
+    from handlers.release_watch import (
+        RELEASE_BETA_ID,
+        _release_delete_keyboard,
+        on_release_delete,
+    )
+
+    db.upsert_user(_FREE_UID)
+    db.set_beta_enrollment(_FREE_UID, RELEASE_BETA_ID, True)
+    prefs = ReleaseWatchPrefs(
+        igdb_game_id=42,
+        game_name="FlowNav Game",
+        days_before=0,
+        platforms=[
+            ReleasePlatformPref(6, "PC", 1_800_000_000, "2027"),
+        ],
+        notified_keys=["6:1800000000"],
+    )
+    sub_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="FlowNav Game",
+        twitch_user_id="rel:42",
+        message_template="release",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        enabled=False,
+        notify_on_live=False,
+        notify_on_end=False,
+        notify_on_category_change=False,
+        release_watch_prefs=dump_release_watch_prefs(prefs),
+    )
+
+    kb = _release_delete_keyboard(sub_id, "ru")
+    assert kb.inline_keyboard[0][0].callback_data == f"rel:del:{sub_id}"
+    assert "Удалить" in (kb.inline_keyboard[0][0].text or "")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, f"rel:del:{sub_id}", cap)
+    query.message.photo = None
+    with patch("handlers.release_watch.analytics.capture"):
+        await on_release_delete(update, ctx := _ctx(application))
+    assert db.get_subscription(sub_id, _FREE_UID) is None
+    query.edit_message_text.assert_awaited()
+    _ = ctx
+
+
 async def _scenario_wizard_alert_type_other(db) -> None:
     """§2.1 Other — inline Other features; Back returns to alert type."""
     from handlers.wizard import _wz, alert_type_open_other, receive_new_sub_other
@@ -2654,6 +2709,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_game_alert(db)
         await _scenario_wizard_release_alert(db)
         await _scenario_wizard_release_pick_pages(db)
+        await _scenario_release_notify_delete(db)
         await _scenario_wizard_alert_type_other(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_top_donations(db)

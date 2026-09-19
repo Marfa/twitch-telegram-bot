@@ -442,6 +442,7 @@ from handlers.watch import (
 from handlers.release_watch import (
     cancel_release_callback,
     check_release_watch_alerts,
+    on_release_delete,
     on_release_find_streams,
     receive_release_dates_callback,
     receive_release_days,
@@ -2670,6 +2671,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_release_delete, pattern=r"^rel:del:\d+$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_twitch_link_decline, pattern=r"^twitch_link:decline$"),
         group=0,
     )
@@ -3579,7 +3584,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=2,
     )
 
-    from config import CHECK_INTERVAL
+    from config import CHECK_INTERVAL, STREAM_PREVIEW_REFRESH_SECONDS
     from handlers.background_jobs import (
         JOB_CHECK_STREAMS,
         JOB_STREAM_PREVIEWS,
@@ -3606,13 +3611,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     install_scheduler_visibility(app.job_queue)
     # coalesce + named jobs: skipped overlapping ticks are visible via listener,
     # and preview captures (~30s+) must not run inside the 60s stream poll.
-    def _stream_job_kwargs(job_id: str) -> dict:
+    def _stream_job_kwargs(job_id: str, *, misfire_grace: int | None = None) -> dict:
         return {
             "id": job_id,
             "replace_existing": True,
             "max_instances": 1,
             "coalesce": True,
-            "misfire_grace_time": max(30, int(CHECK_INTERVAL)),
+            "misfire_grace_time": max(
+                30, int(misfire_grace if misfire_grace is not None else CHECK_INTERVAL)
+            ),
         }
 
     app.job_queue.run_repeating(
@@ -3622,12 +3629,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         name=JOB_CHECK_STREAMS,
         job_kwargs=_stream_job_kwargs(JOB_CHECK_STREAMS),
     )
+    # Preview media refreshes every ~30 min; poll every few minutes, not every live tick.
+    # One MP4 capture can take ~30–45s — grace must cover that so deploys don't misfire.
+    _preview_poll = max(
+        int(CHECK_INTERVAL),
+        min(300, max(60, int(STREAM_PREVIEW_REFRESH_SECONDS) // 6)),
+    )
     app.job_queue.run_repeating(
         check_stream_previews,
-        interval=CHECK_INTERVAL,
+        interval=_preview_poll,
         first=25,
         name=JOB_STREAM_PREVIEWS,
-        job_kwargs=_stream_job_kwargs(JOB_STREAM_PREVIEWS),
+        job_kwargs=_stream_job_kwargs(JOB_STREAM_PREVIEWS, misfire_grace=180),
     )
     app.job_queue.run_repeating(
         check_release_watch_alerts, interval=24 * 3600, first=120

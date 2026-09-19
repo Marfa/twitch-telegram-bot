@@ -122,6 +122,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("alert_dup_edit", f"alert_dup:edit:{_SAMPLE_SUB}"),
     ("alert_dup_continue", "alert_dup:continue"),
     ("rel_streams", "rel:streams:42"),
+    ("rel_del", "rel:del:42"),
     ("share_decline", "share_decline"),
     ("gift_accept", "gift_accept:abc123XYZ_-"),
     ("gift_decline", "gift_decline"),
