@@ -751,7 +751,6 @@ def check_core() -> None:
     fm_ru = i18n_t("follow_monitor_screen", "ru")
     assert "Premium" in fm_ru
     assert "мониторинг" in fm_ru.lower() or "Monitor" in fm_ru
-    assert "выключены" in fm_ru
     assert "Premium" in i18n_t("follow_monitor_screen", "en")
     assert "Follow/Unfollow" in i18n_t("new_sub_other_prompt", "en")
 

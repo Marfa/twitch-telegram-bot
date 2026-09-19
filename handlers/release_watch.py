@@ -35,7 +35,6 @@ from igdb_dumps import igdb_image_url
 logger = logging.getLogger(__name__)
 
 RELEASE_BETA_ID = "release-alerts"
-_IGDB_ATTR = '<a href="https://www.igdb.com">IGDB.com</a>'
 _RELEASE_PICK_PAGE_SIZE = 5
 _RELEASE_SEARCH_LIMIT = 100
 
@@ -222,7 +221,7 @@ async def _send_game_card(
     reply_markup: InlineKeyboardMarkup | None = None,
     footer_html: str = "",
 ) -> None:
-    from twitch import localize_igdb_summary
+    from twitch import igdb_game_page_url, localize_igdb_summary
 
     cover_mid = db.igdb_cover_image_id_for_game(game_id)
     caption = body_html
@@ -230,7 +229,10 @@ async def _send_game_card(
     if localized:
         cap_sum = html.escape(localized[:800])
         caption = f"{body_html}\n\n{cap_sum}"
-    caption = f"{caption}\n\n{_IGDB_ATTR}"
+    game = db.igdb_game_by_id(game_id) or {}
+    page_url = igdb_game_page_url(game.get("slug")) or "https://www.igdb.com"
+    igdb_attr = f'<a href="{html.escape(page_url, quote=True)}">IGDB.com</a>'
+    caption = f"{caption}\n\n{igdb_attr}"
     if footer_html:
         caption = f"{caption}\n\n{footer_html}"
     if len(caption) > 1024:

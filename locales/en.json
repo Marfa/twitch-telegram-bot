@@ -502,7 +502,7 @@
   "whisper_alerts_disabled": "Whisper alerts are off.",
   "whisper_alerts_failed": "Could not enable whisper alerts. Try again.",
   "whisper_alerts_revoked": "Twitch stopped whisper alerts. Open Other → Whisper alerts to turn them on again.",
-  "follow_monitor_screen": "<b>Follow/Unfollow</b>\n\nTrack new Follows and Unfollows on your channel. Enabling monitoring and alerts is Premium only. After beta ends, without Premium monitoring and alerts stay off; this section and the lists remain available.",
+  "follow_monitor_screen": "<b>Follow/Unfollow</b>\n\nTrack new Follows and Unfollows on your channel. Enabling monitoring and alerts is Premium only.",
   "follow_monitor_enable": "Enable monitoring",
   "follow_monitor_notify_follow": "Notify about new Follows",
   "follow_monitor_notify_unfollow": "Notify about new Unfollows",

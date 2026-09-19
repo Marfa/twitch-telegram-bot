@@ -502,7 +502,7 @@
   "whisper_alerts_disabled": "Оповещения об ЛС выключены.",
   "whisper_alerts_failed": "Не удалось включить оповещения об ЛС. Попробуйте ещё раз.",
   "whisper_alerts_revoked": "Twitch отключил оповещения об ЛС. Включите их снова в Прочем → Оповещения об ЛС.",
-  "follow_monitor_screen": "<b>Follow/Unfollow</b>\n\nОтслеживание новых Follow и Unfollow вашего канала. Включение мониторинга и оповещений — только Premium. Без Premium после выхода из беты мониторинг и оповещения выключены; раздел и списки остаются доступны.",
+  "follow_monitor_screen": "<b>Follow/Unfollow</b>\n\nОтслеживание новых Follow и Unfollow вашего канала. Включение мониторинга и оповещений — только Premium.",
   "follow_monitor_enable": "Включить мониторинг",
   "follow_monitor_notify_follow": "Оповещать о новых Follow",
   "follow_monitor_notify_unfollow": "Оповещать о новых Unfollow",

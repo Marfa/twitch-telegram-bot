@@ -500,6 +500,29 @@
     el("view-chat").classList.add("hidden");
     el("view-home").classList.remove("hidden");
     el("embed-hint").classList.add("hidden");
+    loadOnlineList();
+  }
+
+  async function loadOnlineList() {
+    try {
+      const online = await api("/app/chat/api/online");
+      if (online.body.ok) {
+        renderOnline(online.body.streams || [], online.body);
+        renderOtherStreams(online.body.other_streams || []);
+        return;
+      }
+      renderOnline([], { subscribed: 0, live: 0 });
+      renderOtherStreams([]);
+      const hint = el("search-hint");
+      hint.classList.remove("hidden");
+      hint.textContent = t.loadFail.replace(
+        "{error}",
+        online.body.error || "error"
+      );
+    } catch (_) {
+      renderOnline([], { subscribed: 0, live: 0 });
+      renderOtherStreams([]);
+    }
   }
 
   function applyChatMode() {
@@ -667,6 +690,7 @@
       session = body;
       setLang(urlLang || body.lang || detectLang() || "en");
       renderAuth();
+      await loadOnlineList();
       const params = new URLSearchParams(location.search);
       const openLogin = (params.get("login") || "").trim();
       const autoOpen = params.get("open") === "1";
@@ -677,23 +701,8 @@
           );
           if (resolved.body.ok && resolved.body.online) {
             openChat(resolved.body);
-            return;
           }
         } catch (_) {}
-      }
-      const online = await api("/app/chat/api/online");
-      if (online.body.ok) {
-        renderOnline(online.body.streams || [], online.body);
-        renderOtherStreams(online.body.other_streams || []);
-      } else {
-        renderOnline([], { subscribed: 0, live: 0 });
-        renderOtherStreams([]);
-        const hint = el("search-hint");
-        hint.classList.remove("hidden");
-        hint.textContent = t.loadFail.replace(
-          "{error}",
-          online.body.error || "error"
-        );
       }
     } catch (err) {
       showFatal(

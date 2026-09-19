@@ -6578,7 +6578,7 @@ class SqliteDatabase:
         with self._conn() as conn:
             r = conn.execute(
                 """
-                SELECT id, name, first_release_date, cover_id, summary
+                SELECT id, name, slug, first_release_date, cover_id, summary
                 FROM igdb_games WHERE id = ?
                 """,
                 (gid,),
@@ -6588,6 +6588,7 @@ class SqliteDatabase:
         return {
             "id": int(r["id"]),
             "name": str(r["name"]),
+            "slug": str(r["slug"] or "").strip() or None,
             "first_release_date": (
                 int(r["first_release_date"])
                 if r["first_release_date"] is not None
