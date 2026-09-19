@@ -1951,9 +1951,24 @@ def check_core() -> None:
         assert "{username}" in found or "{{username}}" not in found
         assert "Дополнительно" in found or loc != "ru"
         assert "Extras" in found or loc != "en"
-        assert "очистка названия" in found.lower() or "clean title" in found.lower()
+        assert "Додатково" in found or loc != "uk"
+        assert "Extra" in found or loc != "it"
+        assert (
+            "очистка названия" in found.lower()
+            or "clean title" in found.lower()
+            or "очищення назви" in found.lower()
+            or "titolo pulito" in found.lower()
+            or "pulizia" in found.lower()
+        )
         assert "x в эфире с игрой Just Chatting. Тестовый стрим" in found or loc != "ru"
-        assert "x is live with Just Chatting. Test stream" in found or loc != "en"
+        assert "x is live with Just Chatting. Test stream" in found or loc in (
+            "ru",
+            "uk",
+        )
+        assert "x в ефірі з грою Just Chatting. Тестовий стрім" in found or loc != "uk"
+        # Italian template example keeps the English sample stream line.
+        if loc == "it":
+            assert "x is live with Just Chatting. Test stream" in found
         assert tr("advanced_options_strip", loc)
         assert "Очистка названия" in tr("advanced_options_hint_strip", "ru")
         assert "Clean title" in tr("advanced_options_hint_strip", "en")
@@ -1968,8 +1983,18 @@ def check_core() -> None:
         assert "LINK" in edit_tpl
         assert "{username} live" in edit_tpl
         assert "marfapr live" in edit_tpl
-        assert "Current format" in edit_tpl or "Текущий формат" in edit_tpl
-        assert "How it will look" in edit_tpl or "Как будет выглядеть" in edit_tpl
+        assert (
+            "Current format" in edit_tpl
+            or "Текущий формат" in edit_tpl
+            or "Поточний формат" in edit_tpl
+            or "Formato attuale" in edit_tpl
+        )
+        assert (
+            "How it will look" in edit_tpl
+            or "Как будет выглядеть" in edit_tpl
+            or "Як виглядатиме" in edit_tpl
+            or "Come apparirà" in edit_tpl
+        )
         assert "Очистка названия" not in edit_tpl and "Clean title" not in edit_tpl
         feedback = tr("feedback", loc, user_id=42)
         assert "42" in feedback
