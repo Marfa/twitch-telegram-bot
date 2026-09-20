@@ -239,7 +239,10 @@ def _build_alert_history_chunks(
     *,
     bot_username: str = "",
 ) -> tuple[list[str], int | None]:
-    """Return (pages, first_unviewed_page). Page index is 0-based; None if all viewed."""
+    """Return (pages, oldest_unviewed_page). Page index is 0-based; None if all viewed.
+
+    Items are newest-first, so the last unviewed block is the oldest.
+    """
     title = t("alert_history_title", lang, days=days, n=len(items))
     blocks: list[tuple[str, bool]] = []
     last_day: date | None = None
@@ -275,7 +278,7 @@ def _build_alert_history_chunks(
         )
 
     chunks: list[str] = []
-    first_unviewed_page: int | None = None
+    oldest_unviewed_page: int | None = None
     buf = title
     for block, is_unviewed in blocks:
         candidate = f"{buf}\n\n{block}" if buf else block
@@ -286,11 +289,11 @@ def _build_alert_history_chunks(
         else:
             page_for_block = len(chunks)
             buf = candidate if len(candidate) <= 4000 else candidate[:3990].rstrip() + "\n…"
-        if is_unviewed and first_unviewed_page is None:
-            first_unviewed_page = page_for_block
+        if is_unviewed:
+            oldest_unviewed_page = page_for_block
     if buf:
         chunks.append(buf)
-    return chunks, first_unviewed_page
+    return chunks, oldest_unviewed_page
 
 
 def _alert_history_menu_row(lang: str) -> list[InlineKeyboardButton]:

@@ -1180,6 +1180,7 @@ def check_handlers() -> None:
             for row in nav_premium_one.inline_keyboard
             for b in row
         )
+        # Newest-first, same order as list_alert_history (id DESC).
         fat_items = [
             AlertHistoryEntry(
                 id=i,
@@ -1189,13 +1190,17 @@ def check_handlers() -> None:
                 alert_type="live",
                 message_text=("x" * 800),
                 sent_at=datetime.now(timezone.utc).isoformat(),
+                viewed=(i != 0 and i != 11),
             )
-            for i in range(12)
+            for i in range(11, -1, -1)
         ]
         pages, unwatched = _build_alert_history_chunks(fat_items, "ru", 7)
         assert len(pages) > 1
         assert all(len(p) <= 4100 for p in pages)
-        assert unwatched is None or isinstance(unwatched, int)
+        # Jump to oldest unviewed (u0), not newest (u11).
+        assert unwatched == len(pages) - 1
+        assert "u0" in pages[unwatched]
+        assert "u11" in pages[0]
         db.add_alert_history(
             10,
             subscription_id=9,
