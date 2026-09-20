@@ -162,6 +162,41 @@ def _schedule_multistream_wait(
     )
 
 
+def delayed_live_job_name(sub_id: int) -> str:
+    return f"delay_{int(sub_id)}"
+
+
+def has_pending_named_jobs(job_queue, name: str) -> bool:
+    if job_queue is None:
+        return False
+    try:
+        return bool(job_queue.get_jobs_by_name(name))
+    except Exception:
+        return False
+
+
+def schedule_delayed_live_notification(
+    job_queue,
+    *,
+    sub_id: int,
+    stream_id: str,
+    delay_minutes: int,
+) -> bool:
+    """Arm one delayed live send for the first edge; ignore later stream_id changes until it fires."""
+    if job_queue is None or int(delay_minutes or 0) <= 0:
+        return False
+    name = delayed_live_job_name(sub_id)
+    if has_pending_named_jobs(job_queue, name):
+        return False
+    job_queue.run_once(
+        _send_delayed_notification,
+        when=int(delay_minutes) * 60,
+        data={"sub_id": sub_id, "stream_id": stream_id},
+        name=name,
+    )
+    return True
+
+
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _render_sub_template
 
@@ -580,11 +615,12 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     ):
                         continue
                     if sub.delay_minutes > 0:
-                        context.job_queue.run_once(
-                            _send_delayed_notification,
-                            when=sub.delay_minutes * 60,
-                            data={"sub_id": sub.id, "stream_id": stream_id},
-                            name=f"delay_{sub.id}",
+                        # First stream_id arms the delay; further restarts wait until it fires.
+                        schedule_delayed_live_notification(
+                            context.job_queue,
+                            sub_id=sub.id,
+                            stream_id=stream_id,
+                            delay_minutes=sub.delay_minutes,
                         )
                         continue
                     # Helix often returns empty game_name for a few seconds after go-live.

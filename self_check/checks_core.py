@@ -1178,6 +1178,38 @@ def check_core() -> None:
         restored["last_live"], ["2"], {"2": {"id": "new"}}, primed=True
     ) == (["2"], [])
 
+    from handlers.notifications import schedule_delayed_live_notification
+
+    class _FakeJobQueue:
+        def __init__(self) -> None:
+            self.jobs: dict[str, list[object]] = {}
+            self.calls: list[dict] = []
+
+        def get_jobs_by_name(self, name: str):
+            return tuple(self.jobs.get(name, ()))
+
+        def run_once(self, callback, when, data=None, name=None):
+            self.calls.append(
+                {"callback": callback, "when": when, "data": data, "name": name}
+            )
+            self.jobs.setdefault(name, []).append(object())
+
+    jq = _FakeJobQueue()
+    assert schedule_delayed_live_notification(
+        jq, sub_id=269, stream_id="sid-1", delay_minutes=40
+    )
+    assert len(jq.calls) == 1
+    assert jq.calls[0]["data"]["stream_id"] == "sid-1"
+    assert jq.calls[0]["when"] == 40 * 60
+    # Further stream_id changes before first send must not arm another delay.
+    assert not schedule_delayed_live_notification(
+        jq, sub_id=269, stream_id="sid-2", delay_minutes=40
+    )
+    assert not schedule_delayed_live_notification(
+        jq, sub_id=269, stream_id="sid-3", delay_minutes=40
+    )
+    assert len(jq.calls) == 1
+
     with tempfile.TemporaryDirectory() as tmp:
         from db import open_database
 
