@@ -291,21 +291,38 @@ async def open_auth_tokens_menu(
     )
 
 
-async def on_auth_tokens_revoke(
+async def on_auth_tokens_revoke_twitch(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     from handlers.background_jobs import sync_optional_jobs
     from i18n import auth_tokens_menu
-    from oauth_tokens import revoke_all_oauth_tokens
+    from oauth_tokens import revoke_twitch_oauth_tokens
 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    revoke_all_oauth_tokens(db, user_id)
+    revoke_twitch_oauth_tokens(db, user_id)
     sync_optional_jobs(context.application.job_queue, db)
     await update.effective_message.reply_text(
-        t("auth_tokens_revoked", lang),
+        t("auth_tokens_revoked_twitch", lang),
+        reply_markup=auth_tokens_menu(lang),
+    )
+
+
+async def on_auth_tokens_revoke_donationalerts(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from i18n import auth_tokens_menu
+    from oauth_tokens import revoke_donationalerts_oauth_tokens
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    revoke_donationalerts_oauth_tokens(db, user_id)
+    await update.effective_message.reply_text(
+        t("auth_tokens_revoked_donationalerts", lang),
         reply_markup=auth_tokens_menu(lang),
     )
 

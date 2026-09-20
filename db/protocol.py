@@ -616,6 +616,14 @@ class Database(Protocol):
         refresh_token: str,
     ) -> None: ...
 
+    def revoke_user_twitch_oauth_tokens(self, owner_id: int) -> None:
+        """Delete Twitch feature tokens (sync, chat, whispers, drops, follow monitor)."""
+        ...
+
+    def revoke_user_donationalerts_oauth_tokens(self, owner_id: int) -> None:
+        """Delete DonationAlerts OAuth for owner."""
+        ...
+
     def revoke_user_oauth_tokens(self, owner_id: int) -> None:
         """Delete Twitch feature tokens + DonationAlerts auth for owner."""
         ...

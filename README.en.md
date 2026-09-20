@@ -251,7 +251,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ⚙️ Settings | Premium, sync, ignored words (🧪 IGDB categories in beta), system alerts, language, auth tokens, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
-| ↳ 🔑 Auth tokens | One tap to revoke Twitch and DonationAlerts tokens |
+| ↳ 🔑 Auth tokens | Separate buttons to revoke Twitch or DonationAlerts |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), sync, and new-beta alerts |
 | ↳ 🌐 Language | Russian / English / Ukrainian / Italian |

@@ -525,6 +525,15 @@ async def _scenario_settings_and_partner(db) -> None:
     update = _msg_update(_FREE_UID, btn("auth_tokens", "ru"), cap)
     ctx = _ctx(application)
     await open_auth_tokens_menu(update, ctx)
+    labels = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "keyboard", None)
+        for row in m.keyboard
+        for b in row
+    ]
+    assert btn("auth_tokens_revoke_twitch", "ru") in labels
+    assert btn("auth_tokens_revoke_donationalerts", "ru") in labels
     cap.assert_turn("settings_auth_tokens")
 
     application, bot = _app(db)

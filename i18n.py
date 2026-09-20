@@ -225,7 +225,8 @@ def all_menu_buttons() -> set[str]:
         "sync_subs",
         "premium",
         "auth_tokens",
-        "auth_tokens_revoke",
+        "auth_tokens_revoke_twitch",
+        "auth_tokens_revoke_donationalerts",
         "partner",
         "partner_stats",
         "partner_link",
@@ -347,7 +348,8 @@ def settings_menu(
 def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(btn("auth_tokens_revoke", lang))],
+            [KeyboardButton(btn("auth_tokens_revoke_twitch", lang))],
+            [KeyboardButton(btn("auth_tokens_revoke_donationalerts", lang))],
             [KeyboardButton(btn("back_settings", lang))],
         ],
         resize_keyboard=True,

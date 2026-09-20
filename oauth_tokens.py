@@ -213,7 +213,18 @@ def apply_oauth_success_tokens(
     return True
 
 
-def revoke_all_oauth_tokens(db: Database, owner_id: int) -> None:
-    """User-initiated wipe of Twitch feature tokens + DonationAlerts."""
-    db.revoke_user_oauth_tokens(owner_id)
+def revoke_twitch_oauth_tokens(db: Database, owner_id: int) -> None:
+    """User-initiated wipe of Twitch feature tokens (sync, chat, whispers, …)."""
+    db.revoke_user_twitch_oauth_tokens(owner_id)
     db.pause_for_twitch_reauth(owner_id)
+
+
+def revoke_donationalerts_oauth_tokens(db: Database, owner_id: int) -> None:
+    """User-initiated wipe of DonationAlerts OAuth."""
+    db.revoke_user_donationalerts_oauth_tokens(owner_id)
+
+
+def revoke_all_oauth_tokens(db: Database, owner_id: int) -> None:
+    """Wipe Twitch feature tokens + DonationAlerts (tests / full reset)."""
+    revoke_twitch_oauth_tokens(db, owner_id)
+    revoke_donationalerts_oauth_tokens(db, owner_id)

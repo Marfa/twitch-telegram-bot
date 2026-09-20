@@ -4594,7 +4594,7 @@ class SqliteDatabase:
                 (owner_id,),
             )
 
-    def revoke_user_oauth_tokens(self, owner_id: int) -> None:
+    def revoke_user_twitch_oauth_tokens(self, owner_id: int) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM twitch_sync WHERE owner_id = ?", (owner_id,))
             conn.execute(
@@ -4615,9 +4615,6 @@ class SqliteDatabase:
                 (owner_id,),
             )
             conn.execute(
-                "DELETE FROM donationalerts_auth WHERE owner_id = ?", (owner_id,)
-            )
-            conn.execute(
                 """
                 UPDATE users
                 SET premium_twitch_refresh = '',
@@ -4627,6 +4624,16 @@ class SqliteDatabase:
                 """,
                 (owner_id,),
             )
+
+    def revoke_user_donationalerts_oauth_tokens(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM donationalerts_auth WHERE owner_id = ?", (owner_id,)
+            )
+
+    def revoke_user_oauth_tokens(self, owner_id: int) -> None:
+        self.revoke_user_twitch_oauth_tokens(owner_id)
+        self.revoke_user_donationalerts_oauth_tokens(owner_id)
 
     def list_owners_needing_twitch_reauth(self) -> list[int]:
         with self._conn() as conn:

@@ -5011,7 +5011,7 @@ class PostgresDatabase:
                 (owner_id,),
             )
 
-    def revoke_user_oauth_tokens(self, owner_id: int) -> None:
+    def revoke_user_twitch_oauth_tokens(self, owner_id: int) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute("DELETE FROM twitch_sync WHERE owner_id = %s", (owner_id,))
@@ -5033,9 +5033,6 @@ class PostgresDatabase:
                 (owner_id,),
             )
             cur.execute(
-                "DELETE FROM donationalerts_auth WHERE owner_id = %s", (owner_id,)
-            )
-            cur.execute(
                 """
                 UPDATE users
                 SET premium_twitch_refresh = '',
@@ -5045,6 +5042,17 @@ class PostgresDatabase:
                 """,
                 (owner_id,),
             )
+
+    def revoke_user_donationalerts_oauth_tokens(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM donationalerts_auth WHERE owner_id = %s", (owner_id,)
+            )
+
+    def revoke_user_oauth_tokens(self, owner_id: int) -> None:
+        self.revoke_user_twitch_oauth_tokens(owner_id)
+        self.revoke_user_donationalerts_oauth_tokens(owner_id)
 
     def list_owners_needing_twitch_reauth(self) -> list[int]:
         with self._conn() as conn:

@@ -360,7 +360,8 @@ from handlers.settings import (
     open_beta_mode_menu,
     open_other_menu,
     open_auth_tokens_menu,
-    on_auth_tokens_revoke,
+    on_auth_tokens_revoke_twitch,
+    on_auth_tokens_revoke_donationalerts,
     open_settings_menu,
     open_stream_chat,
     open_sys_notifications_menu,
@@ -2421,7 +2422,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
-        MessageHandler(_btn_filter("auth_tokens_revoke"), on_auth_tokens_revoke),
+        MessageHandler(
+            _btn_filter("auth_tokens_revoke_twitch"), on_auth_tokens_revoke_twitch
+        ),
+        MessageHandler(
+            _btn_filter("auth_tokens_revoke_donationalerts"),
+            on_auth_tokens_revoke_donationalerts,
+        ),
         group=0,
     )
     app.add_handler(
@@ -3536,7 +3543,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("settings")
                 | _btn_filter("premium")
                 | _btn_filter("auth_tokens")
-                | _btn_filter("auth_tokens_revoke")
+                | _btn_filter("auth_tokens_revoke_twitch")
+                | _btn_filter("auth_tokens_revoke_donationalerts")
                 | _btn_filter("partner")
                 | _btn_filter("partner_stats")
                 | _btn_filter("partner_link")
