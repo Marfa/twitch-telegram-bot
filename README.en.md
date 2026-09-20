@@ -242,7 +242,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ➕ New subscription | Alert type → wizard |
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
-| 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below” |
+| 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below”, **To unwatched** |
 | 📦 Other | Follow/Unfollow (beta; settings Premium), whisper alerts, schedule, what to watch (feeling lucky), chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
