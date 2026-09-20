@@ -2425,6 +2425,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(
             _btn_filter("auth_tokens_revoke_twitch"), on_auth_tokens_revoke_twitch
         ),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(
             _btn_filter("auth_tokens_revoke_donationalerts"),
             on_auth_tokens_revoke_donationalerts,
