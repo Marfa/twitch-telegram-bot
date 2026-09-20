@@ -18,7 +18,7 @@ import premium as prem
 from bot_helpers import _user_lang, _user_notifications_paused, reply_chat_id, with_oauth_legal
 from db import Database
 from i18n import DEFAULT_LOCALE, follow_monitor_keyboard, other_menu, t
-from twitch import FOLLOWERS_SCOPE, TwitchClient
+from twitch import FOLLOWERS_SCOPE, TwitchClient, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,20 @@ SYNC_PERIOD_DAYS = 1
 PAGE_SIZE = 40
 FM_SEARCH = 1
 _DIGEST_MAX_LINES = 40
+NEW_LIST_DAYS = 30
 
 _LIST_KIND_CURRENT = "current"
 _LIST_KIND_NEW = "new"
+_LIST_KIND_NEW_UNFOLLOW = "new_unfollow"
 _LIST_KIND_UNFOLLOW = "unfollow"
+_LIST_KINDS = frozenset(
+    {
+        _LIST_KIND_CURRENT,
+        _LIST_KIND_NEW,
+        _LIST_KIND_NEW_UNFOLLOW,
+        _LIST_KIND_UNFOLLOW,
+    }
+)
 
 
 def _oauth_ready() -> bool:
@@ -88,14 +98,40 @@ async def maybe_stop_follow_monitor_after_beta_exit(
     )
 
 
-def _format_follower_line(login: str, display_name: str) -> str:
-    login = (login or "").strip()
+def _format_event_date(iso: str) -> str:
+    raw = (iso or "").strip()
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw[:10] if len(raw) >= 10 else raw
+    return dt.astimezone(timezone.utc).strftime("%d.%m.%Y")
+
+
+def _new_list_since_iso() -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=NEW_LIST_DAYS)).isoformat()
+
+
+def _format_follower_line(
+    login: str, display_name: str, *, at: str | None = None
+) -> str:
+    login = (login or "").strip().lstrip("@")
     display = (display_name or "").strip()
+    linked = twitch_login_link_html(login) if login else ""
     if display and display.lower() != login.lower():
-        return f"• {html_escape(display)} (@{html_escape(login)})"
-    if login:
-        return f"• @{html_escape(login)}"
-    return f"• {html_escape(display or '?')}"
+        if linked:
+            base = f"• {html_escape(display)} ({linked})"
+        else:
+            base = f"• {html_escape(display)}"
+    elif linked:
+        base = f"• {linked}"
+    else:
+        base = f"• {html_escape(display or '?')}"
+    date_s = _format_event_date(at or "")
+    if date_s:
+        return f"{base} — {html_escape(date_s)}"
+    return base
 
 
 def _chunk_lines(title: str, lines: list[str]) -> list[str]:
@@ -637,14 +673,46 @@ def _load_list_pages(
         rows = db.list_follow_monitor_followers(
             user_id, limit=min(total, 5000) or 1, offset=0
         )
-        lines = [_format_follower_line(r.login, r.display_name) for r in rows]
-    elif kind == _LIST_KIND_NEW:
-        total = db.count_follow_monitor_events(user_id, event_type="follow")
-        title = t("follow_monitor_list_new_title", lang, count=total)
-        events = db.list_follow_monitor_events(
-            user_id, event_type="follow", limit=min(total, 2000) or 1, offset=0
+        lines = [
+            _format_follower_line(r.login, r.display_name)
+            for r in rows
+        ]
+    elif kind in (_LIST_KIND_NEW, _LIST_KIND_NEW_UNFOLLOW):
+        event_type = "follow" if kind == _LIST_KIND_NEW else "unfollow"
+        since = _new_list_since_iso()
+        total = db.count_follow_monitor_events(
+            user_id, event_type=event_type, since=since
         )
-        lines = [_format_follower_line(e.login, e.display_name) for e in events]
+        title_key = (
+            "follow_monitor_list_new_title"
+            if kind == _LIST_KIND_NEW
+            else "follow_monitor_list_new_unfollow_title"
+        )
+        title = t(title_key, lang, count=total)
+        events = db.list_follow_monitor_events(
+            user_id,
+            event_type=event_type,
+            since=since,
+            limit=min(total, 2000) or 1,
+            offset=0,
+        )
+        followed_at_by_id: dict[str, str] = {}
+        if kind == _LIST_KIND_NEW and events:
+            # Helix followed_at for still-active followers (= true subscription date).
+            want = {e.twitch_user_id for e in events}
+            for row in db.list_follow_monitor_followers(
+                user_id, limit=500_000, offset=0
+            ):
+                if row.twitch_user_id in want and row.followed_at:
+                    followed_at_by_id[row.twitch_user_id] = row.followed_at
+        lines = [
+            _format_follower_line(
+                e.login,
+                e.display_name,
+                at=followed_at_by_id.get(e.twitch_user_id) or e.detected_at,
+            )
+            for e in events
+        ]
     else:
         total = db.count_follow_monitor_events(user_id, event_type="unfollow")
         title = t("follow_monitor_list_unfollow_title", lang, count=total)
@@ -685,6 +753,7 @@ async def _show_list(
         empty_key = {
             _LIST_KIND_CURRENT: "follow_monitor_list_follow_empty",
             _LIST_KIND_NEW: "follow_monitor_list_new_empty",
+            _LIST_KIND_NEW_UNFOLLOW: "follow_monitor_list_new_unfollow_empty",
             _LIST_KIND_UNFOLLOW: "follow_monitor_list_unfollow_empty",
         }[kind]
         text = t(empty_key, lang)
@@ -730,9 +799,9 @@ async def on_follow_monitor_list(
 ) -> None:
     query = update.callback_query
     data = (query.data or "").split(":")
-    # follow_monitor:list:current|new|unfollow
+    # follow_monitor:list:current|new|new_unfollow|unfollow
     kind = data[2] if len(data) >= 3 else _LIST_KIND_CURRENT
-    if kind not in (_LIST_KIND_CURRENT, _LIST_KIND_NEW, _LIST_KIND_UNFOLLOW):
+    if kind not in _LIST_KINDS:
         await query.answer()
         return
     await _show_list(update, context, kind, edit=True)

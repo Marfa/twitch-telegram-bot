@@ -69,7 +69,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
-| Channel Follow/Unfollow (🧪 beta) | Monitoring and alerts — Premium; after beta the section/lists stay available without Premium |
+| Channel Follow/Unfollow (🧪 beta) | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days); after beta the section/lists stay available without Premium |
 | Premium channel for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.

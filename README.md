@@ -69,7 +69,7 @@ English: [README.en.md](README.en.md)
 | История оповещений за 60 дней | На бесплатном — 7 дней |
 | Корзина удалённых подписок на 30 дней | На бесплатном — 10 дней |
 | Безлимитный чат стримов в Mini App | На бесплатном — чтение + 20 сообщений/день |
-| Follow/Unfollow канала (🧪 бета) | Мониторинг и оповещения — Premium; после беты раздел/списки доступны без Premium |
+| Follow/Unfollow канала (🧪 бета) | Мониторинг и оповещения — Premium; списки Follow / новых Follow и Unfollow за 30 дней; после беты раздел/списки доступны без Premium |
 | Премиум-канал для стримеров | Бесплатные взаимодействия с ботом для зрителей, приоритет в «Оповещение по игре», welcome-рекомендация |
 
 Цены задаются env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.

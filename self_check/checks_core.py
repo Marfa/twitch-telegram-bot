@@ -207,6 +207,14 @@ def check_core() -> None:
     assert t.parse_username("https://m.twitch.tv/marfapr") == CHANNEL
     assert t.parse_username("@marfapr") == CHANNEL
     assert t.parse_username("not valid!!!") is None
+    from twitch import twitch_login_link_html, twitch_profile_url
+
+    assert twitch_profile_url("@MarfaPR") == "https://www.twitch.tv/MarfaPR"
+    assert twitch_profile_url("") == ""
+    assert twitch_login_link_html("@alice") == (
+        '<a href="https://www.twitch.tv/alice">alice</a>'
+    )
+    assert twitch_login_link_html("") == ""
     assert t.is_twitch_url("https://www.twitch.tv/marfapr")
     assert t.is_twitch_url("https://m.twitch.tv/marfapr")
     assert t.is_twitch_url("twitch.tv/marfapr")
@@ -732,7 +740,9 @@ def check_core() -> None:
     assert whisper_conversation_url() == "https://www.twitch.tv/inbox"
     formatted = format_whisper_alert("ru", parsed, url=url)
     assert "Alice" in formatted
-    assert "@alice" in formatted
+    assert "@alice" not in formatted
+    assert 'href="https://www.twitch.tv/alice"' in formatted
+    assert ">alice</a>" in formatted
     assert "hi &lt;b&gt;there&lt;/b&gt;" in formatted
     assert "Открыть переписку" in formatted
     nbody = json.dumps(payload).encode()

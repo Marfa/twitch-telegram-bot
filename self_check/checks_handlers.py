@@ -1025,7 +1025,8 @@ def check_handlers() -> None:
         )
         assert "No one is live" in vod_text
         assert "https://www.twitch.tv/videos/99" in vod_text
-        assert "twitch.tv/alice" not in vod_text
+        assert 'href="https://www.twitch.tv/alice"' in vod_text
+        assert "@alice" not in vod_text
         assert "1h2m3s" in vod_text
         # Without video id — skip item (never fall back to channel URL).
         no_id = _format_watch_vod_suggestions(
@@ -1546,10 +1547,54 @@ def check_handlers() -> None:
             "ru", events, notify_follow=True, notify_unfollow=True
         )
         assert digest is not None
-        assert "carol" in digest.lower() or "Carol" in digest or "@c" in digest.lower()
+        assert 'href="https://www.twitch.tv/c"' in digest
+        assert "@c" not in digest.lower()
         assert _build_digest_text(
             "ru", events, notify_follow=False, notify_unfollow=False
         ) is None
+        from handlers.follow_monitor import (
+            _LIST_KIND_NEW,
+            _LIST_KIND_NEW_UNFOLLOW,
+            _format_event_date,
+            _format_follower_line,
+            _load_list_pages,
+            _new_list_since_iso,
+        )
+        from i18n import follow_monitor_keyboard as fm_kb
+
+        assert any(
+            (b.callback_data or "") == "follow_monitor:list:new_unfollow"
+            for row in fm_kb("ru", enabled=True).inline_keyboard
+            for b in row
+        )
+        assert tr("follow_monitor_btn_list_new_unfollow", "ru")
+        old_iso = (
+            datetime.now(timezone.utc) - timedelta(days=45)
+        ).isoformat()
+        recent_iso = datetime.now(timezone.utc).isoformat()
+        fmdb.add_follow_monitor_events(
+            31,
+            [("follow", "9", "oldie", "Oldie")],
+            detected_at=old_iso,
+        )
+        fmdb.add_follow_monitor_events(
+            31,
+            [("unfollow", "8", "gone", "Gone")],
+            detected_at=recent_iso,
+        )
+        assert fmdb.count_follow_monitor_events(
+            31, event_type="follow", since=_new_list_since_iso()
+        ) == 1
+        assert fmdb.count_follow_monitor_events(31, event_type="follow") == 2
+        new_pages = _load_list_pages(fmdb, 31, "ru", _LIST_KIND_NEW)
+        assert new_pages
+        assert "oldie" not in "\n".join(new_pages).lower()
+        assert "c" in "\n".join(new_pages).lower()
+        unf_pages = _load_list_pages(fmdb, 31, "ru", _LIST_KIND_NEW_UNFOLLOW)
+        assert unf_pages
+        assert "gone" in "\n".join(unf_pages).lower()
+        assert _format_event_date(recent_iso) in "\n".join(unf_pages)
+        assert "—" in _format_follower_line("x", "X", at=recent_iso)
     assert "stream-chat" not in {f.id for f in beta_mod.list_features()}
     assert "deleted-subscriptions-cart" not in {f.id for f in beta_mod.list_features()}
     sc_feat = beta_mod.get_feature("stream-chat")
@@ -2202,7 +2247,8 @@ def _check_category_watch_digest_and_legacy() -> None:
     assert "1. <b>U1</b>" in text
     assert "5. <b>U5</b>" in text
     assert "6. <b>U6</b>" not in text
-    assert "https://twitch.tv/u1" in text
+    assert 'href="https://www.twitch.tv/u1"' in text
+    assert "@u1" not in text
 
     sent: list[dict] = []
 
@@ -2244,7 +2290,8 @@ def _check_category_watch_digest_and_legacy() -> None:
     assert sent[0]["sub_id"] == 1
     body = sent[0]["text"]
     assert t("watch_suggest_header", "ru") in body
-    assert body.count("https://twitch.tv/") == 5
+    assert body.count('href="https://www.twitch.tv/') == 5
+    assert "@u1" not in body
     assert sent[0]["kwargs"].get("parse_mode")
     db.set_category_watch_live_state.assert_called()
     # suppress=0 → no cooldown after send

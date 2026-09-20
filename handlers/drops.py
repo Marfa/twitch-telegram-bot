@@ -22,7 +22,7 @@ from bot_helpers import _menu
 from config import MAX_SUBSCRIPTIONS_PER_OWNER
 from db import Database, Subscription, is_drops_sub
 from i18n import DEFAULT_LOCALE, drops_catalog_keyboard, t
-from twitch import TwitchClient
+from twitch import TwitchClient, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +270,7 @@ def _format_stream_alert(
         login_raw = str(stream.get("user_login") or "").strip().lower()
         if not login_raw:
             continue
-        login = html.escape(login_raw)
+        login = twitch_login_link_html(login_raw)
         display = html.escape(str(stream.get("user_name") or login_raw))
         title = html.escape(str(stream.get("title") or "—"))
         stream_game = html.escape(

@@ -1897,6 +1897,29 @@ def _game_name_anchor(label: str, url: str | None, *, label_escaped: bool) -> st
     return f'<a href="{_html.escape(url, quote=True)}">{text}</a>'
 
 
+def twitch_profile_url(login: str) -> str:
+    """Channel page URL; strips a leading @. Empty login → empty string."""
+    bare = (login or "").strip().lstrip("@")
+    return f"https://www.twitch.tv/{bare}" if bare else ""
+
+
+def twitch_login_link_html(
+    login: str,
+    *,
+    label: str | None = None,
+    label_escaped: bool = False,
+) -> str:
+    """Login without @ as a Telegram HTML link to the Twitch profile."""
+    bare = (login or "").strip().lstrip("@")
+    if not bare:
+        return ""
+    return _game_name_anchor(
+        label if label is not None else bare,
+        twitch_profile_url(bare),
+        label_escaped=label_escaped,
+    )
+
+
 def render_template(
     template: str,
     username: str,

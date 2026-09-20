@@ -328,7 +328,10 @@ def _check_drops_tags_and_catalog_keyboard() -> None:
     assert "e" in body and "Drops" in body
     assert body.index("b") < body.index("a")
     assert "👁" in body
-    assert any(ln.strip().startswith("https://twitch.tv/") for ln in body.splitlines())
+    assert 'href="https://www.twitch.tv/' in body
+    assert not any(
+        ln.strip().startswith("https://twitch.tv/") for ln in body.splitlines()
+    )
     assert "Как получить" in body
     assert "Watch any stream for 15 minutes." in body
     assert "https://twitchdrops.app/game/albion-online" in body

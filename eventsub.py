@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from twitch import USERNAME_RE
+from twitch import USERNAME_RE, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
 
@@ -186,11 +186,12 @@ def format_whisper_alert(
     body = event.text.strip()
     if len(body) > _TELEGRAM_TEXT_MAX:
         body = body[: _TELEGRAM_TEXT_MAX - 1] + "…"
+    login_html = twitch_login_link_html(login) if login else html.escape("—")
     return t(
         "whisper_alert_message",
         lang,
         name=html.escape(name),
-        login=html.escape(login or "—"),
+        login=login_html,
         text=html.escape(body) or "—",
         url=html.escape(url, quote=True),
     )

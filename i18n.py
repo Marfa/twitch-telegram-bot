@@ -1571,6 +1571,12 @@ def follow_monitor_keyboard(
             ],
             [
                 InlineKeyboardButton(
+                    t("follow_monitor_btn_list_new_unfollow", lang),
+                    callback_data="follow_monitor:list:new_unfollow",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     t("follow_monitor_btn_list_unfollow", lang),
                     callback_data="follow_monitor:list:unfollow",
                 )

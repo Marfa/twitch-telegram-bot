@@ -5306,55 +5306,59 @@ class PostgresDatabase:
         owner_id: int,
         *,
         event_type: str | None = None,
+        since: str | None = None,
         limit: int = 500,
         offset: int = 0,
     ) -> list[FollowMonitorEvent]:
+        clauses = ["owner_id = %s"]
+        params: list[Any] = [owner_id]
+        if event_type:
+            clauses.append("event_type = %s")
+            params.append(event_type)
+        if since:
+            clauses.append("detected_at >= %s::timestamptz")
+            params.append(since)
+        where = " AND ".join(clauses)
+        params.extend([max(1, limit), max(0, offset)])
         with self._conn() as conn:
             cur = self._cursor(conn)
-            if event_type:
-                cur.execute(
-                    """
-                    SELECT * FROM follow_monitor_events
-                    WHERE owner_id = %s AND event_type = %s
-                    ORDER BY detected_at DESC, id DESC
-                    LIMIT %s OFFSET %s
-                    """,
-                    (owner_id, event_type, max(1, limit), max(0, offset)),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT * FROM follow_monitor_events
-                    WHERE owner_id = %s
-                    ORDER BY detected_at DESC, id DESC
-                    LIMIT %s OFFSET %s
-                    """,
-                    (owner_id, max(1, limit), max(0, offset)),
-                )
+            cur.execute(
+                f"""
+                SELECT * FROM follow_monitor_events
+                WHERE {where}
+                ORDER BY detected_at DESC, id DESC
+                LIMIT %s OFFSET %s
+                """,
+                params,
+            )
             rows = cur.fetchall()
         return [_row_to_follow_monitor_event(r) for r in rows]
 
     def count_follow_monitor_events(
-        self, owner_id: int, *, event_type: str | None = None
+        self,
+        owner_id: int,
+        *,
+        event_type: str | None = None,
+        since: str | None = None,
     ) -> int:
+        clauses = ["owner_id = %s"]
+        params: list[Any] = [owner_id]
+        if event_type:
+            clauses.append("event_type = %s")
+            params.append(event_type)
+        if since:
+            clauses.append("detected_at >= %s::timestamptz")
+            params.append(since)
+        where = " AND ".join(clauses)
         with self._conn() as conn:
             cur = self._cursor(conn)
-            if event_type:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) AS c FROM follow_monitor_events
-                    WHERE owner_id = %s AND event_type = %s
-                    """,
-                    (owner_id, event_type),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) AS c FROM follow_monitor_events
-                    WHERE owner_id = %s
-                    """,
-                    (owner_id,),
-                )
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS c FROM follow_monitor_events
+                WHERE {where}
+                """,
+                params,
+            )
             row = cur.fetchone()
         return int(row["c"] if row else 0)
 

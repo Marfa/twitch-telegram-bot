@@ -2512,13 +2512,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(
-            on_follow_monitor_list, pattern=r"^follow_monitor:list:(current|new|unfollow)$"
+            on_follow_monitor_list,
+            pattern=r"^follow_monitor:list:(current|new_unfollow|new|unfollow)$",
         ),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(
-            on_follow_monitor_page, pattern=r"^follow_monitor:page:(current|new|unfollow):\d+$"
+            on_follow_monitor_page,
+            pattern=r"^follow_monitor:page:(current|new_unfollow|new|unfollow):\d+$",
         ),
         group=0,
     )

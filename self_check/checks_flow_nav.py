@@ -2695,6 +2695,17 @@ async def _scenario_follow_monitor(db) -> None:
     ]
     assert any("Оповещать о новых Follow" in (x or "") for x in labels_on)
     assert any("Оповещать о новых Unfollow" in (x or "") for x in labels_on)
+    callbacks_on = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "follow_monitor:list:new" in callbacks_on
+    assert "follow_monitor:list:new_unfollow" in callbacks_on
+    assert "follow_monitor:list:unfollow" in callbacks_on
+    assert any("новых Unfollow" in (x or "") for x in labels_on)
     cap.assert_turn("other_follow_monitor_enabled")
     _ = FEATURE_ID
 

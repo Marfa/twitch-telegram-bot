@@ -667,12 +667,17 @@ class Database(Protocol):
         owner_id: int,
         *,
         event_type: str | None = None,
+        since: str | None = None,
         limit: int = 500,
         offset: int = 0,
     ) -> list[FollowMonitorEvent]: ...
 
     def count_follow_monitor_events(
-        self, owner_id: int, *, event_type: str | None = None
+        self,
+        owner_id: int,
+        *,
+        event_type: str | None = None,
+        since: str | None = None,
     ) -> int: ...
 
     def add_follow_monitor_events(

@@ -43,6 +43,7 @@ from twitch import (
     filter_streams_for_watch,
     normalize_watch_tags,
     pick_random_streams,
+    twitch_login_link_html,
 )
 
 logger = logging.getLogger(__name__)
@@ -197,7 +198,7 @@ def _format_watch_suggestions(
         lines.append("")
     for i, s in enumerate(streams, start=1):
         login_raw = str(s.get("user_login") or "").lower()
-        login = html.escape(login_raw)
+        login = twitch_login_link_html(login_raw)
         display = html.escape(str(s.get("user_name") or login_raw))
         title = html.escape(str(s.get("title") or "—"))
         game = html.escape(str(s.get("game_name") or "—"))
@@ -235,8 +236,9 @@ def _format_watch_vod_suggestions(
         if not vid:
             continue
         n += 1
-        login = html.escape(str(v.get("user_login") or ""))
-        display = html.escape(str(v.get("user_name") or login))
+        login_raw = str(v.get("user_login") or "").strip()
+        login = twitch_login_link_html(login_raw)
+        display = html.escape(str(v.get("user_name") or login_raw))
         title = html.escape(str(v.get("title") or "—"))
         game = html.escape(str(v.get("game_name") or "—"))
         duration = html.escape(str(v.get("duration") or "—"))
