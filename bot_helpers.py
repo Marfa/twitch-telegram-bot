@@ -199,6 +199,8 @@ def group_setup_menu_filter():
             | _btn_filter("alert_history")
             | _btn_filter("settings")
             | _btn_filter("premium")
+            | _btn_filter("auth_tokens")
+            | _btn_filter("auth_tokens_revoke")
             | _btn_filter("partner")
             | _btn_filter("partner_stats")
             | _btn_filter("partner_link")

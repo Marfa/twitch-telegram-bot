@@ -238,9 +238,10 @@ def _build_alert_history_chunks(
     days: int,
     *,
     bot_username: str = "",
-) -> list[str]:
+) -> tuple[list[str], int | None]:
+    """Return (pages, first_unviewed_page). Page index is 0-based; None if all viewed."""
     title = t("alert_history_title", lang, days=days, n=len(items))
-    blocks: list[str] = []
+    blocks: list[tuple[str, bool]] = []
     last_day: date | None = None
     for item in items:
         local = _parse_alert_sent_at(item.sent_at).astimezone(SCHEDULE_TZ)
@@ -269,20 +270,27 @@ def _build_alert_history_chunks(
                 bot_username=bot_username,
             )
         )
-        blocks.append("\n".join(parts))
+        blocks.append(
+            ("\n".join(parts), not bool(getattr(item, "viewed", False)))
+        )
 
     chunks: list[str] = []
+    first_unviewed_page: int | None = None
     buf = title
-    for block in blocks:
+    for block, is_unviewed in blocks:
         candidate = f"{buf}\n\n{block}" if buf else block
         if buf and len(candidate) > 4000:
             chunks.append(buf if len(buf) <= 4000 else buf[:3990].rstrip() + "\n…")
+            page_for_block = len(chunks)
             buf = block if len(block) <= 4000 else block[:3990].rstrip() + "\n…"
         else:
+            page_for_block = len(chunks)
             buf = candidate if len(candidate) <= 4000 else candidate[:3990].rstrip() + "\n…"
+        if is_unviewed and first_unviewed_page is None:
+            first_unviewed_page = page_for_block
     if buf:
         chunks.append(buf)
-    return chunks
+    return chunks, first_unviewed_page
 
 
 def _alert_history_menu_row(lang: str) -> list[InlineKeyboardButton]:
@@ -292,7 +300,12 @@ def _alert_history_menu_row(lang: str) -> list[InlineKeyboardButton]:
 
 
 def _alert_history_nav_keyboard(
-    lang: str, page: int, total: int, *, show_more: bool
+    lang: str,
+    page: int,
+    total: int,
+    *,
+    show_more: bool,
+    unwatched_page: int | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if total > 1:
@@ -318,6 +331,19 @@ def _alert_history_nav_keyboard(
                 )
             )
         rows.append(nav)
+    if (
+        unwatched_page is not None
+        and total > 0
+        and unwatched_page != page
+    ):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("alert_history_unwatched", lang),
+                    callback_data=f"alert_history:page:{unwatched_page}",
+                )
+            ]
+        )
     if show_more and page >= total - 1:
         rows.append(
             [
@@ -377,15 +403,27 @@ async def _load_alert_history_pages(
         await _fill_alert_history_vods(twitch, db, items)
     if not items:
         context.user_data["alert_history_pages"] = []
+        context.user_data["alert_history_unwatched_page"] = None
         context.user_data["alert_history_deep"] = deep
         return [], deep
     bot_username = _alert_history_bot_username(context)
-    pages = _build_alert_history_chunks(
+    pages, unwatched = _build_alert_history_chunks(
         items, lang, days, bot_username=bot_username
     )
     context.user_data["alert_history_pages"] = pages
+    context.user_data["alert_history_unwatched_page"] = unwatched
     context.user_data["alert_history_deep"] = deep
     return pages, deep
+
+
+def _alert_history_unwatched_page(context: ContextTypes.DEFAULT_TYPE) -> int | None:
+    raw = context.user_data.get("alert_history_unwatched_page")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -415,7 +453,11 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     kb = _alert_history_nav_keyboard(
-        lang, 0, len(pages), show_more=not deep
+        lang,
+        0,
+        len(pages),
+        show_more=not deep,
+        unwatched_page=_alert_history_unwatched_page(context),
     )
     msg = await update.effective_message.reply_text(
         pages[0],
@@ -454,7 +496,11 @@ async def on_alert_history_page(
             return
     page = max(0, min(page, len(pages) - 1))
     kb = _alert_history_nav_keyboard(
-        lang, page, len(pages), show_more=not deep
+        lang,
+        page,
+        len(pages),
+        show_more=not deep,
+        unwatched_page=_alert_history_unwatched_page(context),
     )
     try:
         await query.edit_message_text(
@@ -581,7 +627,11 @@ async def _refresh_alert_history_message(
         return
     page = max(0, min(page, len(pages) - 1))
     kb = _alert_history_nav_keyboard(
-        lang, page, len(pages), show_more=not deep
+        lang,
+        page,
+        len(pages),
+        show_more=not deep,
+        unwatched_page=_alert_history_unwatched_page(context),
     )
     if isinstance(ui, dict) and ui.get("chat_id") and ui.get("message_id"):
         try:

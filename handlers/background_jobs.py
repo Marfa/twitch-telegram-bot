@@ -63,8 +63,19 @@ def ensure_repeating_job(
         return
     existing = list(job_queue.get_jobs_by_name(name))
     if enabled and not existing:
+        grace = max(30, int(interval))
         job_queue.run_repeating(
-            callback, interval=interval, first=first, name=name
+            callback,
+            interval=interval,
+            first=first,
+            name=name,
+            job_kwargs={
+                "id": name,
+                "replace_existing": True,
+                "max_instances": 1,
+                "coalesce": True,
+                "misfire_grace_time": grace,
+            },
         )
     elif not enabled:
         for job in existing:

@@ -1562,7 +1562,7 @@ async def _start_schedule_publish_auth(
 ) -> int:
     from config import twitch_oauth_redirect_uri
     from health import create_pending_login_state
-    from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE, TwitchClient
+    from twitch import SCHEDULE_SCOPE, TwitchClient
 
     query = update.callback_query
     db: Database = context.application.bot_data["db"]
@@ -1618,7 +1618,7 @@ async def _start_schedule_publish_auth(
 
     state = create_pending_login_state(user_id, lang, purpose="schedule")
     url = twitch.build_authorize_url(
-        redirect_uri=redirect_uri, state=state, scopes=SCHEDULE_OAUTH_SCOPES
+        redirect_uri=redirect_uri, state=state, force_verify=True
     )
     auth_text = with_oauth_legal(t("stream_schedule_publish_auth", lang), lang)
     markup = InlineKeyboardMarkup(
@@ -1694,6 +1694,10 @@ async def _complete_schedule_publish(
     twitch_user_id = token_info.get("twitch_user_id", "")
     refresh = token_info.get("refresh_token", "")
     twitch: TwitchClient = application.bot_data["twitch"]
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    apply_oauth_success_tokens(db, owner_id, token_info)
+    await restore_after_twitch_oauth(application, owner_id)
     _remember_schedule_broadcaster(db, owner_id, twitch_user_id, refresh)
 
     if clear_mode not in ("overlap", "none"):
@@ -1849,6 +1853,10 @@ async def _complete_schedule_vacation(
     twitch_user_id = token_info.get("twitch_user_id", "")
     refresh = token_info.get("refresh_token", "")
     twitch: TwitchClient = application.bot_data["twitch"]
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    apply_oauth_success_tokens(db, owner_id, token_info)
+    await restore_after_twitch_oauth(application, owner_id)
     try:
         if disable:
             await asyncio.to_thread(

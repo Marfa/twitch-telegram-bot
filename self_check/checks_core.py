@@ -630,11 +630,18 @@ def check_core() -> None:
     )
     assert "response_type=code" in auth_url
     assert "user%3Aread%3Afollows" in auth_url or "user:read:follows" in auth_url
+    assert (
+        "moderator%3Aread%3Afollowers" in auth_url
+        or "moderator:read:followers" in auth_url
+    )
+    assert "user%3Aread%3Awhispers" in auth_url or "user:read:whispers" in auth_url
     assert "offline_access" not in auth_url
     assert "state=abc" in auth_url
     assert "force_verify" not in auth_url
-    from twitch import FOLLOWERS_SCOPE
+    from twitch import BOT_TWITCH_OAUTH_SCOPES, FOLLOWERS_SCOPE
 
+    assert "moderator:read:followers" in BOT_TWITCH_OAUTH_SCOPES
+    assert "user:read:follows" in BOT_TWITCH_OAUTH_SCOPES
     forced = t.build_authorize_url(
         redirect_uri="https://example.com/oauth/twitch/callback",
         state="abc",
@@ -1022,9 +1029,12 @@ def check_core() -> None:
             if btn("partner", loc) in [b.text for b in row]
         )
         assert [b.text for b in partner_row] == [
+            btn("auth_tokens", loc),
             btn("partner", loc),
-            btn("back", loc),
         ]
+        assert any(
+            btn("back", loc) in [b.text for b in row] for row in settings_kb
+        )
         lang_row = next(
             row
             for row in settings_kb

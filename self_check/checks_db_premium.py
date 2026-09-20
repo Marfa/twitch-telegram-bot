@@ -473,6 +473,87 @@ def check_db_premium() -> None:
         bad = db.get_twitch_sync(99)
         assert bad is not None and bad.needs_reauth is True and bad.refresh_token == ""
         assert db.delete_twitch_sync(99) is True
+        # Unified OAuth fan-out + reauth pause/restore.
+        db.fan_out_twitch_oauth_token(
+            77,
+            twitch_user_id="tw77",
+            twitch_login="login77",
+            refresh_token="fanout-rt",
+        )
+        sync77 = db.get_twitch_sync(77)
+        assert sync77 is not None and sync77.needs_reauth is False
+        assert sync77.refresh_token == "fanout-rt" and sync77.period_days == 0
+        fm77 = db.get_follow_monitor(77)
+        assert fm77 is not None and fm77.enabled is False and fm77.needs_reauth is False
+        assert fm77.refresh_token == "fanout-rt"
+        assert db.get_chat_auth(77) is not None
+        assert db.get_whisper_alert(77) is not None
+        assert db.get_premium_twitch_refresh(77) == "fanout-rt"
+        db.upsert_twitch_sync(
+            owner_id=77,
+            twitch_user_id="tw77",
+            refresh_token="fanout-rt",
+            period_days=7,
+            next_sync_at="2099-01-01T00:00:00+00:00",
+        )
+        sub_sync = db.add_subscription(
+            owner_id=77,
+            twitch_username="syncA",
+            twitch_user_id="tw-sync-a",
+            message_template="hi",
+            dest_type="dm",
+            chat_id=77,
+            thread_id=None,
+            enabled=True,
+            from_twitch_sync=True,
+        )
+        sub_manual = db.add_subscription(
+            owner_id=77,
+            twitch_username="manA",
+            twitch_user_id="tw-man-a",
+            message_template="hi",
+            dest_type="dm",
+            chat_id=77,
+            thread_id=None,
+            enabled=True,
+            from_twitch_sync=False,
+        )
+        paused_n, _ = db.pause_for_twitch_reauth(77)
+        assert paused_n == 1
+        assert db.get_subscription(sub_sync, 77).enabled is False
+        assert db.get_subscription(sub_sync, 77).paused_for_reauth is True
+        assert db.get_subscription(sub_manual, 77).enabled is True
+        db.mark_twitch_stores_needs_reauth(77)
+        assert db.get_twitch_sync(77).needs_reauth is True
+        assert db.get_follow_monitor(77).needs_reauth is True
+        db.fan_out_twitch_oauth_token(
+            77,
+            twitch_user_id="tw77",
+            twitch_login="login77",
+            refresh_token="fanout-rt2",
+        )
+        assert db.get_twitch_sync(77).needs_reauth is False
+        assert db.get_twitch_sync(77).period_days == 7
+        assert db.get_twitch_reauth_notified_at(77) is None
+        for s in db.list_subscriptions_paused_for_reauth(77):
+            db.clear_subscription_paused_for_reauth(s.id, 77, enabled=True)
+        assert db.get_subscription(sub_sync, 77).enabled is True
+        assert db.get_subscription(sub_sync, 77).paused_for_reauth is False
+        with db._conn() as conn:
+            for table in (
+                "subscriptions",
+                "twitch_sync",
+                "follow_monitor",
+                "whisper_alerts",
+                "chat_auth",
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE owner_id = 77")
+            conn.execute("DELETE FROM users WHERE user_id = 77")
+        from handlers.background_jobs import ensure_repeating_job
+        import inspect
+
+        src = inspect.getsource(ensure_repeating_job)
+        assert "coalesce" in src and "misfire_grace_time" in src
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")

@@ -1602,6 +1602,11 @@ async def complete_twitch_import(
     token_info: dict[str, str] | None = None,
 ) -> None:
     purpose = (token_info or {}).get("purpose", "import")
+    if purpose == "reauth":
+        from oauth_tokens import complete_reauth_oauth
+
+        await complete_reauth_oauth(application, owner_id, error, token_info)
+        return
     if purpose == "schedule":
         await _complete_schedule_publish(application, owner_id, error, token_info)
         return
@@ -1651,6 +1656,10 @@ async def complete_twitch_import(
             reply_markup=_menu(lang, owner_id),
         )
         return
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    if apply_oauth_success_tokens(db, owner_id, token_info):
+        await restore_after_twitch_oauth(application, owner_id)
     _store_pending_import(application, owner_id, followed, token_info)
     await application.bot.send_message(
         owner_id,
@@ -1880,6 +1889,13 @@ async def _sync_owner_follows(
     if not prem.has_feature_sync(db, row.owner_id, "twitch_sync"):
         logger.info("Skipping Twitch sync for owner %s: no twitch_sync feature", row.owner_id)
         return 0, 0, 0, [], []
+    if not row.refresh_token:
+        from oauth_tokens import request_twitch_reauth
+
+        await request_twitch_reauth(
+            application, row.owner_id, reason="twitch_sync_empty_token"
+        )
+        return None
     twitch: TwitchClient = application.bot_data["twitch"]
     lang = db.get_user_locale(row.owner_id) or DEFAULT_LOCALE
     now = datetime.now(timezone.utc)
@@ -1894,31 +1910,11 @@ async def _sync_owner_follows(
         )
     except Exception:
         logger.exception("Twitch sync failed for owner %s", row.owner_id)
-        db.set_twitch_sync_needs_reauth(row.owner_id, True)
-        try:
-            from config import twitch_oauth_redirect_uri
-            from health import create_pending_login_state
+        from oauth_tokens import request_twitch_reauth
 
-            redirect_uri = twitch_oauth_redirect_uri()
-            markup = _menu(lang, row.owner_id)
-            if redirect_uri:
-                state = create_pending_login_state(row.owner_id, lang)
-                url = twitch.build_authorize_url(
-                    redirect_uri=redirect_uri, state=state
-                )
-                markup = _import_oauth_authorize_keyboard(lang, url)
-            await application.bot.send_message(
-                row.owner_id,
-                with_oauth_legal(t("sync_job_failed", lang), lang)
-                if redirect_uri
-                else t("sync_job_failed", lang),
-                reply_markup=markup,
-            )
-        except Exception:
-            logger.exception("Cannot notify owner %s about sync failure", row.owner_id)
-        from handlers.background_jobs import sync_optional_jobs
-
-        sync_optional_jobs(application.job_queue, db)
+        await request_twitch_reauth(
+            application, row.owner_id, reason="twitch_sync"
+        )
         return None
 
     imported, skipped, limited, removed_names, _new, ask_streamers = import_followed_as_subscriptions(

@@ -353,6 +353,7 @@ class Subscription:
     pinned_message_id: int | None = None
     last_schedule_reminder_segment_id: str | None = None
     from_twitch_sync: bool = False
+    paused_for_reauth: bool = False
     from_watch_suggest: bool = False
     sync_user_edited: bool = False
     category_watch_prefs: str = ""
@@ -651,6 +652,7 @@ class WhisperAlert:
     twitch_login: str
     refresh_token: str
     eventsub_id: str
+    paused_for_reauth: bool = False
 
 
 @dataclass
@@ -779,6 +781,9 @@ def _row_to_whisper_alert(row: Any) -> WhisperAlert:
         twitch_login=str(row["twitch_login"] or ""),
         refresh_token=str(row["refresh_token"] or ""),
         eventsub_id=str(row["eventsub_id"] or ""),
+        paused_for_reauth=(
+            bool(row["paused_for_reauth"]) if "paused_for_reauth" in row.keys() else False
+        ),
     )
 
 
@@ -971,6 +976,9 @@ def _row_to_sub(row: Any) -> Subscription:
         ),
         from_twitch_sync=bool(row["from_twitch_sync"])
         if "from_twitch_sync" in keys
+        else False,
+        paused_for_reauth=bool(row["paused_for_reauth"])
+        if "paused_for_reauth" in keys
         else False,
         from_watch_suggest=bool(row["from_watch_suggest"])
         if "from_watch_suggest" in keys

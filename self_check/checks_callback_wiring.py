@@ -92,6 +92,8 @@ _MENU_BTN_KEYS = (
     "sync_subs",
     "premium",
     "partner",
+    "auth_tokens",
+    "auth_tokens_revoke",
     "partner_stats",
     "partner_link",
     "partner_withdraw",

@@ -202,7 +202,6 @@ async def _send_oauth_prompt(
     url = twitch.build_authorize_url(
         redirect_uri=redirect,
         state=state,
-        scopes=FOLLOWERS_SCOPE,
         force_verify=True,
     )
     await bot.send_message(
@@ -396,6 +395,10 @@ async def complete_follow_monitor_oauth(
             reply_markup=other_menu(lang),
         )
         return
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    apply_oauth_success_tokens(db, owner_id, info)
+    await restore_after_twitch_oauth(application, owner_id)
     if not _access_has_followers_scope(twitch, access):
         # Consent without the followers scope (stale authorize) — ask again.
         if refresh:
@@ -550,7 +553,14 @@ async def _sync_owner(application: Application, owner_id: int) -> None:
     db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
     mon = db.get_follow_monitor(owner_id)
-    if not mon or not mon.enabled or not mon.refresh_token:
+    if not mon or not mon.enabled:
+        return
+    if not mon.refresh_token:
+        from oauth_tokens import request_twitch_reauth
+
+        await request_twitch_reauth(
+            application, owner_id, reason="follow_monitor_empty_token"
+        )
         return
     if not beta_features.is_enabled(db, owner_id, BETA_FEATURE_ID):
         db.set_follow_monitor_enabled(owner_id, False)
@@ -566,19 +576,18 @@ async def _sync_owner(application: Application, owner_id: int) -> None:
             owner_id,
             type(exc).__name__,
         )
-        try:
-            db.set_follow_monitor_needs_reauth(owner_id, True)
-        except Exception:
-            pass
+        from oauth_tokens import request_twitch_reauth
+
+        await request_twitch_reauth(
+            application, owner_id, reason="follow_monitor_exc"
+        )
         return
     if not ok:
-        lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
-        try:
-            await application.bot.send_message(
-                owner_id, t("follow_monitor_needs_reauth", lang)
-            )
-        except Exception:
-            pass
+        from oauth_tokens import request_twitch_reauth
+
+        await request_twitch_reauth(
+            application, owner_id, reason="follow_monitor_scope"
+        )
         return
     new_n = sum(1 for e in events if e[0] == "follow")
     un_n = sum(1 for e in events if e[0] == "unfollow")

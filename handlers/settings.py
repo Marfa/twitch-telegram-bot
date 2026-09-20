@@ -275,6 +275,41 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=_settings_kb(lang, db, user_id),
     )
 
+
+async def open_auth_tokens_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from i18n import auth_tokens_menu
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    await update.effective_message.reply_text(
+        t("auth_tokens_menu", lang),
+        reply_markup=auth_tokens_menu(lang),
+    )
+
+
+async def on_auth_tokens_revoke(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from handlers.background_jobs import sync_optional_jobs
+    from i18n import auth_tokens_menu
+    from oauth_tokens import revoke_all_oauth_tokens
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    revoke_all_oauth_tokens(db, user_id)
+    sync_optional_jobs(context.application.job_queue, db)
+    await update.effective_message.reply_text(
+        t("auth_tokens_revoked", lang),
+        reply_markup=auth_tokens_menu(lang),
+    )
+
+
 async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -843,7 +878,6 @@ async def _send_whisper_oauth_prompt(
 ) -> None:
     from config import twitch_oauth_redirect_uri
     from health import create_pending_login_state
-    from twitch import WHISPERS_SCOPE
 
     if not _whisper_alerts_ready():
         await bot.send_message(user_id, t("whisper_alerts_oauth_unavailable", lang))
@@ -851,7 +885,7 @@ async def _send_whisper_oauth_prompt(
     redirect = twitch_oauth_redirect_uri()
     state = create_pending_login_state(user_id, lang, purpose="whispers")
     url = twitch.build_authorize_url(
-        redirect_uri=redirect, state=state, scopes=WHISPERS_SCOPE
+        redirect_uri=redirect, state=state, force_verify=True
     )
     await bot.send_message(
         user_id,
@@ -1118,6 +1152,10 @@ async def complete_chat_oauth(
             reply_markup=_menu(lang, owner_id),
         )
         return
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    apply_oauth_success_tokens(db, owner_id, info)
+    await restore_after_twitch_oauth(application, owner_id)
     db.upsert_chat_auth(
         owner_id,
         twitch_user_id=twitch_user_id,
@@ -1164,6 +1202,10 @@ async def complete_whisper_oauth(
     refresh = info.get("refresh_token") or ""
     twitch_user_id = info.get("twitch_user_id") or ""
     twitch_login = info.get("twitch_login") or ""
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    apply_oauth_success_tokens(db, owner_id, info)
+    await restore_after_twitch_oauth(application, owner_id)
     try:
         _enable_whisper_eventsub(
             db,

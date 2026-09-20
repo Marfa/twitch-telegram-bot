@@ -224,6 +224,8 @@ def all_menu_buttons() -> set[str]:
         "beta_mode",
         "sync_subs",
         "premium",
+        "auth_tokens",
+        "auth_tokens_revoke",
         "partner",
         "partner_stats",
         "partner_link",
@@ -327,13 +329,29 @@ def settings_menu(
     if show_partner_ui():
         rows.append(
             [
+                KeyboardButton(btn("auth_tokens", lang)),
                 KeyboardButton(btn("partner", lang)),
+            ]
+        )
+        rows.append([KeyboardButton(btn("back", lang))])
+    else:
+        rows.append(
+            [
+                KeyboardButton(btn("auth_tokens", lang)),
                 KeyboardButton(btn("back", lang)),
             ]
         )
-    else:
-        rows.append([KeyboardButton(btn("back", lang))])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
+def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(btn("auth_tokens_revoke", lang))],
+            [KeyboardButton(btn("back_settings", lang))],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def partner_menu(lang: str) -> ReplyKeyboardMarkup:

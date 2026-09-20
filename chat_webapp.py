@@ -451,7 +451,6 @@ def api_resolve(
 def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, Any]]:
     from config import twitch_oauth_redirect_uri
     from health import create_pending_login_state
-    from twitch import CHAT_OAUTH_SCOPES
 
     user, err, token_lang = _require_user(init_data=init_data, token=token)
     if err or user is None:
@@ -466,7 +465,7 @@ def api_oauth_url(*, init_data: str = "", token: str = "") -> tuple[int, dict[st
     lang = token_lang or _db.get_user_locale(user_id) or "en"
     state = create_pending_login_state(user_id, lang, purpose="chat")
     url = _twitch.build_authorize_url(
-        redirect_uri=redirect, state=state, scopes=CHAT_OAUTH_SCOPES
+        redirect_uri=redirect, state=state, force_verify=True
     )
     from bot_helpers import oauth_legal_suffix
 

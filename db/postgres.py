@@ -222,6 +222,12 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS paused_for_reauth BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS from_watch_suggest BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
@@ -744,6 +750,12 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS twitch_reauth_notified_at TIMESTAMPTZ
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS whisper_alerts (
                     owner_id BIGINT PRIMARY KEY,
                     enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -752,6 +764,12 @@ class PostgresDatabase:
                     refresh_token TEXT NOT NULL DEFAULT '',
                     eventsub_id TEXT NOT NULL DEFAULT ''
                 )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE whisper_alerts
+                ADD COLUMN IF NOT EXISTS paused_for_reauth BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             cur.execute(
@@ -4900,6 +4918,300 @@ class PostgresDatabase:
                 "UPDATE follow_monitor SET needs_reauth = %s WHERE owner_id = %s",
                 (bool(needs), owner_id),
             )
+
+    def fan_out_twitch_oauth_token(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None:
+        from token_crypto import encrypt_secret
+
+        enc = encrypt_secret(refresh_token) if refresh_token else ""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO twitch_sync (
+                    owner_id, twitch_user_id, refresh_token,
+                    period_days, next_sync_at, last_sync_at, needs_reauth
+                ) VALUES (%s, %s, %s, 0, %s::timestamptz, NULL, FALSE)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    refresh_token = EXCLUDED.refresh_token,
+                    needs_reauth = FALSE
+                """,
+                (owner_id, twitch_user_id, enc, now),
+            )
+            cur.execute(
+                """
+                INSERT INTO follow_monitor (
+                    owner_id, enabled, twitch_user_id, twitch_login,
+                    refresh_token, needs_reauth
+                ) VALUES (%s, FALSE, %s, %s, %s, FALSE)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    refresh_token = EXCLUDED.refresh_token,
+                    needs_reauth = FALSE
+                """,
+                (owner_id, twitch_user_id, twitch_login, enc),
+            )
+            cur.execute(
+                """
+                INSERT INTO whisper_alerts (
+                    owner_id, enabled, twitch_user_id, twitch_login,
+                    refresh_token, eventsub_id, paused_for_reauth
+                ) VALUES (%s, FALSE, %s, %s, %s, '', FALSE)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    refresh_token = EXCLUDED.refresh_token
+                """,
+                (owner_id, twitch_user_id, twitch_login, enc),
+            )
+            cur.execute(
+                """
+                INSERT INTO chat_auth (
+                    owner_id, twitch_user_id, twitch_login, refresh_token
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    refresh_token = EXCLUDED.refresh_token
+                """,
+                (owner_id, twitch_user_id, twitch_login, enc),
+            )
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_twitch_refresh, premium_twitch_needs_reauth)
+                VALUES (%s, %s, FALSE)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_twitch_refresh = EXCLUDED.premium_twitch_refresh,
+                    premium_twitch_needs_reauth = FALSE
+                """,
+                (owner_id, enc),
+            )
+            cur.execute(
+                """
+                UPDATE users
+                SET premium_twitch_user_id = %s
+                WHERE user_id = %s
+                  AND COALESCE(premium_twitch_user_id, '') = ''
+                """,
+                (twitch_user_id, owner_id),
+            )
+            cur.execute(
+                """
+                UPDATE users SET twitch_reauth_notified_at = NULL WHERE user_id = %s
+                """,
+                (owner_id,),
+            )
+
+    def revoke_user_oauth_tokens(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("DELETE FROM twitch_sync WHERE owner_id = %s", (owner_id,))
+            cur.execute(
+                "DELETE FROM follow_monitor_events WHERE owner_id = %s", (owner_id,)
+            )
+            cur.execute(
+                "DELETE FROM follow_monitor_followers WHERE owner_id = %s", (owner_id,)
+            )
+            cur.execute("DELETE FROM follow_monitor WHERE owner_id = %s", (owner_id,))
+            cur.execute("DELETE FROM whisper_alerts WHERE owner_id = %s", (owner_id,))
+            cur.execute("DELETE FROM chat_auth WHERE owner_id = %s", (owner_id,))
+            cur.execute(
+                """
+                UPDATE drops_auth
+                SET refresh_token = '', access_token = '', access_expires_at = 0
+                WHERE owner_id = %s
+                """,
+                (owner_id,),
+            )
+            cur.execute(
+                "DELETE FROM donationalerts_auth WHERE owner_id = %s", (owner_id,)
+            )
+            cur.execute(
+                """
+                UPDATE users
+                SET premium_twitch_refresh = '',
+                    premium_twitch_needs_reauth = FALSE,
+                    twitch_reauth_notified_at = NULL
+                WHERE user_id = %s
+                """,
+                (owner_id,),
+            )
+
+    def list_owners_needing_twitch_reauth(self) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT owner_id AS uid FROM twitch_sync
+                WHERE COALESCE(needs_reauth, FALSE) = TRUE
+                UNION
+                SELECT owner_id AS uid FROM follow_monitor
+                WHERE COALESCE(needs_reauth, FALSE) = TRUE
+                UNION
+                SELECT user_id AS uid FROM users
+                WHERE COALESCE(premium_twitch_needs_reauth, FALSE) = TRUE
+                """
+            )
+            rows = cur.fetchall()
+        return sorted({int(r["uid"]) for r in rows})
+
+    def mark_twitch_stores_needs_reauth(self, owner_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE twitch_sync SET needs_reauth = TRUE WHERE owner_id = %s",
+                (owner_id,),
+            )
+            cur.execute(
+                "UPDATE follow_monitor SET needs_reauth = TRUE WHERE owner_id = %s",
+                (owner_id,),
+            )
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_twitch_needs_reauth)
+                VALUES (%s, TRUE)
+                ON CONFLICT (user_id) DO UPDATE SET premium_twitch_needs_reauth = TRUE
+                """,
+                (owner_id,),
+            )
+
+    def pause_for_twitch_reauth(self, owner_id: int) -> tuple[int, bool]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE subscriptions
+                SET enabled = FALSE, paused_for_reauth = TRUE
+                WHERE owner_id = %s
+                  AND from_twitch_sync = TRUE
+                  AND enabled = TRUE
+                """,
+                (owner_id,),
+            )
+            subs = int(cur.rowcount)
+            cur.execute(
+                "SELECT enabled FROM whisper_alerts WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+            whisper_paused = False
+            if row and bool(row["enabled"]):
+                cur.execute(
+                    """
+                    UPDATE whisper_alerts
+                    SET enabled = FALSE, eventsub_id = '', paused_for_reauth = TRUE
+                    WHERE owner_id = %s
+                    """,
+                    (owner_id,),
+                )
+                whisper_paused = True
+        return subs, whisper_paused
+
+    def list_subscriptions_paused_for_reauth(self, owner_id: int) -> list[Subscription]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE owner_id = %s AND COALESCE(paused_for_reauth, FALSE) = TRUE
+                ORDER BY id
+                """,
+                (owner_id,),
+            )
+            rows = cur.fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def clear_subscription_paused_for_reauth(
+        self, sub_id: int, owner_id: int, *, enabled: bool
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE subscriptions
+                SET paused_for_reauth = FALSE, enabled = %s
+                WHERE id = %s AND owner_id = %s
+                """,
+                (bool(enabled), sub_id, owner_id),
+            )
+
+    def take_whisper_paused_for_reauth(self, owner_id: int) -> WhisperAlert | None:
+        from token_crypto import decrypt_secret
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM whisper_alerts
+                WHERE owner_id = %s AND COALESCE(paused_for_reauth, FALSE) = TRUE
+                """,
+                (owner_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cur.execute(
+                """
+                UPDATE whisper_alerts SET paused_for_reauth = FALSE WHERE owner_id = %s
+                """,
+                (owner_id,),
+            )
+        alert = _row_to_whisper_alert(row)
+        alert.refresh_token = decrypt_secret(alert.refresh_token)
+        return alert
+
+    def get_twitch_reauth_notified_at(self, owner_id: int) -> str | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT twitch_reauth_notified_at FROM users WHERE user_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            val = row["twitch_reauth_notified_at"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        if val is None:
+            return None
+        return val.isoformat() if hasattr(val, "isoformat") else str(val)
+
+    def set_twitch_reauth_notified_at(
+        self, owner_id: int, notified_at: str | None
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if notified_at is None:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, twitch_reauth_notified_at)
+                    VALUES (%s, NULL)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        twitch_reauth_notified_at = NULL
+                    """,
+                    (owner_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, twitch_reauth_notified_at)
+                    VALUES (%s, %s::timestamptz)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        twitch_reauth_notified_at = EXCLUDED.twitch_reauth_notified_at
+                    """,
+                    (owner_id, notified_at),
+                )
 
     def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]:
         from token_crypto import try_decrypt_secret

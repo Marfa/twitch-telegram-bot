@@ -28,7 +28,7 @@ from i18n import (
     premium_owned_keyboard,
     t,
 )
-from twitch import SUBSCRIPTIONS_SCOPE, TwitchClient
+from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
@@ -855,7 +855,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         url = twitch.build_authorize_url(
             redirect_uri=redirect,
             state=state,
-            scopes=SUBSCRIPTIONS_SCOPE,
+            force_verify=True,
         )
         channel = prem.twitch_channel_login()
         await query.edit_message_text(
@@ -1039,6 +1039,10 @@ async def complete_premium_oauth(
             disable_web_page_preview=True,
         )
         return
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    apply_oauth_success_tokens(db, owner_id, info)
+    await restore_after_twitch_oauth(application, owner_id)
     db.set_premium_twitch(
         owner_id,
         active=True,
@@ -1315,27 +1319,9 @@ async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None
         )
         if not newly:
             continue
-        lang = db.get_user_locale(uid) or DEFAULT_LOCALE
-        redirect = twitch_oauth_redirect_uri()
-        markup = None
-        if redirect:
-            state = create_pending_login_state(uid, lang, purpose="premium")
-            url = twitch.build_authorize_url(
-                redirect_uri=redirect,
-                state=state,
-                scopes=SUBSCRIPTIONS_SCOPE,
-            )
-            markup = InlineKeyboardMarkup(
-                [[InlineKeyboardButton(btn("premium_marfapr", lang), url=url)]]
-            )
-        try:
-            await context.bot.send_message(
-                uid,
-                with_oauth_legal(t("premium_twitch_reauth", lang), lang)
-                if markup
-                else t("premium_twitch_reauth", lang),
-                reply_markup=markup,
-            )
-        except Exception:
-            logger.exception("Cannot notify %s about premium twitch reauth", uid)
+        from oauth_tokens import request_twitch_reauth
+
+        await request_twitch_reauth(
+            context.application, uid, reason="premium_twitch"
+        )
     sync_optional_jobs(context.application.job_queue, db)

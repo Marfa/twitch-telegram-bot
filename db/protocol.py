@@ -607,6 +607,45 @@ class Database(Protocol):
 
     def set_follow_monitor_needs_reauth(self, owner_id: int, needs: bool) -> None: ...
 
+    def fan_out_twitch_oauth_token(
+        self,
+        owner_id: int,
+        *,
+        twitch_user_id: str,
+        twitch_login: str,
+        refresh_token: str,
+    ) -> None: ...
+
+    def revoke_user_oauth_tokens(self, owner_id: int) -> None:
+        """Delete Twitch feature tokens + DonationAlerts auth for owner."""
+        ...
+
+    def list_owners_needing_twitch_reauth(self) -> list[int]:
+        """Owners with needs_reauth on twitch_sync / follow_monitor / premium."""
+        ...
+
+    def mark_twitch_stores_needs_reauth(self, owner_id: int) -> None: ...
+
+    def pause_for_twitch_reauth(self, owner_id: int) -> tuple[int, bool]:
+        """Pause from_twitch_sync subs + enabled whispers. Returns (subs, whisper_paused)."""
+        ...
+
+    def list_subscriptions_paused_for_reauth(self, owner_id: int) -> list[Subscription]: ...
+
+    def clear_subscription_paused_for_reauth(
+        self, sub_id: int, owner_id: int, *, enabled: bool
+    ) -> None: ...
+
+    def take_whisper_paused_for_reauth(self, owner_id: int) -> WhisperAlert | None:
+        """If whisper was paused for reauth, clear flag and return row (still disabled)."""
+        ...
+
+    def get_twitch_reauth_notified_at(self, owner_id: int) -> str | None: ...
+
+    def set_twitch_reauth_notified_at(
+        self, owner_id: int, notified_at: str | None
+    ) -> None: ...
+
     def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]: ...
 
     def has_any_enabled_follow_monitor(self) -> bool: ...

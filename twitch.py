@@ -28,6 +28,18 @@ CHAT_WRITE_SCOPE = "user:write:chat"
 CHAT_OAUTH_SCOPES = f"{CHAT_READ_SCOPE} {CHAT_WRITE_SCOPE}"
 # Schedule publish may overwrite twitch_sync used by follow import — keep both.
 SCHEDULE_OAUTH_SCOPES = f"{SCHEDULE_SCOPE} {FOLLOWS_SCOPE}"
+# One authorize → one refresh covers every Twitch feature that stores a user token.
+BOT_TWITCH_OAUTH_SCOPES = " ".join(
+    [
+        FOLLOWS_SCOPE,
+        FOLLOWERS_SCOPE,
+        SCHEDULE_SCOPE,
+        SUBSCRIPTIONS_SCOPE,
+        WHISPERS_SCOPE,
+        CHAT_READ_SCOPE,
+        CHAT_WRITE_SCOPE,
+    ]
+)
 
 logger = logging.getLogger(__name__)
 
@@ -897,7 +909,7 @@ class TwitchClient:
             "client_id": TWITCH_CLIENT_ID,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": FOLLOWS_SCOPE if scopes is None else scopes,
+            "scope": BOT_TWITCH_OAUTH_SCOPES if scopes is None else scopes,
             "state": state,
         }
         if force_verify:
