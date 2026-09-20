@@ -28,6 +28,7 @@ from i18n import (
     premium_gate_keyboard,
     premium_gift_keyboard,
     settings_menu,
+    auth_tokens_menu,
     language_keyboard,
     stream_schedule_confirm_keyboard,
     stream_schedule_duration_keyboard,
@@ -182,6 +183,7 @@ def _check_submenu_reply_keyboards() -> None:
             ("subscriptions_menu", subscriptions_menu(loc)),
             ("other_menu", other_menu(loc)),
             ("settings_menu", settings_menu(loc, beta_enrolled=0, beta_total=0)),
+            ("auth_tokens_menu", auth_tokens_menu(loc)),
             ("partner_menu", partner_menu(loc)),
             ("broadcast_menu", broadcast_menu(loc)),
             ("admin_menu", admin_menu(loc)),
@@ -515,7 +517,15 @@ async def _scenario_subscriptions(db) -> None:
 
 async def _scenario_settings_and_partner(db) -> None:
     from handlers.partner import open_partner_menu
-    from handlers.settings import start_ignored_words
+    from handlers.settings import open_auth_tokens_menu, start_ignored_words
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("auth_tokens", "ru"), cap)
+    ctx = _ctx(application)
+    await open_auth_tokens_menu(update, ctx)
+    cap.assert_turn("settings_auth_tokens")
 
     application, bot = _app(db)
     cap = _BotCapture()
