@@ -1191,9 +1191,10 @@ def check_handlers() -> None:
             )
             for i in range(12)
         ]
-        pages = _build_alert_history_chunks(fat_items, "ru", 7)
+        pages, unwatched = _build_alert_history_chunks(fat_items, "ru", 7)
         assert len(pages) > 1
         assert all(len(p) <= 4100 for p in pages)
+        assert unwatched is None or isinstance(unwatched, int)
         db.add_alert_history(
             10,
             subscription_id=9,
