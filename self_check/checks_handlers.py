@@ -1265,13 +1265,42 @@ def check_handlers() -> None:
         from handlers.monitoring import (
             _delta_suffix,
             _format_growth_report,
+            _load_admin_growth_snapshots,
+            _normalize_growth_snapshot_row,
             _previous_calendar_month_bounds,
+            _save_admin_growth_snapshot,
         )
 
         assert _delta_suffix(5, None) == ""
         assert _delta_suffix(5, 3) == " (+2)"
         assert _delta_suffix(2, 5) == " (-3)"
         assert _delta_suffix(4, 4) == " (0)"
+        assert _normalize_growth_snapshot_row(
+            {"users": 200, "trials": 3}
+        ) == {"users": 200, "trials": 3}
+        assert _normalize_growth_snapshot_row(
+            {"count": 10, "paid": 2, "trials": 1}
+        ) == {"trials": 1}
+        assert _normalize_growth_snapshot_row({"trials": 1}) is None
+        snap_path = Path(tempfile.mkdtemp()) / "admin_growth_snapshots.json"
+        snap_path.write_text(
+            json.dumps(
+                {
+                    "weekly": {"count": 5, "paid": 1, "trials": 2},
+                    "monthly": {"users": 90, "trials": 4},
+                }
+            ),
+            encoding="utf-8",
+        )
+        loaded = _load_admin_growth_snapshots(snap_path)
+        assert loaded["weekly"] == {"trials": 2}
+        assert loaded["monthly"] == {"users": 90, "trials": 4}
+        _save_admin_growth_snapshot(
+            "weekly", users=233, trials=0, path=snap_path
+        )
+        raw_after = json.loads(snap_path.read_text(encoding="utf-8"))
+        assert raw_after["weekly"] == {"users": 233, "trials": 0}
+        assert raw_after["monthly"] == {"users": 90, "trials": 4}
         start, end = _previous_calendar_month_bounds(
             datetime(2026, 9, 1, 10, 0, tzinfo=timezone(timedelta(hours=3)))
         )

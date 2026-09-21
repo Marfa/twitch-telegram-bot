@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
@@ -385,26 +386,41 @@ def _admin_growth_snapshot_path() -> Path:
     return Path(DATABASE_PATH).expanduser().resolve().parent / "admin_growth_snapshots.json"
 
 
-def _load_admin_growth_snapshots(path: Path | None = None) -> dict[str, dict[str, int]]:
-    path = path or _admin_growth_snapshot_path()
+def _read_raw_admin_growth_snapshots(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         return {}
-    if not isinstance(raw, dict):
-        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _normalize_growth_snapshot_row(row: object) -> dict[str, int] | None:
+    """New format: users+trials. Legacy (pre-1bdc51d): count/paid/trials — keep trials only."""
+    if not isinstance(row, dict):
+        return None
+    try:
+        trials = int(row["trials"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if "users" in row:
+        try:
+            return {"users": int(row["users"]), "trials": trials}
+        except (TypeError, ValueError):
+            return None
+    # Legacy schema had no total-user baseline; trials_delta still works.
+    if "count" in row or "paid" in row:
+        return {"trials": trials}
+    return None
+
+
+def _load_admin_growth_snapshots(path: Path | None = None) -> dict[str, dict[str, int]]:
+    path = path or _admin_growth_snapshot_path()
+    raw = _read_raw_admin_growth_snapshots(path)
     out: dict[str, dict[str, int]] = {}
     for key in _ADMIN_GROWTH_SNAPSHOT_KEYS:
-        row = raw.get(key)
-        if not isinstance(row, dict):
-            continue
-        try:
-            out[key] = {
-                "users": int(row["users"]),
-                "trials": int(row["trials"]),
-            }
-        except (KeyError, TypeError, ValueError):
-            continue
+        normalized = _normalize_growth_snapshot_row(raw.get(key))
+        if normalized is not None:
+            out[key] = normalized
     return out
 
 
@@ -414,10 +430,14 @@ def _save_admin_growth_snapshot(
     if kind not in _ADMIN_GROWTH_SNAPSHOT_KEYS:
         raise ValueError(f"unknown growth snapshot kind: {kind}")
     path = path or _admin_growth_snapshot_path()
-    data = _load_admin_growth_snapshots(path)
-    data[kind] = {"users": users, "trials": trials}
+    # Merge into raw JSON so a failed/legacy sibling key is not wiped on save.
+    raw = _read_raw_admin_growth_snapshots(path)
+    for key, row in _load_admin_growth_snapshots(path).items():
+        if "users" in row:
+            raw[key] = {"users": int(row["users"]), "trials": int(row["trials"])}
+    raw[kind] = {"users": int(users), "trials": int(trials)}
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
 
 
 def _previous_calendar_month_bounds(
