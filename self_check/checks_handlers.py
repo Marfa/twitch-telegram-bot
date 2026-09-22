@@ -2046,6 +2046,47 @@ def check_handlers() -> None:
         edited = query.edit_message_text.await_args.args[0]
         assert "Premium" in edited or "премиум" in edited.lower()
 
+    # Crafted edit_set:delete_old must not bypass Premium (same as edit_f).
+    from handlers.subscriptions import on_edit_set
+
+    with tempfile.TemporaryDirectory() as edit_set_tmp:
+        edb = SqliteDatabase(Path(edit_set_tmp) / "edit_set.db")
+        edb.upsert_user(4343)
+        sid = edb.add_subscription(
+            4343,
+            "chan",
+            "2",
+            "hi",
+            "channel",
+            -1001,
+            None,
+            enabled=True,
+            delete_previous=False,
+        )
+        query = AsyncMock()
+        query.data = f"edit_set:{sid}:delete_old:1"
+        query.from_user = SimpleNamespace(id=4343)
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        update = SimpleNamespace(callback_query=query)
+        context = MagicMock()
+        context.application.bot_data = {"db": edb}
+        context.bot = AsyncMock()
+        context.user_data = {}
+        with patch(
+            "premium_handlers.send_premium_screen", new=AsyncMock()
+        ) as send_prem, patch(
+            "handlers.subscriptions.prem.has_feature",
+            new=AsyncMock(return_value=False),
+        ):
+            asyncio.run(on_edit_set(update, context))
+        sub = edb.get_subscription(sid, 4343)
+        assert sub is not None
+        assert sub.delete_previous is False
+        send_prem.assert_awaited()
+        edited = query.edit_message_text.await_args.args[0]
+        assert "Premium" in edited or "премиум" in edited.lower()
+
     # on_import_enable / on_toggle must answer callback before premium awaits
     # (Telegram expires query ids ~30s → BadRequest "Query is too old").
     import inspect as _inspect

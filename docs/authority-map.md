@@ -18,6 +18,7 @@ Canonical sources of truth for humans and AI agents. When docs or rules conflict
 | End-user guide (public HTML) | `webapp/guide/ru.html`, `webapp/guide/en.html` | served as `/guide` | Update when user-facing features change (`.cursor/rules/user-guide.mdc`) |
 | Agent execution hints | `.cursor/rules/*.mdc` | — | Cursor adapter; not runtime authority |
 | Characterization checks | `self_check/` (`python -m self_check`) | — | CI: `.github/workflows/self-check.yml` |
+| OWASP-oriented security checklist | `docs/owasp-checklist.md` | CI: `.github/workflows/security.yml` | Quarterly / pre-release manual pass; run log in the same file |
 | Locale strings | `locales/en.json`, `locales/ru.json`, `locales/uk.json`, `locales/it.json` | `i18n.py` loader + keyboards | |
 | Static marketing assets | `assets/` | — | |
 | Runtime analytics | PostHog (external) | `analytics.py` | Observations only — not product authority |

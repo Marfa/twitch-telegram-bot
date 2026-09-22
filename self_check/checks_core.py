@@ -1198,9 +1198,23 @@ def check_core() -> None:
     # Threading health server: a hung client must not block /health.
     import socket
     import threading
+    import urllib.error
     import urllib.request
     from http.server import ThreadingHTTPServer
-    from health import _HealthHandler, evaluate_health, mark_ready, note_check_streams_ok
+    from health import (
+        _HealthHandler,
+        _http_rate_limit_allow,
+        evaluate_health,
+        mark_ready,
+        note_check_streams_ok,
+        reset_http_rate_limits_for_tests,
+    )
+
+    reset_http_rate_limits_for_tests()
+    assert _http_rate_limit_allow("t:ip", limit=2, window_sec=60.0)
+    assert _http_rate_limit_allow("t:ip", limit=2, window_sec=60.0)
+    assert not _http_rate_limit_allow("t:ip", limit=2, window_sec=60.0)
+    reset_http_rate_limits_for_tests()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
     httpd.daemon_threads = True
@@ -1215,6 +1229,28 @@ def check_core() -> None:
         ).read() == b"ok"
         status, body = evaluate_health()
         assert status == 200 and body == b"ok"
+        # OAuth path rate limit: health stays unlimited; oauth trips 429.
+        import health as health_mod
+
+        saved_oauth_limit = health_mod._HTTP_RL_OAUTH_LIMIT
+        health_mod._HTTP_RL_OAUTH_LIMIT = 2
+        reset_http_rate_limits_for_tests()
+        try:
+            oauth_url = f"http://127.0.0.1:{port}/oauth/twitch/callback?state=x"
+
+            def _oauth_status() -> int:
+                try:
+                    with urllib.request.urlopen(oauth_url, timeout=2) as resp:
+                        return resp.status
+                except urllib.error.HTTPError as exc:
+                    return exc.code
+
+            assert _oauth_status() == 400
+            assert _oauth_status() == 400
+            assert _oauth_status() == 429
+        finally:
+            health_mod._HTTP_RL_OAUTH_LIMIT = saved_oauth_limit
+            reset_http_rate_limits_for_tests()
     finally:
         hung.close()
         httpd.shutdown()

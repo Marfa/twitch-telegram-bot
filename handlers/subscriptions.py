@@ -3843,6 +3843,31 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
         await query.edit_message_text(t("sub_not_found", lang))
         return
+    if field in ("delete_old", "delete_fail", "delete_other"):
+        # Same gate as edit_f:delete_* — crafted edit_set must not bypass Premium.
+        if not await prem.has_feature(
+            context.bot,
+            db,
+            query.from_user.id,
+            "delete_prev",
+            channel=sub.twitch_username,
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_field",
+                feature="delete_prev",
+            )
+            return
     if field == "delete_old":
         kwargs: dict = {"delete_previous": value}
         if not value:

@@ -33,6 +33,85 @@ _PENDING_LOGIN_TTL_SEC = 600
 # State is uuid4 (not secrets.token_*), so the on-disk map is not a password store.
 _pending_login_lock = threading.Lock()
 
+# Inbound sliding-window limits for abuse-prone paths (/health excluded).
+# Keyed by client IP (direct peer). Behind nginx, prefer limit_req there too.
+_HTTP_RL_LOCK = threading.Lock()
+_HTTP_RL_HITS: dict[str, list[float]] = {}
+_HTTP_RL_OAUTH_LIMIT = 60
+_HTTP_RL_OAUTH_WINDOW_SEC = 60.0
+_HTTP_RL_HOOKS_LIMIT = 300
+_HTTP_RL_HOOKS_WINDOW_SEC = 60.0
+_HTTP_RL_MAX_KEYS = 10_000
+
+
+def _http_client_ip(handler: BaseHTTPRequestHandler) -> str:
+    return handler.client_address[0] if handler.client_address else "unknown"
+
+
+def _http_rate_limit_allow(
+    bucket_key: str, *, limit: int, window_sec: float
+) -> bool:
+    """Record a hit; return False when over limit (request should be 429)."""
+    now = time.monotonic()
+    cutoff = now - window_sec
+    with _HTTP_RL_LOCK:
+        hits = _HTTP_RL_HITS.get(bucket_key)
+        if hits is None:
+            hits = []
+            _HTTP_RL_HITS[bucket_key] = hits
+        # Drop expired timestamps from the front.
+        drop = 0
+        for ts in hits:
+            if ts >= cutoff:
+                break
+            drop += 1
+        if drop:
+            del hits[:drop]
+        if len(hits) >= limit:
+            return False
+        hits.append(now)
+        if len(_HTTP_RL_HITS) > _HTTP_RL_MAX_KEYS:
+            stale = [
+                k
+                for k, v in _HTTP_RL_HITS.items()
+                if not v or v[-1] < cutoff
+            ]
+            for k in stale[: _HTTP_RL_MAX_KEYS // 2]:
+                _HTTP_RL_HITS.pop(k, None)
+        return True
+
+
+def reset_http_rate_limits_for_tests() -> None:
+    with _HTTP_RL_LOCK:
+        _HTTP_RL_HITS.clear()
+
+
+def _send_rate_limited(handler: BaseHTTPRequestHandler, *, retry_after: int) -> None:
+    body = b"rate limit exceeded"
+    handler.send_response(429)
+    handler.send_header("Content-Type", "text/plain")
+    handler.send_header("Retry-After", str(retry_after))
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _enforce_http_rate_limit(handler: BaseHTTPRequestHandler, path: str) -> bool:
+    """If limited, send 429 and return True; otherwise return False."""
+    if path.startswith("/oauth/"):
+        limit, window = _HTTP_RL_OAUTH_LIMIT, _HTTP_RL_OAUTH_WINDOW_SEC
+        kind = "oauth"
+    elif path.startswith("/hooks/"):
+        limit, window = _HTTP_RL_HOOKS_LIMIT, _HTTP_RL_HOOKS_WINDOW_SEC
+        kind = "hooks"
+    else:
+        return False
+    key = f"{kind}:{_http_client_ip(handler)}"
+    if _http_rate_limit_allow(key, limit=limit, window_sec=window):
+        return False
+    _send_rate_limited(handler, retry_after=max(1, int(window)))
+    return True
+
 
 def _pending_login_store_path() -> Path:
     override = (os.getenv("OAUTH_PENDING_PATH") or "").strip()
@@ -935,6 +1014,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self._path_only()
+        if _enforce_http_rate_limit(self, path):
+            return
         if path == "/oauth/twitch/callback":
             query = parse_qs(urlparse(self.path).query)
             status, body, content_type = _handle_twitch_oauth(query)
@@ -1016,6 +1097,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self._path_only()
+        if _enforce_http_rate_limit(self, path):
+            return
         if path.startswith("/app/chat"):
             if _handle_chat_webapp_post(self):
                 return
