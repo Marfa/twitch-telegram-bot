@@ -114,6 +114,15 @@
       "created_at": "2026-09-15"
     },
     {
+      "id": "giveaways-alerts",
+      "branch": "feat/giveaways-alerts",
+      "title_key": "beta_feat_giveaways_alerts",
+      "description_key": "beta_feat_giveaways_alerts_desc",
+      "issue_label": "beta/giveaways-alerts",
+      "stage": "beta",
+      "created_at": "2026-09-22"
+    },
+    {
       "id": "top-donations",
       "branch": "feat/top-donations",
       "title_key": "beta_feat_top_donations",

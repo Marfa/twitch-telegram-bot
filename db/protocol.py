@@ -13,6 +13,7 @@ from .models import (
     FollowMonitor,
     FollowMonitorEvent,
     FollowMonitorFollower,
+    GiveawaysPrefs,
     PremiumChannel,
     PremiumGift,
     ReferralCreditRef,
@@ -743,6 +744,38 @@ class Database(Protocol):
 
     def delete_drops_auth(self, owner_id: int) -> None: ...
 
+    def get_giveaways_prefs(self, owner_id: int) -> GiveawaysPrefs | None: ...
+
+    def upsert_giveaways_prefs(
+        self,
+        owner_id: int,
+        *,
+        stores: list[str],
+        platforms: list[str],
+        digest_enabled: bool | None = None,
+        first_digest_sent: bool | None = None,
+        last_digest_at: int | None = None,
+    ) -> GiveawaysPrefs: ...
+
+    def set_giveaways_digest_enabled(self, owner_id: int, enabled: bool) -> None: ...
+
+    def list_giveaways_digest_owner_ids(self) -> list[int]: ...
+
+    def has_any_giveaways_work(self) -> bool: ...
+
+    def has_seen_giveaway(
+        self, owner_id: int, source: str, external_id: str
+    ) -> bool: ...
+
+    def mark_giveaway_seen(
+        self,
+        owner_id: int,
+        source: str,
+        external_id: str,
+        *,
+        seen_at: int,
+    ) -> None: ...
+
     def get_donationalerts_auth(self, owner_id: int) -> DonationAlertsAuth | None: ...
 
     def upsert_donationalerts_auth(
@@ -907,6 +940,10 @@ class Database(Protocol):
     def igdb_company_labels_for_games(
         self, game_ids: list[int]
     ) -> dict[int, str]: ...
+
+    def igdb_publisher_developer_names(
+        self, game_id: int
+    ) -> tuple[str, str]: ...
 
     def igdb_company_labels_for_twitch_uids(
         self, twitch_uids: list[str]

@@ -19,12 +19,13 @@
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
-| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops (beta) · game alert · release alerts (beta, IGDB) |
+| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (beta, IGDB) · game giveaways (beta, GamerPower + ITAD) |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+); live → else VOD; own category in **📋 My subscriptions** |
 | 📅 Release alerts | Beta: **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform |
+| 🎁 Game giveaways | Beta: **➕ New subscription** under Release alerts; stores + platforms (GamerPower + IsThereAnyDeal); daily 100% free digest; IGDB enrichment; “Fresh giveaways” after first digest |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Cover | Optional alert cover — stream preview (frame, 30‑min refresh), stream GIF preview ⭐ (~30s autoplay MP4, 30‑min refresh), stream video preview ⭐ (~30s muted MP4, 30‑min refresh), game cover, or your own photo; caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
@@ -335,6 +336,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
+| `ISTHEREANYDEAL_API_KEY` | (opt.) IsThereAnyDeal game giveaways; without it only GamerPower is used |
 | `YOUTUBE_API_KEY` | (opt.) YouTube Data API v3 — Multistream live checks (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Preview/MP4 refresh interval while live (default 1800) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |

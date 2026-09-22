@@ -46,7 +46,8 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^strip_name:(?:cancel|back)$|"
     r"^edit_f:\d+:button_style_back$|"
     r"^template_typo:0$|"
-    r"^stored_typo_fix:0$"
+    r"^stored_typo_fix:0$|"
+    r"^gv:(?:close|hub)$"
     r")"
 )
 

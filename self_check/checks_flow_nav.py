@@ -200,12 +200,25 @@ def _check_submenu_reply_keyboards() -> None:
 
 
 def _check_inline_wizard_keyboards() -> None:
+    from handlers.giveaways import giveaways_hub_keyboard
     from handlers.wizard import _twitch_link_offer_keyboard
     from i18n import drops_catalog_keyboard
 
     for loc in SUPPORTED_LOCALES:
         cases = [
             ("alert_type_keyboard", alert_type_keyboard(loc, show_drops=True)),
+            (
+                "alert_type_keyboard_giveaways",
+                alert_type_keyboard(
+                    loc, show_drops=True, show_release=True, show_giveaways=True
+                ),
+            ),
+            (
+                "giveaways_hub",
+                giveaways_hub_keyboard(
+                    loc, digest_enabled=True, show_fresh=True
+                ),
+            ),
             ("new_sub_other_keyboard", new_sub_other_keyboard(loc)),
             ("premium_gate_first", premium_gate_keyboard(loc, first_step=True)),
             ("premium_gate_later", premium_gate_keyboard(loc, first_step=False)),
@@ -1225,6 +1238,103 @@ async def _scenario_release_notify_delete(db) -> None:
     assert db.get_subscription(sub_id, _FREE_UID) is None
     query.edit_message_text.assert_awaited()
     _ = ctx
+
+
+async def _scenario_wizard_giveaways_hub(db) -> None:
+    """§6.4 Giveaways — alert_type:giveaways → hub with close; stores has Back."""
+    from handlers.giveaways import (
+        GIVEAWAYS_BETA_ID,
+        giveaways_hub_keyboard,
+        on_giveaways_callback,
+        open_giveaways_hub,
+    )
+    from handlers.wizard import receive_alert_type
+    from i18n import t
+    from telegram.ext import ConversationHandler
+
+    application, bot = _app(db)
+    application.job_queue = MagicMock()
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "alert_type:giveaways", cap)
+    update.effective_message = query.message
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
+    db.set_beta_enrollment(_FREE_UID, GIVEAWAYS_BETA_ID, True)
+    state = await receive_alert_type(update, ctx)
+    assert state == ConversationHandler.END
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:close"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    labels = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert t("giveaways_btn_stores", "ru") in labels
+    assert t("giveaways_btn_platforms", "ru") in labels
+    cap.assert_turn("wizard_giveaways_hub")
+
+    assert markup_has_escape_hatch(
+        giveaways_hub_keyboard("ru", digest_enabled=False, show_fresh=False)
+    )
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "gv:stores", cap)
+    update.effective_message = query.message
+    await on_giveaways_callback(update, _ctx(application))
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:hub"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:stores:all"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    cap.assert_turn("wizard_giveaways_stores")
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "gv:platforms", cap)
+    update.effective_message = query.message
+    await on_giveaways_callback(update, _ctx(application))
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:hub"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    cap.assert_turn("wizard_giveaways_platforms")
+
+    # open_giveaways_hub re-entry still has close
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "gv:hub", cap)
+    update.effective_message = query.message
+    await open_giveaways_hub(update, _ctx(application))
+    cap.assert_turn("wizard_giveaways_hub_reopen")
 
 
 async def _scenario_wizard_alert_type_other(db) -> None:
@@ -2805,6 +2915,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_release_alert(db)
         await _scenario_wizard_release_pick_pages(db)
         await _scenario_release_notify_delete(db)
+        await _scenario_wizard_giveaways_hub(db)
         await _scenario_wizard_alert_type_other(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_top_donations(db)
