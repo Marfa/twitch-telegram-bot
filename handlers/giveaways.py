@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes, ConversationHandler
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 GIVEAWAYS_BETA_ID = "giveaways-alerts"
 _PAGE_SIZE = 5
 _DIGEST_MIN_INTERVAL_SEC = 20 * 3600
+_BROWSE_KEY = "giveaways_browse"
 
 
 def giveaways_feature_available(db: Database, user_id: int) -> bool:
@@ -106,7 +107,7 @@ def giveaways_hub_keyboard(
             [
                 InlineKeyboardButton(
                     t("giveaways_btn_fresh", lang),
-                    callback_data="gv:fresh:0",
+                    callback_data="gv:fresh",
                 )
             ]
         )
@@ -167,47 +168,80 @@ def _checkbox_list_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def _page_keyboard(lang: str, page: int, total_pages: int) -> InlineKeyboardMarkup:
-    buttons: list[InlineKeyboardButton] = []
-    if page > 0:
-        buttons.append(
-            InlineKeyboardButton("‹", callback_data=f"gv:fresh:{page - 1}")
-        )
-    buttons.append(
-        InlineKeyboardButton(
-            f"{page + 1}/{total_pages}",
-            callback_data="gv:noop",
-        )
-    )
-    if page + 1 < total_pages:
-        buttons.append(
-            InlineKeyboardButton("›", callback_data=f"gv:fresh:{page + 1}")
-        )
-    rows = [buttons] if buttons else []
-    rows.append(
-        [
+def _card_keyboard(
+    lang: str,
+    *,
+    claim_url: str,
+    igdb_game_id: int | None,
+    show_more_offset: int | None = None,
+) -> InlineKeyboardMarkup:
+    row: list[InlineKeyboardButton] = []
+    url = (claim_url or "").strip()
+    if url.startswith(("http://", "https://")):
+        row.append(
             InlineKeyboardButton(
-                t("giveaways_back_hub", lang),
-                callback_data="gv:hub",
+                t("giveaways_go_store", lang),
+                url=url,
             )
-        ]
-    )
-    return InlineKeyboardMarkup(rows)
+        )
+    if igdb_game_id:
+        row.append(
+            InlineKeyboardButton(
+                t("giveaways_find_streams", lang),
+                callback_data=f"gv:streams:{igdb_game_id}",
+            )
+        )
+    rows: list[list[InlineKeyboardButton]] = []
+    if row:
+        rows.append(row)
+    if show_more_offset is not None:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("giveaways_show_more", lang),
+                    callback_data=f"gv:more:{int(show_more_offset)}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows) if rows else InlineKeyboardMarkup([])
 
 
-def _streams_keyboard(lang: str, igdb_game_id: int | None) -> InlineKeyboardMarkup | None:
-    if not igdb_game_id:
-        return None
+def _details_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    t("giveaways_find_streams", lang),
-                    callback_data=f"gv:streams:{igdb_game_id}",
+                    t("giveaways_details", lang),
+                    callback_data="gv:details",
                 )
             ]
         ]
     )
+
+
+def _store_browse(
+    application: Any,
+    user_id: int,
+    offers: list[GiveawayOffer],
+    lang: str,
+) -> None:
+    application.bot_data.setdefault(_BROWSE_KEY, {})[int(user_id)] = {
+        "offers": list(offers),
+        "lang": lang,
+    }
+
+
+def _load_browse(
+    application: Any, user_id: int
+) -> tuple[list[GiveawayOffer], str] | None:
+    raw = (application.bot_data.get(_BROWSE_KEY) or {}).get(int(user_id))
+    if not isinstance(raw, dict):
+        return None
+    offers = raw.get("offers")
+    if not isinstance(offers, list) or not offers:
+        return None
+    lang = str(raw.get("lang") or DEFAULT_LOCALE)
+    return offers, lang
 
 
 @dataclass
@@ -298,19 +332,15 @@ def _format_dates(offer: GiveawayOffer, lang: str) -> str:
     return start or end or "—"
 
 
-def _build_card_html(item: _Enriched, lang: str) -> str:
+def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
     year_bit = f" ({html.escape(item.year)})" if item.year else ""
     title = f"<b>{html.escape(item.name)}{year_bit}</b>"
     pub = html.escape(item.publisher) if item.publisher else "—"
     dev = html.escape(item.developer) if item.developer else "—"
     dates = html.escape(_format_dates(item.offer, lang))
-    claim = claim_url_or_search(item.offer)
-    plat_parts: list[str] = []
-    for pid in item.offer.platform_ids:
-        label = html.escape(_platform_label(lang, pid))
-        plat_parts.append(
-            f'<a href="{html.escape(claim, quote=True)}">{label}</a>'
-        )
+    plat_parts = [
+        html.escape(_platform_label(lang, pid)) for pid in item.offer.platform_ids
+    ]
     plats = ", ".join(plat_parts) if plat_parts else "—"
     desc = html.escape(item.summary[:800]) if item.summary else ""
     lines = [
@@ -323,69 +353,149 @@ def _build_card_html(item: _Enriched, lang: str) -> str:
     if desc:
         lines.append("")
         lines.append(desc)
-    return "\n".join(lines)
+    if footer:
+        lines.append("")
+        lines.append(footer)
+    body = "\n".join(lines)
+    if len(body) > 1024:
+        body = body[:1020] + "…"
+    return body
 
 
-async def _send_page(
+async def _send_one_card(
+    bot: Any,
+    chat_id: int,
+    item: _Enriched,
+    lang: str,
+    *,
+    footer: str = "",
+    show_more_offset: int | None = None,
+) -> None:
+    body = _build_card_html(item, lang, footer=footer)
+    markup = _card_keyboard(
+        lang,
+        claim_url=claim_url_or_search(item.offer),
+        igdb_game_id=item.igdb_id,
+        show_more_offset=show_more_offset,
+    )
+    if item.cover_url:
+        try:
+            await bot.send_photo(
+                chat_id,
+                photo=item.cover_url,
+                caption=body,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
+            return
+        except BadRequest:
+            logger.info("giveaways cover send failed title=%s", item.name[:60])
+    await bot.send_message(
+        chat_id,
+        body,
+        parse_mode=ParseMode.HTML,
+        reply_markup=markup,
+        disable_web_page_preview=True,
+    )
+
+
+async def _send_cards_batch(
     bot: Any,
     chat_id: int,
     *,
     db: Database,
-    items: list[_Enriched],
+    offers: list[GiveawayOffer],
     lang: str,
-    page: int,
-    total_pages: int,
-    header: str,
-    used_gp: bool,
-    used_itad: bool,
-) -> None:
+    offset: int = 0,
+) -> int:
+    """Send up to _PAGE_SIZE cards from offset; 'Show more' on the last if needed."""
+    if offset < 0:
+        offset = 0
+    if offset >= len(offers):
+        return 0
+    chunk = offers[offset : offset + _PAGE_SIZE]
+    next_offset = offset + len(chunk)
+    has_more = next_offset < len(offers)
+    used_gp = any(o.source == "gamerpower" for o in offers)
+    used_itad = any(o.source == "itad" for o in offers)
     attr = attribution_html(used_gp=used_gp, used_itad=used_itad)
     igdb_attr = '<a href="https://www.igdb.com">IGDB.com</a>'
     footer = " · ".join(p for p in (attr, igdb_attr) if p)
-
-    covers = [i.cover_url for i in items if i.cover_url][:10]
-    if len(covers) > 1:
-        media = [InputMediaPhoto(media=u) for u in covers]
-        try:
-            await bot.send_media_group(chat_id, media=media)
-        except Exception:
-            logger.info("giveaways media_group failed chat=%s", chat_id)
-
+    items = [await asyncio.to_thread(_enrich_offer, db, o, lang) for o in chunk]
     for idx, item in enumerate(items):
-        body = _build_card_html(item, lang)
-        if idx == 0 and header:
-            body = f"{header}\n\n{body}"
-        if idx == len(items) - 1 and footer:
-            body = f"{body}\n\n{footer}"
-        if len(body) > 1024:
-            body = body[:1020] + "…"
-        markup = _streams_keyboard(lang, item.igdb_id)
-        if item.cover_url and len(covers) <= 1:
-            try:
-                await bot.send_photo(
-                    chat_id,
-                    photo=item.cover_url,
-                    caption=body,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=markup,
-                )
-                continue
-            except BadRequest:
-                pass
-        await bot.send_message(
+        is_last = idx == len(items) - 1
+        await _send_one_card(
+            bot,
             chat_id,
-            body,
-            parse_mode=ParseMode.HTML,
-            reply_markup=markup,
-            disable_web_page_preview=True,
+            item,
+            lang,
+            footer=footer if is_last and not has_more else "",
+            show_more_offset=next_offset if is_last and has_more else None,
         )
+    return len(chunk)
 
-    if total_pages > 1:
+
+def _summary_text(lang: str, offers: list[GiveawayOffer]) -> str:
+    names: list[str] = []
+    for o in offers:
+        name = html.escape(_clean_title_for_search(o.title) or o.title)
+        names.append(f"• {name}")
+    listing = "\n".join(names)
+    return t("giveaways_new_summary", lang, list=listing)
+
+
+async def _send_matching_list(
+    bot: Any,
+    chat_id: int,
+    *,
+    db: Database,
+    application: Any,
+    user_id: int,
+    lang: str,
+    mark_seen: bool,
+    set_first_sent: bool = False,
+) -> int:
+    prefs = _prefs_or_empty(db, user_id)
+    offers = filter_giveaways(
+        fetch_active_giveaways(),
+        stores=set(prefs.stores),
+        platforms=set(prefs.platforms),
+    )
+    if not offers:
         await bot.send_message(
             chat_id,
-            t("giveaways_page_nav", lang, page=page + 1, total=total_pages),
-            reply_markup=_page_keyboard(lang, page, total_pages),
+            t("giveaways_empty", lang),
+            reply_markup=_menu(lang, user_id),
         )
+        if set_first_sent:
+            db.upsert_giveaways_prefs(
+                user_id,
+                stores=prefs.stores,
+                platforms=prefs.platforms,
+                digest_enabled=True,
+                first_digest_sent=True,
+                last_digest_at=int(time.time()),
+            )
+        return 0
+
+    _store_browse(application, user_id, offers, lang)
+    await _send_cards_batch(
+        bot, chat_id, db=db, offers=offers, lang=lang, offset=0
+    )
+    if mark_seen:
+        now = int(time.time())
+        for o in offers:
+            db.mark_giveaway_seen(user_id, o.source, o.external_id, seen_at=now)
+    if set_first_sent:
+        db.upsert_giveaways_prefs(
+            user_id,
+            stores=prefs.stores,
+            platforms=prefs.platforms,
+            digest_enabled=True,
+            first_digest_sent=True,
+            last_digest_at=int(time.time()),
+        )
+    return len(offers)
 
 
 async def open_giveaways_hub(
@@ -470,98 +580,12 @@ async def _maybe_activate_and_send_first(
         context.bot,
         chat_id,
         db=db,
+        application=context.application,
         user_id=user_id,
         lang=lang,
-        page=0,
-        only_new=False,
         mark_seen=True,
-        header=t("giveaways_first_digest_header", lang),
         set_first_sent=True,
     )
-
-
-async def _send_matching_list(
-    bot: Any,
-    chat_id: int,
-    *,
-    db: Database,
-    user_id: int,
-    lang: str,
-    page: int,
-    only_new: bool,
-    mark_seen: bool,
-    header: str,
-    set_first_sent: bool = False,
-) -> int:
-    prefs = _prefs_or_empty(db, user_id)
-    stores = set(prefs.stores)
-    platforms = set(prefs.platforms)
-    offers = filter_giveaways(
-        fetch_active_giveaways(),
-        stores=stores,
-        platforms=platforms,
-    )
-    if only_new:
-        offers = [
-            o
-            for o in offers
-            if not db.has_seen_giveaway(user_id, o.source, o.external_id)
-        ]
-    if not offers:
-        await bot.send_message(
-            chat_id,
-            t("giveaways_empty", lang),
-            reply_markup=_menu(lang, user_id),
-        )
-        if set_first_sent:
-            db.upsert_giveaways_prefs(
-                user_id,
-                stores=prefs.stores,
-                platforms=prefs.platforms,
-                digest_enabled=True,
-                first_digest_sent=True,
-                last_digest_at=int(time.time()),
-            )
-        return 0
-
-    total_pages = max(1, (len(offers) + _PAGE_SIZE - 1) // _PAGE_SIZE)
-    page = max(0, min(page, total_pages - 1))
-    chunk = offers[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
-    items = [await asyncio.to_thread(_enrich_offer, db, o, lang) for o in chunk]
-    used_gp = any(i.offer.source == "gamerpower" for i in items)
-    used_itad = any(i.offer.source == "itad" for i in items)
-    # Attribution for whole catalog sources available
-    if any(True for _ in fetch_active_giveaways()):
-        # already cached; mark sources from full filtered set for footer honesty
-        used_gp = used_gp or any(o.source == "gamerpower" for o in offers)
-        used_itad = used_itad or any(o.source == "itad" for o in offers)
-
-    await _send_page(
-        bot,
-        chat_id,
-        db=db,
-        items=items,
-        lang=lang,
-        page=page,
-        total_pages=total_pages,
-        header=header,
-        used_gp=used_gp,
-        used_itad=used_itad,
-    )
-    if mark_seen:
-        now = int(time.time())
-        for o in offers if set_first_sent else chunk:
-            db.mark_giveaway_seen(user_id, o.source, o.external_id, seen_at=now)
-    if set_first_sent:
-        db.upsert_giveaways_prefs(
-            user_id,
-            stores=prefs.stores,
-            platforms=prefs.platforms,
-            digest_enabled=True,
-            first_digest_sent=True,
-            last_digest_at=int(time.time()),
-        )
-    return len(offers)
 
 
 async def on_giveaways_callback(
@@ -737,29 +761,72 @@ async def on_giveaways_callback(
             pass
         return
 
-    if data.startswith("gv:fresh:"):
+    if data == "gv:fresh" or data.startswith("gv:fresh:"):
         await query.answer()
         prefs = _prefs_or_empty(db, user_id)
         if not (prefs.stores and prefs.platforms and prefs.first_digest_sent):
             await query.edit_message_text(t("giveaways_fresh_locked", lang))
             return
-        try:
-            page = int(data.split(":")[-1])
-        except ValueError:
-            page = 0
-        await context.bot.send_message(
-            chat_id, t("giveaways_loading", lang)
-        )
+        await context.bot.send_message(chat_id, t("giveaways_loading", lang))
         await _send_matching_list(
             context.bot,
             chat_id,
             db=db,
+            application=context.application,
             user_id=user_id,
             lang=lang,
-            page=page,
-            only_new=False,
             mark_seen=False,
-            header=t("giveaways_fresh_header", lang),
+        )
+        return
+
+    if data == "gv:details":
+        await query.answer()
+        loaded = _load_browse(context.application, user_id)
+        if not loaded:
+            prefs = _prefs_or_empty(db, user_id)
+            offers = filter_giveaways(
+                fetch_active_giveaways(),
+                stores=set(prefs.stores),
+                platforms=set(prefs.platforms),
+            )
+            if not offers:
+                await context.bot.send_message(
+                    chat_id, t("giveaways_empty", lang)
+                )
+                return
+            _store_browse(context.application, user_id, offers, lang)
+            loaded = (offers, lang)
+        offers, browse_lang = loaded
+        await _send_cards_batch(
+            context.bot,
+            chat_id,
+            db=db,
+            offers=offers,
+            lang=browse_lang or lang,
+            offset=0,
+        )
+        return
+
+    if data.startswith("gv:more:"):
+        await query.answer()
+        try:
+            offset = int(data.split(":")[-1])
+        except ValueError:
+            offset = 0
+        loaded = _load_browse(context.application, user_id)
+        if not loaded:
+            await context.bot.send_message(
+                chat_id, t("giveaways_empty", lang)
+            )
+            return
+        offers, browse_lang = loaded
+        await _send_cards_batch(
+            context.bot,
+            chat_id,
+            db=db,
+            offers=offers,
+            lang=browse_lang or lang,
+            offset=offset,
         )
         return
 
@@ -877,25 +944,13 @@ async def check_giveaways_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             continue
         try:
-            # send first page of new items; mark all new as seen
-            total_pages = max(1, (len(new_offers) + _PAGE_SIZE - 1) // _PAGE_SIZE)
-            chunk = new_offers[:_PAGE_SIZE]
-            items = [
-                await asyncio.to_thread(_enrich_offer, db, o, lang) for o in chunk
-            ]
-            used_gp = any(o.source == "gamerpower" for o in new_offers)
-            used_itad = any(o.source == "itad" for o in new_offers)
-            await _send_page(
-                bot,
+            _store_browse(context.application, owner_id, new_offers, lang)
+            await bot.send_message(
                 owner_id,
-                db=db,
-                items=items,
-                lang=lang,
-                page=0,
-                total_pages=total_pages,
-                header=t("giveaways_daily_header", lang, count=len(new_offers)),
-                used_gp=used_gp,
-                used_itad=used_itad,
+                _summary_text(lang, new_offers),
+                parse_mode=ParseMode.HTML,
+                reply_markup=_details_keyboard(lang),
+                disable_web_page_preview=True,
             )
             for o in new_offers:
                 db.mark_giveaway_seen(owner_id, o.source, o.external_id, seen_at=now)

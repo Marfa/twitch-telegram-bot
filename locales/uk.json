@@ -68,7 +68,7 @@
   "btn_partner_withdrawals": "📋 Мої заявки",
   "btn_back_settings": "◀️ Налаштування",
   "btn_admin_withdrawals": "💸 Виводи",
-  "btn_admin_refund": "↩️ Скасувати підписку",
+  "btn_admin_refund": "↩️ Повернення Stars",
   "btn_watch": "🎲 Що подивитися?",
   "btn_chat": "💬 Чат",
   "watch_cats_prompt": "Сповіщення за грою — категорії\n\nВведіть назву категорії Twitch (гра або Just Chatting).",
@@ -1198,5 +1198,9 @@
   "giveaway_platform_android": "Android",
   "giveaway_platform_ios": "iOS",
   "giveaway_platform_vr": "VR",
-  "giveaway_platform_drm_free": "DRM-Free"
+  "giveaway_platform_drm_free": "DRM-Free",
+  "giveaways_go_store": "Перейти в магазин",
+  "giveaways_show_more": "Показати ще",
+  "giveaways_details": "Подробиці",
+  "giveaways_new_summary": "Знайдено нові безкоштовні ігри:\n{list}"
 }

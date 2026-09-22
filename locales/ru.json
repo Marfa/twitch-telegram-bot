@@ -68,7 +68,7 @@
   "btn_partner_withdrawals": "📋 Мои заявки",
   "btn_back_settings": "◀️ Настройки",
   "btn_admin_withdrawals": "💸 Выводы",
-  "btn_admin_refund": "↩️ Отменить подписку",
+  "btn_admin_refund": "↩️ Возврат Stars",
   "btn_watch": "🎲 Что посмотреть?",
   "btn_chat": "💬 Чат",
   "watch_cats_prompt": "Оповещение по игре — категории\n\nВведите название категории Twitch (игра или Just Chatting).",
@@ -1198,5 +1198,9 @@
   "giveaway_platform_android": "Android",
   "giveaway_platform_ios": "iOS",
   "giveaway_platform_vr": "VR",
-  "giveaway_platform_drm_free": "DRM-Free"
+  "giveaway_platform_drm_free": "DRM-Free",
+  "giveaways_go_store": "Перейти в магазин",
+  "giveaways_show_more": "Показать ещё",
+  "giveaways_details": "Подробности",
+  "giveaways_new_summary": "Найдены новые бесплатные игры:\n{list}"
 }

@@ -124,6 +124,35 @@ def _check_first_digest_unlocks_fresh_flag() -> None:
     kb = giveaways_hub_keyboard("en", digest_enabled=True, show_fresh=True)
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert t("giveaways_btn_fresh", "en") in texts
+    cbs = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert "gv:fresh" in cbs
+
+
+def _check_card_keyboard() -> None:
+    from handlers.giveaways import _card_keyboard, _details_keyboard
+
+    kb = _card_keyboard(
+        "ru",
+        claim_url="https://store.example/game",
+        igdb_game_id=42,
+        show_more_offset=5,
+    )
+    flat = [(b.text, b.url, b.callback_data) for row in kb.inline_keyboard for b in row]
+    assert any(u == "https://store.example/game" for _, u, _ in flat)
+    assert any(cb == "gv:streams:42" for _, _, cb in flat)
+    assert any(cb == "gv:more:5" for _, _, cb in flat)
+    assert t("giveaways_go_store", "ru") in [x[0] for x in flat]
+    assert t("giveaways_show_more", "ru") in [x[0] for x in flat]
+    no_more = _card_keyboard(
+        "en",
+        claim_url="https://store.example/g",
+        igdb_game_id=None,
+        show_more_offset=None,
+    )
+    cbs = [b.callback_data for row in no_more.inline_keyboard for b in row]
+    assert all(c is None or not str(c).startswith("gv:more:") for c in cbs)
+    det = _details_keyboard("en")
+    assert det.inline_keyboard[0][0].callback_data == "gv:details"
 
 
 def _check_beta_manifest() -> None:
@@ -145,6 +174,7 @@ def run() -> None:
     _check_filter_requires_both()
     _check_dedupe_prefers_itad()
     _check_first_digest_unlocks_fresh_flag()
+    _check_card_keyboard()
     _check_beta_manifest()
     # unused mock keeps import for future handler tests
     _ = MagicMock
