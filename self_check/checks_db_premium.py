@@ -1580,8 +1580,22 @@ def check_db_premium() -> None:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock
 
-        from premium import apply_features_payment, get_status, revoke_premium_for_charge
+        from premium import (
+            apply_features_payment,
+            get_status,
+            prorate_refund_surcharge_stars,
+            record_refund_surcharge_for_charge,
+            refund_surcharge_for_features,
+            revoke_premium_for_charge,
+        )
         from premium_handlers import refunded_premium_payment
+
+        assert (
+            prorate_refund_surcharge_stars(
+                stars=20, paid_unix=1000, refund_unix=1000 + 7 * 86400, until_unix=1000 + 30 * 86400
+            )
+            == 5
+        )
 
         rdb = SqliteDatabase(Path(refund_tmp) / "refund.db")
         uid = 424242
@@ -1603,18 +1617,38 @@ def check_db_premium() -> None:
         assert not st.feature_active("advanced_mode")
         assert not st.feature_active("twitch_sync")
         assert rdb.get_advanced_mode_setting(uid) is False
-        assert rdb.find_user_id_by_premium_charge(feat_charge) is None
+        assert rdb.find_user_id_by_premium_charge(feat_charge) == uid  # purchases ledger
 
         feat_charge2 = "stx" + ("C" * 40)
+        paid = int(datetime.now(timezone.utc).timestamp()) - 7 * 86400
+        until2 = paid + 30 * 86400
         apply_features_payment(
             rdb,
             uid,
             feature_ids=["alert_types"],
             charge_id=feat_charge2,
-            until_unix=until,
+            until_unix=until2,
             stars_paid=20,
         )
-        assert get_status(rdb, uid).feature_active("alert_types")
+        rdb.record_premium_purchase(
+            user_id=uid,
+            charge_id=feat_charge2,
+            kind="feat",
+            stars=20,
+            features="alert_types",
+            until_unix=until2,
+        )
+        with rdb._conn() as conn:
+            conn.execute(
+                "UPDATE premium_purchases SET paid_at = datetime(?, 'unixepoch') WHERE charge_id = ?",
+                (paid, feat_charge2),
+            )
+        added = record_refund_surcharge_for_charge(
+            rdb, uid, feat_charge2, refund_unix=paid + 7 * 86400
+        )
+        assert added == 5
+        assert refund_surcharge_for_features(rdb, uid, ["alert_types"]) == 5
+
         app = MagicMock()
         app.bot_data = {"db": rdb}
         bot2 = MagicMock()
@@ -1622,8 +1656,33 @@ def check_db_premium() -> None:
         ctx = MagicMock()
         ctx.application = app
         ctx.bot = bot2
+        # Second charge for refunded_payment path (fresh purchase + surcharge).
+        feat_charge3 = "stx" + ("D" * 40)
+        paid3 = int(datetime.now(timezone.utc).timestamp()) - 10 * 86400
+        until3 = paid3 + 30 * 86400
+        apply_features_payment(
+            rdb,
+            uid,
+            feature_ids=["extra_alerts"],
+            charge_id=feat_charge3,
+            until_unix=until3,
+            stars_paid=20,
+        )
+        rdb.record_premium_purchase(
+            user_id=uid,
+            charge_id=feat_charge3,
+            kind="feat",
+            stars=20,
+            features="extra_alerts",
+            until_unix=until3,
+        )
+        with rdb._conn() as conn:
+            conn.execute(
+                "UPDATE premium_purchases SET paid_at = datetime(?, 'unixepoch') WHERE charge_id = ?",
+                (paid3, feat_charge3),
+            )
         rp = MagicMock()
-        rp.telegram_payment_charge_id = feat_charge2
+        rp.telegram_payment_charge_id = feat_charge3
         rp.total_amount = 20
         msg = MagicMock()
         msg.refunded_payment = rp
@@ -1631,7 +1690,8 @@ def check_db_premium() -> None:
         upd.message = msg
         upd.effective_user = MagicMock(id=uid)
         asyncio.run(refunded_premium_payment(upd, ctx))
-        assert not get_status(rdb, uid).feature_active("alert_types")
+        assert not get_status(rdb, uid).feature_active("extra_alerts")
+        assert refund_surcharge_for_features(rdb, uid, ["extra_alerts"]) >= 1
         bot2.edit_user_star_subscription.assert_awaited()
 
     with tempfile.TemporaryDirectory() as purge_tmp:

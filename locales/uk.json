@@ -1194,5 +1194,7 @@
   "giveaways_go_store": "Перейти в магазин",
   "giveaways_show_more": "Показати ще",
   "giveaways_details": "Подробиці",
-  "giveaways_new_summary": "Знайдено нові безкоштовні ігри:\n{list}"
+  "giveaways_new_summary": "Знайдено нові безкоштовні ігри:\n{list}",
+  "premium_status_surcharge": "Борг за використані дні після повернення: {stars} ⭐ (доплата при наступній покупці).",
+  "premium_pay_surcharge_note": "Включно з доплатою {stars} ⭐ за використані дні після повернення."
 }

@@ -1194,5 +1194,7 @@
   "giveaways_go_store": "Go to store",
   "giveaways_show_more": "Show more",
   "giveaways_details": "Details",
-  "giveaways_new_summary": "New free games found:\n{list}"
+  "giveaways_new_summary": "New free games found:\n{list}",
+  "premium_status_surcharge": "Balance for days used after a refund: {stars} ⭐ (added to the next purchase).",
+  "premium_pay_surcharge_note": "Includes {stars} ⭐ for days used after a prior refund."
 }

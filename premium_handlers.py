@@ -213,7 +213,10 @@ def _status_text(
             else:
                 body = t("premium_status_none", lang)
     if _has_premium_without_autorenew(st, free_chat=free_chat):
-        return body + "\n" + t("premium_buy_after_current", lang)
+        body = body + "\n" + t("premium_buy_after_current", lang)
+    debt = prem.refund_surcharge_total(db, user_id)
+    if debt > 0:
+        body = body + "\n" + t("premium_status_surcharge", lang, stars=debt)
     return body
 
 
@@ -484,6 +487,7 @@ async def _send_invoice_link(
     context: ContextTypes.DEFAULT_TYPE | None = None,
     user_id: int | None = None,
     kind: str = "",
+    surcharge_stars: int = 0,
 ) -> None:
     attr: dict[str, str] = {}
     if context is not None and user_id is not None:
@@ -491,10 +495,15 @@ async def _send_invoice_link(
         payload = prem.attach_invoice_attribution(
             payload, attr.get("source", ""), attr.get("feature", "")
         )
-    prices = [LabeledPrice(title, stars)]
+    extra = max(0, int(surcharge_stars or 0))
+    total = max(1, int(stars) + extra)
+    desc = description
+    if extra > 0:
+        desc = f"{description}\n{t('premium_pay_surcharge_note', lang, stars=extra)}"
+    prices = [LabeledPrice(title, total)]
     kwargs: dict = {
         "title": title,
-        "description": description,
+        "description": desc,
         "payload": payload,
         "provider_token": "",
         "currency": "XTR",
@@ -509,7 +518,11 @@ async def _send_invoice_link(
         await query.edit_message_text(t("premium_pay_failed", lang))
         return
     if context is not None and user_id is not None:
-        props: dict = {"kind": kind or "unknown", "stars": stars}
+        props: dict = {
+            "kind": kind or "unknown",
+            "stars": total,
+            "surcharge_stars": extra,
+        }
         props.update(attr)
         analytics.capture(user_id, "premium_pay_started", props)
     await query.edit_message_text(
@@ -621,6 +634,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             stars = prem.stars_price(user_id)
             title = t("premium_gift_pay_month_title", lang)
             desc = t("premium_gift_pay_month_description", lang, stars=stars)
+        surcharge = prem.refund_surcharge_for_plan(db, user_id)
         await _send_invoice_link(
             query,
             title=title,
@@ -632,6 +646,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             context=context,
             user_id=user_id,
             kind=gift_kind,
+            surcharge_stars=surcharge,
         )
         return
 
@@ -689,6 +704,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         await query.answer()
         total = prem.stars_feature_price(user_id) * len(selected)
+        surcharge = prem.refund_surcharge_for_features(db, user_id, selected)
         await _send_invoice_link(
             query,
             title=t("premium_pay_feat_title", lang),
@@ -700,6 +716,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             context=context,
             user_id=user_id,
             kind="feat",
+            surcharge_stars=surcharge,
         )
         return
 
@@ -775,6 +792,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if action in ("pay", "month"):
         month_stars = prem.stars_price(user_id)
+        surcharge = prem.refund_surcharge_for_plan(db, user_id)
         await _send_invoice_link(
             query,
             title=t("premium_pay_title", lang),
@@ -788,11 +806,13 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             context=context,
             user_id=user_id,
             kind="month",
+            surcharge_stars=surcharge,
         )
         return
 
     if action == "year":
         year_stars = prem.stars_year_price(user_id)
+        surcharge = prem.refund_surcharge_for_plan(db, user_id)
         await _send_invoice_link(
             query,
             title=t("premium_pay_year_title", lang),
@@ -806,11 +826,13 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             context=context,
             user_id=user_id,
             kind="year",
+            surcharge_stars=surcharge,
         )
         return
 
     if action == "life":
         life_stars = prem.stars_lifetime_price(user_id)
+        surcharge = prem.refund_surcharge_for_plan(db, user_id)
         await _send_invoice_link(
             query,
             title=t("premium_pay_life_title", lang),
@@ -826,6 +848,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             context=context,
             user_id=user_id,
             kind="life",
+            surcharge_stars=surcharge,
         )
         return
 
@@ -929,6 +952,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(t("premium_channel_already", lang))
             return
         stars = prem.stars_channel_price(user_id)
+        surcharge = prem.refund_surcharge_for_channel(db, user_id)
         await _send_invoice_link(
             query,
             title=t("premium_channel_pay_title", lang),
@@ -947,6 +971,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             context=context,
             user_id=user_id,
             kind="channel",
+            surcharge_stars=surcharge,
         )
         return
 
@@ -1196,6 +1221,7 @@ async def successful_premium_payment(
             source_feature=attr.get("feature", ""),
             is_renewal=is_renewal,
         )
+        prem.clear_all_refund_surcharge(db, parsed.user_id)
         analytics.capture(
             parsed.user_id,
             "premium_gift_purchased",
@@ -1220,6 +1246,7 @@ async def successful_premium_payment(
             until_unix=until_unix,
             stars_paid=stars_eff,
         )
+        prem.clear_all_refund_surcharge(db, parsed.user_id)
     elif parsed.kind == "year":
         until_unix = now + prem.year_seconds()
         stars_eff = stars_paid or prem.stars_year_price(parsed.user_id)
@@ -1232,6 +1259,7 @@ async def successful_premium_payment(
         )
         # One-shot year: no Telegram auto-renew to cancel.
         db.set_premium_stars_canceled(parsed.user_id, True)
+        prem.clear_all_refund_surcharge(db, parsed.user_id)
     elif parsed.kind == "life":
         until_unix = 0
         stars_eff = stars_paid or prem.stars_lifetime_price(parsed.user_id)
@@ -1241,6 +1269,7 @@ async def successful_premium_payment(
             charge_id=charge_id,
             stars_paid=stars_eff,
         )
+        prem.clear_all_refund_surcharge(db, parsed.user_id)
     elif parsed.kind == "feat":
         until_unix = until_sub if until_sub > 0 else now + prem.stars_period()
         features_s = ",".join(parsed.features)
@@ -1255,6 +1284,7 @@ async def successful_premium_payment(
             until_unix=until_unix,
             stars_paid=stars_eff,
         )
+        prem.clear_refund_surcharge_keys(db, parsed.user_id, list(parsed.features))
     elif parsed.kind == "channel":
         pending = context.application.bot_data.get("pending_premium_channel") or {}
         info = pending.pop(parsed.user_id, None) or {}
@@ -1281,6 +1311,9 @@ async def successful_premium_payment(
             source=attr.get("source", ""),
             source_feature=attr.get("feature", ""),
             is_renewal=is_renewal,
+        )
+        prem.clear_refund_surcharge_keys(
+            db, parsed.user_id, [prem.SURCHARGE_CHANNEL_KEY]
         )
         analytics.capture(
             parsed.user_id,
@@ -1370,12 +1403,20 @@ async def refunded_premium_payment(
             exc_info=True,
         )
     revoked = prem.revoke_premium_for_charge(db, int(owner_id), charge_id)
+    surcharge = prem.record_refund_surcharge_for_charge(
+        db,
+        int(owner_id),
+        charge_id,
+        refund_unix=int(time.time()),
+        stars_fallback=int(rp.total_amount or 0),
+    )
     logger.info(
-        "refunded_payment revoked user=%s charge=%s kinds=%s stars=%s",
+        "refunded_payment revoked user=%s charge=%s kinds=%s stars=%s surcharge=%s",
         owner_id,
         charge_id[:24],
         revoked,
         int(rp.total_amount or 0),
+        surcharge,
     )
     analytics.capture(
         int(owner_id),
@@ -1384,6 +1425,7 @@ async def refunded_premium_payment(
             "charge_id": charge_id,
             "stars": int(rp.total_amount or 0),
             "revoked": revoked,
+            "surcharge_stars": surcharge,
             "from_user": int(from_user or 0),
         },
     )

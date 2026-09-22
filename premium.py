@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from config import (
@@ -1217,6 +1218,168 @@ async def alert_type_entitled(
         return True
     channel = getattr(sub, "twitch_username", None)
     return await has_feature(bot, db, user_id, "alert_types", channel=channel)
+
+
+SURCHARGE_PLAN_KEY = "_plan"
+SURCHARGE_CHANNEL_KEY = "_channel"
+
+
+def _parse_purchase_paid_unix(paid_at: str) -> int:
+    raw = str(paid_at or "").strip()
+    if not raw:
+        return 0
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S.%f%z",
+        "%Y-%m-%d %H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+    ):
+        try:
+            dt = datetime.strptime(raw.replace("Z", "+0000"), fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            continue
+    try:
+        # Postgres often returns "2026-09-15 15:54:35.084766+00"
+        cleaned = raw
+        if cleaned.endswith("+00"):
+            cleaned = cleaned[:-3] + "+0000"
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except ValueError:
+        return 0
+
+
+def prorate_refund_surcharge_stars(
+    *,
+    stars: int,
+    paid_unix: int,
+    refund_unix: int,
+    until_unix: int = 0,
+) -> int:
+    """Stars owed for days used before a refund (ceil, min 1 if any use)."""
+    amount = max(0, int(stars or 0))
+    if amount <= 0 or paid_unix <= 0 or refund_unix <= paid_unix:
+        return 0
+    period = (
+        max(1, int(until_unix) - int(paid_unix))
+        if int(until_unix or 0) > int(paid_unix)
+        else max(1, int(stars_period()))
+    )
+    used = min(period, int(refund_unix) - int(paid_unix))
+    if used <= 0:
+        return 0
+    return max(1, (amount * used + period - 1) // period)
+
+
+def surcharge_bucket_keys(kind: str, features: str = "") -> list[str]:
+    k = str(kind or "").strip()
+    if k == "feat":
+        ids = [p.strip() for p in str(features or "").split(",") if p.strip()]
+        return ids or ["feat"]
+    if k == "channel":
+        return [SURCHARGE_CHANNEL_KEY]
+    if k in ("month", "year", "life", "legacy") or k.startswith("gift"):
+        return [SURCHARGE_PLAN_KEY]
+    return [SURCHARGE_PLAN_KEY]
+
+
+def refund_surcharge_total(db: Database, user_id: int) -> int:
+    return sum(max(0, int(v)) for v in db.get_premium_refund_surcharge(user_id).values())
+
+
+def refund_surcharge_for_features(
+    db: Database, user_id: int, feature_ids: list[str]
+) -> int:
+    debt = db.get_premium_refund_surcharge(user_id)
+    return sum(max(0, int(debt.get(fid, 0))) for fid in feature_ids)
+
+
+def refund_surcharge_for_plan(db: Database, user_id: int) -> int:
+    """Full-plan buy: collect all outstanding refund debt."""
+    return refund_surcharge_total(db, user_id)
+
+
+def refund_surcharge_for_channel(db: Database, user_id: int) -> int:
+    return max(0, int(db.get_premium_refund_surcharge(user_id).get(SURCHARGE_CHANNEL_KEY, 0)))
+
+
+def add_refund_surcharge(
+    db: Database, user_id: int, additions: dict[str, int]
+) -> dict[str, int]:
+    cur = db.get_premium_refund_surcharge(user_id)
+    for key, stars in (additions or {}).items():
+        k = str(key or "").strip()
+        n = max(0, int(stars or 0))
+        if not k or n <= 0:
+            continue
+        cur[k] = max(0, int(cur.get(k, 0))) + n
+    db.set_premium_refund_surcharge(user_id, cur)
+    return cur
+
+
+def clear_refund_surcharge_keys(db: Database, user_id: int, keys: list[str]) -> None:
+    cur = db.get_premium_refund_surcharge(user_id)
+    changed = False
+    for key in keys:
+        k = str(key or "").strip()
+        if k in cur:
+            del cur[k]
+            changed = True
+    if changed:
+        db.set_premium_refund_surcharge(user_id, cur)
+
+
+def clear_all_refund_surcharge(db: Database, user_id: int) -> None:
+    db.set_premium_refund_surcharge(user_id, {})
+
+
+def record_refund_surcharge_for_charge(
+    db: Database,
+    user_id: int,
+    charge_id: str,
+    *,
+    refund_unix: int | None = None,
+    stars_fallback: int = 0,
+) -> int:
+    """Accrue prorated Stars debt after a Telegram refund. Returns stars added."""
+    purchase = db.get_premium_purchase_by_charge(charge_id)
+    now = int(refund_unix or time.time())
+    if purchase is None:
+        # No ledger row — cannot prorate fairly; skip.
+        return 0
+    paid_unix = _parse_purchase_paid_unix(purchase.paid_at)
+    if paid_unix <= 0:
+        return 0
+    stars = max(0, int(purchase.stars or 0) or int(stars_fallback or 0))
+    total = prorate_refund_surcharge_stars(
+        stars=stars,
+        paid_unix=paid_unix,
+        refund_unix=now,
+        until_unix=int(purchase.until_unix or 0),
+    )
+    if total <= 0:
+        return 0
+    keys = surcharge_bucket_keys(purchase.kind, purchase.features)
+    if not keys:
+        return 0
+    base, rem = divmod(total, len(keys))
+    additions = {
+        key: base + (1 if i < rem else 0) for i, key in enumerate(keys)
+    }
+    additions = {k: v for k, v in additions.items() if v > 0}
+    if not additions:
+        return 0
+    add_refund_surcharge(db, user_id, additions)
+    return total
 
 
 def revoke_premium_for_charge(

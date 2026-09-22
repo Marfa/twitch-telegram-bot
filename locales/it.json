@@ -1194,5 +1194,7 @@
   "giveaways_go_store": "Vai al negozio",
   "giveaways_show_more": "Mostra altro",
   "giveaways_details": "Dettagli",
-  "giveaways_new_summary": "Nuovi giochi gratis trovati:\n{list}"
+  "giveaways_new_summary": "Nuovi giochi gratis trovati:\n{list}",
+  "premium_status_surcharge": "Saldo per i giorni usati dopo un rimborso: {stars} ⭐ (aggiunto al prossimo acquisto).",
+  "premium_pay_surcharge_note": "Include {stars} ⭐ per i giorni usati dopo un rimborso precedente."
 }

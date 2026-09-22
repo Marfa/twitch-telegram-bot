@@ -588,6 +588,7 @@ class PostgresDatabase:
                 "premium_trial_until BIGINT NOT NULL DEFAULT 0",
                 "premium_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
                 "premium_features TEXT NOT NULL DEFAULT ''",
+                "premium_refund_surcharge TEXT NOT NULL DEFAULT ''",
                 "advanced_mode INTEGER",
                 "message_draft INTEGER",
                 "notifications_paused_until BIGINT NOT NULL DEFAULT 0",
@@ -2330,6 +2331,102 @@ class PostgresDatabase:
                 ),
             )
             return int(cur.rowcount or 0) > 0
+
+    def get_premium_purchase_by_charge(self, charge_id: str) -> PremiumPurchase | None:
+        cid = str(charge_id or "").strip()
+        if not cid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, user_id, charge_id, kind, stars, features, until_unix,
+                       source, source_feature, paid_at, is_renewal
+                FROM premium_purchases
+                WHERE charge_id = %s
+                """,
+                (cid,),
+            )
+            r = cur.fetchone()
+        if not r:
+            return None
+        paid = r["paid_at"]
+        paid_s = (
+            paid.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            if hasattr(paid, "astimezone")
+            else str(paid or "")
+        )
+        return PremiumPurchase(
+            id=int(r["id"]),
+            user_id=int(r["user_id"]),
+            charge_id=str(r["charge_id"] or ""),
+            kind=str(r["kind"] or ""),
+            stars=int(r["stars"] or 0),
+            features=str(r["features"] or ""),
+            until_unix=int(r["until_unix"] or 0),
+            source=str(r["source"] or ""),
+            source_feature=str(r["source_feature"] or ""),
+            paid_at=paid_s,
+            is_renewal=bool(r["is_renewal"]) if "is_renewal" in r.keys() else False,
+        )
+
+    def get_premium_refund_surcharge(self, user_id: int) -> dict[str, int]:
+        import json
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT COALESCE(premium_refund_surcharge, '') AS premium_refund_surcharge
+                FROM users WHERE user_id = %s
+                """,
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return {}
+        raw = str(row["premium_refund_surcharge"] or "").strip()
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        out: dict[str, int] = {}
+        for k, v in data.items():
+            key = str(k or "").strip()
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if key and n > 0:
+                out[key] = n
+        return out
+
+    def set_premium_refund_surcharge(
+        self, user_id: int, surcharge: dict[str, int]
+    ) -> None:
+        import json
+
+        clean = {
+            str(k).strip(): int(v)
+            for k, v in (surcharge or {}).items()
+            if str(k).strip() and int(v) > 0
+        }
+        blob = json.dumps(clean, separators=(",", ":"), sort_keys=True) if clean else ""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, premium_refund_surcharge)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_refund_surcharge = EXCLUDED.premium_refund_surcharge
+                """,
+                (int(user_id), blob),
+            )
 
     def list_undigested_premium_purchases(self) -> list[PremiumPurchase]:
         with self._conn() as conn:
@@ -6657,6 +6754,13 @@ class PostgresDatabase:
                 )
                 if cid in charges.values():
                     return int(r["user_id"])
+            cur.execute(
+                "SELECT user_id FROM premium_purchases WHERE charge_id = %s",
+                (cid,),
+            )
+            row = cur.fetchone()
+            if row:
+                return int(row["user_id"])
         return None
 
     @staticmethod
