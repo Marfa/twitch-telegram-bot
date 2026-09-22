@@ -234,7 +234,6 @@ def all_menu_buttons() -> set[str]:
         "partner_withdrawals",
         "back_settings",
         "admin_withdrawals",
-        "admin_refund",
         "watch",
         "chat",
     )
@@ -388,6 +387,16 @@ def premium_actions_keyboard(
     from premium import stars_feature_price, stars_lifetime_price, stars_price, stars_year_price
 
     rows: list[list[InlineKeyboardButton]] = []
+    # RU-only: buy Telegram Stars via RF card (external). Before trial.
+    if lang == "ru":
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium_buy_stars_card", lang),
+                    url="https://donatov.net/inv/4297816",
+                )
+            ]
+        )
     if show_trial:
         rows.append(
             [InlineKeyboardButton(btn("premium_trial", lang), callback_data="premium:trial")]
@@ -647,12 +656,7 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
         )
     else:
         rows.append([KeyboardButton(btn("demo", lang))])
-    rows.append(
-        [
-            KeyboardButton(btn("admin_refund", lang)),
-            KeyboardButton(btn("back", lang)),
-        ]
-    )
+    rows.append([KeyboardButton(btn("back", lang))])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 

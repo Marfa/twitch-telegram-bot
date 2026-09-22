@@ -1219,25 +1219,6 @@ async def alert_type_entitled(
     return await has_feature(bot, db, user_id, "alert_types", channel=channel)
 
 
-@dataclass
-class AdminRefundResult:
-    ok: bool
-    user_id: int = 0
-    revoked: list[str] = field(default_factory=list)
-    error: str = ""
-    detail: str = ""
-    already_refunded: bool = False
-    refund_failed: bool = False
-
-
-def _telegram_already_refunded(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return (
-        "charge_already_refunded" in text
-        or ("already" in text and "refund" in text)
-    )
-
-
 def revoke_premium_for_charge(
     db: Database, user_id: int, charge_id: str
 ) -> list[str]:
@@ -1294,64 +1275,3 @@ def revoke_premium_for_charge(
     db.delete_referral_credit_by_charge(cid)
     pause_unentitled_subscriptions(db, user_id)
     return revoked
-
-
-async def admin_refund_charge(
-    bot: Bot, db: Database, charge_id: str
-) -> AdminRefundResult:
-    """Refund Stars by telegram_payment_charge_id and revoke that Premium purchase."""
-    cid = str(charge_id or "").strip()
-    user_id = db.find_user_id_by_premium_charge(cid)
-    if not user_id:
-        return AdminRefundResult(ok=False, error="not_found")
-
-    already = False
-    refund_failed = False
-    detail = ""
-    try:
-        await bot.refund_star_payment(
-            user_id=int(user_id),
-            telegram_payment_charge_id=cid,
-        )
-    except Exception as exc:
-        if _telegram_already_refunded(exc):
-            already = True
-        else:
-            refund_failed = True
-            detail = str(exc)
-            logger.exception(
-                "admin refund_star_payment failed user=%s charge=%s",
-                user_id,
-                cid[:24],
-            )
-
-    try:
-        await bot.edit_user_star_subscription(
-            user_id=int(user_id),
-            telegram_payment_charge_id=cid,
-            is_canceled=True,
-        )
-    except Exception:
-        # One-time invoices / already canceled — entitlement still revoked below.
-        logger.info(
-            "edit_user_star_subscription after admin refund skipped user=%s",
-            user_id,
-            exc_info=True,
-        )
-
-    revoked = revoke_premium_for_charge(db, int(user_id), cid)
-    if refund_failed:
-        return AdminRefundResult(
-            ok=False,
-            user_id=int(user_id),
-            revoked=revoked,
-            error="refund_failed",
-            detail=detail,
-            refund_failed=True,
-        )
-    return AdminRefundResult(
-        ok=True,
-        user_id=int(user_id),
-        revoked=revoked,
-        already_refunded=already,
-    )

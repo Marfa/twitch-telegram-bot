@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 async def _cancel_telegram_star_subscription(
     bot, user_id: int, charge_id: str, *, log_label: str = ""
 ) -> bool:
-    """Cancel Stars auto-renew in Telegram; True if canceled or already canceled."""
+    """Stop Stars auto-renew only — never refunds Stars (no refundStarPayment)."""
     try:
         await bot.edit_user_star_subscription(
             user_id=user_id,
@@ -1328,6 +1328,64 @@ async def successful_premium_payment(
     await msg.reply_text(
         t("premium_pay_done", lang, user_id=parsed.user_id),
         parse_mode=ParseMode.HTML,
+    )
+
+
+async def refunded_premium_payment(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Telegram notified a Stars refund — drop that charge's Premium entitlements."""
+    msg = update.message
+    if not msg or not msg.refunded_payment:
+        return
+    rp = msg.refunded_payment
+    charge_id = str(rp.telegram_payment_charge_id or "").strip()
+    if not charge_id:
+        return
+    db: Database = context.application.bot_data["db"]
+    from_user = update.effective_user.id if update.effective_user else 0
+    owner_id = db.find_user_id_by_premium_charge(charge_id) or int(from_user or 0)
+    if owner_id <= 0:
+        logger.warning(
+            "refunded_payment unknown charge=%s from_user=%s",
+            charge_id[:24],
+            from_user,
+        )
+        analytics.capture(
+            from_user or None,
+            "premium_refund_unknown_charge",
+            {"charge_id": charge_id, "stars": int(rp.total_amount or 0)},
+        )
+        return
+    try:
+        await context.bot.edit_user_star_subscription(
+            user_id=int(owner_id),
+            telegram_payment_charge_id=charge_id,
+            is_canceled=True,
+        )
+    except Exception:
+        logger.info(
+            "edit_user_star_subscription after refunded_payment skipped user=%s",
+            owner_id,
+            exc_info=True,
+        )
+    revoked = prem.revoke_premium_for_charge(db, int(owner_id), charge_id)
+    logger.info(
+        "refunded_payment revoked user=%s charge=%s kinds=%s stars=%s",
+        owner_id,
+        charge_id[:24],
+        revoked,
+        int(rp.total_amount or 0),
+    )
+    analytics.capture(
+        int(owner_id),
+        "premium_refunded",
+        {
+            "charge_id": charge_id,
+            "stars": int(rp.total_amount or 0),
+            "revoked": revoked,
+            "from_user": int(from_user or 0),
+        },
     )
 
 

@@ -208,6 +208,29 @@ def check_handlers() -> None:
     assert 't("import_failed"' not in cancel_block
     assert 't("premium_cancel_failed"' in cancel_block
     assert 't("premium_cancel_failed"' in feat_cancel_block
+    # User cancel = stop auto-renew only; never refund Stars.
+    assert "refund_star_payment" not in cancel_block
+    assert "refund_star_payment" not in feat_cancel_block
+    cancel_helper = ph_src.split(
+        "async def _cancel_telegram_star_subscription", 1
+    )[1].split("async def ", 1)[0]
+    assert "refund_star_payment" not in cancel_helper
+    assert "edit_user_star_subscription(" in cancel_helper
+    assert "refund_star_payment" not in ph_src
+    assert "async def refunded_premium_payment" in ph_src
+    assert "revoke_premium_for_charge" in ph_src
+    prem_src = _Path(__file__).resolve().parents[1].joinpath("premium.py").read_text(
+        encoding="utf-8"
+    )
+    assert "refund_star_payment" not in prem_src
+    assert "admin_refund_charge" not in prem_src
+    assert "refundStarPayment" not in prem_src
+    bot_src_full = _Path(__file__).resolve().parents[1].joinpath("bot.py").read_text(
+        encoding="utf-8"
+    )
+    assert "admin_refund" not in bot_src_full
+    assert "filters.StatusUpdate.REFUNDED_PAYMENT" in bot_src_full
+    assert "refunded_premium_payment_router" in bot_src_full
     assert "premium_cancel_done" in ph_src
     assert "set_premium_feature_canceled" in ph_src
     assert "clear_premium_feature" not in ph_src.split(
@@ -482,6 +505,16 @@ def check_handlers() -> None:
     assert "Пробный" in tr("btn_premium_trial", "ru") or "триал" in tr(
         "btn_premium_trial", "ru"
     ).lower() or "Пробный" in tr("btn_premium_trial", "ru")
+    from i18n import premium_actions_keyboard
+
+    ru_kb = premium_actions_keyboard("ru", show_trial=True, user_id=1)
+    ru_first = ru_kb.inline_keyboard[0][0]
+    assert ru_first.text == tr("btn_premium_buy_stars_card", "ru")
+    assert ru_first.url == "https://donatov.net/inv/4297816"
+    assert ru_kb.inline_keyboard[1][0].callback_data == "premium:trial"
+    en_kb = premium_actions_keyboard("en", show_trial=True, user_id=1)
+    assert en_kb.inline_keyboard[0][0].callback_data == "premium:trial"
+    assert all(not (b.url or "").startswith("https://donatov.net/") for row in en_kb.inline_keyboard for b in row)
     with tempfile.TemporaryDirectory() as d:
         db = SqliteDatabase(Path(d) / "premium.db")
         db.upsert_user(1)

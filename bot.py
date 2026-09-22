@@ -178,11 +178,6 @@ from bot_helpers import (
     reply_setup_private_only,
 )
 from handlers.admin_stats import admin_show_stats, _format_stats
-from handlers.admin_refund import (
-    admin_refund_cancel,
-    admin_refund_receive,
-    admin_refund_start,
-)
 from handlers.alert_history import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
@@ -773,7 +768,6 @@ logger = logging.getLogger(__name__)
     STREAM_SCHEDULE_FIX_SLOTS,
     STREAM_SCHEDULE_MORE,
     PAUSE_ALERTS_DAYS,
-    ADMIN_REFUND_CHARGE,
     STREAM_SCHEDULE_VACATION,
     STREAM_SCHEDULE_VACATION_AUTO,
     RELEASE_SEARCH,
@@ -781,7 +775,7 @@ logger = logging.getLogger(__name__)
     RELEASE_DUP,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(77)
+) = range(76)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2069,6 +2063,14 @@ async def successful_premium_payment_router(
     await successful_premium_payment(update, context)
 
 
+async def refunded_premium_payment_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from premium_handlers import refunded_premium_payment
+
+    await refunded_premium_payment(update, context)
+
+
 async def _on_gift_skip_msg_router(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -2623,6 +2625,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_premium_payment_router),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.REFUNDED_PAYMENT, refunded_premium_payment_router
+        ),
+        group=0,
+    )
     app.add_handler(CallbackQueryHandler(on_enable_all, pattern=r"^enable_all$"), group=0)
     app.add_handler(CallbackQueryHandler(on_import_enable, pattern=r"^imp_en:\d+$"), group=0)
     app.add_handler(CallbackQueryHandler(on_delete_sel, pattern=r"^delete_sel:\d+$"), group=0)
@@ -2820,10 +2828,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(
                 _btn_filter("pause_notifications"),
                 dm_only_conv_entry(start_pause_notifications),
-            ),
-            MessageHandler(
-                _btn_filter("admin_refund"),
-                dm_only_conv_entry(admin_refund_start),
             ),
             MessageHandler(
                 _btn_filter("broadcast_new"), dm_only_conv_entry(admin_broadcast_start)
@@ -3407,12 +3411,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     filters.TEXT & ~filters.COMMAND, receive_pause_notifications_days
                 ),
             ],
-            ADMIN_REFUND_CHARGE: [
-                MessageHandler(_btn_filter("wizard_cancel"), admin_refund_cancel),
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND, admin_refund_receive
-                ),
-            ],
             RELEASE_SEARCH: [
                 _wiz_cancel,
                 CallbackQueryHandler(cancel_release_callback, pattern=r"^rel:cancel$"),
@@ -3575,7 +3573,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("partner_withdrawals")
                 | _btn_filter("back_settings")
                 | _btn_filter("admin_withdrawals")
-                | _btn_filter("admin_refund")
                 | _btn_filter("new")
                 | _btn_filter("watch")
                 | _btn_filter("chat")

@@ -1574,23 +1574,18 @@ def check_db_premium() -> None:
             for b in row
         )
 
-    # Admin refund by charge_id: revoke features / stars immediately + find owner.
+    # Admin refund removed: no refundStarPayment in app code.
+    # Telegram refunded_payment update must still revoke entitlements.
     with tempfile.TemporaryDirectory() as refund_tmp:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock
 
-        from premium import (
-            admin_refund_charge,
-            apply_features_payment,
-            apply_stars_payment,
-            get_status,
-            revoke_premium_for_charge,
-        )
+        from premium import apply_features_payment, get_status, revoke_premium_for_charge
+        from premium_handlers import refunded_premium_payment
 
         rdb = SqliteDatabase(Path(refund_tmp) / "refund.db")
         uid = 424242
         feat_charge = "stx" + ("A" * 40)
-        stars_charge = "stx" + ("B" * 40)
         until = int(datetime.now(timezone.utc).timestamp()) + 86400 * 30
         apply_features_payment(
             rdb,
@@ -1610,18 +1605,34 @@ def check_db_premium() -> None:
         assert rdb.get_advanced_mode_setting(uid) is False
         assert rdb.find_user_id_by_premium_charge(feat_charge) is None
 
-        apply_stars_payment(
-            rdb, uid, charge_id=stars_charge, until_unix=until, stars_paid=50
+        feat_charge2 = "stx" + ("C" * 40)
+        apply_features_payment(
+            rdb,
+            uid,
+            feature_ids=["alert_types"],
+            charge_id=feat_charge2,
+            until_unix=until,
+            stars_paid=20,
         )
-        assert get_status(rdb, uid).stars_active
-        bot = MagicMock()
-        bot.refund_star_payment = AsyncMock(return_value=True)
-        bot.edit_user_star_subscription = AsyncMock(return_value=True)
-        result = asyncio.run(admin_refund_charge(bot, rdb, stars_charge))
-        assert result.ok and result.user_id == uid
-        assert "stars" in result.revoked
-        assert not get_status(rdb, uid).stars_active
-        bot.refund_star_payment.assert_awaited_once()
+        assert get_status(rdb, uid).feature_active("alert_types")
+        app = MagicMock()
+        app.bot_data = {"db": rdb}
+        bot2 = MagicMock()
+        bot2.edit_user_star_subscription = AsyncMock(return_value=True)
+        ctx = MagicMock()
+        ctx.application = app
+        ctx.bot = bot2
+        rp = MagicMock()
+        rp.telegram_payment_charge_id = feat_charge2
+        rp.total_amount = 20
+        msg = MagicMock()
+        msg.refunded_payment = rp
+        upd = MagicMock()
+        upd.message = msg
+        upd.effective_user = MagicMock(id=uid)
+        asyncio.run(refunded_premium_payment(upd, ctx))
+        assert not get_status(rdb, uid).feature_active("alert_types")
+        bot2.edit_user_star_subscription.assert_awaited()
 
     with tempfile.TemporaryDirectory() as purge_tmp:
         pdb = SqliteDatabase(Path(purge_tmp) / "purge_blocked.db")

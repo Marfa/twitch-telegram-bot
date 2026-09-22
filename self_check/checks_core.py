@@ -1167,7 +1167,7 @@ def check_core() -> None:
         assert [[b.text for b in row] for row in admin_kb] == [
             [btn("broadcast", loc), btn("stats", loc)],
             [btn("admin_withdrawals", loc), btn("demo", loc)],
-            [btn("admin_refund", loc), btn("back", loc)],
+            [btn("back", loc)],
         ]
         from i18n import broadcast_menu
 

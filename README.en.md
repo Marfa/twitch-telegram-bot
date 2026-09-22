@@ -39,7 +39,7 @@
 | System alerts | Toggle admin broadcasts (updates / availability / other / sync / **new betas**, default off, auto-on on first beta opt-in); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
 | Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / 🧪 **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
-| Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; refund by charge_id; demo; **daily digest of new Premium payments** (purchase source from analytics) |
+| Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR) |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
@@ -58,7 +58,7 @@ Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the
 | Single feature | 20 | 30 days each |
 | Streamer premium channel | 1500 | one-time for that channel |
 
-Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars.
+Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars. With Russian locale — **Buy Stars with RF card** button (external link).
 
 | Feature | What it unlocks |
 |---|---|
@@ -256,7 +256,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), sync, and new-beta alerts |
 | ↳ 🌐 Language | Russian / English / Ukrainian / Italian |
-| ⚙️ Admin | Broadcast, stats, withdrawals, cancel subscription (refund), demo mode (`ADMIN_USER_IDS` only) |
+| ⚙️ Admin | Broadcast, stats, withdrawals, demo mode (`ADMIN_USER_IDS` only) |
 | ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, or “Other”; scheduled send (MSK default, per-user UTC offset when set); final stats after all UTC waves; footer with type and how to disable in Settings |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
 | ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium; same snapshot sent daily to PostHog (`daily_bot_stats`) |
