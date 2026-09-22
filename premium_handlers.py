@@ -1124,6 +1124,33 @@ async def successful_premium_payment(
     payment = msg.successful_payment
     parsed = prem.parse_invoice_payload(payment.invoice_payload)
     if parsed is None:
+        import analytics
+
+        charge_id = payment.telegram_payment_charge_id or ""
+        payload = (payment.invoice_payload or "")[:200]
+        logger.error(
+            "Premium payment with unknown invoice_payload charge_id=%s payload=%r",
+            charge_id,
+            payload,
+        )
+        analytics.capture(
+            update.effective_user.id if update.effective_user else None,
+            "premium_payment_unknown_payload",
+            {
+                "charge_id": charge_id,
+                "payload_prefix": payload,
+                "stars": int(payment.total_amount or 0),
+            },
+        )
+        analytics.capture_exception(
+            RuntimeError("premium payment unknown invoice_payload"),
+            user_id=update.effective_user.id if update.effective_user else None,
+            properties={
+                "charge_id": charge_id,
+                "payload_prefix": payload,
+                "ops": "successful_premium_payment",
+            },
+        )
         return
     lang = _user_lang(context, update.effective_user.id)
     db: Database = context.application.bot_data["db"]

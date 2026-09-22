@@ -27,6 +27,10 @@ from .models import (
 )
 
 class Database(Protocol):
+    def ping(self) -> bool:
+        """Return True if the database accepts a trivial query."""
+        ...
+
     def add_subscription(
         self,
         owner_id: int,
@@ -487,6 +491,10 @@ class Database(Protocol):
     def get_sent_broadcasts(self, *, retention_days: int = 30) -> list[ScheduledBroadcast]: ...
 
     def purge_old_sent_broadcasts(self, *, retention_days: int = 30) -> int: ...
+
+    def purge_stale_log_tables(self) -> dict[str, int]:
+        """Delete aged rows from append-only / log-like tables. Returns {table: deleted}."""
+        ...
 
     def add_broadcast_delivery(
         self, broadcast_id: int, user_id: int, message_id: int

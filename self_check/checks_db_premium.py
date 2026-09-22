@@ -1654,6 +1654,39 @@ def check_db_premium() -> None:
         assert pdb.is_bot_blocked(stay) is True
         assert pdb.user_exists(fresh) is True
 
+    with tempfile.TemporaryDirectory() as log_tmp:
+        ldb = SqliteDatabase(Path(log_tmp) / "purge_logs.db")
+        ldb.upsert_user(99001)
+        old = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
+        fresh = datetime.now(timezone.utc).isoformat()
+        with ldb._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO follow_monitor_events (
+                    owner_id, event_type, twitch_user_id, login,
+                    display_name, detected_at
+                ) VALUES (?, 'follow', '1', 'a', 'A', ?),
+                         (?, 'follow', '2', 'b', 'B', ?)
+                """,
+                (99001, old, 99001, fresh),
+            )
+            conn.execute(
+                "INSERT INTO chat_send_daily (owner_id, day, count) VALUES (?, ?, 1), (?, ?, 2)",
+                (
+                    99001,
+                    (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat(),
+                    99001,
+                    datetime.now(timezone.utc).date().isoformat(),
+                ),
+            )
+        purged = ldb.purge_stale_log_tables()
+        assert purged.get("follow_monitor_events", 0) == 1
+        assert purged.get("chat_send_daily", 0) == 1
+        assert ldb.count_follow_monitor_events(99001) == 1
+        assert ldb.get_chat_send_count(
+            99001, datetime.now(timezone.utc).date().isoformat()
+        ) == 2
+
     with tempfile.TemporaryDirectory() as msg_tmp:
         mdb = SqliteDatabase(Path(msg_tmp) / "purge_prev.db")
         mdb.upsert_user(88001)

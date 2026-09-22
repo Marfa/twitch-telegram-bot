@@ -1,9 +1,11 @@
 """Core self-checks: analytics, twitch parse, templates, oauth, eventsub, posthog."""
 import json
-from pathlib import Path
 import os
+import subprocess
+import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from config import SCHEDULE_CHECK_INTERVAL, parse_admin_user_ids
 from links import parse_telegram_topic_link, chat_ref_to_id
@@ -95,6 +97,23 @@ def check_core() -> None:
     assert analytics_mod.distinct_id(1) != analytics_mod.distinct_id(2)
     analytics_mod.capture(1, "self_check_noop")
     analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
+
+    ops_py = Path(__file__).resolve().parents[1] / "scripts" / "posthog-ops-event.py"
+    assert ops_py.is_file()
+    op = subprocess.run(
+        [
+            sys.executable,
+            str(ops_py),
+            "--job",
+            "self_check",
+            "--status",
+            "ok",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert op.returncode == 0, op.stderr
 
     class _Stats:
         users = 1
@@ -1181,18 +1200,21 @@ def check_core() -> None:
     import threading
     import urllib.request
     from http.server import ThreadingHTTPServer
-    from health import _HealthHandler, mark_ready
+    from health import _HealthHandler, evaluate_health, mark_ready, note_check_streams_ok
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
     httpd.daemon_threads = True
     port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     mark_ready()
+    note_check_streams_ok()
     hung = socket.create_connection(("127.0.0.1", port), timeout=2)
     try:
         assert urllib.request.urlopen(
             f"http://127.0.0.1:{port}/health", timeout=2
         ).read() == b"ok"
+        status, body = evaluate_health()
+        assert status == 200 and body == b"ok"
     finally:
         hung.close()
         httpd.shutdown()

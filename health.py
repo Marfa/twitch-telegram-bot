@@ -21,7 +21,11 @@ from urllib.parse import parse_qs, urlparse
 logger = logging.getLogger(__name__)
 
 _ready = False
+_ready_at = 0.0
 _ready_lock = threading.Lock()
+_streams_ok_at = 0.0
+_db_ping: Callable[[], bool] | None = None
+_HEALTH_PROBES_LOCK = threading.Lock()
 
 _PENDING_LOGIN_TTL_SEC = 600
 # Thread lock + file store so create_pending_login_state from a one-shot script in the
@@ -126,14 +130,63 @@ _eventsub_on_revoke: EventSubRevokeHandler | None = None
 
 
 def mark_ready() -> None:
-    global _ready
+    global _ready, _ready_at
     with _ready_lock:
         _ready = True
+        _ready_at = time.time()
 
 
 def is_ready() -> bool:
     with _ready_lock:
         return _ready
+
+
+def register_health_probes(*, db_ping: Callable[[], bool]) -> None:
+    """Wire deep /health checks (DB ping). Call once from bot post_init."""
+    global _db_ping
+    with _HEALTH_PROBES_LOCK:
+        _db_ping = db_ping
+
+
+def note_check_streams_ok() -> None:
+    """Mark a successful check_streams tick (Helix poll completed without hard fail)."""
+    global _streams_ok_at
+    with _ready_lock:
+        _streams_ok_at = time.time()
+
+
+def evaluate_health() -> tuple[int, bytes]:
+    """Return (HTTP status, body). Body stays ``ok`` on success for deploy curls."""
+    from config import CHECK_INTERVAL
+
+    if not is_ready():
+        return 503, b"starting"
+
+    ping = None
+    with _HEALTH_PROBES_LOCK:
+        ping = _db_ping
+    if ping is not None:
+        try:
+            if not ping():
+                return 503, b"db"
+        except Exception:
+            logger.exception("health db ping failed")
+            return 503, b"db"
+
+    now = time.time()
+    with _ready_lock:
+        ready_at = _ready_at
+        last_ok = _streams_ok_at
+    # Grace so deploy cutover succeeds before the first check_streams tick.
+    grace = max(float(CHECK_INTERVAL) * 3.0, 180.0)
+    stale = max(float(CHECK_INTERVAL) * 5.0, 300.0)
+    if last_ok <= 0.0:
+        if ready_at > 0.0 and (now - ready_at) < grace:
+            return 200, b"ok"
+        return 503, b"streams_never"
+    if (now - last_ok) > stale:
+        return 503, b"streams_stale"
+    return 200, b"ok"
 
 
 def create_pending_login_state(
@@ -954,12 +1007,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        if is_ready():
-            body = b"ok"
-            self.send_response(200)
-        else:
-            body = b"starting"
-            self.send_response(503)
+        status, body = evaluate_health()
+        self.send_response(status)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

@@ -571,6 +571,8 @@ class SqliteDatabase:
             """
         )
         conn.execute("DROP TABLE IF EXISTS lucky_templates")
+        # Legacy Render/Aiven status RSS dedupe — removed after VPS migration.
+        conn.execute("DROP TABLE IF EXISTS render_status_seen")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS twitch_sync (
@@ -1976,6 +1978,11 @@ class SqliteDatabase:
                 "SELECT 1 FROM users WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
+        return row is not None
+
+    def ping(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute("SELECT 1").fetchone()
         return row is not None
 
     def count_users(self) -> int:
@@ -3846,6 +3853,61 @@ class SqliteDatabase:
                 old_ids,
             )
         return int(cur.rowcount)
+
+    def purge_stale_log_tables(self) -> dict[str, int]:
+        from config import (
+            CHAT_SEND_DAILY_RETENTION_DAYS,
+            DROP_SEEN_RETENTION_DAYS,
+            FOLLOW_MONITOR_EVENTS_RETENTION_DAYS,
+        )
+        from premium import ALERT_HISTORY_PREMIUM_DAYS, DELETED_SUBSCRIPTIONS_CART_MAX_DAYS
+
+        now = datetime.now(timezone.utc)
+        removed: dict[str, int] = {}
+
+        def _cutoff(days: int) -> str:
+            return (now - timedelta(days=int(days))).isoformat()
+
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM alert_history WHERE sent_at < ?",
+                (_cutoff(ALERT_HISTORY_PREMIUM_DAYS),),
+            )
+            removed["alert_history"] = int(cur.rowcount or 0)
+
+            cur = conn.execute(
+                "DELETE FROM deleted_subscriptions_cart WHERE deleted_at < ?",
+                (_cutoff(DELETED_SUBSCRIPTIONS_CART_MAX_DAYS),),
+            )
+            removed["deleted_subscriptions_cart"] = int(cur.rowcount or 0)
+
+            cur = conn.execute(
+                "DELETE FROM follow_monitor_events WHERE detected_at < ?",
+                (_cutoff(FOLLOW_MONITOR_EVENTS_RETENTION_DAYS),),
+            )
+            removed["follow_monitor_events"] = int(cur.rowcount or 0)
+
+            for table in (
+                "drop_campaign_seen",
+                "drop_claim_seen",
+                "drop_stream_seen",
+            ):
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE first_seen_at < ?",
+                    (_cutoff(DROP_SEEN_RETENTION_DAYS),),
+                )
+                removed[table] = int(cur.rowcount or 0)
+
+            day_cutoff = (
+                now - timedelta(days=int(CHAT_SEND_DAILY_RETENTION_DAYS))
+            ).date().isoformat()
+            cur = conn.execute(
+                "DELETE FROM chat_send_daily WHERE day < ?",
+                (day_cutoff,),
+            )
+            removed["chat_send_daily"] = int(cur.rowcount or 0)
+
+        return {k: v for k, v in removed.items() if v > 0}
 
     def add_broadcast_delivery(
         self, broadcast_id: int, user_id: int, message_id: int

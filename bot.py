@@ -562,6 +562,7 @@ from handlers.delivery import (
     _send_test,
     on_stored_template_typo_fix,
     purge_expired_blocked_users,
+    purge_stale_log_tables,
     purge_stale_previous_messages,
 )
 
@@ -2178,6 +2179,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         from health import (
             mark_ready,
             register_eventsub_bridge,
+            register_health_probes,
             register_oauth_bridge,
             register_donationalerts_oauth_bridge,
             register_posthog_issue_bridge,
@@ -2188,6 +2190,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         await _restore_broadcast_jobs(application)
         loop = asyncio.get_running_loop()
         register_chat_webapp(db=db, twitch=twitch)
+        register_health_probes(db_ping=db.ping)
         redirect_uri = twitch_oauth_redirect_uri()
         if redirect_uri:
 
@@ -3702,6 +3705,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.job_queue.run_repeating(
         purge_expired_blocked_users, interval=24 * 3600, first=400
+    )
+    app.job_queue.run_repeating(
+        purge_stale_log_tables, interval=24 * 3600, first=450
     )
     app.job_queue.run_repeating(
         refresh_broadcast_feedback_keyboards, interval=3600, first=180

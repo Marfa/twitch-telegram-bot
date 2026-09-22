@@ -1219,3 +1219,13 @@ async def purge_expired_blocked_users(context) -> None:
     if removed:
         logger.info("Purged %s user(s) blocked for 365+ days", removed)
 
+
+async def purge_stale_log_tables(context) -> None:
+    db: Database = context.application.bot_data["db"]
+    removed = db.purge_stale_log_tables()
+    if removed:
+        logger.info(
+            "Purged stale log rows: %s",
+            ", ".join(f"{k}={v}" for k, v in sorted(removed.items())),
+        )
+

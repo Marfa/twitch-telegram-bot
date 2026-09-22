@@ -39,7 +39,7 @@ English: [README.en.md](README.en.md)
 | Премиум | Триал / Stars месяц·год·lifetime / à la carte / саб Twitch / премиум-канал / 🧪 **подарок** — см. [Premium](#premium) |
 | Партнёрка | Реферальная ссылка, 10% от Stars Premium приглашённых, заявки на вывод (вручную) |
 | Админка | Рассылка в фоне; отложенная; статистика; DeepL; выводы; refund по charge_id; демо; **ежедневный дайджест новых Premium-оплат** (источник из аналитики) |
-| Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, Logs (WARNING+), ежедневный `daily_bot_stats` (03:00 UTC) |
+| Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, Logs (WARNING+), ежедневный `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` для pg-backup и Aiven DR) |
 | Команды | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -292,7 +292,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 
 Репозиторий на сервере: `/opt/twitch-telegram-bot` (рядом лежит `.env`).
 
-При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: build образа при ещё работающем боте, recreate, проверка `/health`. Если health не поднялся — откат на предыдущий image id (workflow всё равно red, но старый бот снова отвечает). Также cron ночного pg-backup и (при `AIVEN_DATABASE_URL`) DR-sync дампа в Aiven в 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: build образа при ещё работающем боте, recreate, проверка `/health`. Если health не поднялся — откат на предыдущий image id (workflow всё равно red, но старый бот снова отвечает). Также cron ночного pg-backup и (при `AIVEN_DATABASE_URL`) DR-sync live Postgres → Aiven в 03:15 UTC (без таблиц `igdb_*` — они пересобираются на VPS). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 
@@ -314,7 +314,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `SCHEDULE_CHECK_INTERVAL` | Опрос Twitch schedule reminders, сек (по умолчанию 180) |
 | `POSTGRES_PASSWORD` | Пароль Postgres на VPS (`compose.vps.yml`) |
 | `DATABASE_URL` | PostgreSQL. Если не задан — SQLite (`compose.vps.yml` задаёт сам) |
-| `AIVEN_DATABASE_URL` | VPS: ночной DR-restore дампа в Aiven (не для бота; обычно `sslmode=require`) |
+| `AIVEN_DATABASE_URL` | VPS: ночной DR-sync в Aiven без `igdb_*` (не для бота; обычно `sslmode=require`) |
 | `DATABASE_PATH` | SQLite: локально `data/bot.db`, в Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Лимит подписок на пользователя (по умолчанию 25) |
 | `ENABLE_PREMIUM` | Premium-магазин и гейты (`0` по умолчанию — всё платное бесплатно; на VPS `1`) |
@@ -392,7 +392,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
 | `translate.py` | DeepL для админ-рассылок |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/health`, `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health` (DB ping + freshness `check_streams`), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue+Report webhook.
 

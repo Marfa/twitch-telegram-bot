@@ -723,6 +723,8 @@ class PostgresDatabase:
                 """
             )
             cur.execute("DROP TABLE IF EXISTS lucky_templates")
+            # Legacy Render/Aiven status RSS dedupe — removed after VPS migration.
+            cur.execute("DROP TABLE IF EXISTS render_status_seen")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS twitch_sync (
@@ -2179,6 +2181,12 @@ class PostgresDatabase:
             )
             row = cur.fetchone()
         return row is not None
+
+    def ping(self) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("SELECT 1")
+            return cur.fetchone() is not None
 
     def count_users(self) -> int:
         with self._conn() as conn:
@@ -4190,6 +4198,74 @@ class PostgresDatabase:
             )
             deleted = int(cur.rowcount)
         return deleted
+
+    def purge_stale_log_tables(self) -> dict[str, int]:
+        from config import (
+            CHAT_SEND_DAILY_RETENTION_DAYS,
+            DROP_SEEN_RETENTION_DAYS,
+            FOLLOW_MONITOR_EVENTS_RETENTION_DAYS,
+        )
+        from premium import ALERT_HISTORY_PREMIUM_DAYS, DELETED_SUBSCRIPTIONS_CART_MAX_DAYS
+
+        removed: dict[str, int] = {}
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+
+            cur.execute(
+                """
+                DELETE FROM alert_history
+                WHERE sent_at < NOW() - make_interval(days => %s)
+                """,
+                (int(ALERT_HISTORY_PREMIUM_DAYS),),
+            )
+            removed["alert_history"] = int(cur.rowcount or 0)
+
+            cur.execute(
+                """
+                DELETE FROM deleted_subscriptions_cart
+                WHERE deleted_at < NOW() - make_interval(days => %s)
+                """,
+                (int(DELETED_SUBSCRIPTIONS_CART_MAX_DAYS),),
+            )
+            removed["deleted_subscriptions_cart"] = int(cur.rowcount or 0)
+
+            cur.execute(
+                """
+                DELETE FROM follow_monitor_events
+                WHERE detected_at < NOW() - make_interval(days => %s)
+                """,
+                (int(FOLLOW_MONITOR_EVENTS_RETENTION_DAYS),),
+            )
+            removed["follow_monitor_events"] = int(cur.rowcount or 0)
+
+            for table in (
+                "drop_campaign_seen",
+                "drop_claim_seen",
+                "drop_stream_seen",
+            ):
+                cur.execute(
+                    f"""
+                    DELETE FROM {table}
+                    WHERE first_seen_at < NOW() - make_interval(days => %s)
+                    """,
+                    (int(DROP_SEEN_RETENTION_DAYS),),
+                )
+                removed[table] = int(cur.rowcount or 0)
+
+            # day is ISO date text YYYY-MM-DD
+            cur.execute(
+                """
+                DELETE FROM chat_send_daily
+                WHERE day < to_char(
+                    (NOW() AT TIMESTAMPTZ) - make_interval(days => %s),
+                    'YYYY-MM-DD'
+                )
+                """,
+                (int(CHAT_SEND_DAILY_RETENTION_DAYS),),
+            )
+            removed["chat_send_daily"] = int(cur.rowcount or 0)
+
+        return {k: v for k, v in removed.items() if v > 0}
 
     def add_broadcast_delivery(
         self, broadcast_id: int, user_id: int, message_id: int

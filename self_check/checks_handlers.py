@@ -168,6 +168,15 @@ def check_handlers() -> None:
     assert "ignored_words:igdb" in bot_src
     assert "drop_pending_updates=False" in inspect.getsource(main_mod.main)
     assert "mark_ready()" in bot_src
+    assert "register_health_probes" in bot_src
+    assert "note_check_streams_ok" in Path("handlers/notifications.py").read_text(
+        encoding="utf-8"
+    )
+    assert "premium_payment_unknown_payload" in Path("premium_handlers.py").read_text(
+        encoding="utf-8"
+    )
+    mon = Path("handlers/monitoring.py").read_text(encoding="utf-8")
+    assert "delivered" in mon and "premium digest undelivered" in mon
     assert "_is_unchanged_message_edit(err)" in bot_src or (
         "_is_unchanged_message_edit(err)" in monitoring_src
     )

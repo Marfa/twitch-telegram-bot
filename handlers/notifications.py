@@ -461,17 +461,27 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     user_ids = db.get_unique_twitch_user_ids()
     category_watch_subs = db.get_enabled_category_watch_subscriptions()
     if not user_ids and not category_watch_subs:
+        from health import note_check_streams_ok
+
+        note_check_streams_ok()
         _log_duration()
         return
 
     live_streams: dict[str, dict] = {}
+    helix_ok = True
     if user_ids:
         try:
             live_streams = await asyncio.to_thread(twitch.get_live_streams, user_ids)
-        except Exception:
+        except Exception as exc:
             logger.exception("Twitch poll failed")
-            live_streams = {}
+            import analytics
+
+            analytics.capture_exception(
+                exc,
+                properties={"ops": "check_streams_helix", "user_ids": len(user_ids)},
+            )
             _phase("helix")
+            helix_ok = False
         else:
             _phase("helix")
             was_primed = primed
@@ -769,6 +779,10 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     if category_watch_subs:
         await _check_category_watch_alerts(context, category_watch_subs)
         _phase("category_watch")
+    if helix_ok:
+        from health import note_check_streams_ok
+
+        note_check_streams_ok()
     _log_duration()
 
 

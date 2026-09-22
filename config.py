@@ -114,6 +114,12 @@ def parse_admin_user_ids(raw: str | None = None) -> frozenset[int]:
 ADMIN_USER_IDS = parse_admin_user_ids()
 # Delete all rows for a user this many days after they block the bot (clock resets on re-block).
 BLOCKED_USER_RETENTION_DAYS = int(os.getenv("BLOCKED_USER_RETENTION_DAYS", "365"))
+# Periodic purge for append-only / log-like tables (see Database.purge_stale_log_tables).
+FOLLOW_MONITOR_EVENTS_RETENTION_DAYS = int(
+    os.getenv("FOLLOW_MONITOR_EVENTS_RETENTION_DAYS", "90")
+)
+DROP_SEEN_RETENTION_DAYS = int(os.getenv("DROP_SEEN_RETENTION_DAYS", "90"))
+CHAT_SEND_DAILY_RETENTION_DAYS = int(os.getenv("CHAT_SEND_DAILY_RETENTION_DAYS", "14"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
 # Optional: YouTube Data API v3 key — multistream live checks for YouTube channels.
 # Create at https://console.cloud.google.com/ (enable YouTube Data API v3 → API key).

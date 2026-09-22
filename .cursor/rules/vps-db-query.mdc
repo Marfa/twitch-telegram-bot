@@ -21,7 +21,8 @@ Default (`VPS_PSQL_SOURCE=auto`):
 1. **Live VPS** — SSH `root@bot.themarfa.name` → `/opt/twitch-telegram-bot` →
    `docker compose -f compose.vps.yml exec -T db psql -U bot -d bot`
 2. If SSH fails and `AIVEN_DATABASE_URL` is available — **Aiven cold DR mirror**
-   (nightly sync ≈ 03:15 UTC; **may lag**; bot does not use Aiven)
+   (nightly sync ≈ 03:15 UTC; **may lag**; bot does not use Aiven).
+   Sync excludes regenerable `igdb_*` partner dumps — empty IGDB on Aiven is expected.
 
 Force a source: `--vps` / `--aiven`, or `VPS_PSQL_SOURCE=vps|aiven|auto`.
 

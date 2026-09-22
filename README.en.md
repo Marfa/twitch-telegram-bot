@@ -39,7 +39,7 @@
 | Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / 🧪 **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; refund by charge_id; demo; **daily digest of new Premium payments** (purchase source from analytics) |
-| Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC) |
+| Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR) |
 | Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
@@ -292,7 +292,7 @@ Category: {game}
 
 Server checkout: `/opt/twitch-telegram-bot` (with `.env` beside it).
 
-On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: build while the old bot still runs, recreate, `/health` check. If health fails, roll back to the previous image id (the workflow stays red, but the old bot answers again). Also nightly pg-backup cron, and (if `AIVEN_DATABASE_URL` is set) DR sync of that dump into Aiven at 03:15 UTC. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: build while the old bot still runs, recreate, `/health` check. If health fails, roll back to the previous image id (the workflow stays red, but the old bot answers again). Also nightly pg-backup cron, and (if `AIVEN_DATABASE_URL` is set) DR sync of live Postgres into Aiven at 03:15 UTC (`igdb_*` excluded — rebuilt on VPS). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
@@ -314,7 +314,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `SCHEDULE_CHECK_INTERVAL` | Twitch schedule reminder poll, seconds (default 180) |
 | `POSTGRES_PASSWORD` | Postgres password on VPS (`compose.vps.yml`) |
 | `DATABASE_URL` | PostgreSQL. If unset — SQLite (`compose.vps.yml` sets it) |
-| `AIVEN_DATABASE_URL` | VPS: nightly DR restore of the dump into Aiven (not used by the bot; usually `sslmode=require`) |
+| `AIVEN_DATABASE_URL` | VPS: nightly DR sync into Aiven excluding `igdb_*` (not used by the bot; usually `sslmode=require`) |
 | `DATABASE_PATH` | SQLite: local `data/bot.db`, Docker `/data/bot.db` |
 | `MAX_SUBSCRIPTIONS_PER_OWNER` | Subscription limit per user (default 25) |
 | `ENABLE_PREMIUM` | Premium shop and gates (`0` default — all paid features free; set `1` on VPS) |
@@ -392,7 +392,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health`, `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health` (DB ping + `check_streams` freshness), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 

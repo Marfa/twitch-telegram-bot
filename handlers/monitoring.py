@@ -591,6 +591,7 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
         return
     renew_count = sum(1 for row in rows if row.is_renewal)
     new_count = len(rows) - renew_count
+    delivered = 0
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
         lines = "".join(_format_premium_purchase_line(lang, row) for row in rows)
@@ -606,11 +607,24 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
                     lines=lines,
                 ),
             )
+            delivered += 1
         except (BadRequest, Forbidden) as exc:
             logger.warning(
                 "Cannot send premium digest to admin %s: %s", admin_id, exc
             )
-    db.mark_premium_purchases_digested([row.id for row in rows])
+    if delivered:
+        db.mark_premium_purchases_digested([row.id for row in rows])
+        return
+    import analytics
+
+    logger.error(
+        "Premium digest undelivered to all admins; leaving %s purchase(s) undigested",
+        len(rows),
+    )
+    analytics.capture_exception(
+        RuntimeError("premium digest undelivered to all admins"),
+        properties={"ops": "daily_premium_purchases_report", "purchases": len(rows)},
+    )
 
 
 async def weekly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
