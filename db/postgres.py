@@ -4252,16 +4252,14 @@ class PostgresDatabase:
                 )
                 removed[table] = int(cur.rowcount or 0)
 
-            # day is ISO date text YYYY-MM-DD
+            # day is ISO date text YYYY-MM-DD (UTC calendar day, same as sqlite)
+            day_cutoff = (
+                datetime.now(timezone.utc)
+                - timedelta(days=int(CHAT_SEND_DAILY_RETENTION_DAYS))
+            ).date().isoformat()
             cur.execute(
-                """
-                DELETE FROM chat_send_daily
-                WHERE day < to_char(
-                    (NOW() AT TIMESTAMPTZ) - make_interval(days => %s),
-                    'YYYY-MM-DD'
-                )
-                """,
-                (int(CHAT_SEND_DAILY_RETENTION_DAYS),),
+                "DELETE FROM chat_send_daily WHERE day < %s",
+                (day_cutoff,),
             )
             removed["chat_send_daily"] = int(cur.rowcount or 0)
 
