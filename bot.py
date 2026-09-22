@@ -674,6 +674,7 @@ from handlers.subscriptions import (
     on_sync_unfollow_answer,
     on_toggle,
     on_welcome_demo_delete,
+    on_welcome_demo_enable,
     open_cart_menu,
     open_subscriptions_menu,
     open_sync_settings,
@@ -855,12 +856,16 @@ async def _ensure_welcome_premium_channel_subscription(
     bot,
     user_id: int,
     lang: str,
-) -> tuple[int, str] | None:
-    """First-start demo: random Premium channel (config + paid).
+) -> tuple[int, str, bool] | None:
+    """First-start demo: random offline Premium channel (config + paid).
 
-    English/Italian locales skip the config promo channel (default marfapr);
-    other paid premium_channels are still eligible.
+    Seeds paused (enabled=False) with a short post-live delay; user opts in
+    via welcome keyboard. English/Italian locales skip the config promo
+    channel (default marfapr); other paid premium_channels are still eligible.
+    Live channels are skipped.
     """
+    # Softens first live DM after the user enables the demo.
+    welcome_delay_minutes = 10
     db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
     candidates = prem.list_promo_channel_logins(db)
@@ -880,16 +885,17 @@ async def _ensure_welcome_premium_channel_subscription(
                 and not sub.notify_on_category_change
                 and not sub.notify_on_end
             ):
-                return sub.id, login
+                return sub.id, login, bool(sub.enabled)
         user = await asyncio.to_thread(twitch.get_user, login)
         if not user:
             logger.warning("Welcome premium seed: Twitch user %s not found", login)
             continue
         uid = str(user["id"])
         uname = str(user.get("login") or login).lower()
-        enabled = await prem.may_enable_subscription_async(
-            bot, db, user_id, twitch_username=uname
-        )
+        live = await asyncio.to_thread(twitch.get_live_streams, [uid])
+        if uid in live:
+            continue
+        # Paused until the user taps Enable — avoid surprise first live DM.
         sub_id = db.add_subscription(
             owner_id=user_id,
             twitch_username=uname,
@@ -899,7 +905,8 @@ async def _ensure_welcome_premium_channel_subscription(
             chat_id=user_id,
             thread_id=None,
             disable_link_preview=True,
-            enabled=enabled,
+            enabled=False,
+            delay_minutes=welcome_delay_minutes,
             notify_on_live=True,
             notify_on_end=False,
             notify_on_category_change=False,
@@ -908,9 +915,14 @@ async def _ensure_welcome_premium_channel_subscription(
         analytics.capture(
             user_id,
             "welcome_demo_subscription_created",
-            {"sub_id": sub_id, "enabled": enabled, "channel": uname},
+            {
+                "sub_id": sub_id,
+                "enabled": False,
+                "channel": uname,
+                "delay_minutes": welcome_delay_minutes,
+            },
         )
-        return sub_id, uname
+        return sub_id, uname, False
     return None
 
 
@@ -942,11 +954,11 @@ async def _send_welcome_bundle(
     )
     if not seeded:
         return
-    sub_id, channel = seeded
+    sub_id, channel, enabled = seeded
     await bot.send_message(
         chat_id,
         t("start_welcome_demo", lang, channel=channel),
-        reply_markup=welcome_demo_keyboard(lang, sub_id),
+        reply_markup=welcome_demo_keyboard(lang, sub_id, enabled=enabled),
     )
 
 
@@ -2738,6 +2750,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_welcome_demo_enable, pattern=r"^welcome_en:\d+$"),
         CallbackQueryHandler(on_welcome_demo_delete, pattern=r"^welcome_del:\d+$"),
         group=0,
     )
@@ -3516,7 +3529,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             wake_stuck_on_menu_callback,
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|edit_type_pick:|edit_type_pick_cancel:|toggle:|imp_en:|enable_all$|delete:\d+$|"
-                r"welcome_del:\d+$|"
+                r"welcome_en:\d+$|welcome_del:\d+$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"
                 r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"

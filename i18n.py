@@ -735,15 +735,23 @@ def language_keyboard(lang: str | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def welcome_demo_keyboard(lang: str, sub_id: int) -> InlineKeyboardMarkup:
+def welcome_demo_keyboard(
+    lang: str, sub_id: int, *, enabled: bool = False
+) -> InlineKeyboardMarkup:
+    first = (
+        InlineKeyboardButton(
+            btn("welcome_demo_edit", lang),
+            callback_data=f"edit:{sub_id}",
+        )
+        if enabled
+        else InlineKeyboardButton(
+            btn("welcome_demo_enable", lang),
+            callback_data=f"welcome_en:{sub_id}",
+        )
+    )
     return InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(
-                    btn("welcome_demo_edit", lang),
-                    callback_data=f"edit:{sub_id}",
-                )
-            ],
+            [first],
             [
                 InlineKeyboardButton(
                     btn("welcome_demo_delete", lang),

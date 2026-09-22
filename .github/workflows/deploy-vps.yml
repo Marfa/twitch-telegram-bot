@@ -3,6 +3,13 @@ name: Deploy VPS
 on:
   push:
     branches: [main]
+    # Docs/rules/tests-only pushes must not recreate the bot on VPS.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".cursor/**"
+      - "self_check/**"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:

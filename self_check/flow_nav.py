@@ -32,6 +32,7 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^alert_history:menu$|"
     r"^share_decline$|"
     r"^gift_decline$|"
+    r"^welcome_del:\d+$|"
     r"^premium:gift_skip_(?:msg|img)$|"
     r"^premium:feat_back$|"
     r"^twitch_link:decline$|"

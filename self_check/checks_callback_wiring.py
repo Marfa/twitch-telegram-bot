@@ -165,6 +165,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("premium_gate", "premium_gate:skip"),
     ("beta_toggle", "beta:toggle:demo_feat"),
     ("ref_wd", f"ref_wd:paid:{_SAMPLE_WD}"),
+    ("welcome_en", f"welcome_en:{_SAMPLE_SUB}"),
     ("welcome_del", f"welcome_del:{_SAMPLE_SUB}"),
     ("delivery_fail", f"delivery_fail_del:{_SAMPLE_SUB}"),
     ("edit_set", f"edit_set:{_SAMPLE_SUB}:preview:1"),

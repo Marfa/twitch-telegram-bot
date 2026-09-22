@@ -1300,6 +1300,7 @@ async def _smoke_welcome_demo_locale(db) -> None:
     twitch.get_user = MagicMock(
         return_value={"id": "999", "login": prem.twitch_channel_login() or "marfapr"}
     )
+    twitch.get_live_streams = MagicMock(return_value={})
     with patch(
         "bot.prem.may_enable_subscription_async", new=AsyncMock(return_value=True)
     ):
@@ -1322,9 +1323,26 @@ async def _smoke_welcome_demo_locale(db) -> None:
         application, bot, uid, "ru"
     )
     assert seeded is not None
-    sub_id, channel = seeded
+    sub_id, channel, enabled = seeded
     assert channel == (prem.twitch_channel_login() or "marfapr")
-    assert any(s.id == sub_id for s in db.get_subscriptions_by_owner(uid))
+    assert enabled is False
+    rows = db.get_subscriptions_by_owner(uid)
+    assert any(
+        s.id == sub_id and not s.enabled and s.delay_minutes == 10 for s in rows
+    )
+
+    # Prefer offline: live promo channel is skipped → no seed when only candidate is live.
+    uid_live = uid + 2
+    db.upsert_user(uid_live)
+    twitch.get_live_streams = MagicMock(return_value={"999": {"id": "s1"}})
+    assert (
+        await _ensure_welcome_premium_channel_subscription(
+            application, bot, uid_live, "ru"
+        )
+        is None
+    )
+    assert db.get_subscriptions_by_owner(uid_live) == []
+    twitch.get_live_streams = MagicMock(return_value={})
 
     uid_uk = uid + 1
     db.upsert_user(uid_uk)
@@ -1333,7 +1351,7 @@ async def _smoke_welcome_demo_locale(db) -> None:
     )
     assert seeded_uk is not None
     assert seeded_uk[1] == (prem.twitch_channel_login() or "marfapr")
-
+    assert seeded_uk[2] is False
 
 async def _run_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:

@@ -2719,12 +2719,77 @@ async def _scenario_follow_monitor(db) -> None:
     _ = FEATURE_ID
 
 
+async def _scenario_welcome_demo(db) -> None:
+    """§1 welcome demo — paused seed keyboard has Enable + Delete escape."""
+    from bot import _ensure_welcome_premium_channel_subscription
+    from handlers.subscriptions import on_welcome_demo_delete, on_welcome_demo_enable
+    from i18n import welcome_demo_keyboard
+    import premium as prem
+
+    uid = _FREE_UID + 21
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+    application, bot = _app(db)
+    twitch = application.bot_data["twitch"]
+    twitch.get_user = MagicMock(
+        return_value={"id": "4242", "login": prem.twitch_channel_login() or "marfapr"}
+    )
+    twitch.get_live_streams = MagicMock(return_value={})
+
+    seeded = await _ensure_welcome_premium_channel_subscription(
+        application, bot, uid, "ru"
+    )
+    assert seeded is not None
+    sub_id, _channel, enabled = seeded
+    assert enabled is False
+    markup = welcome_demo_keyboard("ru", sub_id, enabled=False)
+    assert markup_has_escape_hatch(markup)
+    cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert f"welcome_en:{sub_id}" in cbs
+    assert f"welcome_del:{sub_id}" in cbs
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(uid, f"welcome_en:{sub_id}", cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions.prem.may_enable_subscription_async",
+        new=AsyncMock(return_value=True),
+    ), patch(
+        "handlers.subscriptions.prem.alert_type_entitled",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_welcome_demo_enable(update, ctx)
+    query.edit_message_text.assert_awaited()
+    enabled_markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert enabled_markup is not None
+    assert any(
+        (b.callback_data or "").startswith("edit:")
+        for row in enabled_markup.inline_keyboard
+        for b in row
+    )
+    sub = db.get_subscription(sub_id, uid)
+    assert sub is not None and sub.enabled is True and sub.delay_minutes == 10
+
+    update, query = _cb_update(uid, f"welcome_del:{sub_id}", cap)
+    await on_welcome_demo_delete(update, ctx)
+    query.edit_message_text.assert_awaited()
+    assert db.get_subscription(sub_id, uid) is None
+    cap.assert_turn("welcome_demo_deleted")
+
+
 async def _run_flow_nav_checks() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "flow_nav.db")
         db.upsert_user(_FREE_UID)
         db.set_user_locale(_FREE_UID, "ru")
         await _scenario_menus_and_wizards(db)
+        await _scenario_welcome_demo(db)
         await _scenario_wizard_channel_step(db)
         await _scenario_subscriptions(db)
         await _scenario_settings_and_partner(db)

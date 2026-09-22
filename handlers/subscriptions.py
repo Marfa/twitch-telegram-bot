@@ -73,6 +73,7 @@ from i18n import (
     watch_lang_keyboard,
     watch_tags_keyboard,
     watch_viewers_keyboard,
+    welcome_demo_keyboard,
 )
 from twitch import (
     TwitchClient,
@@ -4340,6 +4341,81 @@ async def on_delete_cart_restore_go(
         kind=kind,
         selected=set(),
         prefix=restored_text + "\n\n",
+    )
+
+
+async def on_welcome_demo_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    try:
+        await query.answer()
+    except BadRequest:
+        return
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    sub_id = int(query.data.split(":", 1)[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if sub.enabled:
+        await query.edit_message_text(
+            t("welcome_demo_enabled", lang, channel=sub.twitch_username),
+            reply_markup=welcome_demo_keyboard(lang, sub_id, enabled=True),
+        )
+        return
+    if not await prem.alert_type_entitled(context.bot, db, user_id, sub):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t(
+                "premium_enable_need_feature",
+                lang,
+                feature=t(prem.feature_label_key("alert_types"), lang),
+            )
+        )
+        await send_premium_screen(
+            context.bot,
+            user_id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="welcome_demo_enable",
+            feature="alert_types",
+        )
+        return
+    if not await prem.may_enable_subscription_async(
+        context.bot, db, user_id, twitch_username=sub.twitch_username
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_active_limit", lang, limit=prem.free_active_limit())
+        )
+        await send_premium_screen(
+            context.bot,
+            user_id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="welcome_demo_enable",
+            feature="active_limit",
+        )
+        return
+    new_state = db.toggle_subscription(sub_id, user_id)
+    if new_state is None:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    analytics.capture(
+        user_id,
+        "welcome_demo_subscription_enabled",
+        {"sub_id": sub_id, "channel": sub.twitch_username},
+    )
+    await query.edit_message_text(
+        t("welcome_demo_enabled", lang, channel=sub.twitch_username),
+        reply_markup=welcome_demo_keyboard(lang, sub_id, enabled=True),
     )
 
 

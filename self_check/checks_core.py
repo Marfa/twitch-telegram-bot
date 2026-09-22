@@ -1817,6 +1817,7 @@ def check_core() -> None:
         assert btn("language", loc)
         assert tr("start_welcome", loc)
         assert tr("start_welcome_demo", loc, channel="marfapr")
+        assert btn("welcome_demo_enable", loc)
         assert btn("welcome_demo_edit", loc)
         assert btn("welcome_demo_delete", loc)
         assert "{duration}" in tr("placeholders_page_body", loc)
@@ -2094,8 +2095,10 @@ def check_core() -> None:
     from i18n import welcome_demo_keyboard
 
     kb = welcome_demo_keyboard("ru", 42)
-    assert kb.inline_keyboard[0][0].callback_data == "edit:42"
+    assert kb.inline_keyboard[0][0].callback_data == "welcome_en:42"
     assert kb.inline_keyboard[1][0].callback_data == "welcome_del:42"
+    kb_on = welcome_demo_keyboard("ru", 42, enabled=True)
+    assert kb_on.inline_keyboard[0][0].callback_data == "edit:42"
 
     from db.models import migrate_sub_fields_for_alert_type
 
