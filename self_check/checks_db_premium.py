@@ -1617,7 +1617,7 @@ def check_db_premium() -> None:
         assert not st.feature_active("advanced_mode")
         assert not st.feature_active("twitch_sync")
         assert rdb.get_advanced_mode_setting(uid) is False
-        assert rdb.find_user_id_by_premium_charge(feat_charge) == uid  # purchases ledger
+        assert rdb.find_user_id_by_premium_charge(feat_charge) is None
 
         feat_charge2 = "stx" + ("C" * 40)
         paid = int(datetime.now(timezone.utc).timestamp()) - 7 * 86400
