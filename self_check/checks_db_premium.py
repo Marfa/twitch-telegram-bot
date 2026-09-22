@@ -595,6 +595,23 @@ def check_db_premium() -> None:
         assert db.get_unique_schedule_reminder_twitch_ids() == []
         assert db.update_subscription(sub_id, 1, schedule_reminder_minutes=10)
         assert db.get_unique_schedule_reminder_twitch_ids() == [sub.twitch_user_id]
+        assert db.update_subscription(sub_id, 1, schedule_reminder_minutes=0)
+        assert db.get_unique_schedule_reminder_twitch_ids() == []
+        assert db.update_subscription(
+            sub_id,
+            1,
+            notify_on_schedule_cancel=True,
+            schedule_cancel_template="cancelled {date}",
+        )
+        assert db.get_unique_schedule_reminder_twitch_ids() == [sub.twitch_user_id]
+        assert db.update_subscription(
+            sub_id,
+            1,
+            notify_on_schedule_cancel=False,
+            schedule_cancel_template="",
+            schedule_reminder_minutes=10,
+        )
+        assert db.get_unique_schedule_reminder_twitch_ids() == [sub.twitch_user_id]
         assert sub.notify_on_live is True
         assert sub.notify_on_end is False
         assert getattr(sub, "from_watch_suggest", False) is False

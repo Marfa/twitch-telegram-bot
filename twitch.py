@@ -574,34 +574,57 @@ class TwitchClient:
         return True
 
     def get_channel_schedule(
-        self, broadcaster_id: str, *, first: int = 20, start_time: str | None = None
+        self, broadcaster_id: str, *, first: int = 25, start_time: str | None = None
     ) -> dict[str, Any]:
-        """Schedule payload: segments list + optional vacation window."""
-        params: dict[str, str | int] = {
-            "broadcaster_id": broadcaster_id,
-            "first": max(1, min(25, first)),
-        }
-        if start_time:
-            params["start_time"] = start_time
-        resp = self._session.get(
-            "https://api.twitch.tv/helix/schedule",
-            headers=self._headers(),
-            params=params,
-            timeout=15,
-        )
-        if resp.status_code == 404:
-            return {"segments": [], "vacation": None, "broadcaster_timezone": "UTC"}
-        resp.raise_for_status()
-        data = resp.json().get("data") or {}
-        segments = [s for s in (data.get("segments") or []) if isinstance(s, dict)]
-        vacation = data.get("vacation")
-        if not isinstance(vacation, dict):
-            vacation = None
-        tz = str(data.get("broadcaster_timezone") or "").strip() or "UTC"
+        """Schedule payload: all upcoming segments (paginated) + vacation window.
+
+        A single Helix page is at most 25 segments. Without pagination, adding a
+        slot can push later days out of the first page and look like cancellations.
+        """
+        segments: list[dict[str, Any]] = []
+        vacation: dict[str, Any] | None = None
+        tz = "UTC"
+        cursor: str | None = None
+        page_size = max(1, min(25, int(first)))
+        for _ in range(40):
+            params: dict[str, str | int] = {
+                "broadcaster_id": broadcaster_id,
+                "first": page_size,
+            }
+            if start_time:
+                params["start_time"] = start_time
+            if cursor:
+                params["after"] = cursor
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/schedule",
+                headers=self._headers(),
+                params=params,
+                timeout=15,
+            )
+            if resp.status_code == 404:
+                return {"segments": [], "vacation": None, "broadcaster_timezone": "UTC"}
+            resp.raise_for_status()
+            payload = resp.json() or {}
+            data = payload.get("data") or {}
+            if not isinstance(data, dict):
+                data = {}
+            for seg in data.get("segments") or []:
+                if isinstance(seg, dict):
+                    segments.append(seg)
+            if vacation is None:
+                vac = data.get("vacation")
+                if isinstance(vac, dict):
+                    vacation = vac
+            page_tz = str(data.get("broadcaster_timezone") or "").strip()
+            if page_tz:
+                tz = page_tz
+            cursor = (payload.get("pagination") or {}).get("cursor") or None
+            if not cursor:
+                break
         return {
             "segments": segments,
             "vacation": vacation,
-            "broadcaster_timezone": tz,
+            "broadcaster_timezone": tz or "UTC",
         }
 
     def get_schedule_segments(

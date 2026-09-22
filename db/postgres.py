@@ -2093,7 +2093,15 @@ class PostgresDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = TRUE AND schedule_reminder_minutes > 0
+                WHERE enabled = TRUE
+                  AND (
+                    schedule_reminder_minutes > 0
+                    OR (
+                      notify_on_schedule_cancel = TRUE
+                      AND COALESCE(NULLIF(TRIM(schedule_cancel_template), ''), '')
+                          <> ''
+                    )
+                  )
                 """
             )
             rows = cur.fetchall()

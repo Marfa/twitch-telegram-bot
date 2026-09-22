@@ -2309,3 +2309,114 @@ def check_core() -> None:
 
     asyncio.run(_fx_roundtrip())
 
+    # Schedule cancel: today-only emptied day + suppress during our publish.
+    from schedule_cancel import (
+        build_schedule_day_map,
+        find_emptied_schedule_days,
+        schedule_cancel_suppressed,
+        suppress_schedule_cancel,
+    )
+
+    now_sc = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    prev_sc = {
+        "2026-09-22": [
+            {
+                "id": "t",
+                "start": "2026-09-22T18:00:00+00:00",
+                "title": "Today",
+                "game": "JC",
+            }
+        ],
+        "2026-09-23": [
+            {
+                "id": "a",
+                "start": "2026-09-23T12:30:00+00:00",
+                "title": "Thu",
+                "game": "JC",
+            }
+        ],
+        "2026-09-25": [
+            {
+                "id": "b",
+                "start": "2026-09-25T12:30:00+00:00",
+                "title": "Fri",
+                "game": "JC",
+            }
+        ],
+    }
+    # Adding a future-day slot must not look like a cancel.
+    cur_add = {
+        "2026-09-22": list(prev_sc["2026-09-22"]),
+        "2026-09-23": [
+            {
+                "id": "a",
+                "start": "2026-09-23T12:30:00+00:00",
+                "title": "Thu",
+                "game": "JC",
+            },
+            {
+                "id": "c",
+                "start": "2026-09-23T15:00:00+00:00",
+                "title": "Thu2",
+                "game": "JC",
+            },
+        ],
+        "2026-09-25": list(prev_sc["2026-09-25"]),
+    }
+    assert (
+        find_emptied_schedule_days(prev_sc, cur_add, now=now_sc, tz_name="UTC") == []
+    )
+    # Future Friday wiped → ignore (cancel is today-only).
+    cur_cancel_fri = {
+        "2026-09-22": list(prev_sc["2026-09-22"]),
+        "2026-09-23": list(prev_sc["2026-09-23"]),
+    }
+    assert (
+        find_emptied_schedule_days(
+            prev_sc, cur_cancel_fri, now=now_sc, tz_name="UTC"
+        )
+        == []
+    )
+    # Today wiped, future days kept → cancel today.
+    cur_cancel_today = {
+        "2026-09-23": list(prev_sc["2026-09-23"]),
+        "2026-09-25": list(prev_sc["2026-09-25"]),
+    }
+    emptied_today = find_emptied_schedule_days(
+        prev_sc, cur_cancel_today, now=now_sc, tz_name="UTC"
+    )
+    assert [d for d, _ in emptied_today] == ["2026-09-22"]
+    # Past-only today slot never cancels.
+    assert find_emptied_schedule_days(
+        {
+            "2026-09-22": [
+                {
+                    "id": "x",
+                    "start": "2026-09-22T08:00:00+00:00",
+                    "title": "",
+                    "game": "",
+                }
+            ]
+        },
+        {},
+        now=now_sc,
+        tz_name="UTC",
+    ) == []
+    segs_today_only_past = [
+        {
+            "id": "past",
+            "start_time": "2026-09-22T08:00:00Z",
+            "title": "gone",
+            "category": {"name": "JC"},
+        }
+    ]
+    today_map = build_schedule_day_map(
+        segs_today_only_past, now=now_sc, tz_name="UTC"
+    )
+    assert "2026-09-22" not in today_map
+    bot_data_sc: dict = {}
+    assert schedule_cancel_suppressed(bot_data_sc, "42") is False
+    suppress_schedule_cancel(bot_data_sc, "42", seconds=120)
+    assert schedule_cancel_suppressed(bot_data_sc, "42") is True
+    assert schedule_cancel_suppressed(bot_data_sc, "42", now_ts=1e12) is False
+

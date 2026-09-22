@@ -1902,7 +1902,14 @@ class SqliteDatabase:
                 """
                 SELECT DISTINCT twitch_user_id
                 FROM subscriptions
-                WHERE enabled = 1 AND schedule_reminder_minutes > 0
+                WHERE enabled = 1
+                  AND (
+                    schedule_reminder_minutes > 0
+                    OR (
+                      notify_on_schedule_cancel = 1
+                      AND TRIM(COALESCE(schedule_cancel_template, '')) != ''
+                    )
+                  )
                 """
             ).fetchall()
         return [r["twitch_user_id"] for r in rows]

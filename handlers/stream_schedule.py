@@ -1700,6 +1700,11 @@ async def _complete_schedule_publish(
     await restore_after_twitch_oauth(application, owner_id)
     _remember_schedule_broadcaster(db, owner_id, twitch_user_id, refresh)
 
+    # clear/create briefly empties Helix days — do not treat that as user cancels.
+    from schedule_cancel import refresh_schedule_day_snapshot, suppress_schedule_cancel
+
+    suppress_schedule_cancel(application.bot_data, twitch_user_id)
+
     if clear_mode not in ("overlap", "none"):
         try:
             unique_dates = {e.get("date") for e in entries if e.get("date")}
@@ -1792,6 +1797,16 @@ async def _complete_schedule_publish(
             ok_count += 1
         except Exception as exc:
             errors.append(_schedule_publish_error_text(exc, str(entry.get("date") or ""), lang))
+
+    try:
+        await asyncio.to_thread(
+            refresh_schedule_day_snapshot, db, twitch, twitch_user_id
+        )
+    except Exception:
+        logger.exception(
+            "Schedule day snapshot refresh failed after publish for %s",
+            twitch_user_id,
+        )
 
     total = len(entries) + len(updates) + len(deletes)
     if ok_count == total:

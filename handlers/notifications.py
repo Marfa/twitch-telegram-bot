@@ -910,6 +910,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     from schedule_cancel import (
         build_schedule_day_map,
         find_emptied_schedule_days,
+        schedule_cancel_suppressed,
     )
 
     db: Database = context.application.bot_data["db"]
@@ -947,8 +948,15 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             segments, now=now, tz_name=tz_name
         )
         previous_days = db.get_schedule_day_snapshot(uid)
-        emptied = find_emptied_schedule_days(
-            previous_days, current_days, now=now
+        suppress_cancel = schedule_cancel_suppressed(
+            context.application.bot_data, uid
+        )
+        emptied = (
+            []
+            if suppress_cancel
+            else find_emptied_schedule_days(
+                previous_days, current_days, now=now, tz_name=tz_name
+            )
         )
         db.set_schedule_day_snapshot(uid, current_days)
 
