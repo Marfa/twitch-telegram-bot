@@ -2751,6 +2751,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_welcome_demo_enable, pattern=r"^welcome_en:\d+$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_welcome_demo_delete, pattern=r"^welcome_del:\d+$"),
         group=0,
     )
