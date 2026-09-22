@@ -1124,8 +1124,6 @@ async def successful_premium_payment(
     payment = msg.successful_payment
     parsed = prem.parse_invoice_payload(payment.invoice_payload)
     if parsed is None:
-        import analytics
-
         charge_id = payment.telegram_payment_charge_id or ""
         payload = (payment.invoice_payload or "")[:200]
         logger.error(

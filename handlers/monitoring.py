@@ -615,8 +615,6 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
     if delivered:
         db.mark_premium_purchases_digested([row.id for row in rows])
         return
-    import analytics
-
     logger.error(
         "Premium digest undelivered to all admins; leaving %s purchase(s) undigested",
         len(rows),
