@@ -13,9 +13,11 @@ from telegram.error import BadRequest, Forbidden, RetryAfter
 from db import Database, Subscription
 from stream_capture import (
     CapturedPreview,
+    build_thumbnail_placeholder_mp4,
     capture_live_preview_mp4,
     forget_and_unlink,
     invalidate_shared,
+    placeholder_preview_ready,
     video_preview_ready,
 )
 from twitch import (
@@ -56,6 +58,106 @@ def build_stream_video_mp4(
         duration=duration,
         force=force,
     )
+
+
+def build_preview_placeholder_mp4(stream: dict[str, Any] | None) -> bytes | None:
+    """Still Helix thumbnail → short muted MP4 (same Animation/Video type as live clip)."""
+    if not placeholder_preview_ready():
+        return None
+    thumb = format_stream_thumbnail_url(
+        str((stream or {}).get("thumbnail_url") or ""),
+        cache_bust=True,
+    )
+    if not thumb:
+        return None
+    return build_thumbnail_placeholder_mp4(thumb)
+
+
+def schedule_preview_upgrade(
+    bot,
+    db: Database,
+    twitch: TwitchClient | None,
+    sub: Subscription,
+    stream: dict[str, Any] | None,
+    bot_data: dict[str, Any] | None,
+) -> None:
+    """Fire-and-forget: replace placeholder MP4 with a live capture (same media type)."""
+    stream_snap = dict(stream) if isinstance(stream, dict) else {}
+
+    async def _run() -> None:
+        try:
+            await upgrade_placeholder_preview(
+                bot, db, twitch, sub, stream_snap, bot_data
+            )
+        except Exception:
+            logger.exception(
+                "Stream preview upgrade failed sub=%s chat=%s",
+                getattr(sub, "id", None),
+                getattr(sub, "chat_id", None),
+            )
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.warning(
+            "No running loop for stream preview upgrade sub=%s",
+            getattr(sub, "id", None),
+        )
+        return
+    loop.create_task(_run(), name=f"stream_preview_upgrade_{int(sub.id)}")
+
+
+async def upgrade_placeholder_preview(
+    bot,
+    db: Database,
+    twitch: TwitchClient | None,
+    sub: Subscription,
+    stream: dict[str, Any],
+    bot_data: dict[str, Any] | None,
+) -> bool:
+    """Capture live MP4 and editMessageMedia in-place (Animation↔Animation / Video↔Video)."""
+    if not video_preview_ready():
+        return False
+    fresh = db.get_subscription(int(sub.id), int(sub.owner_id)) or sub
+    if not fresh.last_message_id:
+        return False
+    if not is_stream_capture_preview_image(fresh.image_file_id):
+        return False
+    login = preview_login_from_stream(stream, fresh)
+    uid = str(
+        (stream or {}).get("user_id") or getattr(fresh, "twitch_user_id", None) or ""
+    ).strip()
+    if not login or not uid:
+        return False
+    captured = await asyncio.to_thread(
+        build_stream_video_mp4,
+        login=login,
+        twitch_user_id=uid,
+        force=False,
+    )
+    if captured is None:
+        return False
+    try:
+        ok = await _edit_preview_media(
+            bot,
+            fresh,
+            stream,
+            captured=captured,
+            bot_data=bot_data,
+            twitch=twitch,
+            db=db,
+        )
+        if ok and bot_data is not None:
+            mark_preview_refresh(bot_data, int(fresh.id))
+            logger.info(
+                "Stream preview upgraded sub=%s chat=%s mid=%s",
+                fresh.id,
+                fresh.chat_id,
+                fresh.last_message_id,
+            )
+        return ok
+    finally:
+        forget_and_unlink(captured.path)
 
 
 def preview_login_from_stream(

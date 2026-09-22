@@ -279,6 +279,8 @@ def check_core() -> None:
     from stream_capture import (
         forget_and_unlink,
         invalidate_shared,
+        peek_shared_preview,
+        placeholder_preview_ready,
         preview_dir,
         purge_for_streamer,
         purge_stale_on_startup,
@@ -330,6 +332,7 @@ def check_core() -> None:
         == "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1280x720.jpg"
     )
     assert isinstance(video_preview_ready(), bool)
+    assert isinstance(placeholder_preview_ready(), bool)
     assert preview_dir().name == "stream_preview"
     _prev = preview_dir()
     _prev.mkdir(parents=True, exist_ok=True)
@@ -364,6 +367,9 @@ def check_core() -> None:
             path=e.path, data=e.data, mono=_time.monotonic() - 10_000
         )
     assert _sc._shared_get("333") is not None
+    peeked = peek_shared_preview("333")
+    assert peeked is not None and peeked.data == b"shared"
+    assert peek_shared_preview("missing") is None
     assert not hasattr(_sc, "SHARED_TTL_SEC")
     invalidate_shared("333")
     assert not _f_shared.exists()
@@ -372,11 +378,27 @@ def check_core() -> None:
     assert float(_bd["stream_preview_refresh_at"][7]) > 0
     from handlers.stream_preview import (
         _preview_caption,
+        build_preview_placeholder_mp4,
         live_streams_from_poll_snapshot,
         refresh_live_stream_previews,
+        schedule_preview_upgrade,
+        upgrade_placeholder_preview,
     )
     import inspect as _inspect
 
+    # First alert: placeholder MP4 + background upgrade (not blocking ~30s capture).
+    import handlers.delivery as _delivery
+
+    _send_src = _inspect.getsource(_delivery._send_notification)
+    assert "build_preview_placeholder_mp4" in _send_src
+    assert "peek_shared_preview" in _send_src
+    assert "schedule_preview_upgrade" in _send_src
+    assert "need_preview_upgrade" in _send_src
+    assert callable(schedule_preview_upgrade)
+    assert callable(upgrade_placeholder_preview)
+    assert callable(build_preview_placeholder_mp4)
+    assert build_preview_placeholder_mp4({}) is None
+    assert build_preview_placeholder_mp4(None) is None
     # After a refresh capture, shared cache must remain for later first-sends.
     assert _inspect.getsource(refresh_live_stream_previews).count(
         "invalidate_shared"
@@ -453,6 +475,63 @@ def check_core() -> None:
     import asyncio as _asyncio
 
     _asyncio.run(_preview_caps_one_video_per_tick())
+
+    async def _preview_upgrade_edits_same_type() -> None:
+        """Background upgrade captures once and editMessageMedia with shared bytes."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from types import SimpleNamespace
+
+        from handlers.stream_preview import upgrade_placeholder_preview
+        from twitch import STREAM_VIDEO_PREVIEW_IMAGE_ID
+
+        captured = SimpleNamespace(
+            path=MagicMock(),
+            data=b"mp4-bytes",
+            twitch_user_id="9",
+        )
+        sub = SimpleNamespace(
+            id=42,
+            owner_id=1,
+            last_message_id=99,
+            image_file_id=STREAM_VIDEO_PREVIEW_IMAGE_ID,
+            twitch_username="x",
+            twitch_user_id="9",
+            chat_id=-100,
+        )
+        db = MagicMock()
+        db.get_subscription.return_value = sub
+        bot_data: dict = {}
+        with (
+            patch(
+                "handlers.stream_preview.video_preview_ready",
+                return_value=True,
+            ),
+            patch(
+                "handlers.stream_preview.build_stream_video_mp4",
+                return_value=captured,
+            ) as build,
+            patch(
+                "handlers.stream_preview._edit_preview_media",
+                new=AsyncMock(return_value=True),
+            ) as edit,
+            patch("handlers.stream_preview.forget_and_unlink") as forget,
+        ):
+            ok = await upgrade_placeholder_preview(
+                MagicMock(),
+                db,
+                MagicMock(),
+                sub,
+                {"user_login": "x", "user_id": "9"},
+                bot_data,
+            )
+        assert ok is True
+        build.assert_called_once()
+        assert build.call_args.kwargs.get("force") is False
+        edit.assert_awaited_once()
+        forget.assert_called_once_with(captured.path)
+        assert 42 in bot_data.get("stream_preview_refresh_at", {})
+
+    _asyncio.run(_preview_upgrade_edits_same_type())
     assert live_streams_from_poll_snapshot({}) == {}
     assert live_streams_from_poll_snapshot(
         {

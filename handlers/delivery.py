@@ -983,6 +983,7 @@ async def _send_notification(
     animation_bytes: bytes | None = None
     video_bytes: bytes | None = None
     captured_preview = None
+    need_preview_upgrade = False
     prefer_media_id = False
     from twitch import template_uses_html
 
@@ -1011,25 +1012,47 @@ async def _send_notification(
         )
         if is_stream_capture_preview_image(sub.image_file_id):
             from handlers.stream_preview import (
+                build_preview_placeholder_mp4,
                 build_stream_video_mp4,
                 preview_login_from_stream,
             )
+            from stream_capture import peek_shared_preview, video_preview_ready
 
             login = preview_login_from_stream(stream, sub)
             uid = str(
                 (stream or {}).get("user_id") or sub.twitch_user_id or ""
             ).strip()
-            if login and uid:
+            # Fast first-send: shared cache → thumbnail placeholder → blocking capture.
+            if uid:
+                captured_preview = peek_shared_preview(uid)
+            if captured_preview is None and login and uid:
+                placeholder = await asyncio.to_thread(
+                    build_preview_placeholder_mp4, stream
+                )
+                if placeholder:
+                    if is_stream_file_video_preview_image(sub.image_file_id):
+                        video_bytes = placeholder
+                    else:
+                        animation_bytes = placeholder
+                    need_preview_upgrade = video_preview_ready()
+            if (
+                captured_preview is None
+                and not animation_bytes
+                and not video_bytes
+                and login
+                and uid
+            ):
                 captured_preview = await asyncio.to_thread(
                     build_stream_video_mp4,
                     login=login,
                     twitch_user_id=uid,
                 )
-                if captured_preview:
-                    if is_stream_file_video_preview_image(sub.image_file_id):
-                        video_bytes = captured_preview.data
-                    else:
-                        animation_bytes = captured_preview.data
+            if captured_preview:
+                if is_stream_file_video_preview_image(sub.image_file_id):
+                    video_bytes = captured_preview.data
+                else:
+                    animation_bytes = captured_preview.data
+                need_preview_upgrade = False
         if (
             is_dynamic_alert_image(sub.image_file_id)
             and not image_photo
@@ -1104,9 +1127,16 @@ async def _send_notification(
     if track_preview or track_delete_prev:
         db.set_last_message_id(sub.id, msg.message_id)
         if track_preview:
-            from handlers.stream_preview import mark_preview_refresh
+            from handlers.stream_preview import (
+                mark_preview_refresh,
+                schedule_preview_upgrade,
+            )
 
             mark_preview_refresh(bot_data, sub.id)
+            if need_preview_upgrade and bot_data is not None:
+                schedule_preview_upgrade(
+                    bot, db, twitch, sub, stream, bot_data
+                )
     if (
         msg
         and getattr(sub, "pin_message", False)

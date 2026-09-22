@@ -63,11 +63,122 @@ def video_preview_ready() -> bool:
     return bool(shutil.which("streamlink") and shutil.which("ffmpeg"))
 
 
+def placeholder_preview_ready() -> bool:
+    """True when ffmpeg can build a thumbnail placeholder MP4 (no streamlink)."""
+    return bool(shutil.which("ffmpeg"))
+
+
 @dataclass(frozen=True)
 class CapturedPreview:
     path: Path
     data: bytes
     twitch_user_id: str
+
+
+def peek_shared_preview(twitch_user_id: str) -> CapturedPreview | None:
+    """Return an already-cached capture without starting a new recording."""
+    uid = str(twitch_user_id or "").strip()
+    if not uid:
+        return None
+    hit = _shared_get(uid)
+    if hit is None:
+        return None
+    return CapturedPreview(path=hit.path, data=hit.data, twitch_user_id=uid)
+
+
+def build_thumbnail_placeholder_mp4(thumbnail_url: str) -> bytes | None:
+    """Muted H.264 MP4 from a still Helix thumbnail — same media type as live preview.
+
+    Used for instant first-send; background capture later replaces via editMessageMedia.
+    Needs ffmpeg only (not streamlink).
+    """
+    if not placeholder_preview_ready():
+        return None
+    url = str(thumbnail_url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return None
+    out_dir = preview_dir()
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.exception("Cannot create stream preview dir %s", out_dir)
+        return None
+    stem = f"placeholder_{int(time.time())}_{os.getpid()}"
+    img_path = out_dir / f"{stem}.jpg"
+    out_path = out_dir / f"{stem}.mp4"
+    try:
+        try:
+            import requests
+
+            resp = requests.get(url, timeout=12)
+            if resp.status_code != 200 or not resp.content:
+                logger.warning(
+                    "Thumbnail placeholder download failed status=%s",
+                    resp.status_code,
+                )
+                return None
+            img_path.write_bytes(resp.content)
+        except OSError:
+            logger.exception("Thumbnail placeholder write failed")
+            return None
+        except Exception as exc:
+            logger.warning("Thumbnail placeholder download error: %s", exc)
+            return None
+        # Short still → MP4 so send_animation/send_video keep a stable media type.
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-loop",
+            "1",
+            "-i",
+            str(img_path),
+            "-t",
+            "1.5",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-profile:v",
+            "baseline",
+            "-level",
+            "3.0",
+            "-preset",
+            "ultrafast",
+            "-threads",
+            "1",
+            "-vf",
+            "fps=10,scale=640:360:force_original_aspect_ratio=decrease,"
+            "pad=640:360:(ow-iw)/2:(oh-ih)/2",
+            "-movflags",
+            "+faststart",
+            str(out_path),
+        ]
+        try:
+            proc = _run_killable(cmd, timeout=45.0)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("Thumbnail placeholder ffmpeg failed: %s", exc)
+            return None
+        if proc.returncode != 0 or not out_path.is_file() or out_path.stat().st_size <= 0:
+            err = (proc.stderr or "")[:400]
+            logger.warning(
+                "Thumbnail placeholder ffmpeg failed code=%s: %s",
+                proc.returncode,
+                err,
+            )
+            return None
+        try:
+            data = out_path.read_bytes()
+        except OSError:
+            logger.exception("Failed to read placeholder MP4 %s", out_path)
+            return None
+        return data or None
+    finally:
+        _safe_unlink(img_path)
+        _safe_unlink(out_path)
 
 
 def capture_live_preview_mp4(

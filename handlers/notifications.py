@@ -761,8 +761,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         bot_data=context.application.bot_data,
                     )
             _phase("alerts")
-            # Stream preview MP4 capture (~30s+) runs in check_stream_previews —
-            # keeping it here overran the 60s interval and skipped ticks.
+            # Stream preview: first send uses a thumbnail placeholder MP4, then
+            # upgrades in the background; periodic refresh runs in check_stream_previews.
             persist_stream_poll_snapshot(db, context.application.bot_data)
             _phase("snapshot")
 
