@@ -107,6 +107,9 @@ def main() -> None:
     from .checks_release import run as check_release
 
     check_release()
+    from .checks_giveaways import run as check_giveaways
+
+    check_giveaways()
     print("ok")
 
 

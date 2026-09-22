@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 JOB_TWITCH_SYNC = "twitch_follows_sync"
 JOB_PREMIUM_TWITCH = "premium_twitch_refresh"
 JOB_DROPS = "drops_check"
+JOB_GIVEAWAYS = "giveaways_digest"
 JOB_SCHEDULE_REMINDERS = "schedule_reminders"
 JOB_FOLLOW_MONITOR = "follow_monitor_sync"
 JOB_CHECK_STREAMS = "check_streams"
@@ -87,6 +88,7 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
     from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
     from handlers.drops import check_drops
     from handlers.follow_monitor import sync_follow_monitors
+    from handlers.giveaways import check_giveaways_digest
     from handlers.notifications import check_schedule_reminders
     from handlers.stream_schedule import (
         VACATION_AUTO_JOB_NAME,
@@ -129,6 +131,14 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
         interval=max(900, CHECK_INTERVAL * 6),
         first=120,
         enabled=db.has_any_drops_work(),
+    )
+    ensure_repeating_job(
+        job_queue,
+        name=JOB_GIVEAWAYS,
+        callback=check_giveaways_digest,
+        interval=24 * 3600,
+        first=180,
+        enabled=db.has_any_giveaways_work(),
     )
     ensure_repeating_job(
         job_queue,

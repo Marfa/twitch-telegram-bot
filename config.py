@@ -121,6 +121,8 @@ FOLLOW_MONITOR_EVENTS_RETENTION_DAYS = int(
 DROP_SEEN_RETENTION_DAYS = int(os.getenv("DROP_SEEN_RETENTION_DAYS", "90"))
 CHAT_SEND_DAILY_RETENTION_DAYS = int(os.getenv("CHAT_SEND_DAILY_RETENTION_DAYS", "14"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
+# Optional: IsThereAnyDeal API key for game giveaways (https://isthereanydeal.com/apps/register/)
+ISTHEREANYDEAL_API_KEY = os.getenv("ISTHEREANYDEAL_API_KEY", "").strip()
 # Optional: YouTube Data API v3 key — multistream live checks for YouTube channels.
 # Create at https://console.cloud.google.com/ (enable YouTube Data API v3 → API key).
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()

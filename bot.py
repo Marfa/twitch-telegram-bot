@@ -457,6 +457,7 @@ from handlers.release_watch import (
     start_edit_release_platforms,
     start_release_wizard,
 )
+from handlers.giveaways import on_giveaways_callback
 
 from handlers.wizard import (
     _GATE_FEATURE_LABEL,
@@ -2909,7 +2910,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,
-                    pattern=r"^alert_type:(live|category|upcoming|end|drops|game|release)$",
+                    pattern=r"^alert_type:(live|category|upcoming|end|drops|game|release|giveaways)$",
                 ),
             ],
             PREMIUM_GATE: [
@@ -3655,6 +3656,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_drops_get_alerts, pattern=r"^drops_get:")
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_giveaways_callback, pattern=r"^gv:")
     )
 
     install_scheduler_visibility(app.job_queue)

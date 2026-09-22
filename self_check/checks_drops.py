@@ -45,6 +45,16 @@ def _check_drops_alert_type_keyboard_last() -> None:
     assert cbs[-3] == "alert_type:release"
     assert cbs[-2] == "alert_type:other"
     assert cbs[-1] == "alert_type:cancel"
+    with_gv = alert_type_keyboard(
+        "en", show_drops=True, show_release=True, show_giveaways=True
+    )
+    cbs_g = [b.callback_data for r in with_gv.inline_keyboard for b in r]
+    assert cbs_g[-6] == "alert_type:drops"
+    assert cbs_g[-5] == "alert_type:game"
+    assert cbs_g[-4] == "alert_type:release"
+    assert cbs_g[-3] == "alert_type:giveaways"
+    assert cbs_g[-2] == "alert_type:other"
+    assert cbs_g[-1] == "alert_type:cancel"
 
 
 def _check_drops_payload_and_migrate() -> None:

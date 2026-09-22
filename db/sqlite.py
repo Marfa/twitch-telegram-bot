@@ -21,6 +21,7 @@ from .models import (
     FollowMonitor,
     FollowMonitorEvent,
     FollowMonitorFollower,
+    GiveawaysPrefs,
     PremiumChannel,
     PremiumGift,
     PremiumPurchase,
@@ -765,6 +766,29 @@ class SqliteDatabase:
                 stream_id TEXT NOT NULL,
                 first_seen_at TEXT NOT NULL,
                 PRIMARY KEY (owner_id, subscription_id, stream_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS giveaways_prefs (
+                owner_id INTEGER PRIMARY KEY,
+                stores_json TEXT NOT NULL DEFAULT '[]',
+                platforms_json TEXT NOT NULL DEFAULT '[]',
+                digest_enabled INTEGER NOT NULL DEFAULT 0,
+                first_digest_sent INTEGER NOT NULL DEFAULT 0,
+                last_digest_at INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS giveaway_seen (
+                owner_id INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                external_id TEXT NOT NULL,
+                seen_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_id, source, external_id)
             )
             """
         )
@@ -5246,6 +5270,165 @@ class SqliteDatabase:
                 (owner_id,),
             )
 
+    @staticmethod
+    def _row_to_giveaways_prefs(row: Any) -> GiveawaysPrefs:
+        import json as _json
+
+        stores: list[str] = []
+        platforms: list[str] = []
+        try:
+            raw_s = _json.loads(str(row["stores_json"] or "[]"))
+            if isinstance(raw_s, list):
+                stores = [str(x) for x in raw_s if str(x)]
+        except Exception:
+            stores = []
+        try:
+            raw_p = _json.loads(str(row["platforms_json"] or "[]"))
+            if isinstance(raw_p, list):
+                platforms = [str(x) for x in raw_p if str(x)]
+        except Exception:
+            platforms = []
+        return GiveawaysPrefs(
+            owner_id=int(row["owner_id"]),
+            stores=stores,
+            platforms=platforms,
+            digest_enabled=bool(row["digest_enabled"]),
+            first_digest_sent=bool(row["first_digest_sent"]),
+            last_digest_at=int(row["last_digest_at"] or 0),
+        )
+
+    def get_giveaways_prefs(self, owner_id: int) -> GiveawaysPrefs | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM giveaways_prefs WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._row_to_giveaways_prefs(row)
+
+    def upsert_giveaways_prefs(
+        self,
+        owner_id: int,
+        *,
+        stores: list[str],
+        platforms: list[str],
+        digest_enabled: bool | None = None,
+        first_digest_sent: bool | None = None,
+        last_digest_at: int | None = None,
+    ) -> GiveawaysPrefs:
+        import json as _json
+
+        existing = self.get_giveaways_prefs(owner_id)
+        en = (
+            bool(digest_enabled)
+            if digest_enabled is not None
+            else (existing.digest_enabled if existing else False)
+        )
+        first = (
+            bool(first_digest_sent)
+            if first_digest_sent is not None
+            else (existing.first_digest_sent if existing else False)
+        )
+        last = (
+            int(last_digest_at)
+            if last_digest_at is not None
+            else (existing.last_digest_at if existing else 0)
+        )
+        stores_json = _json.dumps(list(stores), ensure_ascii=False)
+        platforms_json = _json.dumps(list(platforms), ensure_ascii=False)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO giveaways_prefs (
+                    owner_id, stores_json, platforms_json,
+                    digest_enabled, first_digest_sent, last_digest_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    stores_json = excluded.stores_json,
+                    platforms_json = excluded.platforms_json,
+                    digest_enabled = excluded.digest_enabled,
+                    first_digest_sent = excluded.first_digest_sent,
+                    last_digest_at = excluded.last_digest_at
+                """,
+                (owner_id, stores_json, platforms_json, int(en), int(first), last),
+            )
+        return GiveawaysPrefs(
+            owner_id=owner_id,
+            stores=list(stores),
+            platforms=list(platforms),
+            digest_enabled=en,
+            first_digest_sent=first,
+            last_digest_at=last,
+        )
+
+    def set_giveaways_digest_enabled(self, owner_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO giveaways_prefs (owner_id, digest_enabled)
+                VALUES (?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET digest_enabled = excluded.digest_enabled
+                """,
+                (owner_id, int(bool(enabled))),
+            )
+
+    def list_giveaways_digest_owner_ids(self) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT owner_id FROM giveaways_prefs
+                WHERE digest_enabled = 1
+                  AND stores_json != '[]'
+                  AND platforms_json != '[]'
+                """
+            ).fetchall()
+        return [int(r["owner_id"]) for r in rows]
+
+    def has_any_giveaways_work(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM giveaways_prefs
+                WHERE digest_enabled = 1
+                  AND stores_json != '[]'
+                  AND platforms_json != '[]'
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+
+    def has_seen_giveaway(
+        self, owner_id: int, source: str, external_id: str
+    ) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM giveaway_seen
+                WHERE owner_id = ? AND source = ? AND external_id = ?
+                """,
+                (owner_id, source, external_id),
+            ).fetchone()
+        return row is not None
+
+    def mark_giveaway_seen(
+        self,
+        owner_id: int,
+        source: str,
+        external_id: str,
+        *,
+        seen_at: int,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO giveaway_seen (
+                    owner_id, source, external_id, seen_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (owner_id, source, external_id, int(seen_at)),
+            )
+
     def get_donationalerts_auth(self, owner_id: int) -> DonationAlertsAuth | None:
         from token_crypto import decrypt_secret
 
@@ -6919,6 +7102,35 @@ class SqliteDatabase:
             if gid not in out:
                 out[gid] = str(r["name"]).strip()
         return out
+
+    def igdb_publisher_developer_names(self, game_id: int) -> tuple[str, str]:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return ("", "")
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT c.name, i.is_publisher, i.is_developer
+                FROM igdb_involved i
+                JOIN igdb_companies c ON c.id = i.company_id
+                WHERE i.game_id = ?
+                  AND (i.is_publisher = 1 OR i.is_developer = 1)
+                  AND TRIM(c.name) != ''
+                ORDER BY i.is_publisher DESC, c.name COLLATE NOCASE ASC
+                """,
+                (gid,),
+            ).fetchall()
+        pubs: list[str] = []
+        devs: list[str] = []
+        for r in rows:
+            name = str(r["name"] or "").strip()
+            if not name:
+                continue
+            if int(r["is_publisher"] or 0) and name not in pubs:
+                pubs.append(name)
+            if int(r["is_developer"] or 0) and name not in devs:
+                devs.append(name)
+        return (", ".join(pubs), ", ".join(devs))
 
     def igdb_company_labels_for_twitch_uids(
         self, twitch_uids: list[str]

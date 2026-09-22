@@ -675,6 +675,16 @@ class DropsAuth:
 
 
 @dataclass
+class GiveawaysPrefs:
+    owner_id: int
+    stores: list[str]
+    platforms: list[str]
+    digest_enabled: bool = False
+    first_digest_sent: bool = False
+    last_digest_at: int = 0
+
+
+@dataclass
 class DonationAlertsAuth:
     owner_id: int
     da_user_id: str
