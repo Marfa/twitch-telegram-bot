@@ -280,6 +280,23 @@ async def _smoke_schedule(db) -> None:
     ]
     assert parse_stream_schedule_slots("bad") is None
 
+    from handlers.stream_schedule import clamp_schedule_slot_durations
+
+    # 15:00 + 17:00 with 3h → first ends at 17:00 (120), second keeps 180
+    assert clamp_schedule_slot_durations(
+        [("2026-09-23", "15:00"), ("2026-09-23", "17:00")], 180
+    ) == [120, 180]
+    assert clamp_schedule_slot_durations(
+        [("2026-09-23", "17:00"), ("2026-09-23", "15:00")], 180
+    ) == [180, 120]
+    assert clamp_schedule_slot_durations(
+        [("2026-09-23", "15:00"), ("2026-09-24", "17:00")], 180
+    ) == [180, 180]
+    assert clamp_schedule_slot_durations(
+        [("2026-09-23", "15:00"), ("2026-09-23", "16:00"), ("2026-09-23", "17:00")],
+        180,
+    ) == [60, 60, 180]
+
     application, bot = _app(db)
     day = date.today()
     update = _msg_update(_FREE_UID, "15:30 Just Chatting\n18:40 Deponia")

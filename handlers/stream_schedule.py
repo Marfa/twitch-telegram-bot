@@ -214,6 +214,39 @@ def parse_stream_schedule_slots(raw: str) -> list[tuple[str, str]] | None:
     return out
 
 
+def _slot_minutes_of_day(time_str: str) -> int:
+    hour, minute = (int(x) for x in str(time_str).split(":", 1))
+    return hour * 60 + minute
+
+
+def clamp_schedule_slot_durations(
+    slots: list[tuple[str, str]],
+    duration_min: int,
+) -> list[int]:
+    """Per-slot duration, aligned with `slots` order.
+
+    Same-day earlier slots are shortened so they end at the next slot start
+    (Twitch rejects / deletes overlapping segments). Last slot of the day keeps
+    the chosen duration.
+    """
+    chosen = max(1, int(duration_min))
+    n = len(slots)
+    if n == 0:
+        return []
+    out = [chosen] * n
+    by_date: dict[str, list[tuple[int, int]]] = {}
+    for idx, (day, time_str) in enumerate(slots):
+        by_date.setdefault(str(day), []).append((idx, _slot_minutes_of_day(time_str)))
+    for group in by_date.values():
+        group.sort(key=lambda item: item[1])
+        for i, (idx, start) in enumerate(group):
+            if i + 1 >= len(group):
+                continue
+            gap = group[i + 1][1] - start
+            out[idx] = max(1, min(chosen, gap)) if gap > 0 else 1
+    return out
+
+
 def _stream_schedule_show_finish(context: ContextTypes.DEFAULT_TYPE) -> bool:
     dates = context.user_data.get("stream_schedule_dates", [])
     index = int(context.user_data.get("stream_schedule_index", 0))
@@ -1748,6 +1781,15 @@ async def _complete_schedule_publish(
     errors: list[str] = []
     prefer_recurring = False
     used_recurring_fallback = False
+    # Clamp shared duration so same-day siblings do not overlap (Twitch would
+    # delete the earlier segment on create retry). Updates + creates together.
+    publish_items = list(updates) + list(entries)
+    clamped = clamp_schedule_slot_durations(
+        [(str(item.get("date") or ""), str(item.get("time") or "0:00")) for item in publish_items],
+        duration_min,
+    )
+    update_durations = clamped[: len(updates)]
+    entry_durations = clamped[len(updates) :]
     for del_id in deletes:
         try:
             await asyncio.to_thread(
@@ -1759,7 +1801,7 @@ async def _complete_schedule_publish(
             ok_count += 1
         except Exception as exc:
             errors.append(_schedule_publish_error_text(exc, "", lang))
-    for upd in updates:
+    for upd, slot_duration in zip(updates, update_durations):
         start_iso, game_text, category_id = _start_and_category(upd)
         try:
             _, recurring = twitch.update_schedule_segment_with_overlap_replace(
@@ -1768,7 +1810,7 @@ async def _complete_schedule_publish(
                 str(upd["id"]),
                 start_time=start_iso,
                 timezone=tz_name,
-                duration=duration_min,
+                duration=slot_duration,
                 title=game_text or "",
                 category_id=category_id,
             )
@@ -1777,7 +1819,7 @@ async def _complete_schedule_publish(
             ok_count += 1
         except Exception as exc:
             errors.append(_schedule_publish_error_text(exc, str(upd.get("date") or ""), lang))
-    for entry in entries:
+    for entry, slot_duration in zip(entries, entry_durations):
         start_iso, game_text, category_id = _start_and_category(entry)
         try:
             # Partner/Affiliate → one-off; else Twitch 403 → weekly recurring fallback.
@@ -1786,7 +1828,7 @@ async def _complete_schedule_publish(
                 twitch_user_id,
                 start_time=start_iso,
                 timezone=tz_name,
-                duration=duration_min,
+                duration=slot_duration,
                 title=game_text or "",
                 category_id=category_id,
                 prefer_recurring=prefer_recurring,
