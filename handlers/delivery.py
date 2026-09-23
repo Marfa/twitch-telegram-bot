@@ -727,6 +727,20 @@ async def _maybe_notify_delivery_failure(
         )
 
 
+def _is_message_already_gone_delete_error(exc: BaseException) -> bool:
+    """True when Telegram says the target message is already missing (e.g. deleted by hand)."""
+    err = str(exc).lower()
+    return any(
+        token in err
+        for token in (
+            "message to delete not found",
+            "message not found",
+            "message can't be found",
+            "message_id_invalid",
+        )
+    )
+
+
 async def _maybe_notify_delete_fail(
     bot,
     db: Database,
@@ -768,6 +782,9 @@ async def _delete_one_previous_message(
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
         return True
     except (BadRequest, Forbidden) as exc:
+        # Already gone (manual delete, race, purge) — treat as cleaned up, do not notify.
+        if _is_message_already_gone_delete_error(exc):
+            return True
         logger.warning(
             "Cannot delete message %s in %s: %s",
             message_id,

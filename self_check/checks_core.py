@@ -84,7 +84,7 @@ from db import (
 )
 from i18n import SUPPORTED_LOCALES, btn, format_duration_hm, t as tr
 from health import create_pending_login_state, parse_posthog_issue_payload, pop_pending_login_state
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 from premium import FEATURE_IDS
 from telegram import LinkPreviewOptions, Message
 
@@ -921,6 +921,20 @@ def check_core() -> None:
     )
     assert not _is_unchanged_message_edit(BadRequest("Chat not found"))
     assert not _is_unchanged_message_edit(RuntimeError("not modified"))
+    from handlers.delivery import _is_message_already_gone_delete_error
+
+    assert _is_message_already_gone_delete_error(
+        BadRequest("Message to delete not found")
+    )
+    assert _is_message_already_gone_delete_error(
+        BadRequest("Bad Request: message not found")
+    )
+    assert not _is_message_already_gone_delete_error(
+        BadRequest("Message can't be deleted")
+    )
+    assert not _is_message_already_gone_delete_error(
+        Forbidden("not enough rights to delete")
+    )
     assert _is_stale_callback_query(
         BadRequest(
             "Query is too old and response timeout expired or query id is invalid"
