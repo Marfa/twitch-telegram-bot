@@ -1467,6 +1467,12 @@ def check_handlers() -> None:
             _fake_sub(),
         ]
     ) == ["live", "category", "end"]
+    assert _edit_present_types(
+        [
+            _fake_sub(giveaway_watch_prefs='{"igdb_game_id":1,"game_name":"X"}'),
+            _fake_sub(),
+        ]
+    ) == ["live", "giveaway_watch"]
 
     import beta as beta_mod
     from premium import ensure_trial_expired, has_feature_sync

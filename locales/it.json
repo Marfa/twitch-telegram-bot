@@ -1199,7 +1199,7 @@
   "premium_pay_surcharge_note": "Include {stars} ⭐ per i giorni usati dopo un rimborso precedente.",
   "giveaways_btn_watch": "Avvisa del giveaway",
   "giveaways_btn_back": "Indietro",
-  "alert_type_giveaway_watch": "Avviso giveaway",
+  "alert_type_giveaway_watch": "Giveaway di giochi",
   "sub_list_alert_giveaway_watch": "• Avviso: giveaway di gioco",
   "sub_list_giveaway_watch_platforms": "• Piattaforme: {platforms}",
   "sub_list_giveaway_watch_any_platform": "• Piattaforme: qualsiasi",
@@ -1216,5 +1216,6 @@
   "giveaway_watch_no_platforms": "Nessuna piattaforma IGDB per questo gioco. Usa «Qualsiasi piattaforma» in creazione.",
   "giveaway_watch_default_template": "🎁 Giveaway gratuito: {game}",
   "giveaway_watch_notify": "🎁 <b>{game}</b> è gratis ora ({store}).\n{claim}",
-  "giveaway_watch_paused_note": "⏸ L’avviso giveaway è in pausa."
+  "giveaway_watch_paused_note": "⏸ L’avviso giveaway è in pausa.",
+  "giveaway_watch_type_change_unsupported": "Il tipo di avviso giveaway non può essere cambiato verso/da un altro tipo."
 }

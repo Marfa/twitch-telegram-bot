@@ -1199,7 +1199,7 @@
   "premium_pay_surcharge_note": "Включно з доплатою {stars} ⭐ за використані дні після повернення.",
   "giveaways_btn_watch": "Сповістити про роздачу",
   "giveaways_btn_back": "Назад",
-  "alert_type_giveaway_watch": "Сповіщення про роздачу",
+  "alert_type_giveaway_watch": "Роздачі ігор",
   "sub_list_alert_giveaway_watch": "• Сповіщення: роздача гри",
   "sub_list_giveaway_watch_platforms": "• Платформи: {platforms}",
   "sub_list_giveaway_watch_any_platform": "• Платформи: будь-які",
@@ -1216,5 +1216,6 @@
   "giveaway_watch_no_platforms": "У гри немає платформ в IGDB. При створенні оберіть «Будь-яка платформа».",
   "giveaway_watch_default_template": "🎁 Безкоштовна роздача: {game}",
   "giveaway_watch_notify": "🎁 <b>{game}</b> зараз безкоштовна ({store}).\n{claim}",
-  "giveaway_watch_paused_note": "⏸ Сповіщення про роздачу поставлено на паузу."
+  "giveaway_watch_paused_note": "⏸ Сповіщення про роздачу поставлено на паузу.",
+  "giveaway_watch_type_change_unsupported": "Тип «Сповіщення про роздачу» не можна змінити на інший (і навпаки)."
 }

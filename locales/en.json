@@ -1199,7 +1199,7 @@
   "premium_pay_surcharge_note": "Includes {stars} ⭐ for days used after a prior refund.",
   "giveaways_btn_watch": "Notify about giveaway",
   "giveaways_btn_back": "Back",
-  "alert_type_giveaway_watch": "Giveaway watch",
+  "alert_type_giveaway_watch": "Game giveaways",
   "sub_list_alert_giveaway_watch": "• Alert: game giveaway",
   "sub_list_giveaway_watch_platforms": "• Platforms: {platforms}",
   "sub_list_giveaway_watch_any_platform": "• Platforms: any",
@@ -1216,5 +1216,6 @@
   "giveaway_watch_no_platforms": "No IGDB platforms found for this game. Use «Any platform» when creating.",
   "giveaway_watch_default_template": "🎁 Free giveaway: {game}",
   "giveaway_watch_notify": "🎁 <b>{game}</b> is free now ({store}).\n{claim}",
-  "giveaway_watch_paused_note": "⏸ This giveaway watch is now paused."
+  "giveaway_watch_paused_note": "⏸ This giveaway watch is now paused.",
+  "giveaway_watch_type_change_unsupported": "Giveaway watch type cannot be changed to/from another type."
 }

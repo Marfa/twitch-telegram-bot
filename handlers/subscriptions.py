@@ -1233,6 +1233,7 @@ _EDIT_ALERT_TYPE_ORDER = (
     "drops",
     "game",
     "release",
+    "giveaway_watch",
 )
 
 
@@ -4839,11 +4840,12 @@ def _alert_type_label(kind: str, lang: str) -> str:
 
 
 def _other_alert_types(current: str) -> list[str]:
-    # Drops / game / release need a game id — change/copy type cannot create them.
+    # Drops / game / release / giveaway-watch need a game id — change/copy type cannot create them.
     return [
         kind
         for kind in _EDIT_ALERT_TYPE_ORDER
-        if kind != current and kind not in ("drops", "game", "release")
+        if kind != current
+        and kind not in ("drops", "game", "release", "giveaway_watch")
     ]
 
 
@@ -4921,6 +4923,8 @@ async def _alert_type_allowed(
         return "game_type"
     if new_type == "release" or _alert_type_from_sub(sub) == "release":
         return "release_type"
+    if new_type == "giveaway_watch" or _alert_type_from_sub(sub) == "giveaway_watch":
+        return "giveaway_watch_type"
     feature = "alert_types"
     if not await prem.has_feature(
         bot, db, owner_id, feature, channel=sub.twitch_username
@@ -5154,6 +5158,11 @@ async def on_edit_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if block == "release_type":
         await query.edit_message_text(t("release_type_change_unsupported", lang))
+        return
+    if block == "giveaway_watch_type":
+        await query.edit_message_text(
+            t("giveaway_watch_type_change_unsupported", lang)
+        )
         return
 
     snapshot = migrate_sub_fields_for_alert_type(
