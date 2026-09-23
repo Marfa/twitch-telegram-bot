@@ -551,6 +551,31 @@ def check_core() -> None:
         assert 42 in bot_data.get("stream_preview_refresh_at", {})
 
     _asyncio.run(_preview_upgrade_edits_same_type())
+
+    # Transient edit failures must not permanent-skip (sibling chats would freeze).
+    from telegram.error import BadRequest as _BadRequest
+
+    assert _sp._is_permanent_preview_edit_failure(
+        _BadRequest("There is no media in the message to edit")
+    )
+    assert _sp._is_permanent_preview_edit_failure(
+        _BadRequest("Wrong type of the web page content")
+    )
+    assert not _sp._is_permanent_preview_edit_failure(
+        _BadRequest("Message to edit not found")
+    )
+    assert not _sp._is_permanent_preview_edit_failure(
+        _BadRequest("Message_id_invalid")
+    )
+    assert not _sp._is_permanent_preview_edit_failure(
+        _BadRequest("Message is not modified")
+    )
+
+    _bd_skip: dict = {}
+    _sp._preview_skip_set(_bd_skip).add(767)
+    _sp._clear_preview_skip(_bd_skip, 767)
+    assert 767 not in _sp._preview_skip_set(_bd_skip)
+
     assert live_streams_from_poll_snapshot({}) == {}
     assert live_streams_from_poll_snapshot(
         {

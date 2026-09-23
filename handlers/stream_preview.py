@@ -197,6 +197,42 @@ def _preview_skip_set(bot_data: dict[str, Any]) -> set[int]:
     return skip
 
 
+def _clear_preview_skip(bot_data: dict[str, Any] | None, sub_id: int) -> None:
+    """Allow refresh again after a successful edit (or a recovered mid)."""
+    if bot_data is None:
+        return
+    skip = bot_data.get(_BOT_DATA_SKIP_KEY)
+    if isinstance(skip, set):
+        skip.discard(int(sub_id))
+
+
+def _is_permanent_preview_edit_failure(exc: BaseException) -> bool:
+    """True only for media-type / structure errors that will keep failing until stream end.
+
+    Transient races (placeholder upgrade vs refresh, delete_previous, wrong mid)
+    often look like \"message to edit not found\" — those must NOT permanent-skip,
+    or sibling chats for the same streamer stop refreshing for the rest of the stream.
+    """
+    err = str(exc).lower()
+    if not err:
+        return False
+    if (
+        "message to edit not found" in err
+        or "message_id_invalid" in err
+        or "message is not modified" in err
+        or "message can't be found" in err
+    ):
+        return False
+    return (
+        "there is no media" in err
+        or "wrong type of the web page content" in err
+        or "wrong type" in err
+        or "media type" in err
+        or "can't edit" in err
+        or "cannot edit" in err
+    )
+
+
 def live_streams_from_poll_snapshot(bot_data: dict[str, Any]) -> dict[str, dict]:
     """Build Helix-shaped live map from the last check_streams poll (no extra Helix call)."""
     last_live = bot_data.get("last_live") or {}
@@ -262,8 +298,9 @@ async def refresh_live_stream_previews(
     Missing refresh timestamps (e.g. after deploy) are treated as due so already-sent
     messages keep updating.
 
-    If edit fails for a video preview (e.g. message stored as Video), stop further
-    refresh attempts for that subscription until the stream ends — do not delete/resend.
+    If edit fails with a hard media-type error, stop further refresh attempts for
+    that subscription until the stream ends — do not delete/resend. Transient
+    errors (e.g. message not found during upgrade race) are retried next tick.
     """
     from config import STREAM_PREVIEW_REFRESH_SECONDS
     import premium as prem
@@ -596,13 +633,20 @@ async def _edit_preview_media(
             mid,
             kind,
         )
+        _clear_preview_skip(bot_data, int(sub.id))
         return True
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
         return False
     except (BadRequest, Forbidden) as exc:
-        # Wrong media type (e.g. Animation↔Video) — stop retrying until stream ends.
-        if is_stream_capture_preview_image(sub.image_file_id) and bot_data is not None:
+        # Permanent skip only for hard media-type failures (e.g. Animation↔Video).
+        # "Message to edit not found" is often a race with placeholder upgrade /
+        # delete_previous — skipping would freeze sibling chats for the whole stream.
+        if (
+            is_stream_capture_preview_image(sub.image_file_id)
+            and bot_data is not None
+            and _is_permanent_preview_edit_failure(exc)
+        ):
             _preview_skip_set(bot_data).add(int(sub.id))
             logger.info(
                 "Stream preview refresh stopped for sub=%s chat=%s (uneditable media): %s",
