@@ -470,6 +470,13 @@ def check_db_premium() -> None:
             if r.owner_id == 99
         ]
         assert len(due_bad) == 1 and due_bad[0].refresh_token == ""
+        # Due path clears corrupt blob + marks needs_reauth (no re-log on next poll).
+        with db._conn() as conn:
+            cleared = conn.execute(
+                "SELECT refresh_token, needs_reauth FROM twitch_sync WHERE owner_id = ?",
+                (99,),
+            ).fetchone()
+        assert cleared["refresh_token"] == "" and bool(cleared["needs_reauth"]) is True
         bad = db.get_twitch_sync(99)
         assert bad is not None and bad.needs_reauth is True and bad.refresh_token == ""
         assert db.delete_twitch_sync(99) is True
@@ -554,6 +561,16 @@ def check_db_premium() -> None:
 
         src = inspect.getsource(ensure_repeating_job)
         assert "coalesce" in src and "misfire_grace_time" in src
+        from handlers import notifications as notif_mod
+
+        notif_src = Path(notif_mod.__file__).read_text(encoding="utf-8")
+        assert "def schedule_alert_run_once" in notif_src
+        assert notif_src.count("schedule_alert_run_once(") >= 6
+        # Only the helper may call JobQueue.run_once for alert delays.
+        assert notif_src.count("job_queue.run_once(") == 1
+        assert "def restore_pending_alert_jobs" in notif_src
+        assert "pending_alert_jobs" in Path("db/sqlite.py").read_text(encoding="utf-8")
+        assert "restore_pending_alert_jobs" in Path("bot.py").read_text(encoding="utf-8")
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")

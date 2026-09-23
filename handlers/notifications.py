@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from telegram.error import BadRequest, Forbidden
-from telegram.ext import ContextTypes
+from telegram.ext import Application, ContextTypes
 
 from bot_helpers import _user_notifications_paused
 from db import (
@@ -45,6 +45,12 @@ CATEGORY_WATCH_COOLDOWN_MINUTES_MAX = 24 * 60
 LIVE_GAME_RECHECK_SECONDS = 20
 # Multistream: if secondary platforms are offline, wait then send anyway.
 MULTISTREAM_WAIT_SECONDS = 15 * 60
+
+ALERT_JOB_LIVE = "live"
+ALERT_JOB_END = "end"
+ALERT_JOB_CATEGORY = "category"
+ALERT_JOB_MULTISTREAM = "multistream"
+ALERT_JOB_LIVE_GAME = "live_game"
 
 
 async def _should_skip_ignored_alert(
@@ -128,6 +134,64 @@ async def _multistream_gate_ok(sub) -> bool:
     return await asyncio.to_thread(ms.all_channels_online, channels)
 
 
+def schedule_alert_run_once(
+    job_queue,
+    callback,
+    *,
+    when: float,
+    data: dict | None,
+    name: str,
+    replace_existing: bool = False,
+    db: Database | None = None,
+    kind: str | None = None,
+) -> None:
+    """Schedule a one-shot alert job that survives stalls and process restarts.
+
+    Default APScheduler misfire grace is ~1s, so a busy poll tick can emit
+    EVENT_JOB_MISSED and drop the delayed live/end/category send. Grace at
+    least the delay window keeps a late tick delivering instead of skipping.
+    Stable ``id`` (= name) also makes misfire logs identifiable.
+
+    When ``db`` + ``kind`` are set, the job is persisted so a container
+    recreate can restore it in ``restore_pending_alert_jobs``.
+    """
+    if job_queue is None:
+        return
+    delay = max(0.0, float(when))
+    grace = max(120, int(delay) + 60)
+    payload = dict(data or {})
+    if db is not None and kind:
+        due = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        db.upsert_pending_alert_job(
+            name,
+            kind=kind,
+            sub_id=int(payload.get("sub_id") or 0),
+            due_at=due.isoformat(),
+            payload=payload,
+        )
+    job_queue.run_once(
+        callback,
+        when=delay,
+        data=payload,
+        name=name,
+        job_kwargs={
+            "id": name,
+            "replace_existing": replace_existing,
+            "misfire_grace_time": grace,
+            "coalesce": True,
+        },
+    )
+
+
+def _consume_pending_alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database | None = context.application.bot_data.get("db")
+    if db is None or context.job is None:
+        return
+    name = getattr(context.job, "name", None) or getattr(context.job, "id", None)
+    if name:
+        db.delete_pending_alert_job(str(name))
+
+
 def _schedule_multistream_wait(
     context: ContextTypes.DEFAULT_TYPE,
     *,
@@ -137,6 +201,7 @@ def _schedule_multistream_wait(
     """Defer live send until MULTISTREAM_WAIT_SECONDS, then force-send if still live."""
     name = f"multistream_{sub_id}"
     jq = context.job_queue
+    db: Database = context.application.bot_data["db"]
     if jq is None:
         return
     try:
@@ -144,7 +209,9 @@ def _schedule_multistream_wait(
             job.schedule_removal()
     except Exception:
         pass
-    jq.run_once(
+    db.delete_pending_alert_job(name)
+    schedule_alert_run_once(
+        jq,
         _send_delayed_notification,
         when=MULTISTREAM_WAIT_SECONDS,
         data={
@@ -154,6 +221,9 @@ def _schedule_multistream_wait(
             "multistream_force": True,
         },
         name=name,
+        replace_existing=True,
+        db=db,
+        kind=ALERT_JOB_MULTISTREAM,
     )
     logger.info(
         "Multistream wait %ss for sub=%s — will send even if platforms stay offline",
@@ -166,13 +236,20 @@ def delayed_live_job_name(sub_id: int) -> str:
     return f"delay_{int(sub_id)}"
 
 
-def has_pending_named_jobs(job_queue, name: str) -> bool:
-    if job_queue is None:
-        return False
-    try:
-        return bool(job_queue.get_jobs_by_name(name))
-    except Exception:
-        return False
+def delayed_end_job_name(sub_id: int) -> str:
+    return f"delay_end_{int(sub_id)}"
+
+
+def has_pending_named_jobs(job_queue, name: str, *, db: Database | None = None) -> bool:
+    if job_queue is not None:
+        try:
+            if job_queue.get_jobs_by_name(name):
+                return True
+        except Exception:
+            pass
+    if db is not None and db.has_pending_alert_job(name):
+        return True
+    return False
 
 
 def schedule_delayed_live_notification(
@@ -181,25 +258,79 @@ def schedule_delayed_live_notification(
     sub_id: int,
     stream_id: str,
     delay_minutes: int,
+    db: Database | None = None,
 ) -> bool:
     """Arm one delayed live send for the first edge; ignore later stream_id changes until it fires."""
     if job_queue is None or int(delay_minutes or 0) <= 0:
         return False
     name = delayed_live_job_name(sub_id)
-    if has_pending_named_jobs(job_queue, name):
+    if has_pending_named_jobs(job_queue, name, db=db):
         return False
-    job_queue.run_once(
+    schedule_alert_run_once(
+        job_queue,
         _send_delayed_notification,
         when=int(delay_minutes) * 60,
         data={"sub_id": sub_id, "stream_id": stream_id},
         name=name,
+        db=db,
+        kind=ALERT_JOB_LIVE,
     )
     return True
+
+
+def restore_pending_alert_jobs(application: Application) -> int:
+    """Re-arm delayed alert jobs after process restart. Returns restored count."""
+    db: Database | None = application.bot_data.get("db")
+    jq = application.job_queue
+    if db is None or jq is None:
+        return 0
+    kind_cb = {
+        ALERT_JOB_LIVE: _send_delayed_notification,
+        ALERT_JOB_END: _send_delayed_end_notification,
+        ALERT_JOB_CATEGORY: _send_delayed_category_notification,
+        ALERT_JOB_MULTISTREAM: _send_delayed_notification,
+        ALERT_JOB_LIVE_GAME: _send_delayed_notification,
+    }
+    now = datetime.now(timezone.utc)
+    restored = 0
+    for row in db.list_pending_alert_jobs():
+        callback = kind_cb.get(row.kind)
+        if callback is None:
+            logger.warning("Dropping unknown pending alert job kind=%s", row.kind)
+            db.delete_pending_alert_job(row.job_name)
+            continue
+        try:
+            due = datetime.fromisoformat(row.due_at.replace("Z", "+00:00"))
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+        except ValueError:
+            due = now
+        when = max(0.0, (due - now).total_seconds())
+        # Already in queue (e.g. double restore) — keep DB row, skip re-add.
+        if has_pending_named_jobs(jq, row.job_name):
+            continue
+        payload = dict(row.payload or {})
+        payload.setdefault("sub_id", row.sub_id)
+        schedule_alert_run_once(
+            jq,
+            callback,
+            when=when,
+            data=payload,
+            name=row.job_name,
+            replace_existing=True,
+            db=db,
+            kind=row.kind,
+        )
+        restored += 1
+    if restored:
+        logger.info("Restored %s pending alert delay job(s)", restored)
+    return restored
 
 
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _render_sub_template
 
+    _consume_pending_alert_job(context)
     job_data = context.job.data or {}
     sub_id = job_data["sub_id"]
     silent_offline = bool(job_data.get("silent_offline"))
@@ -273,6 +404,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
 async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _render_sub_template
 
+    _consume_pending_alert_job(context)
     job_data = context.job.data or {}
     sub_id = job_data["sub_id"]
     db: Database = context.application.bot_data["db"]
@@ -324,6 +456,7 @@ async def _send_delayed_category_notification(
 ) -> None:
     from bot import _render_sub_template
 
+    _consume_pending_alert_job(context)
     sub_id = context.job.data["sub_id"]
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
@@ -578,11 +711,15 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         }
                         if end_stream:
                             delay_data["stream_snapshot"] = dict(end_stream)
-                        context.job_queue.run_once(
+                        schedule_alert_run_once(
+                            context.job_queue,
                             _send_delayed_end_notification,
                             when=sub.delay_minutes * 60,
                             data=delay_data,
-                            name=f"delay_end_{sub.id}",
+                            name=delayed_end_job_name(sub.id),
+                            replace_existing=True,
+                            db=db,
+                            kind=ALERT_JOB_END,
                         )
                         continue
                     text = _render_sub_template(
@@ -631,11 +768,13 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                             sub_id=sub.id,
                             stream_id=stream_id,
                             delay_minutes=sub.delay_minutes,
+                            db=db,
                         )
                         continue
                     # Helix often returns empty game_name for a few seconds after go-live.
                     if needs_live_game_recheck(game, sub.delay_minutes):
-                        context.job_queue.run_once(
+                        schedule_alert_run_once(
+                            context.job_queue,
                             _send_delayed_notification,
                             when=LIVE_GAME_RECHECK_SECONDS,
                             data={
@@ -644,6 +783,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 "stream_id": stream_id,
                             },
                             name=f"live_game_{sub.id}",
+                            replace_existing=True,
+                            db=db,
+                            kind=ALERT_JOB_LIVE_GAME,
                         )
                         continue
                     if not await _multistream_gate_ok(sub):
@@ -694,11 +836,15 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         }
                         if end_stream:
                             delay_data["stream_snapshot"] = dict(end_stream)
-                        context.job_queue.run_once(
+                        schedule_alert_run_once(
+                            context.job_queue,
                             _send_delayed_end_notification,
                             when=sub.delay_minutes * 60,
                             data=delay_data,
-                            name=f"delay_end_{sub.id}",
+                            name=delayed_end_job_name(sub.id),
+                            replace_existing=True,
+                            db=db,
+                            kind=ALERT_JOB_END,
                         )
                         continue
                     text = _render_sub_template(
@@ -744,7 +890,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         continue
                     if sub.delay_minutes > 0:
                         game_id = str(stream.get("game_id") or "")
-                        context.job_queue.run_once(
+                        schedule_alert_run_once(
+                            context.job_queue,
                             _send_delayed_category_notification,
                             when=sub.delay_minutes * 60,
                             data={
@@ -753,6 +900,9 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 "vod_offset_seconds": _vod_offset_seconds(stream),
                             },
                             name=f"delay_cat_{sub.id}_{game_id}",
+                            replace_existing=True,
+                            db=db,
+                            kind=ALERT_JOB_CATEGORY,
                         )
                         continue
                     text = _render_sub_template(

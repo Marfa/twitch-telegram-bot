@@ -1311,6 +1311,24 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS pending_alert_jobs (
+                    job_name TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    sub_id BIGINT NOT NULL,
+                    due_at TIMESTAMPTZ NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_pending_alert_jobs_due
+                ON pending_alert_jobs(due_at)
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS premium_gifts (
                     token TEXT PRIMARY KEY,
                     buyer_id BIGINT NOT NULL,
@@ -4702,6 +4720,12 @@ class PostgresDatabase:
         plain = try_decrypt_secret(sync.refresh_token)
         if plain is None:
             self.set_twitch_sync_needs_reauth(owner_id, True)
+            with self._conn() as conn:
+                cur = self._cursor(conn)
+                cur.execute(
+                    "UPDATE twitch_sync SET refresh_token = '' WHERE owner_id = %s",
+                    (owner_id,),
+                )
             sync.refresh_token = ""
             sync.needs_reauth = True
             return sync
@@ -4776,8 +4800,18 @@ class PostgresDatabase:
         for r in rows:
             sync = _row_to_twitch_sync(r)
             plain = try_decrypt_secret(sync.refresh_token)
-            # Undecryptable → empty token; sync job marks needs_reauth + notifies.
-            sync.refresh_token = "" if plain is None else plain
+            if plain is None:
+                self.set_twitch_sync_needs_reauth(sync.owner_id, True)
+                with self._conn() as conn:
+                    cur = self._cursor(conn)
+                    cur.execute(
+                        "UPDATE twitch_sync SET refresh_token = '' WHERE owner_id = %s",
+                        (sync.owner_id,),
+                    )
+                sync.refresh_token = ""
+                sync.needs_reauth = True
+            else:
+                sync.refresh_token = plain
             out.append(sync)
         return out
 
@@ -7083,6 +7117,91 @@ class PostgresDatabase:
         except Exception:
             return None
         return data if isinstance(data, dict) else None
+
+    def upsert_pending_alert_job(
+        self,
+        job_name: str,
+        *,
+        kind: str,
+        sub_id: int,
+        due_at: str,
+        payload: dict | None = None,
+    ) -> None:
+        name = (job_name or "").strip()
+        if not name:
+            return
+        blob = json.dumps(payload or {}, ensure_ascii=False, default=str)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO pending_alert_jobs (
+                    job_name, kind, sub_id, due_at, payload_json
+                ) VALUES (%s, %s, %s, %s::timestamptz, %s)
+                ON CONFLICT (job_name) DO UPDATE SET
+                    kind = EXCLUDED.kind,
+                    sub_id = EXCLUDED.sub_id,
+                    due_at = EXCLUDED.due_at,
+                    payload_json = EXCLUDED.payload_json
+                """,
+                (name, kind, int(sub_id), due_at, blob),
+            )
+
+    def delete_pending_alert_job(self, job_name: str) -> None:
+        name = (job_name or "").strip()
+        if not name:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM pending_alert_jobs WHERE job_name = %s",
+                (name,),
+            )
+
+    def has_pending_alert_job(self, job_name: str) -> bool:
+        name = (job_name or "").strip()
+        if not name:
+            return False
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT 1 FROM pending_alert_jobs WHERE job_name = %s LIMIT 1",
+                (name,),
+            )
+            return cur.fetchone() is not None
+
+    def list_pending_alert_jobs(self) -> list:
+        from db.models import PendingAlertJob
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT job_name, kind, sub_id, due_at, payload_json
+                FROM pending_alert_jobs
+                ORDER BY due_at
+                """
+            )
+            rows = cur.fetchall()
+        out: list[PendingAlertJob] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            due = row["due_at"]
+            out.append(
+                PendingAlertJob(
+                    job_name=str(row["job_name"]),
+                    kind=str(row["kind"] or ""),
+                    sub_id=int(row["sub_id"] or 0),
+                    due_at=due.isoformat() if hasattr(due, "isoformat") else str(due),
+                    payload=payload,
+                )
+            )
+        return out
 
 
     _IGDB_TABLES = frozenset({

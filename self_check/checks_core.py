@@ -1325,9 +1325,15 @@ def check_core() -> None:
         def get_jobs_by_name(self, name: str):
             return tuple(self.jobs.get(name, ()))
 
-        def run_once(self, callback, when, data=None, name=None):
+        def run_once(self, callback, when, data=None, name=None, job_kwargs=None):
             self.calls.append(
-                {"callback": callback, "when": when, "data": data, "name": name}
+                {
+                    "callback": callback,
+                    "when": when,
+                    "data": data,
+                    "name": name,
+                    "job_kwargs": job_kwargs,
+                }
             )
             self.jobs.setdefault(name, []).append(object())
 
@@ -1338,6 +1344,9 @@ def check_core() -> None:
     assert len(jq.calls) == 1
     assert jq.calls[0]["data"]["stream_id"] == "sid-1"
     assert jq.calls[0]["when"] == 40 * 60
+    jk = jq.calls[0]["job_kwargs"] or {}
+    assert jk.get("id") == "delay_269"
+    assert int(jk.get("misfire_grace_time") or 0) >= 40 * 60
     # Further stream_id changes before first send must not arm another delay.
     assert not schedule_delayed_live_notification(
         jq, sub_id=269, stream_id="sid-2", delay_minutes=40
@@ -1346,6 +1355,44 @@ def check_core() -> None:
         jq, sub_id=269, stream_id="sid-3", delay_minutes=40
     )
     assert len(jq.calls) == 1
+
+    # Persist + restore across "restart" (empty job queue, row still in DB).
+    from handlers.notifications import (
+        ALERT_JOB_LIVE,
+        restore_pending_alert_jobs,
+        schedule_alert_run_once,
+    )
+    from db.sqlite import SqliteDatabase
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = SqliteDatabase(Path(tmp) / "pending_alerts.db")
+        jq2 = _FakeJobQueue()
+        schedule_alert_run_once(
+            jq2,
+            lambda ctx: None,
+            when=600,
+            data={"sub_id": 42, "stream_id": "s1"},
+            name="delay_42",
+            db=db,
+            kind=ALERT_JOB_LIVE,
+        )
+        assert db.has_pending_alert_job("delay_42")
+        rows = db.list_pending_alert_jobs()
+        assert len(rows) == 1 and rows[0].sub_id == 42
+        # Simulate restart: new empty queue, restore from DB.
+        jq3 = _FakeJobQueue()
+
+        class _App:
+            bot_data = {"db": db}
+            job_queue = jq3
+
+        n = restore_pending_alert_jobs(_App())  # type: ignore[arg-type]
+        assert n == 1
+        assert len(jq3.calls) == 1
+        assert jq3.calls[0]["name"] == "delay_42"
+        assert jq3.calls[0]["data"]["stream_id"] == "s1"
+        db.delete_pending_alert_job("delay_42")
+        assert not db.has_pending_alert_job("delay_42")
 
     with tempfile.TemporaryDirectory() as tmp:
         from db import open_database

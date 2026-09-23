@@ -1046,3 +1046,19 @@ class Database(Protocol):
     ) -> str: ...
 
     def get_alert_share_snapshot(self, token: str) -> dict[str, Any] | None: ...
+
+    def upsert_pending_alert_job(
+        self,
+        job_name: str,
+        *,
+        kind: str,
+        sub_id: int,
+        due_at: str,
+        payload: dict | None = None,
+    ) -> None: ...
+
+    def delete_pending_alert_job(self, job_name: str) -> None: ...
+
+    def has_pending_alert_job(self, job_name: str) -> bool: ...
+
+    def list_pending_alert_jobs(self) -> list: ...

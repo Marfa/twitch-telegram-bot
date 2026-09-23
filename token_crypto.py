@@ -61,8 +61,11 @@ def try_decrypt_secret(stored: str) -> str | None:
     try:
         return _fernet().decrypt(blob).decode("utf-8")
     except InvalidToken:
-        logger.error(
-            "Failed to decrypt Twitch token — check TOKEN_ENCRYPTION_KEY / bot token"
+        # Wrong key for this blob, or corrupt ciphertext. Callers must clear the
+        # stored value / mark needs_reauth — do not leave the blob to re-log forever.
+        logger.warning(
+            "Failed to decrypt Twitch token (InvalidToken); "
+            "caller should clear ciphertext and mark needs_reauth"
         )
         return None
 

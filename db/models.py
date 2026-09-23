@@ -634,6 +634,15 @@ BROADCAST_RETENTION_DAYS = 30
 
 
 @dataclass
+class PendingAlertJob:
+    job_name: str
+    kind: str
+    sub_id: int
+    due_at: str
+    payload: dict
+
+
+@dataclass
 class TwitchSync:
     owner_id: int
     twitch_user_id: str

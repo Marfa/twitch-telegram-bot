@@ -2191,6 +2191,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
         purge_stale_on_startup()
         await _restore_broadcast_jobs(application)
+        from handlers.notifications import restore_pending_alert_jobs
+
+        restore_pending_alert_jobs(application)
         loop = asyncio.get_running_loop()
         register_chat_webapp(db=db, twitch=twitch)
         register_health_probes(db_ping=db.ping)
