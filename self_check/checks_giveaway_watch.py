@@ -15,6 +15,7 @@ from db.models import (
 )
 from giveaway_sources import GiveawayOffer
 from handlers.giveaway_watch import (
+    _game_pick_keyboard,
     canonicalize_igdb_platform_name,
     platforms_match_offer,
 )
@@ -104,10 +105,24 @@ def _check_platform_canonicalize() -> None:
     assert not platforms_match_offer(prefs, switch)
 
 
+def _check_game_pick_keyboard_company_label() -> None:
+    # Regression: labels are dict[int, str], not (pub, dev) tuples.
+    # Unpacking a multi-char string as 2-tuple raises ValueError.
+    markup = _game_pick_keyboard(
+        [{"id": 1, "name": "Half-Life"}],
+        "en",
+        companies={1: "Valve"},
+    )
+    label = markup.inline_keyboard[0][0].text
+    assert "Half-Life" in label
+    assert "Valve" in label
+
+
 def run() -> None:
     _check_prefs_roundtrip()
     _check_empty_platforms_any()
     _check_platform_canonicalize()
+    _check_game_pick_keyboard_company_label()
 
 
 if __name__ == "__main__":

@@ -81,7 +81,7 @@ def _game_pick_keyboard(
     games: list[dict[str, Any]],
     lang: str,
     *,
-    companies: dict[int, tuple[str, str]] | None = None,
+    companies: dict[int, str] | None = None,
     page: int = 0,
 ) -> InlineKeyboardMarkup:
     companies = companies or {}
@@ -94,11 +94,9 @@ def _game_pick_keyboard(
     for g in chunk:
         gid = int(g["id"])
         name = str(g.get("name") or "").strip() or f"#{gid}"
-        pub, dev = companies.get(gid, ("", ""))
-        suffix = ""
-        if pub or dev:
-            bits = [b for b in (pub, dev) if b]
-            suffix = f" ({', '.join(bits[:2])})"
+        # igdb_company_labels_for_games → dict[int, str] (publisher else developer)
+        company = str(companies.get(gid) or "").strip()
+        suffix = f" ({company})" if company else ""
         label = f"{name}{suffix}"
         if len(label) > 60:
             label = label[:57] + "…"
