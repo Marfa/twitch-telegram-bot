@@ -118,11 +118,38 @@ def _check_game_pick_keyboard_company_label() -> None:
     assert "Valve" in label
 
 
+def _check_igdb_platforms_for_game() -> None:
+    import tempfile
+    from pathlib import Path
+
+    from db import open_database
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        assert db.igdb_platforms_for_game(0) == []
+        with db._conn() as conn:
+            conn.execute(
+                "INSERT INTO igdb_platforms (id, name) VALUES (?, ?), (?, ?)",
+                (6, "PC (Microsoft Windows)", 48, "PlayStation 4"),
+            )
+            conn.execute(
+                """
+                INSERT INTO igdb_release_dates (id, game_id, platform_id, date, human)
+                VALUES (1, 99, 48, 1, ''), (2, 99, 6, 1, ''), (3, 99, 6, 2, '')
+                """
+            )
+            conn.commit()
+        rows = db.igdb_platforms_for_game(99)
+        assert [r["platform_id"] for r in rows] == [6, 48]
+        assert rows[0]["platform_name"].startswith("PC")
+
+
 def run() -> None:
     _check_prefs_roundtrip()
     _check_empty_platforms_any()
     _check_platform_canonicalize()
     _check_game_pick_keyboard_company_label()
+    _check_igdb_platforms_for_game()
 
 
 if __name__ == "__main__":

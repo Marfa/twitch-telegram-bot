@@ -8207,7 +8207,7 @@ owner_id, twitch_username, twitch_user_id,
                 FROM igdb_release_dates rd
                 LEFT JOIN igdb_platforms p ON p.id = rd.platform_id
                 WHERE rd.game_id = %s
-                ORDER BY LOWER(platform_name) ASC
+                ORDER BY platform_name ASC
                 """,
                 (gid,),
             )
