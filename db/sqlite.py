@@ -315,6 +315,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN release_watch_prefs "
                 "TEXT NOT NULL DEFAULT ''"
             )
+        if "giveaway_watch_prefs" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN giveaway_watch_prefs "
+                "TEXT NOT NULL DEFAULT ''"
+            )
         drops_auth_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(drops_auth)")
         }
@@ -1249,6 +1254,7 @@ class SqliteDatabase:
         from_watch_suggest: bool = False,
         category_watch_prefs: str = "",
         release_watch_prefs: str = "",
+        giveaway_watch_prefs: str = "",
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
@@ -1266,7 +1272,7 @@ class SqliteDatabase:
             cur = conn.execute(
                 """
                 INSERT INTO subscriptions (
-                    owner_id, twitch_username, twitch_user_id,
+owner_id, twitch_username, twitch_user_id,
                     message_template, dest_type, chat_id, thread_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     strip_name_mentions, attach_chat_button, attach_live_remind_button,
@@ -1274,13 +1280,13 @@ class SqliteDatabase:
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     image_file_id, image_position, enabled, from_twitch_sync,
-                    from_watch_suggest, category_watch_prefs, release_watch_prefs,
+                    from_watch_suggest, category_watch_prefs, release_watch_prefs, giveaway_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
                     notify_on_drops, drops_game_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1319,6 +1325,7 @@ class SqliteDatabase:
                     int(bool(from_watch_suggest)),
                     str(category_watch_prefs or ""),
                     str(release_watch_prefs or ""),
+                    str(giveaway_watch_prefs or ""),
                     int(bool(notify_on_live)),
                     int(bool(notify_on_end)),
                     int(bool(notify_on_category_change)),
@@ -1606,6 +1613,9 @@ class SqliteDatabase:
                         release_watch_prefs=str(
                             payload.get("release_watch_prefs") or ""
                         ),
+                        giveaway_watch_prefs=str(
+                            payload.get("giveaway_watch_prefs") or ""
+                        ),
                         twitch_username=login,
                     ),
                 )
@@ -1625,7 +1635,7 @@ class SqliteDatabase:
                 conn.execute(
                     """
                     INSERT INTO subscriptions (
-                        owner_id, twitch_username, twitch_user_id,
+owner_id, twitch_username, twitch_user_id,
                         message_template, dest_type, chat_id, thread_id,
                         delete_previous, notify_delete_fail, disable_link_preview,
                         strip_name_mentions, attach_chat_button, attach_live_remind_button,
@@ -1635,15 +1645,13 @@ class SqliteDatabase:
                         ignore_keywords, use_global_ignore,
                         image_file_id, image_position, enabled,
                         from_twitch_sync, from_watch_suggest,
-                        category_watch_prefs, release_watch_prefs,
+                        category_watch_prefs, release_watch_prefs, giveaway_watch_prefs,
                         notify_on_live, notify_on_end, notify_on_category_change,
                         notify_on_drops, drops_game_id,
                         delete_other_alerts, pin_message,
                         top_donations, top_donations_template, is_demo,
                         notify_on_schedule_cancel, schedule_cancel_template
-                    ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                    )
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         owner_id,
@@ -1680,6 +1688,7 @@ class SqliteDatabase:
                         int(bool(payload.get("from_watch_suggest"))),
                         payload.get("category_watch_prefs") or "",
                         payload.get("release_watch_prefs") or "",
+                        payload.get("giveaway_watch_prefs") or "",
                         int(bool(payload.get("notify_on_live"))),
                         int(bool(payload.get("notify_on_end"))),
                         int(bool(payload.get("notify_on_category_change"))),
@@ -1765,6 +1774,7 @@ class SqliteDatabase:
             "twitch_user_id",
             "category_watch_prefs",
             "release_watch_prefs",
+            "giveaway_watch_prefs",
             "notify_on_schedule_cancel",
             "schedule_cancel_template",
             "schedule_cancel_notified_days",
@@ -1807,6 +1817,7 @@ class SqliteDatabase:
                 "twitch_user_id",
                 "category_watch_prefs",
                 "release_watch_prefs",
+                "giveaway_watch_prefs",
                 "custom_buttons",
                 "multistream_channels",
                 "button_style",
@@ -1888,9 +1899,11 @@ class SqliteDatabase:
                 WHERE enabled = 1
                   AND COALESCE(category_watch_prefs, '') = ''
                   AND COALESCE(release_watch_prefs, '') = ''
+                  AND COALESCE(giveaway_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%'
                   AND twitch_user_id NOT LIKE 'drops:%'
                   AND twitch_user_id NOT LIKE 'rel:%'
+                  AND twitch_user_id NOT LIKE 'gvw:%'
                   AND COALESCE(notify_on_drops, 0) = 0
                   AND (
                     notify_on_live = 1
@@ -5515,6 +5528,16 @@ class SqliteDatabase:
                 LIMIT 1
                 """
             ).fetchone()
+            if row is not None:
+                return True
+            row = conn.execute(
+                """
+                SELECT 1 FROM subscriptions
+                WHERE enabled = 1
+                  AND COALESCE(giveaway_watch_prefs, '') != ''
+                LIMIT 1
+                """
+            ).fetchone()
         return row is not None
 
     def has_seen_giveaway(
@@ -5850,9 +5873,11 @@ class SqliteDatabase:
                 WHERE owner_id = ? AND is_demo = ?
                   AND COALESCE(category_watch_prefs, '') = ''
                   AND COALESCE(release_watch_prefs, '') = ''
+                  AND COALESCE(giveaway_watch_prefs, '') = ''
                   AND twitch_user_id NOT LIKE 'cw:%'
                   AND twitch_user_id NOT LIKE 'drops:%'
                   AND twitch_user_id NOT LIKE 'rel:%'
+                  AND twitch_user_id NOT LIKE 'gvw:%'
                 """,
                 (owner_id, int(bool(is_demo))),
             ).fetchall()
@@ -7480,3 +7505,41 @@ class SqliteDatabase:
                 """
             ).fetchall()
         return [_row_to_sub(r) for r in rows]
+
+    def get_giveaway_watch_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE COALESCE(giveaway_watch_prefs, '') != ''
+                ORDER BY id
+                """
+            ).fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def igdb_platforms_for_game(self, game_id: int) -> list[dict[str, Any]]:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT rd.platform_id,
+                       COALESCE(p.name, '') AS platform_name
+                FROM igdb_release_dates rd
+                LEFT JOIN igdb_platforms p ON p.id = rd.platform_id
+                WHERE rd.game_id = ?
+                ORDER BY platform_name COLLATE NOCASE ASC
+                """,
+                (gid,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for r in rows:
+            pid = int(r["platform_id"] or 0)
+            if pid <= 0 or pid in seen:
+                continue
+            seen.add(pid)
+            pname = str(r["platform_name"] or "").strip() or f"#{pid}"
+            out.append({"platform_id": pid, "platform_name": pname})
+        return out

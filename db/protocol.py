@@ -63,6 +63,7 @@ class Database(Protocol):
         from_watch_suggest: bool = False,
         category_watch_prefs: str = "",
         release_watch_prefs: str = "",
+        giveaway_watch_prefs: str = "",
         notify_on_live: bool = True,
         notify_on_end: bool = False,
         notify_on_category_change: bool = False,
@@ -151,6 +152,8 @@ class Database(Protocol):
     def get_enabled_drops_subscriptions(self) -> list[Subscription]: ...
 
     def get_release_watch_subscriptions(self) -> list[Subscription]: ...
+
+    def get_giveaway_watch_subscriptions(self) -> list[Subscription]: ...
 
     def set_category_watch_live_state(
         self, sub_id: int, live_ids: list[str], *, primed: bool
@@ -970,6 +973,8 @@ class Database(Protocol):
     def igdb_cover_image_id_for_game(self, game_id: int) -> str | None: ...
 
     def igdb_release_dates_for_game(self, game_id: int) -> list[dict[str, Any]]: ...
+
+    def igdb_platforms_for_game(self, game_id: int) -> list[dict[str, Any]]: ...
 
     def ensure_beta_announce_baseline(self, feature_ids: list[str]) -> None: ...
 

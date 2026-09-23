@@ -114,7 +114,15 @@ def giveaways_hub_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
-                t("btn_back", lang) if t("btn_back", lang) != "btn_back" else "« Back",
+                t("giveaways_btn_watch", lang),
+                callback_data="gv:watch",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("giveaways_btn_back", lang),
                 callback_data="gv:close",
             )
         ]
@@ -160,7 +168,7 @@ def _checkbox_list_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
-                t("btn_back", lang) if t("btn_back", lang) != "btn_back" else "« Back",
+                t("giveaways_btn_back", lang),
                 callback_data="gv:hub",
             )
         ]
@@ -910,59 +918,62 @@ async def check_giveaways_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     bot = context.bot
     owner_ids = db.list_giveaways_digest_owner_ids()
-    if not owner_ids:
-        return
     now = int(time.time())
-    catalog = await asyncio.to_thread(fetch_active_giveaways)
-    for owner_id in owner_ids:
-        if not giveaways_feature_available(db, owner_id):
-            continue
-        prefs = _prefs_or_empty(db, owner_id)
-        if not prefs.stores or not prefs.platforms or not prefs.digest_enabled:
-            continue
-        if prefs.last_digest_at and (now - prefs.last_digest_at) < _DIGEST_MIN_INTERVAL_SEC:
-            continue
-        lang = _user_lang(db, owner_id)
-        matched = filter_giveaways(
-            catalog,
-            stores=set(prefs.stores),
-            platforms=set(prefs.platforms),
-        )
-        new_offers = [
-            o
-            for o in matched
-            if not db.has_seen_giveaway(owner_id, o.source, o.external_id)
-        ]
-        if not new_offers:
-            db.upsert_giveaways_prefs(
-                owner_id,
-                stores=prefs.stores,
-                platforms=prefs.platforms,
-                digest_enabled=True,
-                first_digest_sent=prefs.first_digest_sent or True,
-                last_digest_at=now,
+    catalog = None
+    if owner_ids:
+        catalog = await asyncio.to_thread(fetch_active_giveaways)
+        for owner_id in owner_ids:
+            if not giveaways_feature_available(db, owner_id):
+                continue
+            prefs = _prefs_or_empty(db, owner_id)
+            if not prefs.stores or not prefs.platforms or not prefs.digest_enabled:
+                continue
+            if prefs.last_digest_at and (now - prefs.last_digest_at) < _DIGEST_MIN_INTERVAL_SEC:
+                continue
+            lang = _user_lang(db, owner_id)
+            matched = filter_giveaways(
+                catalog,
+                stores=set(prefs.stores),
+                platforms=set(prefs.platforms),
             )
-            continue
-        try:
-            _store_browse(context.application, owner_id, new_offers, lang)
-            await bot.send_message(
-                owner_id,
-                _summary_text(lang, new_offers),
-                parse_mode=ParseMode.HTML,
-                reply_markup=_details_keyboard(lang),
-                disable_web_page_preview=True,
-            )
-            for o in new_offers:
-                db.mark_giveaway_seen(owner_id, o.source, o.external_id, seen_at=now)
-            db.upsert_giveaways_prefs(
-                owner_id,
-                stores=prefs.stores,
-                platforms=prefs.platforms,
-                digest_enabled=True,
-                first_digest_sent=True,
-                last_digest_at=now,
-            )
-        except Forbidden:
-            logger.info("giveaways digest forbidden owner=%s", owner_id)
-        except Exception:
-            logger.exception("giveaways digest failed owner=%s", owner_id)
+            new_offers = [
+                o
+                for o in matched
+                if not db.has_seen_giveaway(owner_id, o.source, o.external_id)
+            ]
+            if not new_offers:
+                db.upsert_giveaways_prefs(
+                    owner_id,
+                    stores=prefs.stores,
+                    platforms=prefs.platforms,
+                    digest_enabled=True,
+                    first_digest_sent=prefs.first_digest_sent or True,
+                    last_digest_at=now,
+                )
+                continue
+            try:
+                _store_browse(context.application, owner_id, new_offers, lang)
+                await bot.send_message(
+                    owner_id,
+                    _summary_text(lang, new_offers),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=_details_keyboard(lang),
+                    disable_web_page_preview=True,
+                )
+                for o in new_offers:
+                    db.mark_giveaway_seen(owner_id, o.source, o.external_id, seen_at=now)
+                db.upsert_giveaways_prefs(
+                    owner_id,
+                    stores=prefs.stores,
+                    platforms=prefs.platforms,
+                    digest_enabled=True,
+                    first_digest_sent=True,
+                    last_digest_at=now,
+                )
+            except Forbidden:
+                logger.info("giveaways digest forbidden owner=%s", owner_id)
+            except Exception:
+                logger.exception("giveaways digest failed owner=%s", owner_id)
+    from handlers.giveaway_watch import check_giveaway_watch_alerts
+
+    await check_giveaway_watch_alerts(context)

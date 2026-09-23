@@ -453,7 +453,15 @@ from handlers.release_watch import (
     start_release_wizard,
 )
 from handlers.giveaways import on_giveaways_callback
-
+from handlers.giveaway_watch import (
+    cancel_giveaway_watch_callback,
+    receive_giveaway_watch_dup,
+    receive_giveaway_watch_game_text,
+    receive_giveaway_watch_pick,
+    receive_giveaway_watch_platforms,
+    start_edit_giveaway_watch_platforms,
+    start_giveaway_watch_wizard,
+)
 from handlers.wizard import (
     _GATE_FEATURE_LABEL,
     _LIVE_ADDON_CLEAR_KEYS,
@@ -775,7 +783,11 @@ logger = logging.getLogger(__name__)
     RELEASE_DUP,
     RELEASE_DATES,
     RELEASE_DAYS,
-) = range(76)
+    GIVEAWAY_WATCH_SEARCH,
+    GIVEAWAY_WATCH_PICK,
+    GIVEAWAY_WATCH_DUP,
+    GIVEAWAY_WATCH_PLATFORMS,
+) = range(80)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2899,6 +2911,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 dm_only_conv_entry(start_edit_release_platforms),
                 pattern=r"^edit_r:\d+:platforms$",
             ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_giveaway_watch_wizard),
+                pattern=r"^gv:watch$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_giveaway_watch_platforms),
+                pattern=r"^edit_gw:\d+:platforms$",
+            ),
         ],
         states={
             LANG_SELECT: [
@@ -3447,6 +3467,39 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_release_days),
             ],
+            GIVEAWAY_WATCH_SEARCH: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    cancel_giveaway_watch_callback, pattern=r"^gvw:cancel$"
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_giveaway_watch_game_text
+                ),
+            ],
+            GIVEAWAY_WATCH_PICK: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_giveaway_watch_pick,
+                    pattern=r"^gvw:(pick:\d+|page:\d+|page:noop|cancel)$",
+                ),
+            ],
+            GIVEAWAY_WATCH_DUP: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    cancel_giveaway_watch_callback, pattern=r"^gvw:cancel$"
+                ),
+                CallbackQueryHandler(
+                    receive_giveaway_watch_dup,
+                    pattern=r"^alert_dup:(edit:\d+|continue)$",
+                ),
+            ],
+            GIVEAWAY_WATCH_PLATFORMS: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_giveaway_watch_platforms,
+                    pattern=r"^gvw:(toggle:\d+|create|create:any|cancel)$",
+                ),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
@@ -3658,7 +3711,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_drops_get_alerts, pattern=r"^drops_get:")
     )
     app.add_handler(
-        CallbackQueryHandler(on_giveaways_callback, pattern=r"^gv:")
+        CallbackQueryHandler(on_giveaways_callback, pattern=r"^gv:(?!watch$)")
     )
 
     install_scheduler_visibility(app.job_queue)

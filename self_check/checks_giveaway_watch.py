@@ -1,0 +1,115 @@
+"""Giveaway-watch prefs + platform matching self-check."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import premium as prem
+from db.models import (
+    GiveawayPlatformPref,
+    GiveawayWatchPrefs,
+    alert_type_from_payload,
+    dump_giveaway_watch_prefs,
+    is_giveaway_watch_sub,
+    parse_giveaway_watch_prefs,
+)
+from giveaway_sources import GiveawayOffer
+from handlers.giveaway_watch import (
+    canonicalize_igdb_platform_name,
+    platforms_match_offer,
+)
+
+
+def _check_prefs_roundtrip() -> None:
+    prefs = GiveawayWatchPrefs(
+        igdb_game_id=42,
+        game_name="Demo Game",
+        platforms=[
+            GiveawayPlatformPref(platform_id=6, platform_name="PC (Microsoft Windows)"),
+            GiveawayPlatformPref(platform_id=48, platform_name="PlayStation 4"),
+        ],
+        notified_keys=["gamerpower:1"],
+    )
+    raw = dump_giveaway_watch_prefs(prefs)
+    back = parse_giveaway_watch_prefs(raw)
+    assert back is not None
+    assert back.igdb_game_id == 42
+    assert back.game_name == "Demo Game"
+    assert len(back.platforms) == 2
+    assert back.notified_keys == ["gamerpower:1"]
+    assert alert_type_from_payload({"giveaway_watch_prefs": raw}) == "giveaway_watch"
+    assert is_giveaway_watch_sub(SimpleNamespace(giveaway_watch_prefs=raw))
+    assert prem.is_live_only_alert(SimpleNamespace(giveaway_watch_prefs=raw))
+
+
+def _check_empty_platforms_any() -> None:
+    prefs = GiveawayWatchPrefs(igdb_game_id=1, game_name="X", platforms=[])
+    raw = dump_giveaway_watch_prefs(prefs)
+    back = parse_giveaway_watch_prefs(raw)
+    assert back is not None
+    assert back.platforms == []
+    offer = GiveawayOffer(
+        source="gamerpower",
+        external_id="9",
+        title="X",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="https://example.com",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key="steam|x",
+    )
+    assert platforms_match_offer(back, offer)
+
+
+def _check_platform_canonicalize() -> None:
+    assert "pc" in canonicalize_igdb_platform_name("PC (Microsoft Windows)")
+    assert "ps5" in canonicalize_igdb_platform_name("PlayStation 5")
+    prefs = GiveawayWatchPrefs(
+        igdb_game_id=1,
+        game_name="X",
+        platforms=[
+            GiveawayPlatformPref(platform_id=6, platform_name="PC (Microsoft Windows)")
+        ],
+    )
+    pc = GiveawayOffer(
+        source="itad",
+        external_id="1",
+        title="X",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key="steam|x",
+    )
+    switch = GiveawayOffer(
+        source="itad",
+        external_id="2",
+        title="X",
+        store_id="nintendo_eshop",
+        platform_ids=("switch",),
+        claim_url="",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key="nintendo|x",
+    )
+    assert platforms_match_offer(prefs, pc)
+    assert not platforms_match_offer(prefs, switch)
+
+
+def run() -> None:
+    _check_prefs_roundtrip()
+    _check_empty_platforms_any()
+    _check_platform_canonicalize()
+
+
+if __name__ == "__main__":
+    run()
+    print("ok")

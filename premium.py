@@ -1180,9 +1180,9 @@ async def expire_unentitled_alerts(bot: Bot, db: Database) -> int:
 
 def is_live_only_alert(sub: Any) -> bool:
     """True if alert is live-start only (free-tier type)."""
-    from db.models import is_release_watch_sub
+    from db.models import is_giveaway_watch_sub, is_release_watch_sub
 
-    if is_release_watch_sub(sub):
+    if is_release_watch_sub(sub) or is_giveaway_watch_sub(sub):
         return True
     return bool(
         getattr(sub, "notify_on_live", True)

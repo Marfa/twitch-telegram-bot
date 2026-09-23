@@ -302,6 +302,82 @@ def parse_release_watch_prefs(raw: str | None) -> ReleaseWatchPrefs | None:
     )
 
 
+@dataclass
+class GiveawayPlatformPref:
+    platform_id: int
+    platform_name: str
+
+
+@dataclass
+class GiveawayWatchPrefs:
+    igdb_game_id: int
+    game_name: str
+    platforms: list[GiveawayPlatformPref] = field(default_factory=list)
+    notified_keys: list[str] = field(default_factory=list)
+
+
+def dump_giveaway_watch_prefs(prefs: GiveawayWatchPrefs) -> str:
+    return json.dumps(
+        {
+            "igdb_game_id": int(prefs.igdb_game_id),
+            "game_name": prefs.game_name,
+            "platforms": [
+                {
+                    "platform_id": int(p.platform_id),
+                    "platform_name": p.platform_name,
+                }
+                for p in prefs.platforms
+            ],
+            "notified_keys": list(prefs.notified_keys),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def parse_giveaway_watch_prefs(raw: str | None) -> GiveawayWatchPrefs | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    gid = int(data.get("igdb_game_id") or 0)
+    name = str(data.get("game_name") or "").strip()
+    if gid <= 0 or not name:
+        return None
+    platforms: list[GiveawayPlatformPref] = []
+    for item in data.get("platforms") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            pid = int(item.get("platform_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        pname = str(item.get("platform_name") or "").strip() or "—"
+        if pid <= 0 and pname == "—":
+            continue
+        platforms.append(
+            GiveawayPlatformPref(platform_id=pid, platform_name=pname)
+        )
+    keys_raw = data.get("notified_keys") or []
+    notified: list[str] = []
+    if isinstance(keys_raw, list):
+        for k in keys_raw:
+            s = str(k or "").strip()
+            if s and s not in notified:
+                notified.append(s)
+    return GiveawayWatchPrefs(
+        igdb_game_id=gid,
+        game_name=name,
+        platforms=platforms,
+        notified_keys=notified,
+    )
+
+
 def dump_watch_filters(filters: list[WatchFilter]) -> str:
     payload = {
         "filters": [
@@ -360,6 +436,7 @@ class Subscription:
     category_watch_live_ids: str = ""
     category_watch_primed: bool = False
     release_watch_prefs: str = ""
+    giveaway_watch_prefs: str = ""
     delete_other_alerts: bool = False
     pin_message: bool = False
     top_donations: bool = False
@@ -436,6 +513,8 @@ class PremiumGift:
 def alert_type_from_payload(payload: dict[str, Any]) -> str:
     if payload.get("notify_on_drops"):
         return "drops"
+    if str(payload.get("giveaway_watch_prefs") or "").strip():
+        return "giveaway_watch"
     if str(payload.get("release_watch_prefs") or "").strip():
         return "release"
     if str(payload.get("category_watch_prefs") or "").strip():
@@ -557,6 +636,10 @@ def is_release_watch_sub(sub: Subscription) -> bool:
     return bool((getattr(sub, "release_watch_prefs", "") or "").strip())
 
 
+def is_giveaway_watch_sub(sub: Subscription) -> bool:
+    return bool((getattr(sub, "giveaway_watch_prefs", "") or "").strip())
+
+
 def is_drops_sub(sub: Subscription) -> bool:
     return bool(getattr(sub, "notify_on_drops", False)) and bool(
         (getattr(sub, "drops_game_id", "") or "").strip()
@@ -604,6 +687,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "from_watch_suggest": bool(sub.from_watch_suggest),
         "category_watch_prefs": sub.category_watch_prefs or "",
         "release_watch_prefs": sub.release_watch_prefs or "",
+        "giveaway_watch_prefs": getattr(sub, "giveaway_watch_prefs", "") or "",
         "notify_on_live": bool(sub.notify_on_live),
         "notify_on_end": bool(sub.notify_on_end),
         "notify_on_category_change": bool(sub.notify_on_category_change),
@@ -1016,6 +1100,9 @@ def _row_to_sub(row: Any) -> Subscription:
         else False,
         release_watch_prefs=str(row["release_watch_prefs"] or "")
         if "release_watch_prefs" in keys
+        else "",
+        giveaway_watch_prefs=str(row["giveaway_watch_prefs"] or "")
+        if "giveaway_watch_prefs" in keys
         else "",
         delete_other_alerts=bool(row["delete_other_alerts"])
         if "delete_other_alerts" in keys

@@ -38,6 +38,7 @@ from db import (
     TwitchSync,
     is_category_watch_sub,
     is_drops_sub,
+    is_giveaway_watch_sub,
     is_release_watch_sub,
 )
 from db.models import (
@@ -416,6 +417,21 @@ def _format_sub_line(
                             dates=", ".join(date_bits),
                         )
                     )
+    elif is_giveaway_watch_sub(sub):
+        settings.append(t("sub_list_alert_giveaway_watch", lang))
+        from db.models import parse_giveaway_watch_prefs
+
+        prefs = parse_giveaway_watch_prefs(sub.giveaway_watch_prefs)
+        if prefs is not None:
+            if prefs.platforms:
+                names = ", ".join(
+                    html.escape(p.platform_name or "—") for p in prefs.platforms[:5]
+                )
+                settings.append(
+                    t("sub_list_giveaway_watch_platforms", lang, platforms=names)
+                )
+            else:
+                settings.append(t("sub_list_giveaway_watch_any_platform", lang))
     elif is_category_watch_sub(sub):
         settings.append(t("sub_list_alert_game", lang))
         from handlers.notifications import category_watch_cooldown_minutes
@@ -601,6 +617,8 @@ def _share_link_for_sub(
 def _alert_type_from_sub(sub: Subscription) -> str:
     if getattr(sub, "notify_on_drops", False):
         return "drops"
+    if (getattr(sub, "giveaway_watch_prefs", "") or "").strip():
+        return "giveaway_watch"
     if (getattr(sub, "release_watch_prefs", "") or "").strip():
         return "release"
     if (getattr(sub, "category_watch_prefs", "") or "").strip():
@@ -2328,6 +2346,30 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 days=prefs.days_before,
             ),
             reply_markup=edit_release_options_keyboard(sub_id, lang),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    if is_giveaway_watch_sub(sub):
+        from handlers.giveaway_watch import (
+            edit_giveaway_watch_options_keyboard,
+            giveaways_feature_available,
+        )
+        from db.models import parse_giveaway_watch_prefs
+
+        if not giveaways_feature_available(db, query.from_user.id):
+            await query.edit_message_text(t("giveaways_beta_required", lang))
+            return ConversationHandler.END
+        prefs = parse_giveaway_watch_prefs(sub.giveaway_watch_prefs)
+        if not prefs:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        await query.edit_message_text(
+            t(
+                "edit_giveaway_watch_menu",
+                lang,
+                game=html.escape(prefs.game_name),
+            ),
+            reply_markup=edit_giveaway_watch_options_keyboard(sub_id, lang),
             parse_mode=ParseMode.HTML,
         )
         return ConversationHandler.END
@@ -5185,6 +5227,7 @@ def _share_alert_type_label(payload: dict, lang: str) -> str:
         "end": "alert_type_end",
         "drops": "alert_type_drops",
         "release": "alert_type_release",
+        "giveaway_watch": "alert_type_giveaway_watch",
         "game": "alert_type_game",
     }.get(kind, "alert_type_live")
     return t(key, lang)
@@ -5261,6 +5304,21 @@ def _existing_share_dup(
             if other and other.igdb_game_id == prefs.igdb_game_id:
                 return s
         return None
+    if kind == "giveaway_watch":
+        from db.models import parse_giveaway_watch_prefs
+
+        prefs = parse_giveaway_watch_prefs(
+            str(snapshot.get("giveaway_watch_prefs") or "")
+        )
+        if not prefs:
+            return None
+        for s in _subs_for_owner(db, owner_id):
+            if not is_giveaway_watch_sub(s):
+                continue
+            other = parse_giveaway_watch_prefs(s.giveaway_watch_prefs)
+            if other and other.igdb_game_id == prefs.igdb_game_id:
+                return s
+        return None
     if kind == "drops":
         gid = str(snapshot.get("drops_game_id") or "").strip()
         if not gid:
@@ -5300,6 +5358,8 @@ def _share_clone_snapshot(snapshot: dict, user_id: int) -> dict:
     kind = alert_type_from_payload(out)
     if kind == "release":
         out["twitch_user_id"] = f"rel:{user_id}:{secrets.token_hex(4)}"
+    elif kind == "giveaway_watch":
+        out["twitch_user_id"] = f"gvw:{user_id}:{secrets.token_hex(4)}"
     elif kind == "drops":
         out["twitch_user_id"] = f"drops:{user_id}:{secrets.token_hex(4)}"
     elif kind == "game":
@@ -5332,6 +5392,12 @@ async def _create_shared_subscription(
         if not release_feature_available(db, user_id):
             raise ValueError("release_beta_required")
         type_ok = True
+    elif kind == "giveaway_watch":
+        from handlers.giveaways import giveaways_feature_available
+
+        if not giveaways_feature_available(db, user_id):
+            raise ValueError("giveaways_beta_required")
+        type_ok = True
     elif kind == "drops":
         from handlers.drops import drops_feature_available
 
@@ -5353,6 +5419,7 @@ async def _create_shared_subscription(
                 twitch_username=login,
                 notify_on_drops=bool(clone.get("notify_on_drops")),
                 release_watch_prefs=str(clone.get("release_watch_prefs") or ""),
+                giveaway_watch_prefs=str(clone.get("giveaway_watch_prefs") or ""),
             ),
         )
     enabled = type_ok and await prem.may_enable_subscription_async(
@@ -5584,6 +5651,41 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             pass
         return
 
+    if is_giveaway_watch_sub(sub):
+        from handlers.giveaway_watch import (
+            edit_giveaway_watch_options_keyboard,
+            giveaways_feature_available,
+        )
+        from db.models import parse_giveaway_watch_prefs
+
+        if not giveaways_feature_available(db, user_id):
+            await query.edit_message_text(t("giveaways_beta_required", lang))
+            return
+        prefs = parse_giveaway_watch_prefs(sub.giveaway_watch_prefs)
+        if not prefs:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return
+        await context.bot.send_message(
+            chat_id,
+            t("menu_subs", lang),
+            reply_markup=_subs_kb(lang, db, user_id),
+        )
+        await context.bot.send_message(
+            chat_id,
+            t(
+                "edit_giveaway_watch_menu",
+                lang,
+                game=html.escape(prefs.game_name),
+            ),
+            reply_markup=edit_giveaway_watch_options_keyboard(sub_id, lang),
+            parse_mode=ParseMode.HTML,
+        )
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
+        return
+
     if is_category_watch_sub(sub):
         prefs = parse_category_watch_prefs(sub.category_watch_prefs)
         if not prefs:
@@ -5704,6 +5806,7 @@ async def on_alert_dup_continue(
     force_peek = context.user_data.get("alert_dup_force")
     if isinstance(force_peek, dict) and force_peek.get("kind") in (
         "release_wizard",
+        "giveaway_watch_wizard",
         "game_wizard",
     ):
         return
@@ -5743,6 +5846,41 @@ async def on_alert_dup_continue(
             )
             if status == "release_subscribed_ok" and prefs.date_unknown:
                 note = t("release_subscribed_unknown_date", lang)
+            await context.bot.send_message(
+                user_id, note, reply_markup=_menu(lang, user_id)
+            )
+        elif kind == "giveaway_watch":
+            from db.models import parse_giveaway_watch_prefs
+            from handlers.giveaway_watch import create_giveaway_watch_subscription
+
+            prefs = parse_giveaway_watch_prefs(str(force.get("prefs") or ""))
+            if not prefs:
+                return
+            _sub, status = await create_giveaway_watch_subscription(
+                context.bot,
+                db,
+                user_id,
+                lang,
+                prefs=prefs,
+                allow_duplicate=True,
+            )
+            note = (
+                t(status, lang)
+                if status != "sub_limit"
+                else t("sub_limit", lang, limit=MAX_SUBSCRIPTIONS_PER_OWNER)
+            )
+            if status == "giveaway_watch_subscribed_paused":
+                from config import PREMIUM_FREE_ACTIVE_LIMIT
+
+                note = (
+                    f"{t('giveaway_watch_subscribed_ok', lang)}\n"
+                    + t(
+                        "created_paused_note",
+                        lang,
+                        kind=t("alert_type_giveaway_watch", lang),
+                        limit=PREMIUM_FREE_ACTIVE_LIMIT,
+                    )
+                )
             await context.bot.send_message(
                 user_id, note, reply_markup=_menu(lang, user_id)
             )
