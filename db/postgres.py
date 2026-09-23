@@ -1249,6 +1249,17 @@ class PostgresDatabase:
                 )
                 """
             )
+            # DeepL cache for IGDB EN summaries → bot locales (not a partner dump).
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS igdb_summary_translations (
+                    source_hash TEXT NOT NULL,
+                    lang TEXT NOT NULL,
+                    translated TEXT NOT NULL,
+                    PRIMARY KEY (source_hash, lang)
+                )
+                """
+            )
             cur.execute("SELECT COUNT(*) AS n FROM igdb_external_steam")
             steam_n = cur.fetchone()
             if int((steam_n["n"] if steam_n else 0) or 0) <= 0:
@@ -7809,6 +7820,47 @@ owner_id, twitch_username, twitch_user_id,
             return None
         text = str(game["summary"] or "").strip()
         return text or None
+
+    def get_igdb_summary_translation(
+        self, source_hash: str, lang: str
+    ) -> str | None:
+        h = str(source_hash or "").strip()
+        loc = str(lang or "").strip()
+        if not h or not loc:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT translated FROM igdb_summary_translations
+                WHERE source_hash = %s AND lang = %s
+                """,
+                (h, loc),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        text = str(row["translated"] or "").strip()
+        return text or None
+
+    def set_igdb_summary_translation(
+        self, source_hash: str, lang: str, translated: str
+    ) -> None:
+        h = str(source_hash or "").strip()
+        loc = str(lang or "").strip()
+        text = str(translated or "").strip()
+        if not h or not loc or not text:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO igdb_summary_translations (source_hash, lang, translated)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (source_hash, lang) DO UPDATE SET translated = EXCLUDED.translated
+                """,
+                (h, loc, text),
+            )
 
     def igdb_store_links_for_twitch(self, twitch_uid: str) -> dict[str, str | None]:
         """Helix category id → IGDB slug + Steam app id (local dumps)."""

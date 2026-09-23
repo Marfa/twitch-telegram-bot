@@ -946,6 +946,14 @@ class Database(Protocol):
 
     def igdb_summary_for_twitch(self, twitch_uid: str) -> str | None: ...
 
+    def get_igdb_summary_translation(
+        self, source_hash: str, lang: str
+    ) -> str | None: ...
+
+    def set_igdb_summary_translation(
+        self, source_hash: str, lang: str, translated: str
+    ) -> None: ...
+
     def igdb_store_links_for_twitch(
         self, twitch_uid: str
     ) -> dict[str, str | None]: ...

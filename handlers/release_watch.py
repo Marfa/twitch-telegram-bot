@@ -225,7 +225,7 @@ async def _send_game_card(
 
     cover_mid = db.igdb_cover_image_id_for_game(game_id)
     caption = body_html
-    localized = localize_igdb_summary(summary, lang) if summary else ""
+    localized = localize_igdb_summary(summary, lang, db=db) if summary else ""
     if localized:
         cap_sum = html.escape(localized[:800])
         caption = f"{body_html}\n\n{cap_sum}"

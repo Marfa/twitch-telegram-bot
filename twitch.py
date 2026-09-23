@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
@@ -1750,7 +1751,7 @@ class TwitchClient:
             return "—"
         if not summary:
             return "—"
-        return localize_igdb_summary(summary, lang)
+        return localize_igdb_summary(summary, lang, db=self._igdb_db)
 
     def resolve_game_store_links(
         self, twitch_game_id: str | int | None
@@ -1774,7 +1775,9 @@ class TwitchClient:
 
 
 
-def localize_igdb_summary(summary: str, lang: str) -> str:
+def localize_igdb_summary(
+    summary: str, lang: str, db: Any | None = None
+) -> str:
     """IGDB summaries are US English; translate for non-en bot locales when DeepL is set."""
     import html as _html
 
@@ -1794,6 +1797,17 @@ def localize_igdb_summary(summary: str, lang: str) -> str:
     cached = _IGDB_SUMMARY_TR_CACHE.get(cache_key)
     if cached is not None:
         return cached
+    source_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if db is not None:
+        try:
+            stored = db.get_igdb_summary_translation(source_hash, locale)
+            if stored:
+                _igdb_summary_tr_cache_put(cache_key, stored)
+                return stored
+        except Exception:
+            logger.exception(
+                "IGDB summary translation DB read failed lang=%s", locale
+            )
     try:
         from translate import translate_text
 
@@ -1811,10 +1825,21 @@ def localize_igdb_summary(summary: str, lang: str) -> str:
     except Exception:
         logger.exception("IGDB summary translate failed lang=%s", locale)
         return _html.unescape(text)
+    if db is not None:
+        try:
+            db.set_igdb_summary_translation(source_hash, locale, out)
+        except Exception:
+            logger.exception(
+                "IGDB summary translation DB write failed lang=%s", locale
+            )
+    _igdb_summary_tr_cache_put(cache_key, out)
+    return out
+
+
+def _igdb_summary_tr_cache_put(cache_key: tuple[str, str], value: str) -> None:
     if len(_IGDB_SUMMARY_TR_CACHE) >= _IGDB_SUMMARY_TR_CACHE_MAX:
         _IGDB_SUMMARY_TR_CACHE.clear()
-    _IGDB_SUMMARY_TR_CACHE[cache_key] = out
-    return out
+    _IGDB_SUMMARY_TR_CACHE[cache_key] = value
 
 
 def preview_stream_title(locale: str, game: str) -> str:
@@ -2336,7 +2361,7 @@ def stream_duration_minutes(stream: dict[str, Any] | None) -> str:
 # ponytail: Twitch category → IGDB meta TTL; ceiling = process memory / stale genres.
 _igdb_twitch_meta_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
 _IGDB_TWITCH_META_TTL_SEC = 6 * 3600
-# ponytail: process-local DeepL cache for IGDB summaries; clear on size cap.
+# ponytail: process-local L1 for DeepL IGDB summaries; DB is durable L2.
 _IGDB_SUMMARY_TR_CACHE: dict[tuple[str, str], str] = {}
 _IGDB_SUMMARY_TR_CACHE_MAX = 512
 IGNORE_IGDB_KINDS = frozenset({"developer", "publisher", "genre", "game_mode"})

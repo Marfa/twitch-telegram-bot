@@ -1217,7 +1217,7 @@ def check_db_premium() -> None:
         )
         sent_html = post.call_args.kwargs["data"]
         assert sent_html.get("tag_handling") == "html"
-    from twitch import localize_igdb_summary
+    from twitch import localize_igdb_summary, _IGDB_SUMMARY_TR_CACHE
 
     with patch("config.DEEPL_API_KEY", "x"), patch(
         "translate.translate_text",
@@ -1227,6 +1227,25 @@ def check_db_premium() -> None:
             localize_igdb_summary("Baldur's Gate and others", "ru")
             == "Baldur's Gate и другие"
         )
+    # Durable DB cache: second call must not hit DeepL.
+    with tempfile.TemporaryDirectory() as tr_tmp:
+        tr_db = SqliteDatabase(Path(tr_tmp) / "igdb_tr.db")
+        _IGDB_SUMMARY_TR_CACHE.clear()
+        with patch("config.DEEPL_API_KEY", "x"), patch(
+            "translate.translate_text",
+            return_value="Кэш перевод",
+        ) as translate_mock:
+            assert (
+                localize_igdb_summary("Cached game blurb", "ru", db=tr_db)
+                == "Кэш перевод"
+            )
+            assert translate_mock.call_count == 1
+            _IGDB_SUMMARY_TR_CACHE.clear()
+            assert (
+                localize_igdb_summary("Cached game blurb", "ru", db=tr_db)
+                == "Кэш перевод"
+            )
+            assert translate_mock.call_count == 1
     assert (
         markdown_to_telegram_html("**Доказательства**\n\n- item")
         == "<b>Доказательства</b>\n\n- item"

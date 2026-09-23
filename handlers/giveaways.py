@@ -312,7 +312,7 @@ def _enrich_offer(db: Database, offer: GiveawayOffer, lang: str) -> _Enriched:
             publisher, developer = db.igdb_publisher_developer_names(igdb_id)
             game = db.igdb_game_by_id(igdb_id) or {}
             raw_sum = str(game.get("summary") or "").strip()
-            summary = localize_igdb_summary(raw_sum, lang) if raw_sum else ""
+            summary = localize_igdb_summary(raw_sum, lang, db=db) if raw_sum else ""
             mid = db.igdb_cover_image_id_for_game(igdb_id)
             if mid:
                 cover_url = igdb_image_url(mid)
