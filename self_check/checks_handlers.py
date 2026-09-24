@@ -1701,7 +1701,7 @@ def check_handlers() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=18' in (WEBAPP_DIR / "index.html").read_text(
+    assert '/app/chat/app.js?v=19' in (WEBAPP_DIR / "index.html").read_text(
         encoding="utf-8"
     )
     html = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
@@ -1712,8 +1712,8 @@ def check_handlers() -> None:
     assert 'id="send-form"' in html
     assert html.index('id="fallback-wrap"') < html.index('id="send-form"')
     assert 'id="send-feedback"' in html
-    assert 'id="embed-composer-mask"' in html
-    assert "embed-composer-mask" in (WEBAPP_DIR / "style.css").read_text(
+    assert 'id="embed-composer-mask"' not in html
+    assert "embed-composer-mask" not in (WEBAPP_DIR / "style.css").read_text(
         encoding="utf-8"
     )
     assert "embedHint" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
