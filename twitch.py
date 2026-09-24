@@ -575,18 +575,32 @@ class TwitchClient:
         return True
 
     def get_channel_schedule(
-        self, broadcaster_id: str, *, first: int = 25, start_time: str | None = None
+        self,
+        broadcaster_id: str,
+        *,
+        first: int = 25,
+        start_time: str | None = None,
+        stop_before: str | None = None,
     ) -> dict[str, Any]:
-        """Schedule payload: all upcoming segments (paginated) + vacation window.
+        """Schedule payload: upcoming segments (paginated) + vacation window.
 
         A single Helix page is at most 25 segments. Without pagination, adding a
         slot can push later days out of the first page and look like cancellations.
+
+        When ``stop_before`` (UTC ISO) is set, stop paging once a segment's
+        ``start_time`` is at or after that instant (segments are chronological).
         """
         segments: list[dict[str, Any]] = []
         vacation: dict[str, Any] | None = None
         tz = "UTC"
         cursor: str | None = None
         page_size = max(1, min(25, int(first)))
+        stop_at: datetime | None = None
+        if stop_before:
+            try:
+                stop_at = self._parse_schedule_time(str(stop_before))
+            except ValueError:
+                stop_at = None
         for _ in range(40):
             params: dict[str, str | int] = {
                 "broadcaster_id": broadcaster_id,
@@ -609,9 +623,19 @@ class TwitchClient:
             data = payload.get("data") or {}
             if not isinstance(data, dict):
                 data = {}
+            reached_stop = False
             for seg in data.get("segments") or []:
-                if isinstance(seg, dict):
-                    segments.append(seg)
+                if not isinstance(seg, dict):
+                    continue
+                if stop_at is not None:
+                    raw = seg.get("start_time") or ""
+                    try:
+                        if self._parse_schedule_time(str(raw)) >= stop_at:
+                            reached_stop = True
+                            break
+                    except ValueError:
+                        pass
+                segments.append(seg)
             if vacation is None:
                 vac = data.get("vacation")
                 if isinstance(vac, dict):
@@ -619,6 +643,8 @@ class TwitchClient:
             page_tz = str(data.get("broadcaster_timezone") or "").strip()
             if page_tz:
                 tz = page_tz
+            if reached_stop:
+                break
             cursor = (payload.get("pagination") or {}).get("cursor") or None
             if not cursor:
                 break
@@ -629,12 +655,20 @@ class TwitchClient:
         }
 
     def get_schedule_segments(
-        self, broadcaster_id: str, *, first: int = 20, start_time: str | None = None
+        self,
+        broadcaster_id: str,
+        *,
+        first: int = 20,
+        start_time: str | None = None,
+        stop_before: str | None = None,
     ) -> list[dict[str, Any]]:
         """Upcoming schedule segments; empty if no schedule."""
         return list(
             self.get_channel_schedule(
-                broadcaster_id, first=first, start_time=start_time
+                broadcaster_id,
+                first=first,
+                start_time=start_time,
+                stop_before=stop_before,
             ).get("segments")
             or []
         )
@@ -784,6 +818,51 @@ class TwitchClient:
                 out.append(sid)
         return out
 
+    @classmethod
+    def plan_overlap_resolutions(
+        cls,
+        segments: list[dict[str, Any]],
+        *,
+        start_time: str,
+        duration: int,
+    ) -> list[tuple[str, str, int | None]]:
+        """How to clear room for [start, start+duration).
+
+        Returns ``(segment_id, action, new_duration_or_None)`` where action is
+        ``shorten`` (earlier neighbor ends at new start) or ``delete`` (starts
+        inside / at the new window).
+        """
+        start = cls._parse_schedule_time(start_time)
+        overlap_ids = set(
+            cls.overlapping_schedule_segment_ids(
+                segments, start_time=start_time, duration=duration
+            )
+        )
+        out: list[tuple[str, str, int | None]] = []
+        for seg in segments:
+            sid = str(seg.get("id") or "")
+            if not sid or sid not in overlap_ids:
+                continue
+            ss = seg.get("start_time")
+            if not ss:
+                continue
+            s0 = cls._parse_schedule_time(str(ss))
+            if s0 < start:
+                minutes = max(1, int((start - s0).total_seconds() // 60))
+                ee = seg.get("end_time")
+                if ee:
+                    try:
+                        e0 = cls._parse_schedule_time(str(ee))
+                        current = max(1, int((e0 - s0).total_seconds() // 60))
+                        if minutes >= current:
+                            continue
+                    except ValueError:
+                        pass
+                out.append((sid, "shorten", minutes))
+            else:
+                out.append((sid, "delete", None))
+        return out
+
     def delete_overlapping_schedule_segments(
         self,
         user_access_token: str,
@@ -793,31 +872,51 @@ class TwitchClient:
         duration: int = 120,
         exclude_ids: tuple[str, ...] | list[str] = (),
     ) -> int:
-        """Delete existing segments that would overlap a new one. Returns deleted count."""
+        """Make room for a new segment: shorten earlier overlaps, delete the rest.
+
+        Earlier neighbors (start before the new start) are PATCHed so they end
+        at the new start. Segments that begin at/inside the new window are
+        deleted. Returns number of segments modified.
+        """
         day_start = self._parse_schedule_time(start_time).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
+        # One local/UTC day of segments is enough; avoid paging the whole series.
+        stop_before = (day_start + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
         existing = self.get_schedule_segments(
             broadcaster_id,
             first=25,
             start_time=day_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        )
-        ids = self.overlapping_schedule_segment_ids(
-            existing, start_time=start_time, duration=duration
+            stop_before=stop_before,
         )
         skipped = {str(x) for x in exclude_ids if x}
-        deleted = 0
-        for sid in ids:
+        modified = 0
+        for sid, action, new_duration in self.plan_overlap_resolutions(
+            existing, start_time=start_time, duration=duration
+        ):
             if sid in skipped:
                 continue
             try:
-                self.delete_schedule_segment(user_access_token, broadcaster_id, sid)
-                deleted += 1
+                if action == "shorten" and new_duration is not None:
+                    self.update_schedule_segment(
+                        user_access_token,
+                        broadcaster_id,
+                        sid,
+                        duration=new_duration,
+                    )
+                else:
+                    self.delete_schedule_segment(
+                        user_access_token, broadcaster_id, sid
+                    )
+                modified += 1
             except Exception as exc:
                 logger.warning(
-                    "Failed to delete overlapping schedule segment %s: %s", sid, exc
+                    "Failed to %s overlapping schedule segment %s: %s",
+                    action,
+                    sid,
+                    exc,
                 )
-        return deleted
+        return modified
 
     def clear_channel_schedule(
         self,

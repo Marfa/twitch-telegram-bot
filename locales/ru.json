@@ -402,7 +402,7 @@
   "stream_schedule_publish_yes": "✅ Да",
   "stream_schedule_publish_no": "❌ Нет",
   "stream_schedule_duration_prompt": "Сколько обычно длится стрим (в часах)?\nПеред синхронизацией все текущие слоты на Twitch будут удалены.",
-  "stream_schedule_duration_prompt_keep": "Сколько обычно длится стрим (в часах)?\nЗатираются только пересекающиеся слоты.",
+  "stream_schedule_duration_prompt_keep": "Сколько обычно длится стрим (в часах)?\nБолее ранние пересекающиеся слоты укорачиваются; слоты, начинающиеся в новом окне, заменяются.",
   "stream_schedule_duration_hour": "{hours} ч",
   "stream_schedule_duration_unsure": "Не уверен",
   "stream_schedule_publish_auth": "Авторизуйте бота для управления расписанием на Twitch.",

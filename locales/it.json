@@ -401,7 +401,7 @@
   "stream_schedule_publish_yes": "✅ Sì",
   "stream_schedule_publish_no": "❌ No",
   "stream_schedule_duration_prompt": "Quanto dura di solito uno stream (ore)?\nGli slot esistenti del programma Twitch verranno cancellati prima della sincronizzazione.",
-  "stream_schedule_duration_prompt_keep": "Quanto dura di solito uno stream (ore)?\nVerranno sostituiti solo gli slot che si sovrappongono.",
+  "stream_schedule_duration_prompt_keep": "Quanto dura di solito uno stream (ore)?\nGli slot precedenti sovrapposti vengono accorciati; quelli che iniziano nella nuova finestra vengono sostituiti.",
   "stream_schedule_duration_hour": "{hours} h",
   "stream_schedule_duration_unsure": "Non so",
   "stream_schedule_publish_auth": "Autorizza il bot a gestire il tuo programma Twitch.",

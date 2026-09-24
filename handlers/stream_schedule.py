@@ -388,9 +388,12 @@ def _slots_on_local_day(
 ) -> list[dict]:
     tz = local_tz or SCHEDULE_TZ
     day_start = datetime(day.year, day.month, day.day, 0, 0, tzinfo=tz)
+    next_day = day + timedelta(days=1)
+    day_end = datetime(next_day.year, next_day.month, next_day.day, 0, 0, tzinfo=tz)
     start_iso = day_start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stop_iso = day_end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     segs = twitch.get_schedule_segments(
-        broadcaster_id, first=25, start_time=start_iso
+        broadcaster_id, first=25, start_time=start_iso, stop_before=stop_iso
     )
     out: list[dict] = []
     seen: set[str] = set()

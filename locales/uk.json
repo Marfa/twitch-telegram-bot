@@ -401,7 +401,7 @@
   "stream_schedule_publish_yes": "✅ Так",
   "stream_schedule_publish_no": "❌ Ні",
   "stream_schedule_duration_prompt": "Скільки зазвичай триває стрім (у годинах)?\nПеред синхронізацією всі поточні слоти на Twitch будуть видалені.",
-  "stream_schedule_duration_prompt_keep": "Скільки зазвичай триває стрім (у годинах)?\nЗатираються лише слоти, що перетинаються.",
+  "stream_schedule_duration_prompt_keep": "Скільки зазвичай триває стрім (у годинах)?\nРаніші слоти, що перетинаються, скорочуються; слоти, що починаються в новому вікні, замінюються.",
   "stream_schedule_duration_hour": "{hours} год",
   "stream_schedule_duration_unsure": "Не впевнений",
   "stream_schedule_publish_auth": "Авторизуйте бота для керування розкладом на Twitch.",
