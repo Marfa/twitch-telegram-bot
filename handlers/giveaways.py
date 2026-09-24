@@ -340,9 +340,35 @@ def _format_dates(offer: GiveawayOffer, lang: str) -> str:
     return start or end or "—"
 
 
+def _escaped_fit(text: str, room: int) -> str:
+    """Escape plain text so the result length is ≤ room (no mid-tag cuts)."""
+    if room <= 0 or not text:
+        return ""
+    raw = text
+    escaped = html.escape(raw)
+    if len(escaped) <= room:
+        return escaped
+    ellipsis_room = 1 if room > 1 else 0
+    target = max(0, room - ellipsis_room)
+    while raw and len(html.escape(raw)) > target:
+        over = len(html.escape(raw)) - target
+        step = max(1, over // 2)
+        raw = raw[: max(0, len(raw) - step)]
+    if not raw:
+        return ""
+    out = html.escape(raw)
+    if ellipsis_room and len(text) > len(raw):
+        out = out + "…"
+    return out
+
+
 def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
+    # Photo captions ≤1024. Never slice assembled HTML — that splits <b>/<a>.
+    _CAP = 1024
     year_bit = f" ({html.escape(item.year)})" if item.year else ""
-    title = f"<b>{html.escape(item.name)}{year_bit}</b>"
+    # Leave room for <b></b> (7) + year_bit.
+    name_room = max(16, 180 - len(year_bit))
+    title = f"<b>{_escaped_fit(item.name, name_room)}{year_bit}</b>"
     pub = html.escape(item.publisher) if item.publisher else "—"
     dev = html.escape(item.developer) if item.developer else "—"
     dates = html.escape(_format_dates(item.offer, lang))
@@ -350,24 +376,31 @@ def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
         html.escape(_platform_label(lang, pid)) for pid in item.offer.platform_ids
     ]
     plats = ", ".join(plat_parts) if plat_parts else "—"
-    desc = html.escape(item.summary[:800]) if item.summary else ""
-    lines = [
-        title,
-        f"{t('giveaways_publisher', lang)} {pub}",
-        f"{t('giveaways_developer', lang)} {dev}",
-        f"{t('giveaways_dates', lang)} {dates}",
-        f"{t('giveaways_platforms', lang)} {plats}",
-    ]
+    meta = "\n".join(
+        [
+            title,
+            f"{t('giveaways_publisher', lang)} {pub}",
+            f"{t('giveaways_developer', lang)} {dev}",
+            f"{t('giveaways_dates', lang)} {dates}",
+            f"{t('giveaways_platforms', lang)} {plats}",
+        ]
+    )
+    use_footer = footer
+    footer_block = f"\n\n{use_footer}" if use_footer else ""
+    if len(meta) + len(footer_block) > _CAP:
+        use_footer = ""
+        footer_block = ""
+    room = _CAP - len(meta) - len(footer_block)
+    desc = ""
+    if item.summary and room > 22:
+        room -= 2  # blank line before description
+        desc = _escaped_fit(item.summary.strip(), room)
+    parts = [meta]
     if desc:
-        lines.append("")
-        lines.append(desc)
-    if footer:
-        lines.append("")
-        lines.append(footer)
-    body = "\n".join(lines)
-    if len(body) > 1024:
-        body = body[:1020] + "…"
-    return body
+        parts.extend(["", desc])
+    if use_footer:
+        parts.extend(["", use_footer])
+    return "\n".join(parts)
 
 
 async def _send_one_card(
@@ -789,11 +822,13 @@ async def on_giveaways_callback(
 
     if data == "gv:details":
         await query.answer()
+        await context.bot.send_message(chat_id, t("giveaways_loading", lang))
         loaded = _load_browse(context.application, user_id)
         if not loaded:
             prefs = _prefs_or_empty(db, user_id)
+            catalog = await asyncio.to_thread(fetch_active_giveaways)
             offers = filter_giveaways(
-                fetch_active_giveaways(),
+                catalog,
                 stores=set(prefs.stores),
                 platforms=set(prefs.platforms),
             )

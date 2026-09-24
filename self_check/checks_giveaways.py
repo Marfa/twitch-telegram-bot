@@ -167,6 +167,45 @@ def _check_beta_manifest() -> None:
     assert "premium_feature_id" not in feat
 
 
+def _check_card_html_caption_budget() -> None:
+    """Long summaries must not break Telegram HTML via naive caption slicing."""
+    from handlers.giveaways import _Enriched, _build_card_html
+
+    offer = GiveawayOffer(
+        source="gamerpower",
+        external_id="1",
+        title="Test",
+        store_id="steam",
+        platform_ids=("pc", "mac"),
+        claim_url="https://example.com",
+        start_at="2024-01-01",
+        end_at="2024-12-31",
+        description="",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Test"),
+    )
+    item = _Enriched(
+        offer=offer,
+        igdb_id=1,
+        name="Game <Name> & Co",
+        year="2020",
+        publisher="Pub & Co",
+        developer="Dev <Ltd>",
+        summary="A & B <tag> " + ("word " * 400),
+        cover_url="",
+    )
+    footer = (
+        '<a href="https://www.gamerpower.com">GamerPower</a> · '
+        '<a href="https://www.igdb.com">IGDB.com</a>'
+    )
+    body = _build_card_html(item, "en", footer=footer)
+    assert len(body) <= 1024
+    assert body.count("<b>") == body.count("</b>") == 1
+    assert body.count("<a ") == body.count("</a>")
+    assert "<tag>" not in body
+    assert "&amp;" in body or "Game" in body
+
+
 def run() -> None:
     _check_sources_maps()
     _check_keyboard_order()
@@ -175,6 +214,7 @@ def run() -> None:
     _check_dedupe_prefers_itad()
     _check_first_digest_unlocks_fresh_flag()
     _check_card_keyboard()
+    _check_card_html_caption_budget()
     _check_beta_manifest()
     # unused mock keeps import for future handler tests
     _ = MagicMock
