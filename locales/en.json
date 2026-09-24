@@ -401,7 +401,7 @@
   "stream_schedule_publish_yes": "✅ Yes",
   "stream_schedule_publish_no": "❌ No",
   "stream_schedule_duration_prompt": "How long is a typical stream (hours)?\nExisting Twitch schedule slots will be cleared before sync.",
-  "stream_schedule_duration_prompt_keep": "How long is a typical stream (hours)?\nEarlier overlapping slots are shortened; slots that start in the new window are replaced.",
+  "stream_schedule_duration_prompt_keep": "How long is a typical stream (hours)?\nOverlapping slots are shortened so they fit next to each other.",
   "stream_schedule_duration_hour": "{hours} h",
   "stream_schedule_duration_unsure": "Not sure",
   "stream_schedule_publish_auth": "Authorize the bot to manage your Twitch schedule.",

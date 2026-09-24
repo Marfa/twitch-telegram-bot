@@ -1784,13 +1784,51 @@ async def _complete_schedule_publish(
     errors: list[str] = []
     prefer_recurring = False
     used_recurring_fallback = False
-    # Clamp shared duration so same-day siblings do not overlap (Twitch would
-    # delete the earlier segment on create retry). Updates + creates together.
+    # Clamp shared duration so same-day siblings do not overlap. Include Helix
+    # neighbors in overlap mode so a new earlier slot is shortened to the next
+    # existing start (otherwise Twitch overlap replace would erase it).
     publish_items = list(updates) + list(entries)
-    clamped = clamp_schedule_slot_durations(
-        [(str(item.get("date") or ""), str(item.get("time") or "0:00")) for item in publish_items],
-        duration_min,
-    )
+    neighbor_keys: list[tuple[str, str]] = []
+    if clear_mode == "overlap":
+        skip_ids = {str(x) for x in deletes} | {
+            str(u.get("id") or "") for u in updates if u.get("id")
+        }
+
+        def _as_date(raw: object) -> date | None:
+            if isinstance(raw, date) and not isinstance(raw, datetime):
+                return raw
+            try:
+                return date.fromisoformat(str(raw)[:10])
+            except ValueError:
+                return None
+
+        days: set[date] = set()
+        for item in publish_items:
+            d = _as_date(item.get("date"))
+            if d is not None:
+                days.add(d)
+        for day in sorted(days):
+            try:
+                for slot in _slots_on_local_day(
+                    twitch, twitch_user_id, day, local_tz=local_tz
+                ):
+                    if str(slot.get("id") or "") in skip_ids:
+                        continue
+                    neighbor_keys.append(
+                        (str(slot.get("date") or day), str(slot.get("time") or "0:00"))
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to load Helix neighbors for schedule clamp user=%s day=%s",
+                    owner_id,
+                    day,
+                )
+    clamp_slots = neighbor_keys + [
+        (str(item.get("date") or ""), str(item.get("time") or "0:00"))
+        for item in publish_items
+    ]
+    clamped_all = clamp_schedule_slot_durations(clamp_slots, duration_min)
+    clamped = clamped_all[len(neighbor_keys) :]
     update_durations = clamped[: len(updates)]
     entry_durations = clamped[len(updates) :]
     for del_id in deletes:

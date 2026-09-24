@@ -296,6 +296,11 @@ async def _smoke_schedule(db) -> None:
         [("2026-09-23", "15:00"), ("2026-09-23", "16:00"), ("2026-09-23", "17:00")],
         180,
     ) == [60, 60, 180]
+    # Helix neighbor at 17:00 + new entry 14:30×3h → new slot ends at 17:00
+    assert clamp_schedule_slot_durations(
+        [("2026-09-23", "17:00"), ("2026-09-23", "14:30")],
+        180,
+    ) == [180, 150]
 
     application, bot = _app(db)
     day = date.today()

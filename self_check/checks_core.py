@@ -1018,7 +1018,8 @@ def check_core() -> None:
         duration=120,
     )
     assert overlap_ids == ["seg-a"]
-    # 14:30–17:30 + new 17:00×3h → shorten earlier slot to end at 17:00 (150 min)
+    # 14:30–17:30 + new 17:00×3h → shorten earlier; later neighbors are kept
+    # (new duration is capped separately via cap_duration_before_later_segments).
     plans = TwitchClient.plan_overlap_resolutions(
         [
             {
@@ -1032,6 +1033,11 @@ def check_core() -> None:
                 "end_time": "2026-09-23T16:00:00Z",
             },
             {
+                "id": "same-start",
+                "start_time": "2026-09-23T14:00:00Z",
+                "end_time": "2026-09-23T15:00:00Z",
+            },
+            {
                 "id": "later-day",
                 "start_time": "2026-09-24T11:30:00Z",
                 "end_time": "2026-09-24T14:30:00Z",
@@ -1042,8 +1048,23 @@ def check_core() -> None:
     )
     assert plans == [
         ("earlier", "shorten", 150),
-        ("inside", "delete", None),
+        ("same-start", "delete", None),
     ]
+    # Existing 17:00 + new 14:30×3h → cap new duration to 150 (end at 17:00)
+    assert (
+        TwitchClient.cap_duration_before_later_segments(
+            [
+                {
+                    "id": "later",
+                    "start_time": "2026-09-23T14:00:00Z",
+                    "end_time": "2026-09-23T16:00:00Z",
+                }
+            ],
+            start_time="2026-09-23T11:30:00Z",
+            duration=180,
+        )
+        == 150
+    )
     from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE
 
     assert SCHEDULE_SCOPE in SCHEDULE_OAUTH_SCOPES

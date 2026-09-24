@@ -826,11 +826,14 @@ class TwitchClient:
         start_time: str,
         duration: int,
     ) -> list[tuple[str, str, int | None]]:
-        """How to clear room for [start, start+duration).
+        """How to clear room for [start, start+duration) without erasing later slots.
 
-        Returns ``(segment_id, action, new_duration_or_None)`` where action is
-        ``shorten`` (earlier neighbor ends at new start) or ``delete`` (starts
-        inside / at the new window).
+        Returns ``(segment_id, action, new_duration_or_None)``:
+        - ``shorten`` — earlier neighbor ends at the new start
+        - ``delete`` — same start time only (cannot coexist)
+
+        Later neighbors are never deleted; callers must cap the new duration via
+        ``cap_duration_before_later_segments``.
         """
         start = cls._parse_schedule_time(start_time)
         overlap_ids = set(
@@ -859,9 +862,40 @@ class TwitchClient:
                     except ValueError:
                         pass
                 out.append((sid, "shorten", minutes))
-            else:
+            elif s0 == start:
                 out.append((sid, "delete", None))
         return out
+
+    @classmethod
+    def cap_duration_before_later_segments(
+        cls,
+        segments: list[dict[str, Any]],
+        *,
+        start_time: str,
+        duration: int,
+        exclude_ids: tuple[str, ...] | list[str] = (),
+    ) -> int:
+        """Cap duration so [start, start+dur) ends at the next later segment start."""
+        start = cls._parse_schedule_time(start_time)
+        chosen = max(1, int(duration))
+        skipped = {str(x) for x in exclude_ids if x}
+        for seg in segments:
+            sid = str(seg.get("id") or "")
+            if sid and sid in skipped:
+                continue
+            ss = seg.get("start_time")
+            if not ss:
+                continue
+            try:
+                s0 = cls._parse_schedule_time(str(ss))
+            except ValueError:
+                continue
+            if s0 <= start:
+                continue
+            gap = int((s0 - start).total_seconds() // 60)
+            if 0 < gap < chosen:
+                chosen = gap
+        return chosen
 
     def delete_overlapping_schedule_segments(
         self,
@@ -872,16 +906,15 @@ class TwitchClient:
         duration: int = 120,
         exclude_ids: tuple[str, ...] | list[str] = (),
     ) -> int:
-        """Make room for a new segment: shorten earlier overlaps, delete the rest.
+        """Resolve overlap for a create/update: shorten earlier, never erase later.
 
-        Earlier neighbors (start before the new start) are PATCHed so they end
-        at the new start. Segments that begin at/inside the new window are
-        deleted. Returns number of segments modified.
+        Shortens earlier overlapping neighbors, deletes same-start only, and returns
+        the duration to retry with (capped so the new window ends at the next later
+        segment start). Later overlapping slots are kept.
         """
         day_start = self._parse_schedule_time(start_time).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        # One local/UTC day of segments is enough; avoid paging the whole series.
         stop_before = (day_start + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
         existing = self.get_schedule_segments(
             broadcaster_id,
@@ -890,7 +923,6 @@ class TwitchClient:
             stop_before=stop_before,
         )
         skipped = {str(x) for x in exclude_ids if x}
-        modified = 0
         for sid, action, new_duration in self.plan_overlap_resolutions(
             existing, start_time=start_time, duration=duration
         ):
@@ -908,7 +940,6 @@ class TwitchClient:
                     self.delete_schedule_segment(
                         user_access_token, broadcaster_id, sid
                     )
-                modified += 1
             except Exception as exc:
                 logger.warning(
                     "Failed to %s overlapping schedule segment %s: %s",
@@ -916,7 +947,12 @@ class TwitchClient:
                     sid,
                     exc,
                 )
-        return modified
+        return self.cap_duration_before_later_segments(
+            existing,
+            start_time=start_time,
+            duration=duration,
+            exclude_ids=exclude_ids,
+        )
 
     def clear_channel_schedule(
         self,
@@ -1548,7 +1584,7 @@ class TwitchClient:
                 broadcaster_id,
                 start_time=start_time,
                 timezone=timezone,
-                duration=duration,
+                duration=int(kwargs.get("duration") or duration),
                 title=title,
                 category_id=category_id,
             )
@@ -1557,13 +1593,14 @@ class TwitchClient:
             return _update(), False
         except Exception as exc:
             if self.is_overlapping_schedule(exc):
-                self.delete_overlapping_schedule_segments(
+                capped = self.delete_overlapping_schedule_segments(
                     user_access_token,
                     broadcaster_id,
                     start_time=start_time,
                     duration=duration,
                     exclude_ids=(segment_id,),
                 )
+                kwargs["duration"] = capped
                 try:
                     return _update(), False
                 except Exception as retry_exc:
@@ -1591,7 +1628,8 @@ class TwitchClient:
 
         Returns (response_json, used_recurring). If prefer_recurring is True, skips
         the one-off attempt (sticky after first fallback in a batch).
-        On overlap, deletes conflicting segments and retries once when replace_overlap.
+        On overlap, shortens earlier neighbors / caps this duration and retries once
+        when replace_overlap (later neighbors are kept).
         """
         kwargs = dict(
             user_access_token=user_access_token,
@@ -1609,12 +1647,13 @@ class TwitchClient:
             except Exception as exc:
                 if not replace_overlap or not self.is_overlapping_schedule(exc):
                     raise
-                self.delete_overlapping_schedule_segments(
+                capped = self.delete_overlapping_schedule_segments(
                     user_access_token,
                     broadcaster_id,
                     start_time=start_time,
-                    duration=duration,
+                    duration=int(kwargs["duration"]),
                 )
+                kwargs["duration"] = capped
                 return self.create_schedule_segment(**kwargs, is_recurring=recurring)
 
         if prefer_recurring:
