@@ -475,6 +475,23 @@ def _broadcast_offset_job_name(broadcast_id: int, utc_offset_minutes: int) -> st
     return f"broadcast_{broadcast_id}_tz_{int(utc_offset_minutes)}"
 
 
+def _broadcast_run_once(job_queue, callback, *, when: float, data: dict, name: str) -> None:
+    """One-shot broadcast job with stable id + misfire grace (survives short stalls)."""
+    delay = max(0.0, float(when))
+    job_queue.run_once(
+        callback,
+        when=delay,
+        data=data,
+        name=name,
+        job_kwargs={
+            "id": name,
+            "replace_existing": True,
+            "misfire_grace_time": max(120, int(delay) + 60),
+            "coalesce": True,
+        },
+    )
+
+
 def _cancel_broadcast_job(job_queue, broadcast_id: int) -> None:
     for job in job_queue.get_jobs_by_name(_broadcast_job_name(broadcast_id)):
         job.schedule_removal()
@@ -506,7 +523,8 @@ def _schedule_broadcast_waves(job_queue, db: Database, broadcast_id: int) -> Non
         if offset in sent:
             continue
         when = max(0.0, (due_utc - now).total_seconds())
-        job_queue.run_once(
+        _broadcast_run_once(
+            job_queue,
             _run_scheduled_broadcast,
             when=when,
             data={"broadcast_id": broadcast_id, "utc_offset": offset},
@@ -862,7 +880,8 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text(t("broadcast_started", lang))
         except BadRequest:
             pass
-        context.job_queue.run_once(
+        _broadcast_run_once(
+            context.job_queue,
             _run_scheduled_broadcast,
             when=0,
             data={"broadcast_id": broadcast_id},

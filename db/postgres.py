@@ -4156,7 +4156,7 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def get_premium_twitch_refresh(self, user_id: int) -> str | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4167,10 +4167,12 @@ owner_id, twitch_username, twitch_user_id,
             row = cur.fetchone()
         if not row or not row["premium_twitch_refresh"]:
             return None
-        try:
-            return decrypt_secret(row["premium_twitch_refresh"])
-        except Exception:
+        plain = try_decrypt_secret(row["premium_twitch_refresh"])
+        if plain is None:
+            self.set_premium_twitch_refresh(user_id, "")
+            self.set_premium_twitch_needs_reauth(user_id, True)
             return None
+        return plain or None
 
     def set_premium_twitch_needs_reauth(self, user_id: int, needs: bool) -> None:
         with self._conn() as conn:
@@ -4870,7 +4872,7 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def get_whisper_alert(self, owner_id: int) -> WhisperAlert | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4882,13 +4884,23 @@ owner_id, twitch_username, twitch_user_id,
         if not row:
             return None
         alert = _row_to_whisper_alert(row)
-        alert.refresh_token = decrypt_secret(alert.refresh_token)
+        plain = try_decrypt_secret(alert.refresh_token)
+        if plain is None:
+            with self._conn() as conn:
+                cur = self._cursor(conn)
+                cur.execute(
+                    "UPDATE whisper_alerts SET refresh_token = '' WHERE owner_id = %s",
+                    (owner_id,),
+                )
+            alert.refresh_token = ""
+        else:
+            alert.refresh_token = plain
         return alert
 
     def get_whisper_alerts_by_twitch_user_id(
         self, twitch_user_id: str
     ) -> list[WhisperAlert]:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         if not twitch_user_id:
             return []
@@ -4906,7 +4918,17 @@ owner_id, twitch_username, twitch_user_id,
         out: list[WhisperAlert] = []
         for row in rows:
             alert = _row_to_whisper_alert(row)
-            alert.refresh_token = decrypt_secret(alert.refresh_token)
+            plain = try_decrypt_secret(alert.refresh_token)
+            if plain is None:
+                with self._conn() as conn:
+                    cur = self._cursor(conn)
+                    cur.execute(
+                        "UPDATE whisper_alerts SET refresh_token = '' WHERE owner_id = %s",
+                        (alert.owner_id,),
+                    )
+                alert.refresh_token = ""
+            else:
+                alert.refresh_token = plain
             out.append(alert)
         return out
 
@@ -4996,7 +5018,7 @@ owner_id, twitch_username, twitch_user_id,
         return [int(r["owner_id"]) for r in rows]
 
     def get_follow_monitor(self, owner_id: int) -> FollowMonitor | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -5008,7 +5030,19 @@ owner_id, twitch_username, twitch_user_id,
         if not row:
             return None
         mon = _row_to_follow_monitor(row)
-        mon.refresh_token = decrypt_secret(mon.refresh_token)
+        plain = try_decrypt_secret(mon.refresh_token)
+        if plain is None:
+            self.set_follow_monitor_needs_reauth(owner_id, True)
+            with self._conn() as conn:
+                cur = self._cursor(conn)
+                cur.execute(
+                    "UPDATE follow_monitor SET refresh_token = '' WHERE owner_id = %s",
+                    (owner_id,),
+                )
+            mon.refresh_token = ""
+            mon.needs_reauth = True
+        else:
+            mon.refresh_token = plain
         return mon
 
     def upsert_follow_monitor(
@@ -5418,7 +5452,7 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def take_whisper_paused_for_reauth(self, owner_id: int) -> WhisperAlert | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -5439,7 +5473,17 @@ owner_id, twitch_username, twitch_user_id,
                 (owner_id,),
             )
         alert = _row_to_whisper_alert(row)
-        alert.refresh_token = decrypt_secret(alert.refresh_token)
+        plain = try_decrypt_secret(alert.refresh_token)
+        if plain is None:
+            with self._conn() as conn:
+                cur = self._cursor(conn)
+                cur.execute(
+                    "UPDATE whisper_alerts SET refresh_token = '' WHERE owner_id = %s",
+                    (owner_id,),
+                )
+            alert.refresh_token = ""
+        else:
+            alert.refresh_token = plain
         return alert
 
     def get_twitch_reauth_notified_at(self, owner_id: int) -> str | None:
@@ -5507,7 +5551,18 @@ owner_id, twitch_username, twitch_user_id,
         for row in rows:
             mon = _row_to_follow_monitor(row)
             plain = try_decrypt_secret(mon.refresh_token)
-            mon.refresh_token = "" if plain is None else plain
+            if plain is None:
+                self.set_follow_monitor_needs_reauth(mon.owner_id, True)
+                with self._conn() as conn:
+                    cur = self._cursor(conn)
+                    cur.execute(
+                        "UPDATE follow_monitor SET refresh_token = '' WHERE owner_id = %s",
+                        (mon.owner_id,),
+                    )
+                mon.refresh_token = ""
+                mon.needs_reauth = True
+            else:
+                mon.refresh_token = plain
             out.append(mon)
         return out
 
@@ -5701,7 +5756,7 @@ owner_id, twitch_username, twitch_user_id,
         ]
 
     def get_chat_auth(self, owner_id: int) -> ChatAuth | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -5713,7 +5768,17 @@ owner_id, twitch_username, twitch_user_id,
         if not row:
             return None
         auth = _row_to_chat_auth(row)
-        auth.refresh_token = decrypt_secret(auth.refresh_token)
+        plain = try_decrypt_secret(auth.refresh_token)
+        if plain is None:
+            with self._conn() as conn:
+                cur = self._cursor(conn)
+                cur.execute(
+                    "UPDATE chat_auth SET refresh_token = '' WHERE owner_id = %s",
+                    (owner_id,),
+                )
+            auth.refresh_token = ""
+        else:
+            auth.refresh_token = plain
         return auth
 
     def delete_whisper_alert(self, owner_id: int) -> None:
@@ -5753,7 +5818,7 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def get_drops_auth(self, owner_id: int) -> DropsAuth | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -5779,9 +5844,27 @@ owner_id, twitch_username, twitch_user_id,
             if "access_expires_at" in row.keys()
             else 0,
         )
-        auth.refresh_token = decrypt_secret(auth.refresh_token)
-        if auth.access_token:
-            auth.access_token = decrypt_secret(auth.access_token)
+        plain = try_decrypt_secret(auth.refresh_token)
+        access_plain = (
+            try_decrypt_secret(auth.access_token) if auth.access_token else ""
+        )
+        if plain is None or (auth.access_token and access_plain is None):
+            with self._conn() as conn:
+                cur = self._cursor(conn)
+                cur.execute(
+                    """
+                    UPDATE drops_auth
+                    SET refresh_token = '', access_token = '', access_expires_at = 0
+                    WHERE owner_id = %s
+                    """,
+                    (owner_id,),
+                )
+            auth.refresh_token = ""
+            auth.access_token = ""
+            auth.access_expires_at = 0
+        else:
+            auth.refresh_token = plain
+            auth.access_token = access_plain or ""
         return auth
 
     def upsert_drops_auth(
@@ -6096,7 +6179,7 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def get_donationalerts_auth(self, owner_id: int) -> DonationAlertsAuth | None:
-        from token_crypto import decrypt_secret
+        from token_crypto import try_decrypt_secret
 
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -6115,9 +6198,27 @@ owner_id, twitch_username, twitch_user_id,
             access_token=str(row["access_token"] or ""),
             access_expires_at=int(row["access_expires_at"] or 0),
         )
-        auth.refresh_token = decrypt_secret(auth.refresh_token)
-        if auth.access_token:
-            auth.access_token = decrypt_secret(auth.access_token)
+        plain = try_decrypt_secret(auth.refresh_token)
+        access_plain = (
+            try_decrypt_secret(auth.access_token) if auth.access_token else ""
+        )
+        if plain is None or (auth.access_token and access_plain is None):
+            with self._conn() as conn:
+                cur = self._cursor(conn)
+                cur.execute(
+                    """
+                    UPDATE donationalerts_auth
+                    SET refresh_token = '', access_token = '', access_expires_at = 0
+                    WHERE owner_id = %s
+                    """,
+                    (owner_id,),
+                )
+            auth.refresh_token = ""
+            auth.access_token = ""
+            auth.access_expires_at = 0
+        else:
+            auth.refresh_token = plain
+            auth.access_token = access_plain or ""
         return auth
 
     def upsert_donationalerts_auth(

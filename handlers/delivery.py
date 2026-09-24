@@ -112,6 +112,7 @@ async def _deliver_alert_content(
     reply_markup=None,
     parse_mode: str | None = None,
     prefer_media_message_id: bool = False,
+    on_media_fallback=None,
 ):
     """Send alert text, optionally with image above/below. Returns the primary message."""
     from message_fx import message_fx_disabled
@@ -131,6 +132,7 @@ async def _deliver_alert_content(
             reply_markup=reply_markup,
             parse_mode=parse_mode,
             prefer_media_message_id=prefer_media_message_id,
+            on_media_fallback=on_media_fallback,
         )
 
 
@@ -148,6 +150,7 @@ async def _deliver_alert_content_plain(
     reply_markup=None,
     parse_mode: str | None = None,
     prefer_media_message_id: bool = False,
+    on_media_fallback=None,
 ):
     """Send alert text, optionally with image/animation/video above/below. Returns the primary message."""
     thread_kwargs: dict = {}
@@ -174,6 +177,14 @@ async def _deliver_alert_content_plain(
         import re as _re
 
         return _html.unescape(_re.sub(r"<[^>]+>", "", body or ""))
+
+    async def _note_media_fallback(exc: BaseException) -> None:
+        if on_media_fallback is None:
+            return
+        try:
+            await on_media_fallback(exc)
+        except Exception:
+            logger.warning("media fallback notify failed", exc_info=True)
 
     async def _photo(**photo_kwargs):
         return await _send_photo_with_url_fallback(
@@ -250,14 +261,20 @@ async def _deliver_alert_content_plain(
                         **thread_kwargs,
                         **markup_kwargs,
                     )
-                except BadRequest:
-                    pass
+                except BadRequest as exc2:
+                    logger.warning(
+                        "Media send failed for %s (%s); falling back to text-only",
+                        chat_id,
+                        exc2,
+                    )
+                    await _note_media_fallback(exc2)
             else:
                 logger.warning(
                     "Media send failed for %s (%s); falling back to text-only",
                     chat_id,
                     exc,
                 )
+                await _note_media_fallback(exc)
 
     elif has_media:
         if position == "before":
@@ -269,6 +286,7 @@ async def _deliver_alert_content_plain(
                     chat_id,
                     exc,
                 )
+                await _note_media_fallback(exc)
             else:
                 text_msg = await _send_text()
                 # Dynamic previews need the media message id for editMessageMedia.
@@ -283,6 +301,7 @@ async def _deliver_alert_content_plain(
                     chat_id,
                     exc,
                 )
+                await _note_media_fallback(exc)
                 return msg
             return media_msg if prefer_media_message_id else msg
 
@@ -423,6 +442,8 @@ def _live_remind_button_url(
 # ponytail: in-memory dedupe; resets on restart (acceptable for owner DM notices).
 _DELIVERY_FAIL_NOTICE_COOLDOWN = timedelta(hours=24)
 _delivery_fail_notified: dict[int, datetime] = {}
+_MEDIA_FALLBACK_NOTICE_COOLDOWN = timedelta(hours=24)
+_media_fallback_notified: dict[int, datetime] = {}
 
 _USER_BLOCKED_NEEDLES = (
     "blocked by the user",
@@ -562,6 +583,14 @@ def _delivery_fail_notice_due(sub_id: int, *, now: datetime | None = None) -> bo
         return True
     at = now or datetime.now(timezone.utc)
     return at - last >= _DELIVERY_FAIL_NOTICE_COOLDOWN
+
+
+def _media_fallback_notice_due(sub_id: int, *, now: datetime | None = None) -> bool:
+    last = _media_fallback_notified.get(sub_id)
+    if last is None:
+        return True
+    at = now or datetime.now(timezone.utc)
+    return at - last >= _MEDIA_FALLBACK_NOTICE_COOLDOWN
 
 
 def _delivery_fail_chat_label(display_name: str, chat_id: int) -> str:
@@ -722,6 +751,56 @@ async def _maybe_notify_delivery_failure(
             )
         logger.warning(
             "Cannot notify owner %s about delivery failure: %s",
+            sub.owner_id,
+            notify_exc,
+        )
+
+
+async def _maybe_notify_media_fallback(
+    bot,
+    db: Database,
+    sub: Subscription,
+    exc: BaseException,
+) -> None:
+    """DM owner when alert media could not be posted and text-only was used."""
+    from handlers.subscriptions import _owner_sub_number
+
+    if sub.dest_type == "dm":
+        return
+    if db.is_bot_blocked(sub.owner_id):
+        return
+    if not _media_fallback_notice_due(sub.id):
+        return
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    chat_label = _delivery_fail_chat_label(
+        await _resolve_chat_display_name(bot, sub), sub.chat_id
+    )
+    notice = t(
+        "media_fallback_notice",
+        lang,
+        sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
+        twitch_username=sub.twitch_username,
+        chat_name=chat_label,
+        reason=str(exc),
+    )
+    try:
+        await bot.send_message(sub.owner_id, notice)
+        _media_fallback_notified[sub.id] = datetime.now(timezone.utc)
+        analytics.capture(
+            sub.owner_id,
+            "media_fallback_notice",
+            properties=_block_context(sub),
+        )
+    except (BadRequest, Forbidden) as notify_exc:
+        if _is_user_blocked_error(notify_exc):
+            apply_user_blocked(
+                db,
+                sub.owner_id,
+                source="media_fallback_notice",
+                properties=_block_context(sub),
+            )
+        logger.warning(
+            "Cannot notify owner %s about media fallback: %s",
             sub.owner_id,
             notify_exc,
         )
@@ -1012,6 +1091,10 @@ async def _send_notification(
         alert_parse_mode = parse_mode
     try:
         lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+
+        async def _on_media_fallback(exc: BaseException) -> None:
+            await _maybe_notify_media_fallback(bot, db, sub, exc)
+
         bot_username = ""
         if getattr(sub, "attach_live_remind_button", False):
             me = await bot.get_me()
@@ -1096,6 +1179,7 @@ async def _send_notification(
             reply_markup=chat_markup,
             parse_mode=alert_parse_mode,
             prefer_media_message_id=prefer_media_id,
+            on_media_fallback=_on_media_fallback,
         )
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
@@ -1113,6 +1197,7 @@ async def _send_notification(
                 reply_markup=chat_markup,
                 parse_mode=alert_parse_mode,
                 prefer_media_message_id=prefer_media_id,
+                on_media_fallback=_on_media_fallback,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)

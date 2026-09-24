@@ -452,6 +452,23 @@ def check_db_premium() -> None:
         # Undecryptable ciphertext must not raise (would crash sync_twitch_follows).
         assert try_decrypt_secret("enc:v1:gAAAAABnot-a-valid-fernet-token") is None
         assert decrypt_secret("enc:v1:gAAAAABnot-a-valid-fernet-token") == ""
+        # chat_auth InvalidToken → clear blob (no re-log on next read).
+        db.upsert_chat_auth(
+            55, twitch_user_id="tw55", twitch_login="u55", refresh_token="ok-rt"
+        )
+        with db._conn() as conn:
+            conn.execute(
+                "UPDATE chat_auth SET refresh_token = ? WHERE owner_id = ?",
+                ("enc:v1:gAAAAABcorrupt-chat-auth-xxxxx", 55),
+            )
+        auth55 = db.get_chat_auth(55)
+        assert auth55 is not None and auth55.refresh_token == ""
+        with db._conn() as conn:
+            row55 = conn.execute(
+                "SELECT refresh_token FROM chat_auth WHERE owner_id = ?", (55,)
+            ).fetchone()
+        assert row55["refresh_token"] == ""
+        db.delete_chat_auth(55)
         db.upsert_twitch_sync(
             owner_id=99,
             twitch_user_id="tw-bad",
@@ -571,6 +588,10 @@ def check_db_premium() -> None:
         assert "def restore_pending_alert_jobs" in notif_src
         assert "pending_alert_jobs" in Path("db/sqlite.py").read_text(encoding="utf-8")
         assert "restore_pending_alert_jobs" in Path("bot.py").read_text(encoding="utf-8")
+        bc = Path("handlers/broadcast.py").read_text(encoding="utf-8")
+        assert "def _broadcast_run_once" in bc
+        assert bc.count("job_queue.run_once(") == 1  # only inside _broadcast_run_once
+        assert "misfire_grace_time" in bc
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")
@@ -1409,6 +1430,17 @@ def check_db_premium() -> None:
     _delivery_fail_notified[99] = _now - timedelta(hours=25)
     assert _delivery_fail_notice_due(99, now=_now)
     _delivery_fail_notified.pop(99, None)
+    from handlers.delivery import (
+        _media_fallback_notice_due,
+        _media_fallback_notified,
+    )
+
+    assert _media_fallback_notice_due(88, now=_now)
+    _media_fallback_notified[88] = _now
+    assert not _media_fallback_notice_due(88, now=_now)
+    _media_fallback_notified.pop(88, None)
+    assert "media_fallback_notice" in Path("locales/ru.json").read_text(encoding="utf-8")
+    assert "media_fallback_notice" in Path("locales/en.json").read_text(encoding="utf-8")
     assert _delivery_fail_chat_label("My Group", -1001980871389) == (
         "My Group (-1001980871389)"
     )

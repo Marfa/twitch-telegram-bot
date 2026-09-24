@@ -644,6 +644,7 @@
   "delete_fail_notice": "Impossibile eliminare la notifica precedente:\n{link}",
   "delivery_fail_notice": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) alla chat {chat_name}.\n\nMotivo: {reason}\n\nGli avvisi verso questa chat sono in pausa. Riaggiungi il bot (o ripristina i diritti di invio) e si riattiveranno.",
   "delivery_fail_notice_topic_closed": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) alla chat {chat_name}.\n\nQuesto topic del forum è chiuso — il bot non può pubblicarvi. Apri il topic o cambia la destinazione dell'avviso.",
+  "media_fallback_notice": "Impossibile inviare i media (foto/anteprima) per l'iscrizione #{sub_id} ({twitch_username}) alla chat {chat_name}.\n\nMotivo: {reason}\n\nL'avviso è stato inviato solo come testo. Controlla i diritti del bot in quella chat (invio di foto e video).",
   "delivery_fail_reason_topic_closed": "topic del forum chiuso",
   "delivery_fail_edit_btn": "✏️ Modifica notifica",
   "delivery_fail_delete_btn": "🗑 Elimina notifica",

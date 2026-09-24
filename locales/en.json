@@ -644,6 +644,7 @@
   "delete_fail_notice": "Could not delete the previous notification:\n{link}",
   "delivery_fail_notice": "Could not send notification for subscription #{sub_id} ({twitch_username}) to chat {chat_name}.\n\nReason: {reason}\n\nAlerts to this chat are paused. Re-add the bot (or restore send rights) and they will turn back on.",
   "delivery_fail_notice_topic_closed": "Could not send notification for subscription #{sub_id} ({twitch_username}) to chat {chat_name}.\n\nThis forum topic is closed — the bot cannot post there. Open the topic or change the alert destination.",
+  "media_fallback_notice": "Could not send media (photo/preview) for subscription #{sub_id} ({twitch_username}) to chat {chat_name}.\n\nReason: {reason}\n\nThe alert was sent as text only. Check the bot’s rights in that chat (posting photos and videos).",
   "delivery_fail_reason_topic_closed": "forum topic is closed",
   "delivery_fail_edit_btn": "✏️ Edit notification",
   "delivery_fail_delete_btn": "🗑 Delete notification",
