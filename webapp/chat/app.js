@@ -50,7 +50,7 @@
       statusLive: "Live",
       statusOffline: "Offline",
         embedHint:
-        "Twitch login and Drops inside the embedded chat do not work in Telegram.",
+        "Twitch login/Drops in the embed UI do not work here. Send below after linking Twitch in the header.",
     },
     ru: {
       live: "Сейчас в эфире",
@@ -91,7 +91,7 @@
       statusLive: "В эфире",
       statusOffline: "Оффлайн",
       embedHint:
-        "Вход и Drops во встроенном чате в Telegram не работают.",
+        "Вход и Drops в UI Twitch внутри embed не работают. Пишите в поле ниже (вход Twitch в шапке).",
     },
     uk: {
       live: "Зараз в ефірі",
@@ -132,7 +132,7 @@
       statusLive: "В ефірі",
       statusOffline: "Офлайн",
       embedHint:
-        "Вхід і Drops у вбудованому чаті в Telegram не працюють.",
+        "Вхід і Drops у UI Twitch всередині embed не працюють. Пишіть у поле нижче (вхід Twitch у шапці).",
     },
     it: {
       live: "In diretta ora",
@@ -173,7 +173,7 @@
       statusLive: "In diretta",
       statusOffline: "Offline",
       embedHint:
-        "Accesso Twitch e Drops nella chat incorporata non funzionano in Telegram.",
+        "Accesso Twitch/Drops nell'UI embed non funzionano qui. Scrivi sotto dopo aver collegato Twitch in alto.",
     },
   };
 
@@ -586,6 +586,8 @@
     el("view-chat").classList.add("hidden");
     el("view-home").classList.remove("hidden");
     el("embed-hint").classList.add("hidden");
+    el("send-form").classList.add("hidden");
+    showSendFeedback("");
     loadOnlineList();
   }
 
@@ -614,6 +616,8 @@
   function applyChatMode() {
     el("btn-fallback").textContent = useFallback ? t.embed : t.simple;
     const hint = el("embed-hint");
+    const sendForm = el("send-form");
+    if (sendForm) sendForm.classList.remove("hidden");
     if (useFallback) {
       el("embed-wrap").classList.add("hidden");
       el("fallback-wrap").classList.remove("hidden");
@@ -637,6 +641,23 @@
         encodeURIComponent(parent) +
         "&darkpopout";
     }
+  }
+
+  function showSendFeedback(text) {
+    const box = el("send-feedback");
+    if (!box) return;
+    if (!text) {
+      box.textContent = "";
+      box.classList.add("hidden");
+      return;
+    }
+    box.textContent = text;
+    box.classList.remove("hidden");
+  }
+
+  function notifySend(text) {
+    if (useFallback) appendMsg("", text, true);
+    else showSendFeedback(text);
   }
 
   function clearIrcStatus() {
@@ -847,7 +868,7 @@
     const { body } = await api("/app/chat/api/oauth-url");
     if (!body.ok || !body.url) return;
     const notice = (body.privacy_notice || t.oauthPrivacyHint || "").trim();
-    if (notice) appendMsg("", notice, true);
+    if (notice) notifySend(notice);
     if (tg && tg.openLink) tg.openLink(body.url);
     else window.open(body.url, "_blank");
   });
@@ -855,12 +876,13 @@
   el("send-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!current) return;
+    showSendFeedback("");
     if (!session || !session.twitch_linked) {
-      appendMsg("", t.needAuth, true);
+      notifySend(t.needAuth);
       return;
     }
     if (!session.unlimited && !channelUnlimited(current.login) && session.remaining === 0) {
-      appendMsg("", t.limitHit, true);
+      notifySend(t.limitHit);
       return;
     }
     const input = el("send-input");
@@ -877,9 +899,9 @@
       }),
     });
     if (!body.ok) {
-      if (body.error === "daily_limit") appendMsg("", t.limitHit, true);
-      else if (body.error === "twitch_auth_required") appendMsg("", t.needAuth, true);
-      else appendMsg("", t.sendFail, true);
+      if (body.error === "daily_limit") notifySend(t.limitHit);
+      else if (body.error === "twitch_auth_required") notifySend(t.needAuth);
+      else notifySend(t.sendFail);
       if (typeof body.remaining === "number") {
         session.remaining = body.remaining;
         session.sent_today = body.sent_today;
@@ -891,7 +913,8 @@
     session.sent_today = body.sent_today;
     if (body.unlimited) session.unlimited = true;
     updateQuota();
-    appendMsg(session.twitch_login || "you", text, false);
+    // Embed: message appears in Twitch iframe; Simple: echo into IRC list.
+    if (useFallback) appendMsg(session.twitch_login || "you", text, false);
   });
 
   document.addEventListener("visibilitychange", () => {

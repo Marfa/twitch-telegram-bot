@@ -33,7 +33,7 @@
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks, “viewed all below”, **To unwatched** pagination jump |
 | Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button) |
-| Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed/fallback |
+| Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed + Helix send / Simple IRC |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
 | System alerts | Toggle admin broadcasts (updates / availability / other / sync / **new betas**, default off, auto-on on first beta opt-in); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
@@ -223,7 +223,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 
 ### Twitch stream chat
 
-**Chat** menu button next to the message field (set for everyone on deploy) and **📦 Other → 💬 Chat** → Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + simple fallback). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
+**Chat** menu button next to the message field (set for everyone on deploy) and **📦 Other → 💬 Chat** → Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + send via the field under chat; **Simple** = IRC). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
 
 ### Pause notifications
 

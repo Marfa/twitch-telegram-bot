@@ -53,17 +53,18 @@
       </div>
       <div id="fallback-wrap" class="fallback-wrap hidden">
         <div id="msg-list" class="msg-list"></div>
-        <form id="send-form" class="send">
-          <input id="send-input" type="text" maxlength="500" autocomplete="off"
-                 placeholder="Message">
-          <button type="submit" class="btn" id="btn-send">Send</button>
-        </form>
-        <p id="send-quota" class="hint hidden"></p>
       </div>
+      <form id="send-form" class="send hidden">
+        <input id="send-input" type="text" maxlength="500" autocomplete="off"
+               placeholder="Message">
+        <button type="submit" class="btn" id="btn-send">Send</button>
+      </form>
+      <p id="send-feedback" class="hint hidden"></p>
+      <p id="send-quota" class="hint hidden"></p>
     </section>
 
     <p id="fatal" class="fatal hidden"></p>
   </div>
-  <script src="/app/chat/app.js?v=15"></script>
+  <script src="/app/chat/app.js?v=16"></script>
 </body>
 </html>

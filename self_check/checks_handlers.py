@@ -1701,14 +1701,20 @@ def check_handlers() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=15' in (WEBAPP_DIR / "index.html").read_text(
+    assert '/app/chat/app.js?v=16' in (WEBAPP_DIR / "index.html").read_text(
         encoding="utf-8"
     )
     html = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
     assert 'id="btn-twitch"' not in html
     assert 'id="btn-info"' not in html
     assert 'id="info-panel"' not in html
+    # Helix send bar is shared (outside fallback) so Embed can send without Twitch iframe login.
+    assert 'id="send-form"' in html
+    assert html.index('id="fallback-wrap"') < html.index('id="send-form"')
+    assert 'id="send-feedback"' in html
     assert "embedHint" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
+    assert "showSendFeedback" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
+    assert "notifySend" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
     assert "SecureStorage" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
     assert "DeviceStorage" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
     assert "addToHomeScreen" in (WEBAPP_DIR / "app.js").read_text(encoding="utf-8")
