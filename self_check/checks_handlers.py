@@ -1701,7 +1701,7 @@ def check_handlers() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=17' in (WEBAPP_DIR / "index.html").read_text(
+    assert '/app/chat/app.js?v=18' in (WEBAPP_DIR / "index.html").read_text(
         encoding="utf-8"
     )
     html = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")

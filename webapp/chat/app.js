@@ -913,8 +913,7 @@
     session.sent_today = body.sent_today;
     if (body.unlimited) session.unlimited = true;
     updateQuota();
-    // Embed: message appears in Twitch iframe; Simple: echo into IRC list.
-    if (useFallback) appendMsg(session.twitch_login || "you", text, false);
+    // Do not echo locally: Embed shows it in the Twitch iframe; Simple gets PRIVMSG via IRC.
   });
 
   document.addEventListener("visibilitychange", () => {
