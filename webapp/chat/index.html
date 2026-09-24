@@ -50,6 +50,8 @@
       <p id="embed-hint" class="hint hidden"></p>
       <div id="embed-wrap" class="embed-wrap hidden">
         <iframe id="embed-frame" title="Twitch chat" allowfullscreen></iframe>
+        <!-- Cover Twitch's own composer (login/send) — iframe DOM is cross-origin. -->
+        <div id="embed-composer-mask" class="embed-composer-mask" aria-hidden="true"></div>
       </div>
       <div id="fallback-wrap" class="fallback-wrap hidden">
         <div id="msg-list" class="msg-list"></div>
@@ -65,6 +67,6 @@
 
     <p id="fatal" class="fatal hidden"></p>
   </div>
-  <script src="/app/chat/app.js?v=16"></script>
+  <script src="/app/chat/app.js?v=17"></script>
 </body>
 </html>
