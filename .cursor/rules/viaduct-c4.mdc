@@ -1,0 +1,74 @@
+---
+description: Viaduct C4 (Quiet Grid) — карта архитектуры; предлагать углублять модель при пробеле в контексте
+alwaysApply: true
+---
+
+# Viaduct C4
+
+Сайт: https://c4.quietgridlabs.com/  
+MCP: `https://mcp.quietgridlabs.com/mcp`
+
+## Зачем
+
+Живая C4-модель экосистемы (бот ↔ Telegram / Twitch Helix / IGDB / CloudConvert / PostHog / Aiven DR) для агента через MCP.  
+Не заменяет `.cursor/rules/` (gates, secrets, `vps-psql`) и код — дополняет картой связей.
+
+## Проект модели
+
+- Viaduct projectId: `21b8a379-c247-411c-92e2-f71cea6e674f` (**Twitch Telegram Bot**)
+- Рядом в том же аккаунте: Jira Analyzer `eaf3fb43-1765-4c1d-8a34-35940f57dbac`
+- Skill моделирования: `viaduct-architect` (`~/.agents/skills/viaduct-architect`)
+
+## Подключение
+
+1. Аккаунт на https://c4.quietgridlabs.com/ → Settings → **MCP Access** → токен.
+2. Токен в `.env`: `VIADUCT_MCP_TOKEN=...` (не коммитить). Тот же токен, что для других проектов Marfa.
+3. MCP в `%USERPROFILE%\.cursor\mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "viaduct": {
+      "url": "https://mcp.quietgridlabs.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:VIADUCT_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Docs: https://c4.quietgridlabs.com/docs (MCP for Cursor). Health: `https://mcp.quietgridlabs.com/healthz`.
+
+4. Reload MCP / перезапуск Cursor. Проверка: `c4_whoami`, затем `c4_list_projects`.
+
+## Когда использовать
+
+- «Кто с кем говорит» (Telegram, Helix, dumps, DR)
+- Новый внешний контур (API / оплата / аналитика) — отразить в модели
+- Вопросы агента про границы live DB vs Aiven
+
+## Углублять модель — по необходимости
+
+Базовой L1/L2 (системы + `bot`/`db`/scripts/rules) обычно достаточно. **Не** углублять заранее «на всякий случай» (Magic flow, sequences, полный ER `igdb_*`).
+
+В чате **предложи** углубить Viaduct (конкретно: что добавить — внешняя система, container/endpoint, sequence, Magic flow, таблица), если в ходе работы видно, что карте не хватает контекста, например:
+
+- новый или неочевидный внешний контур (API, платёж, аналитика, DR), которого нет в модели;
+- путаница границ live Postgres vs Aiven / локальный `data/bot.db`;
+- нетривиальный сквозной сценарий (старт стрима → алерт, Stars/Premium unlock, dumps sync), который агент или человек путают без journey/sequence.
+
+После согласия — писать в модель через MCP (`c4_*` / skill `viaduct-architect`). Без согласия — только предложение в чате.
+
+## Как моделировать
+
+- Уровни C4: связи только внутри одного уровня
+- `technology` — id из `c4_list_technologies`, не произвольная строка
+- Live Postgres = container `db`; Aiven = external system (cold DR)
+- SoR по gates/секретам/прод-запросам — по-прежнему rules, не только C4
+
+## Запрещено
+
+- Класть токен MCP в Git / rules / README
+- Считать Viaduct источником истины вместо VPS DB / кода / rules
+- Углублять модель молча без явной нужды или без согласия на доработку
