@@ -17,6 +17,7 @@ from giveaway_sources import GiveawayOffer
 from handlers.giveaway_watch import (
     _game_pick_keyboard,
     canonicalize_igdb_platform_name,
+    offer_matches_game,
     platforms_match_offer,
 )
 
@@ -118,6 +119,32 @@ def _check_game_pick_keyboard_company_label() -> None:
     assert "Valve" in label
 
 
+def _check_offer_matches_game_string_only() -> None:
+    # Hot path must not hit igdb_search (was ~60s/catalog on the asyncio loop).
+    import inspect
+
+    src = inspect.getsource(offer_matches_game)
+    assert "igdb_search_games_by_name" not in src
+    offer = GiveawayOffer(
+        source="gamerpower",
+        external_id="1",
+        title="Grab Demo Game on Steam — Free!",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="https://example.com",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key="steam|demo",
+    )
+    assert offer_matches_game(None, offer, igdb_game_id=42, game_name="Demo Game")
+    assert not offer_matches_game(
+        None, offer, igdb_game_id=42, game_name="Other Title"
+    )
+    assert not offer_matches_game(None, offer, igdb_game_id=42, game_name="")
+
+
 def _check_igdb_platforms_for_game() -> None:
     import tempfile
     from pathlib import Path
@@ -149,6 +176,7 @@ def run() -> None:
     _check_empty_platforms_any()
     _check_platform_canonicalize()
     _check_game_pick_keyboard_company_label()
+    _check_offer_matches_game_string_only()
     _check_igdb_platforms_for_game()
 
 

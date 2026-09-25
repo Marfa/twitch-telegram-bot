@@ -223,22 +223,27 @@ def platforms_match_offer(
 
 
 def offer_matches_game(
-    db: Database, offer: GiveawayOffer, *, igdb_game_id: int, game_name: str
+    _db: Database,
+    offer: GiveawayOffer,
+    *,
+    igdb_game_id: int,
+    game_name: str,
 ) -> bool:
+    """True if offer title refers to the watched game.
+
+    String match only against the known ``game_name``. Never run IGDB fuzzy
+    search here — per-offer ILIKE on the asyncio loop blocked APScheduler for
+    ~60s on a full giveaway catalog scan.
+    ``igdb_game_id`` is kept for call-site clarity / future exact-id hooks.
+    """
+    del igdb_game_id  # matched via game_name stored on the sub
     title = (offer.title or "").strip()
     if not title:
         return False
     want = (game_name or "").casefold().strip()
-    if want and want in title.casefold():
-        return True
-    try:
-        hits = db.igdb_search_games_by_name(title, limit=5)
-    except Exception:
-        logger.exception("giveaway_watch igdb search failed title=%s", title[:80])
+    if not want:
         return False
-    if not hits:
-        return False
-    return int(hits[0].get("id") or 0) == int(igdb_game_id)
+    return want in title.casefold()
 
 
 async def start_giveaway_watch_wizard(
@@ -806,6 +811,9 @@ async def start_edit_giveaway_watch_platforms(
 
 
 async def check_giveaway_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
+    import time as _time
+
+    started = _time.monotonic()
     db: Database = context.application.bot_data["db"]
     bot = context.bot
     subs = db.get_giveaway_watch_subscriptions()
@@ -865,6 +873,14 @@ async def check_giveaway_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> Non
                     "offer": key,
                 },
             )
+    elapsed = _time.monotonic() - started
+    if elapsed >= 5.0:
+        logger.warning(
+            "check_giveaway_watch_alerts took %.1fs (subs=%s offers=%s)",
+            elapsed,
+            len(subs),
+            len(catalog),
+        )
 
 
 async def _send_giveaway_watch_notify(
