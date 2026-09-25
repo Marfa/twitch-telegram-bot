@@ -581,6 +581,7 @@ class TwitchClient:
         first: int = 25,
         start_time: str | None = None,
         stop_before: str | None = None,
+        max_pages: int = 40,
     ) -> dict[str, Any]:
         """Schedule payload: upcoming segments (paginated) + vacation window.
 
@@ -589,19 +590,24 @@ class TwitchClient:
 
         When ``stop_before`` (UTC ISO) is set, stop paging once a segment's
         ``start_time`` is at or after that instant (segments are chronological).
+
+        ``max_pages`` caps Helix pagination (1 = single page). Clear-all must use
+        1 page per round: after full pagination, one recurring series can expand to
+        ~1000 occurrence ids and clear would DELETE each sibling (mostly 404).
         """
         segments: list[dict[str, Any]] = []
         vacation: dict[str, Any] | None = None
         tz = "UTC"
         cursor: str | None = None
         page_size = max(1, min(25, int(first)))
+        page_limit = max(1, min(40, int(max_pages)))
         stop_at: datetime | None = None
         if stop_before:
             try:
                 stop_at = self._parse_schedule_time(str(stop_before))
             except ValueError:
                 stop_at = None
-        for _ in range(40):
+        for _ in range(page_limit):
             params: dict[str, str | int] = {
                 "broadcaster_id": broadcaster_id,
                 "first": page_size,
@@ -661,6 +667,7 @@ class TwitchClient:
         first: int = 20,
         start_time: str | None = None,
         stop_before: str | None = None,
+        max_pages: int = 40,
     ) -> list[dict[str, Any]]:
         """Upcoming schedule segments; empty if no schedule."""
         return list(
@@ -669,6 +676,7 @@ class TwitchClient:
                 first=first,
                 start_time=start_time,
                 stop_before=stop_before,
+                max_pages=max_pages,
             ).get("segments")
             or []
         )
@@ -963,15 +971,20 @@ class TwitchClient:
     ) -> int:
         """Delete all upcoming schedule segments. Returns successful delete calls.
 
-        Refetches after each round because deleting a recurring segment removes the
-        whole series (subsequent occurrence ids 404).
+        One Helix page per round, then refetch: deleting a recurring segment removes
+        the whole series (sibling occurrence ids 404). Do not paginate the full
+        forward window first — a long recurring series can yield ~1000 ids.
         """
         deleted = 0
         for _ in range(max(1, max_rounds)):
-            segments = self.get_schedule_segments(broadcaster_id, first=25)
+            # max_pages=1: pre-pagination clear behavior (page → delete → refetch).
+            segments = self.get_schedule_segments(
+                broadcaster_id, first=25, max_pages=1
+            )
             if not segments:
                 break
             ids: list[str] = []
+            recurring_ids: set[str] = set()
             seen: set[str] = set()
             for seg in segments:
                 sid = str(seg.get("id") or "")
@@ -979,6 +992,8 @@ class TwitchClient:
                     continue
                 seen.add(sid)
                 ids.append(sid)
+                if seg.get("is_recurring"):
+                    recurring_ids.add(sid)
             if not ids:
                 break
             progress = False
@@ -989,6 +1004,9 @@ class TwitchClient:
                     )
                     deleted += 1
                     progress = True
+                    # Whole series is gone — skip sibling occurrence ids on this page.
+                    if sid in recurring_ids:
+                        break
                 except Exception as exc:
                     logger.warning(
                         "Failed to delete schedule segment %s: %s", sid, exc
@@ -1012,10 +1030,17 @@ class TwitchClient:
         in Helix ISO format (e.g. `YYYY-MM-DDT00:00:00Z`).
         """
         deleted = 0
-        day_start = self._parse_schedule_time(start_time).strftime("%Y-%m-%dT%H:%M:%SZ")
+        day_start_dt = self._parse_schedule_time(start_time)
+        day_start = day_start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        stop_before = (
+            day_start_dt + timedelta(minutes=max(1, int(duration)) + 1)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         for _ in range(max(1, max_rounds)):
             segments = self.get_schedule_segments(
-                broadcaster_id, first=25, start_time=day_start
+                broadcaster_id,
+                first=25,
+                start_time=day_start,
+                stop_before=stop_before,
             )
             if not segments:
                 break

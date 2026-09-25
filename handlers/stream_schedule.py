@@ -1751,135 +1751,169 @@ async def _complete_schedule_publish(
                 day_start_iso = day_start_local.astimezone(timezone.utc).strftime(
                     "%Y-%m-%dT%H:%M:%SZ"
                 )
-                await asyncio.to_thread(
+                logger.info(
+                    "Schedule publish clear day broadcaster=%s", twitch_user_id
+                )
+                cleared = await asyncio.to_thread(
                     twitch.clear_schedule_for_day,
                     access,
                     twitch_user_id,
                     start_time=day_start_iso,
                 )
             else:
-                await asyncio.to_thread(
+                logger.info(
+                    "Schedule publish clear all broadcaster=%s", twitch_user_id
+                )
+                cleared = await asyncio.to_thread(
                     twitch.clear_channel_schedule, access, twitch_user_id
                 )
+            logger.info(
+                "Schedule publish clear done broadcaster=%s deleted=%s",
+                twitch_user_id,
+                cleared,
+            )
         except Exception as exc:
             _log_schedule_clear_failed(type(exc).__name__)
 
-    def _start_and_category(item: dict) -> tuple[str, str, str]:
-        hour, minute = (int(x) for x in item["time"].split(":", 1))
-        y, m, d = (int(x) for x in str(item["date"]).split("-", 2))
-        local_dt = datetime(y, m, d, hour, minute, tzinfo=local_tz)
-        start_iso = local_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        game_text = item.get("game", "")
-        category_id = ""
-        if game_text:
-            try:
-                cats = twitch.search_categories(game_text)
-                if cats:
-                    category_id = cats[0]["id"]
-            except Exception:
-                pass
-        return start_iso, game_text, category_id
+    def _mutate_helix() -> tuple[int, list[str], bool]:
+        """Sync Helix deletes/updates/creates — run via to_thread."""
 
-    ok_count = 0
-    errors: list[str] = []
-    prefer_recurring = False
-    used_recurring_fallback = False
-    # Clamp shared duration so same-day siblings do not overlap. Include Helix
-    # neighbors in overlap mode so a new earlier slot is shortened to the next
-    # existing start (otherwise Twitch overlap replace would erase it).
-    publish_items = list(updates) + list(entries)
-    neighbor_keys: list[tuple[str, str]] = []
-    if clear_mode == "overlap":
-        skip_ids = {str(x) for x in deletes} | {
-            str(u.get("id") or "") for u in updates if u.get("id")
-        }
+        def _start_and_category(item: dict) -> tuple[str, str, str]:
+            hour, minute = (int(x) for x in item["time"].split(":", 1))
+            y, m, d = (int(x) for x in str(item["date"]).split("-", 2))
+            local_dt = datetime(y, m, d, hour, minute, tzinfo=local_tz)
+            start_iso = local_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            game_text = item.get("game", "")
+            category_id = ""
+            if game_text:
+                try:
+                    cats = twitch.search_categories(game_text)
+                    if cats:
+                        category_id = cats[0]["id"]
+                except Exception:
+                    pass
+            return start_iso, game_text, category_id
 
-        def _as_date(raw: object) -> date | None:
-            if isinstance(raw, date) and not isinstance(raw, datetime):
-                return raw
-            try:
-                return date.fromisoformat(str(raw)[:10])
-            except ValueError:
-                return None
+        ok = 0
+        errs: list[str] = []
+        prefer_recurring = False
+        used_recurring = False
+        # Clamp shared duration so same-day siblings do not overlap. Include Helix
+        # neighbors in overlap mode so a new earlier slot is shortened to the next
+        # existing start (otherwise Twitch overlap replace would erase it).
+        publish_items = list(updates) + list(entries)
+        neighbor_keys: list[tuple[str, str]] = []
+        if clear_mode == "overlap":
+            skip_ids = {str(x) for x in deletes} | {
+                str(u.get("id") or "") for u in updates if u.get("id")
+            }
 
-        days: set[date] = set()
-        for item in publish_items:
-            d = _as_date(item.get("date"))
-            if d is not None:
-                days.add(d)
-        for day in sorted(days):
-            try:
-                for slot in _slots_on_local_day(
-                    twitch, twitch_user_id, day, local_tz=local_tz
-                ):
-                    if str(slot.get("id") or "") in skip_ids:
-                        continue
-                    neighbor_keys.append(
-                        (str(slot.get("date") or day), str(slot.get("time") or "0:00"))
+            def _as_date(raw: object) -> date | None:
+                if isinstance(raw, date) and not isinstance(raw, datetime):
+                    return raw
+                try:
+                    return date.fromisoformat(str(raw)[:10])
+                except ValueError:
+                    return None
+
+            days: set[date] = set()
+            for item in publish_items:
+                d = _as_date(item.get("date"))
+                if d is not None:
+                    days.add(d)
+            for day in sorted(days):
+                try:
+                    for slot in _slots_on_local_day(
+                        twitch, twitch_user_id, day, local_tz=local_tz
+                    ):
+                        if str(slot.get("id") or "") in skip_ids:
+                            continue
+                        neighbor_keys.append(
+                            (
+                                str(slot.get("date") or day),
+                                str(slot.get("time") or "0:00"),
+                            )
+                        )
+                except Exception:
+                    logger.exception(
+                        "Failed to load Helix neighbors for schedule clamp user=%s day=%s",
+                        owner_id,
+                        day,
                     )
-            except Exception:
-                logger.exception(
-                    "Failed to load Helix neighbors for schedule clamp user=%s day=%s",
-                    owner_id,
-                    day,
+        clamp_slots = neighbor_keys + [
+            (str(item.get("date") or ""), str(item.get("time") or "0:00"))
+            for item in publish_items
+        ]
+        clamped_all = clamp_schedule_slot_durations(clamp_slots, duration_min)
+        clamped = clamped_all[len(neighbor_keys) :]
+        update_durations = clamped[: len(updates)]
+        entry_durations = clamped[len(updates) :]
+        for del_id in deletes:
+            try:
+                twitch.delete_schedule_segment(access, twitch_user_id, str(del_id))
+                ok += 1
+            except Exception as exc:
+                errs.append(_schedule_publish_error_text(exc, "", lang))
+        for upd, slot_duration in zip(updates, update_durations):
+            start_iso, game_text, category_id = _start_and_category(upd)
+            try:
+                _, recurring = twitch.update_schedule_segment_with_overlap_replace(
+                    access,
+                    twitch_user_id,
+                    str(upd["id"]),
+                    start_time=start_iso,
+                    timezone=tz_name,
+                    duration=slot_duration,
+                    title=game_text or "",
+                    category_id=category_id,
                 )
-    clamp_slots = neighbor_keys + [
-        (str(item.get("date") or ""), str(item.get("time") or "0:00"))
-        for item in publish_items
-    ]
-    clamped_all = clamp_schedule_slot_durations(clamp_slots, duration_min)
-    clamped = clamped_all[len(neighbor_keys) :]
-    update_durations = clamped[: len(updates)]
-    entry_durations = clamped[len(updates) :]
-    for del_id in deletes:
-        try:
-            await asyncio.to_thread(
-                twitch.delete_schedule_segment,
-                access,
-                twitch_user_id,
-                str(del_id),
-            )
-            ok_count += 1
-        except Exception as exc:
-            errors.append(_schedule_publish_error_text(exc, "", lang))
-    for upd, slot_duration in zip(updates, update_durations):
-        start_iso, game_text, category_id = _start_and_category(upd)
-        try:
-            _, recurring = twitch.update_schedule_segment_with_overlap_replace(
-                access,
-                twitch_user_id,
-                str(upd["id"]),
-                start_time=start_iso,
-                timezone=tz_name,
-                duration=slot_duration,
-                title=game_text or "",
-                category_id=category_id,
-            )
-            if recurring:
-                used_recurring_fallback = True
-            ok_count += 1
-        except Exception as exc:
-            errors.append(_schedule_publish_error_text(exc, str(upd.get("date") or ""), lang))
-    for entry, slot_duration in zip(entries, entry_durations):
-        start_iso, game_text, category_id = _start_and_category(entry)
-        try:
-            # Partner/Affiliate → one-off; else Twitch 403 → weekly recurring fallback.
-            _, recurring = twitch.create_schedule_segment_with_fallback(
-                access,
-                twitch_user_id,
-                start_time=start_iso,
-                timezone=tz_name,
-                duration=slot_duration,
-                title=game_text or "",
-                category_id=category_id,
-                prefer_recurring=prefer_recurring,
-            )
-            if recurring:
-                prefer_recurring = True
-                used_recurring_fallback = True
-            ok_count += 1
-        except Exception as exc:
-            errors.append(_schedule_publish_error_text(exc, str(entry.get("date") or ""), lang))
+                if recurring:
+                    used_recurring = True
+                ok += 1
+            except Exception as exc:
+                errs.append(
+                    _schedule_publish_error_text(exc, str(upd.get("date") or ""), lang)
+                )
+        for entry, slot_duration in zip(entries, entry_durations):
+            start_iso, game_text, category_id = _start_and_category(entry)
+            try:
+                # Partner/Affiliate → one-off; else Twitch 403 → weekly recurring fallback.
+                _, recurring = twitch.create_schedule_segment_with_fallback(
+                    access,
+                    twitch_user_id,
+                    start_time=start_iso,
+                    timezone=tz_name,
+                    duration=slot_duration,
+                    title=game_text or "",
+                    category_id=category_id,
+                    prefer_recurring=prefer_recurring,
+                )
+                if recurring:
+                    prefer_recurring = True
+                    used_recurring = True
+                ok += 1
+            except Exception as exc:
+                errs.append(
+                    _schedule_publish_error_text(
+                        exc, str(entry.get("date") or ""), lang
+                    )
+                )
+        return ok, errs, used_recurring
+
+    logger.info(
+        "Schedule publish mutate broadcaster=%s entries=%s updates=%s deletes=%s",
+        twitch_user_id,
+        len(entries),
+        len(updates),
+        len(deletes),
+    )
+    ok_count, errors, used_recurring_fallback = await asyncio.to_thread(_mutate_helix)
+    logger.info(
+        "Schedule publish mutate done broadcaster=%s ok=%s errors=%s",
+        twitch_user_id,
+        ok_count,
+        len(errors),
+    )
 
     try:
         await asyncio.to_thread(

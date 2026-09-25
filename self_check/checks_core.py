@@ -1065,6 +1065,39 @@ def check_core() -> None:
         )
         == 150
     )
+    # clear_channel_schedule: one Helix page per round + stop after recurring delete
+    # (full pagination would DELETE ~1000 sibling occurrence ids of one series).
+    from unittest.mock import patch
+
+    clear_client = TwitchClient()
+    page_calls: list[dict] = []
+    deleted: list[str] = []
+
+    def _fake_segments(bid, **kwargs):
+        page_calls.append(kwargs)
+        if len(page_calls) == 1:
+            return [
+                {
+                    "id": f"occ-{i}",
+                    "is_recurring": True,
+                    "start_time": f"2026-09-{25 + i:02d}T11:30:00Z",
+                }
+                for i in range(25)
+            ]
+        return []
+
+    def _fake_delete(_token, _bid, sid):
+        deleted.append(sid)
+
+    with (
+        patch.object(clear_client, "get_schedule_segments", side_effect=_fake_segments),
+        patch.object(clear_client, "delete_schedule_segment", side_effect=_fake_delete),
+    ):
+        n = clear_client.clear_channel_schedule("tok", "broadcaster")
+    assert n == 1
+    assert deleted == ["occ-0"]
+    assert page_calls[0].get("max_pages") == 1
+    assert all(c.get("max_pages") == 1 for c in page_calls)
     from twitch import SCHEDULE_OAUTH_SCOPES, SCHEDULE_SCOPE
 
     assert SCHEDULE_SCOPE in SCHEDULE_OAUTH_SCOPES
