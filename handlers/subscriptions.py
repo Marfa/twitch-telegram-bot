@@ -78,6 +78,7 @@ from i18n import (
 )
 from twitch import (
     TwitchClient,
+    is_ai_game_cover_image,
     is_game_cover_image,
     is_stream_preview_image,
     is_stream_video_preview_image,
@@ -458,6 +459,8 @@ def _format_sub_line(
             settings.append(t("sub_list_image_stream_preview", lang))
         elif is_game_cover_image(sub.image_file_id):
             settings.append(t("sub_list_image_game_cover", lang))
+        elif is_ai_game_cover_image(sub.image_file_id):
+            settings.append(t("sub_list_image_ai_cover", lang))
         else:
             pos = (sub.image_position or "").strip()
             if pos == "after":

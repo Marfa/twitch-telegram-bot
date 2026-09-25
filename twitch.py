@@ -74,6 +74,8 @@ _FALLBACK_GAMES = (
 
 
 GAME_COVER_IMAGE_ID = "__game_cover__"
+# BotHub Nano Banana 2 cover from game description — generated at alert send time.
+AI_GAME_COVER_IMAGE_ID = "__ai_game_cover__"
 STREAM_PREVIEW_IMAGE_ID = "__stream_preview__"
 # Legacy id: muted MP4 sent as Telegram Animation (GIF-like autoplay).
 STREAM_VIDEO_PREVIEW_IMAGE_ID = "__stream_video_preview__"
@@ -87,6 +89,10 @@ STREAM_THUMB_HEIGHT = 720
 
 def is_game_cover_image(image_file_id: str | None) -> bool:
     return (image_file_id or "") == GAME_COVER_IMAGE_ID
+
+
+def is_ai_game_cover_image(image_file_id: str | None) -> bool:
+    return (image_file_id or "") == AI_GAME_COVER_IMAGE_ID
 
 
 def is_stream_preview_image(image_file_id: str | None) -> bool:
@@ -114,6 +120,7 @@ def is_dynamic_alert_image(image_file_id: str | None) -> bool:
     """Sentinel ids resolved at send time (not a Telegram file_id)."""
     return (
         is_game_cover_image(image_file_id)
+        or is_ai_game_cover_image(image_file_id)
         or is_stream_preview_image(image_file_id)
         or is_stream_capture_preview_image(image_file_id)
     )
@@ -203,6 +210,9 @@ def resolve_sub_image_photo(
             return None
         game_id, game_name = _stream_game_fields(stream or {})
         return twitch.resolve_box_art_url(game_id=game_id, game_name=game_name)
+    if is_ai_game_cover_image(fid):
+        # Generated at send time via BotHub — not a URL/file_id.
+        return None
     return fid
 
 

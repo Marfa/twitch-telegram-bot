@@ -262,6 +262,7 @@ def check_core() -> None:
         box_art_cdn_url,
         format_box_art_url,
         format_stream_thumbnail_url,
+        is_ai_game_cover_image,
         is_dynamic_alert_image,
         is_game_cover_image,
         is_stream_preview_image,
@@ -271,6 +272,7 @@ def check_core() -> None:
         resolve_sub_image_photo,
         strip_name_mentions_and_commands,
         template_has_game_placeholder,
+        AI_GAME_COVER_IMAGE_ID,
         GAME_COVER_IMAGE_ID,
         STREAM_PREVIEW_IMAGE_ID,
         STREAM_VIDEO_PREVIEW_IMAGE_ID,
@@ -279,6 +281,8 @@ def check_core() -> None:
 
     assert is_game_cover_image(GAME_COVER_IMAGE_ID)
     assert not is_game_cover_image("AgAC_test")
+    assert is_ai_game_cover_image(AI_GAME_COVER_IMAGE_ID)
+    assert not is_ai_game_cover_image(GAME_COVER_IMAGE_ID)
     assert is_stream_preview_image(STREAM_PREVIEW_IMAGE_ID)
     assert is_stream_video_preview_image(STREAM_VIDEO_PREVIEW_IMAGE_ID)
     assert is_stream_file_video_preview_image(STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID)
@@ -288,6 +292,7 @@ def check_core() -> None:
     assert is_dynamic_alert_image(STREAM_VIDEO_PREVIEW_IMAGE_ID)
     assert is_dynamic_alert_image(STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID)
     assert is_dynamic_alert_image(GAME_COVER_IMAGE_ID)
+    assert is_dynamic_alert_image(AI_GAME_COVER_IMAGE_ID)
     assert not is_dynamic_alert_image("AgAC_test")
     assert template_has_game_placeholder("{username} {game}")
     assert template_has_game_placeholder("{game_igdb}")
@@ -663,6 +668,13 @@ def check_core() -> None:
         == "https://cdn.example/516575.jpg"
     )
     assert resolve_sub_image_photo(cover_sub, {}, _CoverTwitch()) is None
+    ai_sub = type("S", (), {"image_file_id": AI_GAME_COVER_IMAGE_ID})()
+    assert (
+        resolve_sub_image_photo(
+            ai_sub, {"game_id": "509658", "game_name": "Just Chatting"}, _CoverTwitch()
+        )
+        is None
+    )
     preview_sub = type("S", (), {"image_file_id": STREAM_PREVIEW_IMAGE_ID})()
     preview_url = resolve_sub_image_photo(
         preview_sub,
@@ -2211,7 +2223,9 @@ def check_core() -> None:
         assert tr("image_game_cover_note", loc)
         assert tr("sub_list_image_game_cover", loc)
         assert tr("image_ai_cover", loc)
-        assert tr("image_ai_generating", loc)
+        assert tr("image_ai_cover_note", loc)
+        assert tr("sub_list_image_ai_cover", loc)
+        assert tr("image_ai_unavailable", loc)
         assert tr("premium_feat_ai_image", loc)
         assert tr("premium_feat_ai_image_desc", loc)
         assert tr("edit_image", loc)

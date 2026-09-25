@@ -21,6 +21,7 @@ from twitch import (
     TwitchClient,
     find_placeholder_typos,
     fix_placeholder_typos,
+    is_ai_game_cover_image,
     is_dynamic_alert_image,
     is_stream_file_video_preview_image,
     is_stream_capture_preview_image,
@@ -106,6 +107,7 @@ async def _deliver_alert_content(
     thread_id: int | None = None,
     image_file_id: str | None = None,
     image_position: str = "",
+    photo_bytes: bytes | None = None,
     animation_bytes: bytes | None = None,
     video_bytes: bytes | None = None,
     disable_link_preview: bool = False,
@@ -126,6 +128,7 @@ async def _deliver_alert_content(
             thread_id=thread_id,
             image_file_id=image_file_id,
             image_position=image_position,
+            photo_bytes=photo_bytes,
             animation_bytes=animation_bytes,
             video_bytes=video_bytes,
             disable_link_preview=disable_link_preview,
@@ -144,6 +147,7 @@ async def _deliver_alert_content_plain(
     thread_id: int | None = None,
     image_file_id: str | None = None,
     image_position: str = "",
+    photo_bytes: bytes | None = None,
     animation_bytes: bytes | None = None,
     video_bytes: bytes | None = None,
     disable_link_preview: bool = False,
@@ -166,7 +170,8 @@ async def _deliver_alert_content_plain(
     file_id = image_file_id
     position = (image_position or "").strip()
     has_media = bool(
-        (file_id or animation_bytes or video_bytes) and position in ("before", "after")
+        (file_id or photo_bytes or animation_bytes or video_bytes)
+        and position in ("before", "after")
     )
     # Image posts always disable link preview (caption has no separate preview toggle).
     if has_media:
@@ -187,6 +192,12 @@ async def _deliver_alert_content_plain(
             logger.warning("media fallback notify failed", exc_info=True)
 
     async def _photo(**photo_kwargs):
+        if photo_bytes:
+            return await bot.send_photo(
+                chat_id=chat_id,
+                photo=InputFile(BytesIO(photo_bytes), filename="ai_cover.jpg"),
+                **photo_kwargs,
+            )
         return await _send_photo_with_url_fallback(
             bot, chat_id=chat_id, photo=file_id, **photo_kwargs
         )
@@ -1076,6 +1087,7 @@ async def _send_notification(
     image_position = _effective_image_position(sub)
     preview_off = False
     chat_markup = None
+    photo_bytes: bytes | None = None
     animation_bytes: bytes | None = None
     video_bytes: bytes | None = None
     captured_preview = None
@@ -1110,6 +1122,28 @@ async def _send_notification(
         image_photo = await asyncio.to_thread(
             resolve_sub_image_photo, sub, stream, twitch
         )
+        if is_ai_game_cover_image(sub.image_file_id):
+            import bothub as bothub_mod
+
+            try:
+                photo_bytes = await asyncio.to_thread(
+                    bothub_mod.generate_alert_cover_bytes,
+                    stream=stream,
+                    twitch=twitch,
+                    streamer_login=str(sub.twitch_username or ""),
+                    lang=lang,
+                )
+            except Exception:
+                logger.exception(
+                    "AI cover generation failed for sub %s", sub.id
+                )
+                photo_bytes = None
+            if not photo_bytes:
+                logger.warning(
+                    "AI cover unresolved for sub %s (alert_type=%s); sending text only",
+                    sub.id,
+                    alert_type,
+                )
         if is_stream_capture_preview_image(sub.image_file_id):
             from handlers.stream_preview import (
                 build_preview_placeholder_mp4,
@@ -1156,6 +1190,7 @@ async def _send_notification(
         if (
             is_dynamic_alert_image(sub.image_file_id)
             and not image_photo
+            and not photo_bytes
             and not animation_bytes
             and not video_bytes
         ):
@@ -1166,13 +1201,14 @@ async def _send_notification(
                 sub.image_file_id,
             )
         prefer_media_id = is_dynamic_alert_image(sub.image_file_id)
-        msg = await _deliver_alert_content(
-            bot,
-            chat_id=sub.chat_id,
-            text=text,
-            thread_id=sub.thread_id,
-            image_file_id=None if (animation_bytes or video_bytes) else image_photo,
+        _media_kwargs = dict(
+            image_file_id=(
+                None
+                if (photo_bytes or animation_bytes or video_bytes)
+                else image_photo
+            ),
             image_position=image_position,
+            photo_bytes=photo_bytes,
             animation_bytes=animation_bytes,
             video_bytes=video_bytes,
             disable_link_preview=preview_off,
@@ -1181,23 +1217,39 @@ async def _send_notification(
             prefer_media_message_id=prefer_media_id,
             on_media_fallback=_on_media_fallback,
         )
+        msg = await _deliver_alert_content(
+            bot,
+            chat_id=sub.chat_id,
+            text=text,
+            thread_id=sub.thread_id,
+            **_media_kwargs,
+        )
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
         try:
+
+            async def _on_media_fallback_retry(exc2: BaseException) -> None:
+                await _maybe_notify_media_fallback(bot, db, sub, exc2)
+
             msg = await _deliver_alert_content(
                 bot,
                 chat_id=sub.chat_id,
                 text=text,
                 thread_id=sub.thread_id,
-                image_file_id=None if (animation_bytes or video_bytes) else image_photo,
+                image_file_id=(
+                    None
+                    if (photo_bytes or animation_bytes or video_bytes)
+                    else image_photo
+                ),
                 image_position=image_position,
+                photo_bytes=photo_bytes,
                 animation_bytes=animation_bytes,
                 video_bytes=video_bytes,
                 disable_link_preview=preview_off,
                 reply_markup=chat_markup,
                 parse_mode=alert_parse_mode,
                 prefer_media_message_id=prefer_media_id,
-                on_media_fallback=_on_media_fallback,
+                on_media_fallback=_on_media_fallback_retry,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)

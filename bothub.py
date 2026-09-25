@@ -138,6 +138,43 @@ def _image_bytes_from_chat_payload(data: dict[str, Any]) -> bytes:
     raise RuntimeError(f"BotHub chat completion had no image: {str(data)[:500]}")
 
 
+def generate_alert_cover_bytes(
+    *,
+    stream: dict[str, Any] | None,
+    twitch: Any,
+    streamer_login: str = "",
+    lang: str = "en",
+) -> bytes | None:
+    """Build prompt from Helix stream game + IGDB summary; return JPEG/PNG bytes or None."""
+    if not bothub_configured():
+        return None
+    from twitch import _stream_game_fields
+
+    game_id, game_name = _stream_game_fields(stream or {})
+    description = ""
+    if game_id and twitch is not None:
+        try:
+            description = str(
+                twitch.resolve_game_description(game_id, lang=lang) or ""
+            ).strip()
+        except Exception:
+            logger.exception("AI cover: game description failed game_id=%s", game_id)
+            description = ""
+    if description in ("—", "-"):
+        description = ""
+    if not game_name and not description:
+        return None
+    prompt = build_stream_cover_prompt(
+        game_name=game_name or "video game",
+        game_description=description,
+        streamer_login=streamer_login,
+    )
+    raw = generate_cover_image(prompt)
+    if not raw or len(raw) < 256:
+        return None
+    return raw
+
+
 def generate_cover_image(prompt: str) -> bytes:
     """Generate cover bytes via BotHub (images/generations, chat.completions fallback)."""
     if not BOTHUB_API_KEY:

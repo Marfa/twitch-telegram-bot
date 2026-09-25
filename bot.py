@@ -137,6 +137,7 @@ from twitch import (
     filter_streams_for_watch,
     find_placeholder_typos,
     is_dynamic_alert_image,
+    is_ai_game_cover_image,
     is_game_cover_image,
     is_stream_preview_image,
     is_stream_video_preview_image,
@@ -1195,6 +1196,7 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             lang,
             has_image=has_image,
             game_cover_on=is_game_cover_image(sub.image_file_id),
+            ai_cover_on=is_ai_game_cover_image(sub.image_file_id),
             stream_preview_on=is_stream_preview_image(sub.image_file_id),
             stream_video_preview_on=is_stream_video_preview_image(sub.image_file_id),
             stream_file_video_preview_on=is_stream_file_video_preview_image(
