@@ -59,7 +59,65 @@ def _check_prefs_and_seen() -> None:
         db.mark_giveaway_seen(1, "gamerpower", "9", seen_at=1)
         assert db.has_seen_giveaway(1, "gamerpower", "9") is True
         db.set_giveaways_digest_enabled(1, False)
-        assert db.has_any_giveaways_work() is False
+        # Configured stores/platforms still need the daily catalog job.
+        assert db.has_any_giveaways_work() is True
+
+
+def _check_catalog_snapshot() -> None:
+    from db.models import GiveawayCatalogEntry
+    from handlers.giveaways import (
+        _enriched_from_catalog,
+        filter_catalog_entries,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = SqliteDatabase(Path(tmp) / "t.db")
+        assert db.list_giveaways_catalog() == []
+        assert db.giveaways_catalog_refreshed_at() == 0
+        entry = GiveawayCatalogEntry(
+            source="gamerpower",
+            external_id="1",
+            title="Demo Game Free",
+            store_id="steam",
+            platform_ids=("pc",),
+            claim_url="https://example.com",
+            start_at="2026-01-01",
+            end_at="N/A",
+            description="desc",
+            image_url="",
+            dedupe_key="steam|demo",
+            igdb_id=42,
+            name="Demo Game",
+            year="2020",
+            publisher="Pub",
+            developer="Dev",
+            summary="A demo summary.",
+            cover_url="https://example.com/cover.jpg",
+            refreshed_at=1000,
+        )
+        db.replace_giveaways_catalog([entry])
+        rows = db.list_giveaways_catalog()
+        assert len(rows) == 1
+        assert rows[0].name == "Demo Game"
+        assert rows[0].igdb_id == 42
+        assert db.giveaways_catalog_refreshed_at() == 1000
+        matched = filter_catalog_entries(
+            rows, stores={"steam"}, platforms={"pc"}
+        )
+        assert len(matched) == 1
+        assert filter_catalog_entries(rows, stores={"epic"}, platforms={"pc"}) == []
+        enriched = _enriched_from_catalog(db, rows[0], "en")
+        assert enriched.name == "Demo Game"
+        assert enriched.igdb_id == 42
+        # Serve path must not re-run IGDB fuzzy search.
+        import inspect
+        from handlers.giveaways import _send_cards_batch
+
+        src = inspect.getsource(_send_cards_batch)
+        assert "igdb_search_games_by_name" not in src
+        assert "_enriched_from_catalog" in src
+        db.replace_giveaways_catalog([])
+        assert db.list_giveaways_catalog() == []
 
 
 def _check_filter_requires_both() -> None:
@@ -210,6 +268,7 @@ def run() -> None:
     _check_sources_maps()
     _check_keyboard_order()
     _check_prefs_and_seen()
+    _check_catalog_snapshot()
     _check_filter_requires_both()
     _check_dedupe_prefers_itad()
     _check_first_digest_unlocks_fresh_flag()

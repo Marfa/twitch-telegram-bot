@@ -17,6 +17,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 import beta as beta_features
 from bot_helpers import _menu, reply_chat_id
 from db import Database
+from db.models import GiveawayCatalogEntry
 from giveaway_sources import (
     PLATFORM_IDS,
     STORE_IDS,
@@ -24,7 +25,6 @@ from giveaway_sources import (
     attribution_html,
     claim_url_or_search,
     fetch_active_giveaways,
-    filter_giveaways,
 )
 from i18n import DEFAULT_LOCALE, t
 from igdb_dumps import igdb_image_url
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 GIVEAWAYS_BETA_ID = "giveaways-alerts"
 _PAGE_SIZE = 5
 _DIGEST_MIN_INTERVAL_SEC = 20 * 3600
+_CATALOG_MAX_AGE_SEC = 24 * 3600
 _BROWSE_KEY = "giveaways_browse"
 
 
@@ -230,26 +231,26 @@ def _details_keyboard(lang: str) -> InlineKeyboardMarkup:
 def _store_browse(
     application: Any,
     user_id: int,
-    offers: list[GiveawayOffer],
+    entries: list[GiveawayCatalogEntry],
     lang: str,
 ) -> None:
     application.bot_data.setdefault(_BROWSE_KEY, {})[int(user_id)] = {
-        "offers": list(offers),
+        "entries": list(entries),
         "lang": lang,
     }
 
 
 def _load_browse(
     application: Any, user_id: int
-) -> tuple[list[GiveawayOffer], str] | None:
+) -> tuple[list[GiveawayCatalogEntry], str] | None:
     raw = (application.bot_data.get(_BROWSE_KEY) or {}).get(int(user_id))
     if not isinstance(raw, dict):
         return None
-    offers = raw.get("offers")
-    if not isinstance(offers, list) or not offers:
+    entries = raw.get("entries")
+    if not isinstance(entries, list) or not entries:
         return None
     lang = str(raw.get("lang") or DEFAULT_LOCALE)
-    return offers, lang
+    return entries, lang
 
 
 @dataclass
@@ -262,6 +263,40 @@ class _Enriched:
     developer: str
     summary: str
     cover_url: str
+
+
+def catalog_entry_to_offer(entry: GiveawayCatalogEntry) -> GiveawayOffer:
+    return GiveawayOffer(
+        source=entry.source,
+        external_id=entry.external_id,
+        title=entry.title,
+        store_id=entry.store_id,
+        platform_ids=entry.platform_ids,
+        claim_url=entry.claim_url,
+        start_at=entry.start_at,
+        end_at=entry.end_at,
+        description=entry.description,
+        image_url=entry.image_url,
+        dedupe_key=entry.dedupe_key,
+    )
+
+
+def filter_catalog_entries(
+    entries: list[GiveawayCatalogEntry],
+    *,
+    stores: set[str],
+    platforms: set[str],
+) -> list[GiveawayCatalogEntry]:
+    if not stores or not platforms:
+        return []
+    out: list[GiveawayCatalogEntry] = []
+    for e in entries:
+        if e.store_id not in stores:
+            continue
+        if not (set(e.platform_ids) & platforms):
+            continue
+        out.append(e)
+    return out
 
 
 def _clean_title_for_search(title: str) -> str:
@@ -287,9 +322,8 @@ def _year_from_unix(ts: Any) -> str:
         return ""
 
 
-def _enrich_offer(db: Database, offer: GiveawayOffer, lang: str) -> _Enriched:
-    from twitch import localize_igdb_summary
-
+def _enrich_offer_base(db: Database, offer: GiveawayOffer) -> GiveawayCatalogEntry:
+    """IGDB enrich once for the daily snapshot (no locale / DeepL)."""
     q = _clean_title_for_search(offer.title)
     igdb_id: int | None = None
     name = offer.title
@@ -311,23 +345,76 @@ def _enrich_offer(db: Database, offer: GiveawayOffer, lang: str) -> _Enriched:
         if igdb_id:
             publisher, developer = db.igdb_publisher_developer_names(igdb_id)
             game = db.igdb_game_by_id(igdb_id) or {}
-            raw_sum = str(game.get("summary") or "").strip()
-            summary = localize_igdb_summary(raw_sum, lang, db=db) if raw_sum else ""
+            summary = str(game.get("summary") or "").strip()
             mid = db.igdb_cover_image_id_for_game(igdb_id)
             if mid:
                 cover_url = igdb_image_url(mid)
     if not summary:
         summary = (offer.description or "")[:800]
-    return _Enriched(
-        offer=offer,
+    return GiveawayCatalogEntry(
+        source=offer.source,
+        external_id=offer.external_id,
+        title=offer.title,
+        store_id=offer.store_id,
+        platform_ids=tuple(offer.platform_ids),
+        claim_url=offer.claim_url,
+        start_at=offer.start_at,
+        end_at=offer.end_at,
+        description=offer.description,
+        image_url=offer.image_url,
+        dedupe_key=offer.dedupe_key,
         igdb_id=igdb_id,
         name=name,
         year=year,
         publisher=publisher,
         developer=developer,
         summary=summary,
-        cover_url=cover_url,
+        cover_url=cover_url or "",
+        refreshed_at=0,
     )
+
+
+def _enriched_from_catalog(
+    db: Database, entry: GiveawayCatalogEntry, lang: str
+) -> _Enriched:
+    from twitch import localize_igdb_summary
+
+    summary = entry.summary
+    if entry.igdb_id and summary:
+        summary = localize_igdb_summary(summary, lang, db=db)
+    return _Enriched(
+        offer=catalog_entry_to_offer(entry),
+        igdb_id=entry.igdb_id,
+        name=entry.name or entry.title,
+        year=entry.year,
+        publisher=entry.publisher,
+        developer=entry.developer,
+        summary=summary,
+        cover_url=entry.cover_url,
+    )
+
+
+def rebuild_giveaways_catalog_sync(db: Database) -> list[GiveawayCatalogEntry]:
+    """Fetch GP/ITAD, enrich once, replace DB snapshot. Sync — call via to_thread."""
+    offers = fetch_active_giveaways(force=True)
+    now = int(time.time())
+    entries = [_enrich_offer_base(db, o) for o in offers]
+    for e in entries:
+        e.refreshed_at = now
+    db.replace_giveaways_catalog(entries)
+    logger.info("giveaways catalog rebuilt entries=%s", len(entries))
+    return entries
+
+
+async def ensure_giveaways_catalog(
+    db: Database, *, force: bool = False
+) -> list[GiveawayCatalogEntry]:
+    if not force:
+        entries = db.list_giveaways_catalog()
+        age = int(time.time()) - int(db.giveaways_catalog_refreshed_at() or 0)
+        if entries and age < _CATALOG_MAX_AGE_SEC:
+            return entries
+    return await asyncio.to_thread(rebuild_giveaways_catalog_sync, db)
 
 
 def _format_dates(offer: GiveawayOffer, lang: str) -> str:
@@ -445,24 +532,24 @@ async def _send_cards_batch(
     chat_id: int,
     *,
     db: Database,
-    offers: list[GiveawayOffer],
+    entries: list[GiveawayCatalogEntry],
     lang: str,
     offset: int = 0,
 ) -> int:
     """Send up to _PAGE_SIZE cards from offset; 'Show more' on the last if needed."""
     if offset < 0:
         offset = 0
-    if offset >= len(offers):
+    if offset >= len(entries):
         return 0
-    chunk = offers[offset : offset + _PAGE_SIZE]
+    chunk = entries[offset : offset + _PAGE_SIZE]
     next_offset = offset + len(chunk)
-    has_more = next_offset < len(offers)
-    used_gp = any(o.source == "gamerpower" for o in offers)
-    used_itad = any(o.source == "itad" for o in offers)
+    has_more = next_offset < len(entries)
+    used_gp = any(e.source == "gamerpower" for e in entries)
+    used_itad = any(e.source == "itad" for e in entries)
     attr = attribution_html(used_gp=used_gp, used_itad=used_itad)
     igdb_attr = '<a href="https://www.igdb.com">IGDB.com</a>'
     footer = " · ".join(p for p in (attr, igdb_attr) if p)
-    items = [await asyncio.to_thread(_enrich_offer, db, o, lang) for o in chunk]
+    items = [_enriched_from_catalog(db, e, lang) for e in chunk]
     for idx, item in enumerate(items):
         is_last = idx == len(items) - 1
         await _send_one_card(
@@ -476,11 +563,11 @@ async def _send_cards_batch(
     return len(chunk)
 
 
-def _summary_text(lang: str, offers: list[GiveawayOffer]) -> str:
+def _summary_text(lang: str, entries: list[GiveawayCatalogEntry]) -> str:
     names: list[str] = []
-    for o in offers:
-        name = html.escape(_clean_title_for_search(o.title) or o.title)
-        names.append(f"• {name}")
+    for e in entries:
+        label = e.name or _clean_title_for_search(e.title) or e.title
+        names.append(f"• {html.escape(label)}")
     listing = "\n".join(names)
     return t("giveaways_new_summary", lang, list=listing)
 
@@ -497,12 +584,13 @@ async def _send_matching_list(
     set_first_sent: bool = False,
 ) -> int:
     prefs = _prefs_or_empty(db, user_id)
-    offers = filter_giveaways(
-        fetch_active_giveaways(),
+    catalog = await ensure_giveaways_catalog(db)
+    entries = filter_catalog_entries(
+        catalog,
         stores=set(prefs.stores),
         platforms=set(prefs.platforms),
     )
-    if not offers:
+    if not entries:
         await bot.send_message(
             chat_id,
             t("giveaways_empty", lang),
@@ -519,14 +607,14 @@ async def _send_matching_list(
             )
         return 0
 
-    _store_browse(application, user_id, offers, lang)
+    _store_browse(application, user_id, entries, lang)
     await _send_cards_batch(
-        bot, chat_id, db=db, offers=offers, lang=lang, offset=0
+        bot, chat_id, db=db, entries=entries, lang=lang, offset=0
     )
     if mark_seen:
         now = int(time.time())
-        for o in offers:
-            db.mark_giveaway_seen(user_id, o.source, o.external_id, seen_at=now)
+        for e in entries:
+            db.mark_giveaway_seen(user_id, e.source, e.external_id, seen_at=now)
     if set_first_sent:
         db.upsert_giveaways_prefs(
             user_id,
@@ -536,7 +624,7 @@ async def _send_matching_list(
             first_digest_sent=True,
             last_digest_at=int(time.time()),
         )
-    return len(offers)
+    return len(entries)
 
 
 async def open_giveaways_hub(
@@ -826,25 +914,25 @@ async def on_giveaways_callback(
         loaded = _load_browse(context.application, user_id)
         if not loaded:
             prefs = _prefs_or_empty(db, user_id)
-            catalog = await asyncio.to_thread(fetch_active_giveaways)
-            offers = filter_giveaways(
+            catalog = await ensure_giveaways_catalog(db)
+            entries = filter_catalog_entries(
                 catalog,
                 stores=set(prefs.stores),
                 platforms=set(prefs.platforms),
             )
-            if not offers:
+            if not entries:
                 await context.bot.send_message(
                     chat_id, t("giveaways_empty", lang)
                 )
                 return
-            _store_browse(context.application, user_id, offers, lang)
-            loaded = (offers, lang)
-        offers, browse_lang = loaded
+            _store_browse(context.application, user_id, entries, lang)
+            loaded = (entries, lang)
+        entries, browse_lang = loaded
         await _send_cards_batch(
             context.bot,
             chat_id,
             db=db,
-            offers=offers,
+            entries=entries,
             lang=browse_lang or lang,
             offset=0,
         )
@@ -862,12 +950,12 @@ async def on_giveaways_callback(
                 chat_id, t("giveaways_empty", lang)
             )
             return
-        offers, browse_lang = loaded
+        entries, browse_lang = loaded
         await _send_cards_batch(
             context.bot,
             chat_id,
             db=db,
-            offers=offers,
+            entries=entries,
             lang=browse_lang or lang,
             offset=offset,
         )
@@ -952,63 +1040,62 @@ async def on_giveaways_find_streams(
 async def check_giveaways_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     bot = context.bot
+    # Daily enriched snapshot (HTTP + IGDB) — browse/digest/watch read from DB.
+    catalog = await ensure_giveaways_catalog(db, force=True)
     owner_ids = db.list_giveaways_digest_owner_ids()
     now = int(time.time())
-    catalog = None
-    if owner_ids:
-        catalog = await asyncio.to_thread(fetch_active_giveaways)
-        for owner_id in owner_ids:
-            if not giveaways_feature_available(db, owner_id):
-                continue
-            prefs = _prefs_or_empty(db, owner_id)
-            if not prefs.stores or not prefs.platforms or not prefs.digest_enabled:
-                continue
-            if prefs.last_digest_at and (now - prefs.last_digest_at) < _DIGEST_MIN_INTERVAL_SEC:
-                continue
-            lang = _user_lang(db, owner_id)
-            matched = filter_giveaways(
-                catalog,
-                stores=set(prefs.stores),
-                platforms=set(prefs.platforms),
+    for owner_id in owner_ids:
+        if not giveaways_feature_available(db, owner_id):
+            continue
+        prefs = _prefs_or_empty(db, owner_id)
+        if not prefs.stores or not prefs.platforms or not prefs.digest_enabled:
+            continue
+        if prefs.last_digest_at and (now - prefs.last_digest_at) < _DIGEST_MIN_INTERVAL_SEC:
+            continue
+        lang = _user_lang(db, owner_id)
+        matched = filter_catalog_entries(
+            catalog,
+            stores=set(prefs.stores),
+            platforms=set(prefs.platforms),
+        )
+        new_entries = [
+            e
+            for e in matched
+            if not db.has_seen_giveaway(owner_id, e.source, e.external_id)
+        ]
+        if not new_entries:
+            db.upsert_giveaways_prefs(
+                owner_id,
+                stores=prefs.stores,
+                platforms=prefs.platforms,
+                digest_enabled=True,
+                first_digest_sent=prefs.first_digest_sent or True,
+                last_digest_at=now,
             )
-            new_offers = [
-                o
-                for o in matched
-                if not db.has_seen_giveaway(owner_id, o.source, o.external_id)
-            ]
-            if not new_offers:
-                db.upsert_giveaways_prefs(
-                    owner_id,
-                    stores=prefs.stores,
-                    platforms=prefs.platforms,
-                    digest_enabled=True,
-                    first_digest_sent=prefs.first_digest_sent or True,
-                    last_digest_at=now,
-                )
-                continue
-            try:
-                _store_browse(context.application, owner_id, new_offers, lang)
-                await bot.send_message(
-                    owner_id,
-                    _summary_text(lang, new_offers),
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=_details_keyboard(lang),
-                    disable_web_page_preview=True,
-                )
-                for o in new_offers:
-                    db.mark_giveaway_seen(owner_id, o.source, o.external_id, seen_at=now)
-                db.upsert_giveaways_prefs(
-                    owner_id,
-                    stores=prefs.stores,
-                    platforms=prefs.platforms,
-                    digest_enabled=True,
-                    first_digest_sent=True,
-                    last_digest_at=now,
-                )
-            except Forbidden:
-                logger.info("giveaways digest forbidden owner=%s", owner_id)
-            except Exception:
-                logger.exception("giveaways digest failed owner=%s", owner_id)
+            continue
+        try:
+            _store_browse(context.application, owner_id, new_entries, lang)
+            await bot.send_message(
+                owner_id,
+                _summary_text(lang, new_entries),
+                parse_mode=ParseMode.HTML,
+                reply_markup=_details_keyboard(lang),
+                disable_web_page_preview=True,
+            )
+            for e in new_entries:
+                db.mark_giveaway_seen(owner_id, e.source, e.external_id, seen_at=now)
+            db.upsert_giveaways_prefs(
+                owner_id,
+                stores=prefs.stores,
+                platforms=prefs.platforms,
+                digest_enabled=True,
+                first_digest_sent=True,
+                last_digest_at=now,
+            )
+        except Forbidden:
+            logger.info("giveaways digest forbidden owner=%s", owner_id)
+        except Exception:
+            logger.exception("giveaways digest failed owner=%s", owner_id)
     from handlers.giveaway_watch import check_giveaway_watch_alerts
 
     await check_giveaway_watch_alerts(context)

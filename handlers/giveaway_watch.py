@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 import re
@@ -27,7 +26,8 @@ from db import (
     parse_giveaway_watch_prefs,
 )
 from db.models import GiveawayPlatformPref, GiveawayWatchPrefs
-from giveaway_sources import GiveawayOffer, fetch_active_giveaways
+from giveaway_sources import GiveawayOffer
+from handlers.giveaways import catalog_entry_to_offer, ensure_giveaways_catalog
 from i18n import DEFAULT_LOCALE, btn, t
 from igdb_dumps import igdb_image_url
 
@@ -819,9 +819,10 @@ async def check_giveaway_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> Non
     subs = db.get_giveaway_watch_subscriptions()
     if not subs:
         return
-    catalog = await asyncio.to_thread(fetch_active_giveaways)
-    if not catalog:
+    catalog_entries = await ensure_giveaways_catalog(db)
+    if not catalog_entries:
         return
+    catalog = [catalog_entry_to_offer(e) for e in catalog_entries]
     for sub in subs:
         if not sub.enabled:
             continue

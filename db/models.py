@@ -778,6 +778,31 @@ class GiveawaysPrefs:
 
 
 @dataclass
+class GiveawayCatalogEntry:
+    """Enriched giveaway row from the daily catalog snapshot."""
+
+    source: str
+    external_id: str
+    title: str
+    store_id: str
+    platform_ids: tuple[str, ...]
+    claim_url: str
+    start_at: str
+    end_at: str
+    description: str
+    image_url: str
+    dedupe_key: str
+    igdb_id: int | None
+    name: str
+    year: str
+    publisher: str
+    developer: str
+    summary: str
+    cover_url: str
+    refreshed_at: int = 0
+
+
+@dataclass
 class DonationAlertsAuth:
     owner_id: int
     da_user_id: str

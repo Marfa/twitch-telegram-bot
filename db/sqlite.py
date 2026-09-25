@@ -22,6 +22,7 @@ from .models import (
     FollowMonitorEvent,
     FollowMonitorFollower,
     GiveawaysPrefs,
+    GiveawayCatalogEntry,
     PremiumChannel,
     PremiumGift,
     PremiumPurchase,
@@ -795,6 +796,32 @@ class SqliteDatabase:
                 external_id TEXT NOT NULL,
                 seen_at INTEGER NOT NULL,
                 PRIMARY KEY (owner_id, source, external_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS giveaways_catalog (
+                source TEXT NOT NULL,
+                external_id TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                store_id TEXT NOT NULL DEFAULT '',
+                platforms_json TEXT NOT NULL DEFAULT '[]',
+                claim_url TEXT NOT NULL DEFAULT '',
+                start_at TEXT NOT NULL DEFAULT '',
+                end_at TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                image_url TEXT NOT NULL DEFAULT '',
+                dedupe_key TEXT NOT NULL DEFAULT '',
+                igdb_id INTEGER,
+                name TEXT NOT NULL DEFAULT '',
+                year TEXT NOT NULL DEFAULT '',
+                publisher TEXT NOT NULL DEFAULT '',
+                developer TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL DEFAULT '',
+                cover_url TEXT NOT NULL DEFAULT '',
+                refreshed_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (source, external_id)
             )
             """
         )
@@ -5609,8 +5636,7 @@ owner_id, twitch_username, twitch_user_id,
             row = conn.execute(
                 """
                 SELECT 1 FROM giveaways_prefs
-                WHERE digest_enabled = 1
-                  AND stores_json != '[]'
+                WHERE stores_json != '[]'
                   AND platforms_json != '[]'
                 LIMIT 1
                 """
@@ -5657,6 +5683,95 @@ owner_id, twitch_username, twitch_user_id,
                 """,
                 (owner_id, source, external_id, int(seen_at)),
             )
+
+    @staticmethod
+    def _row_to_giveaways_catalog(row: Any) -> GiveawayCatalogEntry:
+        plats_raw = json.loads(str(row["platforms_json"] or "[]"))
+        plats = tuple(
+            str(p) for p in (plats_raw if isinstance(plats_raw, list) else [])
+        )
+        igdb_raw = row["igdb_id"]
+        igdb_id = int(igdb_raw) if igdb_raw is not None else None
+        if igdb_id is not None and igdb_id <= 0:
+            igdb_id = None
+        return GiveawayCatalogEntry(
+            source=str(row["source"] or ""),
+            external_id=str(row["external_id"] or ""),
+            title=str(row["title"] or ""),
+            store_id=str(row["store_id"] or ""),
+            platform_ids=plats,
+            claim_url=str(row["claim_url"] or ""),
+            start_at=str(row["start_at"] or ""),
+            end_at=str(row["end_at"] or ""),
+            description=str(row["description"] or ""),
+            image_url=str(row["image_url"] or ""),
+            dedupe_key=str(row["dedupe_key"] or ""),
+            igdb_id=igdb_id,
+            name=str(row["name"] or ""),
+            year=str(row["year"] or ""),
+            publisher=str(row["publisher"] or ""),
+            developer=str(row["developer"] or ""),
+            summary=str(row["summary"] or ""),
+            cover_url=str(row["cover_url"] or ""),
+            refreshed_at=int(row["refreshed_at"] or 0),
+        )
+
+    def replace_giveaways_catalog(
+        self, entries: list[GiveawayCatalogEntry]
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM giveaways_catalog")
+            for e in entries:
+                conn.execute(
+                    """
+                    INSERT INTO giveaways_catalog (
+                        source, external_id, title, store_id, platforms_json,
+                        claim_url, start_at, end_at, description, image_url,
+                        dedupe_key, igdb_id, name, year, publisher, developer,
+                        summary, cover_url, refreshed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        e.source,
+                        e.external_id,
+                        e.title,
+                        e.store_id,
+                        json.dumps(list(e.platform_ids), ensure_ascii=False),
+                        e.claim_url,
+                        e.start_at,
+                        e.end_at,
+                        e.description,
+                        e.image_url,
+                        e.dedupe_key,
+                        e.igdb_id,
+                        e.name,
+                        e.year,
+                        e.publisher,
+                        e.developer,
+                        e.summary,
+                        e.cover_url,
+                        int(e.refreshed_at),
+                    ),
+                )
+
+    def list_giveaways_catalog(self) -> list[GiveawayCatalogEntry]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM giveaways_catalog
+                ORDER BY start_at DESC, title ASC
+                """
+            ).fetchall()
+        return [self._row_to_giveaways_catalog(r) for r in rows]
+
+    def giveaways_catalog_refreshed_at(self) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(refreshed_at) AS ts FROM giveaways_catalog"
+            ).fetchone()
+        if not row or row["ts"] is None:
+            return 0
+        return int(row["ts"] or 0)
 
     def get_donationalerts_auth(self, owner_id: int) -> DonationAlertsAuth | None:
         from token_crypto import try_decrypt_secret
