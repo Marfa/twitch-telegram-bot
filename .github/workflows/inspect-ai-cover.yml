@@ -72,3 +72,11 @@ jobs:
             docker compose -f compose.vps.yml logs --since 24h bot 2>&1 \
               | grep -iE 'AI cover|bothub|Dynamic image unresolved|__ai_game_cover__' \
               | tail -60 || true
+            echo "=== BotHub smoke ==="
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import bothub
+            raw = bothub.generate_cover_image(
+                "Solid deep blue abstract gradient, no text, widescreen 16:9."
+            )
+            print("ok bytes", len(raw or b""), "magic", (raw or b"")[:4])
+            PY
