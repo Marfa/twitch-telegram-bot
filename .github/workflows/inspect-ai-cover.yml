@@ -1,0 +1,74 @@
+name: Inspect AI cover
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner_id:
+        description: Telegram owner_id
+        required: true
+        default: "150697169"
+      owner_num:
+        description: User-facing subscription number (#N)
+        required: true
+        default: "12"
+
+permissions: {}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect AI cover sub + logs
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 3m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            OID="${{ github.event.inputs.owner_id }}"
+            NUM="${{ github.event.inputs.owner_num }}"
+            echo "=== BOTHUB in container (presence only) ==="
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import os
+            key = (os.getenv("BOTHUB_API_KEY") or "").strip()
+            print("BOTHUB_API_KEY_set", bool(key), "len", len(key))
+            print("BOTHUB_BASE_URL", (os.getenv("BOTHUB_BASE_URL") or "")[:60] or "(default)")
+            print("BOTHUB_IMAGE_MODEL", os.getenv("BOTHUB_IMAGE_MODEL") or "(default)")
+            try:
+                import bothub
+                print("bothub_configured", bothub.bothub_configured())
+            except Exception as exc:
+                print("bothub_import_error", type(exc).__name__, exc)
+            PY
+            echo "=== owner #${NUM} / all AI sentinels ==="
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "
+              WITH ranked AS (
+                SELECT s.*,
+                       ROW_NUMBER() OVER (ORDER BY s.id) AS owner_num
+                FROM subscriptions s
+                WHERE s.owner_id = ${OID}
+                  AND COALESCE(s.is_demo, FALSE) = FALSE
+              )
+              SELECT id, owner_num, twitch_username, image_file_id, image_position,
+                     enabled, dest_type, notify_on_end, notify_on_category_change
+              FROM ranked
+              WHERE owner_num = ${NUM}
+                 OR image_file_id = '__ai_game_cover__'
+              ORDER BY owner_num;
+            "
+            echo "=== any __ai_game_cover__ globally ==="
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "
+              SELECT id, owner_id, twitch_username, image_file_id, image_position, enabled
+              FROM subscriptions
+              WHERE image_file_id = '__ai_game_cover__'
+              ORDER BY id
+              LIMIT 30;
+            "
+            echo "=== recent AI / bothub / dynamic image logs ==="
+            docker compose -f compose.vps.yml logs --since 24h bot 2>&1 \
+              | grep -iE 'AI cover|bothub|Dynamic image unresolved|__ai_game_cover__' \
+              | tail -60 || true
