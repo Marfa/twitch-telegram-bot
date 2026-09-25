@@ -199,7 +199,7 @@ def generate_cover_image(prompt: str) -> bytes:
         json=gen_body,
         timeout=_HTTP_TIMEOUT,
     )
-    if response.is_success:
+    if response.ok:
         return _image_bytes_from_generations_payload(response.json())
 
     err_snip = response.text[:400]
@@ -232,7 +232,7 @@ def generate_cover_image(prompt: str) -> bytes:
             json=minimal,
             timeout=_HTTP_TIMEOUT,
         )
-        if response.is_success:
+        if response.ok:
             return _image_bytes_from_generations_payload(response.json())
         err_snip = response.text[:400]
 
@@ -254,7 +254,7 @@ def generate_cover_image(prompt: str) -> bytes:
         json=chat_body,
         timeout=_HTTP_TIMEOUT,
     )
-    if chat.is_error:
+    if not chat.ok:
         logger.error(
             "BotHub chat.completions → %s %s", chat.status_code, chat.text[:500]
         )
