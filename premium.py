@@ -58,6 +58,7 @@ ADVANCED_MODE_FEATURE_IDS: frozenset[str] = frozenset(
         "pin_message",
         "custom_buttons",
         "stream_video_preview",
+        "ai_image",
         "schedule_cancel",
         "multistream",
     }
@@ -90,6 +91,7 @@ _FEATURE_LABEL_KEYS = {
     "pin_message": "premium_feat_pin_message",
     "custom_buttons": "premium_feat_custom_buttons",
     "stream_video_preview": "premium_feat_stream_video_preview",
+    "ai_image": "premium_feat_ai_image",
     "schedule_cancel": "premium_feat_schedule_cancel",
     "multistream": "premium_feat_multistream",
     "schedule_publish": "premium_feat_schedule_publish",

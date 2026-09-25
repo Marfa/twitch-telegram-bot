@@ -2979,7 +2979,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(
-                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep|game_cover|stream_preview|stream_video_preview|stream_file_video_preview)$"
+                    receive_image_ask, pattern=r"^image_ask:(add|skip|delete|keep|game_cover|ai_image|stream_preview|stream_video_preview|stream_file_video_preview)$"
                 ),
             ],
             IMAGE_UPLOAD: [

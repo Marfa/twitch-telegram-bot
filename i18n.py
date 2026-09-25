@@ -2231,6 +2231,12 @@ def image_ask_keyboard(
                     callback_data="image_ask:game_cover",
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    t("image_ai_cover", lang),
+                    callback_data="image_ask:ai_image",
+                )
+            ],
             [InlineKeyboardButton(t("image_add", lang), callback_data="image_ask:add")],
             [InlineKeyboardButton(t("image_skip", lang), callback_data="image_ask:skip")],
         ]
@@ -2274,6 +2280,12 @@ def image_edit_keyboard(
             callback_data="image_ask:game_cover",
         )
     ]
+    ai_row = [
+        InlineKeyboardButton(
+            t("image_ai_cover", lang),
+            callback_data="image_ask:ai_image",
+        )
+    ]
     if has_image:
         return InlineKeyboardMarkup(
             [
@@ -2281,6 +2293,7 @@ def image_edit_keyboard(
                 gif_row,
                 file_video_row,
                 cover_row,
+                ai_row,
                 [
                     InlineKeyboardButton(
                         t("edit_image_replace", lang),

@@ -316,7 +316,24 @@ def check_core() -> None:
     assert any("gif" in lab.lower() for lab in ask_labels)
     assert any("видео" in lab.lower() for lab in ask_labels)
     assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in ask_labels)
+    assert any("ии" in lab.lower() for lab in ask_labels)
+    assert any(
+        b.callback_data == "image_ask:ai_image"
+        for row in ask_kb.inline_keyboard
+        for b in row
+    )
     assert any("сво" in lab.lower() for lab in ask_labels)
+    from bothub import build_stream_cover_prompt
+
+    prompt = build_stream_cover_prompt(
+        game_name="Hades",
+        game_description="Battle out of hell.",
+        streamer_login="marfapr",
+    )
+    assert "Hades" in prompt
+    assert "Battle out of hell" in prompt
+    assert "no text" in prompt.lower()
+    assert "livestream" in prompt.lower() or "streaming" in prompt.lower()
     on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
     on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)
@@ -2193,6 +2210,10 @@ def check_core() -> None:
         assert tr("image_game_cover", loc)
         assert tr("image_game_cover_note", loc)
         assert tr("sub_list_image_game_cover", loc)
+        assert tr("image_ai_cover", loc)
+        assert tr("image_ai_generating", loc)
+        assert tr("premium_feat_ai_image", loc)
+        assert tr("premium_feat_ai_image_desc", loc)
         assert tr("edit_image", loc)
         assert tr("edit_image_prompt", loc)
         assert tr("edit_image_delete", loc)

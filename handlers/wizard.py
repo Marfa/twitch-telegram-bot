@@ -5,16 +5,18 @@ import html
 import logging
 import re
 import secrets
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
 
 import requests
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes, ConversationHandler
 
 import analytics
+import bothub
 import demo_mode
 import premium as prem
 from bot_helpers import (
@@ -2693,6 +2695,9 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await _save_edit_image(update, context, lang)
         return await _go_after_image_step(update, context, lang)
 
+    if action == "ai_image":
+        return await _receive_image_ai(update, context, lang)
+
     if action in (
         "game_cover",
         "stream_preview",
@@ -2764,6 +2769,102 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
     _set_wizard_back(context, _wz()["IMAGE_UPLOAD"])
     return _wz()["IMAGE_UPLOAD"]
+
+async def _receive_image_ai(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """Generate a BotHub cover from the channel's game description (Premium advanced)."""
+    query = update.callback_query
+    assert query is not None
+    db: Database = context.application.bot_data["db"]
+    user_id = query.from_user.id
+    entitled = await prem.has_feature(
+        context.bot,
+        db,
+        user_id,
+        "ai_image",
+        channel=_wizard_channel(context),
+    )
+    if not entitled:
+        await query.answer(t("advanced_options_premium_only", lang), show_alert=True)
+        return _wz()["IMAGE_ASK"]
+    if not bothub.bothub_configured():
+        await query.answer(t("image_ai_unavailable", lang), show_alert=True)
+        return _wz()["IMAGE_ASK"]
+
+    chat_id = reply_chat_id(update)
+    try:
+        await query.edit_message_text(t("image_ai_generating", lang))
+    except BadRequest:
+        await context.bot.send_message(chat_id, t("image_ai_generating", lang))
+
+    login = str(context.user_data.get("twitch_username") or "").strip()
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+
+    def _resolve_context() -> tuple[str, str, str]:
+        game_id, game_name = twitch.resolve_channel_game(login) if login else ("", "")
+        description = ""
+        if game_id:
+            description = twitch.resolve_game_description(game_id, lang=lang)
+        if description in ("—", "-"):
+            description = ""
+        return game_id, game_name, description
+
+    try:
+        _game_id, game_name, description = await asyncio.to_thread(_resolve_context)
+    except Exception:
+        logger.exception("AI cover: resolve game failed login=%s", login)
+        await context.bot.send_message(chat_id, t("image_ai_failed", lang))
+        return await _go_image_ask_prompt(update, context, lang)
+
+    if not game_name and not description:
+        await context.bot.send_message(chat_id, t("image_ai_no_game", lang))
+        return await _go_image_ask_prompt(update, context, lang)
+
+    prompt = bothub.build_stream_cover_prompt(
+        game_name=game_name or "video game",
+        game_description=description,
+        streamer_login=login,
+    )
+    try:
+        raw = await asyncio.to_thread(bothub.generate_cover_image, prompt)
+    except Exception:
+        logger.exception("AI cover: BotHub generation failed login=%s", login)
+        await context.bot.send_message(chat_id, t("image_ai_failed", lang))
+        return await _go_image_ask_prompt(update, context, lang)
+
+    if not raw or len(raw) < 256:
+        await context.bot.send_message(chat_id, t("image_ai_failed", lang))
+        return await _go_image_ask_prompt(update, context, lang)
+
+    try:
+        sent = await context.bot.send_photo(
+            chat_id,
+            photo=InputFile(BytesIO(raw), filename="ai_cover.jpg"),
+            caption=t("image_ai_ready", lang),
+        )
+    except Exception:
+        logger.exception("AI cover: Telegram upload failed login=%s", login)
+        await context.bot.send_message(chat_id, t("image_ai_failed", lang))
+        return await _go_image_ask_prompt(update, context, lang)
+
+    photos = sent.photo or []
+    if not photos:
+        await context.bot.send_message(chat_id, t("image_ai_failed", lang))
+        return await _go_image_ask_prompt(update, context, lang)
+
+    context.user_data["image_file_id"] = photos[-1].file_id
+    context.user_data["edit_has_image"] = True
+    context.user_data.pop("image_backup_file_id", None)
+    context.user_data.pop("image_backup_position", None)
+    await context.bot.send_message(
+        chat_id,
+        t("image_position_prompt", lang),
+        reply_markup=image_position_keyboard(lang),
+    )
+    _set_wizard_back(context, _wz()["IMAGE_POSITION"])
+    return _wz()["IMAGE_POSITION"]
+
 
 async def receive_image_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)

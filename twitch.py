@@ -482,6 +482,42 @@ class TwitchClient:
                 out[stream["user_id"]] = stream
         return out
 
+    def get_channel(self, broadcaster_id: str) -> dict[str, Any] | None:
+        """Helix Get Channel Information (last category when offline)."""
+        uid = str(broadcaster_id or "").strip()
+        if not uid.isdigit():
+            return None
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/channels",
+            headers=self._headers(),
+            params={"broadcaster_id": uid},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        rows = resp.json().get("data") or []
+        return rows[0] if rows else None
+
+    def resolve_channel_game(
+        self, login: str
+    ) -> tuple[str, str]:
+        """Current or last Helix category for a channel login → (game_id, game_name)."""
+        user = self.get_user(login)
+        if not user:
+            return "", ""
+        uid = str(user.get("id") or "").strip()
+        if not uid:
+            return "", ""
+        live = self.get_live_streams([uid]).get(uid)
+        if live:
+            return _stream_game_fields(live)
+        channel = self.get_channel(uid)
+        if not channel:
+            return "", ""
+        return (
+            str(channel.get("game_id") or "").strip(),
+            str(channel.get("game_name") or "").strip(),
+        )
+
     def get_videos_by_user(
         self,
         user_id: str,

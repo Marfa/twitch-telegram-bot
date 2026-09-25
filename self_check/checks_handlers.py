@@ -827,10 +827,13 @@ def check_handlers() -> None:
         assert "custom_buttons" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "pin_message" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "stream_video_preview" in prem.ADVANCED_MODE_FEATURE_IDS
+        assert "ai_image" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "schedule_cancel" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "stream_video_preview" not in FEATURE_IDS
+        assert "ai_image" not in FEATURE_IDS
         assert "schedule_cancel" not in FEATURE_IDS
         assert tr("premium_feat_advanced_mode", "ru") == "Продвинутые опции оповещений"
+        assert tr("premium_feat_ai_image", "ru")
         assert tr("premium_feat_schedule_cancel", "ru")
         assert tr("premium_feat_custom_buttons", "ru")
         assert tr("advanced_options_buttons", "ru")
