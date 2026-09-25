@@ -183,6 +183,8 @@ def generate_cover_image(prompt: str) -> bytes:
         "Authorization": f"Bearer {BOTHUB_API_KEY}",
         "Content-Type": "application/json",
     }
+    # Do not send output_format — BotHub may reject it as unavailable for the model.
+    # Telegram accepts PNG/JPEG from send_photo either way.
     gen_body: dict[str, Any] = {
         "model": BOTHUB_IMAGE_MODEL,
         "prompt": prompt,
@@ -190,7 +192,6 @@ def generate_cover_image(prompt: str) -> bytes:
         "size": "1792x1024",
         "response_format": "b64_json",
         "aspect_ratio": "16:9",
-        "output_format": "jpeg",
     }
     response = _http.post(
         f"{BOTHUB_BASE_URL}/images/generations",
@@ -198,17 +199,50 @@ def generate_cover_image(prompt: str) -> bytes:
         json=gen_body,
         timeout=_HTTP_TIMEOUT,
     )
-    if response.status_code in (404, 405):
-        logger.info("BotHub images/generations unavailable — trying chat.completions")
-    elif response.is_error:
-        logger.warning(
-            "BotHub images/generations → %s %s — trying chat.completions",
-            response.status_code,
-            response.text[:400],
-        )
-    else:
+    if response.is_success:
         return _image_bytes_from_generations_payload(response.json())
 
+    err_snip = response.text[:400]
+    # Retry with a minimal OpenAI-shaped body if optional fields are rejected.
+    if response.status_code == 400 and any(
+        key in err_snip.lower()
+        for key in (
+            "output_format",
+            "aspect_ratio",
+            "size",
+            "response_format",
+            "unvailvable",
+            "unavailable",
+        )
+    ):
+        logger.warning(
+            "BotHub images/generations → %s %s — retrying without optional fields",
+            response.status_code,
+            err_snip,
+        )
+        minimal = {
+            "model": BOTHUB_IMAGE_MODEL,
+            "prompt": prompt,
+            "n": 1,
+            "response_format": "b64_json",
+        }
+        response = _http.post(
+            f"{BOTHUB_BASE_URL}/images/generations",
+            headers=headers,
+            json=minimal,
+            timeout=_HTTP_TIMEOUT,
+        )
+        if response.is_success:
+            return _image_bytes_from_generations_payload(response.json())
+        err_snip = response.text[:400]
+
+    if response.status_code not in (404, 405):
+        logger.error(
+            "BotHub images/generations → %s %s", response.status_code, err_snip
+        )
+        response.raise_for_status()
+
+    logger.info("BotHub images/generations unavailable — trying chat.completions")
     chat_body = {
         "model": BOTHUB_IMAGE_MODEL,
         "messages": [{"role": "user", "content": prompt}],
