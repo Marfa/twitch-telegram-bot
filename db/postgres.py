@@ -2256,6 +2256,19 @@ owner_id, twitch_username, twitch_user_id,
             rows = cur.fetchall()
         return [int(r["owner_id"]) for r in rows]
 
+    def get_owners_with_enabled_subscriptions(self) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT DISTINCT owner_id FROM subscriptions
+                WHERE enabled = TRUE AND is_demo = FALSE
+                ORDER BY owner_id
+                """
+            )
+            rows = cur.fetchall()
+        return [int(r["owner_id"]) for r in rows]
+
     def upsert_user(self, user_id: int) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)

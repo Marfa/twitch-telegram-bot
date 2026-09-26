@@ -2053,6 +2053,17 @@ owner_id, twitch_username, twitch_user_id,
             ).fetchall()
         return [int(r["owner_id"]) for r in rows]
 
+    def get_owners_with_enabled_subscriptions(self) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT owner_id FROM subscriptions
+                WHERE enabled = 1 AND COALESCE(is_demo, 0) = 0
+                ORDER BY owner_id
+                """
+            ).fetchall()
+        return [int(r["owner_id"]) for r in rows]
+
     def upsert_user(self, user_id: int) -> None:
         with self._conn() as conn:
             conn.execute(

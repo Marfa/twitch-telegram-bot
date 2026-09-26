@@ -1133,17 +1133,17 @@ def pause_unentitled_subscriptions(db: Database, user_id: int) -> int:
     return paused
 
 
-async def expire_unentitled_alerts(bot: Bot, db: Database) -> int:
-    """Pause alerts that lost entitlement after Stars / feature expiry.
+def _unentitled_candidate_user_ids(db: Database) -> list[int]:
+    """DB-only: owners with enabled alerts that look overdue for pause.
 
-    Skips free-chat members (they still get full Premium via has_feature).
-    Returns total paused subscription rows.
+    Runs off the asyncio loop via to_thread — full notify-user scan was
+    blocking APScheduler for tens of seconds (premium phase ≈ CHECK_INTERVAL).
     """
     if paid_features_free():
-        return 0
-    total = 0
+        return []
     now = int(time.time())
-    for user_id in db.get_notify_user_ids():
+    candidates: list[int] = []
+    for user_id in db.get_owners_with_enabled_subscriptions():
         enabled = [
             s
             for s in db.get_subscriptions_by_owner(user_id)
@@ -1167,11 +1167,25 @@ async def expire_unentitled_alerts(bot: Bot, db: Database) -> int:
             )
             > PREMIUM_FREE_ACTIVE_LIMIT
         )
-        if not (clocks_expired or type_blocked or over_cap):
-            continue
+        if clocks_expired or type_blocked or over_cap:
+            candidates.append(user_id)
+    return candidates
+
+
+async def expire_unentitled_alerts(bot: Bot, db: Database) -> int:
+    """Pause alerts that lost entitlement after Stars / feature expiry.
+
+    Skips free-chat members (they still get full Premium via has_feature).
+    Returns total paused subscription rows.
+    """
+    if paid_features_free():
+        return 0
+    candidates = await asyncio.to_thread(_unentitled_candidate_user_ids, db)
+    total = 0
+    for user_id in candidates:
         if await is_free_chat_member(bot, user_id):
             continue
-        n = pause_unentitled_subscriptions(db, user_id)
+        n = await asyncio.to_thread(pause_unentitled_subscriptions, db, user_id)
         if n:
             total += n
             logger.info(

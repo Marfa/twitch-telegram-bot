@@ -703,6 +703,39 @@ def check_handlers() -> None:
             if db.get_subscription(sid, cap_owner).enabled
         )
         assert still_on == prem.free_active_limit()
+        # Background expire_unentitled_alerts: thread offload + enabled-owners only.
+        import asyncio as _asyncio
+        import inspect as _insp
+
+        _exp_src = _insp.getsource(prem.expire_unentitled_alerts)
+        assert "asyncio.to_thread" in _exp_src
+        assert "_unentitled_candidate_user_ids" in _exp_src
+        assert "get_notify_user_ids" not in _insp.getsource(
+            prem._unentitled_candidate_user_ids
+        )
+        assert hasattr(db, "get_owners_with_enabled_subscriptions")
+        owners_on = db.get_owners_with_enabled_subscriptions()
+        assert cap_owner in owners_on
+        # Re-enable one over-cap row and sweep via async path (no free-chat).
+        over_sid = next(
+            sid for sid in live_ids if not db.get_subscription(sid, cap_owner).enabled
+        )
+        db.toggle_subscription(over_sid, cap_owner)
+        assert db.get_subscription(over_sid, cap_owner).enabled is True
+
+        async def _sweep() -> int:
+            from unittest.mock import AsyncMock, MagicMock, patch
+
+            bot = MagicMock()
+            bot.get_chat_member = AsyncMock(side_effect=AssertionError("unused"))
+            with patch("premium.FREE_CHAT_ID", None):
+                return await prem.expire_unentitled_alerts(bot, db)
+
+        assert _asyncio.run(_sweep()) >= 1
+        assert (
+            sum(1 for sid in live_ids if db.get_subscription(sid, cap_owner).enabled)
+            == prem.free_active_limit()
+        )
         ok3, reason3 = start_trial(db, 50)
         assert not ok3 and reason3 == "used"
 

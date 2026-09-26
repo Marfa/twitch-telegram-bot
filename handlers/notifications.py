@@ -542,7 +542,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
 
     db: Database = context.application.bot_data["db"]
-    expired_trials = prem.expire_due_trials(db)
+    expired_trials = await asyncio.to_thread(prem.expire_due_trials, db)
     if expired_trials:
         logger.info("Expired %s premium trial(s)", len(expired_trials))
         max_age = max(int(CHECK_INTERVAL) * 2, 120)
