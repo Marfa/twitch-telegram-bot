@@ -3757,16 +3757,50 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         announce_new_beta_features, interval=3600, first=90
     )
     sync_optional_jobs(app.job_queue, db)
-    app.job_queue.run_repeating(process_scheduled_broadcasts, interval=60, first=20)
-    app.job_queue.run_repeating(purge_old_broadcasts, interval=24 * 3600, first=300)
+    # Same grace/coalesce as stream jobs — default 1s grace misfires when
+    # check_streams' premium phase blocks the loop for tens of seconds.
     app.job_queue.run_repeating(
-        purge_stale_previous_messages, interval=3600, first=210
+        process_scheduled_broadcasts,
+        interval=60,
+        first=20,
+        name="process_scheduled_broadcasts",
+        job_kwargs=_stream_job_kwargs("process_scheduled_broadcasts", misfire_grace=60),
     )
     app.job_queue.run_repeating(
-        purge_expired_blocked_users, interval=24 * 3600, first=400
+        purge_old_broadcasts,
+        interval=24 * 3600,
+        first=300,
+        name="purge_old_broadcasts",
+        job_kwargs=_stream_job_kwargs(
+            "purge_old_broadcasts", misfire_grace=24 * 3600
+        ),
     )
     app.job_queue.run_repeating(
-        purge_stale_log_tables, interval=24 * 3600, first=450
+        purge_stale_previous_messages,
+        interval=3600,
+        first=210,
+        name="purge_stale_previous_messages",
+        job_kwargs=_stream_job_kwargs(
+            "purge_stale_previous_messages", misfire_grace=3600
+        ),
+    )
+    app.job_queue.run_repeating(
+        purge_expired_blocked_users,
+        interval=24 * 3600,
+        first=400,
+        name="purge_expired_blocked_users",
+        job_kwargs=_stream_job_kwargs(
+            "purge_expired_blocked_users", misfire_grace=24 * 3600
+        ),
+    )
+    app.job_queue.run_repeating(
+        purge_stale_log_tables,
+        interval=24 * 3600,
+        first=450,
+        name="purge_stale_log_tables",
+        job_kwargs=_stream_job_kwargs(
+            "purge_stale_log_tables", misfire_grace=24 * 3600
+        ),
     )
     app.job_queue.run_repeating(
         refresh_broadcast_feedback_keyboards, interval=3600, first=180

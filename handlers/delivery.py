@@ -1159,6 +1159,7 @@ async def _send_notification(
             # Fast first-send: shared cache → thumbnail placeholder → blocking capture.
             if uid:
                 captured_preview = peek_shared_preview(uid)
+            # End alerts: stream is offline — peek/placeholder only, never live capture.
             if captured_preview is None and login and uid:
                 placeholder = await asyncio.to_thread(
                     build_preview_placeholder_mp4, stream
@@ -1168,13 +1169,16 @@ async def _send_notification(
                         video_bytes = placeholder
                     else:
                         animation_bytes = placeholder
-                    need_preview_upgrade = video_preview_ready()
+                    need_preview_upgrade = (
+                        alert_type != "end" and video_preview_ready()
+                    )
             if (
                 captured_preview is None
                 and not animation_bytes
                 and not video_bytes
                 and login
                 and uid
+                and alert_type != "end"
             ):
                 captured_preview = await asyncio.to_thread(
                     build_stream_video_mp4,

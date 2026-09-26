@@ -435,6 +435,8 @@ def check_core() -> None:
     assert "peek_shared_preview" in _send_src
     assert "schedule_preview_upgrade" in _send_src
     assert "need_preview_upgrade" in _send_src
+    # Offline end alerts must not start streamlink/ffmpeg after purge.
+    assert 'alert_type != "end"' in _send_src
     assert callable(schedule_preview_upgrade)
     assert callable(upgrade_placeholder_preview)
     assert callable(build_preview_placeholder_mp4)
@@ -610,6 +612,21 @@ def check_core() -> None:
     import bot as _bot_mod
 
     assert "STREAM_PREVIEW_REFRESH_SECONDS" in _inspect.getsource(_bot_mod)
+    _bot_build = _inspect.getsource(_bot_mod.build_application)
+    assert '_stream_job_kwargs("process_scheduled_broadcasts"' in _bot_build
+    assert '"purge_stale_previous_messages", misfire_grace=' in _bot_build
+    # Edit image: checkbox toggles memory only; Apply/Skip/Delete persist.
+    from handlers.wizard import receive_image_ask as _recv_image_ask
+
+    _ask_src = _inspect.getsource(_recv_image_ask)
+    assert "_persist_edit_image_fields" not in _ask_src
+    _keep_src = _ask_src.split('action == "keep"', 1)[1].split("if action ==", 1)[0]
+    assert "_save_edit_image" in _keep_src
+    _toggle_src = _ask_src.split('"game_cover"', 1)[1].split(
+        "# Add own image", 1
+    )[0]
+    assert "update_subscription" not in _toggle_src
+    assert "_save_edit_image" not in _toggle_src
     assert "EVENT_JOB_MAX_INSTANCES" in _inspect.getsource(
         install_scheduler_visibility
     )

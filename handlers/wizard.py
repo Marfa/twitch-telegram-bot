@@ -225,29 +225,6 @@ async def _save_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE, l
     return await _impl(update, context, lang)
 
 
-async def _persist_edit_image_fields(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Save image fields during edit without ending the conversation."""
-    sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
-        return
-    db: Database = context.application.bot_data["db"]
-    owner_id = update.effective_user.id
-    file_id = context.user_data.get("image_file_id") or None
-    position = str(context.user_data.get("image_position") or "") if file_id else ""
-    fields: dict = {
-        "image_file_id": file_id,
-        "image_position": position,
-    }
-    if file_id:
-        fields["disable_link_preview"] = True
-    db.update_subscription(sub_id, owner_id, **fields)
-    from handlers.background_jobs import sync_optional_jobs
-
-    sync_optional_jobs(context.application.job_queue, db)
-
-
 async def _save_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, template: str) -> int:
     from bot import _save_edit_template as _impl
 
@@ -2668,6 +2645,8 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if action == "keep":
         await query.edit_message_text("✓")
+        if is_edit:
+            return await _save_edit_image(update, context, lang)
         owner_id = query.from_user.id
         context.user_data.clear()
         await context.bot.send_message(
@@ -2763,8 +2742,7 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data["image_file_id"] = sentinel
             context.user_data["image_position"] = "before"
             context.user_data["edit_has_image"] = True
-        if is_edit:
-            await _persist_edit_image_fields(update, context)
+        # Edit: persist on Apply / Skip / Delete — not on each checkbox (avoids DB lag).
         has_image = bool(is_edit and context.user_data.get("image_file_id"))
         fid = context.user_data.get("image_file_id")
         await query.edit_message_reply_markup(
