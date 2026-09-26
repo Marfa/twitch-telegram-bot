@@ -1130,8 +1130,8 @@ async def _send_notification(
                     bothub_mod.generate_alert_cover_bytes,
                     stream=stream,
                     twitch=twitch,
-                    streamer_login=str(sub.twitch_username or ""),
                     lang=lang,
+                    db=db,
                 )
             except Exception:
                 logger.exception(

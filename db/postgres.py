@@ -1356,6 +1356,19 @@ class PostgresDatabase:
                 )
                 """
             )
+            # BotHub AI alert covers — one image per Twitch Helix category id.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_game_covers (
+                    twitch_game_id TEXT PRIMARY KEY,
+                    game_name TEXT NOT NULL DEFAULT '',
+                    image_bytes BYTEA NOT NULL,
+                    content_type TEXT NOT NULL DEFAULT 'image/jpeg',
+                    model TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
             cur.execute("SELECT COUNT(*) AS n FROM igdb_external_steam")
             steam_n = cur.fetchone()
             if int((steam_n["n"] if steam_n else 0) or 0) <= 0:
@@ -8164,6 +8177,71 @@ owner_id, twitch_username, twitch_user_id,
                 ON CONFLICT (source_hash, lang) DO UPDATE SET translated = EXCLUDED.translated
                 """,
                 (h, loc, text),
+            )
+
+    def get_ai_game_cover(self, twitch_game_id: str) -> dict[str, Any] | None:
+        gid = str(twitch_game_id or "").strip()
+        if not gid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT twitch_game_id, game_name, image_bytes, content_type, model
+                FROM ai_game_covers WHERE twitch_game_id = %s
+                """,
+                (gid,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        raw = row["image_bytes"]
+        if raw is None:
+            return None
+        if isinstance(raw, memoryview):
+            raw = raw.tobytes()
+        return {
+            "twitch_game_id": str(row["twitch_game_id"] or ""),
+            "game_name": str(row["game_name"] or ""),
+            "image_bytes": bytes(raw),
+            "content_type": str(row["content_type"] or "image/jpeg"),
+            "model": str(row["model"] or ""),
+        }
+
+    def upsert_ai_game_cover(
+        self,
+        twitch_game_id: str,
+        *,
+        game_name: str,
+        image_bytes: bytes,
+        content_type: str,
+        model: str,
+    ) -> None:
+        gid = str(twitch_game_id or "").strip()
+        raw = bytes(image_bytes or b"")
+        if not gid or len(raw) < 256:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO ai_game_covers (
+                    twitch_game_id, game_name, image_bytes, content_type, model
+                ) VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (twitch_game_id) DO UPDATE SET
+                    game_name = EXCLUDED.game_name,
+                    image_bytes = EXCLUDED.image_bytes,
+                    content_type = EXCLUDED.content_type,
+                    model = EXCLUDED.model,
+                    created_at = NOW()
+                """,
+                (
+                    gid,
+                    str(game_name or "").strip(),
+                    raw,
+                    str(content_type or "image/jpeg").strip() or "image/jpeg",
+                    str(model or "").strip(),
+                ),
             )
 
     def igdb_store_links_for_twitch(self, twitch_uid: str) -> dict[str, str | None]:

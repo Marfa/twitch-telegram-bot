@@ -121,14 +121,13 @@ FOLLOW_MONITOR_EVENTS_RETENTION_DAYS = int(
 DROP_SEEN_RETENTION_DAYS = int(os.getenv("DROP_SEEN_RETENTION_DAYS", "90"))
 CHAT_SEND_DAILY_RETENTION_DAYS = int(os.getenv("CHAT_SEND_DAILY_RETENTION_DAYS", "14"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
-# Optional: BotHub (Nano Banana 2 / gemini-3.1-flash-image) for AI alert covers.
-# Same API shape as Marfa/ghost-text-prepper. Empty = AI cover button disabled.
+# Optional: BotHub AI alert covers (Flash Lite by default). Prefer Eco key. Skip if unset.
 BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY", "").strip()
 BOTHUB_BASE_URL = (
     os.getenv("BOTHUB_BASE_URL", "").strip() or "https://bothub.chat/api/v2/openai/v1"
 ).rstrip("/")
 BOTHUB_IMAGE_MODEL = (
-    os.getenv("BOTHUB_IMAGE_MODEL", "").strip() or "gemini-3.1-flash-image"
+    os.getenv("BOTHUB_IMAGE_MODEL", "").strip() or "gemini-3.1-flash-lite-image"
 )
 # Optional: IsThereAnyDeal API key for game giveaways (https://isthereanydeal.com/apps/register/)
 ISTHEREANYDEAL_API_KEY = os.getenv("ISTHEREANYDEAL_API_KEY", "").strip()

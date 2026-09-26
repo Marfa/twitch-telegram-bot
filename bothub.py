@@ -1,13 +1,14 @@
 """BotHub image generation (OpenAI-compatible API).
 
-Same integration pattern as Marfa/ghost-text-prepper:
-Nano Banana 2 on BotHub == ``gemini-3.1-flash-image``.
+Default model: Gemini 3.1 Flash Lite Image (fast). Covers are cached per
+Twitch ``game_id`` in ``ai_game_covers`` so each category is generated once.
 """
 from __future__ import annotations
 
 import base64
 import logging
 import re
+import threading
 from typing import Any
 
 import requests
@@ -23,6 +24,8 @@ _MAX_TOPIC_CHARS = 900
 _HTTP_TIMEOUT = 120
 
 _http = requests.Session()
+_gen_locks_guard = threading.Lock()
+_gen_locks: dict[str, threading.Lock] = {}
 
 
 def bothub_configured() -> bool:
@@ -33,15 +36,13 @@ def build_stream_cover_prompt(
     *,
     game_name: str,
     game_description: str,
-    streamer_login: str = "",
 ) -> str:
-    """Cover for a Twitch stream alert: game mood + livestream framing, no text."""
+    """Category cover for a Twitch alert: game mood + livestream framing, no text."""
     name = re.sub(r"\s+", " ", (game_name or "").strip()) or "a video game"
     topic = re.sub(r"\s+", " ", (game_description or "").strip())
     if topic in ("—", "-"):
         topic = ""
     topic = topic[:_MAX_TOPIC_CHARS].strip()
-    login = re.sub(r"\s+", " ", (streamer_login or "").strip())
 
     parts = [
         "Create a single widescreen cover image for a Twitch livestream alert in Telegram.",
@@ -49,11 +50,6 @@ def build_stream_cover_prompt(
         "Mood: live streaming, gaming community, energetic but clean cinematic look "
         "suitable as a stream notification thumbnail.",
     ]
-    if login:
-        parts.append(
-            f"Streamer channel context (atmosphere only, do not depict real people "
-            f"or write the name): {login}."
-        )
     if topic:
         parts.append(f"Game description (mood and motifs only): {topic}")
     parts.append(
@@ -62,7 +58,11 @@ def build_stream_cover_prompt(
     )
     parts.append(
         "Strict rules: no text, letters, words, numbers, typography, watermarks, "
-        "logos, Twitch UI chrome, captions, or signatures anywhere in the image."
+        "logos, Twitch UI chrome, captions, or signatures anywhere in the image. "
+        "CRITICAL: ZERO readable text of any kind — no words on monitors, no neon "
+        "signs with letters, no UI labels, no DEMO/PLAYTEST/LIVE/START badges, "
+        "no HUD text, no logos with letters. Screens may show abstract colorful "
+        "gameplay shapes only, without any glyphs."
     )
     return " ".join(parts)
 
@@ -138,41 +138,19 @@ def _image_bytes_from_chat_payload(data: dict[str, Any]) -> bytes:
     raise RuntimeError(f"BotHub chat completion had no image: {str(data)[:500]}")
 
 
-def generate_alert_cover_bytes(
-    *,
-    stream: dict[str, Any] | None,
-    twitch: Any,
-    streamer_login: str = "",
-    lang: str = "en",
-) -> bytes | None:
-    """Build prompt from Helix stream game + IGDB summary; return JPEG/PNG bytes or None."""
-    if not bothub_configured():
-        return None
-    from twitch import _stream_game_fields
+def _content_type_for(raw: bytes) -> str:
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    return "image/jpeg"
 
-    game_id, game_name = _stream_game_fields(stream or {})
-    description = ""
-    if game_id and twitch is not None:
-        try:
-            description = str(
-                twitch.resolve_game_description(game_id, lang=lang) or ""
-            ).strip()
-        except Exception:
-            logger.exception("AI cover: game description failed game_id=%s", game_id)
-            description = ""
-    if description in ("—", "-"):
-        description = ""
-    if not game_name and not description:
-        return None
-    prompt = build_stream_cover_prompt(
-        game_name=game_name or "video game",
-        game_description=description,
-        streamer_login=streamer_login,
-    )
-    raw = generate_cover_image(prompt)
-    if not raw or len(raw) < 256:
-        return None
-    return raw
+
+def _lock_for_game(game_id: str) -> threading.Lock:
+    with _gen_locks_guard:
+        lock = _gen_locks.get(game_id)
+        if lock is None:
+            lock = threading.Lock()
+            _gen_locks[game_id] = lock
+        return lock
 
 
 def generate_cover_image(prompt: str) -> bytes:
@@ -189,7 +167,8 @@ def generate_cover_image(prompt: str) -> bytes:
         "model": BOTHUB_IMAGE_MODEL,
         "prompt": prompt,
         "n": 1,
-        "size": "1792x1024",
+        # ~1K 16:9 — enough for Telegram chat; 1792x1024 was slower for little gain.
+        "size": "1280x720",
         "response_format": "b64_json",
         "aspect_ratio": "16:9",
     }
@@ -260,3 +239,79 @@ def generate_cover_image(prompt: str) -> bytes:
         )
     chat.raise_for_status()
     return _image_bytes_from_chat_payload(chat.json())
+
+
+def generate_alert_cover_bytes(
+    *,
+    stream: dict[str, Any] | None,
+    twitch: Any,
+    lang: str = "en",
+    db: Any = None,
+) -> bytes | None:
+    """Return AI cover bytes for the stream category (DB cache → generate once)."""
+    if not bothub_configured():
+        return None
+    from twitch import _stream_game_fields
+
+    game_id, game_name = _stream_game_fields(stream or {})
+    gid = str(game_id or "").strip()
+    model = str(BOTHUB_IMAGE_MODEL or "").strip()
+
+    def _cached() -> bytes | None:
+        if not db or not gid or not hasattr(db, "get_ai_game_cover"):
+            return None
+        row = db.get_ai_game_cover(gid)
+        if not row:
+            return None
+        raw = row.get("image_bytes") if isinstance(row, dict) else None
+        stored_model = str((row or {}).get("model") or "").strip()
+        if not raw or len(raw) < 256:
+            return None
+        if model and stored_model and stored_model != model:
+            return None
+        return bytes(raw)
+
+    hit = _cached()
+    if hit:
+        return hit
+
+    lock = _lock_for_game(gid) if gid else threading.Lock()
+    with lock:
+        hit = _cached()
+        if hit:
+            return hit
+
+        description = ""
+        if game_id and twitch is not None:
+            try:
+                description = str(
+                    twitch.resolve_game_description(game_id, lang=lang) or ""
+                ).strip()
+            except Exception:
+                logger.exception(
+                    "AI cover: game description failed game_id=%s", game_id
+                )
+                description = ""
+        if description in ("—", "-"):
+            description = ""
+        if not game_name and not description:
+            return None
+        prompt = build_stream_cover_prompt(
+            game_name=game_name or "video game",
+            game_description=description,
+        )
+        raw = generate_cover_image(prompt)
+        if not raw or len(raw) < 256:
+            return None
+        if db and gid and hasattr(db, "upsert_ai_game_cover"):
+            try:
+                db.upsert_ai_game_cover(
+                    gid,
+                    game_name=game_name or "",
+                    image_bytes=raw,
+                    content_type=_content_type_for(raw),
+                    model=model,
+                )
+            except Exception:
+                logger.exception("AI cover: failed to cache game_id=%s", gid)
+        return raw

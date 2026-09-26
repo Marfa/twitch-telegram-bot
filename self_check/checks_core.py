@@ -333,12 +333,46 @@ def check_core() -> None:
     prompt = build_stream_cover_prompt(
         game_name="Hades",
         game_description="Battle out of hell.",
-        streamer_login="marfapr",
     )
     assert "Hades" in prompt
     assert "Battle out of hell" in prompt
-    assert "no text" in prompt.lower()
+    assert "no text" in prompt.lower() or "zero readable text" in prompt.lower()
     assert "livestream" in prompt.lower() or "streaming" in prompt.lower()
+    assert "DEMO" in prompt  # explicit ban list for Lite
+    # Category-stable: no streamer in prompt (covers cached per game_id).
+    assert "marfapr" not in prompt.lower()
+    from bothub import generate_alert_cover_bytes
+    import tempfile
+    from db.sqlite import SqliteDatabase
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmp:
+        adb = SqliteDatabase(Path(tmp) / "ai_cover.db")
+        fake = b"\x89PNG\r\n\x1a\n" + b"x" * 300
+        calls = {"n": 0}
+
+        def _fake_gen(_prompt: str) -> bytes:
+            calls["n"] += 1
+            return fake
+
+        with patch("bothub.bothub_configured", return_value=True), patch(
+            "bothub.generate_cover_image", side_effect=_fake_gen
+        ), patch("bothub.BOTHUB_IMAGE_MODEL", "test-model"):
+            first = generate_alert_cover_bytes(
+                stream={"game_id": "509658", "game_name": "Just Chatting"},
+                twitch=None,
+                db=adb,
+            )
+            second = generate_alert_cover_bytes(
+                stream={"game_id": "509658", "game_name": "Just Chatting"},
+                twitch=None,
+                db=adb,
+            )
+        assert first == fake and second == fake
+        assert calls["n"] == 1
+        cached = adb.get_ai_game_cover("509658")
+        assert cached and cached["image_bytes"] == fake
+        assert cached["model"] == "test-model"
     on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
     on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)

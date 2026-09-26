@@ -964,6 +964,18 @@ class Database(Protocol):
         self, source_hash: str, lang: str, translated: str
     ) -> None: ...
 
+    def get_ai_game_cover(self, twitch_game_id: str) -> dict[str, Any] | None: ...
+
+    def upsert_ai_game_cover(
+        self,
+        twitch_game_id: str,
+        *,
+        game_name: str,
+        image_bytes: bytes,
+        content_type: str,
+        model: str,
+    ) -> None: ...
+
     def igdb_store_links_for_twitch(
         self, twitch_uid: str
     ) -> dict[str, str | None]: ...
