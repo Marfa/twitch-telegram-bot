@@ -1791,9 +1791,20 @@ def check_core() -> None:
 
     from db.postgres import PostgresDatabase
 
-    # Bulk IGDB loads must not hold the shared pooled connection lock (stalls
-    # check_streams on the asyncio loop → missed APScheduler ticks).
+    # Concurrent queries use a small connection pool — never one global lock
+    # held across a PG wait (that froze Telegram handlers during IGDB merge).
+    # Long rewrites use _bulk_conn so they do not occupy a pool slot for minutes.
+    assert "_acquire" in inspect.getsource(PostgresDatabase)
+    assert "pool_size" in inspect.getsource(PostgresDatabase.__init__)
+    _conn_src = inspect.getsource(PostgresDatabase._conn)
+    assert "self._lock" not in _conn_src
     assert "_bulk_conn" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
+    assert "_bulk_conn" in inspect.getsource(
+        PostgresDatabase.replace_follow_monitor_followers
+    )
+    assert "_bulk_conn" in inspect.getsource(
+        PostgresDatabase.replace_giveaways_catalog
+    )
     assert "_bulk_conn" in inspect.getsource(PostgresDatabase)
     assert "ON CONFLICT" in inspect.getsource(PostgresDatabase.igdb_replace_rows)
     assert "DELETE FROM" in inspect.getsource(PostgresDatabase.igdb_replace_rows)

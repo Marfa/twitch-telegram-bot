@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import queue
 import random
 import secrets
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
@@ -54,6 +57,12 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# Concurrent queries without one stuck PG wait holding a process-wide lock
+# (that pattern froze Telegram handlers during IGDB merge / premium scans).
+_DEFAULT_POOL_SIZE = 8
+_POOL_ACQUIRE_TIMEOUT_SEC = 60.0
+
+
 def _normalize_pg_url(database_url: str) -> str:
     url = database_url.strip()
     if url.startswith("postgres://"):
@@ -70,42 +79,102 @@ class PostgresDatabase:
 
         self._psycopg = psycopg
         self._dsn = _normalize_pg_url(database_url)
-        self._lock = threading.Lock()
-        self._pooled: Any | None = None
+        try:
+            size = int(os.getenv("POSTGRES_POOL_SIZE", str(_DEFAULT_POOL_SIZE)) or _DEFAULT_POOL_SIZE)
+        except ValueError:
+            size = _DEFAULT_POOL_SIZE
+        self._pool_size = max(2, min(32, size))
+        self._pool: queue.Queue[Any] = queue.Queue(maxsize=self._pool_size)
+        self._pool_created = 0
+        self._pool_create_lock = threading.Lock()
         self._init_schema()
-        logger.info("Database: PostgreSQL (DATABASE_URL)")
+        logger.info(
+            "Database: PostgreSQL (DATABASE_URL) pool_size=%s", self._pool_size
+        )
 
-    def _ensure_pooled(self) -> Any:
-        conn = self._pooled
-        if conn is not None and not conn.closed:
+    def _new_connection(self) -> Any:
+        return self._psycopg.connect(self._dsn, connect_timeout=30)
+
+    def _acquire(self) -> Any:
+        """Borrow a pooled connection; never blocks other borrowers on PG wait."""
+        end = time.monotonic() + _POOL_ACQUIRE_TIMEOUT_SEC
+        while True:
+            try:
+                conn = self._pool.get_nowait()
+            except queue.Empty:
+                conn = None
+            if conn is not None:
+                if getattr(conn, "closed", True):
+                    with self._pool_create_lock:
+                        self._pool_created = max(0, self._pool_created - 1)
+                    continue
+                return conn
+            with self._pool_create_lock:
+                if self._pool_created < self._pool_size:
+                    self._pool_created += 1
+                    try:
+                        return self._new_connection()
+                    except Exception:
+                        self._pool_created -= 1
+                        raise
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"PostgreSQL pool exhausted (size={self._pool_size})"
+                )
+            try:
+                conn = self._pool.get(timeout=min(remaining, 5.0))
+            except queue.Empty:
+                continue
+            if getattr(conn, "closed", True):
+                with self._pool_create_lock:
+                    self._pool_created = max(0, self._pool_created - 1)
+                continue
             return conn
-        self._pooled = self._psycopg.connect(self._dsn, connect_timeout=30)
-        return self._pooled
+
+    def _release(self, conn: Any, *, discard: bool = False) -> None:
+        if discard or getattr(conn, "closed", True):
+            try:
+                if conn is not None and not getattr(conn, "closed", True):
+                    conn.close()
+            except Exception:
+                pass
+            with self._pool_create_lock:
+                self._pool_created = max(0, self._pool_created - 1)
+            return
+        try:
+            self._pool.put_nowait(conn)
+        except queue.Full:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with self._pool_create_lock:
+                self._pool_created = max(0, self._pool_created - 1)
 
     @contextmanager
     def _conn(self) -> Iterator[Any]:
-        # Reuse one connection under a lock — avoids TCP handshake per query on VPS.
-        with self._lock:
-            conn = self._ensure_pooled()
+        conn = self._acquire()
+        discard = False
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            discard = True
             try:
-                yield conn
-                conn.commit()
+                if not getattr(conn, "closed", True):
+                    conn.rollback()
             except Exception:
-                try:
-                    if not conn.closed:
-                        conn.rollback()
-                except Exception:
-                    self._pooled = None
-                if getattr(conn, "closed", False):
-                    self._pooled = None
-                raise
+                pass
+            raise
+        finally:
+            self._release(conn, discard=discard)
 
     @contextmanager
     def _bulk_conn(self) -> Iterator[Any]:
-        # Separate short-lived connection OUTSIDE self._lock. Long IGDB dump
-        # writes must not hold the pooled lock — check_streams DB reads run on
-        # the asyncio loop; waiting on that lock freezes APScheduler.
-        conn = self._psycopg.connect(self._dsn, connect_timeout=30)
+        # Dedicated connection outside the pool — long IGDB / follower rewrites
+        # must not occupy a pool slot for minutes.
+        conn = self._new_connection()
         try:
             yield conn
             conn.commit()
@@ -5650,7 +5719,7 @@ owner_id, twitch_username, twitch_user_id,
         owner_id: int,
         followers: list[tuple[str, str, str, str]],
     ) -> None:
-        with self._conn() as conn:
+        with self._bulk_conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
                 "DELETE FROM follow_monitor_followers WHERE owner_id = %s",
@@ -6252,7 +6321,7 @@ owner_id, twitch_username, twitch_user_id,
     def replace_giveaways_catalog(
         self, entries: list[GiveawayCatalogEntry]
     ) -> None:
-        with self._conn() as conn:
+        with self._bulk_conn() as conn:
             cur = self._cursor(conn)
             cur.execute("DELETE FROM giveaways_catalog")
             for e in entries:
