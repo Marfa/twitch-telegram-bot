@@ -710,6 +710,8 @@ def check_handlers() -> None:
         _exp_src = _insp.getsource(prem.expire_unentitled_alerts)
         assert "asyncio.to_thread" in _exp_src
         assert "_unentitled_candidate_user_ids" in _exp_src
+        assert "raise_on_timeout" in _exp_src
+        assert "_EXPIRE_UNENTITLED_BUDGET_SEC" in _exp_src
         assert "get_notify_user_ids" not in _insp.getsource(
             prem._unentitled_candidate_user_ids
         )
@@ -736,6 +738,68 @@ def check_handlers() -> None:
             sum(1 for sid in live_ids if db.get_subscription(sid, cap_owner).enabled)
             == prem.free_active_limit()
         )
+
+        # Budget: leave leftover candidates for next tick (no hang past CHECK_INTERVAL).
+        # Timeout on free-chat check: skip user this tick (do not pause).
+        async def _budget_and_timeout() -> None:
+            from unittest.mock import AsyncMock, MagicMock, patch
+
+            prem._FREE_CHAT_CACHE.clear()
+
+            async def _hang(*_a, **_k):
+                await _asyncio.sleep(1.0)
+
+            bot = MagicMock()
+            bot.get_chat_member = AsyncMock(side_effect=_hang)
+            pause = MagicMock(side_effect=AssertionError("must not pause on timeout"))
+            with (
+                patch("premium.FREE_CHAT_ID", -100),
+                patch("premium._EXPIRE_UNENTITLED_BUDGET_SEC", 0.01),
+                patch("premium._CHAT_MEMBER_TIMEOUT_SEC", 0.05),
+                patch(
+                    "premium._unentitled_candidate_user_ids",
+                    return_value=[9001, 9002, 9003],
+                ),
+                patch("premium.pause_unentitled_subscriptions", pause),
+            ):
+                n = await prem.expire_unentitled_alerts(bot, db)
+            assert n == 0
+            pause.assert_not_called()
+            # After first ~0.05s timeout, budget 0.01s is exhausted — rest deferred.
+            assert bot.get_chat_member.await_count == 1
+
+            # Explicit timeout → skip, not pause (even with large budget).
+            prem._FREE_CHAT_CACHE.clear()
+            bot2 = MagicMock()
+            bot2.get_chat_member = AsyncMock(side_effect=_hang)
+            pause2 = MagicMock(side_effect=AssertionError("must not pause on timeout"))
+            with (
+                patch("premium.FREE_CHAT_ID", -100),
+                patch("premium._EXPIRE_UNENTITLED_BUDGET_SEC", 30.0),
+                patch("premium._CHAT_MEMBER_TIMEOUT_SEC", 0.02),
+                patch(
+                    "premium._unentitled_candidate_user_ids",
+                    return_value=[9004],
+                ),
+                patch("premium.pause_unentitled_subscriptions", pause2),
+            ):
+                assert await prem.expire_unentitled_alerts(bot2, db) == 0
+            pause2.assert_not_called()
+
+            # Cache: second call must not hit Telegram.
+            prem._FREE_CHAT_CACHE.clear()
+            member = MagicMock()
+            member.status = "member"
+            get_m = AsyncMock(return_value=member)
+            bot3 = MagicMock()
+            bot3.get_chat_member = get_m
+            with patch("premium.FREE_CHAT_ID", -100):
+                assert await prem.is_free_chat_member(bot3, 42) is True
+                assert await prem.is_free_chat_member(bot3, 42) is True
+            assert get_m.await_count == 1
+
+        _asyncio.run(_budget_and_timeout())
+
         ok3, reason3 = start_trial(db, 50)
         assert not ok3 and reason3 == "used"
 

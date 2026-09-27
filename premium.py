@@ -455,25 +455,51 @@ def is_premium(db: Database, user_id: int) -> bool:
     return get_status(db, user_id).is_premium
 
 
-async def is_free_chat_member(bot: Bot, user_id: int) -> bool:
+# Successful getChatMember only — avoid re-hitting Telegram every check_streams tick.
+_FREE_CHAT_CACHE: dict[int, tuple[float, bool]] = {}
+_FREE_CHAT_CACHE_TTL_SEC = 300.0
+_CHAT_MEMBER_TIMEOUT_SEC = 3.0
+# Cap premium-phase Telegram work so check_streams stays under CHECK_INTERVAL.
+_EXPIRE_UNENTITLED_BUDGET_SEC = 20.0
+
+
+async def is_free_chat_member(
+    bot: Bot, user_id: int, *, raise_on_timeout: bool = False
+) -> bool:
     from telegram.constants import ChatMemberStatus
 
     if FREE_CHAT_ID is None:
         return False
+    hit = _FREE_CHAT_CACHE.get(user_id)
+    if hit is not None and time.monotonic() - hit[0] < _FREE_CHAT_CACHE_TTL_SEC:
+        return hit[1]
     try:
-        member = await bot.get_chat_member(FREE_CHAT_ID, user_id)
+        member = await asyncio.wait_for(
+            bot.get_chat_member(FREE_CHAT_ID, user_id),
+            timeout=_CHAT_MEMBER_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "getChatMember timed out for %s in %s", user_id, FREE_CHAT_ID
+        )
+        if raise_on_timeout:
+            raise
+        return False
     except Exception:
         logger.exception("getChatMember failed for %s in %s", user_id, FREE_CHAT_ID)
         return False
     status = member.status
     if status == ChatMemberStatus.RESTRICTED:
-        return bool(getattr(member, "is_member", True))
-    return status in {
-        ChatMemberStatus.OWNER,
-        ChatMemberStatus.ADMINISTRATOR,
-        ChatMemberStatus.MEMBER,
-        ChatMemberStatus.RESTRICTED,
-    }
+        ok = bool(getattr(member, "is_member", True))
+    else:
+        ok = status in {
+            ChatMemberStatus.OWNER,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.MEMBER,
+            ChatMemberStatus.RESTRICTED,
+        }
+    _FREE_CHAT_CACHE[user_id] = (time.monotonic(), ok)
+    return ok
 
 
 def has_feature_sync(
@@ -1176,14 +1202,35 @@ async def expire_unentitled_alerts(bot: Bot, db: Database) -> int:
     """Pause alerts that lost entitlement after Stars / feature expiry.
 
     Skips free-chat members (they still get full Premium via has_feature).
+    Time-budgeted so a Telegram blip cannot stall check_streams past CHECK_INTERVAL;
+    leftover candidates are picked up on the next tick. On free-chat check timeout,
+    skip that user this tick (do not pause — avoid punishing free-chat on blips).
     Returns total paused subscription rows.
     """
     if paid_features_free():
         return 0
     candidates = await asyncio.to_thread(_unentitled_candidate_user_ids, db)
+    deadline = time.monotonic() + _EXPIRE_UNENTITLED_BUDGET_SEC
     total = 0
-    for user_id in candidates:
-        if await is_free_chat_member(bot, user_id):
+    for i, user_id in enumerate(candidates):
+        if time.monotonic() >= deadline:
+            left = len(candidates) - i
+            logger.warning(
+                "expire_unentitled_alerts budget %.0fs hit; %s left for next tick",
+                _EXPIRE_UNENTITLED_BUDGET_SEC,
+                left,
+            )
+            break
+        try:
+            member = await is_free_chat_member(
+                bot, user_id, raise_on_timeout=True
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "free-chat check timed out for %s; skip this tick", user_id
+            )
+            continue
+        if member:
             continue
         n = await asyncio.to_thread(pause_unentitled_subscriptions, db, user_id)
         if n:
