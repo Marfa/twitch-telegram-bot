@@ -1342,6 +1342,7 @@ def ignore_keywords_keyboard(
     show_cancel: bool = False,
     show_igdb: bool = False,
     has_igdb: bool = False,
+    has_words: bool = False,
 ) -> InlineKeyboardMarkup:
     mark = "✅ " if use_global else "❌ "
     rows: list[list[InlineKeyboardButton]] = [
@@ -1371,6 +1372,15 @@ def ignore_keywords_keyboard(
                 ]
             )
     if as_cancel:
+        if has_words:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        t("ignored_words_clear", lang),
+                        callback_data="ignore_keywords:clear",
+                    )
+                ]
+            )
         rows.append(
             [
                 InlineKeyboardButton(

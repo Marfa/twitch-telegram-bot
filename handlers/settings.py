@@ -172,7 +172,12 @@ async def _resume_edit_ignore_keywords(
             lang,
             sub_id=sub_num,
             current=current,
-            hint=t("edit_ignore_keywords_hint_cancel", lang),
+            hint=t(
+                "edit_ignore_keywords_hint_edit"
+                if has_keywords
+                else "edit_ignore_keywords_hint_empty",
+                lang,
+            ),
         ),
         parse_mode=ParseMode.HTML,
         reply_markup=ignore_keywords_keyboard(
@@ -181,6 +186,7 @@ async def _resume_edit_ignore_keywords(
             use_global=bool(context.user_data.get("use_global_ignore")),
             show_igdb=show_igdb,
             has_igdb=has_igdb,
+            has_words=has_keywords,
         ),
     )
     return EDIT_IGNORE_KEYWORDS

@@ -268,7 +268,11 @@ def _check_inline_wizard_keyboards() -> None:
             (
                 "ignore_keywords_edit",
                 ignore_keywords_keyboard(
-                    loc, as_cancel=True, show_igdb=True, has_igdb=False
+                    loc,
+                    as_cancel=True,
+                    has_words=True,
+                    show_igdb=True,
+                    has_igdb=False,
                 ),
             ),
             ("language_settings", language_keyboard(loc)),
@@ -2115,6 +2119,69 @@ async def _scenario_subscriptions_edit_game_alert(db) -> None:
     assert db.delete_subscription(sub_id, _FREE_UID)
 
 
+async def _scenario_subscriptions_edit_ignore_keywords(db) -> None:
+    """§4 edit — ignore keywords: Cancel + Clear when list non-empty; Cancel when empty."""
+    from handlers.subscriptions import start_edit_ignore_keywords
+
+    sub_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="streamer",
+        twitch_user_id="100",
+        message_template="hi",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        ignore_keywords="irl, chatting",
+    )
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:ignore_keywords", cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await start_edit_ignore_keywords(update, ctx)
+    from bot import EDIT_IGNORE_KEYWORDS
+
+    assert state == EDIT_IGNORE_KEYWORDS
+    cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ignore_keywords:cancel" in cbs
+    assert "ignore_keywords:clear" in cbs
+    assert "ignore_keywords:global_toggle" in cbs
+    cap.assert_turn("subscriptions_edit_ignore_keywords")
+
+    assert db.update_subscription(sub_id, _FREE_UID, ignore_keywords="")
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:ignore_keywords", cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await start_edit_ignore_keywords(update, ctx)
+    assert state == EDIT_IGNORE_KEYWORDS
+    cbs_empty = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ignore_keywords:cancel" in cbs_empty
+    assert "ignore_keywords:clear" not in cbs_empty
+    cap.assert_turn("subscriptions_edit_ignore_keywords_empty")
+    assert db.delete_subscription(sub_id, _FREE_UID)
+
+
 async def _scenario_subscriptions_edit_pick(db) -> None:
     from handlers.subscriptions import edit_menu, on_edit_pick
 
@@ -2924,6 +2991,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_import(db)
         await _scenario_alert_history(db)
         await _scenario_subscriptions_edit_pick(db)
+        await _scenario_subscriptions_edit_ignore_keywords(db)
         await _scenario_subscriptions_edit_game_alert(db)
         await _scenario_subscriptions_edit_type_copy(db)
         await _scenario_subscriptions_edit_checkboxes(db)

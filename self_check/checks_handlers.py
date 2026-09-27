@@ -138,6 +138,12 @@ def check_handlers() -> None:
     assert "_pulse_wizard_keyboard" not in edit_ignore_chunk
     assert "edit_message_reply_markup" not in edit_ignore_chunk
     assert "_wizard(" not in edit_ignore_chunk
+    assert "has_words=has_keywords" in edit_ignore_chunk
+    receive_edit_ignore_chunk = subscriptions_src.split(
+        "async def receive_edit_ignore_keywords", 1
+    )[1].split("async def receive_edit_ignore_keywords_skip", 1)[0]
+    assert "merge_ignore_keywords" in receive_edit_ignore_chunk
+    assert 'ignore_keywords:(skip|clear)' in bot_src or "ignore_keywords:(skip|clear)$" in bot_src
     # Create ignore-keywords: inline Back/Cancel (no reply pulse).
     create_ignore_chunk = wizard_src.split("async def _go_ignore_keywords_prompt", 1)[1].split(
         "async def _go_link_preview_prompt", 1

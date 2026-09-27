@@ -83,6 +83,7 @@ from twitch import (
     is_stream_preview_image,
     is_stream_video_preview_image,
     is_stream_file_video_preview_image,
+    merge_ignore_keywords,
     normalize_ignore_keywords,
     normalize_watch_tags,
     template_has_link,
@@ -3074,7 +3075,10 @@ async def start_edit_ignore_keywords(
     current = _ignore_keywords_current_label(sub.ignore_keywords, lang)
     if has_keywords:
         current = f"<code>{html.escape(current)}</code>"
-    hint = t("edit_ignore_keywords_hint_cancel", lang)
+    hint = t(
+        "edit_ignore_keywords_hint_edit" if has_keywords else "edit_ignore_keywords_hint_empty",
+        lang,
+    )
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     from handlers.settings import _igdb_kb_flags
 
@@ -3097,6 +3101,7 @@ async def start_edit_ignore_keywords(
             use_global=bool(sub.use_global_ignore),
             show_igdb=show_igdb,
             has_igdb=has_igdb,
+            has_words=has_keywords,
         ),
     )
     return _sub_states()["EDIT_IGNORE_KEYWORDS"]
@@ -3464,9 +3469,20 @@ async def receive_edit_ignore_keywords(
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return _sub_states()["EDIT_IGNORE_KEYWORDS"]
 
-    keywords = normalize_ignore_keywords(text)
+    added = normalize_ignore_keywords(text)
+    if not added:
+        await update.effective_message.reply_text(t("edit_ignore_keywords_hint_empty", lang))
+        return _sub_states()["EDIT_IGNORE_KEYWORDS"]
+
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    sub = db.get_subscription(sub_id, owner_id)
+    if not sub:
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    keywords = merge_ignore_keywords(sub.ignore_keywords, added)
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(
         sub_id,

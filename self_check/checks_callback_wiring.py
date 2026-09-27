@@ -460,6 +460,17 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             },
         ),
         (
+            "ignore_keywords_edit",
+            ignore_keywords_keyboard,
+            {
+                "lang": loc,
+                "as_cancel": True,
+                "has_words": True,
+                "show_igdb": True,
+                "has_igdb": True,
+            },
+        ),
+        (
             "template_strip",
             template_strip_keyboard,
             {"lang": loc, "show_back": True, "show_cancel": True},

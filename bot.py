@@ -3143,7 +3143,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     pattern=r"^ignore_keywords:global_toggle$",
                 ),
                 CallbackQueryHandler(
-                    receive_edit_ignore_keywords_skip, pattern=r"^ignore_keywords:skip$"
+                    receive_edit_ignore_keywords_skip,
+                    pattern=r"^ignore_keywords:(skip|clear)$",
                 ),
                 CallbackQueryHandler(
                     start_ignore_igdb, pattern=r"^ignored_words:igdb$"
