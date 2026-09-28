@@ -29,6 +29,7 @@ from db import Database, Subscription
 from handlers.watch import (
     _go_watch_categories_prompt,
     _go_watch_filters_prompt,
+    _go_watch_language_prompt,
     _go_watch_tags_prompt,
     _go_watch_viewers_prompt,
 )
@@ -134,6 +135,7 @@ def _wz() -> dict[str, int]:
         TOP_DONATIONS_TEMPLATE,
         WATCH_FILTERS,
         WATCH_LANGUAGE,
+        WATCH_DELIVERY,
         WATCH_TAGS,
         WATCH_VIEWERS,
         ADVANCED_OPTIONS,
@@ -178,6 +180,7 @@ def _wz() -> dict[str, int]:
         "TOP_DONATIONS_TEMPLATE": TOP_DONATIONS_TEMPLATE,
         "WATCH_FILTERS": WATCH_FILTERS,
         "WATCH_LANGUAGE": WATCH_LANGUAGE,
+        "WATCH_DELIVERY": WATCH_DELIVERY,
         "WATCH_TAGS": WATCH_TAGS,
         "WATCH_VIEWERS": WATCH_VIEWERS,
     }
@@ -2001,6 +2004,15 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return await _go_watch_tags_prompt(update, context, lang)
         return await _go_watch_filters_prompt(update, context, lang)
     if state == _wz()["WATCH_LANGUAGE"]:
+        if context.user_data.get("watch_want_viewers"):
+            return await _go_watch_viewers_prompt(update, context, lang)
+        if context.user_data.get("watch_want_tags"):
+            return await _go_watch_tags_prompt(update, context, lang)
+        return await _go_watch_filters_prompt(update, context, lang)
+    if state == _wz()["WATCH_DELIVERY"]:
+        # Back from delivery → last filter detail or filters screen.
+        if context.user_data.get("watch_want_language"):
+            return await _go_watch_language_prompt(update, context, lang)
         if context.user_data.get("watch_want_viewers"):
             return await _go_watch_viewers_prompt(update, context, lang)
         if context.user_data.get("watch_want_tags"):

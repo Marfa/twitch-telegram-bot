@@ -18,11 +18,15 @@ import premium as prem
 from bot_helpers import _menu, _user_lang
 from handlers.alert_history import _twitch_vod_url
 from db import (
+    CATEGORY_WATCH_DELIVERY_DIGEST,
+    CATEGORY_WATCH_DELIVERY_REALTIME,
     Database,
     Subscription,
     WatchPrefs,
+    category_watch_is_digest,
     dump_category_watch_prefs,
     is_category_watch_sub,
+    normalize_category_watch_delivery,
     parse_category_watch_prefs,
     watch_filter_auto_name,
 )
@@ -31,6 +35,7 @@ from i18n import (
     t,
     watch_cats_nav_keyboard,
     watch_cats_pick_keyboard,
+    watch_delivery_keyboard,
     watch_filters_keyboard,
     watch_lang_keyboard,
     watch_mode_keyboard,
@@ -52,6 +57,7 @@ logger = logging.getLogger(__name__)
 def _ws() -> dict[str, int]:
     from bot import (
         WATCH_CATEGORIES,
+        WATCH_DELIVERY,
         WATCH_DUP,
         WATCH_FILTERS,
         WATCH_LANGUAGE,
@@ -62,6 +68,7 @@ def _ws() -> dict[str, int]:
 
     return {
         "WATCH_CATEGORIES": WATCH_CATEGORIES,
+        "WATCH_DELIVERY": WATCH_DELIVERY,
         "WATCH_DUP": WATCH_DUP,
         "WATCH_FILTERS": WATCH_FILTERS,
         "WATCH_LANGUAGE": WATCH_LANGUAGE,
@@ -152,6 +159,11 @@ def _watch_viewers_label(prefs: WatchPrefs, lang: str) -> str:
 def _watch_prefs_summary(prefs: WatchPrefs, lang: str) -> str:
     cats = ", ".join(c["name"] for c in prefs.categories) or "—"
     tags = ", ".join(prefs.tags) if prefs.tags else t("watch_tags_label_any", lang)
+    delivery_key = (
+        "watch_delivery_label_digest"
+        if category_watch_is_digest(prefs)
+        else "watch_delivery_label_realtime"
+    )
     return t(
         "watch_prefs_summary",
         lang,
@@ -164,7 +176,7 @@ def _watch_prefs_summary(prefs: WatchPrefs, lang: str) -> str:
             if prefs.exclude_mature
             else t("watch_mature_label_allow", lang)
         ),
-    )
+    ) + "\n" + t(delivery_key, lang)
 
 
 def _premium_channel_badge_html(lang: str, *, login: str, db: Database) -> str:
@@ -743,6 +755,9 @@ def _watch_prefs_from_user_data(context: ContextTypes.DEFAULT_TYPE) -> WatchPref
         language=context.user_data.get("watch_language"),
         tags=list(context.user_data.get("watch_tags") or []),
         exclude_mature=bool(context.user_data.get("watch_exclude_mature", True)),
+        delivery=normalize_category_watch_delivery(
+            context.user_data.get("watch_delivery")
+        ),
     )
 
 
@@ -871,6 +886,8 @@ async def _go_watch_next_detail(
 ) -> int:
     queue = list(context.user_data.get("watch_detail_queue") or [])
     if not queue:
+        if context.user_data.get("watch_create_alert"):
+            return await _go_watch_delivery_prompt(update, context, lang)
         return await _finalize_watch_wizard(update, context, lang)
     step = queue.pop(0)
     context.user_data["watch_detail_queue"] = queue
@@ -880,6 +897,53 @@ async def _go_watch_next_detail(
         return await _go_watch_viewers_prompt(update, context, lang)
     if step == "language":
         return await _go_watch_language_prompt(update, context, lang)
+    if context.user_data.get("watch_create_alert"):
+        return await _go_watch_delivery_prompt(update, context, lang)
+    return await _finalize_watch_wizard(update, context, lang)
+
+
+async def _go_watch_delivery_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    text = t("watch_delivery_prompt", lang)
+    markup = watch_delivery_keyboard(lang)
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=markup)
+        except BadRequest:
+            await context.bot.send_message(
+                update.effective_chat.id, text, reply_markup=markup
+            )
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    _set_wizard_back(context, _ws()["WATCH_DELIVERY"])
+    return _ws()["WATCH_DELIVERY"]
+
+
+async def receive_watch_delivery_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = (query.data or "").strip()
+    if data == "watch_delivery:cancel":
+        context.user_data.clear()
+        try:
+            await query.edit_message_text(t("cancelled", lang))
+        except BadRequest:
+            pass
+        return ConversationHandler.END
+    if data == "watch_delivery:digest":
+        context.user_data["watch_delivery"] = CATEGORY_WATCH_DELIVERY_DIGEST
+    elif data == "watch_delivery:realtime":
+        context.user_data["watch_delivery"] = CATEGORY_WATCH_DELIVERY_REALTIME
+    else:
+        return _ws()["WATCH_DELIVERY"]
+    try:
+        await query.edit_message_reply_markup(None)
+    except BadRequest:
+        pass
     return await _finalize_watch_wizard(update, context, lang)
 
 
@@ -961,6 +1025,10 @@ async def _finalize_watch_wizard(
             text,
             parse_mode=ParseMode.HTML,
         )
+        if category_watch_is_digest(prefs):
+            from handlers.background_jobs import sync_optional_jobs
+
+            sync_optional_jobs(context.application.job_queue, db)
     context.user_data.clear()
     _set_watch_lucky_mode(context, user_id, enabled=False)
     await _send_watch_suggestions(
@@ -1258,7 +1326,11 @@ async def create_category_watch_subscription(
     analytics.capture(
         user_id,
         "watch_create_category_alert",
-        {"categories": len(prefs.categories), "enabled": enabled},
+        {
+            "categories": len(prefs.categories),
+            "enabled": enabled,
+            "delivery": prefs.delivery,
+        },
     )
     created = db.get_subscription(sub_id, user_id)
     return text, created, "watch_create_alerts_ok"
@@ -1276,22 +1348,20 @@ async def on_watch_create_alerts(
         await query.edit_message_text(t("watch_create_alerts_none", lang))
         return
 
-    db: Database = context.application.bot_data["db"]
-    text, sub, status = await create_category_watch_subscription(
-        context.bot, db, user_id, lang, prefs
+    # Store prefs and ask delivery mode before creating.
+    context.user_data["watch_create_alert"] = True
+    context.user_data["watch_categories"] = list(prefs.categories)
+    context.user_data["watch_tags"] = list(prefs.tags)
+    context.user_data["watch_min_viewers"] = prefs.min_viewers
+    context.user_data["watch_max_viewers"] = prefs.max_viewers
+    context.user_data["watch_language"] = prefs.language
+    context.user_data["watch_exclude_mature"] = prefs.exclude_mature
+    context.user_data["watch_detail_queue"] = []
+    context.user_data["watch_pending_create_from_suggest"] = True
+    await query.edit_message_text(
+        t("watch_delivery_prompt", lang),
+        reply_markup=watch_delivery_keyboard(lang, show_nav=False),
     )
-    if status == "watch_create_alerts_dup" and sub is not None:
-        from i18n import alert_dup_keyboard
-
-        context.user_data["alert_dup_force"] = {
-            "kind": "game",
-            "prefs": dump_category_watch_prefs(prefs),
-        }
-        await query.edit_message_text(
-            text, reply_markup=alert_dup_keyboard(lang, sub.id)
-        )
-        return
-    await query.edit_message_text(text, parse_mode=ParseMode.HTML)
 
 
 async def receive_watch_category_text(

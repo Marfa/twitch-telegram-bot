@@ -1042,6 +1042,50 @@ def watch_mode_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def watch_delivery_keyboard(
+    lang: str, *, show_nav: bool = True
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                t("watch_delivery_realtime", lang),
+                callback_data="watch_delivery:realtime",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                t("watch_delivery_digest", lang),
+                callback_data="watch_delivery:digest",
+            )
+        ],
+    ]
+    if show_nav:
+        rows.append(_watch_nav_row(lang))
+    else:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang),
+                    callback_data="watch_delivery:cancel",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def category_watch_digest_more_keyboard(lang: str, offset: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("category_watch_digest_more", lang),
+                    callback_data=f"cw_digest:more:{int(offset)}",
+                )
+            ]
+        ]
+    )
+
+
 def watch_suggest_keyboard(
     lang: str, *, offer_create_alerts: bool = False
 ) -> InlineKeyboardMarkup:
@@ -2671,9 +2715,14 @@ def edit_game_options_keyboard(
     viewers_label: str,
     language_label: str,
     exclude_mature: bool,
+    delivery_digest: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Game-alert editor: filter fields + cooldown. Mature is an in-place checkbox."""
+    """Game-alert editor: filter fields + cooldown + delivery. Mature is an in-place checkbox."""
     mature_mark = "✅ " if exclude_mature else "⬜️ "
+    delivery_label = t(
+        "watch_delivery_label_digest" if delivery_digest else "watch_delivery_label_realtime",
+        lang,
+    )
 
     def _btn(label: str, field: str) -> list[InlineKeyboardButton]:
         return [
@@ -2689,6 +2738,7 @@ def edit_game_options_keyboard(
             _btn(f"{t('watch_filt_viewers', lang)}: {viewers_label}", "viewers"),
             _btn(f"{t('watch_filt_language', lang)}: {language_label}", "language"),
             _btn(mature_mark + t("watch_filt_mature", lang), "mature"),
+            _btn(delivery_label, "delivery"),
             _btn(t("edit_game_cooldown", lang), "cooldown"),
         ]
     )

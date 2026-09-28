@@ -62,9 +62,11 @@ from bot import (
 )
 from db import (
     AlertHistoryEntry,
+    CATEGORY_WATCH_DELIVERY_DIGEST,
     SqliteDatabase,
     WATCH_MAX_FILTERS,
     WatchPrefs,
+    category_watch_is_digest,
     dump_category_watch_prefs,
     dump_watch_filters,
     dump_watch_prefs,
@@ -2041,7 +2043,7 @@ def check_handlers() -> None:
         assert "twitch.tv" in snap["message_template"] or "{username}" in snap[
             "message_template"
         ]
-        # Without db/bot_username the remind row is omitted.
+        # Without db/bot_username the remind/pause rows are omitted.
         bare = _delivery_alert_markup(upcoming_sub, "ru")
         assert bare is None
         # With share token path: purpose must not clobber list-share token.
@@ -2056,8 +2058,10 @@ def check_handlers() -> None:
                 upcoming_sub, "ru", db=share_db, bot_username="TestBot"
             )
             assert remind_markup is not None
-            remind_btn = remind_markup.inline_keyboard[0][0]
-            assert "share_" in (remind_btn.url or "")
+            flat = [b for row in remind_markup.inline_keyboard for b in row]
+            urls = [b.url or "" for b in flat]
+            assert any("share_" in u for u in urls)
+            assert any("start=pause_7" in u for u in urls)
             assert share_db.ensure_alert_share_token(
                 42, 7, {"notify_on_live": False, "schedule_reminder_minutes": 30}
             ) == list_token
@@ -2666,3 +2670,89 @@ def _check_category_watch_digest_and_legacy() -> None:
     db.set_category_watch_live_state.assert_not_called()
     twitch.get_streams_by_game.side_effect = None
     twitch.get_streams_by_game.return_value = streams
+
+    # Digest delivery: skipped by realtime poll; prefs round-trip.
+    digest_prefs = WatchPrefs(
+        categories=[{"id": "509658", "name": "Just Chatting"}],
+        delivery=CATEGORY_WATCH_DELIVERY_DIGEST,
+    )
+    assert category_watch_is_digest(digest_prefs)
+    digest_json = dump_category_watch_prefs(digest_prefs)
+    parsed = parse_category_watch_prefs(digest_json)
+    assert parsed is not None and category_watch_is_digest(parsed)
+    assert "delivery" in digest_json
+    digest_sub = SimpleNamespace(
+        **{
+            **legacy.__dict__,
+            "category_watch_prefs": digest_json,
+            "category_watch_live_ids": '["old"]',
+        }
+    )
+    sent.clear()
+    db.set_category_watch_live_state.reset_mock()
+    with (
+        patch(
+            "handlers.notifications.filter_streams_for_watch",
+            side_effect=lambda pooled, **kw: pooled,
+        ),
+        patch(
+            "handlers.notifications._send_notification",
+            new=AsyncMock(side_effect=_capture_send),
+        ),
+    ):
+        asyncio.run(_check_category_watch_alerts(ctx, [digest_sub]))  # type: ignore[list-item]
+    assert sent == []
+    db.set_category_watch_live_state.assert_not_called()
+
+    # Hourly digest job sends paginated page + "Show more" when >5 new streams.
+    from handlers.notifications import check_category_watch_digest
+
+    digest_bot = AsyncMock()
+    digest_db = MagicMock()
+    digest_db.get_enabled_category_watch_subscriptions.return_value = [digest_sub]
+    digest_db.is_bot_blocked.return_value = False
+    digest_db.get_user_locale.return_value = "ru"
+    digest_db.set_category_watch_live_state = MagicMock()
+    digest_twitch = MagicMock()
+    digest_twitch.get_streams_by_game.return_value = streams
+    digest_app = MagicMock()
+    digest_app.bot_data = {
+        "db": digest_db,
+        "twitch": digest_twitch,
+        "category_watch_digest_in_flight": set(),
+    }
+    digest_ctx = MagicMock()
+    digest_ctx.application = digest_app
+    digest_ctx.bot = digest_bot
+    with (
+        patch(
+            "handlers.notifications.filter_streams_for_watch",
+            side_effect=lambda pooled, **kw: pooled,
+        ),
+        patch(
+            "handlers.notifications._user_notifications_paused",
+            return_value=False,
+        ),
+        patch(
+            "handlers.watch._premium_channel_badge_html",
+            return_value="",
+        ),
+    ):
+        asyncio.run(check_category_watch_digest(digest_ctx))
+    assert digest_bot.send_message.await_count == 1
+    digest_call = digest_bot.send_message.await_args
+    digest_text = (
+        digest_call.kwargs.get("text")
+        if digest_call.kwargs.get("text") is not None
+        else (digest_call.args[1] if len(digest_call.args) > 1 else "")
+    )
+    assert t("category_watch_digest_header", "ru") in digest_text
+    markup = digest_call.kwargs.get("reply_markup")
+    assert markup is not None
+    more_cbs = [
+        b.callback_data or ""
+        for row in markup.inline_keyboard
+        for b in row
+    ]
+    assert any(c.startswith("cw_digest:more:") for c in more_cbs)
+    digest_db.set_category_watch_live_state.assert_called()

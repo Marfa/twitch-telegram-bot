@@ -33,9 +33,12 @@ from bot_helpers import (
     with_oauth_legal,
 )
 from db import (
+    CATEGORY_WATCH_DELIVERY_DIGEST,
+    CATEGORY_WATCH_DELIVERY_REALTIME,
     Database,
     Subscription,
     TwitchSync,
+    category_watch_is_digest,
     is_category_watch_sub,
     is_drops_sub,
     is_giveaway_watch_sub,
@@ -767,6 +770,75 @@ async def cancel_pause_notifications(
         reply_markup=_subs_kb(lang, db, user_id),
     )
     return ConversationHandler.END
+
+
+def _parse_pause_sub_start_arg(raw: str) -> int | None:
+    text = (raw or "").strip()
+    if not text.startswith("pause_"):
+        return None
+    try:
+        sub_id = int(text[6:])
+    except ValueError:
+        return None
+    return sub_id if sub_id > 0 else None
+
+
+async def handle_pause_sub_start_arg(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> bool:
+    """Handle /start pause_{sub_id} from the alert message deep link.
+
+    Disables that subscription for the owner. Returns True when consumed.
+    """
+    args = context.args
+    if not args:
+        return False
+    sub_id = _parse_pause_sub_start_arg(args[0])
+    if sub_id is None:
+        return False
+    user = update.effective_user
+    if user is None:
+        return True
+    user_id = user.id
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        await update.effective_message.reply_text(
+            t("alert_pause_not_found", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return True
+    channel = (sub.twitch_username or "").strip() or str(sub_id)
+    if not sub.enabled:
+        await update.effective_message.reply_text(
+            t("alert_pause_already", lang, channel=channel),
+            reply_markup=_subs_kb(lang, db, user_id),
+        )
+        return True
+    new_state = db.toggle_subscription(sub_id, user_id)
+    if new_state is None or new_state:
+        await update.effective_message.reply_text(
+            t("alert_pause_not_found", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return True
+    analytics.capture(
+        user_id,
+        "subscription_paused_from_alert",
+        {
+            "subscription_id": sub_id,
+            "twitch_username": sub.twitch_username,
+            "alert_type": _alert_type_from_sub(sub),
+            "dest_type": sub.dest_type,
+        },
+    )
+    await update.effective_message.reply_text(
+        t("alert_pause_done", lang, channel=channel),
+        reply_markup=_subs_kb(lang, db, user_id),
+    )
+    return True
 
 
 def _import_oauth_authorize_keyboard(lang: str, url: str) -> InlineKeyboardMarkup:
@@ -2461,6 +2533,7 @@ def _edit_game_options_for_sub(
         viewers_label=_watch_viewers_label(prefs, lang),
         language_label=prefs.language or t("watch_lang_label_any", lang),
         exclude_mature=bool(prefs.exclude_mature),
+        delivery_digest=category_watch_is_digest(prefs),
     )
 
 
@@ -2541,6 +2614,46 @@ async def on_edit_game_mature(
         query.from_user.id,
         category_watch_prefs=dump_category_watch_prefs(prefs),
     )
+    sub = db.get_subscription(sub_id, query.from_user.id) or sub
+    await _reshow_game_edit_menu(update, context, sub=sub, lang=lang, prefs=prefs)
+
+
+async def on_edit_game_delivery(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Toggle realtime ↔ hourly digest for a game alert (in-place, like mature)."""
+    query = update.callback_query
+    lang = _user_lang(context, query.from_user.id)
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        await query.answer()
+        return
+    sub_id = int(parts[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub or not is_category_watch_sub(sub):
+        await query.answer()
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+    if not prefs:
+        await query.answer()
+        await query.edit_message_text(t("sub_not_found", lang))
+        return
+    await query.answer()
+    prefs.delivery = (
+        CATEGORY_WATCH_DELIVERY_REALTIME
+        if category_watch_is_digest(prefs)
+        else CATEGORY_WATCH_DELIVERY_DIGEST
+    )
+    db.update_subscription(
+        sub_id,
+        query.from_user.id,
+        category_watch_prefs=dump_category_watch_prefs(prefs),
+    )
+    from handlers.background_jobs import sync_optional_jobs
+
+    sync_optional_jobs(context.application.job_queue, db)
     sub = db.get_subscription(sub_id, query.from_user.id) or sub
     await _reshow_game_edit_menu(update, context, sub=sub, lang=lang, prefs=prefs)
 

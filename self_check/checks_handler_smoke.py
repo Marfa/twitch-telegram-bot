@@ -1169,6 +1169,7 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert capture.call_args.args[1] == "bot_blocked"
     assert capture.call_args.args[2]["source"] == "delivery"
     assert capture.call_args.args[2]["dest_type"] == "dm"
+    assert "active_subs" in capture.call_args.args[2]
     clear_user_blocked(db, _FREE_UID)
     db.set_chat_unreachable(channel_id, False)
 
@@ -1185,6 +1186,15 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert len(alert_calls) == 1
     assert alert_calls[0].args[2]["alert_type"] == "live"
     assert alert_calls[0].args[2]["dest_type"] == "dm"
+    sent_kwargs = bot.send_message.await_args.kwargs
+    pause_markup = sent_kwargs.get("reply_markup")
+    assert pause_markup is not None
+    pause_urls = [
+        (b.url or "")
+        for row in pause_markup.inline_keyboard
+        for b in row
+    ]
+    assert any(f"start=pause_{dm_sub_id}" in u for u in pause_urls)
 
     application, bot = _app(db)
     ctx = _ctx(application)
@@ -1375,6 +1385,45 @@ async def _smoke_welcome_demo_locale(db) -> None:
     assert seeded_uk[1] == (prem.twitch_channel_login() or "marfapr")
     assert seeded_uk[2] is False
 
+async def _smoke_pause_sub_start(db) -> None:
+    from handlers.subscriptions import handle_pause_sub_start_arg
+    from i18n import t
+
+    uid = _FREE_UID + 55
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+    sub_id = db.add_subscription(
+        owner_id=uid,
+        twitch_username="pauseme",
+        twitch_user_id="tw_pause",
+        message_template="hi",
+        dest_type="dm",
+        chat_id=uid,
+        thread_id=None,
+        enabled=True,
+    )
+    application, _bot = _app(db)
+    update = _msg_update(uid, f"/start pause_{sub_id}")
+    ctx = _ctx(application)
+    ctx.args = [f"pause_{sub_id}"]
+    with patch("handlers.subscriptions.analytics.capture") as capture:
+        handled = await handle_pause_sub_start_arg(update, ctx)
+    assert handled is True
+    sub = db.get_subscription(sub_id, uid)
+    assert sub is not None and sub.enabled is False
+    assert capture.call_args.args[1] == "subscription_paused_from_alert"
+    update.effective_message.reply_text.assert_awaited()
+    text = update.effective_message.reply_text.call_args.args[0]
+    assert text == t("alert_pause_done", "ru", channel="pauseme")
+
+    update.effective_message.reply_text.reset_mock()
+    ctx.args = [f"pause_{sub_id}"]
+    handled2 = await handle_pause_sub_start_arg(update, ctx)
+    assert handled2 is True
+    already = update.effective_message.reply_text.call_args.args[0]
+    assert already == t("alert_pause_already", "ru", channel="pauseme")
+
+
 async def _run_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "smoke.db")
@@ -1391,6 +1440,7 @@ async def _run_smoke() -> None:
         await _smoke_subscriptions(db)
         await _smoke_premium_and_menus(db)
         await _smoke_delivery_and_helpers(db)
+        await _smoke_pause_sub_start(db)
         await _smoke_welcome_demo_locale(db)
 
 

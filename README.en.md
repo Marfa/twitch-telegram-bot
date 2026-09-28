@@ -23,7 +23,7 @@
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
-| 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+); live → else VOD; own category in **📋 My subscriptions** |
+| 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+) → **realtime or hourly digest**; live → else VOD; own category in **📋 My subscriptions** |
 | 📅 Release alerts | Beta: **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform |
 | 🎁 Game giveaways | Beta: **➕ New subscription** under Release alerts; stores + platforms (GamerPower + IsThereAnyDeal); cards 5 at a time (photo+caption, store / streams, “Show more”); new games as a short summary + “Details”; **Notify about giveaway** — wait for a free giveaway of a chosen game (IGDB platforms), then pause |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
@@ -32,7 +32,7 @@
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks, “viewed all below”, **To unwatched** pagination jump |
-| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button) |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button). Every alert includes a **⏸ Pause alert** button (deep link disables that subscription without blocking the bot) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed + Helix send / Simple IRC |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
@@ -158,9 +158,9 @@ After setup the bot sends **“✅ Setup complete!”** to DM and a test message
 | Mode | What it does |
 |---|---|
 | Search streams by game | Category → filters → live suggestions (else recent VODs); no alert created |
-| Game alerts | Category → filters → creates the alert + suggestions (duplicate → warning only) |
+| Game alerts | Category → filters → realtime or hourly digest → creates the alert + suggestions (duplicate → warning only) |
 
-Filters: checkboxes for tags / viewers / language / exclude 18+; value prompts for checked items. Frequency (minutes, default 60) — in the **✏️** editor.
+Filters: checkboxes for tags / viewers / language / exclude 18+; value prompts for checked items. Delivery mode and frequency (minutes, default 60, realtime only) — in the **✏️** editor. Digest — hourly, up to 5 streams with “Show more”.
 
 After suggestions: **Suggest again** (no “Filters / new search”).
 
@@ -373,7 +373,7 @@ Premium (already in PostHog, Trends / Funnels):
 
 Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (break down by `source` / `kind`). Stars volume: Trends → `premium_purchased` → Property value `stars` (sum).
 
-Churn / blocks: `bot_blocked` with `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …) and optional `alert_type` / `dest_type`; successful DM delivery → `alert_sent` (same `alert_type`). In Trends: path `alert_sent` → `bot_blocked`, or break down `bot_blocked` by `source`.
+Churn / blocks: `bot_blocked` with `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …), optional `alert_type` / `dest_type`, plus DB context (`active_subs`, `total_subs`, `has_demo_sub`, `last_alert_channel` / `last_alert_age_hours`, …); successful DM delivery → `alert_sent` (same `alert_type`). In Trends: path `alert_sent` → `bot_blocked`, or break down `bot_blocked` by `source`. Pause from an alert: deep link `?start=pause_{sub_id}` → `subscription_paused_from_alert`.
 
 One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (on VPS inside the bot container).
 

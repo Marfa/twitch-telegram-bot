@@ -276,6 +276,8 @@ from handlers.notifications import (
     LIVE_GAME_RECHECK_SECONDS,
     _WATCH_CATEGORY_NOTIFY_CAP,
     _check_category_watch_alerts,
+    check_category_watch_digest,
+    on_category_watch_digest_more,
     _parse_category_watch_live_ids,
     _parse_segment_start,
     _send_delayed_category_notification,
@@ -427,6 +429,7 @@ from handlers.watch import (
     on_watch_create_alerts,
     receive_watch_category_callback,
     receive_watch_category_text,
+    receive_watch_delivery_callback,
     receive_watch_dup_callback,
     receive_watch_filters_callback,
     receive_watch_language_callback,
@@ -620,6 +623,7 @@ from handlers.subscriptions import (
     complete_twitch_import,
     delete_menu,
     edit_menu,
+    handle_pause_sub_start_arg,
     import_followed_as_subscriptions,
     list_subscriptions,
     migrate_import_sync_subscriptions,
@@ -639,6 +643,7 @@ from handlers.subscriptions import (
     on_edit_change_type_click,
     on_edit_copy_click,
     on_edit_copy_change_click,
+    on_edit_game_delivery,
     on_edit_game_mature,
     on_edit_pick,
     on_edit_set,
@@ -764,6 +769,7 @@ logger = logging.getLogger(__name__)
     WATCH_TAGS,
     WATCH_VIEWERS,
     WATCH_LANGUAGE,
+    WATCH_DELIVERY,
     DELETE_SIBLING_ALERTS,
     GLOBAL_IGNORE_KEYWORDS,
     GLOBAL_IGNORE_IGDB,
@@ -788,7 +794,7 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_PICK,
     GIVEAWAY_WATCH_DUP,
     GIVEAWAY_WATCH_PLATFORMS,
-) = range(80)
+) = range(81)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -1012,6 +1018,8 @@ async def _maybe_offer_pending_share(
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await handle_alert_history_start_arg(update, context):
+        return ConversationHandler.END
+    if await handle_pause_sub_start_arg(update, context):
         return ConversationHandler.END
     context.user_data.clear()
     db: Database = context.application.bot_data["db"]
@@ -2691,6 +2699,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_watch_again, pattern=r"^watch:again$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_watch_create_alerts, pattern=r"^watch:create_alerts$"),
+        CallbackQueryHandler(
+            receive_watch_delivery_callback, pattern=r"^watch_delivery:"
+        ),
+        CallbackQueryHandler(
+            on_category_watch_digest_more, pattern=r"^cw_digest:more:\d+$"
+        ),
         group=0,
     )
     app.add_handler(CallbackQueryHandler(schedule_save_token_callback, pattern=r"^sched_save_token:"), group=0)
@@ -2803,6 +2817,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_edit_game_mature, pattern=r"^edit_g:\d+:mature$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_edit_game_delivery, pattern=r"^edit_g:\d+:delivery$"),
         group=0,
     )
     app.add_handler(
@@ -3427,6 +3445,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_watch_language_text
+                ),
+            ],
+            WATCH_DELIVERY: [
+                _wiz_cancel,
+                CallbackQueryHandler(cancel, pattern=r"^watch_nav:cancel$"),
+                CallbackQueryHandler(receive_watch_nav_back, pattern=r"^watch_nav:back$"),
+                CallbackQueryHandler(
+                    receive_watch_delivery_callback, pattern=r"^watch_delivery:"
                 ),
             ],
             PAUSE_ALERTS_DAYS: [

@@ -2238,6 +2238,16 @@ owner_id, twitch_username, twitch_user_id,
             rows = cur.fetchall()
         return [_row_to_sub(r) for r in rows]
 
+    def has_any_category_watch_digest(self) -> bool:
+        from db.models import category_watch_is_digest, parse_category_watch_prefs
+
+        for sub in self.get_enabled_category_watch_subscriptions():
+            if category_watch_is_digest(
+                parse_category_watch_prefs(sub.category_watch_prefs)
+            ):
+                return True
+        return False
+
     def get_enabled_drops_subscriptions(self) -> list[Subscription]:
         with self._conn() as conn:
             cur = self._cursor(conn)

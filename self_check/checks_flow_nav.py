@@ -40,6 +40,7 @@ from i18n import (
     edit_button_style_keyboard,
     subscriptions_menu,
     watch_cats_nav_keyboard,
+    watch_delivery_keyboard,
     watch_filters_keyboard,
     watch_lang_keyboard,
     watch_mature_keyboard,
@@ -292,6 +293,8 @@ def _check_inline_wizard_keyboards() -> None:
             ("watch_lang", watch_lang_keyboard(loc)),
             ("watch_mature", watch_mature_keyboard(loc)),
             ("watch_tags", watch_tags_keyboard(loc)),
+            ("watch_delivery", watch_delivery_keyboard(loc)),
+            ("watch_delivery_suggest", watch_delivery_keyboard(loc, show_nav=False)),
             ("twitch_link_offer", _twitch_link_offer_keyboard(loc, "shroud")),
             ("premium_gift_plans", premium_gift_keyboard(loc, user_id=_FREE_UID)),
             (
@@ -1093,6 +1096,42 @@ async def _scenario_wizard_game_alert(db) -> None:
     ):
         await receive_alert_type(update, ctx)
     cap.assert_turn("wizard_game_alert_categories")
+
+
+async def _scenario_wizard_game_alert_delivery(db) -> None:
+    """§6 Game alert — after filters, delivery step (realtime vs hourly digest)."""
+    from handlers.watch import receive_watch_filters_callback
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "watch_filt:next", cap)
+    update.effective_message = query.message
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
+    ctx.user_data["watch_create_alert"] = True
+    ctx.user_data["watch_categories"] = [{"id": "509658", "name": "Just Chatting"}]
+    ctx.user_data["watch_want_tags"] = False
+    ctx.user_data["watch_want_viewers"] = False
+    ctx.user_data["watch_want_language"] = False
+    ctx.user_data["watch_want_mature"] = False
+    ctx.user_data["watch_exclude_mature"] = True
+    state = await receive_watch_filters_callback(update, ctx)
+    from bot import WATCH_DELIVERY
+
+    assert state == WATCH_DELIVERY
+    cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "watch_delivery:realtime" in cbs
+    assert "watch_delivery:digest" in cbs
+    assert "watch_nav:back" in cbs
+    assert "watch_nav:cancel" in cbs
+    cap.assert_turn("wizard_game_alert_delivery")
 
 
 async def _scenario_wizard_release_alert(db) -> None:
@@ -2065,6 +2104,7 @@ async def _scenario_subscriptions_edit_game_alert(db) -> None:
     assert f"edit_g:{sub_id}:viewers" in edit_cbs
     assert f"edit_g:{sub_id}:language" in edit_cbs
     assert f"edit_g:{sub_id}:mature" in edit_cbs
+    assert f"edit_g:{sub_id}:delivery" in edit_cbs
     assert f"edit_g:{sub_id}:cooldown" in edit_cbs
     mature_labels = [
         b.text
@@ -2979,6 +3019,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_custom_buttons(db)
         await _scenario_wizard_drops_game(db)
         await _scenario_wizard_game_alert(db)
+        await _scenario_wizard_game_alert_delivery(db)
         await _scenario_wizard_release_alert(db)
         await _scenario_wizard_release_pick_pages(db)
         await _scenario_release_notify_delete(db)

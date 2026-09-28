@@ -13,6 +13,7 @@ JOB_TWITCH_SYNC = "twitch_follows_sync"
 JOB_PREMIUM_TWITCH = "premium_twitch_refresh"
 JOB_DROPS = "drops_check"
 JOB_GIVEAWAYS = "giveaways_digest"
+JOB_CATEGORY_WATCH_DIGEST = "category_watch_digest"
 JOB_SCHEDULE_REMINDERS = "schedule_reminders"
 JOB_FOLLOW_MONITOR = "follow_monitor_sync"
 JOB_CHECK_STREAMS = "check_streams"
@@ -139,6 +140,16 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
         interval=24 * 3600,
         first=180,
         enabled=db.has_any_giveaways_work(),
+    )
+    from handlers.notifications import check_category_watch_digest
+
+    ensure_repeating_job(
+        job_queue,
+        name=JOB_CATEGORY_WATCH_DIGEST,
+        callback=check_category_watch_digest,
+        interval=3600,
+        first=210,
+        enabled=db.has_any_category_watch_digest(),
     )
     ensure_repeating_job(
         job_queue,

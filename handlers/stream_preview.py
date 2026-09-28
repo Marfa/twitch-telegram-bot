@@ -528,14 +528,11 @@ async def _preview_reply_markup(bot, db: Database | None, sub: Subscription):
     """Rebuild alert inline keyboard (editMessageMedia drops it if omitted)."""
     if db is None:
         return None
-    from handlers.delivery import _alert_chat_button_markup
+    from handlers.delivery import _alert_chat_button_markup, _cached_bot_username
     from i18n import DEFAULT_LOCALE
 
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-    bot_username = ""
-    if getattr(sub, "attach_live_remind_button", False):
-        me = await bot.get_me()
-        bot_username = (me.username or "").strip()
+    bot_username = await _cached_bot_username(bot)
     return _alert_chat_button_markup(
         sub, lang, db=db, bot_username=bot_username
     )

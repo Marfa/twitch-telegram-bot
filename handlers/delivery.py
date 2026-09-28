@@ -319,6 +319,27 @@ async def _deliver_alert_content_plain(
     return await _send_text()
 
 
+def _alert_pause_button_url(sub: Subscription, bot_username: str) -> str | None:
+    bot = (bot_username or "").strip().lstrip("@")
+    sub_id = int(getattr(sub, "id", 0) or 0)
+    if not bot or sub_id <= 0:
+        return None
+    return f"https://t.me/{bot}?start=pause_{sub_id}"
+
+
+async def _cached_bot_username(bot, bot_data: dict | None = None) -> str:
+    if bot_data is not None:
+        cached = bot_data.get("bot_username")
+        if isinstance(cached, str) and cached.strip():
+            return cached.strip()
+    me = await bot.get_me()
+    raw = getattr(me, "username", None)
+    username = raw.strip() if isinstance(raw, str) else ""
+    if bot_data is not None and username:
+        bot_data["bot_username"] = username
+    return username
+
+
 def _alert_chat_button_markup(
     sub: Subscription,
     lang: str,
@@ -378,9 +399,18 @@ def _alert_chat_button_markup(
                 style=style,
             )
         )
+    pause_url = _alert_pause_button_url(sub, bot_username)
+    if pause_url:
+        buttons.append(
+            cbtn.styled_inline_button(
+                t("alert_pause_button", lang),
+                url=pause_url,
+                style=style,
+            )
+        )
     if not buttons:
         return None
-    # Always 2 per row (custom + chat + live-remind share the same grid).
+    # Always 2 per row (custom + chat + live-remind + pause share the same grid).
     return InlineKeyboardMarkup(cbtn.chunk_buttons(buttons, per_row=2))
 
 
@@ -552,6 +582,42 @@ def resume_delivery_for_chat(db: Database, chat_id: int) -> int:
     return resumed
 
 
+def user_block_analytics_props(db: Database, user_id: int) -> dict[str, Any]:
+    """DB context for bot_blocked (esp. my_chat_member, which has no delivery props)."""
+    props: dict[str, Any] = {}
+    get_subs = getattr(db, "get_subscriptions_by_owner", None)
+    if callable(get_subs):
+        subs = list(get_subs(user_id) or [])
+        enabled = [s for s in subs if getattr(s, "enabled", False)]
+        props["active_subs"] = len(enabled)
+        props["total_subs"] = len(subs)
+        props["has_demo_sub"] = any(bool(getattr(s, "is_demo", False)) for s in subs)
+    try:
+        props["notifications_paused"] = bool(_user_notifications_paused(db, user_id))
+    except Exception:
+        pass
+    list_hist = getattr(db, "list_alert_history", None)
+    if callable(list_hist):
+        history = list_hist(user_id, limit=1) or []
+        if history:
+            last = history[0]
+            props["last_alert_type"] = getattr(last, "alert_type", None)
+            props["last_alert_channel"] = getattr(last, "twitch_username", None)
+            try:
+                sent = datetime.fromisoformat(
+                    str(last.sent_at).replace("Z", "+00:00")
+                )
+                if sent.tzinfo is None:
+                    sent = sent.replace(tzinfo=timezone.utc)
+                age_h = (
+                    datetime.now(timezone.utc) - sent.astimezone(timezone.utc)
+                ).total_seconds() / 3600
+                props["last_alert_age_hours"] = round(max(0.0, age_h), 2)
+            except (TypeError, ValueError, AttributeError):
+                pass
+    return props
+
+
 def apply_user_blocked(
     db: Database,
     user_id: int,
@@ -563,6 +629,10 @@ def apply_user_blocked(
     db.set_bot_blocked(user_id, True)
     if not already:
         props: dict[str, Any] = {"source": source}
+        try:
+            props.update(user_block_analytics_props(db, user_id))
+        except Exception:
+            logger.debug("bot_blocked enrichment failed", exc_info=True)
         if properties:
             props.update(properties)
         analytics.capture(user_id, "bot_blocked", props)
@@ -1107,10 +1177,7 @@ async def _send_notification(
         async def _on_media_fallback(exc: BaseException) -> None:
             await _maybe_notify_media_fallback(bot, db, sub, exc)
 
-        bot_username = ""
-        if getattr(sub, "attach_live_remind_button", False):
-            me = await bot.get_me()
-            bot_username = (me.username or "").strip()
+        bot_username = await _cached_bot_username(bot, bot_data)
         chat_markup = _alert_chat_button_markup(
             sub, lang, db=db, bot_username=bot_username
         )

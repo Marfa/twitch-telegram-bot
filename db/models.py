@@ -68,6 +68,25 @@ class WatchPrefs:
     language: str | None = None
     tags: list[str] = field(default_factory=list)
     exclude_mature: bool = True
+    # realtime = check_streams; digest = hourly job with pagination.
+    delivery: str = "realtime"
+
+
+CATEGORY_WATCH_DELIVERY_REALTIME = "realtime"
+CATEGORY_WATCH_DELIVERY_DIGEST = "digest"
+
+
+def normalize_category_watch_delivery(raw: object) -> str:
+    value = str(raw or "").strip().lower()
+    if value == CATEGORY_WATCH_DELIVERY_DIGEST:
+        return CATEGORY_WATCH_DELIVERY_DIGEST
+    return CATEGORY_WATCH_DELIVERY_REALTIME
+
+
+def category_watch_is_digest(prefs: WatchPrefs | None) -> bool:
+    if prefs is None:
+        return False
+    return normalize_category_watch_delivery(prefs.delivery) == CATEGORY_WATCH_DELIVERY_DIGEST
 
 
 @dataclass
@@ -125,6 +144,7 @@ def _parse_watch_prefs_dict(data: dict[str, Any]) -> WatchPrefs | None:
         language=language,
         tags=tags,
         exclude_mature=bool(data.get("exclude_mature", True)),
+        delivery=normalize_category_watch_delivery(data.get("delivery")),
     )
 
 
@@ -173,15 +193,19 @@ def dump_watch_prefs(prefs: WatchPrefs) -> str:
 
 def dump_category_watch_prefs(prefs: WatchPrefs) -> str:
     """Stable JSON for category-watch subscriptions (no random filter id)."""
+    payload: dict[str, Any] = {
+        "categories": prefs.categories,
+        "min_viewers": prefs.min_viewers,
+        "max_viewers": prefs.max_viewers,
+        "language": prefs.language,
+        "tags": list(prefs.tags),
+        "exclude_mature": prefs.exclude_mature,
+    }
+    delivery = normalize_category_watch_delivery(prefs.delivery)
+    if delivery != CATEGORY_WATCH_DELIVERY_REALTIME:
+        payload["delivery"] = delivery
     return json.dumps(
-        {
-            "categories": prefs.categories,
-            "min_viewers": prefs.min_viewers,
-            "max_viewers": prefs.max_viewers,
-            "language": prefs.language,
-            "tags": list(prefs.tags),
-            "exclude_mature": prefs.exclude_mature,
-        },
+        payload,
         ensure_ascii=False,
         sort_keys=True,
     )

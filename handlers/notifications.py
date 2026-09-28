@@ -12,6 +12,7 @@ from bot_helpers import _user_notifications_paused
 from db import (
     Database,
     Subscription,
+    category_watch_is_digest,
     is_category_watch_sub,
     is_on_notify_cooldown,
     parse_category_watch_prefs,
@@ -965,9 +966,11 @@ async def _check_category_watch_alerts(
     for sub in subs:
         if sub.id in in_flight:
             continue
+        prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+        if category_watch_is_digest(prefs):
+            continue
         if _category_watch_cooling_down(sub):
             continue
-        prefs = parse_category_watch_prefs(sub.category_watch_prefs)
         if not prefs or not prefs.categories:
             continue
         in_flight.add(sub.id)
@@ -1054,6 +1057,215 @@ async def _check_category_watch_alerts(
                 )
         finally:
             in_flight.discard(sub.id)
+
+
+_CW_DIGEST_PAGES_KEY = "category_watch_digest_pages"
+
+
+def _store_category_watch_digest_pages(
+    application: Application,
+    user_id: int,
+    *,
+    streams: list[dict],
+    prefs,
+    lang: str,
+) -> None:
+    store = application.bot_data.setdefault(_CW_DIGEST_PAGES_KEY, {})
+    store[int(user_id)] = {
+        "streams": list(streams),
+        "prefs": prefs,
+        "lang": lang,
+    }
+
+
+async def _send_category_watch_digest_page(
+    bot,
+    db: Database,
+    *,
+    chat_id: int,
+    user_id: int,
+    streams: list[dict],
+    prefs,
+    lang: str,
+    offset: int,
+    application: Application | None = None,
+) -> None:
+    from telegram.constants import ParseMode
+
+    from handlers.watch import _format_watch_suggestions
+    from i18n import category_watch_digest_more_keyboard
+
+    if offset < 0:
+        offset = 0
+    chunk = streams[offset : offset + _WATCH_CATEGORY_NOTIFY_CAP]
+    if not chunk:
+        return
+    next_offset = offset + len(chunk)
+    has_more = next_offset < len(streams)
+    text = _format_watch_suggestions(
+        chunk,
+        prefs,
+        lang,
+        db=db,
+        header_key="category_watch_digest_header",
+        include_prefs=offset == 0,
+    )
+    markup = (
+        category_watch_digest_more_keyboard(lang, next_offset) if has_more else None
+    )
+    await bot.send_message(
+        chat_id,
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=markup,
+        disable_web_page_preview=True,
+    )
+    if application is not None and has_more:
+        _store_category_watch_digest_pages(
+            application, user_id, streams=streams, prefs=prefs, lang=lang
+        )
+
+
+async def check_category_watch_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Hourly digest for category-watch subscriptions with delivery=digest."""
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    subs = [
+        s
+        for s in db.get_enabled_category_watch_subscriptions()
+        if category_watch_is_digest(parse_category_watch_prefs(s.category_watch_prefs))
+    ]
+    in_flight: set[int] = context.application.bot_data.setdefault(
+        "category_watch_digest_in_flight", set()
+    )
+    for sub in subs:
+        if sub.id in in_flight:
+            continue
+        if db.is_bot_blocked(sub.owner_id) or _user_notifications_paused(
+            db, sub.owner_id
+        ):
+            continue
+        prefs = parse_category_watch_prefs(sub.category_watch_prefs)
+        if not prefs or not prefs.categories:
+            continue
+        in_flight.add(sub.id)
+        try:
+            pooled: list[dict] = []
+            fetch_failed = False
+            for cat in prefs.categories:
+                try:
+                    batch = await asyncio.to_thread(
+                        twitch.get_streams_by_game,
+                        cat["id"],
+                        language=prefs.language,
+                        first=100,
+                    )
+                except Exception:
+                    fetch_failed = True
+                    logger.exception(
+                        "category watch digest fetch failed sub=%s game_id=%s",
+                        sub.id,
+                        cat.get("id"),
+                    )
+                    continue
+                pooled.extend(batch)
+            if fetch_failed:
+                continue
+            filtered = filter_streams_for_watch(
+                pooled,
+                min_viewers=prefs.min_viewers,
+                max_viewers=prefs.max_viewers,
+                exclude_mature=prefs.exclude_mature,
+                tags=prefs.tags,
+            )
+            by_uid: dict[str, dict] = {}
+            for stream in filtered:
+                uid = str(stream.get("user_id") or "").strip()
+                if uid and uid not in by_uid:
+                    by_uid[uid] = stream
+            current_uids = set(by_uid)
+            prev_uids = _parse_category_watch_live_ids(sub.category_watch_live_ids)
+            if not sub.category_watch_primed:
+                db.set_category_watch_live_state(
+                    sub.id, sorted(current_uids), primed=True
+                )
+                continue
+            if prev_uids and not current_uids:
+                continue
+            new_streams = [by_uid[uid] for uid in (current_uids - prev_uids)]
+            new_streams.sort(
+                key=lambda s: int(s.get("viewer_count") or 0), reverse=True
+            )
+            db.set_category_watch_live_state(
+                sub.id, sorted(current_uids), primed=True
+            )
+            if not new_streams:
+                continue
+            lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+            try:
+                await _send_category_watch_digest_page(
+                    context.bot,
+                    db,
+                    chat_id=sub.chat_id,
+                    user_id=sub.owner_id,
+                    streams=new_streams,
+                    prefs=prefs,
+                    lang=lang,
+                    offset=0,
+                    application=context.application,
+                )
+            except Forbidden:
+                from handlers.delivery import apply_user_blocked
+
+                apply_user_blocked(
+                    db, sub.owner_id, source="category_watch_digest"
+                )
+            except Exception:
+                logger.exception(
+                    "category watch digest send failed sub=%s owner=%s",
+                    sub.id,
+                    sub.owner_id,
+                )
+        finally:
+            in_flight.discard(sub.id)
+
+
+async def on_category_watch_digest_more(
+    update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = (query.data or "").strip()
+    try:
+        offset = int(data.rsplit(":", 1)[-1])
+    except ValueError:
+        return
+    user_id = query.from_user.id
+    store = context.application.bot_data.get(_CW_DIGEST_PAGES_KEY) or {}
+    entry = store.get(int(user_id))
+    if not isinstance(entry, dict):
+        return
+    streams = list(entry.get("streams") or [])
+    prefs = entry.get("prefs")
+    lang = entry.get("lang") or DEFAULT_LOCALE
+    if not streams or prefs is None:
+        return
+    db: Database = context.application.bot_data["db"]
+    try:
+        await query.edit_message_reply_markup(None)
+    except BadRequest:
+        pass
+    await _send_category_watch_digest_page(
+        context.bot,
+        db,
+        chat_id=query.message.chat_id if query.message else user_id,
+        user_id=user_id,
+        streams=streams,
+        prefs=prefs,
+        lang=lang,
+        offset=offset,
+        application=context.application,
+    )
 
 
 def _parse_segment_start(segment: dict) -> datetime | None:
