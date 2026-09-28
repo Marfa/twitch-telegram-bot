@@ -1,0 +1,77 @@
+name: Query pause-button bug impact
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Count users affected by non-DM pause button
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 <<'SQL'
+            -- Pause-from-alert went live ~2026-09-28 07:50 UTC.
+            -- Non-DM alerts get the button on send, or on later preview refresh.
+
+            \echo '=== tracked non-DM messages (last_message_id / pin) ==='
+            SELECT COUNT(DISTINCT owner_id) AS owners,
+                   COUNT(*) AS subs,
+                   COUNT(*) FILTER (WHERE last_message_at >= '2026-09-28 07:50:00+00') AS subs_touched_since_deploy
+            FROM subscriptions
+            WHERE dest_type IS DISTINCT FROM 'dm'
+              AND (last_message_id IS NOT NULL OR pinned_message_id IS NOT NULL);
+
+            \echo '=== owners of tracked non-DM since deploy ==='
+            SELECT COUNT(DISTINCT owner_id) AS owners,
+                   COUNT(*) AS subs
+            FROM subscriptions
+            WHERE dest_type IS DISTINCT FROM 'dm'
+              AND (last_message_id IS NOT NULL OR pinned_message_id IS NOT NULL)
+              AND last_message_at >= '2026-09-28 07:50:00+00';
+
+            \echo '=== all enabled non-DM (upper bound: could receive alert while bug live) ==='
+            SELECT COUNT(DISTINCT owner_id) AS owners,
+                   COUNT(*) AS subs
+            FROM subscriptions
+            WHERE dest_type IS DISTINCT FROM 'dm'
+              AND COALESCE(enabled, FALSE) = TRUE
+              AND COALESCE(delivery_paused, FALSE) = FALSE;
+
+            \echo '=== enabled non-DM with live-capable notify (notify_on_live) ==='
+            SELECT COUNT(DISTINCT owner_id) AS owners,
+                   COUNT(*) AS subs
+            FROM subscriptions
+            WHERE dest_type IS DISTINCT FROM 'dm'
+              AND COALESCE(enabled, FALSE) = TRUE
+              AND COALESCE(delivery_paused, FALSE) = FALSE
+              AND COALESCE(notify_on_live, TRUE) = TRUE;
+
+            \echo '=== strip workflow sub ids: distinct owners ==='
+            SELECT COUNT(DISTINCT owner_id) AS owners, COUNT(*) AS subs
+            FROM subscriptions
+            WHERE id IN (
+              105,301,354,364,390,447,484,510,632,683,693,735,786,789,811,817,824,844
+            );
+
+            \echo '=== per-owner for strip set ==='
+            SELECT owner_id, COUNT(*) AS subs,
+                   array_agg(id ORDER BY id) AS sub_ids,
+                   array_agg(DISTINCT dest_type) AS dests
+            FROM subscriptions
+            WHERE id IN (
+              105,301,354,364,390,447,484,510,632,683,693,735,786,789,811,817,824,844
+            )
+            GROUP BY owner_id
+            ORDER BY subs DESC, owner_id;
+            SQL
