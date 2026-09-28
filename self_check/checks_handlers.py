@@ -2062,6 +2062,18 @@ def check_handlers() -> None:
             urls = [b.url or "" for b in flat]
             assert any("share_" in u for u in urls)
             assert any("start=pause_7" in u for u in urls)
+            group_upcoming = SimpleNamespace(**{**upcoming_sub.__dict__, "dest_type": "group"})
+            group_remind = _delivery_alert_markup(
+                group_upcoming, "ru", db=share_db, bot_username="TestBot"
+            )
+            assert group_remind is not None
+            group_urls = [
+                b.url or ""
+                for row in group_remind.inline_keyboard
+                for b in row
+            ]
+            assert any("share_" in u for u in group_urls)
+            assert not any("start=pause_" in u for u in group_urls)
             assert share_db.ensure_alert_share_token(
                 42, 7, {"notify_on_live": False, "schedule_reminder_minutes": 30}
             ) == list_token

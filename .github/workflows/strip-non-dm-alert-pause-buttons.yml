@@ -1,0 +1,193 @@
+name: Strip non-DM alert pause buttons
+
+# One-shot: editMessageReplyMarkup on group/channel alerts that still have
+# the pause-from-alert deep link (should be DM-only). Uses last_message_id /
+# pinned_message_id recorded since the pause feature deploy.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  strip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Strip pause buttons from non-DM alert messages
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            docker compose -f compose.vps.yml exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -c "
+            SELECT dest_type, COUNT(*) AS n
+            FROM subscriptions
+            WHERE dest_type IS DISTINCT FROM 'dm'
+              AND last_message_id IS NOT NULL
+              AND last_message_at >= '2026-09-28 07:50:00+00'
+            GROUP BY dest_type
+            ORDER BY dest_type;
+            "
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import asyncio
+            import logging
+            from datetime import datetime, timezone
+
+            logging.basicConfig(level=logging.INFO)
+            from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN
+            from db import open_database
+            from handlers.delivery import _alert_chat_button_markup, _cached_bot_username
+            from i18n import DEFAULT_LOCALE
+            from telegram import Bot, InlineKeyboardMarkup
+            from telegram.error import BadRequest, Forbidden, RetryAfter
+
+            # Successful Deploy VPS of pause-from-alert feature.
+            SINCE = datetime(2026, 9, 28, 7, 50, tzinfo=timezone.utc)
+
+            def _is_pause_url(url: str | None) -> bool:
+                u = (url or "").strip()
+                return "start=pause_" in u
+
+            def _without_pause(markup: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
+                if markup is None:
+                    return None
+                rows: list[list] = []
+                for row in markup.inline_keyboard:
+                    kept = [b for b in row if not _is_pause_url(getattr(b, "url", None))]
+                    if kept:
+                        rows.append(kept)
+                if not rows:
+                    return None
+                return InlineKeyboardMarkup(rows)
+
+            def _parse_at(raw) -> datetime | None:
+                if raw is None:
+                    return None
+                if isinstance(raw, datetime):
+                    dt = raw
+                else:
+                    text = str(raw).strip().replace(" ", "T", 1)
+                    if text.endswith("Z"):
+                        text = text[:-1] + "+00:00"
+                    try:
+                        dt = datetime.fromisoformat(text)
+                    except ValueError:
+                        return None
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc)
+
+            async def _edit(bot, *, chat_id: int, message_id: int, markup) -> str:
+                try:
+                    await bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=int(message_id),
+                        reply_markup=markup if markup is not None else InlineKeyboardMarkup([]),
+                    )
+                    return "ok"
+                except RetryAfter as exc:
+                    await asyncio.sleep(float(exc.retry_after) + 0.5)
+                    try:
+                        await bot.edit_message_reply_markup(
+                            chat_id=chat_id,
+                            message_id=int(message_id),
+                            reply_markup=markup if markup is not None else InlineKeyboardMarkup([]),
+                        )
+                        return "ok_retry"
+                    except (BadRequest, Forbidden) as exc2:
+                        return f"fail:{exc2}"
+                except BadRequest as exc:
+                    msg = str(exc).lower()
+                    if "not modified" in msg:
+                        return "unchanged"
+                    return f"fail:{exc}"
+                except Forbidden as exc:
+                    return f"fail:{exc}"
+
+            async def main() -> None:
+                db = open_database(DATABASE_PATH, DATABASE_URL)
+                bot = Bot(TELEGRAM_BOT_TOKEN)
+                bot_username = await _cached_bot_username(bot)
+                # Prefer SQL for the candidate set (Postgres on VPS).
+                import psycopg
+
+                url = (DATABASE_URL or "").replace("postgres://", "postgresql://", 1)
+                rows = []
+                with psycopg.connect(url) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT id, chat_id, last_message_id, pinned_message_id,
+                                   last_message_at, dest_type, twitch_username
+                            FROM subscriptions
+                            WHERE dest_type IS DISTINCT FROM 'dm'
+                              AND (
+                                last_message_id IS NOT NULL
+                                OR pinned_message_id IS NOT NULL
+                              )
+                              AND last_message_at >= %s
+                            ORDER BY id
+                            """,
+                            (SINCE,),
+                        )
+                        cols = [d.name for d in cur.description]
+                        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+                print(f"candidates={len(rows)} since={SINCE.isoformat()} bot=@{bot_username}")
+                ok = fail = unchanged = skip = 0
+                seen: set[tuple[int, int]] = set()
+                for row in rows:
+                    sid = int(row["id"])
+                    sub = db.get_subscription_by_id(sid)
+                    if sub is None:
+                        skip += 1
+                        print("skip missing", sid)
+                        continue
+                    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                    # Build current keyboard then drop pause deep-links (DM-only).
+                    rebuilt = _alert_chat_button_markup(
+                        sub, lang, db=db, bot_username=bot_username
+                    )
+                    markup = _without_pause(rebuilt)
+                    mids = []
+                    if row.get("last_message_id"):
+                        mids.append(int(row["last_message_id"]))
+                    pin = row.get("pinned_message_id")
+                    if pin and int(pin) not in mids:
+                        mids.append(int(pin))
+                    for mid in mids:
+                        key = (int(sub.chat_id), mid)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        status = await _edit(
+                            bot, chat_id=int(sub.chat_id), message_id=mid, markup=markup
+                        )
+                        print(
+                            status,
+                            "sub", sid,
+                            "dest", row["dest_type"],
+                            "chat", sub.chat_id,
+                            "mid", mid,
+                            "login", row["twitch_username"],
+                            "buttons", 0 if markup is None else sum(len(r) for r in markup.inline_keyboard),
+                        )
+                        if status.startswith("ok"):
+                            ok += 1
+                        elif status == "unchanged":
+                            unchanged += 1
+                        else:
+                            fail += 1
+                    await asyncio.sleep(0.05)
+
+                print(
+                    f"done ok={ok} unchanged={unchanged} fail={fail} skip={skip} "
+                    f"unique_messages={len(seen)}"
+                )
+
+            asyncio.run(main())
+            PY

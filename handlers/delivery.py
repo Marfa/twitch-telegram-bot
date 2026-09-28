@@ -399,15 +399,17 @@ def _alert_chat_button_markup(
                 style=style,
             )
         )
-    pause_url = _alert_pause_button_url(sub, bot_username)
-    if pause_url:
-        buttons.append(
-            cbtn.styled_inline_button(
-                t("alert_pause_button", lang),
-                url=pause_url,
-                style=style,
+    # Pause deep-link opens a private chat with the bot — only useful on DM alerts.
+    if sub.dest_type == "dm":
+        pause_url = _alert_pause_button_url(sub, bot_username)
+        if pause_url:
+            buttons.append(
+                cbtn.styled_inline_button(
+                    t("alert_pause_button", lang),
+                    url=pause_url,
+                    style=style,
+                )
             )
-        )
     if not buttons:
         return None
     # Always 2 per row (custom + chat + live-remind + pause share the same grid).
