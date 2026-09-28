@@ -2043,9 +2043,14 @@ def check_handlers() -> None:
         assert "twitch.tv" in snap["message_template"] or "{username}" in snap[
             "message_template"
         ]
-        # Without db/bot_username the remind/pause rows are omitted.
+        # Without db/bot_username the live-remind share row is omitted; DM pause
+        # callback does not need bot_username.
         bare = _delivery_alert_markup(upcoming_sub, "ru")
-        assert bare is None
+        assert bare is not None
+        bare_cbs = [
+            b.callback_data or "" for row in bare.inline_keyboard for b in row
+        ]
+        assert bare_cbs == ["alert_pause:7"]
         # With share token path: purpose must not clobber list-share token.
         with tempfile.TemporaryDirectory() as tmp:
             share_db = open_database(Path(tmp) / "live_remind.db")
