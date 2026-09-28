@@ -947,6 +947,15 @@ async def receive_watch_delivery_callback(
     return await _finalize_watch_wizard(update, context, lang)
 
 
+async def receive_watch_delivery_from_suggest(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Group-0 only: create-from-suggest. Wizard delivery stays in ConversationHandler."""
+    if not context.user_data.get("watch_pending_create_from_suggest"):
+        return
+    await receive_watch_delivery_callback(update, context)
+
+
 async def _go_watch_tags_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
@@ -1031,14 +1040,15 @@ async def _finalize_watch_wizard(
             sync_optional_jobs(context.application.job_queue, db)
     context.user_data.clear()
     _set_watch_lucky_mode(context, user_id, enabled=False)
-    await _send_watch_suggestions(
-        bot=context.bot,
-        chat_id=chat_id,
-        user_id=user_id,
-        context=context,
-        prefs=prefs,
-        offer_create_alerts=False,
-    )
+    if prefs.categories:
+        await _send_watch_suggestions(
+            bot=context.bot,
+            chat_id=chat_id,
+            user_id=user_id,
+            context=context,
+            prefs=prefs,
+            offer_create_alerts=False,
+        )
     return ConversationHandler.END
 
 

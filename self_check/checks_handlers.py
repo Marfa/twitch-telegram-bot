@@ -2756,3 +2756,19 @@ def _check_category_watch_digest_and_legacy() -> None:
     ]
     assert any(c.startswith("cw_digest:more:") for c in more_cbs)
     digest_db.set_category_watch_live_state.assert_called()
+
+    # Group-0 delivery handler must not run during the wizard ConversationHandler step.
+    from handlers.watch import receive_watch_delivery_from_suggest
+
+    suggest_ctx = MagicMock()
+    suggest_ctx.user_data = {"watch_create_alert": True}
+    suggest_update = MagicMock()
+    with patch(
+        "handlers.watch.receive_watch_delivery_callback",
+        new=AsyncMock(),
+    ) as cb:
+        asyncio.run(receive_watch_delivery_from_suggest(suggest_update, suggest_ctx))
+        cb.assert_not_awaited()
+        suggest_ctx.user_data["watch_pending_create_from_suggest"] = True
+        asyncio.run(receive_watch_delivery_from_suggest(suggest_update, suggest_ctx))
+        cb.assert_awaited_once()

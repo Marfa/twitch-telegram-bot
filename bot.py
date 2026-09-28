@@ -430,6 +430,7 @@ from handlers.watch import (
     receive_watch_category_callback,
     receive_watch_category_text,
     receive_watch_delivery_callback,
+    receive_watch_delivery_from_suggest,
     receive_watch_dup_callback,
     receive_watch_filters_callback,
     receive_watch_language_callback,
@@ -2703,7 +2704,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(
-            receive_watch_delivery_callback, pattern=r"^watch_delivery:"
+            receive_watch_delivery_from_suggest, pattern=r"^watch_delivery:"
         ),
         group=0,
     )
