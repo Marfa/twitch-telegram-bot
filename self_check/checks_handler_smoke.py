@@ -1146,6 +1146,20 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert channel_sub.delivery_paused is False
     assert channel_sub.enabled is True
 
+    # Successful group/channel delivery writes ops-only log (not user alert_history).
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=77))
+    bot.send_photo = AsyncMock()
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
+    ok_ch = await _send_notification(bot, db, channel_sub, "channel delivered")
+    assert ok_ch is True
+    ch_logs = db.list_alert_delivery_log(owner_id=_FREE_UID)
+    assert len(ch_logs) == 1
+    assert ch_logs[0].dest_type == "channel"
+    assert ch_logs[0].chat_id == channel_id
+    assert ch_logs[0].message_id == 77
+    assert all(h.subscription_id != sub_id for h in db.list_alert_history(_FREE_UID))
+
     apply_user_blocked(db, _FREE_UID)
     dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
     assert dm_sub.enabled is False and dm_sub.delivery_paused is True
@@ -1189,12 +1203,12 @@ async def _smoke_delivery_and_helpers(db) -> None:
     sent_kwargs = bot.send_message.await_args.kwargs
     pause_markup = sent_kwargs.get("reply_markup")
     assert pause_markup is not None
-    pause_urls = [
-        (b.url or "")
+    pause_cbs = [
+        (b.callback_data or "")
         for row in pause_markup.inline_keyboard
         for b in row
     ]
-    assert any(f"start=pause_{dm_sub_id}" in u for u in pause_urls)
+    assert any(cb == f"alert_pause:{dm_sub_id}" for cb in pause_cbs)
 
     application, bot = _app(db)
     ctx = _ctx(application)
@@ -1386,7 +1400,7 @@ async def _smoke_welcome_demo_locale(db) -> None:
     assert seeded_uk[2] is False
 
 async def _smoke_pause_sub_start(db) -> None:
-    from handlers.subscriptions import handle_pause_sub_start_arg
+    from handlers.subscriptions import handle_pause_sub_start_arg, on_alert_pause
     from i18n import t
 
     uid = _FREE_UID + 55
@@ -1412,6 +1426,7 @@ async def _smoke_pause_sub_start(db) -> None:
     sub = db.get_subscription(sub_id, uid)
     assert sub is not None and sub.enabled is False
     assert capture.call_args.args[1] == "subscription_paused_from_alert"
+    assert capture.call_args.args[2].get("via") == "start"
     update.effective_message.reply_text.assert_awaited()
     text = update.effective_message.reply_text.call_args.args[0]
     assert text == t("alert_pause_done", "ru", channel="pauseme")
@@ -1422,6 +1437,47 @@ async def _smoke_pause_sub_start(db) -> None:
     assert handled2 is True
     already = update.effective_message.reply_text.call_args.args[0]
     assert already == t("alert_pause_already", "ru", channel="pauseme")
+
+    # Callback path (current DM alert button).
+    sub_id2 = db.add_subscription(
+        owner_id=uid,
+        twitch_username="pausecb",
+        twitch_user_id="tw_pause_cb",
+        message_template="hi",
+        dest_type="dm",
+        chat_id=uid,
+        thread_id=None,
+        enabled=True,
+    )
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    update2, query = _cb_update(uid, f"alert_pause:{sub_id2}")
+    query.message.reply_markup = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("keep", url="https://twitch.tv/x"),
+                InlineKeyboardButton("pause", callback_data=f"alert_pause:{sub_id2}"),
+            ]
+        ]
+    )
+    ctx2 = _ctx(application)
+    with patch("handlers.subscriptions.analytics.capture") as capture2:
+        await on_alert_pause(update2, ctx2)
+    sub2 = db.get_subscription(sub_id2, uid)
+    assert sub2 is not None and sub2.enabled is False
+    assert capture2.call_args.args[1] == "subscription_paused_from_alert"
+    assert capture2.call_args.args[2].get("via") == "callback"
+    query.answer.assert_awaited()
+    toast = query.answer.call_args.args[0]
+    assert toast == t("alert_pause_done", "ru", channel="pausecb")
+    query.edit_message_reply_markup.assert_awaited()
+    new_markup = query.edit_message_reply_markup.await_args.kwargs.get("reply_markup")
+    assert new_markup is not None
+    left = [b.callback_data or b.url for row in new_markup.inline_keyboard for b in row]
+    assert "https://twitch.tv/x" in left
+    assert not any(
+        (isinstance(v, str) and v.startswith("alert_pause:")) for v in left
+    )
 
 
 async def _run_smoke() -> None:

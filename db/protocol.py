@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from .models import (
+    AlertDeliveryLogEntry,
     AlertHistoryEntry,
     BotStats,
     ChatAuth,
@@ -274,6 +275,29 @@ class Database(Protocol):
         since: datetime | None = None,
         limit: int = 500,
     ) -> list[AlertHistoryEntry]: ...
+
+    def add_alert_delivery_log(
+        self,
+        owner_id: int,
+        *,
+        subscription_id: int | None,
+        dest_type: str,
+        chat_id: int,
+        message_id: int | None = None,
+        thread_id: int | None = None,
+        twitch_username: str = "",
+        alert_type: str = "live",
+        twitch_user_id: str = "",
+        stream_id: str = "",
+    ) -> None: ...
+
+    def list_alert_delivery_log(
+        self,
+        *,
+        owner_id: int | None = None,
+        since: datetime | None = None,
+        limit: int = 500,
+    ) -> list[AlertDeliveryLogEntry]: ...
 
     def resolve_referral_withdrawal(
         self, withdrawal_id: int, status: str

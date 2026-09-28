@@ -685,6 +685,7 @@ from handlers.subscriptions import (
     on_sync_now,
     on_sync_unfollow_answer,
     on_toggle,
+    on_alert_pause,
     on_welcome_demo_delete,
     on_welcome_demo_enable,
     open_cart_menu,
@@ -2609,6 +2610,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(
+        CallbackQueryHandler(on_alert_pause, pattern=r"^alert_pause:\d+$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_premium_callback_router,
             pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+|gift|gift_month|gift_year|gift_life)$",
@@ -3625,7 +3630,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(
             wake_stuck_on_menu_callback,
             pattern=(
-                r"^(edit:\d+$|edit_f:|edit_set:|edit_type_pick:|edit_type_pick_cancel:|toggle:|imp_en:|enable_all$|delete:\d+$|"
+                r"^(edit:\d+$|edit_f:|edit_set:|edit_type_pick:|edit_type_pick_cancel:|toggle:|alert_pause:\d+$|imp_en:|enable_all$|delete:\d+$|"
                 r"welcome_en:\d+$|welcome_del:\d+$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"

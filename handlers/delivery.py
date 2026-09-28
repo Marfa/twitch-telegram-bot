@@ -319,12 +319,11 @@ async def _deliver_alert_content_plain(
     return await _send_text()
 
 
-def _alert_pause_button_url(sub: Subscription, bot_username: str) -> str | None:
-    bot = (bot_username or "").strip().lstrip("@")
+def _alert_pause_callback_data(sub: Subscription) -> str | None:
     sub_id = int(getattr(sub, "id", 0) or 0)
-    if not bot or sub_id <= 0:
+    if sub_id <= 0:
         return None
-    return f"https://t.me/{bot}?start=pause_{sub_id}"
+    return f"alert_pause:{sub_id}"
 
 
 async def _cached_bot_username(bot, bot_data: dict | None = None) -> str:
@@ -399,14 +398,14 @@ def _alert_chat_button_markup(
                 style=style,
             )
         )
-    # Pause deep-link opens a private chat with the bot — only useful on DM alerts.
+    # Callback works in private chats with the bot — DM alerts only.
     if sub.dest_type == "dm":
-        pause_url = _alert_pause_button_url(sub, bot_username)
-        if pause_url:
+        pause_cb = _alert_pause_callback_data(sub)
+        if pause_cb:
             buttons.append(
                 cbtn.styled_inline_button(
                     t("alert_pause_button", lang),
-                    url=pause_url,
+                    callback_data=pause_cb,
                     style=style,
                 )
             )
@@ -1373,16 +1372,17 @@ async def _send_notification(
         await _pin_after_send(bot, db, sub, msg.message_id)
     if sub.suppress_repeat_minutes > 0:
         db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
-    # History is for the user's DM inbox only — skip channel/group destinations.
+    # DM inbox history is user-facing; group/channel goes to ops-only delivery log.
+    stream_uid = str((stream or {}).get("user_id") or "").strip()
+    history_uid = (
+        stream_uid if stream_uid.isdigit() else (sub.twitch_user_id or "")
+    )
+    history_stream_id = (
+        (stream_id or "").strip()
+        or (str(stream.get("id") or "") if stream else "")
+    )
     if sub.dest_type == "dm":
         try:
-            # Prefer stream broadcaster id — category-watch/drops subs store cw:/drops: synthetics.
-            stream_uid = str((stream or {}).get("user_id") or "").strip()
-            history_uid = (
-                stream_uid
-                if stream_uid.isdigit()
-                else (sub.twitch_user_id or "")
-            )
             db.add_alert_history(
                 sub.owner_id,
                 subscription_id=sub.id,
@@ -1390,10 +1390,7 @@ async def _send_notification(
                 alert_type=alert_type,
                 message_text=text,
                 twitch_user_id=history_uid,
-                stream_id=(
-                    (stream_id or "").strip()
-                    or (str(stream.get("id") or "") if stream else "")
-                ),
+                stream_id=history_stream_id,
                 vod_offset_seconds=(
                     vod_offset_seconds
                     if vod_offset_seconds is not None
@@ -1416,6 +1413,25 @@ async def _send_notification(
                 "twitch_username": sub.twitch_username,
             },
         )
+    else:
+        try:
+            mid = getattr(msg, "message_id", None) if msg is not None else None
+            db.add_alert_delivery_log(
+                sub.owner_id,
+                subscription_id=sub.id,
+                dest_type=sub.dest_type,
+                chat_id=int(sub.chat_id),
+                message_id=int(mid) if mid is not None else None,
+                thread_id=sub.thread_id,
+                twitch_username=sub.twitch_username,
+                alert_type=alert_type,
+                twitch_user_id=history_uid,
+                stream_id=history_stream_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to record alert delivery log for sub %s", sub.id
+            )
     return True
 
 

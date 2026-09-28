@@ -39,6 +39,7 @@ from .models import (
     WatchPrefs,
     WhisperAlert,
     _cart_item_from_row,
+    _row_to_alert_delivery_log,
     _row_to_alert_history,
     _row_to_chat_auth,
     _row_to_follow_monitor,
@@ -1113,6 +1114,36 @@ class PostgresDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_alert_history_owner_sent
                 ON alert_history(owner_id, sent_at DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alert_delivery_log (
+                    id SERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL,
+                    subscription_id BIGINT,
+                    dest_type TEXT NOT NULL,
+                    chat_id BIGINT NOT NULL,
+                    message_id BIGINT,
+                    thread_id BIGINT,
+                    twitch_username TEXT NOT NULL DEFAULT '',
+                    alert_type TEXT NOT NULL DEFAULT 'live',
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    stream_id TEXT NOT NULL DEFAULT '',
+                    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_alert_delivery_log_sent
+                ON alert_delivery_log(sent_at DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_alert_delivery_log_owner_sent
+                ON alert_delivery_log(owner_id, sent_at DESC)
                 """
             )
             cur.execute(
@@ -3014,6 +3045,80 @@ owner_id, twitch_username, twitch_user_id,
             rows = cur.fetchall()
         return [_row_to_alert_history(r) for r in rows]
 
+    def add_alert_delivery_log(
+        self,
+        owner_id: int,
+        *,
+        subscription_id: int | None,
+        dest_type: str,
+        chat_id: int,
+        message_id: int | None = None,
+        thread_id: int | None = None,
+        twitch_username: str = "",
+        alert_type: str = "live",
+        twitch_user_id: str = "",
+        stream_id: str = "",
+    ) -> None:
+        dest = (dest_type or "").strip().lower() or "group"
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO alert_delivery_log (
+                    owner_id, subscription_id, dest_type, chat_id, message_id,
+                    thread_id, twitch_username, alert_type, twitch_user_id, stream_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    int(owner_id),
+                    int(subscription_id) if subscription_id is not None else None,
+                    dest,
+                    int(chat_id),
+                    int(message_id) if message_id is not None else None,
+                    int(thread_id) if thread_id is not None else None,
+                    (twitch_username or "").strip() or "—",
+                    (alert_type or "").strip() or "live",
+                    (twitch_user_id or "").strip(),
+                    (stream_id or "").strip(),
+                ),
+            )
+
+    def list_alert_delivery_log(
+        self,
+        *,
+        owner_id: int | None = None,
+        since: datetime | None = None,
+        limit: int = 500,
+    ) -> list:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if owner_id is not None:
+            clauses.append("owner_id = %s")
+            params.append(int(owner_id))
+        if since is not None:
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+            clauses.append("sent_at >= %s")
+            params.append(since.astimezone(timezone.utc))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(int(limit))
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                f"""
+                SELECT id, owner_id, subscription_id, dest_type, chat_id, message_id,
+                       thread_id, twitch_username, alert_type, twitch_user_id,
+                       stream_id, sent_at
+                FROM alert_delivery_log
+                {where}
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+        return [_row_to_alert_delivery_log(r) for r in rows]
+
     def resolve_referral_withdrawal(
         self, withdrawal_id: int, status: str
     ) -> ReferralWithdrawal | None:
@@ -3129,7 +3234,12 @@ owner_id, twitch_username, twitch_user_id,
                     "DELETE FROM alert_history WHERE subscription_id = ANY(%s)",
                     (sub_ids,),
                 )
+                cur.execute(
+                    "DELETE FROM alert_delivery_log WHERE subscription_id = ANY(%s)",
+                    (sub_ids,),
+                )
             cur.execute("DELETE FROM alert_history WHERE owner_id = %s", (uid,))
+            cur.execute("DELETE FROM alert_delivery_log WHERE owner_id = %s", (uid,))
             cur.execute(
                 "DELETE FROM deleted_subscriptions_cart WHERE owner_id = %s", (uid,)
             )
@@ -3978,6 +4088,10 @@ owner_id, twitch_username, twitch_user_id,
                     "DELETE FROM alert_history WHERE subscription_id = ANY(%s)",
                     (ids,),
                 )
+                cur.execute(
+                    "DELETE FROM alert_delivery_log WHERE subscription_id = ANY(%s)",
+                    (ids,),
+                )
             cur.execute(
                 "DELETE FROM deleted_subscriptions_cart WHERE owner_id = %s AND is_demo = TRUE",
                 (owner_id,),
@@ -4502,6 +4616,7 @@ owner_id, twitch_username, twitch_user_id,
 
     def purge_stale_log_tables(self) -> dict[str, int]:
         from config import (
+            ALERT_DELIVERY_LOG_DAYS,
             CHAT_SEND_DAILY_RETENTION_DAYS,
             DROP_SEEN_RETENTION_DAYS,
             FOLLOW_MONITOR_EVENTS_RETENTION_DAYS,
@@ -4520,6 +4635,15 @@ owner_id, twitch_username, twitch_user_id,
                 (int(ALERT_HISTORY_PREMIUM_DAYS),),
             )
             removed["alert_history"] = int(cur.rowcount or 0)
+
+            cur.execute(
+                """
+                DELETE FROM alert_delivery_log
+                WHERE sent_at < NOW() - make_interval(days => %s)
+                """,
+                (int(ALERT_DELIVERY_LOG_DAYS),),
+            )
+            removed["alert_delivery_log"] = int(cur.rowcount or 0)
 
             cur.execute(
                 """

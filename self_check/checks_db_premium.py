@@ -1826,6 +1826,39 @@ def check_db_premium() -> None:
             99001, datetime.now(timezone.utc).date().isoformat()
         ) == 2
 
+        # Ops-only group/channel delivery log: write + 30-day purge; never in alert_history.
+        from config import ALERT_DELIVERY_LOG_DAYS
+
+        assert ALERT_DELIVERY_LOG_DAYS == 30
+        ldb.add_alert_delivery_log(
+            99001,
+            subscription_id=None,
+            dest_type="channel",
+            chat_id=-1001,
+            message_id=42,
+            thread_id=None,
+            twitch_username="opschan",
+            alert_type="live",
+            stream_id="s1",
+        )
+        rows = ldb.list_alert_delivery_log(owner_id=99001)
+        assert len(rows) == 1
+        assert rows[0].dest_type == "channel"
+        assert rows[0].chat_id == -1001
+        assert rows[0].message_id == 42
+        assert ldb.list_alert_history(99001) == []
+        old_del = (
+            datetime.now(timezone.utc) - timedelta(days=ALERT_DELIVERY_LOG_DAYS + 1)
+        ).isoformat()
+        with ldb._conn() as conn:
+            conn.execute(
+                "UPDATE alert_delivery_log SET sent_at = ? WHERE owner_id = ?",
+                (old_del, 99001),
+            )
+        purged2 = ldb.purge_stale_log_tables()
+        assert purged2.get("alert_delivery_log", 0) >= 1
+        assert ldb.list_alert_delivery_log(owner_id=99001) == []
+
     with tempfile.TemporaryDirectory() as msg_tmp:
         mdb = SqliteDatabase(Path(msg_tmp) / "purge_prev.db")
         mdb.upsert_user(88001)

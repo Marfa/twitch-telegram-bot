@@ -47,6 +47,7 @@ def styled_inline_button(
     *,
     url: str | None = None,
     web_app: WebAppInfo | None = None,
+    callback_data: str | None = None,
     style: str = "",
 ) -> InlineKeyboardButton:
     """Build an InlineKeyboardButton with optional Bot API 9.4 style."""
@@ -55,6 +56,8 @@ def styled_inline_button(
         kwargs["url"] = url
     if web_app is not None:
         kwargs["web_app"] = web_app
+    if callback_data is not None:
+        kwargs["callback_data"] = callback_data
     api_style = normalize_button_style(style)
     if api_style:
         # api_kwargs works on PTB 21+; first-class style= arrived later.

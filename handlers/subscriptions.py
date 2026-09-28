@@ -783,10 +783,47 @@ def _parse_pause_sub_start_arg(raw: str) -> int | None:
     return sub_id if sub_id > 0 else None
 
 
+def _pause_subscription_from_alert(
+    db: Database, user_id: int, sub_id: int
+) -> tuple[str, str, Subscription | None]:
+    """Disable one owned subscription from an alert pause control.
+
+    Returns (status, channel, sub) where status is done|already|not_found.
+    """
+    sub = db.get_subscription(sub_id, user_id)
+    if sub is None or not _sub_in_current_mode(sub, user_id):
+        return "not_found", "", None
+    channel = (sub.twitch_username or "").strip() or str(sub_id)
+    if not sub.enabled:
+        return "already", channel, sub
+    new_state = db.toggle_subscription(sub_id, user_id)
+    if new_state is None or new_state:
+        return "not_found", channel, sub
+    return "done", channel, sub
+
+
+def _markup_without_alert_pause(markup: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
+    if markup is None:
+        return None
+    rows: list[list[InlineKeyboardButton]] = []
+    for row in markup.inline_keyboard:
+        kept = [
+            b
+            for b in row
+            if not (b.callback_data or "").startswith("alert_pause:")
+            and "start=pause_" not in (b.url or "")
+        ]
+        if kept:
+            rows.append(kept)
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(rows)
+
+
 async def handle_pause_sub_start_arg(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> bool:
-    """Handle /start pause_{sub_id} from the alert message deep link.
+    """Handle legacy /start pause_{sub_id} deep links from older alert messages.
 
     Disables that subscription for the owner. Returns True when consumed.
     """
@@ -803,25 +840,17 @@ async def handle_pause_sub_start_arg(
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
     lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
-    sub = db.get_subscription(sub_id, user_id)
-    if sub is None or not _sub_in_current_mode(sub, user_id):
+    status, channel, sub = _pause_subscription_from_alert(db, user_id, sub_id)
+    if status == "not_found":
         await update.effective_message.reply_text(
             t("alert_pause_not_found", lang),
             reply_markup=_menu(lang, user_id),
         )
         return True
-    channel = (sub.twitch_username or "").strip() or str(sub_id)
-    if not sub.enabled:
+    if status == "already":
         await update.effective_message.reply_text(
             t("alert_pause_already", lang, channel=channel),
             reply_markup=_subs_kb(lang, db, user_id),
-        )
-        return True
-    new_state = db.toggle_subscription(sub_id, user_id)
-    if new_state is None or new_state:
-        await update.effective_message.reply_text(
-            t("alert_pause_not_found", lang),
-            reply_markup=_menu(lang, user_id),
         )
         return True
     analytics.capture(
@@ -829,9 +858,10 @@ async def handle_pause_sub_start_arg(
         "subscription_paused_from_alert",
         {
             "subscription_id": sub_id,
-            "twitch_username": sub.twitch_username,
-            "alert_type": _alert_type_from_sub(sub),
-            "dest_type": sub.dest_type,
+            "twitch_username": sub.twitch_username if sub else "",
+            "alert_type": _alert_type_from_sub(sub) if sub else "",
+            "dest_type": sub.dest_type if sub else "",
+            "via": "start",
         },
     )
     await update.effective_message.reply_text(
@@ -839,6 +869,61 @@ async def handle_pause_sub_start_arg(
         reply_markup=_subs_kb(lang, db, user_id),
     )
     return True
+
+
+async def on_alert_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Pause subscription from the inline button on a DM alert message."""
+    query = update.callback_query
+    if query is None or query.from_user is None:
+        return
+    data = query.data or ""
+    try:
+        sub_id = int(data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        try:
+            await query.answer()
+        except BadRequest:
+            pass
+        return
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
+    status, channel, sub = _pause_subscription_from_alert(db, user_id, sub_id)
+    if status == "not_found":
+        try:
+            await query.answer(t("alert_pause_not_found", lang), show_alert=True)
+        except BadRequest:
+            pass
+        return
+    toast = (
+        t("alert_pause_already", lang, channel=channel)
+        if status == "already"
+        else t("alert_pause_done", lang, channel=channel)
+    )
+    try:
+        await query.answer(toast[:200])
+    except BadRequest:
+        return
+    if status == "done" and sub is not None:
+        analytics.capture(
+            user_id,
+            "subscription_paused_from_alert",
+            {
+                "subscription_id": sub_id,
+                "twitch_username": sub.twitch_username,
+                "alert_type": _alert_type_from_sub(sub),
+                "dest_type": sub.dest_type,
+                "via": "callback",
+            },
+        )
+    # Drop the pause control so a second tap is not needed.
+    new_markup = _markup_without_alert_pause(query.message.reply_markup if query.message else None)
+    try:
+        await query.edit_message_reply_markup(reply_markup=new_markup)
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            logger.debug("alert_pause markup edit failed: %s", exc)
 
 
 def _import_oauth_authorize_keyboard(lang: str, url: str) -> InlineKeyboardMarkup:

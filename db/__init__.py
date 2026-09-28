@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .models import (
     WATCH_MAX_FILTERS,
+    AlertDeliveryLogEntry,
     AlertHistoryEntry,
     BotStats,
     ChatAuth,
@@ -55,6 +56,7 @@ from .sqlite import SqliteDatabase
 
 __all__ = [
     "WATCH_MAX_FILTERS",
+    "AlertDeliveryLogEntry",
     "AlertHistoryEntry",
     "BotStats",
     "ChatAuth",

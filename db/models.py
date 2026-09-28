@@ -61,6 +61,24 @@ class AlertHistoryEntry:
 
 
 @dataclass
+class AlertDeliveryLogEntry:
+    """Ops-only group/channel delivery row (not shown in user alert history)."""
+
+    id: int
+    owner_id: int
+    subscription_id: int | None
+    dest_type: str
+    chat_id: int
+    message_id: int | None
+    thread_id: int | None
+    twitch_username: str
+    alert_type: str
+    sent_at: str
+    twitch_user_id: str = ""
+    stream_id: str = ""
+
+
+@dataclass
 class WatchPrefs:
     categories: list[dict[str, str]] = field(default_factory=list)
     min_viewers: int = 0
@@ -1045,6 +1063,29 @@ def _row_to_alert_history(row: Any) -> AlertHistoryEntry:
         vod_id=str(row["vod_id"] or "") if "vod_id" in keys else "",
         vod_offset_seconds=offset,
         viewed=viewed,
+    )
+
+
+def _row_to_alert_delivery_log(row: Any) -> AlertDeliveryLogEntry:
+    sent = row["sent_at"]
+    if sent is not None and not isinstance(sent, str):
+        sent = sent.isoformat()
+    sub_id = row["subscription_id"]
+    mid = row["message_id"]
+    tid = row["thread_id"]
+    return AlertDeliveryLogEntry(
+        id=int(row["id"]),
+        owner_id=int(row["owner_id"]),
+        subscription_id=int(sub_id) if sub_id is not None else None,
+        dest_type=str(row["dest_type"] or ""),
+        chat_id=int(row["chat_id"]),
+        message_id=int(mid) if mid is not None else None,
+        thread_id=int(tid) if tid is not None else None,
+        twitch_username=str(row["twitch_username"] or ""),
+        alert_type=str(row["alert_type"] or ""),
+        sent_at=str(sent or ""),
+        twitch_user_id=str(row["twitch_user_id"] or ""),
+        stream_id=str(row["stream_id"] or ""),
     )
 
 

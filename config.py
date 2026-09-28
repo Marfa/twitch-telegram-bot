@@ -120,6 +120,8 @@ FOLLOW_MONITOR_EVENTS_RETENTION_DAYS = int(
 )
 DROP_SEEN_RETENTION_DAYS = int(os.getenv("DROP_SEEN_RETENTION_DAYS", "90"))
 CHAT_SEND_DAILY_RETENTION_DAYS = int(os.getenv("CHAT_SEND_DAILY_RETENTION_DAYS", "14"))
+# Ops-only log of group/channel alert deliveries (not shown in user alert history).
+ALERT_DELIVERY_LOG_DAYS = int(os.getenv("ALERT_DELIVERY_LOG_DAYS", "30"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
 # Optional: BotHub AI alert covers (Flash Lite by default). Prefer Eco key. Skip if unset.
 BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY", "").strip()
