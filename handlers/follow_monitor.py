@@ -674,7 +674,7 @@ def _load_list_pages(
             user_id, limit=min(total, 5000) or 1, offset=0
         )
         lines = [
-            _format_follower_line(r.login, r.display_name)
+            _format_follower_line(r.login, r.display_name, at=r.followed_at)
             for r in rows
         ]
     elif kind in (_LIST_KIND_NEW, _LIST_KIND_NEW_UNFOLLOW):
@@ -719,7 +719,10 @@ def _load_list_pages(
         events = db.list_follow_monitor_events(
             user_id, event_type="unfollow", limit=min(total, 2000) or 1, offset=0
         )
-        lines = [_format_follower_line(e.login, e.display_name) for e in events]
+        lines = [
+            _format_follower_line(e.login, e.display_name, at=e.detected_at)
+            for e in events
+        ]
     if not lines:
         return []
     # Split into PAGE_SIZE line pages for nav.
@@ -761,14 +764,21 @@ async def _show_list(
         if edit and query:
             await query.answer()
             try:
-                await query.edit_message_text(text, reply_markup=kb)
+                await query.edit_message_text(
+                    text,
+                    reply_markup=kb,
+                    disable_web_page_preview=True,
+                )
             except BadRequest:
                 pass
             return
         if query:
             await query.answer()
         await context.bot.send_message(
-            reply_chat_id(update), text, reply_markup=kb
+            reply_chat_id(update),
+            text,
+            reply_markup=kb,
+            disable_web_page_preview=True,
         )
         return
     kb = _nav_keyboard(lang, 0, len(pages), kind)
@@ -779,6 +789,7 @@ async def _show_list(
                 pages[0],
                 parse_mode=ParseMode.HTML,
                 reply_markup=kb,
+                disable_web_page_preview=True,
             )
         except BadRequest as exc:
             if "not modified" not in str(exc).lower():
@@ -791,6 +802,7 @@ async def _show_list(
         pages[0],
         parse_mode=ParseMode.HTML,
         reply_markup=kb,
+        disable_web_page_preview=True,
     )
 
 
@@ -838,6 +850,7 @@ async def on_follow_monitor_page(
             pages[page],
             parse_mode=ParseMode.HTML,
             reply_markup=kb,
+            disable_web_page_preview=True,
         )
     except BadRequest as exc:
         if "not modified" not in str(exc).lower():

@@ -1741,8 +1741,10 @@ def check_handlers() -> None:
             "ru", events, notify_follow=False, notify_unfollow=False
         ) is None
         from handlers.follow_monitor import (
+            _LIST_KIND_CURRENT,
             _LIST_KIND_NEW,
             _LIST_KIND_NEW_UNFOLLOW,
+            _LIST_KIND_UNFOLLOW,
             _format_event_date,
             _format_follower_line,
             _load_list_pages,
@@ -1783,6 +1785,16 @@ def check_handlers() -> None:
         assert "gone" in "\n".join(unf_pages).lower()
         assert _format_event_date(recent_iso) in "\n".join(unf_pages)
         assert "—" in _format_follower_line("x", "X", at=recent_iso)
+        cur_pages = _load_list_pages(fmdb, 31, "ru", _LIST_KIND_CURRENT)
+        assert cur_pages
+        cur_text = "\n".join(cur_pages)
+        assert "c" in cur_text.lower()
+        assert _format_event_date(_now) in cur_text
+        all_unf = _load_list_pages(fmdb, 31, "ru", _LIST_KIND_UNFOLLOW)
+        assert all_unf
+        all_unf_text = "\n".join(all_unf)
+        assert "gone" in all_unf_text.lower()
+        assert _format_event_date(recent_iso) in all_unf_text
     assert "stream-chat" not in {f.id for f in beta_mod.list_features()}
     assert "deleted-subscriptions-cart" not in {f.id for f in beta_mod.list_features()}
     sc_feat = beta_mod.get_feature("stream-chat")
