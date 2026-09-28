@@ -2699,9 +2699,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_watch_again, pattern=r"^watch:again$"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_watch_create_alerts, pattern=r"^watch:create_alerts$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             receive_watch_delivery_callback, pattern=r"^watch_delivery:"
         ),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_category_watch_digest_more, pattern=r"^cw_digest:more:\d+$"
         ),

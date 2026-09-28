@@ -450,9 +450,11 @@ def check_alert_setting_order() -> None:
         "edit_g:1:viewers",
         "edit_g:1:language",
         "edit_g:1:mature",
+        "edit_g:1:delivery",
         "edit_g:1:cooldown",
     }
     assert game_cbs["edit_g:1:mature"].startswith("✅ ")
+    assert "edit_g:1:delivery" in game_cbs
     off = edit_game_options_keyboard(
         1,
         "en",
@@ -460,6 +462,7 @@ def check_alert_setting_order() -> None:
         viewers_label="any",
         language_label="any",
         exclude_mature=False,
+        delivery_digest=True,
     )
     off_cbs = {
         (btn.callback_data or ""): btn.text
@@ -467,6 +470,7 @@ def check_alert_setting_order() -> None:
         for btn in row
     }
     assert off_cbs["edit_g:1:mature"].startswith("⬜️ ")
+    assert t("watch_delivery_label_digest", "en") in off_cbs["edit_g:1:delivery"]
 
     for loc in SUPPORTED_LOCALES:
         chat_kb = chat_button_keyboard(loc)
