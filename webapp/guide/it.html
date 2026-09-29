@@ -63,7 +63,7 @@
       <tr><td>⬇️ Importa iscrizioni</td><td>Importa i follow da Twitch</td></tr>
       <tr><td>📋 Le mie iscrizioni</td><td>Elenco, attiva/disattiva, modifica, elimina</td></tr>
       <tr><td>📜 Cronologia avvisi</td><td>Cosa ha già inviato il bot</td></tr>
-      <tr><td>📦 Altro</td><td>Follow/Unfollow (beta), whisper, programma, Cosa guardare? (mi sento fortunato), chat</td></tr>
+      <tr><td>📦 Altro</td><td>Follow/Unfollow, whisper, programma, Cosa guardare? (mi sento fortunato), chat</td></tr>
       <tr><td>⚙️ Impostazioni</td><td>Premium, sync, lingua, partner, …</td></tr>
       <tr><td>❓ Aiuto</td><td>Contatti e questa guida</td></tr>
     </tbody>
@@ -78,9 +78,9 @@
       <tr><td>Cambio categoria</td><td>Lo streamer cambia gioco/categoria <span class="star">⭐ Premium</span></td></tr>
       <tr><td>Stream in arrivo</td><td>Promemoria N minuti prima del programma ufficiale Twitch <span class="star">⭐</span></td></tr>
       <tr><td>Fine stream</td><td>Lo stream è andato offline <span class="star">⭐</span></td></tr>
-      <tr><td>Drops</td><td>Nuove campagne drop per un gioco scelto <span class="star">⭐</span> (beta)</td></tr>
+      <tr><td>Drops</td><td>Nuove campagne drop per un gioco scelto <span class="star">⭐</span></td></tr>
       <tr><td>Avviso di gioco</td><td>Nuovi stream nelle categorie/filtri selezionati (gratuito)</td></tr>
-      <tr><td>Avvisi di uscita</td><td>Beta: avvisi di uscita di un gioco (IGDB); se la data è sconosciuta — crea subito, completa dopo</td></tr>
+      <tr><td>Avvisi di uscita</td><td>Avvisi di uscita di un gioco (IGDB); se la data è sconosciuta — crea subito, completa dopo</td></tr>
     </tbody>
   </table>
 
@@ -88,7 +88,7 @@
   <ol>
     <li><strong>Canale</strong> — login o link twitch.tv / m.twitch.tv. Se hai già un avviso per quel canale, puoi modificarlo o crearne un altro.</li>
     <li><strong>Messaggio</strong> — modello con placeholder come <code>{username}</code>, <code>{game}</code>, <code>{name}</code>, <code>{game_description}</code>. Elenco completo: <a href="/placeholders?lang=it">placeholder</a>.</li>
-    <li><strong>Extra</strong> — seleziona ciò che ti serve: immagine, titolo pulito (rimuove @streamer e !comandi), parole da ignorare ⭐, invio ritardato ⭐, silenzia ripetizioni ⭐, elimina messaggi precedenti ⭐, fissa il messaggio fino a fine stream ⭐ (solo canale/gruppo), pulsanti URL personalizzati ⭐/🧪, pulsante chat, 🧪 «Pulsante promemoria» (solo stream in arrivo — pulsante con link a un avviso di inizio stream; attiva in Modalità beta), colore pulsanti (predefinito / blu / verde / rosso quando è attiva un’opzione pulsante), anteprima link. Una spunta attiva subito l’opzione — niente secondo Sì/No.</li>
+    <li><strong>Extra</strong> — seleziona ciò che ti serve: immagine, titolo pulito (rimuove @streamer e !comandi), parole da ignorare ⭐, invio ritardato ⭐, silenzia ripetizioni ⭐, elimina messaggi precedenti ⭐, fissa il messaggio fino a fine stream ⭐ (solo canale/gruppo), pulsanti URL personalizzati ⭐, pulsante chat, «Pulsante promemoria» (solo stream in arrivo — pulsante con link a un avviso di inizio stream), «Top donazioni» (fine stream, DonationAlerts), colore pulsanti (predefinito / blu / verde / rosso quando è attiva un’opzione pulsante), anteprima link. Una spunta attiva subito l’opzione — niente secondo Sì/No.</li>
     <li>Il bot chiede poi solo i passaggi che richiedono altri dati (copertina: anteprima stream ⬜️/✅, anteprima GIF ⭐, anteprima video ⭐, copertina gioco ⬜️/✅, oppure un tuo upload; minuti di ritardo/silenzio, ecc.).</li>
     <li><strong>Destinazione</strong> — chat privata o canale/gruppo. Per un canale/gruppo, aggiungi il bot e conferma la chat.</li>
   </ol>
@@ -108,7 +108,7 @@
     <li>attiva / disattiva;</li>
     <li>modifica (canale, testo, opzioni, destinazione);</li>
     <li>elimina;</li>
-    <li>condividi un link all’avviso (quando disponibile in modalità beta).</li>
+    <li>condividi un link all’avviso.</li>
   </ul>
   <p>Menu in basso: <strong>cestino</strong> (ripristino eliminati: 10 giorni gratis, 30 Premium) e <strong>metti in pausa tutti gli avvisi</strong>.</p>
 
@@ -117,7 +117,7 @@
 
   <h2 id="other">7. Altro</h2>
   <h3>👥 Follow/Unfollow</h3>
-  <p>Monitora nuovi Follow e Unfollow sul tuo canale (🧪 beta, ⭐ Premium). L’attivazione richiede OAuth Twitch; la sync gira una volta al giorno. Elenchi Follow / nuovi Follow e Unfollow (ultimi 30 giorni con data) / Unfollow e ricerca.</p>
+  <p>Monitora nuovi Follow e Unfollow sul tuo canale (⭐ Premium). L’attivazione richiede OAuth Twitch; la sync gira una volta al giorno. Elenchi Follow / nuovi Follow e Unfollow (ultimi 30 giorni con data) / Unfollow e ricerca.</p>
 
   <h3>💬 Avvisi whisper</h3>
   <p>Notifiche sui whisper Twitch in arrivo. La prima attivazione richiede OAuth Twitch.</p>
@@ -132,7 +132,7 @@
   <p>Ingresso: <strong>➕ Nuova iscrizione</strong> → tipo «Avviso di gioco» (sotto Drops). Una categoria Twitch → subito i filtri (tag, spettatori, lingua, escludi 18+ — casella, senza passo extra). Alla creazione dell’avviso — scegli <strong>tempo reale</strong> o <strong>digest orario</strong> (con paginazione «Mostra altri»). Se non c’è nulla in live — VOD recenti. Salva un filtro e intercetta nuovi stream (realtime: fino a 5 in un messaggio); elencato in una categoria propria in Le mie iscrizioni; <strong>✏️</strong> modifica tag / spettatori / lingua / escludi 18+ / modalità di consegna / frequenza in minuti per il realtime (predefinito 60, 0 = disattivata).</p>
 
   <h3>📅 Avvisi di uscita</h3>
-  <p>Beta: <strong>➕ Nuova iscrizione</strong> → «Avvisi di uscita» (sotto Avviso di gioco). Cerca un gioco nel database IGDB locale («Cerco giochi…»), scegli date/piattaforme e quanti giorni prima notificare (0 = il giorno dell’uscita). Se la data di uscita è sconosciuta, l’avviso viene creato comunque e completato quando la data appare nel database. Una iscrizione per gioco; limite gratuito condiviso di 5 attivi con tutti i tipi di avviso; dopo la notifica per ogni piattaforma selezionata l’avviso va in pausa (nota nel messaggio + pulsante «Elimina avviso»). L’editor può cambiare solo giorni e piattaforme. La condivisione (📤) è disponibile quando la beta condivisione-avvisi è attiva. Fonte dati: <a href="https://www.igdb.com">IGDB.com</a>.</p>
+  <p><strong>➕ Nuova iscrizione</strong> → «Avvisi di uscita» (sotto Avviso di gioco). Cerca un gioco nel database IGDB locale («Cerco giochi…»), scegli date/piattaforme e quanti giorni prima notificare (0 = il giorno dell’uscita). Se la data di uscita è sconosciuta, l’avviso viene creato comunque e completato quando la data appare nel database. Una iscrizione per gioco; limite gratuito condiviso di 5 attivi con tutti i tipi di avviso; dopo la notifica per ogni piattaforma selezionata l’avviso va in pausa (nota nel messaggio + pulsante «Elimina avviso»). L’editor può cambiare solo giorni e piattaforme. La condivisione (📤) è disponibile. Fonte dati: <a href="https://www.igdb.com">IGDB.com</a>.</p>
 
   <h3>💬 Chat</h3>
   <p>Mini App per leggere e scrivere nella chat dello stream Twitch. In Embed scrivi nel campo sotto la chat (dopo «Accedi a Twitch» in alto) — l’accesso Twitch dentro Telegram non funziona; «Semplice» è la vista leggera. Gratuito: lettura + fino a 20 messaggi/giorno; illimitato con Premium.</p>
@@ -140,12 +140,12 @@
   <h2 id="settings">8. Impostazioni e Premium</h2>
   <p><strong>⚙️ Impostazioni</strong> in genere include:</p>
   <ul>
-    <li><strong>⭐ Premium</strong> — prova di 7 giorni (una sola volta), piani Stars (mese / anno / a vita), funzioni à la carte, verifica abbonamento Twitch sul canale dello sviluppatore, canale Premium per streamer. In modalità beta: <strong>compra Premium in regalo</strong> (una tantum) → messaggio e immagine opzionali → link per un amico.</li>
+    <li><strong>⭐ Premium</strong> — prova di 7 giorni (una sola volta), piani Stars (mese / anno / a vita), funzioni à la carte, verifica abbonamento Twitch sul canale dello sviluppatore, canale Premium per streamer. <strong>compra Premium in regalo</strong> (una tantum) → messaggio e immagine opzionali → link per un amico.</li>
     <li><strong>Sincronizzazione</strong> — periodo di auto-sync dei follow oppure disattiva.</li>
     <li><strong>Notifiche di sistema</strong> — aggiornamenti bot, disponibilità, altre comunicazioni; stato Twitch.</li>
     <li><strong>Lingua</strong>, <strong>modalità avanzata</strong>, <strong>modalità beta</strong> (accesso anticipato).</li>
     <li><strong>Programma partner</strong> — link referral e una quota del Premium Stars degli invitati.</li>
-    <li><strong>Parole ignorate</strong> — elenco globale per gli avvisi; in beta — ignora generi/publisher/modalità via IGDB (quando «usa elenco globale» è attivo). Senza Premium dopo la fine della beta, l’ignore non si applica.</li>
+    <li><strong>Parole ignorate</strong> — elenco globale per gli avvisi; ignora generi/publisher/modalità via IGDB (quando «usa elenco globale» è attivo). Senza Premium l’ignore non si applica.</li>
   </ul>
   <p>Dopo un pagamento Stars riuscito il bot dice: «Premium attivato. Grazie!» e sotto — come contattare @immarfa con il tuo user ID se qualcosa non va.</p>
 

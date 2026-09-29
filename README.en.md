@@ -19,12 +19,12 @@
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
-| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (beta, IGDB) · game giveaways (beta, GamerPower + ITAD) |
+| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (beta, GamerPower + ITAD) |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+) → **realtime or hourly digest**; live → else VOD; own category in **📋 My subscriptions** |
-| 📅 Release alerts | Beta: **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform |
+| 📅 Release alerts | **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform |
 | 🎁 Game giveaways | Beta: **➕ New subscription** under Release alerts; stores + platforms (GamerPower + IsThereAnyDeal); cards 5 at a time (photo+caption, store / streams, “Show more”); new games as a short summary + “Details”; **Notify about giveaway** — wait for a free giveaway of a chosen game (IGDB platforms), then pause |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Cover | Optional alert cover — stream preview (frame, 30‑min refresh), stream GIF preview ⭐ (~30s autoplay MP4, 30‑min refresh), stream video preview ⭐ (~30s muted MP4, 30‑min refresh), game cover, **AI image** ⭐ (generated from the game description when the alert is sent; Advanced options), or your own photo; caption above or below; link preview then off |
@@ -32,12 +32,12 @@
 | Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks, “viewed all below”, **To unwatched** pagination jump |
-| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** (⭐ Premium / 🧪 beta), chat button, 🧪 remind about stream (upcoming), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button). DM alerts include a **⏸ Pause alert** button (disables that subscription without blocking the bot; not shown in groups/channels) |
-| Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share** (🧪 beta); **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed + Helix send / Simple IRC |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / delay / repeat mute / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** ⭐, chat button, remind about stream (upcoming), **top donations** (stream end: DonationAlerts), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button). DM alerts include a **⏸ Pause alert** button (disables that subscription without blocking the bot; not shown in groups/channels) |
+| Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share**; **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed + Helix send / Simple IRC |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
 | System alerts | Toggle admin broadcasts (updates / availability / other / sync / **new betas**, default off, auto-on on first beta opt-in); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
-| Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / 🧪 **gift** — see [Premium](#premium) |
+| Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR) |
@@ -54,7 +54,7 @@ Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the
 | Month | 100 | 30 days, auto-renew |
 | Year | 1000 | 365 days |
 | Lifetime | 2000 | permanent |
-| Gift (month / year / forever) | 100 / 1000 / 2000 | one-time, no renew; link for recipient (🧪 beta) |
+| Gift (month / year / forever) | 100 / 1000 / 2000 | one-time, no renew; link for recipient |
 | Single feature | 20 | 30 days each |
 | Streamer premium channel | 1500 | one-time for that channel |
 
@@ -63,14 +63,14 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Feature | What it unlocks |
 |---|---|
 | More than 5 active alerts | Removes the free-plan cap of 5 active alerts |
-| Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (beta: JSON catalog from twitchdrops.app with attribution, hourly digest, stream alerts up to 5 live with Drops-tag priority, description + game page link) |
+| Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (JSON catalog from twitchdrops.app with attribution, hourly digest, stream alerts up to 5 live with Drops-tag priority, description + game page link) |
 | Twitch follow auto-sync | Periodic import of new follows / removal of unfollows |
 | Advanced alert options | Ignore keywords, delayed send, repeat mute, delete previous, pin until stream ends, multistream (prefer GG/VK/YouTube online; send after 15 min anyway), AI cover from the game description on send, schedule stream cancel |
 | Twitch schedule tools | Publish slots, fix a day, vacation mode on Twitch |
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
-| Channel Follow/Unfollow (🧪 beta) | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days); after beta the section/lists stay available without Premium |
+| Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
 | Premium channel for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
@@ -118,7 +118,7 @@ Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
-3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, pin message until stream ends ⭐, custom URL buttons ⭐/🧪, chat button, 🧪 “Reminder button” (upcoming), **“Stream cancel” ⭐** (upcoming), **“Multistream” ⭐** (stream start: GoodGame / VK Play / YouTube links — prefer all online, send after 15 min anyway), button color (default / blue / green / red — shown when any button option is on), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
+3. **Extras** — checklist: image, clean title, ignore keywords ⭐, delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, pin message until stream ends ⭐, custom URL buttons ⭐, chat button, “Reminder button” (upcoming), **“Top donations”** (stream end, DonationAlerts), **“Stream cancel” ⭐** (upcoming), **“Multistream” ⭐** (stream start: GoodGame / VK Play / YouTube links — prefer all online, send after 15 min anyway), button color (default / blue / green / red — shown when any button option is on), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
 4. Cover (if checked) — `⬜️/✅ Stream preview` (Helix live frame, refreshed every 30 min), `⬜️/✅ Stream GIF preview ⭐` (~30s MP4 as autoplay animation, refreshed every 30 min; Advanced options), `⬜️/✅ Stream video preview ⭐` (~30s muted MP4 as video, refreshed every 30 min; Advanced options), `⬜️/✅ Use game cover`, `🎨 AI image ⭐` (from game description, generated when the alert is sent; Advanced options), or your own photo and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
@@ -127,9 +127,9 @@ Then the wizard (for stream start / category change / stream end):
 9. For channel or group — add the bot and confirm the chat
 10. Delete previous bot message? — if checked (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
 
-Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, 🧪 “Reminder button”, clean title, and image are free.
+Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, “Reminder button”, clean title, and image are free.
 
-For **upcoming stream**, after the channel and schedule check — template and settings (in beta, “Reminder button” — a button with a share link for a stream-start alert; optional “Stream cancel” ⭐ — separate template when a day’s schedule slots are removed without replacement), then reminder minutes and destination (no “do you want reminders?” ask).
+For **upcoming stream**, after the channel and schedule check — template and settings (“Reminder button” — a button with a share link for a stream-start alert; optional “Stream cancel” ⭐ — separate template when a day’s schedule slots are removed without replacement), then reminder minutes and destination (no “do you want reminders?” ask).
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
@@ -244,12 +244,12 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below”, **To unwatched** |
-| 📦 Other | Follow/Unfollow (beta; settings Premium), whisper alerts, schedule, what to watch (feeling lucky), chat |
+| 📦 Other | Follow/Unfollow (settings Premium), whisper alerts, schedule, what to watch (feeling lucky), chat |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
 | ↳ 🎲 What to watch? | Feeling lucky immediately; suggest again |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
-| ⚙️ Settings | Premium, sync, ignored words (🧪 IGDB categories in beta), system alerts, language, auth tokens, partner program |
+| ⚙️ Settings | Premium, sync, ignored words (incl. IGDB categories), system alerts, language, auth tokens, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
 | ↳ 🔑 Auth tokens | Separate buttons to revoke Twitch or DonationAlerts |
@@ -277,7 +277,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report (Mon 10:00 MSK): total users (parentheses = change vs the previous mailing), new users and Stars payers for the week, active trials. On the 1st at 10:00 MSK — the same for the previous calendar month.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / pin message / chat button / 🧪 remind about stream (upcoming) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

@@ -1577,7 +1577,7 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
 
 
 async def _scenario_wizard_top_donations(db) -> None:
-    """§2 Extras — top donations (end + beta): toggle, OAuth prompt, template step."""
+    """§2 Extras — top donations (end alert): toggle, OAuth prompt, template step."""
     from handlers.wizard import (
         _go_advanced_options_prompt,
         receive_advanced_options_next,
@@ -1586,7 +1586,7 @@ async def _scenario_wizard_top_donations(db) -> None:
         _wz,
     )
 
-    # Live alert: no top-donations row even with beta on.
+    # Live alert: no top-donations row.
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)

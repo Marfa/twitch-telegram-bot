@@ -63,7 +63,7 @@
       <tr><td>⬇️ Import subscriptions</td><td>Pull follows from Twitch</td></tr>
       <tr><td>📋 My subscriptions</td><td>List, toggle, edit, delete</td></tr>
       <tr><td>📜 Alert history</td><td>What the bot already sent</td></tr>
-      <tr><td>📦 Other</td><td>Follow/Unfollow (beta), whispers, schedule, What to watch (feeling lucky), chat</td></tr>
+      <tr><td>📦 Other</td><td>Follow/Unfollow, whispers, schedule, What to watch (feeling lucky), chat</td></tr>
       <tr><td>⚙️ Settings</td><td>Premium, sync, language, partner, …</td></tr>
       <tr><td>❓ Help</td><td>Contacts and this guide</td></tr>
     </tbody>
@@ -78,9 +78,9 @@
       <tr><td>Category change</td><td>Streamer switches game/category <span class="star">⭐ Premium</span></td></tr>
       <tr><td>Upcoming stream</td><td>Reminder N minutes before official Twitch schedule <span class="star">⭐</span></td></tr>
       <tr><td>Stream end</td><td>Stream went offline <span class="star">⭐</span></td></tr>
-      <tr><td>Drops</td><td>New drop campaigns for a chosen game <span class="star">⭐</span> (beta)</td></tr>
+      <tr><td>Drops</td><td>New drop campaigns for a chosen game <span class="star">⭐</span></td></tr>
       <tr><td>Game alert</td><td>New streams in selected categories/filters (free)</td></tr>
-      <tr><td>Release alerts</td><td>Beta: game release alerts (IGDB); if date unknown — create now, backfill later</td></tr>
+      <tr><td>Release alerts</td><td>Game release alerts (IGDB); if date unknown — create now, backfill later</td></tr>
       <tr><td>Game giveaways</td><td>Beta: free giveaway digest (GamerPower + IsThereAnyDeal) by store/platform; IGDB</td></tr>
     </tbody>
   </table>
@@ -89,7 +89,7 @@
   <ol>
     <li><strong>Channel</strong> — login or twitch.tv / m.twitch.tv link. If you already have an alert for that channel, you can edit it or create another.</li>
     <li><strong>Message</strong> — template with placeholders like <code>{username}</code>, <code>{game}</code>, <code>{name}</code>, <code>{game_description}</code>. Full list: <a href="/placeholders?lang=en">placeholders</a>.</li>
-    <li><strong>Extras</strong> — tick what you need: image, clean title (strips @streamers and !commands), ignore words ⭐, delayed send ⭐, repeat mute ⭐, delete previous messages ⭐, pin message until stream ends ⭐ (channel/group only), custom URL buttons ⭐/🧪, chat button, 🧪 “Reminder button” (upcoming only — button with a link to a stream-start alert; enable in Beta mode), button color (default / blue / green / red when any button option is on), link preview. A tick turns the option on — no second Yes/No.</li>
+    <li><strong>Extras</strong> — tick what you need: image, clean title (strips @streamers and !commands), ignore words ⭐, delayed send ⭐, repeat mute ⭐, delete previous messages ⭐, pin message until stream ends ⭐ (channel/group only), custom URL buttons ⭐, chat button, “Reminder button” (upcoming only — button with a link to a stream-start alert), “Top donations” (stream end, DonationAlerts), button color (default / blue / green / red when any button option is on), link preview. A tick turns the option on — no second Yes/No.</li>
     <li>The bot then asks only for steps that need extra input (cover: stream preview ⬜️/✅, stream GIF preview ⭐, stream video preview ⭐, game cover ⬜️/✅, or your own upload; delay/mute minutes, etc.).</li>
     <li><strong>Destination</strong> — DM or channel/group. For a channel/group, add the bot and confirm the chat.</li>
   </ol>
@@ -109,7 +109,7 @@
     <li>enable / disable;</li>
     <li>edit (channel, text, options, destination);</li>
     <li>delete;</li>
-    <li>share an alert link (when available in beta mode).</li>
+    <li>share an alert link.</li>
   </ul>
   <p>Lower menu: <strong>cart</strong> (restore deleted: 10 days free, 30 Premium) and <strong>pause all alerts</strong>.</p>
 
@@ -119,7 +119,7 @@
 
   <h2 id="other">7. Other</h2>
   <h3>👥 Follow/Unfollow</h3>
-  <p>Track new Follows and Unfollows on your channel (🧪 beta, ⭐ Premium). Enabling asks for Twitch OAuth; sync runs once a day. Follow / new Follow &amp; Unfollow (last 30 days with date) / Unfollow lists and search.</p>
+  <p>Track new Follows and Unfollows on your channel (⭐ Premium). Enabling asks for Twitch OAuth; sync runs once a day. Follow / new Follow &amp; Unfollow (last 30 days with date) / Unfollow lists and search.</p>
 
   <h3>💬 Whisper alerts</h3>
   <p>Notify you about incoming Twitch whispers. First enable requires Twitch OAuth.</p>
@@ -134,7 +134,7 @@
   <p>Entry: <strong>➕ New subscription</strong> → type “Game alert” (under Drops). One Twitch category → filters next (tags, viewers, language, exclude 18+ — checkbox, no extra step). When creating an alert — choose <strong>real-time</strong> or <strong>hourly digest</strong> (with “Show more” pagination). If nothing is live — recent VODs. Save a filter and catch new streams (realtime: up to 5 in one message); listed under its own category in My subscriptions; <strong>✏️</strong> edits tags / viewers / language / exclude 18+ / delivery mode / frequency in minutes for realtime (default 60, 0 = off).</p>
 
   <h3>📅 Release alerts</h3>
-  <p>Beta: <strong>➕ New subscription</strong> → “Release alerts” (under Game alert). Search a game in the local IGDB database (“Searching games…”), pick dates/platforms, and how many days before to notify (0 = on release day). If the release date is unknown, the alert is still created and filled in when the date appears in the database. One subscription per game; shared free active cap of 5 with all alert types; after notify for every selected platform the alert is paused (note in the message + “Delete alert” button). Editor can change only days and platforms. Share (📤) is available when the share-alerts beta is on. Data source: <a href="https://www.igdb.com">IGDB.com</a>.</p>
+  <p><strong>➕ New subscription</strong> → “Release alerts” (under Game alert). Search a game in the local IGDB database (“Searching games…”), pick dates/platforms, and how many days before to notify (0 = on release day). If the release date is unknown, the alert is still created and filled in when the date appears in the database. One subscription per game; shared free active cap of 5 with all alert types; after notify for every selected platform the alert is paused (note in the message + “Delete alert” button). Editor can change only days and platforms. Share (📤) is available. Data source: <a href="https://www.igdb.com">IGDB.com</a>.</p>
 
   <h3>🎁 Game giveaways</h3>
   <p>Beta: <strong>➕ New subscription</strong> → “Game giveaways” (under Release alerts). Pick stores and platforms (multi-select). When both are set, you get game cards right away (photo + caption; “Go to store” / “Find streams”; 5 at a time, “Show more”). New games arrive as a short list summary with a “Details” button. Sources: <a href="https://www.gamerpower.com">GamerPower.com</a>, <a href="https://isthereanydeal.com">IsThereAnyDeal.com</a>, <a href="https://www.igdb.com">IGDB.com</a>.</p>
@@ -145,12 +145,12 @@
   <h2 id="settings">8. Settings &amp; Premium</h2>
   <p><strong>⚙️ Settings</strong> typically includes:</p>
   <ul>
-    <li><strong>⭐ Premium</strong> — 7-day trial (once), Stars plans (month / year / lifetime), à la carte features, Twitch sub check on the developer channel, Premium channel for streamers. In beta mode: <strong>buy Premium as a gift</strong> (one-time) → optional message and image → link for a friend.</li>
+    <li><strong>⭐ Premium</strong> — 7-day trial (once), Stars plans (month / year / lifetime), à la carte features, Twitch sub check on the developer channel, Premium channel for streamers. <strong>buy Premium as a gift</strong> (one-time) → optional message and image → link for a friend.</li>
     <li><strong>Sync</strong> — follow auto-sync period or turn off.</li>
     <li><strong>System notifications</strong> — bot updates, availability, other broadcasts; Twitch status.</li>
     <li><strong>Language</strong>, <strong>advanced mode</strong>, <strong>beta mode</strong> (early access).</li>
     <li><strong>Partner program</strong> — referral link and a cut of invitees’ Stars Premium.</li>
-    <li><strong>Ignored words</strong> — global list for alerts; in beta — ignore genres/publishers/modes via IGDB (when “use global list” is on). Without Premium after beta ends, ignore does not apply.</li>
+    <li><strong>Ignored words</strong> — global list for alerts; ignore genres/publishers/modes via IGDB (when “use global list” is on). Without Premium, ignore does not apply.</li>
   </ul>
   <p>After a successful Stars payment the bot says: “Premium activated. Thank you!” and below that — how to contact @immarfa with your user ID if something goes wrong.</p>
 

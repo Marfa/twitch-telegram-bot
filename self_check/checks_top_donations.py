@@ -1,8 +1,10 @@
-"""Top donations (DonationAlerts) beta — format + wiring smoke."""
+"""Top donations (DonationAlerts) — format + wiring smoke."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from alert_settings import ALERT_SETTING_ORDER
 from donationalerts import (
@@ -17,6 +19,9 @@ from i18n import SUPPORTED_LOCALES, t
 
 def check_top_donations() -> None:
     assert BETA_FEATURE_ID == "top-donations"
+    data = json.loads(Path("beta/manifest.json").read_text(encoding="utf-8"))
+    feat = next(f for f in data["features"] if f["id"] == "top-donations")
+    assert feat["stage"] == "ga"
     assert "top_donations" in ALERT_SETTING_ORDER
     assert ALERT_SETTING_ORDER.index("top_donations") == ALERT_SETTING_ORDER.index(
         "live_remind"
