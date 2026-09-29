@@ -284,11 +284,19 @@ async def start_release_wizard(
     if update.callback_query:
         await update.callback_query.edit_message_text("✓")
         await context.bot.send_message(
-            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+            chat_id,
+            prompt,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
     else:
         await context.bot.send_message(
-            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+            chat_id,
+            prompt,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
     return _wz()["RELEASE_SEARCH"]
 
@@ -308,7 +316,9 @@ async def receive_release_game_text(
     query = (update.effective_message.text or "").strip()
     if not query:
         await update.effective_message.reply_text(
-            t("release_game_prompt", lang), parse_mode=ParseMode.HTML
+            t("release_game_prompt", lang),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
         return _wz()["RELEASE_SEARCH"]
     status = await update.effective_message.reply_text(

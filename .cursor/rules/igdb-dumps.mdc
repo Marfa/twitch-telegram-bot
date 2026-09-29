@@ -32,7 +32,7 @@ Personal data is excluded from “IGDB Services” in the Addendum — do not tr
 2. **Prefer local dumps** — propose storing/querying via `igdb_dumps` + DB instead of new live Apicalypse calls to `api.igdb.com`.
 3. **Reuse existing tables** when possible; if a new endpoint is required, add it to `_ENDPOINT_TABLE` in `igdb_dumps.py` (it joins the daily sync automatically).
 4. **Live IGDB API** only when dumps clearly cannot cover the need (write path, real-time-only field, etc.) — say so explicitly.
-5. **Attribution** — every new user-facing IGDB surface must use `igdb_attribution` (or the same wording + link). Keep Help `/feedback`, feature prompts, README/guide in sync. See also [`api-license-compliance.mdc`](api-license-compliance.mdc).
+5. **Attribution** — every new user-facing IGDB surface must use `igdb_attribution` (or the same wording + link). Keep Help `/feedback`, feature prompts, README/guide in sync. See also [`api-license-compliance.mdc`](api-license-compliance.mdc). Send/edit those Telegram messages with **`disable_web_page_preview=True`** (or `LinkPreviewOptions(is_disabled=True)`) so the IGDB link does not expand a preview.
 6. **Scope check** — feature must stay inside Permitted Purpose; no export/download of dumps for users; no third-party resale of metadata.
 
 ## Already on daily dumps

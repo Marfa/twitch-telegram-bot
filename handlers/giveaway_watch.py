@@ -283,11 +283,19 @@ async def start_giveaway_watch_wizard(
         except BadRequest:
             pass
         await context.bot.send_message(
-            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+            chat_id,
+            prompt,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
     else:
         await context.bot.send_message(
-            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+            chat_id,
+            prompt,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
     return _wz()["GIVEAWAY_WATCH_SEARCH"]
 
@@ -325,7 +333,9 @@ async def receive_giveaway_watch_game_text(
     query = (update.effective_message.text or "").strip()
     if not query:
         await update.effective_message.reply_text(
-            t("giveaway_watch_game_prompt", lang), parse_mode=ParseMode.HTML
+            t("giveaway_watch_game_prompt", lang),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
         return _wz()["GIVEAWAY_WATCH_SEARCH"]
     status = await update.effective_message.reply_text(
@@ -399,15 +409,26 @@ async def _after_game_chosen(
     if query:
         try:
             await query.edit_message_text(
-                text, reply_markup=markup, parse_mode=ParseMode.HTML
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
             )
         except BadRequest:
             await context.bot.send_message(
-                chat_id, text, reply_markup=markup, parse_mode=ParseMode.HTML
+                chat_id,
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
             )
     else:
         await context.bot.send_message(
-            chat_id, text, reply_markup=markup, parse_mode=ParseMode.HTML
+            chat_id,
+            text,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
     return _wz()["GIVEAWAY_WATCH_PLATFORMS"]
 
@@ -809,6 +830,7 @@ async def start_edit_giveaway_watch_platforms(
             game=html.escape(prefs.game_name),
         ),
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
         reply_markup=_platforms_keyboard(platforms, selected, lang),
     )
     return _wz()["GIVEAWAY_WATCH_PLATFORMS"]
@@ -929,7 +951,7 @@ async def _send_giveaway_watch_notify(
             chat_id,
             caption,
             parse_mode=ParseMode.HTML,
-            disable_web_page_preview=False,
+            disable_web_page_preview=True,
         )
         return True
     except Forbidden:
