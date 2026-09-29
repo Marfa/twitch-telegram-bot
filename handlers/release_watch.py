@@ -29,7 +29,7 @@ from db import (
     parse_release_watch_prefs,
 )
 from db.models import ReleasePlatformPref, ReleaseWatchPrefs, release_platform_key
-from i18n import DEFAULT_LOCALE, alert_dup_keyboard, btn, t
+from i18n import DEFAULT_LOCALE, alert_dup_keyboard, btn, igdb_attribution, t
 from igdb_dumps import igdb_image_url
 
 logger = logging.getLogger(__name__)
@@ -231,8 +231,7 @@ async def _send_game_card(
         caption = f"{body_html}\n\n{cap_sum}"
     game = db.igdb_game_by_id(game_id) or {}
     page_url = igdb_game_page_url(game.get("slug")) or "https://www.igdb.com"
-    igdb_attr = f'<a href="{html.escape(page_url, quote=True)}">IGDB.com</a>'
-    caption = f"{caption}\n\n{igdb_attr}"
+    caption = f"{caption}\n\n{igdb_attribution(lang, url=page_url)}"
     if footer_html:
         caption = f"{caption}\n\n{footer_html}"
     if len(caption) > 1024:
@@ -284,9 +283,13 @@ async def start_release_wizard(
     )
     if update.callback_query:
         await update.callback_query.edit_message_text("✓")
-        await context.bot.send_message(chat_id, prompt, reply_markup=markup)
+        await context.bot.send_message(
+            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+        )
     else:
-        await context.bot.send_message(chat_id, prompt, reply_markup=markup)
+        await context.bot.send_message(
+            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+        )
     return _wz()["RELEASE_SEARCH"]
 
 
@@ -304,7 +307,9 @@ async def receive_release_game_text(
         return ConversationHandler.END
     query = (update.effective_message.text or "").strip()
     if not query:
-        await update.effective_message.reply_text(t("release_game_prompt", lang))
+        await update.effective_message.reply_text(
+            t("release_game_prompt", lang), parse_mode=ParseMode.HTML
+        )
         return _wz()["RELEASE_SEARCH"]
     status = await update.effective_message.reply_text(
         t("release_game_searching", lang)

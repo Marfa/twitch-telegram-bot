@@ -252,9 +252,11 @@ def _check_card_html_caption_budget() -> None:
         summary="A & B <tag> " + ("word " * 400),
         cover_url="",
     )
+    from i18n import igdb_attribution
+
     footer = (
         '<a href="https://www.gamerpower.com">GamerPower</a> · '
-        '<a href="https://www.igdb.com">IGDB.com</a>'
+        + igdb_attribution("en")
     )
     body = _build_card_html(item, "en", footer=footer)
     assert len(body) <= 1024

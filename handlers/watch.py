@@ -32,6 +32,7 @@ from db import (
 )
 from i18n import (
     DEFAULT_LOCALE,
+    igdb_attribution,
     t,
     watch_cats_nav_keyboard,
     watch_cats_pick_keyboard,
@@ -720,6 +721,8 @@ async def _send_watch_suggestions(
             )
     else:
         text = t("watch_lucky_empty", lang)
+    if _watch_lucky_mode(context, user_id) and (streams or vods):
+        text = f"{text}\n\n{igdb_attribution(lang)}"
     markup = watch_suggest_keyboard(lang, offer_create_alerts=offer_create_alerts)
     if edit_message is not None:
         try:

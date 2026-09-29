@@ -1,5 +1,5 @@
 ---
-description: Prefer IGDB CSV data dumps over live API when building game-metadata features
+description: Prefer IGDB CSV data dumps over live API; commercial partner obligations
 alwaysApply: true
 ---
 
@@ -9,13 +9,31 @@ Partner dumps: [IGDB Data Dumps](https://api-docs.igdb.com/#data-dumps) (`GET /v
 
 Local sync lives in [`igdb_dumps.py`](igdb_dumps.py) → DB tables `igdb_*`. Job `igdb_dumps_sync` refreshes **all used endpoints** about once a day (`USED_ENDPOINTS` / `_ENDPOINT_TABLE`).
 
+## Commercial Usage Addendum (partner)
+
+Signed addendum to the [Twitch Developer Services Agreement](https://www.twitch.tv/p/legal/developer-agreement/). On conflict for IGDB Services, the Addendum wins. Keep these constraints when changing the bot:
+
+| Obligation | Rule for the product |
+|---|---|
+| **Permitted Purpose** | End-user features inside this Twitch → Telegram alerts bot only. Do not build a separate product that is “IGDB as a service”. |
+| **No independent monetization of IGDB** | Do **not** sell, license, or redistribute IGDB dumps / raw metadata as a dataset or paid API. Premium may charge for *our* bot features that *use* IGDB data — not for the data itself. |
+| **ClientID** | Access IGDB only with the partner Twitch app ClientID recorded in the Addendum (`TWITCH_CLIENT_ID` in env). Changing or adding ClientIDs requires **written notice** to Twitch before use. |
+| **Attribution (§4)** | On every user-facing surface that shows IGDB-sourced data (Telegram UI, guide, README, web), show credit **similar to** `Games metadata is powered by IGDB.com` linking to [IGDB.com](https://www.igdb.com). Shared helper: `i18n.igdb_attribution(lang)` / key `igdb_attribution`. Do not ship new IGDB UI without that credit. |
+| **Partner list** | Twitch may list our trade name/logo as an IGDB data partner — do not treat that as affiliation/endorsement copy in the bot. |
+| **Data contribution** | Current Addendum: N/A — do not invent a pipeline that uploads user/game datasets to Twitch unless a new Addendum says so. |
+| **Fees / term** | No fees under the Addendum; 1-year term with auto-renew; either party may terminate with 30 days’ notice. Contact email for IGDB notices: keep `biz@themarfa.name` (or update Twitch in writing if it changes). |
+| **After termination** | Already-collected IGDB data may still be used under §1 while the Twitch DSA remains in effect; **attribution still required** for commercial use of that data. |
+
+Personal data is excluded from “IGDB Services” in the Addendum — do not treat Helix/user PII as covered by this partner grant.
+
 ## When designing or extending a feature
 
 1. **Check the dump catalog** — does the needed entity exist as a dump endpoint (games, companies, genres, game_modes, covers, artworks, external_games, involved_companies, …)?
 2. **Prefer local dumps** — propose storing/querying via `igdb_dumps` + DB instead of new live Apicalypse calls to `api.igdb.com`.
 3. **Reuse existing tables** when possible; if a new endpoint is required, add it to `_ENDPOINT_TABLE` in `igdb_dumps.py` (it joins the daily sync automatically).
 4. **Live IGDB API** only when dumps clearly cannot cover the need (write path, real-time-only field, etc.) — say so explicitly.
-5. **Attribution** — user-facing IGDB data still needs credit to [IGDB.com](https://www.igdb.com) (Help /feedback, feature prompts, README/guide as appropriate). See [`api-license-compliance.mdc`](api-license-compliance.mdc).
+5. **Attribution** — every new user-facing IGDB surface must use `igdb_attribution` (or the same wording + link). Keep Help `/feedback`, feature prompts, README/guide in sync. See also [`api-license-compliance.mdc`](api-license-compliance.mdc).
+6. **Scope check** — feature must stay inside Permitted Purpose; no export/download of dumps for users; no third-party resale of metadata.
 
 ## Already on daily dumps
 

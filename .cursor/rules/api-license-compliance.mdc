@@ -37,4 +37,8 @@ Authority: [Twitch Developer Services Agreement](https://legal.twitch.com/legal/
 
 ## IGDB
 
-Prefer partner [CSV data dumps](https://api-docs.igdb.com/#data-dumps) over live Apicalypse for new game-metadata features — see [`igdb-dumps.mdc`](igdb-dumps.mdc). Keep user-facing attribution to IGDB.com.
+Prefer partner [CSV data dumps](https://api-docs.igdb.com/#data-dumps) over live Apicalypse for new game-metadata features — see [`igdb-dumps.mdc`](igdb-dumps.mdc) (includes **Commercial Usage Addendum** constraints: Permitted Purpose, no selling dumps, partner ClientID, attribution wording, termination survival).
+
+- Attribution copy (EN): `Games metadata is powered by IGDB.com` → link [IGDB.com](https://www.igdb.com); helper `i18n.igdb_attribution`
+- Do not redistribute IGDB metadata as a paid dataset; Premium = product features, not data resale
+- ClientID / partner contact email changes → written notice to Twitch (not only local `.env`)

@@ -28,7 +28,7 @@ from db import (
 from db.models import GiveawayPlatformPref, GiveawayWatchPrefs
 from giveaway_sources import GiveawayOffer
 from handlers.giveaways import catalog_entry_to_offer, ensure_giveaways_catalog
-from i18n import DEFAULT_LOCALE, btn, t
+from i18n import DEFAULT_LOCALE, btn, igdb_attribution, t
 from igdb_dumps import igdb_image_url
 
 logger = logging.getLogger(__name__)
@@ -282,9 +282,13 @@ async def start_giveaway_watch_wizard(
             await update.callback_query.edit_message_text("✓")
         except BadRequest:
             pass
-        await context.bot.send_message(chat_id, prompt, reply_markup=markup)
+        await context.bot.send_message(
+            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+        )
     else:
-        await context.bot.send_message(chat_id, prompt, reply_markup=markup)
+        await context.bot.send_message(
+            chat_id, prompt, reply_markup=markup, parse_mode=ParseMode.HTML
+        )
     return _wz()["GIVEAWAY_WATCH_SEARCH"]
 
 
@@ -321,7 +325,7 @@ async def receive_giveaway_watch_game_text(
     query = (update.effective_message.text or "").strip()
     if not query:
         await update.effective_message.reply_text(
-            t("giveaway_watch_game_prompt", lang)
+            t("giveaway_watch_game_prompt", lang), parse_mode=ParseMode.HTML
         )
         return _wz()["GIVEAWAY_WATCH_SEARCH"]
     status = await update.effective_message.reply_text(
@@ -905,8 +909,7 @@ async def _send_giveaway_watch_notify(
     )
     body = f"{body}\n\n{t('giveaway_watch_paused_note', lang)}"
     cover_mid = db.igdb_cover_image_id_for_game(prefs.igdb_game_id)
-    igdb_attr = '<a href="https://www.igdb.com">IGDB.com</a>'
-    caption = f"{body}\n\n{igdb_attr}"
+    caption = f"{body}\n\n{igdb_attribution(lang)}"
     if len(caption) > 1024:
         caption = caption[:1020] + "…"
     try:

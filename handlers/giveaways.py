@@ -26,7 +26,7 @@ from giveaway_sources import (
     claim_url_or_search,
     fetch_active_giveaways,
 )
-from i18n import DEFAULT_LOCALE, t
+from i18n import DEFAULT_LOCALE, igdb_attribution, t
 from igdb_dumps import igdb_image_url
 
 logger = logging.getLogger(__name__)
@@ -547,8 +547,7 @@ async def _send_cards_batch(
     used_gp = any(e.source == "gamerpower" for e in entries)
     used_itad = any(e.source == "itad" for e in entries)
     attr = attribution_html(used_gp=used_gp, used_itad=used_itad)
-    igdb_attr = '<a href="https://www.igdb.com">IGDB.com</a>'
-    footer = " · ".join(p for p in (attr, igdb_attr) if p)
+    footer = " · ".join(p for p in (attr, igdb_attribution(lang)) if p)
     items = [_enriched_from_catalog(db, e, lang) for e in chunk]
     for idx, item in enumerate(items):
         is_last = idx == len(items) - 1

@@ -59,6 +59,15 @@ def t(key: str, lang: str, **kwargs: object) -> str:
     return text.format(**kwargs) if kwargs else text
 
 
+_IGDB_HOME_URL = "https://www.igdb.com"
+
+
+def igdb_attribution(lang: str, *, url: str | None = None) -> str:
+    """User-facing IGDB credit (IGDB Commercial Usage Addendum §4)."""
+    href = (url or _IGDB_HOME_URL).strip() or _IGDB_HOME_URL
+    return t("igdb_attribution", lang, url=html.escape(href, quote=True))
+
+
 def _plural_form(n: int, lang: str) -> str:
     """Return one|few|many for locale plural rules (en/it: one vs many; ru/uk: Slavic)."""
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE

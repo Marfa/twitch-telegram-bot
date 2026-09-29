@@ -2468,6 +2468,18 @@ def check_core() -> None:
         assert "<code>42</code>" in feedback
         assert "@immarfa" in feedback
         assert "igdb.com" in feedback.lower()
+        from i18n import igdb_attribution
+
+        attr = igdb_attribution(loc)
+        assert "igdb.com" in attr.lower()
+        assert 'href="https://www.igdb.com"' in attr
+        if loc == "en":
+            assert "powered by" in feedback.lower()
+            assert "powered by" in attr.lower()
+        elif loc == "ru":
+            assert "метаданные игр" in feedback.lower()
+            assert "метаданные игр" in attr.lower()
+        assert "powered by" in tr("igdb_attribution", "en", url="https://www.igdb.com").lower()
         assert "bot_version" not in feedback
         assert "Версия бота" not in feedback
         assert "Bot version" not in feedback
