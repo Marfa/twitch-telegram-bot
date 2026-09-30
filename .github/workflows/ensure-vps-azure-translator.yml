@@ -1,0 +1,77 @@
+name: Ensure VPS Azure Translator env
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vps-azure-translator-env
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upsert Azure Translator keys on VPS and recreate bot
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          AZURE_TRANSLATOR_KEY: ${{ secrets.AZURE_TRANSLATOR_KEY }}
+          AZURE_TRANSLATOR_REGION: ${{ secrets.AZURE_TRANSLATOR_REGION }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          envs: AZURE_TRANSLATOR_KEY,AZURE_TRANSLATOR_REGION
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            test -f .env
+
+            if [[ -z "${AZURE_TRANSLATOR_KEY:-}" || -z "${AZURE_TRANSLATOR_REGION:-}" ]]; then
+              echo "ERROR: AZURE_TRANSLATOR_KEY/REGION secrets are empty" >&2
+              exit 1
+            fi
+
+            python3 - <<'PY'
+            import os
+            import pathlib
+            import re
+
+            key = os.environ["AZURE_TRANSLATOR_KEY"].strip()
+            region = os.environ["AZURE_TRANSLATOR_REGION"].strip()
+            if not key or not region:
+                raise SystemExit("AZURE_TRANSLATOR_KEY/REGION empty")
+            path = pathlib.Path(".env")
+            text = path.read_text(encoding="utf-8")
+            updates = {
+                "AZURE_TRANSLATOR_KEY": key,
+                "AZURE_TRANSLATOR_REGION": region,
+            }
+            for name, value in updates.items():
+                line = f"{name}={value}"
+                if re.search(rf"^{name}=", text, flags=re.M):
+                    text = re.sub(rf"^{name}=.*$", line, text, count=1, flags=re.M)
+                else:
+                    text = text.rstrip("\n") + "\n" + line + "\n"
+            path.write_text(text, encoding="utf-8")
+            print(
+                f"AZURE_TRANSLATOR_KEY set (len={len(key)} prefix={key[:4]}); "
+                f"REGION={region}"
+            )
+            PY
+
+            docker compose -f compose.vps.yml up -d --no-deps --force-recreate bot
+            for i in $(seq 1 30); do
+              if curl -fsS --connect-timeout 2 --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                echo "health ok"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "WARNING: health not ready" >&2
+            docker compose -f compose.vps.yml logs --tail=40 bot || true
+            exit 1

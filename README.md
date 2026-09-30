@@ -335,7 +335,10 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `PUBLIC_BASE_URL` | Публичный HTTPS origin: OAuth (`…/oauth/twitch/callback`), плейсхолдеры (`…/placeholders`), [инструкция](https://bot.themarfa.name/guide?lang=ru) (`…/guide`). Прод: `https://bot.themarfa.name` |
 | `TOKEN_ENCRYPTION_KEY` | Опционально: Fernet-ключ для refresh token (иначе из `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Порт health/OAuth (по умолчанию 8080) |
-| `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя |
+| `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя (основной) |
+| `AZURE_TRANSLATOR_KEY` | Fallback при исчерпании квоты DeepL (HTTP 456) |
+| `AZURE_TRANSLATOR_REGION` | Регион ресурса Azure Translator (`northeurope`, `eastus`, …) |
+| `AZURE_TRANSLATOR_ENDPOINT` | Опционально; по умолчанию global Translator API |
 | `ISTHEREANYDEAL_API_KEY` | (опц.) IsThereAnyDeal — раздачи игр; без ключа работает только GamerPower |
 | `YOUTUBE_API_KEY` | (опц.) YouTube Data API v3 — проверка онлайн для Мультистрима (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Интервал обновления превью/MP4 на эфире (по умолчанию 1800) |
@@ -392,7 +395,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `beta.py` | Бета-каталог (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Флаг админского демо-режима (free UX + сброс демо-подписок) |
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
-| `translate.py` | DeepL для админ-рассылок |
+| `translate.py` | DeepL для админ-рассылок; при квоте 456 — Azure Translator |
 | `links.py` | Парсинг `t.me/c/…/тема` |
 | `health.py` | `/health` (DB ping + freshness `check_streams`), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 

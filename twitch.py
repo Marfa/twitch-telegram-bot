@@ -1987,7 +1987,7 @@ class TwitchClient:
 def localize_igdb_summary(
     summary: str, lang: str, db: Any | None = None
 ) -> str:
-    """IGDB summaries are US English; translate for non-en bot locales when DeepL is set."""
+    """IGDB summaries are US English; translate for non-en bot locales when a translator is set."""
     import html as _html
 
     text = (summary or "").strip()
@@ -1998,9 +1998,13 @@ def localize_igdb_summary(
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     if locale == "en":
         return _html.unescape(text)
-    from config import DEEPL_API_KEY
+    from config import (
+        AZURE_TRANSLATOR_KEY,
+        AZURE_TRANSLATOR_REGION,
+        DEEPL_API_KEY,
+    )
 
-    if not DEEPL_API_KEY:
+    if not DEEPL_API_KEY and not (AZURE_TRANSLATOR_KEY and AZURE_TRANSLATOR_REGION):
         return _html.unescape(text)
     cache_key = (text, locale)
     cached = _IGDB_SUMMARY_TR_CACHE.get(cache_key)

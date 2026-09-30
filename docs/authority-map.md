@@ -54,5 +54,6 @@ Add a GA feature registry only if you introduce gradual rollout or automated dep
 | Twitch Helix / EventSub / OAuth | Stream state, follows, schedule |
 | PostgreSQL (VPS) | Production user state |
 | PostHog | Usage analytics, error tracking |
-| DeepL | Optional admin broadcast translation |
+| DeepL | Optional admin broadcast translation (primary) |
+| Azure Translator | Fallback when DeepL quota (HTTP 456) is exhausted |
 | Groq / Hugging Face | Optional «Мне повезёт» templates |

@@ -335,7 +335,10 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `PUBLIC_BASE_URL` | Public HTTPS origin: OAuth (`…/oauth/twitch/callback`), placeholders (`…/placeholders`), [user guide](https://bot.themarfa.name/guide?lang=en) (`…/guide`). Prod: `https://bot.themarfa.name` |
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
-| `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
+| `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language (primary) |
+| `AZURE_TRANSLATOR_KEY` | Fallback when DeepL quota is exhausted (HTTP 456) |
+| `AZURE_TRANSLATOR_REGION` | Azure Translator resource region (`northeurope`, `eastus`, …) |
+| `AZURE_TRANSLATOR_ENDPOINT` | Optional; default is the global Translator API |
 | `ISTHEREANYDEAL_API_KEY` | (opt.) IsThereAnyDeal game giveaways; without it only GamerPower is used |
 | `YOUTUBE_API_KEY` | (opt.) YouTube Data API v3 — Multistream live checks (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Preview/MP4 refresh interval while live (default 1800) |
@@ -392,7 +395,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `beta.py` | Beta catalog (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
-| `translate.py` | DeepL for admin broadcasts |
+| `translate.py` | DeepL for admin broadcasts; Azure Translator on DeepL quota 456 |
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/health` (DB ping + `check_streams` freshness), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 

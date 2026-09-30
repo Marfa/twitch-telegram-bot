@@ -1220,10 +1220,16 @@ def check_db_premium() -> None:
     # Plain text must not force DeepL HTML mode (avoids &#x27; in alerts).
     from unittest.mock import MagicMock, patch
 
+    import translate as translate_mod
+
+    translate_mod._deepl_quota_exhausted = False
     with patch("translate.DEEPL_API_KEY", "test-key"), patch(
+        "translate.AZURE_TRANSLATOR_KEY", ""
+    ), patch("translate.AZURE_TRANSLATOR_REGION", ""), patch(
         "translate.requests.post"
     ) as post:
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"translations": [{"text": "привет"}]}
         post.return_value = mock_resp
@@ -1238,6 +1244,39 @@ def check_db_premium() -> None:
         )
         sent_html = post.call_args.kwargs["data"]
         assert sent_html.get("tag_handling") == "html"
+
+    # DeepL 456 → sticky fallback to Azure Translator.
+    translate_mod._deepl_quota_exhausted = False
+    with patch("translate.DEEPL_API_KEY", "test-key"), patch(
+        "translate.AZURE_TRANSLATOR_KEY", "azure-key"
+    ), patch("translate.AZURE_TRANSLATOR_REGION", "northeurope"), patch(
+        "translate.requests.post"
+    ) as post:
+        deepl_resp = MagicMock()
+        deepl_resp.status_code = 456
+        deepl_resp.text = "Quota exceeded"
+        azure_resp = MagicMock()
+        azure_resp.status_code = 200
+        azure_resp.is_error = False
+        azure_resp.raise_for_status = MagicMock()
+        azure_resp.json.return_value = [
+            {"translations": [{"text": "привет azure", "to": "ru"}]}
+        ]
+        post.side_effect = [deepl_resp, azure_resp]
+        assert (
+            translate_text("hello", target_lang="ru", source_lang="en")
+            == "привет azure"
+        )
+        assert translate_mod._deepl_quota_exhausted is True
+        assert post.call_count == 2
+        # Second call skips DeepL (sticky) and goes straight to Azure.
+        post.side_effect = [azure_resp]
+        assert (
+            translate_text("hello", target_lang="ru", source_lang="en")
+            == "привет azure"
+        )
+        assert post.call_count == 3
+    translate_mod._deepl_quota_exhausted = False
     from twitch import localize_igdb_summary, _IGDB_SUMMARY_TR_CACHE
 
     with patch("config.DEEPL_API_KEY", "x"), patch(
