@@ -1248,9 +1248,9 @@ def check_db_premium() -> None:
 
     # DeepL 456 → sticky fallback to Azure Translator.
     translate_mod._deepl_quota_exhausted = False
-    with patch("translate.DEEPL_API_KEY", "test-key"), patch(
-        "translate.AZURE_TRANSLATOR_KEY", "azure-key"
-    ), patch("translate.AZURE_TRANSLATOR_REGION", "northeurope"), patch(
+    with patch("config.DEEPL_API_KEY", "test-key"), patch(
+        "config.AZURE_TRANSLATOR_KEY", "azure-key"
+    ), patch("config.AZURE_TRANSLATOR_REGION", "northeurope"), patch(
         "translate.requests.post"
     ) as post:
         deepl_resp = MagicMock()
@@ -1258,7 +1258,7 @@ def check_db_premium() -> None:
         deepl_resp.text = "Quota exceeded"
         azure_resp = MagicMock()
         azure_resp.status_code = 200
-        azure_resp.is_error = False
+        azure_resp.ok = True
         azure_resp.raise_for_status = MagicMock()
         azure_resp.json.return_value = [
             {"translations": [{"text": "привет azure", "to": "ru"}]}
