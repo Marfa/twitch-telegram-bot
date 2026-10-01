@@ -7833,6 +7833,40 @@ owner_id, twitch_username, twitch_user_id,
                 devs.append(name)
         return (", ".join(pubs), ", ".join(devs))
 
+    def igdb_genre_names_for_game(self, game_id: int) -> list[str]:
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return []
+        with self._conn() as conn:
+            game = conn.execute(
+                "SELECT genres FROM igdb_games WHERE id = ?",
+                (gid,),
+            ).fetchone()
+            if not game:
+                return []
+            ids = [
+                int(x)
+                for x in str(game["genres"] or "").split(",")
+                if x.strip().isdigit()
+            ]
+            if not ids:
+                return []
+            placeholders = ",".join("?" * len(ids))
+            rows = conn.execute(
+                f"""
+                SELECT name FROM igdb_genres
+                WHERE id IN ({placeholders}) AND TRIM(name) != ''
+                ORDER BY name COLLATE NOCASE ASC
+                """,
+                ids,
+            ).fetchall()
+        out: list[str] = []
+        for r in rows:
+            name = str(r["name"] or "").strip()
+            if name and name not in out:
+                out.append(name)
+        return out
+
     def igdb_company_labels_for_twitch_uids(
         self, twitch_uids: list[str]
     ) -> dict[str, str]:

@@ -1405,6 +1405,7 @@ async def _scenario_wizard_alert_type_other(db) -> None:
     assert btn("follow_monitor", "ru") in labels
     assert btn("whisper_alerts", "ru") in labels
     assert btn("chat", "ru") in labels
+    assert btn("game_info", "ru") in labels
     assert btn("wizard_back", "ru") in labels
     assert btn("wizard_cancel", "ru") not in labels
     cap.assert_turn("wizard_alert_type_other")
@@ -1427,6 +1428,43 @@ async def _scenario_wizard_alert_type_other(db) -> None:
     cap.assert_turn("wizard_alert_type_other_back")
     assert markup_has_escape_hatch(new_sub_other_keyboard("ru"))
     assert markup_has_escape_hatch(alert_type_keyboard("ru", show_drops=True))
+
+
+async def _scenario_other_game_info(db) -> None:
+    """§1.4 Other → Game info — search prompt with Cancel; pick Cancel ends."""
+    from handlers.game_info import (
+        cancel_game_info_callback,
+        start_game_info,
+        _wz,
+    )
+    from telegram.ext import ConversationHandler
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("game_info", "ru"), cap)
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
+    state = await start_game_info(update, ctx)
+    assert state == _wz()["GAME_INFO_SEARCH"]
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "ginfo:cancel"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    cap.assert_turn("other_game_info_search")
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "ginfo:cancel", cap)
+    update.effective_message = query.message
+    state = await cancel_game_info_callback(update, ctx)
+    assert state == ConversationHandler.END
+    cap.assert_turn("other_game_info_cancel")
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:
@@ -3025,6 +3063,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_release_notify_delete(db)
         await _scenario_wizard_giveaways_hub(db)
         await _scenario_wizard_alert_type_other(db)
+        await _scenario_other_game_info(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_top_donations(db)
         await _scenario_wizard_button_style(db)

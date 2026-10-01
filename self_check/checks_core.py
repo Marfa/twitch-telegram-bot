@@ -1284,7 +1284,8 @@ def check_core() -> None:
         assert [[b.text for b in row] for row in other_kb] == [
             [btn("follow_monitor", loc), btn("whisper_alerts", loc)],
             [btn("create_schedule", loc), btn("watch", loc)],
-            [btn("chat", loc), btn("back", loc)],
+            [btn("chat", loc), btn("game_info", loc)],
+            [btn("back", loc)],
         ]
         for i, row in enumerate(other_kb):
             if i == len(other_kb) - 1 and len(row) == 1:

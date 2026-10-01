@@ -312,7 +312,15 @@ def subscriptions_menu(
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
-    keys = ["follow_monitor", "whisper_alerts", "create_schedule", "watch", "chat", "back"]
+    keys = [
+        "follow_monitor",
+        "whisper_alerts",
+        "create_schedule",
+        "watch",
+        "chat",
+        "game_info",
+        "back",
+    ]
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
     return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
 
@@ -1834,7 +1842,14 @@ def alert_type_keyboard(
 
 def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
     """Other features from New subscription (§2.1); Back returns to alert type."""
-    keys = ["follow_monitor", "whisper_alerts", "create_schedule", "watch", "chat"]
+    keys = [
+        "follow_monitor",
+        "whisper_alerts",
+        "create_schedule",
+        "watch",
+        "chat",
+        "game_info",
+    ]
     buttons = [
         InlineKeyboardButton(btn(k, lang), callback_data=f"new_sub_other:{k}")
         for k in keys

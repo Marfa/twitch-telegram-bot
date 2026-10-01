@@ -146,7 +146,8 @@ def _tr_azure_once(
         json=[{"Text": text}],
         timeout=_AZURE_TIMEOUT,
     )
-    if response.is_error:
+    # requests.Response has .ok, not httpx-style .is_error
+    if not response.ok:
         logger.error(
             "azure translate → %s %s",
             response.status_code,

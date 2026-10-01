@@ -29,7 +29,7 @@ from db import (
     parse_release_watch_prefs,
 )
 from db.models import ReleasePlatformPref, ReleaseWatchPrefs, release_platform_key
-from i18n import DEFAULT_LOCALE, alert_dup_keyboard, btn, igdb_attribution, t
+from i18n import DEFAULT_LOCALE, alert_dup_keyboard, btn, t
 from igdb_dumps import igdb_image_url
 
 logger = logging.getLogger(__name__)
@@ -216,26 +216,38 @@ async def _send_game_card(
     game_id: int,
     game_name: str,
     summary: str,
-    body_html: str,
+    body_html: str | None = None,
     lang: str = DEFAULT_LOCALE,
     reply_markup: InlineKeyboardMarkup | None = None,
     footer_html: str = "",
 ) -> None:
-    from twitch import igdb_game_page_url, localize_igdb_summary
+    from twitch import igdb_game_page_url
+
+    from game_card import (
+        attribution_footer,
+        build_game_card_html,
+        fields_from_igdb,
+    )
 
     cover_mid = db.igdb_cover_image_id_for_game(game_id)
-    caption = body_html
-    localized = localize_igdb_summary(summary, lang, db=db) if summary else ""
-    if localized:
-        cap_sum = html.escape(localized[:800])
-        caption = f"{body_html}\n\n{cap_sum}"
     game = db.igdb_game_by_id(game_id) or {}
     page_url = igdb_game_page_url(game.get("slug")) or "https://www.igdb.com"
-    caption = f"{caption}\n\n{igdb_attribution(lang, url=page_url)}"
-    if footer_html:
-        caption = f"{caption}\n\n{footer_html}"
-    if len(caption) > 1024:
-        caption = caption[:1020] + "…"
+    attr = attribution_footer(lang, page_url=page_url)
+    footer = "\n\n".join(p for p in (attr, footer_html) if p)
+    if body_html:
+        # Legacy one-liner callers (notify header) — keep as prefix above card.
+        fields = fields_from_igdb(
+            db, game_id, lang=lang, name=game_name, summary=summary
+        )
+        card = build_game_card_html(fields, lang, footer=footer)
+        caption = f"{body_html}\n\n{card}"
+        if len(caption) > 1024:
+            caption = build_game_card_html(fields, lang, footer=footer)
+    else:
+        fields = fields_from_igdb(
+            db, game_id, lang=lang, name=game_name, summary=summary
+        )
+        caption = build_game_card_html(fields, lang, footer=footer)
     if cover_mid:
         url = igdb_image_url(cover_mid)
         try:
@@ -503,11 +515,6 @@ async def _continue_release_with_game(
         await context.bot.send_message(chat_id, t("release_days_prompt", lang))
         return _wz()["RELEASE_DAYS"]
     if not future:
-        body = t(
-            "release_already_out",
-            lang,
-            game=html.escape(name),
-        )
         if query:
             try:
                 await query.edit_message_text("✓")
@@ -530,7 +537,7 @@ async def _continue_release_with_game(
             game_id=game_id,
             game_name=name,
             summary=summary,
-            body_html=body,
+            body_html=None,
             lang=lang,
             reply_markup=find_kb,
         )
@@ -1105,14 +1112,14 @@ async def _send_release_notify(
     )
     all_out = all(int(p.date) <= now for p in due)
     if all_out:
-        body = t(
+        header = t(
             "release_notify_out",
             lang,
             game=html.escape(prefs.game_name),
             platforms=platforms_txt,
         )
     else:
-        body = t(
+        header = t(
             "release_notify_soon",
             lang,
             game=html.escape(prefs.game_name),
@@ -1131,7 +1138,7 @@ async def _send_release_notify(
             game_id=prefs.igdb_game_id,
             game_name=prefs.game_name,
             summary=summary,
-            body_html=body,
+            body_html=header,
             lang=lang,
             reply_markup=markup,
             footer_html=footer,

@@ -211,6 +211,7 @@ def group_setup_menu_filter():
             | _btn_filter("admin_withdrawals")
             | _btn_filter("new")
             | _btn_filter("watch")
+            | _btn_filter("game_info")
             | _btn_filter("create_schedule")
             | _btn_filter("language")
             | _btn_filter("sys_notifications")

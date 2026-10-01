@@ -249,6 +249,7 @@ def _check_card_html_caption_budget() -> None:
         year="2020",
         publisher="Pub & Co",
         developer="Dev <Ltd>",
+        genre="Action",
         summary="A & B <tag> " + ("word " * 400),
         cover_url="",
     )
@@ -260,10 +261,34 @@ def _check_card_html_caption_budget() -> None:
     )
     body = _build_card_html(item, "en", footer=footer)
     assert len(body) <= 1024
-    assert body.count("<b>") == body.count("</b>") == 1
+    assert body.count("<b>") == body.count("</b>")
+    assert body.count("<b>") >= 6  # title + genre + pub + dev + platforms + dates
+    assert "Genre:" in body or "<b>Genre:</b>" in body
+    assert "Giveaway dates:" in body
+    assert body.index("Platforms:") < body.index("Giveaway dates:")
+    assert "\n\n<b>Giveaway dates:" in body or "\n\n<b>Giveaway dates:</b>" in body
     assert body.count("<a ") == body.count("</a>")
     assert "<tag>" not in body
     assert "&amp;" in body or "Game" in body
+
+
+def _check_unified_card_dates_after_platforms() -> None:
+    from game_card import GameCardFields, build_game_card_html
+
+    fields = GameCardFields(
+        name="Test",
+        genre="RPG",
+        publisher="P",
+        developer="D",
+        platforms="PC",
+        dates="2024-01-01",
+        dates_key="game_card_release_dates",
+        summary="Hi",
+    )
+    body = build_game_card_html(fields, "en")
+    assert "<b>Genre:</b>" in body
+    assert body.index("Platforms:") < body.index("Release dates:")
+    assert "\n\n<b>Release dates:</b>" in body
 
 
 def run() -> None:
@@ -276,6 +301,7 @@ def run() -> None:
     _check_first_digest_unlocks_fresh_flag()
     _check_card_keyboard()
     _check_card_html_caption_budget()
+    _check_unified_card_dates_after_platforms()
     _check_beta_manifest()
     # unused mock keeps import for future handler tests
     _ = MagicMock

@@ -940,6 +940,7 @@ async def receive_new_sub_other(
     import beta as beta_features
     from handlers.drops import DROPS_BETA_ID
     from handlers.follow_monitor import open_follow_monitor_menu
+    from handlers.game_info import start_game_info
     from handlers.settings import open_stream_chat, open_whisper_alerts_menu
     from handlers.stream_schedule import start_stream_schedule
     from handlers.watch import start_watch_lucky
@@ -977,6 +978,7 @@ async def receive_new_sub_other(
         "create_schedule",
         "watch",
         "chat",
+        "game_info",
     ):
         markup = new_sub_other_keyboard(lang)
         await query.edit_message_reply_markup(reply_markup=markup)
@@ -994,6 +996,8 @@ async def receive_new_sub_other(
         return ConversationHandler.END
     if action == "watch":
         return await start_watch_lucky(update, context)
+    if action == "game_info":
+        return await start_game_info(update, context)
     return await start_stream_schedule(update, context)
 
 async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
