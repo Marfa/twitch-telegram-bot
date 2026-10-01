@@ -19,13 +19,13 @@
 |---|---|
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
-| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (beta, GamerPower + ITAD) |
+| Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (GamerPower + ITAD) |
 | Destinations | DM or channel/group/community (with topics) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+) → **realtime or hourly digest**; live → else VOD; own category in **📋 My subscriptions** |
 | 📅 Release alerts | **➕ New subscription** under Game alert; local IGDB search; dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform |
-| 🎁 Game giveaways | Beta: **➕ New subscription** under Release alerts; stores + platforms (GamerPower + IsThereAnyDeal); cards 5 at a time (photo+caption, store / streams, “Show more”); new games as a short summary + “Details”; **Notify about giveaway** — wait for a free giveaway of a chosen game (IGDB platforms), then pause |
+| 🎁 Game giveaways | **➕ New subscription** under Release alerts; stores + platforms (GamerPower + IsThereAnyDeal); cards 5 at a time (photo+caption, store / streams, “Show more”); new games as a short summary + “Details”; **Notify about giveaway** — wait for a free giveaway of a chosen game (IGDB platforms), then pause |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Cover | Optional alert cover — stream preview (frame, 30‑min refresh), stream GIF preview ⭐ (~30s autoplay MP4, 30‑min refresh), stream video preview ⭐ (~30s muted MP4, 30‑min refresh), game cover, **AI image** ⭐ (generated from the game description when the alert is sent; Advanced options), or your own photo; caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |

@@ -1,4 +1,4 @@
-"""Game giveaways digest (GamerPower + ITAD) — beta giveaways-alerts."""
+"""Game giveaways digest (GamerPower + ITAD)."""
 from __future__ import annotations
 
 import asyncio

@@ -270,7 +270,7 @@ def _check_beta_manifest() -> None:
     ids = {f["id"] for f in data["features"]}
     assert "giveaways-alerts" in ids
     feat = next(f for f in data["features"] if f["id"] == "giveaways-alerts")
-    assert feat["stage"] == "beta"
+    assert feat["stage"] == "ga"
     assert "premium_feature_id" not in feat
 
 
