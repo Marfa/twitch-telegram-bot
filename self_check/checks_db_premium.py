@@ -1220,19 +1220,20 @@ def check_db_premium() -> None:
     # Plain text must not force DeepL HTML mode (avoids &#x27; in alerts).
     from unittest.mock import MagicMock, patch
 
-    import translate as translate_mod
-
-    translate_mod._deepl_quota_exhausted = False
-    with patch("translate.DEEPL_API_KEY", "test-key"), patch(
-        "translate.AZURE_TRANSLATOR_KEY", ""
-    ), patch("translate.AZURE_TRANSLATOR_REGION", ""), patch(
+    with patch("config.DEEPL_API_KEY", "test-key"), patch(
+        "config.AZURE_TRANSLATOR_KEY", ""
+    ), patch("config.AZURE_TRANSLATOR_REGION", ""), patch(
         "translate.requests.post"
     ) as post:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
+        mock_resp.ok = True
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"translations": [{"text": "привет"}]}
         post.return_value = mock_resp
+        import translate as translate_mod
+
+        translate_mod._deepl_quota_exhausted = False
         assert translate_text("hello", target_lang="ru", source_lang="en") == "привет"
         sent = post.call_args.kwargs["data"]
         assert "tag_handling" not in sent

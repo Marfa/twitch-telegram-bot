@@ -1,4 +1,4 @@
-"""Game giveaways digest (GamerPower + ITAD) — beta giveaways-alerts."""
+"""Game giveaways digest (GamerPower + ITAD)."""
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +6,6 @@ import html
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -28,6 +27,12 @@ from giveaway_sources import (
 )
 from i18n import DEFAULT_LOCALE, igdb_attribution, t
 from igdb_dumps import igdb_image_url
+from game_card import (
+    GameCardFields,
+    build_game_card_html,
+    genre_line,
+    year_from_unix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +266,7 @@ class _Enriched:
     year: str
     publisher: str
     developer: str
+    genre: str
     summary: str
     cover_url: str
 
@@ -313,13 +319,7 @@ def _clean_title_for_search(title: str) -> str:
 
 
 def _year_from_unix(ts: Any) -> str:
-    try:
-        n = int(ts or 0)
-        if n <= 0:
-            return ""
-        return str(datetime.fromtimestamp(n, tz=timezone.utc).year)
-    except Exception:
-        return ""
+    return year_from_unix(ts)
 
 
 def _enrich_offer_base(db: Database, offer: GiveawayOffer) -> GiveawayCatalogEntry:
@@ -380,8 +380,10 @@ def _enriched_from_catalog(
     from twitch import localize_igdb_summary
 
     summary = entry.summary
-    if entry.igdb_id and summary:
+    # Translate any English blurb (IGDB or store description), not only when matched.
+    if summary:
         summary = localize_igdb_summary(summary, lang, db=db)
+    genre = genre_line(db, entry.igdb_id) if entry.igdb_id else ""
     return _Enriched(
         offer=catalog_entry_to_offer(entry),
         igdb_id=entry.igdb_id,
@@ -389,20 +391,31 @@ def _enriched_from_catalog(
         year=entry.year,
         publisher=entry.publisher,
         developer=entry.developer,
-        summary=summary,
+        genre=genre,
+        summary=summary if summary != "—" else "",
         cover_url=entry.cover_url,
     )
 
 
 def rebuild_giveaways_catalog_sync(db: Database) -> list[GiveawayCatalogEntry]:
     """Fetch GP/ITAD, enrich once, replace DB snapshot. Sync — call via to_thread."""
+    from twitch import prewarm_igdb_summary_translations
+
     offers = fetch_active_giveaways(force=True)
     now = int(time.time())
     entries = [_enrich_offer_base(db, o) for o in offers]
     for e in entries:
         e.refreshed_at = now
     db.replace_giveaways_catalog(entries)
-    logger.info("giveaways catalog rebuilt entries=%s", len(entries))
+    # Translate descriptions once into igdb_summary_translations (all bot locales).
+    filled = prewarm_igdb_summary_translations(
+        db, (e.summary for e in entries if e.summary)
+    )
+    logger.info(
+        "giveaways catalog rebuilt entries=%s translations_filled=%s",
+        len(entries),
+        filled,
+    )
     return entries
 
 
@@ -427,67 +440,23 @@ def _format_dates(offer: GiveawayOffer, lang: str) -> str:
     return start or end or "—"
 
 
-def _escaped_fit(text: str, room: int) -> str:
-    """Escape plain text so the result length is ≤ room (no mid-tag cuts)."""
-    if room <= 0 or not text:
-        return ""
-    raw = text
-    escaped = html.escape(raw)
-    if len(escaped) <= room:
-        return escaped
-    ellipsis_room = 1 if room > 1 else 0
-    target = max(0, room - ellipsis_room)
-    while raw and len(html.escape(raw)) > target:
-        over = len(html.escape(raw)) - target
-        step = max(1, over // 2)
-        raw = raw[: max(0, len(raw) - step)]
-    if not raw:
-        return ""
-    out = html.escape(raw)
-    if ellipsis_room and len(text) > len(raw):
-        out = out + "…"
-    return out
-
-
 def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
-    # Photo captions ≤1024. Never slice assembled HTML — that splits <b>/<a>.
-    _CAP = 1024
-    year_bit = f" ({html.escape(item.year)})" if item.year else ""
-    # Leave room for <b></b> (7) + year_bit.
-    name_room = max(16, 180 - len(year_bit))
-    title = f"<b>{_escaped_fit(item.name, name_room)}{year_bit}</b>"
-    pub = html.escape(item.publisher) if item.publisher else "—"
-    dev = html.escape(item.developer) if item.developer else "—"
-    dates = html.escape(_format_dates(item.offer, lang))
     plat_parts = [
-        html.escape(_platform_label(lang, pid)) for pid in item.offer.platform_ids
+        _platform_label(lang, pid) for pid in item.offer.platform_ids
     ]
-    plats = ", ".join(plat_parts) if plat_parts else "—"
-    meta = "\n".join(
-        [
-            title,
-            f"{t('giveaways_publisher', lang)} {pub}",
-            f"{t('giveaways_developer', lang)} {dev}",
-            f"{t('giveaways_dates', lang)} {dates}",
-            f"{t('giveaways_platforms', lang)} {plats}",
-        ]
+    plats = ", ".join(plat_parts) if plat_parts else ""
+    fields = GameCardFields(
+        name=item.name,
+        year=item.year,
+        genre=item.genre,
+        publisher=item.publisher,
+        developer=item.developer,
+        platforms=plats,
+        dates=_format_dates(item.offer, lang),
+        dates_key="giveaways_dates",
+        summary=item.summary,
     )
-    use_footer = footer
-    footer_block = f"\n\n{use_footer}" if use_footer else ""
-    if len(meta) + len(footer_block) > _CAP:
-        use_footer = ""
-        footer_block = ""
-    room = _CAP - len(meta) - len(footer_block)
-    desc = ""
-    if item.summary and room > 22:
-        room -= 2  # blank line before description
-        desc = _escaped_fit(item.summary.strip(), room)
-    parts = [meta]
-    if desc:
-        parts.extend(["", desc])
-    if use_footer:
-        parts.extend(["", use_footer])
-    return "\n".join(parts)
+    return build_game_card_html(fields, lang, footer=footer)
 
 
 async def _send_one_card(

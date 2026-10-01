@@ -457,6 +457,12 @@ from handlers.release_watch import (
     start_edit_release_platforms,
     start_release_wizard,
 )
+from handlers.game_info import (
+    cancel_game_info_callback,
+    receive_game_info_pick,
+    receive_game_info_text,
+    start_game_info,
+)
 from handlers.giveaways import on_giveaways_callback
 from handlers.giveaway_watch import (
     cancel_giveaway_watch_callback,
@@ -796,7 +802,9 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_PICK,
     GIVEAWAY_WATCH_DUP,
     GIVEAWAY_WATCH_PLATFORMS,
-) = range(81)
+    GAME_INFO_SEARCH,
+    GAME_INFO_PICK,
+) = range(83)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -854,6 +862,7 @@ def _help_text(lang: str) -> str:
         btn_create_schedule=btn("create_schedule", lang),
         btn_watch=btn("watch", lang),
         btn_chat=btn("chat", lang),
+        btn_game_info=btn("game_info", lang),
         btn_settings=btn("settings", lang),
         btn_feedback=btn("feedback", lang),
         alert_type_game=t("alert_type_game", lang),
@@ -2864,6 +2873,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _btn_filter("watch"), dm_only_conv_entry(start_watch_lucky)
             ),
             MessageHandler(
+                _btn_filter("game_info"), dm_only_conv_entry(start_game_info)
+            ),
+            MessageHandler(
                 _btn_filter("create_schedule"), dm_only_conv_entry(start_stream_schedule)
             ),
             MessageHandler(
@@ -2965,7 +2977,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_new_sub_other,
-                    pattern=r"^new_sub_other:(back|follow_monitor|whisper_alerts|create_schedule|watch|chat)$",
+                    pattern=r"^new_sub_other:(back|follow_monitor|whisper_alerts|create_schedule|watch|chat|game_info)$",
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,
@@ -3541,6 +3553,22 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     pattern=r"^gvw:(toggle:\d+|create|create:any|cancel)$",
                 ),
             ],
+            GAME_INFO_SEARCH: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    cancel_game_info_callback, pattern=r"^ginfo:cancel$"
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_game_info_text
+                ),
+            ],
+            GAME_INFO_PICK: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_game_info_pick,
+                    pattern=r"^ginfo:(pick:\d+|page:\d+|page:noop|cancel)$",
+                ),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
@@ -3672,6 +3700,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("admin_withdrawals")
                 | _btn_filter("new")
                 | _btn_filter("watch")
+                | _btn_filter("game_info")
                 | _btn_filter("chat")
                 | _btn_filter("create_schedule")
                 | _btn_filter("back")

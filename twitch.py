@@ -1987,7 +1987,7 @@ class TwitchClient:
 def localize_igdb_summary(
     summary: str, lang: str, db: Any | None = None
 ) -> str:
-    """IGDB summaries are US English; translate for non-en bot locales when a translator is set."""
+    """IGDB summaries are US English; translate once into DB for non-en locales."""
     import html as _html
 
     text = (summary or "").strip()
@@ -1998,13 +1998,9 @@ def localize_igdb_summary(
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     if locale == "en":
         return _html.unescape(text)
-    from config import (
-        AZURE_TRANSLATOR_KEY,
-        AZURE_TRANSLATOR_REGION,
-        DEEPL_API_KEY,
-    )
+    from translate import translation_configured
 
-    if not DEEPL_API_KEY and not (AZURE_TRANSLATOR_KEY and AZURE_TRANSLATOR_REGION):
+    if not translation_configured():
         return _html.unescape(text)
     cache_key = (text, locale)
     cached = _IGDB_SUMMARY_TR_CACHE.get(cache_key)
@@ -2047,6 +2043,55 @@ def localize_igdb_summary(
             )
     _igdb_summary_tr_cache_put(cache_key, out)
     return out
+
+
+def prewarm_igdb_summary_translations(
+    db: Any,
+    texts: Any,
+    *,
+    langs: list[str] | None = None,
+) -> int:
+    """Translate unique EN summaries into DB for non-en locales. Returns # newly stored."""
+    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
+    from translate import translation_configured
+
+    if db is None or not translation_configured():
+        return 0
+    want = [
+        loc
+        for loc in (langs or list(SUPPORTED_LOCALES))
+        if loc in SUPPORTED_LOCALES and loc != DEFAULT_LOCALE
+    ]
+    if not want:
+        return 0
+    unique: list[str] = []
+    seen: set[str] = set()
+    for raw in texts:
+        text = (raw or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        unique.append(text)
+    filled = 0
+    for text in unique:
+        source_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        for loc in want:
+            try:
+                if db.get_igdb_summary_translation(source_hash, loc):
+                    continue
+            except Exception:
+                logger.exception(
+                    "IGDB summary prewarm DB read failed lang=%s", loc
+                )
+            localize_igdb_summary(text, loc, db=db)
+            try:
+                if db.get_igdb_summary_translation(source_hash, loc):
+                    filled += 1
+            except Exception:
+                logger.exception(
+                    "IGDB summary prewarm DB verify failed lang=%s", loc
+                )
+    return filled
 
 
 def _igdb_summary_tr_cache_put(cache_key: tuple[str, str], value: str) -> None:

@@ -6,12 +6,6 @@ import re
 
 import requests
 
-from config import (
-    AZURE_TRANSLATOR_ENDPOINT,
-    AZURE_TRANSLATOR_KEY,
-    AZURE_TRANSLATOR_REGION,
-    DEEPL_API_KEY,
-)
 from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
 
 logger = logging.getLogger(__name__)
@@ -79,12 +73,16 @@ def _normalize_locale(locale: str | None) -> str:
 
 
 def _azure_configured() -> bool:
-    return bool(AZURE_TRANSLATOR_KEY and AZURE_TRANSLATOR_REGION)
+    import config as cfg
+
+    return bool(cfg.AZURE_TRANSLATOR_KEY and cfg.AZURE_TRANSLATOR_REGION)
 
 
 def translation_configured() -> bool:
     """True when DeepL and/or Azure Translator can translate."""
-    return bool(DEEPL_API_KEY) or _azure_configured()
+    import config as cfg
+
+    return bool(cfg.DEEPL_API_KEY) or _azure_configured()
 
 
 def _tr_deepl(
@@ -94,7 +92,9 @@ def _tr_deepl(
     source: str | None,
     use_html: bool,
 ) -> str:
-    api_key = DEEPL_API_KEY
+    import config as cfg
+
+    api_key = cfg.DEEPL_API_KEY
     payload: dict[str, object] = {
         "text": [text],
         "target_lang": _DEEPL_TARGET[target],
@@ -126,6 +126,8 @@ def _tr_azure_once(
     source: str | None,
     use_html: bool,
 ) -> str:
+    import config as cfg
+
     params: dict[str, str] = {
         "api-version": "3.0",
         "to": _AZURE_LANG[target],
@@ -135,18 +137,19 @@ def _tr_azure_once(
     if use_html:
         params["textType"] = "html"
     headers = {
-        "Ocp-Apim-Subscription-Key": AZURE_TRANSLATOR_KEY,
-        "Ocp-Apim-Subscription-Region": AZURE_TRANSLATOR_REGION,
+        "Ocp-Apim-Subscription-Key": cfg.AZURE_TRANSLATOR_KEY,
+        "Ocp-Apim-Subscription-Region": cfg.AZURE_TRANSLATOR_REGION,
         "Content-Type": "application/json; charset=UTF-8",
     }
     response = requests.post(
-        f"{AZURE_TRANSLATOR_ENDPOINT}/translate",
+        f"{cfg.AZURE_TRANSLATOR_ENDPOINT}/translate",
         params=params,
         headers=headers,
         json=[{"Text": text}],
         timeout=_AZURE_TIMEOUT,
     )
-    if response.is_error:
+    # requests.Response has .ok, not httpx-style .is_error
+    if not response.ok:
         logger.error(
             "azure translate → %s %s",
             response.status_code,
@@ -199,6 +202,8 @@ def translate_text(
     preserve_html: bool | None = None,
 ) -> str:
     global _deepl_quota_exhausted
+    import config as cfg
+
     target = _normalize_locale(target_lang)
     source = _normalize_locale(source_lang) if source_lang else None
     if source and target == source:
@@ -216,7 +221,7 @@ def translate_text(
         else ("<" in text and ">" in text)
     )
 
-    if DEEPL_API_KEY and not _deepl_quota_exhausted:
+    if cfg.DEEPL_API_KEY and not _deepl_quota_exhausted:
         try:
             return _tr_deepl(text, target=target, source=source, use_html=use_html)
         except DeeplQuotaExceeded:

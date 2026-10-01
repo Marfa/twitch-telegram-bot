@@ -120,6 +120,55 @@ def _check_catalog_snapshot() -> None:
         assert db.list_giveaways_catalog() == []
 
 
+def _check_rebuild_prewarms_translations() -> None:
+    """Catalog rebuild stores summary translations once; display must not re-call API."""
+    from unittest.mock import patch
+
+    from handlers.giveaways import (
+        _enriched_from_catalog,
+        rebuild_giveaways_catalog_sync,
+    )
+    from twitch import _IGDB_SUMMARY_TR_CACHE
+
+    offer = GiveawayOffer(
+        source="gamerpower",
+        external_id="99",
+        title="Prewarm Game",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="https://example.com",
+        start_at="",
+        end_at="",
+        description="English blurb for prewarm.",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Prewarm Game"),
+    )
+    with tempfile.TemporaryDirectory() as td:
+        db = SqliteDatabase(Path(td) / "gv_tr.db")
+        _IGDB_SUMMARY_TR_CACHE.clear()
+        with (
+            patch(
+                "handlers.giveaways.fetch_active_giveaways",
+                return_value=[offer],
+            ),
+            patch("config.DEEPL_API_KEY", "x"),
+            patch("config.AZURE_TRANSLATOR_KEY", ""),
+            patch("config.AZURE_TRANSLATOR_REGION", ""),
+            patch(
+                "translate.translate_text",
+                return_value="Русский текст преворма.",
+            ) as tr,
+        ):
+            entries = rebuild_giveaways_catalog_sync(db)
+            assert len(entries) == 1
+            # ru+uk+it for one unique summary
+            assert tr.call_count == 3
+            _IGDB_SUMMARY_TR_CACHE.clear()
+            item = _enriched_from_catalog(db, entries[0], "ru")
+            assert item.summary == "Русский текст преворма."
+            assert tr.call_count == 3  # no extra API on display
+
+
 def _check_filter_requires_both() -> None:
     offer = GiveawayOffer(
         source="gamerpower",
@@ -221,7 +270,7 @@ def _check_beta_manifest() -> None:
     ids = {f["id"] for f in data["features"]}
     assert "giveaways-alerts" in ids
     feat = next(f for f in data["features"] if f["id"] == "giveaways-alerts")
-    assert feat["stage"] == "beta"
+    assert feat["stage"] == "ga"
     assert "premium_feature_id" not in feat
 
 
@@ -249,6 +298,7 @@ def _check_card_html_caption_budget() -> None:
         year="2020",
         publisher="Pub & Co",
         developer="Dev <Ltd>",
+        genre="Action",
         summary="A & B <tag> " + ("word " * 400),
         cover_url="",
     )
@@ -260,10 +310,34 @@ def _check_card_html_caption_budget() -> None:
     )
     body = _build_card_html(item, "en", footer=footer)
     assert len(body) <= 1024
-    assert body.count("<b>") == body.count("</b>") == 1
+    assert body.count("<b>") == body.count("</b>")
+    assert body.count("<b>") >= 6  # title + genre + pub + dev + platforms + dates
+    assert "Genre:" in body or "<b>Genre:</b>" in body
+    assert "Giveaway dates:" in body
+    assert body.index("Platforms:") < body.index("Giveaway dates:")
+    assert "\n\n<b>Giveaway dates:" in body or "\n\n<b>Giveaway dates:</b>" in body
     assert body.count("<a ") == body.count("</a>")
     assert "<tag>" not in body
     assert "&amp;" in body or "Game" in body
+
+
+def _check_unified_card_dates_after_platforms() -> None:
+    from game_card import GameCardFields, build_game_card_html
+
+    fields = GameCardFields(
+        name="Test",
+        genre="RPG",
+        publisher="P",
+        developer="D",
+        platforms="PC",
+        dates="2024-01-01",
+        dates_key="game_card_release_dates",
+        summary="Hi",
+    )
+    body = build_game_card_html(fields, "en")
+    assert "<b>Genre:</b>" in body
+    assert body.index("Platforms:") < body.index("Release dates:")
+    assert "\n\n<b>Release dates:</b>" in body
 
 
 def run() -> None:
@@ -271,11 +345,13 @@ def run() -> None:
     _check_keyboard_order()
     _check_prefs_and_seen()
     _check_catalog_snapshot()
+    _check_rebuild_prewarms_translations()
     _check_filter_requires_both()
     _check_dedupe_prefers_itad()
     _check_first_digest_unlocks_fresh_flag()
     _check_card_keyboard()
     _check_card_html_caption_budget()
+    _check_unified_card_dates_after_platforms()
     _check_beta_manifest()
     # unused mock keeps import for future handler tests
     _ = MagicMock

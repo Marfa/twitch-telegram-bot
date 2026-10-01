@@ -70,6 +70,7 @@
   "btn_admin_withdrawals": "💸 Prelievi",
   "btn_watch": "🎲 Cosa guardare?",
   "btn_chat": "💬 Chat",
+  "btn_game_info": "🎮 Info sul gioco",
   "watch_cats_prompt": "Avviso di gioco — categorie\n\nScrivi il nome di una categoria Twitch (gioco o Just Chatting).",
   "watch_cats_added": "Aggiunta: {name}\nSelezionate ({count}/{max}): {list}\n\nScrivi un'altra categoria o svuota l'elenco.",
   "watch_cats_pick": "Scegli una categoria:",
@@ -716,7 +717,7 @@
   "cancelled": "Annullato.",
   "callback_stale": "Il bot si stava aggiornando. Tocca di nuovo oppure apri il menu.",
   "feedback": "Se hai problemi a usare il bot, domande sul pagamento o vuoi suggerire una nuova funzione, puoi sempre scrivere allo sviluppatore @immarfa. Indica il tuo ID utente: <code>{user_id}</code>.\n\nI nostri altri link:\n• Twitch: https://www.twitch.tv/marfapr\n• Telegram: https://t.me/themarfa\n• Sito: https://blog.themarfa.name/\n\nTi consigliamo di leggere prima la guida.\n\nQuesto bot non è affiliato, approvato né sponsorizzato da Twitch Interactive, Inc. Twitch è un marchio dei rispettivi proprietari.\n\nI metadati dei giochi sono forniti da <a href=\"https://www.igdb.com\">IGDB.com</a>.",
-  "help": "Comandi disponibili:\n/start — apri il menu principale\n/help — mostra questo aiuto\n/cancel — annulla la procedura corrente\n/schedule — crea un programma stream settimanale\n/when — quando è lo stream? (in un gruppo con un avviso)\n/feedback — aiuto\n/settings — apri le impostazioni\n\nMenu:\n• {btn_new} — canale Twitch, template messaggio, immagine opzionale, filtri, destinazione; {alert_type_game}\n• {btn_import_twitch} — autorizza e importa i canali seguiti\n• {btn_list} — elenco, attiva/disattiva, modifica, elimina, cestino\n• {btn_alert_history} — cronologia avvisi inviati\n• {btn_other} — {btn_follow_monitor}, {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}, {btn_chat}\n• {btn_settings} — premium, sync, avvisi di sistema, lingua, programma partner\n• {btn_feedback}",
+  "help": "Comandi disponibili:\n/start — apri il menu principale\n/help — mostra questo aiuto\n/cancel — annulla la procedura corrente\n/schedule — crea un programma stream settimanale\n/when — quando è lo stream? (in un gruppo con un avviso)\n/feedback — aiuto\n/settings — apri le impostazioni\n\nMenu:\n• {btn_new} — canale Twitch, template messaggio, immagine opzionale, filtri, destinazione; {alert_type_game}\n• {btn_import_twitch} — autorizza e importa i canali seguiti\n• {btn_list} — elenco, attiva/disattiva, modifica, elimina, cestino\n• {btn_alert_history} — cronologia avvisi inviati\n• {btn_other} — {btn_follow_monitor}, {btn_whisper_alerts}, {btn_create_schedule}, {btn_watch}, {btn_chat}, {btn_game_info}\n• {btn_settings} — premium, sync, avvisi di sistema, lingua, programma partner\n• {btn_feedback}",
   "no_subs": "Nessuna iscrizione ancora.\n\nTocca ➕ Nuova iscrizione.\n\nAiuto: /help",
   "subs_list": "Le tue iscrizioni (tocca per attivare/disattivare):\n\n",
   "import_oauth_prompt": "Autorizza il bot su Twitch per importare i canali che segui.",
@@ -1241,5 +1242,8 @@
   "edit_game_delivery_set": "Modalità di invio aggiornata.",
   "category_watch_digest_header": "Digest orario — nuovi stream",
   "category_watch_digest_more": "Mostra altri",
-  "category_watch_digest_empty": "Nessuno stream nuovo nell'ultima ora."
+  "category_watch_digest_empty": "Nessuno stream nuovo nell'ultima ora.",
+  "game_card_genre": "Genere:",
+  "game_card_release_dates": "Date di uscita:",
+  "game_info_prompt": "Inserisci il nome di un gioco (ricerca IGDB):\n\nI metadati dei giochi sono forniti da <a href=\"https://www.igdb.com\">IGDB.com</a>"
 }
