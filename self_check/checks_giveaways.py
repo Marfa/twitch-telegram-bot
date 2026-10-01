@@ -322,7 +322,7 @@ def _check_card_html_caption_budget() -> None:
 
 
 def _check_unified_card_dates_after_platforms() -> None:
-    from game_card import GameCardFields, build_game_card_html
+    from game_card import GameCardFields, build_game_card_html, release_dates_line
 
     fields = GameCardFields(
         name="Test",
@@ -330,7 +330,7 @@ def _check_unified_card_dates_after_platforms() -> None:
         publisher="P",
         developer="D",
         platforms="PC",
-        dates="2024-01-01",
+        dates="2024-01-01 (PC)",
         dates_key="game_card_release_dates",
         summary="Hi",
     )
@@ -338,6 +338,20 @@ def _check_unified_card_dates_after_platforms() -> None:
     assert "<b>Genre:</b>" in body
     assert body.index("Platforms:") < body.index("Release dates:")
     assert "\n\n<b>Release dates:</b>" in body
+    assert "2024-01-01 (PC)" in body
+
+    class _Db:
+        def igdb_release_dates_for_game(self, _gid: int):
+            return [
+                {"date": 1704067200, "platform_name": "PC"},
+                {"date": 1706745600, "platform_name": "PlayStation 5"},
+            ]
+
+        def igdb_game_by_id(self, _gid: int):
+            return {}
+
+    line = release_dates_line(_Db(), 1, "en")
+    assert line == "2024-01-01 (PC), 2024-02-01 (PlayStation 5)"
 
 
 def run() -> None:

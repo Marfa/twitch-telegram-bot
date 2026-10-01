@@ -118,12 +118,16 @@ def release_dates_line(db: Any, game_id: int, lang: str) -> str:
     """Actual or planned release date(s) from local IGDB dumps."""
     rows = db.igdb_release_dates_for_game(int(game_id or 0)) or []
     seen: list[str] = []
-    for r in sorted(rows, key=lambda x: int(x.get("date") or 0)):
+    for r in sorted(rows, key=lambda x: (int(x.get("date") or 0), str(x.get("platform_name") or ""))):
         try:
-            s = format_release_date(int(r["date"]), lang)
+            date_s = format_release_date(int(r["date"]), lang)
         except (TypeError, ValueError):
             continue
-        if s and s not in seen:
+        if not date_s:
+            continue
+        plat = str(r.get("platform_name") or "").strip()
+        s = f"{date_s} ({plat})" if plat and plat != "—" else date_s
+        if s not in seen:
             seen.append(s)
     if seen:
         extra = "…" if len(seen) > 5 else ""
