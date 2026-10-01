@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from telegram import ReplyKeyboardMarkup
 from telegram.constants import ChatType, ParseMode
-from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
 from telegram.ext import ContextTypes, ConversationHandler, filters
 
 import beta as beta_features
@@ -163,11 +163,35 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
 
 async def _pulse_reply_keyboard(bot, chat_id: int, reply_markup: ReplyKeyboardMarkup) -> None:
     """Set reply keyboard without leaving a visible chat message."""
-    try:
-        msg = await bot.send_message(chat_id, "·", reply_markup=reply_markup)
-        await bot.delete_message(chat_id, msg.message_id)
-    except (BadRequest, Forbidden):
-        pass
+    from message_fx import message_fx_disabled
+
+    # Draft/typing wrap can race with an immediate delete on some clients and
+    # leave the reply keyboard collapsed after inline-only DMs (bot_update).
+    with message_fx_disabled():
+        for attempt in range(3):
+            try:
+                msg = await bot.send_message(chat_id, "·", reply_markup=reply_markup)
+                # Brief pause so the client applies ReplyKeyboard before delete.
+                await asyncio.sleep(0.35)
+                try:
+                    await bot.delete_message(chat_id, msg.message_id)
+                except (BadRequest, Forbidden):
+                    pass
+                return
+            except RetryAfter as exc:
+                await asyncio.sleep(float(exc.retry_after) + 0.5)
+            except NetworkError:
+                if attempt + 1 >= 3:
+                    logger.warning(
+                        "Pulse reply keyboard failed for %s after retries", chat_id
+                    )
+                    return
+                await asyncio.sleep(0.5 * (attempt + 1))
+            except (BadRequest, Forbidden):
+                return
+            except Exception:
+                logger.exception("Pulse reply keyboard failed for %s", chat_id)
+                return
 
 
 async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = True) -> None:

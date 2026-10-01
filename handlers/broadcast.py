@@ -671,9 +671,15 @@ async def _send_admin_broadcast(
             if message_id is not None:
                 db.add_broadcast_delivery(broadcast_id, uid, message_id)
             if attach_menu:
-                await _pulse_reply_keyboard(
-                    context.bot, uid, _menu(locale, uid)
-                )
+                try:
+                    await _pulse_reply_keyboard(
+                        context.bot, uid, _menu(locale, uid)
+                    )
+                except Exception:
+                    # Never abort the rest of the wave if one keyboard refresh fails.
+                    logger.exception(
+                        "bot_update menu pulse failed for %s", uid
+                    )
         else:
             failed += 1
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
