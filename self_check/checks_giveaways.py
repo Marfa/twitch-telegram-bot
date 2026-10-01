@@ -120,6 +120,55 @@ def _check_catalog_snapshot() -> None:
         assert db.list_giveaways_catalog() == []
 
 
+def _check_rebuild_prewarms_translations() -> None:
+    """Catalog rebuild stores summary translations once; display must not re-call API."""
+    from unittest.mock import patch
+
+    from handlers.giveaways import (
+        _enriched_from_catalog,
+        rebuild_giveaways_catalog_sync,
+    )
+    from twitch import _IGDB_SUMMARY_TR_CACHE
+
+    offer = GiveawayOffer(
+        source="gamerpower",
+        external_id="99",
+        title="Prewarm Game",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="https://example.com",
+        start_at="",
+        end_at="",
+        description="English blurb for prewarm.",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Prewarm Game"),
+    )
+    with tempfile.TemporaryDirectory() as td:
+        db = SqliteDatabase(Path(td) / "gv_tr.db")
+        _IGDB_SUMMARY_TR_CACHE.clear()
+        with (
+            patch(
+                "handlers.giveaways.fetch_active_giveaways",
+                return_value=[offer],
+            ),
+            patch("config.DEEPL_API_KEY", "x"),
+            patch("config.AZURE_TRANSLATOR_KEY", ""),
+            patch("config.AZURE_TRANSLATOR_REGION", ""),
+            patch(
+                "translate.translate_text",
+                return_value="Русский текст преворма.",
+            ) as tr,
+        ):
+            entries = rebuild_giveaways_catalog_sync(db)
+            assert len(entries) == 1
+            # ru+uk+it for one unique summary
+            assert tr.call_count == 3
+            _IGDB_SUMMARY_TR_CACHE.clear()
+            item = _enriched_from_catalog(db, entries[0], "ru")
+            assert item.summary == "Русский текст преворма."
+            assert tr.call_count == 3  # no extra API on display
+
+
 def _check_filter_requires_both() -> None:
     offer = GiveawayOffer(
         source="gamerpower",
@@ -296,6 +345,7 @@ def run() -> None:
     _check_keyboard_order()
     _check_prefs_and_seen()
     _check_catalog_snapshot()
+    _check_rebuild_prewarms_translations()
     _check_filter_requires_both()
     _check_dedupe_prefers_itad()
     _check_first_digest_unlocks_fresh_flag()

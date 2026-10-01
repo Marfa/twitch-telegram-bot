@@ -399,13 +399,23 @@ def _enriched_from_catalog(
 
 def rebuild_giveaways_catalog_sync(db: Database) -> list[GiveawayCatalogEntry]:
     """Fetch GP/ITAD, enrich once, replace DB snapshot. Sync — call via to_thread."""
+    from twitch import prewarm_igdb_summary_translations
+
     offers = fetch_active_giveaways(force=True)
     now = int(time.time())
     entries = [_enrich_offer_base(db, o) for o in offers]
     for e in entries:
         e.refreshed_at = now
     db.replace_giveaways_catalog(entries)
-    logger.info("giveaways catalog rebuilt entries=%s", len(entries))
+    # Translate descriptions once into igdb_summary_translations (all bot locales).
+    filled = prewarm_igdb_summary_translations(
+        db, (e.summary for e in entries if e.summary)
+    )
+    logger.info(
+        "giveaways catalog rebuilt entries=%s translations_filled=%s",
+        len(entries),
+        filled,
+    )
     return entries
 
 
