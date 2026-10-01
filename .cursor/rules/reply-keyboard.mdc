@@ -1,0 +1,23 @@
+---
+description: Private-chat reply keyboard must stay available after inline-only DMs
+alwaysApply: true
+---
+
+# Reply keyboard in private chats
+
+The Chat Menu Button (`MenuButtonWebApp`) occupies the client menu icon. A hidden reply keyboard then has nothing to reopen it.
+
+## Rule
+
+In a private chat, do not leave an inline-only message as the last bot message without a reply keyboard still applied.
+
+One message accepts either an inline keyboard or a reply keyboard, not both. Feedback buttons (👍/👎) and the main menu are two sends.
+
+To refresh the menu without a visible message, use `_pulse_reply_keyboard` in `bot_helpers.py`. Do not `send_message` plus an immediate `delete_message`: the client drops the keyboard if the carrier disappears before it is applied. The helper disables draft FX and waits before delete.
+
+## Also
+
+- Build reply keyboards only via `_reply_keyboard` in `i18n.py` (`resize_keyboard=True`, `is_persistent=True`). Do not construct a non-persistent `ReplyKeyboardMarkup`.
+- Do not send `ReplyKeyboardRemove` in private chats.
+- Do not run `sendMessageDraft` / typing FX on a message that carries a `ReplyKeyboardMarkup` (`message_fx.py` already skips those).
+- `bot_update` broadcasts keep the post-send `_pulse_reply_keyboard` call. A new private DM that ends on inline buttons needs the same pulse (or a lasting message that includes the reply keyboard).

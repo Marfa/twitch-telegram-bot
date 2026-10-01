@@ -3874,7 +3874,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        refresh_broadcast_feedback_keyboards, interval=3600, first=180
+        refresh_broadcast_feedback_keyboards,
+        interval=3600,
+        first=15,
+        name="refresh_broadcast_feedback_keyboards",
+        job_kwargs=_stream_job_kwargs(
+            "refresh_broadcast_feedback_keyboards", misfire_grace=3600
+        ),
     )
     app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
     app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)

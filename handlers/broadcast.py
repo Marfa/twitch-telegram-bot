@@ -749,6 +749,12 @@ async def on_broadcast_feedback(
             await query.edit_message_reply_markup(reply_markup=markup)
         except (BadRequest, Forbidden):
             pass
+    # History copies are not in broadcast_deliveries. A tap rewrites only the
+    # clicked message unless we also push the same counts to every delivery.
+    asyncio.create_task(
+        _refresh_broadcast_feedback_keyboards(context, broadcast_id),
+        name=f"broadcast_feedback_refresh_{broadcast_id}",
+    )
 
 
 async def _report_broadcast_done(
