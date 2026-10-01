@@ -253,6 +253,11 @@ def all_wizard_nav_buttons() -> set[str]:
     return {btn(k, loc) for k in ("wizard_back", "wizard_cancel") for loc in SUPPORTED_LOCALES}
 
 
+def _reply_keyboard(rows: list[list[KeyboardButton]]) -> ReplyKeyboardMarkup:
+    """Always-visible reply keyboard (hidden keyboards lose the client menu icon)."""
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
+
+
 def main_menu(
     lang: str, *, is_admin: bool = False, demo_active: bool = False
 ) -> ReplyKeyboardMarkup:
@@ -280,7 +285,7 @@ def main_menu(
     elif is_admin:
         tail.append(KeyboardButton(btn("admin", lang)))
     rows.extend(_pair_reply_rows(tail))
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    return _reply_keyboard(rows)
 
 
 def _pair_reply_rows(buttons: list[KeyboardButton]) -> list[list[KeyboardButton]]:
@@ -308,7 +313,7 @@ def subscriptions_menu(
         keys.append("pause_notifications")
     keys.append("back")
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
-    return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
+    return _reply_keyboard(_pair_reply_rows(buttons))
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
@@ -322,7 +327,7 @@ def other_menu(lang: str) -> ReplyKeyboardMarkup:
         "back",
     ]
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
-    return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
+    return _reply_keyboard(_pair_reply_rows(buttons))
 
 
 def settings_menu(
@@ -358,22 +363,21 @@ def settings_menu(
                 KeyboardButton(btn("back", lang)),
             ]
         )
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    return _reply_keyboard(rows)
 
 
 def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
+    return _reply_keyboard(
         [
             [KeyboardButton(btn("auth_tokens_revoke_twitch", lang))],
             [KeyboardButton(btn("auth_tokens_revoke_donationalerts", lang))],
             [KeyboardButton(btn("back_settings", lang))],
-        ],
-        resize_keyboard=True,
+        ]
     )
 
 
 def partner_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
+    return _reply_keyboard(
         [
             [
                 KeyboardButton(btn("partner_stats", lang)),
@@ -386,8 +390,7 @@ def partner_menu(lang: str) -> ReplyKeyboardMarkup:
             [
                 KeyboardButton(btn("back_settings", lang)),
             ],
-        ],
-        resize_keyboard=True,
+        ]
     )
 
 
@@ -674,7 +677,7 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
     else:
         rows.append([KeyboardButton(btn("demo", lang))])
     rows.append([KeyboardButton(btn("back", lang))])
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    return _reply_keyboard(rows)
 
 
 def withdrawal_actions_keyboard(withdrawal_id: int, lang: str) -> InlineKeyboardMarkup:
@@ -701,7 +704,7 @@ def broadcast_menu(lang: str) -> ReplyKeyboardMarkup:
         KeyboardButton(btn("sent_broadcasts", lang)),
         KeyboardButton(btn("back", lang)),
     ]
-    return ReplyKeyboardMarkup(_pair_reply_rows(buttons), resize_keyboard=True)
+    return _reply_keyboard(_pair_reply_rows(buttons))
 
 
 def broadcast_feedback_keyboard(
@@ -727,7 +730,7 @@ def wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
     row = [KeyboardButton(btn("wizard_cancel", lang))]
     if back:
         row.insert(0, KeyboardButton(btn("wizard_back", lang)))
-    return ReplyKeyboardMarkup([row], resize_keyboard=True)
+    return _reply_keyboard([row])
 
 
 def admin_wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:

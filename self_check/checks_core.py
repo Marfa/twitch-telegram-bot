@@ -1239,6 +1239,7 @@ def check_core() -> None:
 
     for loc in SUPPORTED_LOCALES:
         main_kb = main_menu(loc).keyboard
+        assert main_menu(loc).is_persistent is True
         main_btns = [b.text for row in main_kb for b in row]
         assert btn("other", loc) in main_btns
         assert btn("alert_history", loc) in main_btns
@@ -2636,6 +2637,18 @@ def check_core() -> None:
         bot.send_chat_action.reset_mock()
         await bot.send_message(-1001, "x" * 80)
         bot.send_chat_action.assert_not_awaited()
+
+        # Reply keyboard: no draft (clients can drop the keyboard after sendMessageDraft).
+        from telegram import KeyboardButton, ReplyKeyboardMarkup
+
+        bot.send_chat_action.reset_mock()
+        bot.send_message_draft.reset_mock()
+        original_send.reset_mock()
+        kb = ReplyKeyboardMarkup([[KeyboardButton("A")]], resize_keyboard=True)
+        await bot.send_message(42, "x" * 80, reply_markup=kb)
+        bot.send_chat_action.assert_not_awaited()
+        bot.send_message_draft.assert_not_awaited()
+        assert original_send.await_count == 1
 
         ok = await stream_draft_then(bot, 42, "plain " * 20)
         assert ok is False  # mock still raises

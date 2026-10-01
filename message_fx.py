@@ -17,6 +17,7 @@ import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from telegram import ReplyKeyboardMarkup
 from telegram.constants import ChatAction
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,10 @@ async def _fx_send(bot, original, args: tuple, kwargs: dict):
 
     chat_id, text, thread_id, parse_mode = _extract_send_args(args, kwargs)
     if text is None or not _private_chat_id(chat_id):
+        return await original(*args, **kwargs)
+
+    # Draft stream before sendMessage can drop ReplyKeyboard on some clients.
+    if isinstance(kwargs.get("reply_markup"), ReplyKeyboardMarkup):
         return await original(*args, **kwargs)
 
     if not _draft_on_for(bot, chat_id):

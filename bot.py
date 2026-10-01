@@ -962,13 +962,16 @@ async def _send_welcome_bundle(
     first_start: bool = False,
     lucky_nth: int | None = None,
 ) -> None:
+    from message_fx import message_fx_disabled
+
     db: Database = application.bot_data["db"]
     await sync_stream_chat_menu_button(bot, db, user_id)
-    await bot.send_message(
-        chat_id,
-        t("start_welcome", lang),
-        reply_markup=_menu(lang, user_id),
-    )
+    with message_fx_disabled():
+        await bot.send_message(
+            chat_id,
+            t("start_welcome", lang),
+            reply_markup=_menu(lang, user_id),
+        )
     if lucky_nth:
         await grant_and_announce_lucky_nth(
             bot, db, user_id=user_id, lang=lang, user_count=int(lucky_nth)
