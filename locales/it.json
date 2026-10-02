@@ -302,7 +302,7 @@
   "premium_channel_failed": "Impossibile verificare il canale Twitch. Riprova.",
   "new_sub_prompt": "Inserisci un canale Twitch: link, link mobile o username.",
   "alert_type_prompt": "Qui puoi configurare diversi avvisi sugli stream Twitch. Scegli quale tipo di avviso configurare:\n- quando uno stream inizia\n- quando cambia la categoria dello stream (nessun avviso all'inizio; ogni cambio fino a fine stream)\n- per uno stream in arrivo, se lo streamer ha un programma\n- quando uno stream termina\n- nuovi Twitch Drops per un gioco\n- avviso di gioco (nuovi stream nelle categorie selezionate)\n- avvisi di uscita (quando un gioco esce sulle piattaforme selezionate)\n- giveaway di giochi (giochi gratis per negozio e piattaforma)",
-  "new_sub_other_prompt": "Anche altre funzioni del bot sono disponibili qui. Scegli:\n- Follow/Unfollow per il tuo canale (monitoraggio e avvisi — Premium)\n- avvisi whisper Twitch\n- gestione del programma stream\n- consigli («Cosa guardare?»)\n- chat dello stream",
+  "new_sub_other_prompt": "Anche altre funzioni del bot sono disponibili qui. Scegli:\n- Follow/Unfollow per il tuo canale (monitoraggio e avvisi — Premium)\n- avvisi whisper Twitch\n- gestione del programma stream\n- consigli («Cosa guardare?»)\n- chat dello stream\n- info sul gioco (ricerca IGDB)",
   "alert_type_live": "Inizio stream",
   "alert_type_category": "Cambio categoria ⭐",
   "alert_type_upcoming": "Stream in arrivo ⭐",
