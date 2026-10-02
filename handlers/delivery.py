@@ -1201,6 +1201,12 @@ async def _send_notification(
                     lang=lang,
                     db=db,
                 )
+            except bothub_mod.BotHubInsufficientCapsError:
+                # already reported to PostHog from bothub.generate_cover_image
+                logger.exception(
+                    "AI cover CAPS insufficient for sub %s", sub.id
+                )
+                photo_bytes = None
             except Exception:
                 logger.exception(
                     "AI cover generation failed for sub %s", sub.id

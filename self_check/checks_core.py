@@ -341,7 +341,18 @@ def check_core() -> None:
     assert "DEMO" in prompt  # explicit ban list for Lite
     # Category-stable: no streamer in prompt (covers cached per game_id).
     assert "marfapr" not in prompt.lower()
-    from bothub import generate_alert_cover_bytes
+    from bothub import (
+        BotHubInsufficientCapsError,
+        generate_alert_cover_bytes,
+        is_bothub_insufficient_caps,
+    )
+
+    assert is_bothub_insufficient_caps(
+        403, '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
+    )
+    assert not is_bothub_insufficient_caps(403, '{"error":{"code":"OTHER"}}')
+    assert not is_bothub_insufficient_caps(500, "NOT_ENOUGH_TOKENS")
+    assert issubclass(BotHubInsufficientCapsError, RuntimeError)
     import tempfile
     from db.sqlite import SqliteDatabase
     from unittest.mock import patch
@@ -373,6 +384,25 @@ def check_core() -> None:
         cached = adb.get_ai_game_cover("509658")
         assert cached and cached["image_bytes"] == fake
         assert cached["model"] == "test-model"
+
+    with patch("bothub.BOTHUB_API_KEY", "test-key"), patch(
+        "bothub._http"
+    ) as http_mock, patch("bothub._report_insufficient_caps") as report_caps:
+        caps_body = '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
+        resp = type("R", (), {})()
+        resp.ok = False
+        resp.status_code = 403
+        resp.text = caps_body
+        http_mock.post.return_value = resp
+        from bothub import generate_cover_image
+
+        try:
+            generate_cover_image("test prompt")
+            raise AssertionError("expected BotHubInsufficientCapsError")
+        except BotHubInsufficientCapsError as exc:
+            assert "CAPS insufficient" in str(exc)
+            report_caps.assert_called_once()
+            assert report_caps.call_args[0][0] is exc
     on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
     on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)

@@ -20,16 +20,52 @@ logger = logging.getLogger(__name__)
 _DATA_URL_RE = re.compile(
     r"data:(image/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)", re.I
 )
+_BOTHUB_CAPS_RE = re.compile(r"NOT_ENOUGH_TOKENS|Недостаточно CAPS", re.I)
 _MAX_TOPIC_CHARS = 900
 _HTTP_TIMEOUT = 120
+_COVER_SIZE = "1280x720"
 
 _http = requests.Session()
 _gen_locks_guard = threading.Lock()
 _gen_locks: dict[str, threading.Lock] = {}
 
 
+class BotHubInsufficientCapsError(RuntimeError):
+    """BotHub CAPS balance too low for image generation (403 NOT_ENOUGH_TOKENS)."""
+
+
 def bothub_configured() -> bool:
     return bool(BOTHUB_API_KEY)
+
+
+def is_bothub_insufficient_caps(status_code: int, body: str) -> bool:
+    return status_code == 403 and bool(_BOTHUB_CAPS_RE.search(body or ""))
+
+
+def _report_insufficient_caps(exc: BotHubInsufficientCapsError) -> None:
+    try:
+        import analytics
+
+        analytics.capture_exception(
+            exc,
+            properties={
+                "handler": "bothub.generate_cover_image",
+                "error_kind": "bothub_insufficient_caps",
+                "model": BOTHUB_IMAGE_MODEL,
+                "size": _COVER_SIZE,
+            },
+        )
+    except Exception:
+        logger.exception("PostHog CAPS report failed")
+
+
+def _raise_insufficient_caps(err_snip: str, *, via: str) -> None:
+    exc = BotHubInsufficientCapsError(
+        f"BotHub CAPS insufficient for cover ({via}, size={_COVER_SIZE}). "
+        f"Top up balance. API: {err_snip}"
+    )
+    _report_insufficient_caps(exc)
+    raise exc
 
 
 def build_stream_cover_prompt(
@@ -168,7 +204,7 @@ def generate_cover_image(prompt: str) -> bytes:
         "prompt": prompt,
         "n": 1,
         # ~1K 16:9 — enough for Telegram chat; 1792x1024 was slower for little gain.
-        "size": "1280x720",
+        "size": _COVER_SIZE,
         "response_format": "b64_json",
         "aspect_ratio": "16:9",
     }
@@ -182,6 +218,8 @@ def generate_cover_image(prompt: str) -> bytes:
         return _image_bytes_from_generations_payload(response.json())
 
     err_snip = response.text[:400]
+    if is_bothub_insufficient_caps(response.status_code, err_snip):
+        _raise_insufficient_caps(err_snip, via="images/generations")
     # Retry with a minimal OpenAI-shaped body if optional fields are rejected.
     if response.status_code == 400 and any(
         key in err_snip.lower()
@@ -214,6 +252,8 @@ def generate_cover_image(prompt: str) -> bytes:
         if response.ok:
             return _image_bytes_from_generations_payload(response.json())
         err_snip = response.text[:400]
+        if is_bothub_insufficient_caps(response.status_code, err_snip):
+            _raise_insufficient_caps(err_snip, via="images/generations")
 
     if response.status_code not in (404, 405):
         logger.error(
@@ -237,6 +277,8 @@ def generate_cover_image(prompt: str) -> bytes:
         logger.error(
             "BotHub chat.completions → %s %s", chat.status_code, chat.text[:500]
         )
+        if is_bothub_insufficient_caps(chat.status_code, chat.text):
+            _raise_insufficient_caps(chat.text[:400], via="chat.completions")
     chat.raise_for_status()
     return _image_bytes_from_chat_payload(chat.json())
 
