@@ -1183,6 +1183,7 @@
   "giveaways_developer": "Developer:",
   "giveaways_dates": "Giveaway dates:",
   "giveaways_platforms": "Platforms:",
+  "giveaways_store": "Store:",
   "giveaways_date_open": "no end date",
   "giveaways_find_streams": "Find streams",
   "giveaways_find_streams_none": "No Twitch category found for <b>{game}</b>.",

@@ -1184,6 +1184,7 @@
   "giveaways_developer": "Разработчик:",
   "giveaways_dates": "Даты раздачи:",
   "giveaways_platforms": "Платформы:",
+  "giveaways_store": "Магазин:",
   "giveaways_date_open": "без срока",
   "giveaways_find_streams": "Найти стримы",
   "giveaways_find_streams_none": "Не нашёл категорию Twitch для <b>{game}</b>.",

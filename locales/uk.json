@@ -1183,6 +1183,7 @@
   "giveaways_developer": "Розробник:",
   "giveaways_dates": "Дати роздачі:",
   "giveaways_platforms": "Платформи:",
+  "giveaways_store": "Магазин:",
   "giveaways_date_open": "без терміну",
   "giveaways_find_streams": "Знайти стріми",
   "giveaways_find_streams_none": "Не знайшов категорію Twitch для <b>{game}</b>.",

@@ -311,11 +311,14 @@ def _check_card_html_caption_budget() -> None:
     body = _build_card_html(item, "en", footer=footer)
     assert len(body) <= 1024
     assert body.count("<b>") == body.count("</b>")
-    assert body.count("<b>") >= 6  # title + genre + pub + dev + platforms + dates
+    assert body.count("<b>") >= 7  # title + genre + pub + dev + platforms + store + dates
     assert "Genre:" in body or "<b>Genre:</b>" in body
     assert "Giveaway dates:" in body
-    assert body.index("Platforms:") < body.index("Giveaway dates:")
+    assert body.index("Platforms:") < body.index("Store:")
+    assert body.index("Store:") < body.index("Giveaway dates:")
     assert "\n\n<b>Giveaway dates:" in body or "\n\n<b>Giveaway dates:</b>" in body
+    assert 'href="https://example.com"' in body
+    assert ">Steam</a>" in body
     assert body.count("<a ") == body.count("</a>")
     assert "<tag>" not in body
     assert "&amp;" in body or "Game" in body

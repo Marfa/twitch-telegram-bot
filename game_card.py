@@ -23,6 +23,8 @@ class GameCardFields:
     dates: str = ""
     dates_key: str = "game_card_release_dates"
     summary: str = ""
+    # Prebuilt HTML value for the store line (linked name). Survives Forward.
+    store_html: str = ""
 
 
 def year_from_unix(ts: Any) -> str:
@@ -88,6 +90,9 @@ def build_game_card_html(fields: GameCardFields, lang: str, *, footer: str = "")
         _bold_label(t("giveaways_developer", lang), dev),
         _bold_label(t("giveaways_platforms", lang), plats),
     ]
+    store = (fields.store_html or "").strip()
+    if store:
+        meta_lines.append(_bold_label(t("giveaways_store", lang), store))
     meta = "\n".join(meta_lines)
     dates_line = _bold_label(t(fields.dates_key, lang), dates)
     dates_block = f"\n\n{dates_line}"

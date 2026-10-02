@@ -440,6 +440,20 @@ def _format_dates(offer: GiveawayOffer, lang: str) -> str:
     return start or end or "—"
 
 
+def _store_value_html(item: _Enriched, lang: str) -> str:
+    """Store name as a text link (survives Forward; inline keyboards do not)."""
+    label = _store_label(lang, item.offer.store_id)
+    if not label:
+        return ""
+    url = (claim_url_or_search(item.offer) or "").strip()
+    if url.startswith(("http://", "https://")):
+        return (
+            f'<a href="{html.escape(url, quote=True)}">'
+            f"{html.escape(label)}</a>"
+        )
+    return html.escape(label)
+
+
 def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
     plat_parts = [
         _platform_label(lang, pid) for pid in item.offer.platform_ids
@@ -455,6 +469,7 @@ def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
         dates=_format_dates(item.offer, lang),
         dates_key="giveaways_dates",
         summary=item.summary,
+        store_html=_store_value_html(item, lang),
     )
     return build_game_card_html(fields, lang, footer=footer)
 
