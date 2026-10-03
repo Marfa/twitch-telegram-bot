@@ -2690,6 +2690,11 @@ async def _scenario_subscriptions_list_pages(db) -> None:
     """§4 list pagination — long list yields pages; flip keeps working."""
     from handlers.subscriptions import list_subscriptions, on_list_page
 
+    # Earlier scenarios may leave mixed alert types; list then stops at type pick
+    # without list_pages. Keep this case single-type (live only).
+    for sub in list(db.get_subscriptions_by_owner(_FREE_UID)):
+        db.delete_subscription(sub.id, _FREE_UID, to_cart=False)
+
     for i in range(12):
         db.add_subscription(
             owner_id=_FREE_UID,
