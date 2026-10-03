@@ -14,7 +14,7 @@ from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes, ConversationHandler
 
 import beta as beta_features
-from bot_helpers import _menu, reply_chat_id
+from bot_helpers import _menu, _pulse_wizard_keyboard, reply_chat_id
 from db import Database
 from db.models import GiveawayCatalogEntry
 from giveaway_sources import (
@@ -24,6 +24,7 @@ from giveaway_sources import (
     attribution_html,
     claim_url_or_search,
     fetch_active_giveaways,
+    fetch_deals,
 )
 from i18n import DEFAULT_LOCALE, igdb_attribution, t
 from igdb_dumps import igdb_image_url
@@ -37,6 +38,7 @@ from game_card import (
 logger = logging.getLogger(__name__)
 
 GIVEAWAYS_BETA_ID = "giveaways-alerts"
+GIVEAWAYS_DISCOUNT = 1  # ConversationHandler state: await cut %
 _PAGE_SIZE = 5
 _DIGEST_MIN_INTERVAL_SEC = 20 * 3600
 _CATALOG_MAX_AGE_SEC = 24 * 3600
@@ -64,6 +66,7 @@ def _prefs_or_empty(db: Database, owner_id: int):
         digest_enabled=False,
         first_digest_sent=False,
         last_digest_at=0,
+        deal_cut_min=None,
     )
 
 
@@ -96,6 +99,12 @@ def giveaways_hub_keyboard(
             InlineKeyboardButton(
                 t("giveaways_btn_platforms", lang),
                 callback_data="gv:platforms",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                t("giveaways_btn_discount", lang),
+                callback_data="gv:discount",
             )
         ],
     ]
@@ -134,6 +143,25 @@ def giveaways_hub_keyboard(
         ]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def _discount_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("giveaways_discount_clear", lang),
+                    callback_data="gv:discount:clear",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("giveaways_btn_back", lang),
+                    callback_data="gv:hub",
+                )
+            ],
+        ]
+    )
 
 
 def _checkbox_list_keyboard(
@@ -284,6 +312,7 @@ def catalog_entry_to_offer(entry: GiveawayCatalogEntry) -> GiveawayOffer:
         description=entry.description,
         image_url=entry.image_url,
         dedupe_key=entry.dedupe_key,
+        cut=entry.cut,
     )
 
 
@@ -371,6 +400,7 @@ def _enrich_offer_base(db: Database, offer: GiveawayOffer) -> GiveawayCatalogEnt
         summary=summary,
         cover_url=cover_url or "",
         refreshed_at=0,
+        cut=offer.cut,
     )
 
 
@@ -459,8 +489,12 @@ def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
         _platform_label(lang, pid) for pid in item.offer.platform_ids
     ]
     plats = ", ".join(plat_parts) if plat_parts else ""
+    name = item.name
+    cut = item.offer.cut
+    if cut is not None and 0 <= int(cut) <= 100:
+        name = f"−{int(cut)}% · {name}"
     fields = GameCardFields(
-        name=item.name,
+        name=name,
         year=item.year,
         genre=item.genre,
         publisher=item.publisher,
@@ -511,6 +545,67 @@ async def _send_one_card(
     )
 
 
+def _merge_catalog_prefer_giveaway(
+    free: list[GiveawayCatalogEntry], deals: list[GiveawayCatalogEntry]
+) -> list[GiveawayCatalogEntry]:
+    by_key: dict[str, GiveawayCatalogEntry] = {}
+    for e in deals:
+        by_key[e.dedupe_key] = e
+    for e in free:
+        by_key[e.dedupe_key] = e
+    return sorted(
+        by_key.values(),
+        key=lambda e: (e.start_at or "", e.cut or 0, e.title),
+        reverse=True,
+    )
+
+
+def _enrich_deals_sync(
+    db: Database,
+    *,
+    cut_min: int,
+    stores: set[str],
+    platforms: set[str],
+    country: str,
+) -> list[GiveawayCatalogEntry]:
+    offers = fetch_deals(
+        cut_min,
+        stores=stores,
+        platforms=platforms,
+        country=country,
+    )
+    return [_enrich_offer_base(db, o) for o in offers]
+
+
+async def _entries_for_prefs(
+    db: Database,
+    prefs: Any,
+    lang: str,
+    *,
+    catalog: list[GiveawayCatalogEntry] | None = None,
+) -> list[GiveawayCatalogEntry]:
+    if catalog is None:
+        catalog = await ensure_giveaways_catalog(db)
+    free = filter_catalog_entries(
+        catalog,
+        stores=set(prefs.stores),
+        platforms=set(prefs.platforms),
+    )
+    cut = prefs.deal_cut_min
+    if cut is None or not (0 <= int(cut) <= 99):
+        return free
+    country = "RU" if str(lang or "").startswith("ru") else "US"
+    deals = await asyncio.to_thread(
+        _enrich_deals_sync,
+        db,
+        cut_min=int(cut),
+        stores=set(prefs.stores),
+        platforms=set(prefs.platforms),
+        country=country,
+    )
+    return _merge_catalog_prefer_giveaway(free, deals)
+
+
 async def _send_cards_batch(
     bot: Any,
     chat_id: int,
@@ -529,7 +624,7 @@ async def _send_cards_batch(
     next_offset = offset + len(chunk)
     has_more = next_offset < len(entries)
     used_gp = any(e.source == "gamerpower" for e in entries)
-    used_itad = any(e.source == "itad" for e in entries)
+    used_itad = any(e.source in ("itad", "itad_deal") for e in entries)
     attr = attribution_html(used_gp=used_gp, used_itad=used_itad)
     footer = " · ".join(p for p in (attr, igdb_attribution(lang)) if p)
     items = [_enriched_from_catalog(db, e, lang) for e in chunk]
@@ -567,12 +662,7 @@ async def _send_matching_list(
     set_first_sent: bool = False,
 ) -> int:
     prefs = _prefs_or_empty(db, user_id)
-    catalog = await ensure_giveaways_catalog(db)
-    entries = filter_catalog_entries(
-        catalog,
-        stores=set(prefs.stores),
-        platforms=set(prefs.platforms),
-    )
+    entries = await _entries_for_prefs(db, prefs, lang)
     if not entries:
         await bot.send_message(
             chat_id,
@@ -631,11 +721,17 @@ async def open_giveaways_hub(
     show_fresh = bool(
         prefs.stores and prefs.platforms and prefs.first_digest_sent
     )
+    cut = prefs.deal_cut_min
+    if cut is not None and 0 <= int(cut) <= 99:
+        discount_line = t("giveaways_hub_discount", lang, cut=int(cut))
+    else:
+        discount_line = t("giveaways_hub_discount_off", lang)
     text = t(
         "giveaways_hub",
         lang,
         stores=len(prefs.stores),
         platforms=len(prefs.platforms),
+        discount=discount_line,
         status=(
             t("giveaways_status_on", lang)
             if prefs.digest_enabled
@@ -698,6 +794,163 @@ async def _maybe_activate_and_send_first(
         mark_seen=True,
         set_first_sent=True,
     )
+
+
+def _discount_prompt_text(lang: str, prefs: Any) -> str:
+    cut = prefs.deal_cut_min
+    if cut is not None and 0 <= int(cut) <= 99:
+        current = t("giveaways_discount_current", lang, cut=int(cut))
+    else:
+        current = t("giveaways_discount_current_off", lang)
+    return t("giveaways_discount_prompt", lang, current=current)
+
+
+async def start_giveaways_discount(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return ConversationHandler.END
+    db: Database = context.application.bot_data["db"]
+    lang = _user_lang(db, user.id)
+    await query.answer()
+    if not giveaways_feature_available(db, user.id):
+        await query.edit_message_text(t("giveaways_beta_required", lang))
+        return ConversationHandler.END
+    prefs = _prefs_or_empty(db, user.id)
+    text = _discount_prompt_text(lang, prefs)
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=_discount_keyboard(lang),
+            parse_mode=ParseMode.HTML,
+        )
+    except BadRequest:
+        await context.bot.send_message(
+            reply_chat_id(update),
+            text,
+            reply_markup=_discount_keyboard(lang),
+            parse_mode=ParseMode.HTML,
+        )
+    await _pulse_wizard_keyboard(
+        context.bot, reply_chat_id(update), lang, back=False
+    )
+    return GIVEAWAYS_DISCOUNT
+
+
+async def receive_giveaways_discount(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg or not msg.text:
+        return GIVEAWAYS_DISCOUNT
+    db: Database = context.application.bot_data["db"]
+    lang = _user_lang(db, user.id)
+    if not giveaways_feature_available(db, user.id):
+        await msg.reply_text(t("giveaways_beta_required", lang))
+        return ConversationHandler.END
+    raw = (msg.text or "").strip().replace("%", "")
+    try:
+        value = int(raw)
+    except ValueError:
+        await msg.reply_text(t("giveaways_discount_invalid", lang))
+        return GIVEAWAYS_DISCOUNT
+    if value < 0 or value > 100:
+        await msg.reply_text(t("giveaways_discount_invalid", lang))
+        return GIVEAWAYS_DISCOUNT
+    prefs = _prefs_or_empty(db, user.id)
+    if value == 100:
+        cut: int | None = None
+        confirm = t("giveaways_discount_set_free", lang)
+    else:
+        cut = value
+        confirm = t("giveaways_discount_set", lang, cut=value)
+    db.upsert_giveaways_prefs(
+        user.id,
+        stores=prefs.stores,
+        platforms=prefs.platforms,
+        digest_enabled=prefs.digest_enabled,
+        first_digest_sent=prefs.first_digest_sent,
+        last_digest_at=prefs.last_digest_at,
+        deal_cut_min=cut,
+    )
+    await msg.reply_text(confirm, reply_markup=_menu(lang, user.id))
+    prefs = _prefs_or_empty(db, user.id)
+    if prefs.deal_cut_min is not None and 0 <= int(prefs.deal_cut_min) <= 99:
+        discount_line = t(
+            "giveaways_hub_discount", lang, cut=int(prefs.deal_cut_min)
+        )
+    else:
+        discount_line = t("giveaways_hub_discount_off", lang)
+    show_fresh = bool(
+        prefs.stores and prefs.platforms and prefs.first_digest_sent
+    )
+    hub = t(
+        "giveaways_hub",
+        lang,
+        stores=len(prefs.stores),
+        platforms=len(prefs.platforms),
+        discount=discount_line,
+        status=(
+            t("giveaways_status_on", lang)
+            if prefs.digest_enabled
+            else t("giveaways_status_off", lang)
+        ),
+    )
+    await msg.reply_text(
+        hub,
+        reply_markup=giveaways_hub_keyboard(
+            lang,
+            digest_enabled=prefs.digest_enabled,
+            show_fresh=show_fresh,
+        ),
+        parse_mode=ParseMode.HTML,
+    )
+    return ConversationHandler.END
+
+
+async def on_giveaways_discount_clear(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return ConversationHandler.END
+    db: Database = context.application.bot_data["db"]
+    lang = _user_lang(db, user.id)
+    await query.answer()
+    prefs = _prefs_or_empty(db, user.id)
+    db.upsert_giveaways_prefs(
+        user.id,
+        stores=prefs.stores,
+        platforms=prefs.platforms,
+        digest_enabled=prefs.digest_enabled,
+        first_digest_sent=prefs.first_digest_sent,
+        last_digest_at=prefs.last_digest_at,
+        deal_cut_min=None,
+    )
+    await query.edit_message_text(t("giveaways_discount_set_free", lang))
+    await open_giveaways_hub(update, context)
+    return ConversationHandler.END
+
+
+async def cancel_giveaways_discount(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user = update.effective_user
+    if user:
+        db: Database = context.application.bot_data["db"]
+        lang = _user_lang(db, user.id)
+        if update.callback_query:
+            await update.callback_query.answer()
+        await open_giveaways_hub(update, context)
+        if update.effective_message and not update.callback_query:
+            await update.effective_message.reply_text(
+                "✓", reply_markup=_menu(lang, user.id)
+            )
+    return ConversationHandler.END
 
 
 async def on_giveaways_callback(
@@ -1036,10 +1289,8 @@ async def check_giveaways_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
         if prefs.last_digest_at and (now - prefs.last_digest_at) < _DIGEST_MIN_INTERVAL_SEC:
             continue
         lang = _user_lang(db, owner_id)
-        matched = filter_catalog_entries(
-            catalog,
-            stores=set(prefs.stores),
-            platforms=set(prefs.platforms),
+        matched = await _entries_for_prefs(
+            db, prefs, lang, catalog=catalog
         )
         new_entries = [
             e

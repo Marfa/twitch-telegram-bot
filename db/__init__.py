@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .models import (
+    DEAL_CUT_UNSET,
     WATCH_MAX_FILTERS,
     AlertDeliveryLogEntry,
     AlertHistoryEntry,
@@ -55,6 +56,7 @@ from .protocol import Database
 from .sqlite import SqliteDatabase
 
 __all__ = [
+    "DEAL_CUT_UNSET",
     "WATCH_MAX_FILTERS",
     "AlertDeliveryLogEntry",
     "AlertHistoryEntry",

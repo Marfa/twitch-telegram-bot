@@ -462,7 +462,14 @@ from handlers.game_info import (
     receive_game_info_text,
     start_game_info,
 )
-from handlers.giveaways import on_giveaways_callback
+from handlers.giveaways import (
+    GIVEAWAYS_DISCOUNT,
+    cancel_giveaways_discount,
+    on_giveaways_callback,
+    on_giveaways_discount_clear,
+    receive_giveaways_discount,
+    start_giveaways_discount,
+)
 from handlers.giveaway_watch import (
     cancel_giveaway_watch_callback,
     receive_giveaway_watch_dup,
@@ -3611,8 +3618,43 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(fm_search_conv, group=1)
 
+    giveaways_discount_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(
+                start_giveaways_discount, pattern=r"^gv:discount$"
+            ),
+        ],
+        states={
+            GIVEAWAYS_DISCOUNT: [
+                MessageHandler(
+                    _btn_filter("wizard_cancel"), cancel_giveaways_discount
+                ),
+                CommandHandler("cancel", cancel_giveaways_discount),
+                CallbackQueryHandler(
+                    on_giveaways_discount_clear, pattern=r"^gv:discount:clear$"
+                ),
+                CallbackQueryHandler(
+                    cancel_giveaways_discount, pattern=r"^gv:hub$"
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_giveaways_discount
+                ),
+            ],
+        },
+        fallbacks=[
+            MessageHandler(_btn_filter("wizard_cancel"), cancel_giveaways_discount),
+            CommandHandler("cancel", cancel_giveaways_discount),
+            CallbackQueryHandler(
+                cancel_giveaways_discount, pattern=r"^gv:hub$"
+            ),
+        ],
+        allow_reentry=True,
+        name="giveaways_discount",
+    )
+    app.add_handler(giveaways_discount_conv, group=1)
+
     def _clear_stuck_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        for c in (conv, fm_search_conv):
+        for c in (conv, fm_search_conv, giveaways_discount_conv):
             try:
                 key = c._get_key(update)
             except Exception:
@@ -3781,7 +3823,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_drops_get_alerts, pattern=r"^drops_get:")
     )
     app.add_handler(
-        CallbackQueryHandler(on_giveaways_callback, pattern=r"^gv:(?!watch$)")
+        CallbackQueryHandler(
+            on_giveaways_callback, pattern=r"^gv:(?!watch$|discount(?:$|:))"
+        )
     )
 
     install_scheduler_visibility(app.job_queue)

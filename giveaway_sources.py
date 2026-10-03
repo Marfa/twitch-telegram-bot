@@ -98,7 +98,7 @@ _ITAD_SHOP_ID_STORE: dict[int, str] = {
 
 @dataclass(frozen=True)
 class GiveawayOffer:
-    source: str  # gamerpower | itad
+    source: str  # gamerpower | itad | itad_deal
     external_id: str
     title: str
     store_id: str
@@ -109,6 +109,7 @@ class GiveawayOffer:
     description: str
     image_url: str
     dedupe_key: str
+    cut: int | None = None  # discount % for itad_deal
 
 
 @dataclass
@@ -118,7 +119,24 @@ class _CatalogCache:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
+@dataclass
+class _DealsCache:
+    by_key: dict[tuple[Any, ...], tuple[float, list[GiveawayOffer]]] = field(
+        default_factory=dict
+    )
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
 _cache = _CatalogCache()
+_deals_cache = _DealsCache()
+
+# Reverse of _ITAD_SHOP_ID_STORE for deals shop filter
+_STORE_ITAD_SHOP_IDS: dict[str, list[int]] = {}
+for _shop_id, _store in _ITAD_SHOP_ID_STORE.items():
+    _STORE_ITAD_SHOP_IDS.setdefault(_store, []).append(_shop_id)
+
+_DEALS_MAX = 100
+_DEALS_PAGE = 50
 
 
 def _norm_token(s: str) -> str:
@@ -400,7 +418,180 @@ def filter_giveaways(
     return out
 
 
+def merge_prefer_giveaway(
+    free: list[GiveawayOffer], deals: list[GiveawayOffer]
+) -> list[GiveawayOffer]:
+    """Dedupe by dedupe_key; keep free giveaway when both match."""
+    by_key: dict[str, GiveawayOffer] = {}
+    for offer in deals:
+        by_key[offer.dedupe_key] = offer
+    for offer in free:
+        by_key[offer.dedupe_key] = offer
+    return sorted(
+        by_key.values(),
+        key=lambda o: (o.start_at or "", o.cut or 0, o.title),
+        reverse=True,
+    )
+
+
+def fetch_deals(
+    cut_min: int,
+    *,
+    stores: set[str],
+    platforms: set[str],
+    country: str = "US",
+    force: bool = False,
+) -> list[GiveawayOffer]:
+    """ITAD /deals/v2 with cut >= cut_min; empty without API key or invalid cut."""
+    if cut_min < 0 or cut_min > 99:
+        return []
+    if not stores or not platforms:
+        return []
+    key = _itad_api_key()
+    if not key:
+        return []
+    cc = (country or "US").strip().upper()[:2] or "US"
+    cache_key = (
+        int(cut_min),
+        cc,
+        tuple(sorted(stores)),
+        tuple(sorted(platforms)),
+    )
+    now = time.monotonic()
+    with _deals_cache.lock:
+        hit = _deals_cache.by_key.get(cache_key)
+        if (
+            not force
+            and hit
+            and (now - hit[0]) < _CACHE_TTL_SEC
+        ):
+            return list(hit[1])
+
+    shop_ids: list[int] = []
+    for sid in stores:
+        shop_ids.extend(_STORE_ITAD_SHOP_IDS.get(sid, []))
+    shop_ids = sorted(set(shop_ids))
+
+    out: list[GiveawayOffer] = []
+    offset = 0
+    while offset < _DEALS_MAX:
+        limit = min(_DEALS_PAGE, _DEALS_MAX - offset)
+        filt: dict[str, Any] = {"cut": {"min": int(cut_min), "max": None}}
+        if shop_ids:
+            filt["shops"] = shop_ids
+        body: dict[str, Any] = {
+            "country": cc,
+            "offset": offset,
+            "limit": limit,
+            "sort": "-cut",
+            "nondeals": False,
+            "mature": False,
+            "filter": filt,
+        }
+        try:
+            r = _SESSION.post(
+                f"{_ITAD_BASE}/deals/v2",
+                json=body,
+                headers={
+                    "ITAD-API-Key": key,
+                    "Content-Type": "application/json",
+                },
+                timeout=25,
+            )
+            if r.status_code == 429:
+                retry = int(r.headers.get("Retry-After") or "5")
+                time.sleep(min(retry, 30))
+                continue
+            if r.status_code in (401, 403):
+                logger.warning("itad deals auth failed status=%s", r.status_code)
+                return []
+            r.raise_for_status()
+            data = r.json()
+        except Exception:
+            logger.exception("itad deals fetch failed offset=%s", offset)
+            break
+        rows = data.get("list") if isinstance(data, dict) else None
+        if not isinstance(rows, list) or not rows:
+            break
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            if str(raw.get("type") or "").lower() != "game":
+                continue
+            title = str(raw.get("title") or "").strip()
+            if not title:
+                continue
+            deal = raw.get("deal") or {}
+            if not isinstance(deal, dict):
+                continue
+            try:
+                cut = int(deal.get("cut") or 0)
+            except (TypeError, ValueError):
+                continue
+            if cut < cut_min:
+                continue
+            shop = deal.get("shop") or {}
+            shop_id = int(shop.get("id") or 0) if isinstance(shop, dict) else 0
+            shop_name = str(shop.get("name") or "") if isinstance(shop, dict) else ""
+            store_id = _ITAD_SHOP_ID_STORE.get(shop_id) or canonicalize_store(
+                shop_name
+            )
+            if store_id not in stores:
+                continue
+            plats_raw = deal.get("platforms") or []
+            plat_names: list[str] = []
+            if isinstance(plats_raw, list):
+                for p in plats_raw:
+                    if isinstance(p, dict):
+                        plat_names.append(str(p.get("name") or ""))
+                    else:
+                        plat_names.append(str(p))
+            plats = canonicalize_platforms(plat_names) or ("pc",)
+            if not (set(plats) & platforms):
+                continue
+            claim = str(deal.get("url") or "").strip()
+            assets = raw.get("assets") or {}
+            image = ""
+            if isinstance(assets, dict):
+                image = str(
+                    assets.get("boxart")
+                    or assets.get("banner400")
+                    or assets.get("banner300")
+                    or ""
+                ).strip()
+            gid = str(raw.get("id") or "").strip() or title
+            out.append(
+                GiveawayOffer(
+                    source="itad_deal",
+                    external_id=gid,
+                    title=title,
+                    store_id=store_id,
+                    platform_ids=plats,
+                    claim_url=claim,
+                    start_at=str(deal.get("timestamp") or "").strip(),
+                    end_at=str(deal.get("expiry") or "").strip() or "N/A",
+                    description=f"−{cut}%",
+                    image_url=image,
+                    dedupe_key=_dedupe_key(store_id, title),
+                    cut=cut,
+                )
+            )
+        has_more = bool(data.get("hasMore")) if isinstance(data, dict) else False
+        if not has_more or len(rows) < limit:
+            break
+        next_off = data.get("nextOffset") if isinstance(data, dict) else None
+        try:
+            offset = int(next_off) if next_off is not None else offset + limit
+        except (TypeError, ValueError):
+            offset += limit
+
+    with _deals_cache.lock:
+        _deals_cache.by_key[cache_key] = (time.monotonic(), list(out))
+    return list(out)
+
+
 def attribution_html(*, used_gp: bool, used_itad: bool) -> str:
+    """used_itad covers both ITAD giveaways and ITAD deals."""
     parts: list[str] = []
     if used_gp:
         parts.append(
@@ -460,6 +651,26 @@ def demo_self_check() -> None:
     assert len(filtered) == 1
     assert filter_giveaways(merged, stores={"steam"}, platforms={"switch"}) == []
     assert filter_giveaways(merged, stores=set(), platforms={"pc"}) == []
+    deal = GiveawayOffer(
+        source="itad_deal",
+        external_id="d1",
+        title="Foo",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="https://example.com/d",
+        start_at="",
+        end_at="",
+        description="−50%",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Foo"),
+        cut=50,
+    )
+    prefer = merge_prefer_giveaway([a], [deal])
+    assert len(prefer) == 1 and prefer[0].source == "gamerpower"
+    only_deal = merge_prefer_giveaway([], [deal])
+    assert len(only_deal) == 1 and only_deal[0].cut == 50
+    assert fetch_deals(100, stores={"steam"}, platforms={"pc"}) == []
+    assert fetch_deals(50, stores=set(), platforms={"pc"}) == []
 
 
 if __name__ == "__main__":

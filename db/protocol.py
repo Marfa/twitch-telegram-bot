@@ -802,6 +802,7 @@ class Database(Protocol):
         digest_enabled: bool | None = None,
         first_digest_sent: bool | None = None,
         last_digest_at: int | None = None,
+        deal_cut_min: Any = ...,
     ) -> GiveawaysPrefs: ...
 
     def set_giveaways_digest_enabled(self, owner_id: int, enabled: bool) -> None: ...

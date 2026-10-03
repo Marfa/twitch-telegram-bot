@@ -128,6 +128,8 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("gv_hub", "gv:hub"),
     ("gv_stores", "gv:stores"),
     ("gv_platforms", "gv:platforms"),
+    ("gv_discount", "gv:discount"),
+    ("gv_discount_clear", "gv:discount:clear"),
     ("gv_disable", "gv:disable"),
     ("gv_fresh", "gv:fresh"),
     ("gv_watch", "gv:watch"),

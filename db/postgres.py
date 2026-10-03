@@ -14,6 +14,7 @@ from typing import Any, Iterator
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .models import (
+    DEAL_CUT_UNSET,
     WATCH_MAX_FILTERS,
     AlertHistoryEntry,
     BotStats,
@@ -1005,8 +1006,15 @@ class PostgresDatabase:
                     platforms_json TEXT NOT NULL DEFAULT '[]',
                     digest_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                     first_digest_sent BOOLEAN NOT NULL DEFAULT FALSE,
-                    last_digest_at BIGINT NOT NULL DEFAULT 0
+                    last_digest_at BIGINT NOT NULL DEFAULT 0,
+                    deal_cut_min INTEGER
                 )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE giveaways_prefs
+                ADD COLUMN IF NOT EXISTS deal_cut_min INTEGER
                 """
             )
             cur.execute(
@@ -6287,6 +6295,17 @@ owner_id, twitch_username, twitch_user_id,
                 platforms = [str(x) for x in raw_p if str(x)]
         except Exception:
             platforms = []
+        cut_raw = row["deal_cut_min"] if "deal_cut_min" in row else None
+        cut: int | None
+        if cut_raw is None:
+            cut = None
+        else:
+            try:
+                cut_i = int(cut_raw)
+            except (TypeError, ValueError):
+                cut = None
+            else:
+                cut = cut_i if 0 <= cut_i <= 99 else None
         return GiveawaysPrefs(
             owner_id=int(row["owner_id"]),
             stores=stores,
@@ -6294,6 +6313,7 @@ owner_id, twitch_username, twitch_user_id,
             digest_enabled=bool(row["digest_enabled"]),
             first_digest_sent=bool(row["first_digest_sent"]),
             last_digest_at=int(row["last_digest_at"] or 0),
+            deal_cut_min=cut,
         )
 
     def get_giveaways_prefs(self, owner_id: int) -> GiveawaysPrefs | None:
@@ -6317,6 +6337,7 @@ owner_id, twitch_username, twitch_user_id,
         digest_enabled: bool | None = None,
         first_digest_sent: bool | None = None,
         last_digest_at: int | None = None,
+        deal_cut_min: int | None | object = DEAL_CUT_UNSET,
     ) -> GiveawaysPrefs:
         existing = self.get_giveaways_prefs(owner_id)
         en = (
@@ -6334,6 +6355,17 @@ owner_id, twitch_username, twitch_user_id,
             if last_digest_at is not None
             else (existing.last_digest_at if existing else 0)
         )
+        if deal_cut_min is DEAL_CUT_UNSET:
+            cut = existing.deal_cut_min if existing else None
+        elif deal_cut_min is None:
+            cut = None
+        else:
+            try:
+                cut_i = int(deal_cut_min)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                cut = existing.deal_cut_min if existing else None
+            else:
+                cut = cut_i if 0 <= cut_i <= 99 else None
         stores_json = json.dumps(list(stores), ensure_ascii=False)
         platforms_json = json.dumps(list(platforms), ensure_ascii=False)
         with self._conn() as conn:
@@ -6342,16 +6374,18 @@ owner_id, twitch_username, twitch_user_id,
                 """
                 INSERT INTO giveaways_prefs (
                     owner_id, stores_json, platforms_json,
-                    digest_enabled, first_digest_sent, last_digest_at
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                    digest_enabled, first_digest_sent, last_digest_at,
+                    deal_cut_min
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (owner_id) DO UPDATE SET
                     stores_json = EXCLUDED.stores_json,
                     platforms_json = EXCLUDED.platforms_json,
                     digest_enabled = EXCLUDED.digest_enabled,
                     first_digest_sent = EXCLUDED.first_digest_sent,
-                    last_digest_at = EXCLUDED.last_digest_at
+                    last_digest_at = EXCLUDED.last_digest_at,
+                    deal_cut_min = EXCLUDED.deal_cut_min
                 """,
-                (owner_id, stores_json, platforms_json, en, first, last),
+                (owner_id, stores_json, platforms_json, en, first, last, cut),
             )
         return GiveawaysPrefs(
             owner_id=owner_id,
@@ -6360,6 +6394,7 @@ owner_id, twitch_username, twitch_user_id,
             digest_enabled=en,
             first_digest_sent=first,
             last_digest_at=last,
+            deal_cut_min=cut,
         )
 
     def set_giveaways_digest_enabled(self, owner_id: int, enabled: bool) -> None:

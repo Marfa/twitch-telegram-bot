@@ -808,6 +808,10 @@ class DropsAuth:
     access_expires_at: int = 0
 
 
+# Sentinel for upsert_giveaways_prefs: omit means keep existing deal_cut_min.
+DEAL_CUT_UNSET = object()
+
+
 @dataclass
 class GiveawaysPrefs:
     owner_id: int
@@ -816,6 +820,7 @@ class GiveawaysPrefs:
     digest_enabled: bool = False
     first_digest_sent: bool = False
     last_digest_at: int = 0
+    deal_cut_min: int | None = None  # 0..99; None = free giveaways only
 
 
 @dataclass
@@ -841,6 +846,7 @@ class GiveawayCatalogEntry:
     summary: str
     cover_url: str
     refreshed_at: int = 0
+    cut: int | None = None  # ITAD deal discount %; None for free giveaways
 
 
 @dataclass

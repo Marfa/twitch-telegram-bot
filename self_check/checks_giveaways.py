@@ -53,6 +53,33 @@ def _check_prefs_and_seen() -> None:
         assert prefs.stores == ["steam", "epic"]
         assert prefs.platforms == ["pc"]
         assert prefs.digest_enabled is True
+        assert prefs.deal_cut_min is None
+        db.upsert_giveaways_prefs(
+            1,
+            stores=prefs.stores,
+            platforms=prefs.platforms,
+            deal_cut_min=50,
+        )
+        prefs = db.get_giveaways_prefs(1)
+        assert prefs is not None and prefs.deal_cut_min == 50
+        # Omitting deal_cut_min keeps existing value.
+        db.upsert_giveaways_prefs(
+            1,
+            stores=["steam"],
+            platforms=["pc"],
+            digest_enabled=True,
+        )
+        prefs = db.get_giveaways_prefs(1)
+        assert prefs is not None and prefs.deal_cut_min == 50
+        # 100 / clear → NULL (free-only default).
+        db.upsert_giveaways_prefs(
+            1,
+            stores=prefs.stores,
+            platforms=prefs.platforms,
+            deal_cut_min=None,
+        )
+        prefs = db.get_giveaways_prefs(1)
+        assert prefs is not None and prefs.deal_cut_min is None
         assert db.has_any_giveaways_work() is True
         assert db.list_giveaways_digest_owner_ids() == [1]
         assert db.has_seen_giveaway(1, "gamerpower", "9") is False
@@ -231,8 +258,117 @@ def _check_first_digest_unlocks_fresh_flag() -> None:
     kb = giveaways_hub_keyboard("en", digest_enabled=True, show_fresh=True)
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert t("giveaways_btn_fresh", "en") in texts
+    assert t("giveaways_btn_discount", "en") in texts
     cbs = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert "gv:fresh" in cbs
+    assert "gv:discount" in cbs
+    # Discount under platforms
+    assert cbs.index("gv:platforms") < cbs.index("gv:discount")
+
+
+def _check_deal_merge_and_card_cut() -> None:
+    from giveaway_sources import merge_prefer_giveaway
+    from handlers.giveaways import _Enriched, _build_card_html, _merge_catalog_prefer_giveaway
+    from db.models import GiveawayCatalogEntry
+
+    free = GiveawayOffer(
+        source="gamerpower",
+        external_id="1",
+        title="Foo",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="a",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Foo"),
+    )
+    deal = GiveawayOffer(
+        source="itad_deal",
+        external_id="d",
+        title="Foo",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="d",
+        start_at="",
+        end_at="",
+        description="−50%",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Foo"),
+        cut=50,
+    )
+    merged = merge_prefer_giveaway([free], [deal])
+    assert len(merged) == 1 and merged[0].source == "gamerpower"
+    entry_free = GiveawayCatalogEntry(
+        source="gamerpower",
+        external_id="1",
+        title="Foo",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="a",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Foo"),
+        igdb_id=None,
+        name="Foo",
+        year="",
+        publisher="",
+        developer="",
+        summary="",
+        cover_url="",
+    )
+    entry_deal = GiveawayCatalogEntry(
+        source="itad_deal",
+        external_id="d",
+        title="Bar",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="d",
+        start_at="",
+        end_at="",
+        description="−70%",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Bar"),
+        igdb_id=None,
+        name="Bar",
+        year="",
+        publisher="",
+        developer="",
+        summary="",
+        cover_url="",
+        cut=70,
+    )
+    cat = _merge_catalog_prefer_giveaway([entry_free], [entry_deal])
+    assert len(cat) == 2
+    item = _Enriched(
+        offer=GiveawayOffer(
+            source="itad_deal",
+            external_id="d",
+            title="Bar",
+            store_id="steam",
+            platform_ids=("pc",),
+            claim_url="d",
+            start_at="",
+            end_at="",
+            description="",
+            image_url="",
+            dedupe_key=_dedupe_key("steam", "Bar"),
+            cut=70,
+        ),
+        igdb_id=None,
+        name="Bar",
+        year="",
+        publisher="",
+        developer="",
+        genre="",
+        summary="",
+        cover_url="",
+    )
+    html_body = _build_card_html(item, "en")
+    assert "−70%" in html_body
 
 
 def _check_card_keyboard() -> None:
@@ -366,6 +502,7 @@ def run() -> None:
     _check_filter_requires_both()
     _check_dedupe_prefers_itad()
     _check_first_digest_unlocks_fresh_flag()
+    _check_deal_merge_and_card_cut()
     _check_card_keyboard()
     _check_card_html_caption_budget()
     _check_unified_card_dates_after_platforms()

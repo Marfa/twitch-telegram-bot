@@ -1324,11 +1324,15 @@ async def _scenario_wizard_giveaways_hub(db) -> None:
     ]
     assert t("giveaways_btn_stores", "ru") in labels
     assert t("giveaways_btn_platforms", "ru") in labels
+    assert t("giveaways_btn_discount", "ru") in labels
     cap.assert_turn("wizard_giveaways_hub")
 
     assert markup_has_escape_hatch(
         giveaways_hub_keyboard("ru", digest_enabled=False, show_fresh=False)
     )
+    from handlers.giveaways import _discount_keyboard
+
+    assert markup_has_escape_hatch(_discount_keyboard("ru"))
 
     cap = _BotCapture()
     cap.wrap(bot)
@@ -1378,6 +1382,137 @@ async def _scenario_wizard_giveaways_hub(db) -> None:
     update.effective_message = query.message
     await open_giveaways_hub(update, _ctx(application))
     cap.assert_turn("wizard_giveaways_hub_reopen")
+
+
+async def _scenario_wizard_giveaways_discount(db) -> None:
+    """§6.4 Giveaways — discount % screen: Back/Clear + text 15 / 100."""
+    from handlers.giveaways import (
+        GIVEAWAYS_BETA_ID,
+        GIVEAWAYS_DISCOUNT,
+        cancel_giveaways_discount,
+        on_giveaways_discount_clear,
+        receive_giveaways_discount,
+        start_giveaways_discount,
+    )
+    from telegram.ext import ConversationHandler
+
+    application, bot = _app(db)
+    application.job_queue = MagicMock()
+    db.upsert_user(_FREE_UID)
+    db.set_beta_enrollment(_FREE_UID, GIVEAWAYS_BETA_ID, True)
+    db.upsert_giveaways_prefs(
+        _FREE_UID, stores=["steam"], platforms=["pc"], digest_enabled=True
+    )
+
+    def _patch_pulse(cap: _BotCapture):
+        async def _pulse(bot_arg, chat_id, lang, *, back=True):
+            cap.note_pulse()
+
+        return patch("handlers.giveaways._pulse_wizard_keyboard", new=_pulse)
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "gv:discount", cap)
+    update.effective_message = query.message
+    with _patch_pulse(cap):
+        state = await start_giveaways_discount(update, _ctx(application))
+    assert state == GIVEAWAYS_DISCOUNT
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:hub"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:discount:clear"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    cap.assert_turn("wizard_giveaways_discount")
+
+    # 15% → store deal_cut_min=15 (deals with cut >= 15)
+    cap = _BotCapture()
+    msg_update = _msg_update(_FREE_UID, "15", cap)
+    state = await receive_giveaways_discount(msg_update, _ctx(application))
+    assert state == ConversationHandler.END
+    prefs = db.get_giveaways_prefs(_FREE_UID)
+    assert prefs is not None and prefs.deal_cut_min == 15
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:close"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    cap.assert_turn("wizard_giveaways_discount_set_15")
+
+    # Re-open discount, clear → free-only default
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "gv:discount", cap)
+    update.effective_message = query.message
+    with _patch_pulse(cap):
+        state = await start_giveaways_discount(update, _ctx(application))
+    assert state == GIVEAWAYS_DISCOUNT
+    cap.assert_turn("wizard_giveaways_discount_reopen")
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "gv:discount:clear", cap)
+    update.effective_message = query.message
+    state = await on_giveaways_discount_clear(update, _ctx(application))
+    assert state == ConversationHandler.END
+    prefs = db.get_giveaways_prefs(_FREE_UID)
+    assert prefs is not None and prefs.deal_cut_min is None
+    cap.assert_turn("wizard_giveaways_discount_clear")
+
+    # 100 → same as clear (free-only)
+    cap = _BotCapture()
+    msg_update = _msg_update(_FREE_UID, "100", cap)
+    db.upsert_giveaways_prefs(
+        _FREE_UID,
+        stores=["steam"],
+        platforms=["pc"],
+        deal_cut_min=40,
+    )
+    state = await receive_giveaways_discount(msg_update, _ctx(application))
+    assert state == ConversationHandler.END
+    prefs = db.get_giveaways_prefs(_FREE_UID)
+    assert prefs is not None and prefs.deal_cut_min is None
+    cap.assert_turn("wizard_giveaways_discount_set_100")
+
+    # Back to hub from discount screen
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, "gv:discount", cap)
+    update.effective_message = query.message
+    with _patch_pulse(cap):
+        await start_giveaways_discount(update, _ctx(application))
+    cap.markups.clear()
+    cap.pulsed_wizard = False
+    update, query = _cb_update(_FREE_UID, "gv:hub", cap)
+    update.effective_message = query.message
+    state = await cancel_giveaways_discount(update, _ctx(application))
+    assert state == ConversationHandler.END
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.callback_data or "") == "gv:close"
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in cap.markups
+    )
+    cap.assert_turn("wizard_giveaways_discount_back_hub")
 
 
 async def _scenario_wizard_alert_type_other(db) -> None:
@@ -3135,6 +3270,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_release_pick_pages(db)
         await _scenario_release_notify_delete(db)
         await _scenario_wizard_giveaways_hub(db)
+        await _scenario_wizard_giveaways_discount(db)
         await _scenario_wizard_alert_type_other(db)
         await _scenario_other_game_info(db)
         await _scenario_wizard_extras_checkboxes(db)
