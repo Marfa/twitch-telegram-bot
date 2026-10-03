@@ -356,25 +356,25 @@ class GiveawayWatchPrefs:
     game_name: str
     platforms: list[GiveawayPlatformPref] = field(default_factory=list)
     notified_keys: list[str] = field(default_factory=list)
+    deal_cut_min: int | None = None  # 0..99; None = free giveaways only
 
 
 def dump_giveaway_watch_prefs(prefs: GiveawayWatchPrefs) -> str:
-    return json.dumps(
-        {
-            "igdb_game_id": int(prefs.igdb_game_id),
-            "game_name": prefs.game_name,
-            "platforms": [
-                {
-                    "platform_id": int(p.platform_id),
-                    "platform_name": p.platform_name,
-                }
-                for p in prefs.platforms
-            ],
-            "notified_keys": list(prefs.notified_keys),
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+    payload: dict[str, Any] = {
+        "igdb_game_id": int(prefs.igdb_game_id),
+        "game_name": prefs.game_name,
+        "platforms": [
+            {
+                "platform_id": int(p.platform_id),
+                "platform_name": p.platform_name,
+            }
+            for p in prefs.platforms
+        ],
+        "notified_keys": list(prefs.notified_keys),
+    }
+    if prefs.deal_cut_min is not None:
+        payload["deal_cut_min"] = int(prefs.deal_cut_min)
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
 def parse_giveaway_watch_prefs(raw: str | None) -> GiveawayWatchPrefs | None:
@@ -412,11 +412,20 @@ def parse_giveaway_watch_prefs(raw: str | None) -> GiveawayWatchPrefs | None:
             s = str(k or "").strip()
             if s and s not in notified:
                 notified.append(s)
+    cut: int | None = None
+    if "deal_cut_min" in data and data.get("deal_cut_min") is not None:
+        try:
+            cut_i = int(data.get("deal_cut_min"))
+        except (TypeError, ValueError):
+            cut_i = -1
+        if 0 <= cut_i <= 99:
+            cut = cut_i
     return GiveawayWatchPrefs(
         igdb_game_id=gid,
         game_name=name,
         platforms=platforms,
         notified_keys=notified,
+        deal_cut_min=cut,
     )
 
 

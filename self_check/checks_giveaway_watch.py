@@ -17,6 +17,8 @@ from giveaway_sources import GiveawayOffer
 from handlers.giveaway_watch import (
     _game_pick_keyboard,
     canonicalize_igdb_platform_name,
+    cut_matches_offer,
+    edit_giveaway_watch_options_keyboard,
     offer_matches_game,
     platforms_match_offer,
 )
@@ -31,6 +33,7 @@ def _check_prefs_roundtrip() -> None:
             GiveawayPlatformPref(platform_id=48, platform_name="PlayStation 4"),
         ],
         notified_keys=["gamerpower:1"],
+        deal_cut_min=25,
     )
     raw = dump_giveaway_watch_prefs(prefs)
     back = parse_giveaway_watch_prefs(raw)
@@ -39,9 +42,15 @@ def _check_prefs_roundtrip() -> None:
     assert back.game_name == "Demo Game"
     assert len(back.platforms) == 2
     assert back.notified_keys == ["gamerpower:1"]
+    assert back.deal_cut_min == 25
     assert alert_type_from_payload({"giveaway_watch_prefs": raw}) == "giveaway_watch"
     assert is_giveaway_watch_sub(SimpleNamespace(giveaway_watch_prefs=raw))
     assert prem.is_live_only_alert(SimpleNamespace(giveaway_watch_prefs=raw))
+    # Legacy JSON without deal_cut_min → free-only.
+    legacy = parse_giveaway_watch_prefs(
+        '{"igdb_game_id":1,"game_name":"X","platforms":[],"notified_keys":[]}'
+    )
+    assert legacy is not None and legacy.deal_cut_min is None
 
 
 def _check_empty_platforms_any() -> None:
@@ -119,6 +128,66 @@ def _check_game_pick_keyboard_company_label() -> None:
     assert "Valve" in label
 
 
+def _check_cut_matches_offer() -> None:
+    free = GiveawayOffer(
+        source="gamerpower",
+        external_id="1",
+        title="X",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key="steam|x",
+        cut=None,
+    )
+    deal15 = GiveawayOffer(
+        source="itad_deal",
+        external_id="2",
+        title="X",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key="steam|x2",
+        cut=15,
+    )
+    deal50 = GiveawayOffer(
+        source="itad_deal",
+        external_id="3",
+        title="X",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key="steam|x3",
+        cut=50,
+    )
+    free_only = GiveawayWatchPrefs(igdb_game_id=1, game_name="X", deal_cut_min=None)
+    from15 = GiveawayWatchPrefs(igdb_game_id=1, game_name="X", deal_cut_min=15)
+    from40 = GiveawayWatchPrefs(igdb_game_id=1, game_name="X", deal_cut_min=40)
+    assert cut_matches_offer(free_only, free)
+    assert not cut_matches_offer(free_only, deal15)
+    assert cut_matches_offer(from15, free)
+    assert cut_matches_offer(from15, deal15)
+    assert cut_matches_offer(from15, deal50)
+    assert cut_matches_offer(from40, free)
+    assert not cut_matches_offer(from40, deal15)
+    assert cut_matches_offer(from40, deal50)
+    kb = edit_giveaway_watch_options_keyboard(9, "en")
+    texts = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("discount" in (b.callback_data or "") for row in kb.inline_keyboard for b in row)
+    assert len(texts) >= 2
+
+
 def _check_offer_matches_game_string_only() -> None:
     # Hot path must not hit igdb_search (was ~60s/catalog on the asyncio loop).
     import inspect
@@ -176,6 +245,7 @@ def run() -> None:
     _check_empty_platforms_any()
     _check_platform_canonicalize()
     _check_game_pick_keyboard_company_label()
+    _check_cut_matches_offer()
     _check_offer_matches_game_string_only()
     _check_igdb_platforms_for_game()
 

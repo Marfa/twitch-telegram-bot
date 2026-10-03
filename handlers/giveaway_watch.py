@@ -1,7 +1,8 @@
-"""Giveaway-watch subscriptions: wait for a free giveaway of a chosen IGDB game."""
+"""Giveaway-watch subscriptions: wait for a free/discounted offer of a chosen IGDB game."""
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -26,7 +27,12 @@ from db import (
     parse_giveaway_watch_prefs,
 )
 from db.models import GiveawayPlatformPref, GiveawayWatchPrefs
-from giveaway_sources import GiveawayOffer
+from giveaway_sources import (
+    PLATFORM_IDS,
+    STORE_IDS,
+    GiveawayOffer,
+    fetch_deals,
+)
 from handlers.giveaways import catalog_entry_to_offer, ensure_giveaways_catalog
 from i18n import DEFAULT_LOCALE, btn, igdb_attribution, t
 from igdb_dumps import igdb_image_url
@@ -48,6 +54,7 @@ def _user_lang(db: Database, user_id: int) -> str:
 
 def _wz() -> dict[str, int]:
     from bot import (
+        GIVEAWAY_WATCH_DISCOUNT,
         GIVEAWAY_WATCH_DUP,
         GIVEAWAY_WATCH_PICK,
         GIVEAWAY_WATCH_PLATFORMS,
@@ -59,6 +66,7 @@ def _wz() -> dict[str, int]:
         "GIVEAWAY_WATCH_PICK": GIVEAWAY_WATCH_PICK,
         "GIVEAWAY_WATCH_DUP": GIVEAWAY_WATCH_DUP,
         "GIVEAWAY_WATCH_PLATFORMS": GIVEAWAY_WATCH_PLATFORMS,
+        "GIVEAWAY_WATCH_DISCOUNT": GIVEAWAY_WATCH_DISCOUNT,
     }
 
 
@@ -72,9 +80,41 @@ def edit_giveaway_watch_options_keyboard(
                     t("edit_giveaway_watch_platforms", lang),
                     callback_data=f"edit_gw:{sub_id}:platforms",
                 )
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    t("edit_giveaway_watch_discount", lang),
+                    callback_data=f"edit_gw:{sub_id}:discount",
+                )
+            ],
         ]
     )
+
+
+def _discount_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("giveaways_discount_clear", lang),
+                    callback_data="gvw:discount:clear",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang), callback_data="gvw:cancel"
+                )
+            ],
+        ]
+    )
+
+
+def _discount_prompt_text(lang: str, cut: int | None) -> str:
+    if cut is not None and 0 <= int(cut) <= 99:
+        current = t("giveaways_discount_current", lang, cut=int(cut))
+    else:
+        current = t("giveaways_discount_current_off", lang)
+    return t("giveaway_watch_discount_prompt", lang, current=current)
 
 
 def _game_pick_keyboard(
@@ -220,6 +260,21 @@ def platforms_match_offer(
     if not wanted:
         return True
     return bool(wanted & set(offer.platform_ids))
+
+
+def cut_matches_offer(prefs: GiveawayWatchPrefs, offer: GiveawayOffer) -> bool:
+    """Free offers always match; deals need cut >= deal_cut_min (or free-only)."""
+    oc = offer.cut
+    if oc is None:
+        return True
+    try:
+        n = int(oc)
+    except (TypeError, ValueError):
+        return True
+    want = prefs.deal_cut_min
+    if want is None:
+        return n >= 100
+    return n >= int(want)
 
 
 def offer_matches_game(
@@ -386,23 +441,8 @@ async def _after_game_chosen(
     chat_id = reply_chat_id(update)
     name = html.escape(str(game.get("name") or ""))
     if not platforms:
-        prefs = GiveawayWatchPrefs(
-            igdb_game_id=game_id,
-            game_name=str(game.get("name") or "").strip(),
-            platforms=[],
-            notified_keys=[],
-        )
-        sub, status = await create_giveaway_watch_subscription(
-            context.bot,
-            db,
-            user_id,
-            lang,
-            prefs=prefs,
-            allow_duplicate=bool(context.user_data.get("gvw_allow_duplicate")),
-        )
-        return await _finish_create(
-            update, context, db, user_id, lang, sub, status, prefs
-        )
+        context.user_data["gvw_pending_platforms"] = []
+        return await _prompt_giveaway_watch_discount(update, context, lang, cut=None)
     text = t("giveaway_watch_pick_platforms", lang, game=name)
     markup = _platforms_keyboard(platforms, set(), lang)
     query = update.callback_query
@@ -610,14 +650,13 @@ async def receive_giveaway_watch_platforms(
                 )
             )
 
-    prefs = GiveawayWatchPrefs(
-        igdb_game_id=game_id,
-        game_name=name,
-        platforms=chosen,
-        notified_keys=[],
-    )
-
     if edit_sub_id:
+        prefs = GiveawayWatchPrefs(
+            igdb_game_id=game_id,
+            game_name=name,
+            platforms=chosen,
+            notified_keys=[],
+        )
         sub = db.get_subscription(int(edit_sub_id), user_id)
         if not sub or not is_giveaway_watch_sub(sub):
             await query.edit_message_text(t("sub_not_found", lang))
@@ -626,6 +665,7 @@ async def receive_giveaway_watch_platforms(
         old = parse_giveaway_watch_prefs(sub.giveaway_watch_prefs)
         if old:
             prefs.notified_keys = list(old.notified_keys)
+            prefs.deal_cut_min = old.deal_cut_min
         db.update_subscription(
             sub.id,
             user_id,
@@ -641,6 +681,160 @@ async def receive_giveaway_watch_platforms(
         )
         return ConversationHandler.END
 
+    context.user_data["gvw_pending_platforms"] = chosen
+    return await _prompt_giveaway_watch_discount(update, context, lang, cut=None)
+
+
+async def _prompt_giveaway_watch_discount(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    *,
+    cut: int | None,
+) -> int:
+    text = _discount_prompt_text(lang, cut)
+    markup = _discount_keyboard(lang)
+    query = update.callback_query
+    chat_id = reply_chat_id(update)
+    if query:
+        try:
+            await query.edit_message_text(
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+            )
+        except BadRequest:
+            await context.bot.send_message(
+                chat_id,
+                text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML,
+            )
+    elif update.effective_message:
+        await update.effective_message.reply_text(
+            text,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+        )
+    return _wz()["GIVEAWAY_WATCH_DISCOUNT"]
+
+
+async def receive_giveaway_watch_discount(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    lang = _user_lang(db, user_id)
+    msg = update.effective_message
+    if not msg or not msg.text:
+        return _wz()["GIVEAWAY_WATCH_DISCOUNT"]
+    if not giveaways_feature_available(db, user_id):
+        await msg.reply_text(
+            t("giveaways_beta_required", lang), reply_markup=_menu(lang, user_id)
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    raw = (msg.text or "").strip().replace("%", "")
+    try:
+        value = int(raw)
+    except ValueError:
+        await msg.reply_text(t("giveaways_discount_invalid", lang))
+        return _wz()["GIVEAWAY_WATCH_DISCOUNT"]
+    if value < 0 or value > 100:
+        await msg.reply_text(t("giveaways_discount_invalid", lang))
+        return _wz()["GIVEAWAY_WATCH_DISCOUNT"]
+    cut: int | None = None if value == 100 else value
+    return await _apply_giveaway_watch_discount(
+        update, context, db, user_id, lang, cut=cut
+    )
+
+
+async def on_giveaway_watch_discount_clear(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    db: Database = context.application.bot_data["db"]
+    user_id = query.from_user.id
+    lang = _user_lang(db, user_id)
+    if not giveaways_feature_available(db, user_id):
+        await query.edit_message_text(t("giveaways_beta_required", lang))
+        context.user_data.clear()
+        return ConversationHandler.END
+    return await _apply_giveaway_watch_discount(
+        update, context, db, user_id, lang, cut=None
+    )
+
+
+async def _apply_giveaway_watch_discount(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    user_id: int,
+    lang: str,
+    *,
+    cut: int | None,
+) -> int:
+    edit_sub_id = context.user_data.get("gvw_edit_discount_sub_id")
+    if edit_sub_id:
+        sub = db.get_subscription(int(edit_sub_id), user_id)
+        prefs = parse_giveaway_watch_prefs(sub.giveaway_watch_prefs) if sub else None
+        if not prefs:
+            text = t("sub_not_found", lang)
+            if update.callback_query:
+                await update.callback_query.edit_message_text(text)
+            elif update.effective_message:
+                await update.effective_message.reply_text(text)
+            context.user_data.clear()
+            return ConversationHandler.END
+        prefs.deal_cut_min = cut
+        db.update_subscription(
+            sub.id,
+            user_id,
+            giveaway_watch_prefs=dump_giveaway_watch_prefs(prefs),
+            mark_sync_edited=False,
+        )
+        confirm = (
+            t("giveaway_watch_discount_updated_free", lang)
+            if cut is None
+            else t("giveaway_watch_discount_updated", lang, cut=int(cut))
+        )
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text(confirm)
+            except BadRequest:
+                pass
+            await context.bot.send_message(
+                reply_chat_id(update),
+                t("menu_main", lang),
+                reply_markup=_menu(lang, user_id),
+            )
+        elif update.effective_message:
+            await update.effective_message.reply_text(
+                confirm, reply_markup=_menu(lang, user_id)
+            )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    game = context.user_data.get("gvw_game") or {}
+    game_id = int(game.get("id") or 0)
+    name = str(game.get("name") or "").strip()
+    platforms = list(context.user_data.get("gvw_pending_platforms") or [])
+    if not game_id or not name:
+        text = t("giveaway_watch_create_failed", lang)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text)
+        elif update.effective_message:
+            await update.effective_message.reply_text(text)
+        context.user_data.clear()
+        return ConversationHandler.END
+    prefs = GiveawayWatchPrefs(
+        igdb_game_id=game_id,
+        game_name=name,
+        platforms=platforms,
+        notified_keys=[],
+        deal_cut_min=cut,
+    )
     sub, status = await create_giveaway_watch_subscription(
         context.bot,
         db,
@@ -651,6 +845,33 @@ async def receive_giveaway_watch_platforms(
     )
     return await _finish_create(
         update, context, db, user_id, lang, sub, status, prefs
+    )
+
+
+async def start_edit_giveaway_watch_discount(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    db: Database = context.application.bot_data["db"]
+    user_id = query.from_user.id
+    lang = _user_lang(db, user_id)
+    try:
+        sub_id = int((query.data or "").split(":")[1])
+    except (IndexError, ValueError):
+        return ConversationHandler.END
+    if not giveaways_feature_available(db, user_id):
+        await query.edit_message_text(t("giveaways_beta_required", lang))
+        return ConversationHandler.END
+    sub = db.get_subscription(sub_id, user_id)
+    prefs = parse_giveaway_watch_prefs(sub.giveaway_watch_prefs) if sub else None
+    if not prefs:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    context.user_data.clear()
+    context.user_data["gvw_edit_discount_sub_id"] = sub_id
+    return await _prompt_giveaway_watch_discount(
+        update, context, lang, cut=prefs.deal_cut_min
     )
 
 
@@ -783,6 +1004,7 @@ async def create_giveaway_watch_subscription(
             "igdb_game_id": prefs.igdb_game_id,
             "enabled": enabled,
             "platforms": len(prefs.platforms),
+            "deal_cut_min": prefs.deal_cut_min,
         },
     )
     if not enabled:
@@ -836,6 +1058,48 @@ async def start_edit_giveaway_watch_platforms(
     return _wz()["GIVEAWAY_WATCH_PLATFORMS"]
 
 
+async def _offers_for_watch_scan(
+    db: Database, subs: list[Subscription]
+) -> list[GiveawayOffer]:
+    catalog_entries = await ensure_giveaways_catalog(db)
+    free = [catalog_entry_to_offer(e) for e in catalog_entries]
+    cuts: list[int] = []
+    countries: set[str] = set()
+    for sub in subs:
+        if not sub.enabled:
+            continue
+        prefs = parse_giveaway_watch_prefs(sub.giveaway_watch_prefs)
+        if not prefs:
+            continue
+        cut = prefs.deal_cut_min
+        if cut is None or not (0 <= int(cut) <= 99):
+            continue
+        cuts.append(int(cut))
+        lang = _user_lang(db, sub.owner_id)
+        countries.add("RU" if str(lang).startswith("ru") else "US")
+    if not cuts:
+        return free
+    min_cut = min(cuts)
+    if not countries:
+        countries = {"US"}
+    by_key: dict[str, GiveawayOffer] = {}
+    stores = set(STORE_IDS)
+    platforms = set(PLATFORM_IDS)
+    for country in sorted(countries):
+        deals = await asyncio.to_thread(
+            fetch_deals,
+            min_cut,
+            stores=stores,
+            platforms=platforms,
+            country=country,
+        )
+        for offer in deals:
+            by_key[offer.dedupe_key] = offer
+    for offer in free:
+        by_key[offer.dedupe_key] = offer
+    return list(by_key.values())
+
+
 async def check_giveaway_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
     import time as _time
 
@@ -845,10 +1109,9 @@ async def check_giveaway_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> Non
     subs = db.get_giveaway_watch_subscriptions()
     if not subs:
         return
-    catalog_entries = await ensure_giveaways_catalog(db)
-    if not catalog_entries:
+    catalog = await _offers_for_watch_scan(db, subs)
+    if not catalog:
         return
-    catalog = [catalog_entry_to_offer(e) for e in catalog_entries]
     for sub in subs:
         if not sub.enabled:
             continue
@@ -871,6 +1134,8 @@ async def check_giveaway_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> Non
             ):
                 continue
             if not platforms_match_offer(prefs, offer):
+                continue
+            if not cut_matches_offer(prefs, offer):
                 continue
             match = offer
             break
@@ -922,13 +1187,37 @@ async def _send_giveaway_watch_notify(
     title = html.escape(offer.title or prefs.game_name)
     store = html.escape(offer.store_id or "—")
     claim = (offer.claim_url or "").strip()
-    body = t(
-        "giveaway_watch_notify",
-        lang,
-        game=title,
-        store=store,
-        claim=html.escape(claim) if claim else "—",
-    )
+    cut = offer.cut
+    if cut is not None:
+        try:
+            cut_n = int(cut)
+        except (TypeError, ValueError):
+            cut_n = 100
+        if cut_n < 100:
+            body = t(
+                "giveaway_watch_notify_deal",
+                lang,
+                game=title,
+                store=store,
+                cut=cut_n,
+                claim=html.escape(claim) if claim else "—",
+            )
+        else:
+            body = t(
+                "giveaway_watch_notify",
+                lang,
+                game=title,
+                store=store,
+                claim=html.escape(claim) if claim else "—",
+            )
+    else:
+        body = t(
+            "giveaway_watch_notify",
+            lang,
+            game=title,
+            store=store,
+            claim=html.escape(claim) if claim else "—",
+        )
     body = f"{body}\n\n{t('giveaway_watch_paused_note', lang)}"
     cover_mid = db.igdb_cover_image_id_for_game(prefs.igdb_game_id)
     caption = f"{body}\n\n{igdb_attribution(lang)}"

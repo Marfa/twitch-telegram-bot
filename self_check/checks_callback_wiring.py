@@ -190,6 +190,8 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("edit_r_days", f"edit_r:{_SAMPLE_SUB}:days"),
     ("edit_r_platforms", f"edit_r:{_SAMPLE_SUB}:platforms"),
     ("edit_gw_platforms", f"edit_gw:{_SAMPLE_SUB}:platforms"),
+    ("edit_gw_discount", f"edit_gw:{_SAMPLE_SUB}:discount"),
+    ("gvw_discount_clear", "gvw:discount:clear"),
     ("rel_pick", "rel:pick:1"),
     ("rel_page", "rel:page:1"),
     ("rel_page_noop", "rel:page:noop"),

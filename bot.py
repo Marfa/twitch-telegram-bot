@@ -472,10 +472,13 @@ from handlers.giveaways import (
 )
 from handlers.giveaway_watch import (
     cancel_giveaway_watch_callback,
+    on_giveaway_watch_discount_clear,
+    receive_giveaway_watch_discount,
     receive_giveaway_watch_dup,
     receive_giveaway_watch_game_text,
     receive_giveaway_watch_pick,
     receive_giveaway_watch_platforms,
+    start_edit_giveaway_watch_discount,
     start_edit_giveaway_watch_platforms,
     start_giveaway_watch_wizard,
 )
@@ -807,9 +810,10 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_PICK,
     GIVEAWAY_WATCH_DUP,
     GIVEAWAY_WATCH_PLATFORMS,
+    GIVEAWAY_WATCH_DISCOUNT,
     GAME_INFO_SEARCH,
     GAME_INFO_PICK,
-) = range(83)
+) = range(84)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2970,6 +2974,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 dm_only_conv_entry(start_edit_giveaway_watch_platforms),
                 pattern=r"^edit_gw:\d+:platforms$",
             ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_giveaway_watch_discount),
+                pattern=r"^edit_gw:\d+:discount$",
+            ),
         ],
         states={
             LANG_SELECT: [
@@ -3558,6 +3566,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(
                     receive_giveaway_watch_platforms,
                     pattern=r"^gvw:(toggle:\d+|create|create:any|cancel)$",
+                ),
+            ],
+            GIVEAWAY_WATCH_DISCOUNT: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    cancel_giveaway_watch_callback, pattern=r"^gvw:cancel$"
+                ),
+                CallbackQueryHandler(
+                    on_giveaway_watch_discount_clear,
+                    pattern=r"^gvw:discount:clear$",
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_giveaway_watch_discount
                 ),
             ],
             GAME_INFO_SEARCH: [

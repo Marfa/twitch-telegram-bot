@@ -6570,9 +6570,12 @@ owner_id, twitch_username, twitch_user_id,
         return [self._row_to_giveaways_catalog(r) for r in rows]
 
     def giveaways_catalog_refreshed_at(self) -> int:
+        # Negative refreshed_at = snapshot time, IGDB not enriched yet (lazy pages).
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute("SELECT MAX(refreshed_at) AS ts FROM giveaways_catalog")
+            cur.execute(
+                "SELECT MAX(ABS(refreshed_at)) AS ts FROM giveaways_catalog"
+            )
             row = cur.fetchone()
         if not row or row["ts"] is None:
             return 0

@@ -22,6 +22,8 @@ class GameCardFields:
     platforms: str = ""
     dates: str = ""
     dates_key: str = "game_card_release_dates"
+    discount: str = ""  # e.g. "15%" / "100%"; empty = omit line
+    discount_key: str = "giveaways_discount_label"
     summary: str = ""
     # Prebuilt HTML value for the store line (linked name). Survives Forward.
     store_html: str = ""
@@ -95,12 +97,22 @@ def build_game_card_html(fields: GameCardFields, lang: str, *, footer: str = "")
         meta_lines.append(_bold_label(t("giveaways_store", lang), store))
     meta = "\n".join(meta_lines)
     dates_line = _bold_label(t(fields.dates_key, lang), dates)
+    disc_raw = (fields.discount or "").strip()
+    discount_line = (
+        _bold_label(t(fields.discount_key, lang), html.escape(disc_raw))
+        if disc_raw
+        else ""
+    )
     dates_block = f"\n\n{dates_line}"
+    if discount_line:
+        dates_block += f"\n{discount_line}"
     use_footer = footer
     footer_block = f"\n\n{use_footer}" if use_footer else ""
     if len(meta) + len(dates_block) + len(footer_block) > _CAP:
         use_footer = ""
         footer_block = ""
+    if len(meta) + len(dates_block) + len(footer_block) > _CAP:
+        dates_block = f"\n\n{dates_line}" if dates_line else ""
     if len(meta) + len(dates_block) + len(footer_block) > _CAP:
         dates_block = ""
     room = _CAP - len(meta) - len(dates_block) - len(footer_block)
@@ -112,6 +124,8 @@ def build_game_card_html(fields: GameCardFields, lang: str, *, footer: str = "")
     if dates_block:
         parts.append("")
         parts.append(dates_line)
+        if discount_line and discount_line in dates_block:
+            parts.append(discount_line)
     if desc:
         parts.extend(["", desc])
     if use_footer:

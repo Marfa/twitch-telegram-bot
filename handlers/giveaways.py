@@ -266,11 +266,14 @@ def _store_browse(
     user_id: int,
     entries: list[GiveawayCatalogEntry],
     lang: str,
-) -> None:
+) -> list[GiveawayCatalogEntry]:
+    """Store browse list; return the same list object so page enrich sticks."""
+    stored = list(entries)
     application.bot_data.setdefault(_BROWSE_KEY, {})[int(user_id)] = {
-        "entries": list(entries),
+        "entries": stored,
         "lang": lang,
     }
+    return stored
 
 
 def _load_browse(
@@ -428,24 +431,16 @@ def _enriched_from_catalog(
 
 
 def rebuild_giveaways_catalog_sync(db: Database) -> list[GiveawayCatalogEntry]:
-    """Fetch GP/ITAD, enrich once, replace DB snapshot. Sync — call via to_thread."""
-    from twitch import prewarm_igdb_summary_translations
-
+    """Fetch GP/ITAD into a raw snapshot; IGDB enrich happens per browse page."""
     offers = fetch_active_giveaways(force=True)
     now = int(time.time())
-    entries = [_enrich_offer_base(db, o) for o in offers]
+    # Negative refreshed_at = catalog age (ABS) without IGDB enrich yet.
+    stamp = -max(1, now)
+    entries = [_raw_catalog_entry_from_offer(o) for o in offers]
     for e in entries:
-        e.refreshed_at = now
+        e.refreshed_at = stamp
     db.replace_giveaways_catalog(entries)
-    # Translate descriptions once into igdb_summary_translations (all bot locales).
-    filled = prewarm_igdb_summary_translations(
-        db, (e.summary for e in entries if e.summary)
-    )
-    logger.info(
-        "giveaways catalog rebuilt entries=%s translations_filled=%s",
-        len(entries),
-        filled,
-    )
+    logger.info("giveaways catalog rebuilt entries=%s (lazy igdb)", len(entries))
     return entries
 
 
@@ -484,17 +479,27 @@ def _store_value_html(item: _Enriched, lang: str) -> str:
     return html.escape(label)
 
 
+def _discount_display(offer: GiveawayOffer) -> str:
+    """Free giveaways → 100%; ITAD deals → their cut (including 100)."""
+    cut = offer.cut
+    if cut is None:
+        return "100%"
+    try:
+        n = int(cut)
+    except (TypeError, ValueError):
+        return "100%"
+    if n < 0:
+        return "100%"
+    return f"{min(100, n)}%"
+
+
 def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
     plat_parts = [
         _platform_label(lang, pid) for pid in item.offer.platform_ids
     ]
     plats = ", ".join(plat_parts) if plat_parts else ""
-    name = item.name
-    cut = item.offer.cut
-    if cut is not None and 0 <= int(cut) <= 100:
-        name = f"−{int(cut)}% · {name}"
     fields = GameCardFields(
-        name=name,
+        name=item.name,
         year=item.year,
         genre=item.genre,
         publisher=item.publisher,
@@ -502,6 +507,7 @@ def _build_card_html(item: _Enriched, lang: str, *, footer: str = "") -> str:
         platforms=plats,
         dates=_format_dates(item.offer, lang),
         dates_key="giveaways_dates",
+        discount=_discount_display(item.offer),
         summary=item.summary,
         store_html=_store_value_html(item, lang),
     )
@@ -560,8 +566,66 @@ def _merge_catalog_prefer_giveaway(
     )
 
 
-def _enrich_deals_sync(
-    db: Database,
+def _raw_catalog_entry_from_offer(offer: GiveawayOffer) -> GiveawayCatalogEntry:
+    """Lightweight row for browse; IGDB enrich happens per page on send."""
+    # Keep cut off the summary/description so the card does not show it twice.
+    summary = ""
+    if offer.source != "itad_deal":
+        summary = (offer.description or "")[:800]
+    elif offer.description and not str(offer.description).strip().startswith("−"):
+        summary = (offer.description or "")[:800]
+    return GiveawayCatalogEntry(
+        source=offer.source,
+        external_id=offer.external_id,
+        title=offer.title,
+        store_id=offer.store_id,
+        platform_ids=tuple(offer.platform_ids),
+        claim_url=offer.claim_url,
+        start_at=offer.start_at,
+        end_at=offer.end_at,
+        description=offer.description if offer.source != "itad_deal" else "",
+        image_url=offer.image_url,
+        dedupe_key=offer.dedupe_key,
+        igdb_id=None,
+        name=offer.title,
+        year="",
+        publisher="",
+        developer="",
+        summary=summary,
+        cover_url=offer.image_url or "",
+        refreshed_at=0,
+        cut=offer.cut,
+    )
+
+
+def _needs_igdb_enrich(entry: GiveawayCatalogEntry) -> bool:
+    # <=0: raw deal (0) or catalog snapshot (−timestamp). >0: already enriched.
+    return int(entry.refreshed_at or 0) <= 0
+
+
+def _enrich_entry_igdb(db: Database, entry: GiveawayCatalogEntry) -> GiveawayCatalogEntry:
+    if not _needs_igdb_enrich(entry):
+        return entry
+    enriched = _enrich_offer_base(db, catalog_entry_to_offer(entry))
+    stamp = abs(int(entry.refreshed_at or 0)) or int(time.time())
+    enriched.refreshed_at = max(1, stamp)
+    enriched.cut = entry.cut
+    return enriched
+
+
+def _enrich_browse_page(
+    db: Database, entries: list[GiveawayCatalogEntry], offset: int, limit: int
+) -> None:
+    """IGDB-enrich one page in place (for Show more / first batch)."""
+    if offset < 0:
+        offset = 0
+    end = min(len(entries), offset + max(0, limit))
+    for i in range(offset, end):
+        if _needs_igdb_enrich(entries[i]):
+            entries[i] = _enrich_entry_igdb(db, entries[i])
+
+
+def _deals_entries_sync(
     *,
     cut_min: int,
     stores: set[str],
@@ -574,7 +638,7 @@ def _enrich_deals_sync(
         platforms=platforms,
         country=country,
     )
-    return [_enrich_offer_base(db, o) for o in offers]
+    return [_raw_catalog_entry_from_offer(o) for o in offers]
 
 
 async def _entries_for_prefs(
@@ -596,8 +660,7 @@ async def _entries_for_prefs(
         return free
     country = "RU" if str(lang or "").startswith("ru") else "US"
     deals = await asyncio.to_thread(
-        _enrich_deals_sync,
-        db,
+        _deals_entries_sync,
         cut_min=int(cut),
         stores=set(prefs.stores),
         platforms=set(prefs.platforms),
@@ -620,6 +683,10 @@ async def _send_cards_batch(
         offset = 0
     if offset >= len(entries):
         return 0
+    # Enrich only this page (ITAD deals); free catalog rows already enriched.
+    await asyncio.to_thread(
+        _enrich_browse_page, db, entries, offset, _PAGE_SIZE
+    )
     chunk = entries[offset : offset + _PAGE_SIZE]
     next_offset = offset + len(chunk)
     has_more = next_offset < len(entries)
@@ -680,13 +747,13 @@ async def _send_matching_list(
             )
         return 0
 
-    _store_browse(application, user_id, entries, lang)
+    stored = _store_browse(application, user_id, entries, lang)
     await _send_cards_batch(
-        bot, chat_id, db=db, entries=entries, lang=lang, offset=0
+        bot, chat_id, db=db, entries=stored, lang=lang, offset=0
     )
     if mark_seen:
         now = int(time.time())
-        for e in entries:
+        for e in stored:
             db.mark_giveaway_seen(user_id, e.source, e.external_id, seen_at=now)
     if set_first_sent:
         db.upsert_giveaways_prefs(
@@ -697,7 +764,7 @@ async def _send_matching_list(
             first_digest_sent=True,
             last_digest_at=int(time.time()),
         )
-    return len(entries)
+    return len(stored)
 
 
 async def open_giveaways_hub(
@@ -1161,7 +1228,9 @@ async def on_giveaways_callback(
                     chat_id, t("giveaways_empty", lang)
                 )
                 return
-            _store_browse(context.application, user_id, entries, lang)
+            entries = _store_browse(
+                context.application, user_id, entries, lang
+            )
             loaded = (entries, lang)
         entries, browse_lang = loaded
         await _send_cards_batch(
@@ -1308,15 +1377,17 @@ async def check_giveaways_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             continue
         try:
-            _store_browse(context.application, owner_id, new_entries, lang)
+            stored = _store_browse(
+                context.application, owner_id, new_entries, lang
+            )
             await bot.send_message(
                 owner_id,
-                _summary_text(lang, new_entries),
+                _summary_text(lang, stored),
                 parse_mode=ParseMode.HTML,
                 reply_markup=_details_keyboard(lang),
                 disable_web_page_preview=True,
             )
-            for e in new_entries:
+            for e in stored:
                 db.mark_giveaway_seen(owner_id, e.source, e.external_id, seen_at=now)
             db.upsert_giveaways_prefs(
                 owner_id,

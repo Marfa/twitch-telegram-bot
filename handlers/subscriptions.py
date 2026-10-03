@@ -437,6 +437,13 @@ def _format_sub_line(
                 )
             else:
                 settings.append(t("sub_list_giveaway_watch_any_platform", lang))
+            cut = prefs.deal_cut_min
+            if cut is not None and 0 <= int(cut) <= 99:
+                settings.append(
+                    t("sub_list_giveaway_watch_discount", lang, cut=int(cut))
+                )
+            else:
+                settings.append(t("sub_list_giveaway_watch_discount_free", lang))
     elif is_category_watch_sub(sub):
         settings.append(t("sub_list_alert_game", lang))
         from handlers.notifications import category_watch_cooldown_minutes
@@ -2523,11 +2530,18 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         if not prefs:
             await query.edit_message_text(t("sub_not_found", lang))
             return ConversationHandler.END
+        cut = prefs.deal_cut_min
+        discount = (
+            t("giveaways_hub_discount", lang, cut=int(cut))
+            if cut is not None and 0 <= int(cut) <= 99
+            else t("giveaways_hub_discount_off", lang)
+        )
         await query.edit_message_text(
             t(
                 "edit_giveaway_watch_menu",
                 lang,
                 game=html.escape(prefs.game_name),
+                discount=discount,
             ),
             reply_markup=edit_giveaway_watch_options_keyboard(sub_id, lang),
             parse_mode=ParseMode.HTML,
@@ -5848,6 +5862,12 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if not prefs:
             await query.edit_message_text(t("sub_not_found", lang))
             return
+        cut = prefs.deal_cut_min
+        discount = (
+            t("giveaways_hub_discount", lang, cut=int(cut))
+            if cut is not None and 0 <= int(cut) <= 99
+            else t("giveaways_hub_discount_off", lang)
+        )
         await context.bot.send_message(
             chat_id,
             t("menu_subs", lang),
@@ -5859,6 +5879,7 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "edit_giveaway_watch_menu",
                 lang,
                 game=html.escape(prefs.game_name),
+                discount=discount,
             ),
             reply_markup=edit_giveaway_watch_options_keyboard(sub_id, lang),
             parse_mode=ParseMode.HTML,

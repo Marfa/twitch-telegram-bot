@@ -147,53 +147,40 @@ def _check_catalog_snapshot() -> None:
         assert db.list_giveaways_catalog() == []
 
 
-def _check_rebuild_prewarms_translations() -> None:
-    """Catalog rebuild stores summary translations once; display must not re-call API."""
+def _check_rebuild_is_lazy() -> None:
+    """Catalog rebuild stores raw rows; IGDB enrich is deferred to browse pages."""
     from unittest.mock import patch
 
     from handlers.giveaways import (
-        _enriched_from_catalog,
+        _needs_igdb_enrich,
         rebuild_giveaways_catalog_sync,
     )
-    from twitch import _IGDB_SUMMARY_TR_CACHE
 
     offer = GiveawayOffer(
         source="gamerpower",
         external_id="99",
-        title="Prewarm Game",
+        title="Lazy Rebuild Game",
         store_id="steam",
         platform_ids=("pc",),
         claim_url="https://example.com",
         start_at="",
         end_at="",
-        description="English blurb for prewarm.",
+        description="English blurb.",
         image_url="",
-        dedupe_key=_dedupe_key("steam", "Prewarm Game"),
+        dedupe_key=_dedupe_key("steam", "Lazy Rebuild Game"),
     )
     with tempfile.TemporaryDirectory() as td:
-        db = SqliteDatabase(Path(td) / "gv_tr.db")
-        _IGDB_SUMMARY_TR_CACHE.clear()
-        with (
-            patch(
-                "handlers.giveaways.fetch_active_giveaways",
-                return_value=[offer],
-            ),
-            patch("config.DEEPL_API_KEY", "x"),
-            patch("config.AZURE_TRANSLATOR_KEY", ""),
-            patch("config.AZURE_TRANSLATOR_REGION", ""),
-            patch(
-                "translate.translate_text",
-                return_value="Русский текст преворма.",
-            ) as tr,
+        db = SqliteDatabase(Path(td) / "gv_lazy.db")
+        with patch(
+            "handlers.giveaways.fetch_active_giveaways",
+            return_value=[offer],
         ):
             entries = rebuild_giveaways_catalog_sync(db)
-            assert len(entries) == 1
-            # ru+uk+it for one unique summary
-            assert tr.call_count == 3
-            _IGDB_SUMMARY_TR_CACHE.clear()
-            item = _enriched_from_catalog(db, entries[0], "ru")
-            assert item.summary == "Русский текст преворма."
-            assert tr.call_count == 3  # no extra API on display
+        assert len(entries) == 1
+        assert entries[0].refreshed_at < 0
+        assert _needs_igdb_enrich(entries[0])
+        assert db.giveaways_catalog_refreshed_at() == abs(entries[0].refreshed_at)
+        assert entries[0].igdb_id is None
 
 
 def _check_filter_requires_both() -> None:
@@ -266,10 +253,90 @@ def _check_first_digest_unlocks_fresh_flag() -> None:
     assert cbs.index("gv:platforms") < cbs.index("gv:discount")
 
 
-def _check_deal_merge_and_card_cut() -> None:
-    from giveaway_sources import merge_prefer_giveaway
-    from handlers.giveaways import _Enriched, _build_card_html, _merge_catalog_prefer_giveaway
+def _check_deal_page_enrich_lazy() -> None:
+    """ITAD deals stay raw until the browse page is sent."""
     from db.models import GiveawayCatalogEntry
+    from handlers.giveaways import (
+        _enrich_browse_page,
+        _needs_igdb_enrich,
+        _raw_catalog_entry_from_offer,
+        _store_browse,
+    )
+
+    deal = GiveawayOffer(
+        source="itad_deal",
+        external_id="d1",
+        title="Lazy Deal",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="https://example.com/d",
+        start_at="",
+        end_at="",
+        description="−15%",
+        image_url="https://example.com/i.jpg",
+        dedupe_key=_dedupe_key("steam", "Lazy Deal"),
+        cut=15,
+    )
+    raw = _raw_catalog_entry_from_offer(deal)
+    assert _needs_igdb_enrich(raw)
+    assert raw.refreshed_at == 0
+    free = GiveawayCatalogEntry(
+        source="gamerpower",
+        external_id="1",
+        title="Free",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="a",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Free"),
+        igdb_id=1,
+        name="Free",
+        year="2020",
+        publisher="P",
+        developer="D",
+        summary="s",
+        cover_url="",
+        refreshed_at=100,
+    )
+    assert not _needs_igdb_enrich(free)
+    entries = [raw, free]
+    app = MagicMock()
+    app.bot_data = {}
+    stored = _store_browse(app, 1, entries, "en")
+    assert stored is app.bot_data["giveaways_browse"][1]["entries"]
+
+    class _Db:
+        def igdb_search_games_by_name(self, q, limit=5):
+            return [{"id": 99, "name": q, "first_release_date": 0}]
+
+        def igdb_publisher_developer_names(self, _gid):
+            return ("Pub", "Dev")
+
+        def igdb_game_by_id(self, _gid):
+            return {"summary": "Hello"}
+
+        def igdb_cover_image_id_for_game(self, _gid):
+            return None
+
+    _enrich_browse_page(_Db(), stored, 0, 1)
+    assert stored[0].refreshed_at > 0
+    assert stored[0].name == "Lazy Deal"
+    assert not _needs_igdb_enrich(stored[0])
+    # Second row untouched by page size 1
+    assert stored[1].refreshed_at == 100
+
+
+def _check_deal_merge_and_card_cut() -> None:
+    from db.models import GiveawayCatalogEntry
+    from giveaway_sources import merge_prefer_giveaway
+    from handlers.giveaways import (
+        _Enriched,
+        _build_card_html,
+        _merge_catalog_prefer_giveaway,
+    )
 
     free = GiveawayOffer(
         source="gamerpower",
@@ -368,7 +435,36 @@ def _check_deal_merge_and_card_cut() -> None:
         cover_url="",
     )
     html_body = _build_card_html(item, "en")
-    assert "−70%" in html_body
+    assert "Discount:" in html_body
+    assert "70%" in html_body
+    assert "−70% ·" not in html_body
+    free_item = _Enriched(
+        offer=GiveawayOffer(
+            source="gamerpower",
+            external_id="1",
+            title="Free",
+            store_id="steam",
+            platform_ids=("pc",),
+            claim_url="a",
+            start_at="",
+            end_at="",
+            description="",
+            image_url="",
+            dedupe_key=_dedupe_key("steam", "Free"),
+            cut=None,
+        ),
+        igdb_id=None,
+        name="Free",
+        year="",
+        publisher="",
+        developer="",
+        genre="",
+        summary="",
+        cover_url="",
+    )
+    free_html = _build_card_html(free_item, "ru")
+    assert "Скидка:" in free_html
+    assert "100%" in free_html
 
 
 def _check_card_keyboard() -> None:
@@ -498,10 +594,11 @@ def run() -> None:
     _check_keyboard_order()
     _check_prefs_and_seen()
     _check_catalog_snapshot()
-    _check_rebuild_prewarms_translations()
+    _check_rebuild_is_lazy()
     _check_filter_requires_both()
     _check_dedupe_prefers_itad()
     _check_first_digest_unlocks_fresh_flag()
+    _check_deal_page_enrich_lazy()
     _check_deal_merge_and_card_cut()
     _check_card_keyboard()
     _check_card_html_caption_budget()
