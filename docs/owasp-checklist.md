@@ -168,7 +168,7 @@ rg -n "edit_set:|has_feature.*delete_prev|delete_previous" handlers/subscription
 |----|--------|-------|
 | A1–A4 | PASS | Single `ThreadingHTTPServer` in `health.py`; compose publishes `8080:8080` (see F2) |
 | B1–B5 | PASS | Owner in DB API; chat admin fail-closed; admin gates present |
-| B6 | **PASS** (fixed 2026-09-22) | `on_edit_set` gates `delete_old` / `delete_fail` / `delete_other` with `has_feature("delete_prev")` — same as `edit_f` |
+| B6 | **PASS** (fixed 2026-09-22) | `on_edit_set` gates `delete_old` / `delete_other` with `has_feature("delete_prev")` — same as `edit_f` |
 | B7 | PASS | Enable paths use subscription gates (spot-checked) |
 | B8 | PASS | Mini App APIs use initData / HMAC |
 | C1–C5 | PASS | Tokens Fernet; OAuth state uuid4 + 600s TTL + pop; residual: prefer dedicated `TOKEN_ENCRYPTION_KEY` |

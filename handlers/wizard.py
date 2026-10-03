@@ -44,7 +44,6 @@ from i18n import (
     channel_dup_keyboard,
     chat_button_keyboard,
     delay_keyboard,
-    delete_fail_notify_keyboard,
     delete_old_keyboard,
     delete_sibling_keyboard,
     dest_keyboard,
@@ -111,7 +110,6 @@ def _wz() -> dict[str, int]:
         MULTISTREAM,
         DELAY_MINUTES,
         DELAY_SEND,
-        DELETE_FAIL_NOTIFY,
         DELETE_OLD,
         DELETE_SIBLING_ALERTS,
         DEST_CHAT,
@@ -155,7 +153,6 @@ def _wz() -> dict[str, int]:
         "MULTISTREAM": MULTISTREAM,
         "DELAY_MINUTES": DELAY_MINUTES,
         "DELAY_SEND": DELAY_SEND,
-        "DELETE_FAIL_NOTIFY": DELETE_FAIL_NOTIFY,
         "DELETE_OLD": DELETE_OLD,
         "DELETE_SIBLING_ALERTS": DELETE_SIBLING_ALERTS,
         "DEST_CHAT": DEST_CHAT,
@@ -422,7 +419,6 @@ _GATE_FEATURE_LABEL = {
     "delay": "premium_feat_delay",
     "repeat": "premium_feat_repeat",
     "delete_old": "premium_feat_delete_prev",
-    "delete_fail": "premium_feat_delete_prev",
 }
 
 def _premium_gate_text(lang: str, feature: str, action: str) -> str:
@@ -490,11 +486,6 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
-        chat_id = context.user_data.get("pending_chat_id", user_id)
-        thread_id = context.user_data.get("pending_thread_id")
-        return await _finish_subscription(update, context, user_id, chat_id, thread_id)
-    if feature == "delete_fail":
-        context.user_data["notify_delete_fail"] = False
         chat_id = context.user_data.get("pending_chat_id", user_id)
         thread_id = context.user_data.get("pending_thread_id")
         return await _finish_subscription(update, context, user_id, chat_id, thread_id)
@@ -1943,20 +1934,6 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         _set_wizard_back(context, _wz()["DEST_CHAT"])
         return _wz()["DEST_CHAT"]
     if state == _wz()["DELETE_SIBLING_ALERTS"]:
-        await update.effective_message.reply_text(
-            _delete_old_prompt_text(context, lang),
-            reply_markup=delete_old_keyboard(lang),
-        )
-        _set_wizard_back(context, _wz()["DELETE_OLD"])
-        return _wz()["DELETE_OLD"]
-    if state == _wz()["DELETE_FAIL_NOTIFY"]:
-        if context.user_data.get("delete_sibling_asked"):
-            await update.effective_message.reply_text(
-                t("delete_sibling_text", lang),
-                reply_markup=delete_sibling_keyboard(lang),
-            )
-            _set_wizard_back(context, _wz()["DELETE_SIBLING_ALERTS"])
-            return _wz()["DELETE_SIBLING_ALERTS"]
         await update.effective_message.reply_text(
             _delete_old_prompt_text(context, lang),
             reply_markup=delete_old_keyboard(lang),
@@ -3450,7 +3427,8 @@ async def _prompt_delete_old(
 async def _continue_after_delete_old_yes(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    """After delete_previous=True: optional sibling ask, then fail-notify."""
+    """After delete_previous=True: optional sibling ask, then finish."""
+    context.user_data["notify_delete_fail"] = True
     if context.user_data.get("alert_type") == "category":
         db: Database = context.application.bot_data["db"]
         chat_id = context.user_data["pending_chat_id"]
@@ -3479,7 +3457,11 @@ async def _continue_after_delete_old_yes(
         context.user_data["delete_other_alerts"] = False
     else:
         context.user_data["delete_other_alerts"] = False
-    return await _prompt_delete_fail_notify(update, context, lang)
+    chat_id = context.user_data["pending_chat_id"]
+    thread_id = context.user_data.get("pending_thread_id")
+    return await _finish_subscription(
+        update, context, update.effective_user.id, chat_id, thread_id
+    )
 
 def _delete_old_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
     if context.user_data.get("alert_type") == "category":
@@ -3507,26 +3489,6 @@ def _has_sibling_publication_subs(
         return True
     return False
 
-async def _prompt_delete_fail_notify(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
-) -> int:
-    db: Database = context.application.bot_data["db"]
-    user_id = update.effective_user.id
-    if not await prem.has_feature(
-        context.bot, db, user_id, "delete_prev", channel=_wizard_channel(context)
-    ):
-        return await _show_premium_gate(
-            update, context, feature="delete_fail", first_step=False
-        )
-    text = t("delete_fail_notify_text", lang)
-    markup = delete_fail_notify_keyboard(lang)
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=markup)
-    else:
-        await update.effective_message.reply_text(text, reply_markup=markup)
-    _set_wizard_back(context, _wz()["DELETE_FAIL_NOTIFY"])
-    return _wz()["DELETE_FAIL_NOTIFY"]
-
 async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -3549,16 +3511,21 @@ async def receive_delete_sibling(
 ) -> int:
     query = update.callback_query
     await query.answer()
-    lang = _user_lang(context, query.from_user.id)
     context.user_data["delete_other_alerts"] = query.data.endswith(":1")
-    return await _prompt_delete_fail_notify(update, context, lang)
+    context.user_data["notify_delete_fail"] = True
+    chat_id = context.user_data["pending_chat_id"]
+    thread_id = context.user_data.get("pending_thread_id")
+    return await _finish_subscription(
+        update, context, query.from_user.id, chat_id, thread_id
+    )
 
 async def receive_delete_fail_notify(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
+    """Legacy callback from removed wizard step — always notify and finish."""
     query = update.callback_query
     await query.answer()
-    context.user_data["notify_delete_fail"] = query.data.endswith(":1")
+    context.user_data["notify_delete_fail"] = True
     chat_id = context.user_data["pending_chat_id"]
     thread_id = context.user_data.get("pending_thread_id")
     return await _finish_subscription(
@@ -3609,7 +3576,7 @@ async def _finish_subscription(
         context.user_data.clear()
         return ConversationHandler.END
     delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
-    notify_delete_fail = bool(data.get("notify_delete_fail", False)) and delete_previous
+    notify_delete_fail = delete_previous
     pin_message = (
         bool(data.get("pin_message", False) or data.get("adv_want_pin", False))
         and dest_type != "dm"
@@ -3931,16 +3898,6 @@ async def _finish_subscription(
                 if delete_other_alerts
                 else t("delete_yes_category", lang)
             )
-        delete_fail_note = ""
-        if delete_previous:
-            delete_fail_note = (
-                "\n"
-                + (
-                    t("delete_fail_yes_note", lang)
-                    if notify_delete_fail
-                    else t("delete_fail_no_note", lang)
-                )
-            )
         pin_note = t("pin_yes", lang) if pin_message else t("pin_no", lang)
         has_image = bool(data.get("image_file_id"))
         preview_disabled = bool(data.get("disable_link_preview", False)) or has_image
@@ -4014,7 +3971,7 @@ async def _finish_subscription(
             dest=dest_label(dest_type, lang),
             thread_note=thread_note,
             delete_note=delete_note,
-            delete_fail_note=delete_fail_note,
+            delete_fail_note="",
             pin_note=pin_note,
             preview_note=preview_note,
             image_note=image_note,

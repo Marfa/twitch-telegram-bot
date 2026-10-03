@@ -1304,6 +1304,21 @@ class SqliteDatabase:
             conn.execute(
                 "INSERT INTO schema_flags(name) VALUES ('digest_cd_minutes_v1')"
             )
+        # One-shot: delete-fail notice is always on when delete_previous is enabled.
+        flag_ndf = conn.execute(
+            "SELECT 1 FROM schema_flags WHERE name = 'notify_delete_fail_always_v1'"
+        ).fetchone()
+        if flag_ndf is None:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET notify_delete_fail = 1
+                WHERE delete_previous = 1 AND notify_delete_fail = 0
+                """
+            )
+            conn.execute(
+                "INSERT INTO schema_flags(name) VALUES ('notify_delete_fail_always_v1')"
+            )
 
     def add_subscription(
         self,

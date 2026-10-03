@@ -523,7 +523,12 @@ def check_core() -> None:
         _notif.check_streams
     )
     assert "check_stream_previews" in _inspect.getsource(_sp)
+    assert "stream preview %s took" in _inspect.getsource(_sp.check_stream_previews)
+    assert "_preview_kind_label" in _inspect.getsource(_sp)
     assert _sp._MAX_VIDEO_CAPTURES_PER_TICK == 1
+    assert _sp._preview_kind_label("__stream_preview__") == "photo"
+    assert _sp._preview_kind_label("__stream_video_preview__") == "gif"
+    assert _sp._preview_kind_label("__stream_file_video_preview__") == "file_video"
 
     async def _preview_caps_one_video_per_tick() -> None:
         """Two due video streamers → only one ffmpeg capture this tick."""

@@ -277,7 +277,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report (Mon 10:00 MSK): total users (parentheses = change vs the previous mailing), new users and Stars payers for the week, active trials. On the 1st at 10:00 MSK — the same for the previous calendar month.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ fail notify / delete other) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ delete other for category) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), repeat mute and ignore / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

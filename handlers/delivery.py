@@ -902,7 +902,7 @@ def _is_message_already_gone_delete_error(exc: BaseException) -> bool:
     )
 
 
-async def _maybe_notify_delete_fail(
+async def _notify_delete_fail(
     bot,
     db: Database,
     *,
@@ -910,10 +910,7 @@ async def _maybe_notify_delete_fail(
     chat_id: int,
     message_id: int,
     thread_id: int | None,
-    notify: bool,
 ) -> None:
-    if not notify:
-        return
     lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
     link = _message_link(chat_id, message_id, thread_id)
     try:
@@ -937,7 +934,6 @@ async def _delete_one_previous_message(
     message_id: int,
     thread_id: int | None,
     owner_id: int,
-    notify_delete_fail: bool,
 ) -> bool:
     try:
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
@@ -952,14 +948,13 @@ async def _delete_one_previous_message(
             chat_id,
             exc,
         )
-        await _maybe_notify_delete_fail(
+        await _notify_delete_fail(
             bot,
             db,
             owner_id=owner_id,
             chat_id=chat_id,
             message_id=message_id,
             thread_id=thread_id,
-            notify=notify_delete_fail,
         )
         return False
 
@@ -992,7 +987,6 @@ async def _delete_previous_before_send(bot, db: Database, sub: Subscription) -> 
             message_id=message_id,
             thread_id=sub.thread_id,
             owner_id=sub.owner_id,
-            notify_delete_fail=sub.notify_delete_fail,
         )
         if not ok:
             continue
@@ -1121,7 +1115,6 @@ async def purge_stale_previous_messages(context) -> None:
             message_id=sub.last_message_id,
             thread_id=sub.thread_id,
             owner_id=sub.owner_id,
-            notify_delete_fail=sub.notify_delete_fail,
         )
         # Clear either way — undeletable/gone messages must not be retried forever.
         db.set_last_message_id(sub.id, None)

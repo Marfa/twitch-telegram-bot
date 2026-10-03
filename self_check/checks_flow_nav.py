@@ -1468,12 +1468,14 @@ async def _scenario_other_game_info(db) -> None:
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:
-    """§2 Extras checkbox values apply without a second Yes/No (delete/delay/repeat/pin)."""
+    """§2 / §2.12 Extras delete → finish (no fail-notify step); delay/repeat/pin unchanged."""
     from handlers.wizard import (
         _go_delay_prompt,
         _prompt_delete_old,
         _prompt_repeat_step,
         receive_advanced_options_next,
+        receive_delete_old,
+        receive_delete_sibling,
         _wz,
     )
     from telegram.ext import ConversationHandler
@@ -1504,8 +1506,15 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
         "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
     ):
         state = await _prompt_delete_old(update, ctx, "ru")
-    assert state == _wz()["DELETE_FAIL_NOTIFY"]
-    assert ctx.user_data.get("delete_previous") is True
+
+    assert state == ConversationHandler.END
+    created = [
+        s
+        for s in db.get_subscriptions_by_owner(_FREE_UID)
+        if s.twitch_username == "streamer"
+    ]
+    assert created and created[-1].delete_previous is True
+    assert created[-1].notify_delete_fail is True
     inline_cbs = [
         b.callback_data or ""
         for m in cap.markups
@@ -1514,8 +1523,76 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
         for b in row
     ]
     assert not any(cb.startswith("delete_old:") for cb in inline_cbs)
-    assert any(cb.startswith("delete_fail:") for cb in inline_cbs)
+    assert not any(cb.startswith("delete_fail:") for cb in inline_cbs)
     cap.assert_turn("wizard_delete_from_extras")
+
+    # §2.12 legacy Yes → finish without delete_fail UI.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update, _query = _cb_update(_FREE_UID, "delete_old:1", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "twitch_username": "legacy",
+            "twitch_user_id": "101",
+            "alert_type": "live",
+            "dest_type": "channel",
+            "pending_chat_id": -1002,
+            "pending_thread_id": None,
+            "message_template": "hi",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.advanced_mode_on", new=AsyncMock(return_value=True)
+    ), patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_delete_old(update, ctx)
+    assert state == ConversationHandler.END
+    legacy = [
+        s
+        for s in db.get_subscriptions_by_owner(_FREE_UID)
+        if s.twitch_username == "legacy"
+    ]
+    assert legacy and legacy[-1].notify_delete_fail is True
+    assert not any(
+        (b.callback_data or "").startswith("delete_fail:")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    )
+    cap.assert_turn("wizard_delete_old_yes_no_fail_step")
+
+    # §2.12 sibling answer → finish (still no fail-notify step).
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update, _query = _cb_update(_FREE_UID, "delete_sibling:1", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "twitch_username": "sib",
+            "twitch_user_id": "102",
+            "alert_type": "category",
+            "dest_type": "channel",
+            "pending_chat_id": -1003,
+            "pending_thread_id": None,
+            "message_template": "hi",
+            "delete_previous": True,
+        }
+    )
+    state = await receive_delete_sibling(update, ctx)
+    assert state == ConversationHandler.END
+    sib = [
+        s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.twitch_username == "sib"
+    ]
+    assert sib and sib[-1].delete_other_alerts is True
+    assert sib[-1].notify_delete_fail is True
+    cap.assert_turn("wizard_delete_sibling_no_fail_step")
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -2036,23 +2113,6 @@ async def _scenario_subscriptions_edit_checkboxes(db) -> None:
         assert any(cb.startswith(f"edit_f:{sub_id}:") for cb in edit_cbs)
         assert not any(cb.startswith(f"edit_set:{sub_id}:") for cb in edit_cbs)
 
-    update, _query = _cb_update(_FREE_UID, f"edit_f:{sub_id}:delete_fail", cap)
-    with patch(
-        "handlers.subscriptions.prem.advanced_mode_on",
-        new=AsyncMock(return_value=True),
-    ), patch(
-        "handlers.subscriptions.prem.has_feature",
-        new=AsyncMock(return_value=True),
-    ):
-        await on_edit_bool_menu(update, ctx)
-    assert not any(
-        (b.callback_data or "").startswith(f"edit_set:{sub_id}:")
-        for m in cap.markups
-        if getattr(m, "inline_keyboard", None)
-        for row in m.inline_keyboard
-        for b in row
-    )
-
     sub = db.get_subscription(sub_id, _FREE_UID)
     assert sub is not None
     assert sub.strip_name_mentions is True
@@ -2061,6 +2121,14 @@ async def _scenario_subscriptions_edit_checkboxes(db) -> None:
     assert sub.delete_previous is True
     assert sub.notify_delete_fail is True
     assert sub.pin_message is True
+    edit_labels = {
+        (b.callback_data or ""): b.text
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    }
+    assert f"edit_f:{sub_id}:delete_fail" not in edit_labels
     cap.assert_turn("subscriptions_edit_checkboxes")
 
 async def _scenario_subscriptions_delete(db) -> None:

@@ -640,8 +640,7 @@ def migrate_sub_fields_for_alert_type(
         out["notify_delete_fail"] = False
         out["delete_other_alerts"] = False
         out["pin_message"] = False
-    if not out.get("delete_previous"):
-        out["notify_delete_fail"] = False
+    out["notify_delete_fail"] = bool(out.get("delete_previous"))
     if not out.get("notify_on_category_change") or not out.get("delete_previous"):
         out["delete_other_alerts"] = False
     if new_type != "upcoming":

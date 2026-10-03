@@ -504,8 +504,6 @@ def _format_sub_line(
             )
     if sub.dest_type != "dm" and sub.delete_previous:
         settings.append(t("sub_list_delete_yes", lang))
-        if sub.notify_delete_fail:
-            settings.append(t_bullet("delete_fail_yes_note", lang))
         if sub.notify_on_category_change and sub.delete_other_alerts:
             settings.append(t("sub_list_delete_other_yes", lang))
     if sub.dest_type != "dm" and getattr(sub, "pin_message", False):
@@ -3920,9 +3918,8 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         await query.answer()
         enabled = not bool(sub.delete_previous)
-        kwargs = {"delete_previous": enabled}
+        kwargs = {"delete_previous": enabled, "notify_delete_fail": enabled}
         if not enabled:
-            kwargs["notify_delete_fail"] = False
             kwargs["delete_other_alerts"] = False
         db.update_subscription(sub_id, query.from_user.id, **kwargs)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
@@ -3982,40 +3979,6 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         db.update_subscription(
             sub_id, query.from_user.id, disable_link_preview=not want_on
-        )
-        sub = db.get_subscription(sub_id, query.from_user.id) or sub
-        await _reshow_edit_menu(sub)
-        return
-    if field == "delete_fail":
-        if sub.dest_type == "dm" or not sub.delete_previous:
-            await query.answer()
-            await _reshow_edit_menu(sub)
-            return
-        if not await prem.has_feature(
-            context.bot, db, query.from_user.id, "delete_prev", channel=sub.twitch_username
-        ):
-            from premium_handlers import send_premium_screen
-
-            await query.answer()
-            await query.edit_message_text(
-                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-            )
-            await send_premium_screen(
-                context.bot,
-                query.from_user.id,
-                lang,
-                db,
-                update=update,
-                context=context,
-                source="edit_field",
-                feature="delete_prev",
-            )
-            return
-        await query.answer()
-        db.update_subscription(
-            sub_id,
-            query.from_user.id,
-            notify_delete_fail=not bool(sub.notify_delete_fail),
         )
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
@@ -4100,10 +4063,10 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     value = parts[3] == "1"
-    if field in ("delete_old", "delete_fail", "delete_other") and sub.dest_type == "dm":
+    if field in ("delete_old", "delete_other") and sub.dest_type == "dm":
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    if field in ("delete_old", "delete_fail", "delete_other"):
+    if field in ("delete_old", "delete_other"):
         # Same gate as edit_f:delete_* — crafted edit_set must not bypass Premium.
         if not await prem.has_feature(
             context.bot,
@@ -4129,15 +4092,9 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             return
     if field == "delete_old":
-        kwargs: dict = {"delete_previous": value}
+        kwargs: dict = {"delete_previous": value, "notify_delete_fail": value}
         if not value:
-            kwargs["notify_delete_fail"] = False
             kwargs["delete_other_alerts"] = False
-    elif field == "delete_fail":
-        if not sub.delete_previous:
-            await query.edit_message_text(t("sub_not_found", lang))
-            return
-        kwargs = {"notify_delete_fail": value}
     elif field == "delete_other":
         if not sub.notify_on_category_change or not sub.delete_previous:
             await query.edit_message_text(t("sub_not_found", lang))
@@ -5176,7 +5133,7 @@ def _add_subscription_from_snapshot(
         chat_id=int(snapshot.get("chat_id") or owner_id),
         thread_id=snapshot.get("thread_id"),
         delete_previous=bool(snapshot.get("delete_previous")),
-        notify_delete_fail=bool(snapshot.get("notify_delete_fail")),
+        notify_delete_fail=bool(snapshot.get("delete_previous")),
         disable_link_preview=bool(snapshot.get("disable_link_preview")),
         strip_name_mentions=bool(snapshot.get("strip_name_mentions")),
         attach_chat_button=bool(snapshot.get("attach_chat_button")),

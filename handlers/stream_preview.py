@@ -249,6 +249,17 @@ def live_streams_from_poll_snapshot(bot_data: dict[str, Any]) -> dict[str, dict]
     return out
 
 
+def _preview_kind_label(image_file_id: str | None) -> str:
+    """Stable log labels: photo / gif / file_video (same as refresh success logs)."""
+    if is_stream_file_video_preview_image(image_file_id):
+        return "file_video"
+    if is_stream_video_preview_image(image_file_id):
+        return "gif"
+    if is_stream_preview_image(image_file_id):
+        return "photo"
+    return "unknown"
+
+
 async def check_stream_previews(context) -> None:
     """JobQueue callback: refresh due stream previews outside the 60s check_streams tick.
 
@@ -262,8 +273,9 @@ async def check_stream_previews(context) -> None:
         return
     db: Database = bot_data["db"]
     twitch: TwitchClient = bot_data["twitch"]
+    kinds: set[str] = set()
     try:
-        await refresh_live_stream_previews(
+        kinds = await refresh_live_stream_previews(
             context.bot,
             db,
             twitch,
@@ -272,15 +284,18 @@ async def check_stream_previews(context) -> None:
         )
     finally:
         elapsed = time.monotonic() - started
+        label = "+".join(sorted(kinds)) if kinds else "idle"
         # Captures are expected to be long; warn so PostHog still sees backlog here.
         if elapsed >= 60.0:
             logger.warning(
-                "check_stream_previews took %.1fs (outside check_streams)",
+                "stream preview %s took %.1fs (outside check_streams)",
+                label,
                 elapsed,
             )
         elif elapsed >= 15.0:
             logger.info(
-                "check_stream_previews took %.1fs (outside check_streams)",
+                "stream preview %s took %.1fs (outside check_streams)",
+                label,
                 elapsed,
             )
 
@@ -291,7 +306,7 @@ async def refresh_live_stream_previews(
     twitch: TwitchClient,
     live_streams: dict[str, dict],
     bot_data: dict[str, Any],
-) -> None:
+) -> set[str]:
     """Every ~30 min: editMessageMedia for stream photo / video MP4 previews.
 
     One MP4 capture per streamer per refresh cycle (shared across all their alerts).
@@ -301,16 +316,19 @@ async def refresh_live_stream_previews(
     If edit fails with a hard media-type error, stop further refresh attempts for
     that subscription until the stream ends — do not delete/resend. Transient
     errors (e.g. message not found during upgrade race) are retried next tick.
+
+    Returns the set of preview kinds attempted this tick (photo / gif / file_video).
     """
     from config import STREAM_PREVIEW_REFRESH_SECONDS
     import premium as prem
 
     if not live_streams:
-        return
+        return set()
     refresh_at: dict[int, float] = bot_data.setdefault(_BOT_DATA_REFRESH_KEY, {})
     skip = _preview_skip_set(bot_data)
     now = time.time()
     interval = max(60, int(STREAM_PREVIEW_REFRESH_SECONDS))
+    kinds_attempted: set[str] = set()
 
     # uid -> (stream, video_subs, photo_subs)
     due: dict[str, tuple[dict[str, Any], list[Subscription], list[Subscription]]] = {}
@@ -377,6 +395,7 @@ async def refresh_live_stream_previews(
                 )
             video_captures += 1
         for sub in video_subs:
+            kinds_attempted.add(_preview_kind_label(sub.image_file_id))
             ok = await _edit_preview_media(
                 bot,
                 sub,
@@ -389,6 +408,7 @@ async def refresh_live_stream_previews(
             if ok:
                 refresh_at[sub.id] = now
         for sub in photo_subs:
+            kinds_attempted.add(_preview_kind_label(sub.image_file_id))
             ok = await _edit_preview_media(
                 bot,
                 sub,
@@ -404,6 +424,7 @@ async def refresh_live_stream_previews(
         # owners) until the next forced refresh or stream end.
         if captured is not None:
             forget_and_unlink(captured.path)
+    return kinds_attempted
 
 
 def animation_input_file(data: bytes, *, attach: bool = False) -> InputFile:
@@ -617,12 +638,7 @@ async def _edit_preview_media(
                     await bot.edit_message_media(**edit_kwargs)
                 else:
                     raise
-        if is_stream_file_video_preview_image(sub.image_file_id):
-            kind = "file_video"
-        elif is_stream_video_preview_image(sub.image_file_id):
-            kind = "gif"
-        else:
-            kind = "photo"
+        kind = _preview_kind_label(sub.image_file_id)
         logger.info(
             "Stream preview refreshed sub=%s chat=%s mid=%s kind=%s",
             sub.id,

@@ -308,7 +308,7 @@ def check_alert_setting_order() -> None:
     assert labels["edit_f:1:preview"].startswith("⬜️ ")
     assert labels["edit_f:1:delete_old"].startswith("✅ ")
     assert labels["edit_f:1:pin_message"].startswith("✅ ")
-    assert labels["edit_f:1:delete_fail"].startswith("⬜️ ")
+    assert "edit_f:1:delete_fail" not in labels
     assert not labels["edit_f:1:repeat"].startswith(("✅ ", "⬜️ "))
 
     upcoming_edit = edit_options_keyboard(
@@ -398,7 +398,6 @@ def check_alert_setting_order() -> None:
         "en",
         dest_type="channel",
         delete_previous=True,
-        notify_delete_fail=True,
         delete_other_alerts=True,
         notify_on_category_change=True,
         schedule_reminder_configured=True,
@@ -410,7 +409,7 @@ def check_alert_setting_order() -> None:
         for row in fail_on.inline_keyboard
         for btn in row
     }
-    assert fail_labels["edit_f:1:delete_fail"].startswith("✅ ")
+    assert "edit_f:1:delete_fail" not in fail_labels
     assert fail_labels["edit_f:1:delete_other"].startswith("✅ ")
     assert fail_labels["edit_f:1:sched_remind"].startswith("✅ ")
     assert "edit_f:1:repeat" not in fail_labels  # hidden for category alerts

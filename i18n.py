@@ -1351,15 +1351,6 @@ def delete_old_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
-def delete_fail_notify_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(t("delete_fail_yes", lang), callback_data="delete_fail:1")],
-            [InlineKeyboardButton(t("delete_fail_no", lang), callback_data="delete_fail:0")],
-        ]
-    )
-
-
 def delivery_fail_notice_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -2778,7 +2769,6 @@ def edit_options_keyboard(
     dest_type: str = "dm",
     delete_previous: bool = False,
     pin_message: bool = False,
-    notify_delete_fail: bool = False,
     delete_other_alerts: bool = False,
     has_image: bool = False,
     strip_name_mentions: bool = False,
@@ -2804,7 +2794,7 @@ def edit_options_keyboard(
     multistream_count: int = 0,
 ) -> InlineKeyboardMarkup:
     # Shared block order: alert_settings.ALERT_SETTING_ORDER. Edit-only around it:
-    # template, image_del, delete_fail/other, schedule, dest, type/copy.
+    # template, image_del, delete_other, schedule, dest, type/copy.
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER, EDIT_FIELD
 
     rows: list[list[InlineKeyboardButton]] = [
@@ -2892,26 +2882,16 @@ def edit_options_keyboard(
                         )
                     ]
                 )
-                if delete_previous:
-                    fail_mark = "✅ " if notify_delete_fail else "⬜️ "
+                if delete_previous and notify_on_category_change:
+                    other_mark = "✅ " if delete_other_alerts else "⬜️ "
                     rows.append(
                         [
                             InlineKeyboardButton(
-                                fail_mark + t("edit_delete_fail_notify", lang),
-                                callback_data=f"edit_f:{sub_id}:delete_fail",
+                                other_mark + t("edit_delete_other", lang),
+                                callback_data=f"edit_f:{sub_id}:delete_other",
                             )
                         ]
                     )
-                    if notify_on_category_change:
-                        other_mark = "✅ " if delete_other_alerts else "⬜️ "
-                        rows.append(
-                            [
-                                InlineKeyboardButton(
-                                    other_mark + t("edit_delete_other", lang),
-                                    callback_data=f"edit_f:{sub_id}:delete_other",
-                                )
-                            ]
-                        )
             continue
         if sid == "pin":
             if show_advanced and dest_type != "dm":
@@ -3129,23 +3109,6 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
             [
                 [InlineKeyboardButton(t("repeat_yes", lang), callback_data=f"edit_set:{sub_id}:repeat:1")],
                 [InlineKeyboardButton(t("repeat_no", lang), callback_data=f"edit_set:{sub_id}:repeat:0")],
-            ]
-        )
-    if field == "delete_fail":
-        return InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        t("delete_fail_yes", lang),
-                        callback_data=f"edit_set:{sub_id}:delete_fail:1",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        t("delete_fail_no", lang),
-                        callback_data=f"edit_set:{sub_id}:delete_fail:0",
-                    )
-                ],
             ]
         )
     if field == "delete_other":

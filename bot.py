@@ -73,7 +73,6 @@ from i18n import (
     channel_dup_keyboard,
     default_utc_offset_minutes_for_locale,
     delete_old_keyboard,
-    delete_fail_notify_keyboard,
     delivery_fail_notice_keyboard,
     delete_sibling_keyboard,
     dest_keyboard,
@@ -501,7 +500,6 @@ from handlers.wizard import (
     _offer_template_typo_fix,
     _parse_dest_input,
     _premium_gate_text,
-    _prompt_delete_fail_notify,
     _prompt_delete_old,
     _prompt_dest_step,
     _prompt_repeat_step,
@@ -1807,7 +1805,6 @@ def _edit_options_for_sub(
         dest_type=sub.dest_type,
         delete_previous=sub.delete_previous,
         pin_message=bool(getattr(sub, "pin_message", False)),
-        notify_delete_fail=bool(sub.notify_delete_fail),
         delete_other_alerts=bool(sub.delete_other_alerts),
         has_image=bool(sub.image_file_id),
         strip_name_mentions=bool(sub.strip_name_mentions),
@@ -2835,7 +2832,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_fail|delete_other|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_other|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back)$",
         ),
         group=0,
     )
@@ -2850,7 +2847,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_set,
-            pattern=r"^edit_set:\d+:(delete_old|delete_fail|delete_other|preview|chat_button):[01]$|^edit_set:\d+:button_style:(default|primary|success|danger)$",
+            pattern=r"^edit_set:\d+:(delete_old|delete_other|preview|chat_button):[01]$|^edit_set:\d+:button_style:(default|primary|success|danger)$",
         ),
         group=0,
     )

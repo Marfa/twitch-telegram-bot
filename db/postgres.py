@@ -1542,6 +1542,21 @@ class PostgresDatabase:
                 cur.execute(
                     "INSERT INTO schema_flags(name) VALUES ('digest_cd_minutes_v1')"
                 )
+            # One-shot: delete-fail notice is always on when delete_previous is enabled.
+            cur.execute(
+                "SELECT 1 FROM schema_flags WHERE name = 'notify_delete_fail_always_v1'"
+            )
+            if cur.fetchone() is None:
+                cur.execute(
+                    """
+                    UPDATE subscriptions
+                    SET notify_delete_fail = TRUE
+                    WHERE delete_previous = TRUE AND notify_delete_fail = FALSE
+                    """
+                )
+                cur.execute(
+                    "INSERT INTO schema_flags(name) VALUES ('notify_delete_fail_always_v1')"
+                )
 
     def add_subscription(
         self,

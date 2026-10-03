@@ -1,6 +1,6 @@
 """Shared Extras / edit / subscription-list order for alert option rows.
 
-Edit-only rows (template, image_del, delete_fail, schedule, dest, …) stay outside
+Edit-only rows (template, image_del, delete_other, schedule, dest, …) stay outside
 this tuple. List always leads with alert type and ends with dest/thread.
 """
 
