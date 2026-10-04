@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+import time
 
 import requests
 
@@ -19,12 +20,30 @@ _AZURE_TIMEOUT = 30
 # Azure Text API ~50k chars — keep under with margin (bot texts are usually short).
 _AZURE_MAX_CHARS = 45_000
 
-# Sticky for process lifetime: after DeepL 456, stop retrying until restart.
-_deepl_quota_exhausted = False
+# After DeepL 456, skip DeepL for a day (Azure fallback), then probe again.
+_DEEPL_QUOTA_STICKY_SEC = 24 * 3600
+_deepl_quota_exhausted_at: float | None = None
 
 
 class DeeplQuotaExceeded(RuntimeError):
     """DeepL returned HTTP 456 (quota exhausted)."""
+
+
+def _deepl_quota_blocked() -> bool:
+    """True while sticky Azure-only window after DeepL 456 is still active."""
+    global _deepl_quota_exhausted_at
+    if _deepl_quota_exhausted_at is None:
+        return False
+    if time.monotonic() - _deepl_quota_exhausted_at >= _DEEPL_QUOTA_STICKY_SEC:
+        _deepl_quota_exhausted_at = None
+        logger.info("DeepL quota sticky expired; retrying DeepL")
+        return False
+    return True
+
+
+def _mark_deepl_quota_exhausted() -> None:
+    global _deepl_quota_exhausted_at
+    _deepl_quota_exhausted_at = time.monotonic()
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -201,7 +220,6 @@ def translate_text(
     source_lang: str | None = None,
     preserve_html: bool | None = None,
 ) -> str:
-    global _deepl_quota_exhausted
     import config as cfg
 
     target = _normalize_locale(target_lang)
@@ -221,17 +239,17 @@ def translate_text(
         else ("<" in text and ">" in text)
     )
 
-    if cfg.DEEPL_API_KEY and not _deepl_quota_exhausted:
+    if cfg.DEEPL_API_KEY and not _deepl_quota_blocked():
         try:
             return _tr_deepl(text, target=target, source=source, use_html=use_html)
         except DeeplQuotaExceeded:
-            _deepl_quota_exhausted = True
+            _mark_deepl_quota_exhausted()
             logger.warning("DeepL quota exceeded; falling back to Azure Translator")
 
     if _azure_configured():
         return _tr_azure(text, target=target, source=source, use_html=use_html)
 
-    if _deepl_quota_exhausted:
+    if _deepl_quota_blocked():
         raise RuntimeError(
             "DeepL quota exceeded and Azure Translator is not configured "
             "(AZURE_TRANSLATOR_KEY + AZURE_TRANSLATOR_REGION)"

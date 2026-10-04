@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import os
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 
 from config import SCHEDULE_CHECK_INTERVAL, parse_admin_user_ids
@@ -1233,7 +1234,7 @@ def check_db_premium() -> None:
         post.return_value = mock_resp
         import translate as translate_mod
 
-        translate_mod._deepl_quota_exhausted = False
+        translate_mod._deepl_quota_exhausted_at = None
         assert translate_text("hello", target_lang="ru", source_lang="en") == "привет"
         sent = post.call_args.kwargs["data"]
         assert "tag_handling" not in sent
@@ -1246,8 +1247,8 @@ def check_db_premium() -> None:
         sent_html = post.call_args.kwargs["data"]
         assert sent_html.get("tag_handling") == "html"
 
-    # DeepL 456 → sticky fallback to Azure Translator.
-    translate_mod._deepl_quota_exhausted = False
+    # DeepL 456 → sticky fallback to Azure Translator (clears after 24h).
+    translate_mod._deepl_quota_exhausted_at = None
     with patch("config.DEEPL_API_KEY", "test-key"), patch(
         "config.AZURE_TRANSLATOR_KEY", "azure-key"
     ), patch("config.AZURE_TRANSLATOR_REGION", "northeurope"), patch(
@@ -1268,7 +1269,7 @@ def check_db_premium() -> None:
             translate_text("hello", target_lang="ru", source_lang="en")
             == "привет azure"
         )
-        assert translate_mod._deepl_quota_exhausted is True
+        assert translate_mod._deepl_quota_exhausted_at is not None
         assert post.call_count == 2
         # Second call skips DeepL (sticky) and goes straight to Azure.
         post.side_effect = [azure_resp]
@@ -1277,7 +1278,23 @@ def check_db_premium() -> None:
             == "привет azure"
         )
         assert post.call_count == 3
-    translate_mod._deepl_quota_exhausted = False
+        # After sticky TTL, DeepL is tried again.
+        translate_mod._deepl_quota_exhausted_at = (
+            time.monotonic() - translate_mod._DEEPL_QUOTA_STICKY_SEC - 1
+        )
+        deepl_ok = MagicMock()
+        deepl_ok.status_code = 200
+        deepl_ok.ok = True
+        deepl_ok.raise_for_status = MagicMock()
+        deepl_ok.json.return_value = {"translations": [{"text": "привет deepl"}]}
+        post.side_effect = [deepl_ok]
+        assert (
+            translate_text("hello", target_lang="ru", source_lang="en")
+            == "привет deepl"
+        )
+        assert translate_mod._deepl_quota_exhausted_at is None
+        assert post.call_count == 4
+    translate_mod._deepl_quota_exhausted_at = None
     from twitch import localize_igdb_summary, _IGDB_SUMMARY_TR_CACHE
 
     with patch("config.DEEPL_API_KEY", "x"), patch(
