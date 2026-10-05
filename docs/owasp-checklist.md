@@ -56,7 +56,7 @@ Adapted for this Telegram bot (handlers + small HTTP surface), not a full web AS
 |---|--------|----------|
 | D1 | SQL parameterized; dynamic identifiers allowlisted | No user strings in SQL text |
 | D2 | HTML alerts escape Twitch/user placeholders when `parse_mode=HTML` | `escape_html` on delivery path |
-| D3 | Subprocess: no `shell=True`; argv lists; validate Twitch logins | `USERNAME_RE` / fixed args |
+| D3 | Subprocess: no `shell=True`; argv lists; validate Twitch logins | login regex in `twitch.py` / fixed args |
 | D4 | No `eval` / `exec` / `pickle` of untrusted input | — |
 | D5 | User-supplied regex (ignore keywords) cannot ReDoS the poll loop | timeout, literal-only, or complexity limits |
 | D6 | Bot-side URL fetches (thumbnails, photo fallback) host-allowlisted or size-capped | Limit SSRF / large-body DoS |
