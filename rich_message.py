@@ -79,6 +79,48 @@ async def send_rich_message(
         raise
 
 
+async def send_rich_message_draft(
+    bot,
+    *,
+    chat_id: int,
+    draft_id: int,
+    rich_message: dict[str, Any],
+    can_stop: bool = False,
+    message_thread_id: int | None = None,
+) -> bool:
+    """Update a temporary rich draft (thinking). False if unavailable."""
+    global _rich_ok
+    if _rich_ok is False:
+        return False
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "draft_id": draft_id,
+        "can_stop": can_stop,
+        "rich_message": rich_message,
+    }
+    if message_thread_id is not None:
+        payload["message_thread_id"] = message_thread_id
+    try:
+        result = await bot.do_api_request(
+            "sendRichMessageDraft",
+            api_kwargs=payload,
+        )
+        if result is True or isinstance(result, (Message, dict)):
+            _rich_ok = True
+            return True
+        # Some servers return empty/True-ish; treat explicit False as fail.
+        if result is False or result is None:
+            return False
+        _rich_ok = True
+        return True
+    except (BadRequest, TelegramError) as exc:
+        if _is_rich_unsupported_error(exc):
+            logger.info("sendRichMessageDraft unavailable: %s", exc)
+            _rich_ok = False
+            return False
+        raise
+
+
 async def edit_rich_message(
     bot,
     *,

@@ -34,6 +34,7 @@ from game_card import (
     genre_line,
     year_from_unix,
 )
+from request_progress import request_progress
 
 logger = logging.getLogger(__name__)
 
@@ -851,16 +852,17 @@ async def _maybe_activate_and_send_first(
     from handlers.background_jobs import sync_optional_jobs
 
     sync_optional_jobs(context.application.job_queue, db)
-    await _send_matching_list(
-        context.bot,
-        chat_id,
-        db=db,
-        application=context.application,
-        user_id=user_id,
-        lang=lang,
-        mark_seen=True,
-        set_first_sent=True,
-    )
+    async with request_progress(context.bot, chat_id, lang):
+        await _send_matching_list(
+            context.bot,
+            chat_id,
+            db=db,
+            application=context.application,
+            user_id=user_id,
+            lang=lang,
+            mark_seen=True,
+            set_first_sent=True,
+        )
 
 
 def _discount_prompt_text(lang: str, prefs: Any) -> str:
@@ -1199,30 +1201,30 @@ async def on_giveaways_callback(
         if not (prefs.stores and prefs.platforms and prefs.first_digest_sent):
             await query.edit_message_text(t("giveaways_fresh_locked", lang))
             return
-        await context.bot.send_message(chat_id, t("giveaways_loading", lang))
-        await _send_matching_list(
-            context.bot,
-            chat_id,
-            db=db,
-            application=context.application,
-            user_id=user_id,
-            lang=lang,
-            mark_seen=False,
-        )
+        async with request_progress(context.bot, chat_id, lang):
+            await _send_matching_list(
+                context.bot,
+                chat_id,
+                db=db,
+                application=context.application,
+                user_id=user_id,
+                lang=lang,
+                mark_seen=False,
+            )
         return
 
     if data == "gv:details":
         await query.answer()
-        await context.bot.send_message(chat_id, t("giveaways_loading", lang))
         loaded = _load_browse(context.application, user_id)
         if not loaded:
             prefs = _prefs_or_empty(db, user_id)
-            catalog = await ensure_giveaways_catalog(db)
-            entries = filter_catalog_entries(
-                catalog,
-                stores=set(prefs.stores),
-                platforms=set(prefs.platforms),
-            )
+            async with request_progress(context.bot, chat_id, lang):
+                catalog = await ensure_giveaways_catalog(db)
+                entries = filter_catalog_entries(
+                    catalog,
+                    stores=set(prefs.stores),
+                    platforms=set(prefs.platforms),
+                )
             if not entries:
                 await context.bot.send_message(
                     chat_id, t("giveaways_empty", lang)

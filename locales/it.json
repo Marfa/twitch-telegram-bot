@@ -82,6 +82,7 @@
   "watch_cats_recommended": "Canali consigliati",
   "watch_recommended_header": "Canali Premium consigliati:",
   "watch_recommended_empty": "Nessun canale Premium è in diretta in questo momento.",
+  "request_in_progress": "Eseguo la richiesta…",
   "watch_lucky_searching": "Cerco stream in diretta…",
   "watch_lucky_empty": "Nessuno stream in diretta per giochi casuali / usciti di recente. Riprova o scrivi una categoria.",
   "watch_filt_prompt": "Avviso di gioco — filtri\n\nSeleziona cosa vuoi impostare. Le opzioni non selezionate restano “qualsiasi”.",

@@ -2309,6 +2309,7 @@ def check_core() -> None:
         assert tr("watch_recommended_header", loc)
         assert tr("watch_recommended_empty", loc)
         assert tr("watch_lucky_searching", loc)
+        assert tr("request_in_progress", loc)
         assert tr("watch_lucky_empty", loc)
         assert tr("watch_tags_prompt", loc)
         assert tr("watch_filt_prompt", loc)
@@ -2729,6 +2730,75 @@ def check_core() -> None:
         assert bot2.send_message_draft.await_count >= 1
 
     asyncio.run(_fx_roundtrip())
+
+    # request_progress: rich thinking draft with timer; classic fallback
+    from request_progress import (
+        format_elapsed,
+        progress_plain_text,
+        progress_thinking_html,
+        request_progress,
+        reset_progress_emoji_for_tests,
+    )
+    from rich_message import reset_rich_support_for_tests
+
+    assert format_elapsed(65) == "1:05"
+    assert format_elapsed(3661) == "1:01:01"
+    plain = progress_plain_text("ru", 12)
+    assert "Выполняю запрос" in plain
+    assert "0:12" in plain
+    assert plain.startswith("⏳")
+    think = progress_thinking_html("en", 5, custom_emoji_id="123")
+    assert "<thinking>" in think
+    assert "tg-emoji" in think
+    assert 'emoji-id="123"' in think
+    assert "Executing request" in think
+    assert "0:05" in think
+    assert progress_thinking_html("en", 0, custom_emoji_id=None).startswith(
+        "<thinking>⏳"
+    )
+
+    async def _progress_roundtrip() -> None:
+        reset_rich_support_for_tests()
+        reset_progress_emoji_for_tests()
+        bot = AsyncMock()
+        bot.get_sticker_set = AsyncMock(
+            side_effect=RuntimeError("no stickers in test")
+        )
+        bot.do_api_request = AsyncMock(return_value=True)
+        async with request_progress(bot, 99, "en"):
+            await asyncio.sleep(0.01)
+        assert bot.do_api_request.await_count >= 1
+        first = bot.do_api_request.await_args_list[0]
+        assert first.args[0] == "sendRichMessageDraft"
+        kwargs = first.kwargs.get("api_kwargs") or {}
+        assert kwargs.get("can_stop") is False
+        assert "draft_id" in kwargs
+        html_body = (kwargs.get("rich_message") or {}).get("html") or ""
+        assert "<thinking>" in html_body
+        assert "Executing request" in html_body
+
+        reset_rich_support_for_tests()
+        reset_progress_emoji_for_tests()
+        fail_bot = AsyncMock()
+        fail_bot.get_sticker_set = AsyncMock(side_effect=RuntimeError("x"))
+        from telegram.error import BadRequest
+
+        fail_bot.do_api_request = AsyncMock(
+            side_effect=BadRequest("Unknown method")
+        )
+        status = MagicMock()
+        status.message_id = 7
+        status.edit_text = AsyncMock()
+        fail_bot.send_message = AsyncMock(return_value=status)
+        fail_bot.delete_message = AsyncMock()
+        async with request_progress(fail_bot, 99, "ru"):
+            await asyncio.sleep(0.01)
+        fail_bot.send_message.assert_awaited()
+        sent = fail_bot.send_message.await_args.kwargs.get("text") or ""
+        assert "Выполняю запрос" in str(sent)
+        fail_bot.delete_message.assert_awaited()
+
+    asyncio.run(_progress_roundtrip())
 
     # Schedule cancel: today-only emptied day + suppress during our publish.
     from schedule_cancel import (

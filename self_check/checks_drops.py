@@ -171,12 +171,12 @@ def _check_drops_catalog_fetch_copy() -> None:
     assert "re-link" not in t("drops_catalog_fetch_failed", "en").lower()
     assert "вручную" not in t("drops_catalog_empty", "ru")
     assert "twitchdrops.app" not in t("drops_catalog_fetch_failed", "en").lower()
-    assert "получаем" in t("drops_catalog_loading", "ru").lower()
-    assert "fetching" in t("drops_catalog_loading", "en").lower()
+    assert "выполняю" in t("request_in_progress", "ru").lower()
+    assert "executing" in t("request_in_progress", "en").lower()
 
 
 def _check_drops_catalog_shows_loading() -> None:
-    """Catalog send shows loading text before the fetch finishes."""
+    """Catalog send shows unified progress before the fetch finishes."""
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -184,23 +184,36 @@ def _check_drops_catalog_shows_loading() -> None:
     from i18n import t
 
     bot = AsyncMock()
-    status = AsyncMock()
-    bot.send_message = AsyncMock(return_value=status)
+    bot.send_message = AsyncMock(return_value=AsyncMock())
     db = MagicMock()
     db.get_drops_auth.return_value = None
     twitch = MagicMock()
 
-    with patch(
-        "handlers.drops.list_active_drop_campaigns",
-        return_value=[],
+    progress_entered = {"n": 0}
+
+    class _FakeProgress:
+        async def __aenter__(self):
+            progress_entered["n"] += 1
+            return None
+
+        async def __aexit__(self, *args):
+            return None
+
+    with (
+        patch(
+            "handlers.drops.list_active_drop_campaigns",
+            return_value=[],
+        ),
+        patch(
+            "handlers.drops.request_progress",
+            return_value=_FakeProgress(),
+        ),
     ):
         asyncio.run(send_drops_catalog(bot, db, twitch, 42, "ru"))
 
-    assert bot.send_message.await_args_list[0].args[1] == t(
-        "drops_catalog_loading", "ru"
-    )
-    status.edit_text.assert_awaited()
-    assert t("drops_catalog_empty", "ru") in status.edit_text.await_args.args[0]
+    assert progress_entered["n"] == 1
+    assert bot.send_message.await_count >= 1
+    assert t("drops_catalog_empty", "ru") in bot.send_message.await_args.args[1]
 
 
 def _check_drops_catalog_from_app_only() -> None:

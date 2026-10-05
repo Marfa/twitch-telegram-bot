@@ -36,6 +36,7 @@ from giveaway_sources import (
 from handlers.giveaways import catalog_entry_to_offer, ensure_giveaways_catalog
 from i18n import DEFAULT_LOCALE, btn, igdb_attribution, t
 from igdb_dumps import igdb_image_url
+from request_progress import request_progress
 
 logger = logging.getLogger(__name__)
 
@@ -393,12 +394,12 @@ async def receive_giveaway_watch_game_text(
             disable_web_page_preview=True,
         )
         return _wz()["GIVEAWAY_WATCH_SEARCH"]
-    status = await update.effective_message.reply_text(
-        t("release_game_searching", lang)
-    )
-    games = db.igdb_search_games_by_name(query, limit=_SEARCH_LIMIT)
+    async with request_progress(
+        context.bot, update.effective_chat.id, lang
+    ):
+        games = db.igdb_search_games_by_name(query, limit=_SEARCH_LIMIT)
     if not games:
-        await status.edit_text(
+        await update.effective_message.reply_text(
             t("release_game_not_found", lang),
             reply_markup=InlineKeyboardMarkup(
                 [
@@ -415,7 +416,7 @@ async def receive_giveaway_watch_game_text(
     context.user_data["gvw_search_hits"] = games
     context.user_data["gvw_search_companies"] = companies
     context.user_data["gvw_search_page"] = 0
-    await status.edit_text(
+    await update.effective_message.reply_text(
         t("release_game_pick", lang),
         reply_markup=_game_pick_keyboard(
             games, lang, companies=companies, page=0

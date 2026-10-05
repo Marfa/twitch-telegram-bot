@@ -80,6 +80,7 @@ from i18n import (
     watch_viewers_keyboard,
     welcome_demo_keyboard,
 )
+from request_progress import request_progress
 from twitch import (
     TwitchClient,
     is_ai_game_cover_image,
@@ -1053,7 +1054,6 @@ async def on_import_oauth_manual(
     if not sync or not (sync.refresh_token or "").strip():
         await query.edit_message_text(t("import_pending_expired", lang))
         return
-    await query.edit_message_text(t("import_oauth_manual_running", lang))
     twitch: TwitchClient = context.application.bot_data["twitch"]
 
     async def _show_reauth() -> None:
@@ -1068,30 +1068,31 @@ async def on_import_oauth_manual(
             reply_markup=_import_oauth_authorize_keyboard(lang, url),
         )
 
-    try:
-        token_data = await asyncio.to_thread(
-            twitch.refresh_user_token, sync.refresh_token
-        )
-        access = token_data.get("access_token") or ""
-        refresh = token_data.get("refresh_token") or sync.refresh_token
-        followed = await asyncio.to_thread(
-            twitch.get_followed_channels, access, sync.twitch_user_id
-        )
-    except Exception:
-        logger.exception("Manual Twitch import failed for owner %s", user_id)
-        db.delete_twitch_sync(user_id)
-        await _show_reauth()
-        return
+    async with request_progress(context.bot, user_id, lang):
+        try:
+            token_data = await asyncio.to_thread(
+                twitch.refresh_user_token, sync.refresh_token
+            )
+            access = token_data.get("access_token") or ""
+            refresh = token_data.get("refresh_token") or sync.refresh_token
+            followed = await asyncio.to_thread(
+                twitch.get_followed_channels, access, sync.twitch_user_id
+            )
+        except Exception:
+            logger.exception("Manual Twitch import failed for owner %s", user_id)
+            db.delete_twitch_sync(user_id)
+            await _show_reauth()
+            return
 
-    db.update_twitch_sync_tokens(
-        user_id,
-        refresh,
-        last_sync_at=datetime.now(timezone.utc).isoformat(),
-        next_sync_at=sync.next_sync_at,
-    )
-    imported, skipped, limited, removed_names, new_subs, ask_streamers = (
-        await _run_followed_import(context.application, user_id, followed)
-    )
+        db.update_twitch_sync_tokens(
+            user_id,
+            refresh,
+            last_sync_at=datetime.now(timezone.utc).isoformat(),
+            next_sync_at=sync.next_sync_at,
+        )
+        imported, skipped, limited, removed_names, new_subs, ask_streamers = (
+            await _run_followed_import(context.application, user_id, followed)
+        )
     await _deliver_import_result(
         context.application,
         user_id,
@@ -2222,8 +2223,10 @@ async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not sync or sync.period_days <= 0:
         await query.edit_message_text(t("sync_menu_off", lang))
         return
-    await query.edit_message_text(t("sync_now_running", lang))
-    result = await _sync_owner_follows(context.application, sync, advance_schedule=True)
+    async with request_progress(context.bot, user_id, lang):
+        result = await _sync_owner_follows(
+            context.application, sync, advance_schedule=True
+        )
     if result is None:
         return
     imported, skipped, limited, removed_names, ask_streamers = result

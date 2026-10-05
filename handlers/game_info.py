@@ -16,6 +16,7 @@ from handlers.release_watch import (
     release_game_pick_keyboard,
 )
 from i18n import DEFAULT_LOCALE, btn, t
+from request_progress import request_progress
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +99,12 @@ async def receive_game_info_text(
             disable_web_page_preview=True,
         )
         return _wz()["GAME_INFO_SEARCH"]
-    status = await update.effective_message.reply_text(
-        t("release_game_searching", lang)
-    )
-    games = db.igdb_search_games_by_name(query, limit=_SEARCH_LIMIT)
+    async with request_progress(
+        context.bot, update.effective_chat.id, lang
+    ):
+        games = db.igdb_search_games_by_name(query, limit=_SEARCH_LIMIT)
     if not games:
-        await status.edit_text(
+        await update.effective_message.reply_text(
             t("release_game_not_found", lang),
             reply_markup=InlineKeyboardMarkup(
                 [
@@ -121,7 +122,7 @@ async def receive_game_info_text(
     context.user_data["ginfo_search_hits"] = games
     context.user_data["ginfo_search_companies"] = companies
     context.user_data["ginfo_search_page"] = 0
-    await status.edit_text(
+    await update.effective_message.reply_text(
         t("release_game_pick", lang),
         reply_markup=_pick_keyboard(games, lang, companies=companies, page=0),
     )

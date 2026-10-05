@@ -31,6 +31,7 @@ from db import (
 from db.models import ReleasePlatformPref, ReleaseWatchPrefs, release_platform_key
 from i18n import DEFAULT_LOCALE, alert_dup_keyboard, btn, t
 from igdb_dumps import igdb_image_url
+from request_progress import request_progress
 
 logger = logging.getLogger(__name__)
 
@@ -333,12 +334,12 @@ async def receive_release_game_text(
             disable_web_page_preview=True,
         )
         return _wz()["RELEASE_SEARCH"]
-    status = await update.effective_message.reply_text(
-        t("release_game_searching", lang)
-    )
-    games = db.igdb_search_games_by_name(query, limit=_RELEASE_SEARCH_LIMIT)
+    async with request_progress(
+        context.bot, update.effective_chat.id, lang
+    ):
+        games = db.igdb_search_games_by_name(query, limit=_RELEASE_SEARCH_LIMIT)
     if not games:
-        await status.edit_text(
+        await update.effective_message.reply_text(
             t("release_game_not_found", lang),
             reply_markup=InlineKeyboardMarkup(
                 [
@@ -355,7 +356,7 @@ async def receive_release_game_text(
     context.user_data["release_search_hits"] = games
     context.user_data["release_search_companies"] = companies
     context.user_data["release_search_page"] = 0
-    await status.edit_text(
+    await update.effective_message.reply_text(
         t("release_game_pick", lang),
         reply_markup=release_game_pick_keyboard(
             games, lang, companies=companies, page=0

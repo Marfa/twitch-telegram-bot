@@ -51,6 +51,7 @@ from twitch import (
     pick_random_streams,
     twitch_login_link_html,
 )
+from request_progress import request_progress
 
 logger = logging.getLogger(__name__)
 
@@ -1084,15 +1085,11 @@ async def start_watch_lucky(
     context.user_data.clear()
     _set_watch_recommended_mode(context, user_id, enabled=False)
     analytics.capture(user_id, "watch_lucky_opened", {})
-    status = await update.effective_message.reply_text(
-        t("watch_lucky_searching", lang)
-    )
     return await _run_watch_lucky(
         context,
         user_id=user_id,
         lang=lang,
         chat_id=update.effective_chat.id,
-        status_message=status,
         stay_in_categories_on_empty=False,
     )
 
@@ -1138,9 +1135,10 @@ async def _run_watch_lucky(
     twitch: TwitchClient = context.application.bot_data["twitch"]
     prefer = _bot_lang_to_twitch(lang)
     try:
-        cats, streams, vods = await _fetch_lucky_watch_suggestions(
-            twitch, prefer_language=prefer
-        )
+        async with request_progress(context.bot, chat_id, lang):
+            cats, streams, vods = await _fetch_lucky_watch_suggestions(
+                twitch, prefer_language=prefer
+            )
     except Exception:
         logger.exception("watch lucky failed")
         await _show(t("watch_suggest_error", lang))
@@ -1225,16 +1223,15 @@ async def on_watch_again(
         )
         return
     if _watch_lucky_mode(context, user_id):
-        try:
-            await query.edit_message_text(t("watch_lucky_searching", lang))
-        except BadRequest:
-            pass
         twitch: TwitchClient = context.application.bot_data["twitch"]
         prefer = _bot_lang_to_twitch(lang)
         try:
-            cats, streams, vods = await _fetch_lucky_watch_suggestions(
-                twitch, prefer_language=prefer
-            )
+            async with request_progress(
+                context.bot, query.message.chat_id, lang
+            ):
+                cats, streams, vods = await _fetch_lucky_watch_suggestions(
+                    twitch, prefer_language=prefer
+                )
         except Exception:
             logger.exception("watch lucky again failed")
             await query.edit_message_text(t("watch_suggest_error", lang))
@@ -1394,7 +1391,12 @@ async def receive_watch_category_text(
         return _ws()["WATCH_CATEGORIES"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     try:
-        found = await asyncio.to_thread(twitch.search_categories, query, first=20)
+        async with request_progress(
+            context.bot, update.effective_chat.id, lang
+        ):
+            found = await asyncio.to_thread(
+                twitch.search_categories, query, first=20
+            )
     except Exception:
         logger.exception("watch category search failed")
         await update.effective_message.reply_text(
@@ -1717,28 +1719,22 @@ async def receive_watch_category_callback(
     data = query.data or ""
     if data == "watch_cat:lucky":
         try:
-            await query.edit_message_text(t("watch_lucky_searching", lang))
+            await query.edit_message_reply_markup(None)
         except BadRequest:
-            try:
-                await query.edit_message_reply_markup(None)
-            except BadRequest:
-                pass
-            await context.bot.send_message(
-                query.message.chat_id, t("watch_lucky_searching", lang)
-            )
+            pass
         return await _run_watch_lucky(
             context,
             user_id=user_id,
             lang=lang,
             chat_id=query.message.chat_id,
-            status_message=query.message,
             edit_message=query.message,
             stay_in_categories_on_empty=True,
         )
     if data == "watch_cat:recommended":
         db: Database = context.application.bot_data["db"]
         twitch: TwitchClient = context.application.bot_data["twitch"]
-        streams = await _fetch_recommended_promo_streams(db, twitch)
+        async with request_progress(context.bot, query.message.chat_id, lang):
+            streams = await _fetch_recommended_promo_streams(db, twitch)
         context.user_data["watch_has_recommended"] = bool(streams)
         if not streams:
             try:

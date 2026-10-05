@@ -12,7 +12,6 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 import analytics
@@ -22,6 +21,7 @@ from bot_helpers import _menu
 from config import MAX_SUBSCRIPTIONS_PER_OWNER
 from db import Database, Subscription, is_drops_sub
 from i18n import DEFAULT_LOCALE, drops_catalog_keyboard, t
+from request_progress import request_progress
 from twitch import TwitchClient, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
@@ -133,14 +133,13 @@ async def send_drops_catalog(
     **_kwargs: Any,
 ) -> list[dict[str, Any]]:
     """Fetch and send the available-Drops list with digest checkbox."""
-    status = await bot.send_message(user_id, t("drops_catalog_loading", lang))
-
-    campaigns = await asyncio.to_thread(
-        list_active_drop_campaigns,
-        db,
-        twitch,
-        user_id,
-    )
+    async with request_progress(bot, user_id, lang):
+        campaigns = await asyncio.to_thread(
+            list_active_drop_campaigns,
+            db,
+            twitch,
+            user_id,
+        )
     store = bot_data if bot_data is not None else None
 
     def _clear_store() -> None:
@@ -151,13 +150,6 @@ async def send_drops_catalog(
 
     async def _show(text: str, markup: InlineKeyboardMarkup) -> None:
         reply_markup = _with_extra_markup(markup, reply_markup_extra)
-        edit = getattr(status, "edit_text", None)
-        if callable(edit):
-            try:
-                await edit(text, reply_markup=reply_markup)
-                return
-            except BadRequest:
-                pass
         await bot.send_message(user_id, text, reply_markup=reply_markup)
 
     auth = db.get_drops_auth(user_id)
