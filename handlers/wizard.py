@@ -3646,7 +3646,11 @@ async def _finish_subscription(
                 multistream_channels=str(data.get("multistream_channels") or "[]"),
                 button_style=str(data.get("button_style") or ""),
                 delay_minutes=int(data.get("delay_minutes", 0)),
-                suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
+                suppress_repeat_minutes=prem.suppress_repeat_minutes_for_create(
+                    twitch_username=str(data.get("twitch_username") or ""),
+                    is_demo=demo_mode.is_active(owner_id),
+                    requested=int(data.get("suppress_repeat_minutes", 0)),
+                ),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 use_global_ignore=bool(data.get("use_global_ignore")),
                 image_file_id=data.get("image_file_id") or None,
@@ -3769,7 +3773,11 @@ async def _finish_subscription(
                 suppress_repeat_minutes=(
                     0
                     if notify_on_category_change
-                    else int(data.get("suppress_repeat_minutes", 0))
+                    else prem.suppress_repeat_minutes_for_create(
+                        twitch_username=str(data.get("twitch_username") or ""),
+                        is_demo=demo_mode.is_active(owner_id),
+                        requested=int(data.get("suppress_repeat_minutes", 0)),
+                    )
                 ),
                 schedule_reminder_minutes=int(
                     data.get("schedule_reminder_minutes", 0)

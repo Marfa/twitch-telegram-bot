@@ -1369,8 +1369,11 @@ async def _send_notification(
         and alert_type != "end"
     ):
         await _pin_after_send(bot, db, sub, msg.message_id)
-    if sub.suppress_repeat_minutes > 0:
-        db.set_notify_cooldown(sub.id, sub.suppress_repeat_minutes)
+    import premium as prem
+
+    suppress_m = prem.effective_suppress_repeat_minutes(sub)
+    if suppress_m > 0:
+        db.set_notify_cooldown(sub.id, suppress_m)
     # DM inbox history is user-facing; group/channel goes to ops-only delivery log.
     stream_uid = str((stream or {}).get("user_id") or "").strip()
     history_uid = (

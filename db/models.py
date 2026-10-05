@@ -1248,7 +1248,13 @@ def _parse_utc(value: str | None) -> datetime | None:
 
 
 def is_on_notify_cooldown(sub: Subscription) -> bool:
-    if sub.suppress_repeat_minutes <= 0:
+    try:
+        from premium import effective_suppress_repeat_minutes
+
+        minutes = effective_suppress_repeat_minutes(sub)
+    except Exception:
+        minutes = max(0, int(sub.suppress_repeat_minutes or 0))
+    if minutes <= 0:
         return False
     until = _parse_utc(sub.notify_cooldown_until)
     if until is None:

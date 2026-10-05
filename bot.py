@@ -942,6 +942,8 @@ async def _ensure_welcome_premium_channel_subscription(
             disable_link_preview=True,
             enabled=False,
             delay_minutes=welcome_delay_minutes,
+            # Welcome seed is not is_demo, but still a first-run demo alert.
+            suppress_repeat_minutes=prem.DEMO_SUPPRESS_REPEAT_MINUTES,
             notify_on_live=True,
             notify_on_end=False,
             notify_on_category_change=False,
@@ -1751,6 +1753,13 @@ async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE
     minutes = int(raw)
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    sub = db.get_subscription(sub_id, owner_id)
+    if sub is not None:
+        minutes = prem.suppress_repeat_minutes_for_create(
+            twitch_username=sub.twitch_username,
+            is_demo=bool(sub.is_demo),
+            requested=minutes,
+        )
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(sub_id, owner_id, suppress_repeat_minutes=minutes):
         await update.effective_message.reply_text(t("sub_not_found", lang))
@@ -2012,6 +2021,9 @@ async def _enter_demo_mode(
                 image_file_id=GAME_COVER_IMAGE_ID,
                 image_position="before",
                 enabled=True,
+                suppress_repeat_minutes=prem.suppress_repeat_minutes_for_create(
+                    twitch_username=uname, is_demo=True
+                ),
                 notify_on_live=True,
                 notify_on_end=False,
                 is_demo=True,
