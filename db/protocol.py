@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from .models import (
     AlertDeliveryLogEntry,
     AlertHistoryEntry,
+    AiClipsAuto,
     AiClipsJob,
     BotStats,
     ChatAuth,
@@ -1147,6 +1148,27 @@ class Database(Protocol):
 
     def get_active_ai_clips_job(self, owner_id: int) -> AiClipsJob | None: ...
 
+    def get_done_ai_clips_job(
+        self, owner_id: int, *, vod_id: str
+    ) -> AiClipsJob | None: ...
+
     def list_resumable_ai_clips_jobs(self) -> list: ...
 
     def count_active_ai_clips_jobs(self, *, owner_id: int | None = None) -> int: ...
+
+    def get_ai_clips_auto(self, owner_id: int) -> AiClipsAuto | None: ...
+
+    def set_ai_clips_auto_enabled(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str = "",
+        last_vod_id: str = "",
+    ) -> None: ...
+
+    def update_ai_clips_auto_last_vod(
+        self, owner_id: int, *, last_vod_id: str
+    ) -> None: ...
+
+    def list_enabled_ai_clips_auto(self) -> list[AiClipsAuto]: ...

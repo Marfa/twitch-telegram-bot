@@ -71,7 +71,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
 | Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
-| AI clips from VOD | **📦 Other → 🎬 AI clips** (beta + Premium / à la carte `ai_clips`): up to 5 clips — priority chat «clip»/«клип» → message spikes → loud audio; Helix Create Clip From VOD; temp files deleted |
+| AI clips from VOD | **📦 Other → 🎬 AI clips** (beta + Premium / à la carte `ai_clips`): up to 5 clips — priority chat «clip»/«клип» → message spikes → loud audio; Helix Create Clip From VOD; auto checkbox for new VODs; temp files deleted |
 | Premium channel for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.

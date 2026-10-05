@@ -1231,6 +1231,113 @@ class TwitchClient:
         data = resp.json().get("data") or []
         return data[0] if data else {}
 
+    def get_clips_by_ids(self, clip_ids: list[str]) -> list[dict[str, Any]]:
+        """Helix Get Clips by clip id (up to 100 per request)."""
+        ids = [str(c).strip() for c in clip_ids if str(c or "").strip()]
+        if not ids:
+            return []
+        out: list[dict[str, Any]] = []
+        for i in range(0, len(ids), 100):
+            chunk = ids[i : i + 100]
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/clips",
+                headers=self._headers(),
+                params=[("id", cid) for cid in chunk],
+                timeout=15,
+            )
+            resp.raise_for_status()
+            out.extend(list(resp.json().get("data") or []))
+        return out
+
+    def get_clips_for_video(
+        self,
+        broadcaster_id: str,
+        video_id: str,
+        *,
+        started_at: datetime | None = None,
+        ended_at: datetime | None = None,
+        max_pages_per_window: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Helix Get Clips for a broadcaster, filtered to ``video_id``.
+
+        Helix caps ``started_at``…``ended_at`` at about one week, so longer
+        ranges are walked in weekly windows. Without dates, one undated query
+        (recent top clips) is used as a fallback.
+        """
+        bid = str(broadcaster_id or "").strip()
+        vid = str(video_id or "").strip()
+        if not bid.isdigit() or not vid:
+            return []
+        end = ended_at or datetime.now(timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+
+        def _page(
+            *,
+            start: datetime | None,
+            stop: datetime | None,
+        ) -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            cursor: str | None = None
+            for _ in range(max(1, int(max_pages_per_window))):
+                params: dict[str, str] = {
+                    "broadcaster_id": bid,
+                    "first": "100",
+                }
+                if start is not None:
+                    params["started_at"] = start.astimezone(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    )
+                if stop is not None:
+                    params["ended_at"] = stop.astimezone(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    )
+                if cursor:
+                    params["after"] = cursor
+                resp = self._session.get(
+                    "https://api.twitch.tv/helix/clips",
+                    headers=self._headers(),
+                    params=params,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                payload = resp.json() or {}
+                rows.extend(list(payload.get("data") or []))
+                cursor = (payload.get("pagination") or {}).get("cursor") or None
+                if not cursor:
+                    break
+            return rows
+
+        collected: list[dict[str, Any]] = []
+        if started_at is None:
+            collected.extend(_page(start=None, stop=None))
+        else:
+            start = started_at
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            if start > end:
+                start = end - timedelta(days=1)
+            window = start
+            # Cap windows so a very old VOD cannot spin Helix forever.
+            for _ in range(52):
+                if window >= end:
+                    break
+                stop = min(window + timedelta(days=7), end)
+                collected.extend(_page(start=window, stop=stop))
+                window = stop
+
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in collected:
+            if str(row.get("video_id") or "").strip() != vid:
+                continue
+            cid = str(row.get("id") or "").strip()
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            out.append(row)
+        return out
+
     def send_chat_message(
         self,
         user_access_token: str,

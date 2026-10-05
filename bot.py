@@ -391,6 +391,7 @@ from handlers.follow_monitor import (
 )
 from handlers.ai_clips import (
     on_ai_clips_callback,
+    poll_ai_clips_auto,
     start_ai_clips,
 )
 
@@ -2592,7 +2593,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_ai_clips_callback,
-            pattern=r"^ai_clips:(cancel|status|vod:.+|page:\d+)$",
+            pattern=r"^ai_clips:(cancel|status|auto|back|rerun:.+|vod:.+|page:\d+)$",
         ),
         group=0,
     )
@@ -4040,6 +4041,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         job_kwargs=_stream_job_kwargs(
             "monthly_lucky_premium", misfire_grace=24 * 3600
         ),
+    )
+    app.job_queue.run_repeating(
+        poll_ai_clips_auto,
+        interval=20 * 60,
+        first=180,
+        name="ai_clips_auto",
+        job_kwargs=_stream_job_kwargs("ai_clips_auto", misfire_grace=20 * 60),
     )
     app.job_queue.run_repeating(
         daily_bot_stats_snapshot,

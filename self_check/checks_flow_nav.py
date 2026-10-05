@@ -3269,10 +3269,43 @@ async def _scenario_ai_clips(db) -> None:
         for b in row
     ]
     assert "ai_clips:cancel" in callbacks
+    assert "ai_clips:auto" in callbacks
     assert any((c or "").startswith("ai_clips:vod:") for c in callbacks)
     assert "ai_clips:page:1" in callbacks
     assert sum(1 for c in callbacks if (c or "").startswith("ai_clips:vod:")) == 5
     cap.assert_turn("other_ai_clips_pick_vod")
+
+    update, query = _cb_update(_FREE_UID, "ai_clips:auto", cap)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_ai_clips_callback(update, ctx)
+    pref = db.get_ai_clips_auto(_FREE_UID)
+    assert pref is not None and pref.enabled
+    assert pref.last_vod_id == "1001"  # newest archive baseline, no backlog
+    callbacks_auto = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ai_clips:auto" in callbacks_auto
+    cap.assert_turn("other_ai_clips_auto_on")
+
+    from handlers.ai_clips import poll_ai_clips_auto
+
+    # Poller no-ops when nothing newer than baseline (and while busy would also skip).
+    poll_ctx = _ctx(application)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        with patch("handlers.ai_clips.ai_clips_ready", return_value=True):
+            await poll_ai_clips_auto(poll_ctx)
+    assert db.count_active_ai_clips_jobs() == 0
+    assert db.get_ai_clips_auto(_FREE_UID).last_vod_id == "1001"
 
     update, query = _cb_update(_FREE_UID, "ai_clips:page:1", cap)
     await on_ai_clips_callback(update, ctx)
@@ -3289,6 +3322,72 @@ async def _scenario_ai_clips(db) -> None:
     update, query = _cb_update(_FREE_UID, "ai_clips:cancel", cap)
     await on_ai_clips_callback(update, ctx)
     cap.assert_turn("other_ai_clips_cancel")
+
+    # Re-open picker; clicking a VOD that already has a done job shows live clip list.
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("ai_clips", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        with patch("handlers.ai_clips.ai_clips_ready", return_value=True):
+            await start_ai_clips(update, ctx)
+    jid = db.create_ai_clips_job(
+        _FREE_UID, vod_id="1001", vod_title="Test VOD 1"
+    )
+    db.update_ai_clips_job(
+        jid,
+        status="done",
+        clips_json='[{"clip_id":"botClip","url":"https://clips.twitch.tv/botClip","vod_offset":60}]',
+        progress_pct=100,
+    )
+    twitch.get_clips_by_ids.return_value = [
+        {
+            "id": "botClip",
+            "url": "https://clips.twitch.tv/botClip",
+            "video_id": "1001",
+            "vod_offset": 30,
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+    ]
+    twitch.get_clips_for_video.return_value = [
+        {
+            "id": "botClip",
+            "url": "https://clips.twitch.tv/botClip",
+            "video_id": "1001",
+            "vod_offset": 30,
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        {
+            "id": "userClip",
+            "url": "https://clips.twitch.tv/userClip",
+            "video_id": "1001",
+            "vod_offset": 90,
+            "created_at": "2026-01-01T01:00:00Z",
+        },
+    ]
+    update, query = _cb_update(_FREE_UID, "ai_clips:vod:1001", cap)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_ai_clips_callback(update, ctx)
+    edited = " ".join(
+        str(c.args[0]) if c.args else str(c.kwargs.get("text") or "")
+        for c in query.edit_message_text.await_args_list
+    )
+    assert "userClip" in edited and "botClip" in edited
+    assert "ai_clips:rerun:1001" in [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    cap.assert_turn("other_ai_clips_existing_list")
     _ = FEATURE_ID
 
 

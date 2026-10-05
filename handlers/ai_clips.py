@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from html import escape as html_escape
 from typing import Any
 
@@ -71,6 +72,7 @@ def _vod_pick_keyboard(
     *,
     page: int,
     show_status: bool = False,
+    auto_on: bool = False,
 ) -> InlineKeyboardMarkup:
     total = len(videos)
     pages = max(1, (total + VOD_PAGE_SIZE - 1) // VOD_PAGE_SIZE)
@@ -87,6 +89,17 @@ def _vod_pick_keyboard(
                 )
             ]
         )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t(
+                    "ai_clips_auto_on" if auto_on else "ai_clips_auto_off",
+                    lang,
+                ),
+                callback_data="ai_clips:auto",
+            )
+        ]
+    )
     for v in chunk:
         vid = str(v.get("id") or "").strip()
         if not vid:
@@ -122,6 +135,11 @@ def _vod_pick_keyboard(
         ]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def _auto_on(db: Database, user_id: int) -> bool:
+    pref = db.get_ai_clips_auto(user_id)
+    return bool(pref and pref.enabled)
 
 
 async def _send_oauth_prompt(
@@ -201,9 +219,169 @@ def _archive_videos(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "id": vid,
                 "title": str(v.get("title") or vid),
                 "duration": str(v.get("duration") or ""),
+                "created_at": str(v.get("created_at") or ""),
             }
         )
     return out
+
+
+def _parse_rfc3339(raw: str) -> datetime | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _existing_clips_keyboard(lang: str, vod_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_rerun", lang),
+                    callback_data=f"ai_clips:rerun:{vod_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_back_vods", lang),
+                    callback_data="ai_clips:back",
+                )
+            ],
+        ]
+    )
+
+
+def _format_clips_message(
+    lang: str,
+    clips: list[dict[str, Any]],
+    *,
+    title_key: str = "ai_clips_existing_title",
+) -> str:
+    if not clips:
+        return t("ai_clips_existing_empty", lang)
+    lines = [t(title_key, lang, count=len(clips))]
+    for i, c in enumerate(clips, start=1):
+        url = html_escape(
+            str(c.get("url") or clip_watch_url(str(c.get("id") or ""))).strip()
+        )
+        offset_raw = c.get("vod_offset")
+        try:
+            offset = int(offset_raw) if offset_raw is not None else 0
+        except (TypeError, ValueError):
+            offset = 0
+        lines.append(
+            t(
+                "ai_clips_done_line",
+                lang,
+                n=i,
+                offset=format_clip_timecode(max(0, offset)),
+                url=url,
+            )
+        )
+    return "\n".join(lines)
+
+
+async def _fetch_live_vod_clips(
+    twitch: TwitchClient,
+    *,
+    broadcaster_id: str,
+    vod_id: str,
+    stored: list[CreatedClip],
+    started_at: datetime | None,
+) -> list[dict[str, Any]]:
+    """Current Helix clips for a VOD (bot-made + user-made), newest-safe merge."""
+    by_id: dict[str, dict[str, Any]] = {}
+    stored_ids = [c.clip_id for c in stored if c.clip_id]
+    if stored_ids:
+        try:
+            for row in await asyncio.to_thread(twitch.get_clips_by_ids, stored_ids):
+                cid = str(row.get("id") or "").strip()
+                if cid:
+                    by_id[cid] = row
+        except Exception:
+            logger.warning(
+                "ai_clips get_clips_by_ids failed vod=%s", vod_id, exc_info=True
+            )
+            for c in stored:
+                by_id[c.clip_id] = {
+                    "id": c.clip_id,
+                    "url": c.url or clip_watch_url(c.clip_id),
+                    # Stored Create Clip offset is the clip end; Helix uses start.
+                    "vod_offset": max(0, int(c.vod_offset) - CLIP_DURATION_SEC),
+                }
+    since = started_at
+    if since is None:
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+    else:
+        # Clips can be created slightly before VOD publish stamp.
+        since = since - timedelta(hours=6)
+    try:
+        live = await asyncio.to_thread(
+            twitch.get_clips_for_video,
+            broadcaster_id,
+            vod_id,
+            started_at=since,
+        )
+        for row in live:
+            cid = str(row.get("id") or "").strip()
+            if cid:
+                by_id[cid] = row
+    except Exception:
+        logger.warning(
+            "ai_clips get_clips_for_video failed vod=%s", vod_id, exc_info=True
+        )
+    clips = list(by_id.values())
+
+    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
+        try:
+            off = int(row.get("vod_offset") if row.get("vod_offset") is not None else 10**9)
+        except (TypeError, ValueError):
+            off = 10**9
+        return (off, str(row.get("created_at") or ""))
+
+    clips.sort(key=_sort_key)
+    return clips
+
+
+async def _show_vod_picker(
+    query: Any,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    lang: str,
+    db: Database,
+    user_id: int,
+) -> None:
+    videos: list[dict[str, Any]] = context.user_data.get("ai_clips_videos") or []
+    page = int(context.user_data.get("ai_clips_page") or 0)
+    if not videos:
+        try:
+            await query.edit_message_text(t("ai_clips_failed", lang))
+        except BadRequest:
+            pass
+        return
+    active = db.get_active_ai_clips_job(user_id)
+    try:
+        await query.edit_message_text(
+            t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_vod_pick_keyboard(
+                lang,
+                videos,
+                page=page,
+                show_status=active is not None,
+                auto_on=_auto_on(db, user_id),
+            ),
+        )
+    except BadRequest:
+        pass
 
 
 async def start_ai_clips(
@@ -292,7 +470,11 @@ async def start_ai_clips(
         t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
         parse_mode=ParseMode.HTML,
         reply_markup=_vod_pick_keyboard(
-            lang, archives, page=0, show_status=active is not None
+            lang,
+            archives,
+            page=0,
+            show_status=active is not None,
+            auto_on=_auto_on(db, user_id),
         ),
     )
 
@@ -324,6 +506,60 @@ async def on_ai_clips_callback(
         )
         return
 
+    if data == "ai_clips:auto":
+        beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
+        if not beta_ok or not premium_ok:
+            await query.answer(t("ai_clips_failed", lang), show_alert=True)
+            return
+        twitch: TwitchClient = context.application.bot_data["twitch"]
+        token = await _ensure_clips_token(db, twitch, user_id)
+        if not token:
+            await query.answer(t("ai_clips_need_auth", lang), show_alert=True)
+            await _send_oauth_prompt(context.bot, twitch, user_id, lang)
+            return
+        currently = _auto_on(db, user_id)
+        if currently:
+            db.set_ai_clips_auto_enabled(user_id, enabled=False)
+            await query.answer(t("ai_clips_auto_disabled", lang))
+        else:
+            baseline = ""
+            try:
+                newest = await asyncio.to_thread(
+                    twitch.get_videos_by_user,
+                    token["twitch_user_id"],
+                    first=1,
+                )
+                if newest:
+                    baseline = str(newest[0].get("id") or "").strip()
+            except Exception:
+                logger.warning(
+                    "ai_clips auto baseline failed owner=%s", user_id, exc_info=True
+                )
+            db.set_ai_clips_auto_enabled(
+                user_id,
+                enabled=True,
+                twitch_user_id=token["twitch_user_id"],
+                last_vod_id=baseline,
+            )
+            await query.answer(t("ai_clips_auto_enabled", lang))
+        videos: list[dict[str, Any]] = context.user_data.get("ai_clips_videos") or []
+        page = int(context.user_data.get("ai_clips_page") or 0)
+        active = db.get_active_ai_clips_job(user_id)
+        if videos:
+            try:
+                await query.edit_message_reply_markup(
+                    reply_markup=_vod_pick_keyboard(
+                        lang,
+                        videos,
+                        page=page,
+                        show_status=active is not None,
+                        auto_on=_auto_on(db, user_id),
+                    )
+                )
+            except BadRequest:
+                pass
+        return
+
     await query.answer()
 
     if data == "ai_clips:cancel":
@@ -339,7 +575,7 @@ async def on_ai_clips_callback(
         return
 
     if data.startswith("ai_clips:page:"):
-        videos: list[dict[str, Any]] = context.user_data.get("ai_clips_videos") or []
+        videos = context.user_data.get("ai_clips_videos") or []
         if not videos:
             try:
                 await query.edit_message_text(t("ai_clips_failed", lang))
@@ -357,11 +593,45 @@ async def on_ai_clips_callback(
                 t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
                 parse_mode=ParseMode.HTML,
                 reply_markup=_vod_pick_keyboard(
-                    lang, videos, page=page, show_status=active is not None
+                    lang,
+                    videos,
+                    page=page,
+                    show_status=active is not None,
+                    auto_on=_auto_on(db, user_id),
                 ),
             )
         except BadRequest:
             pass
+        return
+
+    if data == "ai_clips:back":
+        await _show_vod_picker(
+            query, context, lang=lang, db=db, user_id=user_id
+        )
+        return
+
+    if data.startswith("ai_clips:rerun:"):
+        vod_id = data.split(":", 2)[-1].strip()
+        videos_map = {
+            str(v["id"]): v
+            for v in (context.user_data.get("ai_clips_videos") or [])
+            if v.get("id")
+        }
+        video = videos_map.get(vod_id) or {
+            "id": vod_id,
+            "title": "Clip",
+            "duration": "",
+        }
+        await _start_vod_job(
+            query,
+            context,
+            user_id=user_id,
+            lang=lang,
+            db=db,
+            chat=chat,
+            vod_id=vod_id,
+            video=video,
+        )
         return
 
     if not data.startswith("ai_clips:vod:"):
@@ -385,6 +655,70 @@ async def on_ai_clips_callback(
         )
         return
 
+    done = db.get_done_ai_clips_job(user_id, vod_id=vod_id)
+    if done:
+        twitch: TwitchClient = context.application.bot_data["twitch"]
+        token = await _ensure_clips_token(db, twitch, user_id)
+        broadcaster_id = (token or {}).get("twitch_user_id") or ""
+        if not broadcaster_id:
+            sync = db.get_twitch_sync(user_id)
+            broadcaster_id = (sync.twitch_user_id if sync else "") or ""
+        started = _parse_rfc3339(str(video.get("created_at") or ""))
+        if started is None:
+            started = _parse_rfc3339(done.created_at)
+        stored = _clips_from_json(done.clips_json)
+        clips: list[dict[str, Any]] = []
+        if broadcaster_id:
+            clips = await _fetch_live_vod_clips(
+                twitch,
+                broadcaster_id=broadcaster_id,
+                vod_id=vod_id,
+                stored=stored,
+                started_at=started,
+            )
+        if not clips and stored:
+            clips = [
+                {
+                    "id": c.clip_id,
+                    "url": c.url or clip_watch_url(c.clip_id),
+                    "vod_offset": max(0, c.vod_offset - CLIP_DURATION_SEC),
+                }
+                for c in stored
+            ]
+        try:
+            await query.edit_message_text(
+                _format_clips_message(lang, clips),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=_existing_clips_keyboard(lang, vod_id),
+            )
+        except BadRequest:
+            pass
+        return
+
+    await _start_vod_job(
+        query,
+        context,
+        user_id=user_id,
+        lang=lang,
+        db=db,
+        chat=chat,
+        vod_id=vod_id,
+        video=video,
+    )
+
+
+async def _start_vod_job(
+    query: Any,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int,
+    lang: str,
+    db: Database,
+    chat: int,
+    vod_id: str,
+    video: dict[str, Any],
+) -> None:
     if db.count_active_ai_clips_jobs() > 0:
         try:
             await query.edit_message_text(t("ai_clips_busy", lang))
@@ -780,3 +1114,73 @@ def resume_ai_clips_jobs(application: Application) -> None:
     logger.info("ai_clips resume %s job(s)", len(jobs))
     for job in jobs:
         asyncio.create_task(_run_job(application, job.id))
+
+
+async def poll_ai_clips_auto(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every ~20m: enqueue one job for the oldest new archive per enabled user."""
+    application = context.application
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    if not ai_clips_ready():
+        return
+    if db.count_active_ai_clips_jobs() > 0:
+        return
+    prefs = db.list_enabled_ai_clips_auto()
+    if not prefs:
+        return
+    for pref in prefs:
+        if db.count_active_ai_clips_jobs() > 0:
+            return
+        owner_id = int(pref.owner_id)
+        beta_ok, premium_ok = await _entitled(application.bot, db, owner_id)
+        if not beta_ok or not premium_ok:
+            db.set_ai_clips_auto_enabled(owner_id, enabled=False)
+            continue
+        token = await _ensure_clips_token(db, twitch, owner_id)
+        if not token:
+            continue
+        channel_id = (pref.twitch_user_id or token["twitch_user_id"] or "").strip()
+        if not channel_id:
+            continue
+        try:
+            videos = await asyncio.to_thread(
+                twitch.get_videos_by_user, channel_id, first=5
+            )
+        except Exception:
+            logger.warning(
+                "ai_clips auto list VODs failed owner=%s", owner_id, exc_info=True
+            )
+            continue
+        archives = _archive_videos(videos)
+        if not archives:
+            continue
+        last = (pref.last_vod_id or "").strip()
+        if not last:
+            db.update_ai_clips_auto_last_vod(
+                owner_id, last_vod_id=str(archives[0]["id"])
+            )
+            continue
+        newer: list[dict[str, Any]] = []
+        for v in archives:
+            if str(v["id"]) == last:
+                break
+            newer.append(v)
+        if not newer:
+            continue
+        # Helix is newest-first; process oldest unseen first (one per tick).
+        pick = newer[-1]
+        vod_id = str(pick["id"])
+        job_id = db.create_ai_clips_job(
+            owner_id,
+            vod_id=vod_id,
+            vod_title=str(pick.get("title") or "Clip"),
+        )
+        db.update_ai_clips_auto_last_vod(owner_id, last_vod_id=vod_id)
+        logger.info(
+            "ai_clips auto enqueued owner=%s vod=%s job=%s",
+            owner_id,
+            vod_id,
+            job_id,
+        )
+        asyncio.create_task(_run_job(application, job_id))
+        return

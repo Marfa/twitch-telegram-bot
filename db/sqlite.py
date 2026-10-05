@@ -1285,6 +1285,17 @@ class SqliteDatabase:
             )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS ai_clips_auto (
+                owner_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                last_vod_id TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS premium_gifts (
                 token TEXT PRIMARY KEY,
                 buyer_id INTEGER NOT NULL,
@@ -7172,6 +7183,27 @@ owner_id, twitch_username, twitch_user_id,
             return None
         return self._ai_clips_job_from_row(row)
 
+    def get_done_ai_clips_job(self, owner_id: int, *, vod_id: str):
+        vid = str(vod_id or "").strip()
+        if not vid:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, owner_id, vod_id, vod_title, status,
+                       peaks_json, clips_json, error, progress_pct,
+                       created_at, updated_at
+                FROM ai_clips_jobs
+                WHERE owner_id = ? AND vod_id = ? AND status = 'done'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (int(owner_id), vid),
+            ).fetchone()
+        if not row:
+            return None
+        return self._ai_clips_job_from_row(row)
+
     def get_active_ai_clips_job(self, owner_id: int):
         with self._conn() as conn:
             row = conn.execute(
@@ -7224,6 +7256,89 @@ owner_id, twitch_username, twitch_user_id,
                     (int(owner_id),),
                 ).fetchone()
         return int(row["n"] if row else 0)
+
+    def _ai_clips_auto_from_row(self, row):
+        from db.models import AiClipsAuto
+
+        return AiClipsAuto(
+            owner_id=int(row["owner_id"]),
+            enabled=bool(int(row["enabled"] or 0)),
+            twitch_user_id=str(row["twitch_user_id"] or ""),
+            last_vod_id=str(row["last_vod_id"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+        )
+
+    def get_ai_clips_auto(self, owner_id: int):
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT owner_id, enabled, twitch_user_id, last_vod_id, updated_at
+                FROM ai_clips_auto WHERE owner_id = ?
+                """,
+                (int(owner_id),),
+            ).fetchone()
+        if not row:
+            return None
+        return self._ai_clips_auto_from_row(row)
+
+    def set_ai_clips_auto_enabled(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str = "",
+        last_vod_id: str = "",
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_clips_auto (
+                    owner_id, enabled, twitch_user_id, last_vod_id, updated_at
+                ) VALUES (?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    twitch_user_id = CASE
+                        WHEN excluded.twitch_user_id != '' THEN excluded.twitch_user_id
+                        ELSE ai_clips_auto.twitch_user_id
+                    END,
+                    last_vod_id = CASE
+                        WHEN excluded.last_vod_id != '' THEN excluded.last_vod_id
+                        ELSE ai_clips_auto.last_vod_id
+                    END,
+                    updated_at = datetime('now')
+                """,
+                (
+                    int(owner_id),
+                    1 if enabled else 0,
+                    str(twitch_user_id or ""),
+                    str(last_vod_id or ""),
+                ),
+            )
+
+    def update_ai_clips_auto_last_vod(
+        self, owner_id: int, *, last_vod_id: str
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE ai_clips_auto
+                SET last_vod_id = ?, updated_at = datetime('now')
+                WHERE owner_id = ?
+                """,
+                (str(last_vod_id or ""), int(owner_id)),
+            )
+
+    def list_enabled_ai_clips_auto(self) -> list:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT owner_id, enabled, twitch_user_id, last_vod_id, updated_at
+                FROM ai_clips_auto
+                WHERE enabled = 1
+                ORDER BY owner_id
+                """
+            ).fetchall()
+        return [self._ai_clips_auto_from_row(r) for r in rows]
 
     _IGDB_TABLES = frozenset({
         "igdb_games",

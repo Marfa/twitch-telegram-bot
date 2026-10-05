@@ -184,6 +184,20 @@ def check_core() -> None:
         jdb.update_ai_clips_job(jid, status="done", progress_pct=100)
         assert jdb.count_active_ai_clips_jobs() == 0
         assert jdb.get_active_ai_clips_job(7) is None
+        assert jdb.get_done_ai_clips_job(7, vod_id="99") is not None
+        assert jdb.get_done_ai_clips_job(7, vod_id="nope") is None
+
+        jdb.set_ai_clips_auto_enabled(
+            7, enabled=True, twitch_user_id="42", last_vod_id="99"
+        )
+        pref = jdb.get_ai_clips_auto(7)
+        assert pref is not None and pref.enabled and pref.last_vod_id == "99"
+        assert len(jdb.list_enabled_ai_clips_auto()) == 1
+        jdb.update_ai_clips_auto_last_vod(7, last_vod_id="100")
+        assert jdb.get_ai_clips_auto(7).last_vod_id == "100"
+        jdb.set_ai_clips_auto_enabled(7, enabled=False)
+        assert jdb.get_ai_clips_auto(7).enabled is False
+        assert jdb.list_enabled_ai_clips_auto() == []
 
     ops_py = Path(__file__).resolve().parents[1] / "scripts" / "posthog-ops-event.py"
     assert ops_py.is_file()
@@ -778,6 +792,8 @@ def check_core() -> None:
     assert '_stream_job_kwargs("check_posthog_status"' in _bot_build
     assert '_stream_job_kwargs("check_twitch_status"' in _bot_build
     assert '_stream_job_kwargs("check_cursor_status"' in _bot_build
+    assert 'name="ai_clips_auto"' in _bot_build
+    assert "poll_ai_clips_auto" in _bot_build
     # Edit image: checkbox toggles memory only; Apply/Skip/Delete persist.
     from handlers.wizard import receive_image_ask as _recv_image_ask
 

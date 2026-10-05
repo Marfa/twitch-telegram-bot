@@ -792,6 +792,15 @@ class AiClipsJob:
 
 
 @dataclass
+class AiClipsAuto:
+    owner_id: int
+    enabled: bool = False
+    twitch_user_id: str = ""
+    last_vod_id: str = ""
+    updated_at: str = ""
+
+
+@dataclass
 class TwitchSync:
     owner_id: int
     twitch_user_id: str
