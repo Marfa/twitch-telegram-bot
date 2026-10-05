@@ -553,6 +553,41 @@ def _clips_from_json(raw: str) -> list[CreatedClip]:
     return out
 
 
+_PROGRESS_SEC = 120
+
+
+async def _progress_pulse(
+    application: Application,
+    *,
+    user_id: int,
+    job_id: int,
+    loc: str,
+    title: str,
+) -> None:
+    """Periodic “still working” so long chat/audio scans do not look hung."""
+    db: Database = application.bot_data["db"]
+    while True:
+        await asyncio.sleep(_PROGRESS_SEC)
+        job = db.get_ai_clips_job(job_id)
+        if not job or job.status in ("done", "failed"):
+            return
+        try:
+            await application.bot.send_message(
+                user_id,
+                t(
+                    "ai_clips_still_working",
+                    loc,
+                    title=html_escape((title or "")[:80]),
+                    status=job.status,
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+            # Touch row so ops can see liveness.
+            db.update_ai_clips_job(job_id, status=job.status)
+        except Exception:
+            logger.debug("ai_clips progress pulse failed job=%s", job_id, exc_info=True)
+
+
 async def _run_job(
     application: Application,
     job_id: int,
@@ -565,6 +600,7 @@ async def _run_job(
         _RUNNING_JOB_IDS.add(job_id)
     db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
+    pulse: asyncio.Task[None] | None = None
     try:
         job = db.get_ai_clips_job(job_id)
         if not job or job.status in ("done", "failed"):
@@ -583,6 +619,15 @@ async def _run_job(
         peaks = _peaks_from_json(job.peaks_json)
         if job.status in ("queued", "analyzing") or not peaks:
             db.update_ai_clips_job(job_id, status="analyzing")
+            pulse = asyncio.create_task(
+                _progress_pulse(
+                    application,
+                    user_id=user_id,
+                    job_id=job_id,
+                    loc=loc,
+                    title=job.vod_title or job.vod_id,
+                )
+            )
             vod_duration = 0
             try:
                 videos = await asyncio.to_thread(
@@ -602,17 +647,39 @@ async def _run_job(
                 MAX_VOD_ANALYZE_SEC,
                 vod_duration if vod_duration > 0 else MAX_VOD_ANALYZE_SEC,
             )
+
+            def _chat_prog(done: int, total: int) -> None:
+                logger.info(
+                    "ai_clips chat progress job=%s %s/%s", job_id, done, total
+                )
+                db.update_ai_clips_job(job_id, status="analyzing")
+
             chat_msgs = await asyncio.to_thread(
-                fetch_vod_chat_messages, job.vod_id, max_seconds=max_sec
+                fetch_vod_chat_messages,
+                job.vod_id,
+                max_seconds=max_sec,
+                progress=_chat_prog,
             )
             phrases = find_phrase_peaks(chat_msgs)
             spikes = find_message_spikes(chat_msgs, n=MAX_CLIPS)
             audio_peaks: list[LoudPeak] = []
             need_audio = len(phrases) + len(spikes) < MAX_CLIPS
             if need_audio:
+                def _audio_prog(done: int, total: int) -> None:
+                    logger.info(
+                        "ai_clips audio progress job=%s %ss/%ss",
+                        job_id,
+                        done,
+                        total,
+                    )
+                    db.update_ai_clips_job(job_id, status="analyzing")
+
                 try:
                     rms = await asyncio.to_thread(
-                        analyze_vod_rms, job.vod_id, max_seconds=max_sec
+                        analyze_vod_rms,
+                        job.vod_id,
+                        max_seconds=max_sec,
+                        progress=_audio_prog,
                     )
                     audio_peaks = find_loud_peaks(rms, n=MAX_CLIPS)
                 except Exception:
@@ -693,6 +760,14 @@ async def _run_job(
             {"vod_id": job.vod_id, "clips": len(clips), "job_id": job_id},
         )
     finally:
+        if pulse is not None:
+            pulse.cancel()
+            try:
+                await pulse
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
         async with _RUNNING_LOCK:
             _RUNNING_JOB_IDS.discard(job_id)
 

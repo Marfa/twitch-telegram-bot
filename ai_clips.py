@@ -25,9 +25,10 @@ import tempfile
 import time
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,9 @@ _GQL_COMMENTS_HASH = (
     "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
 )
 _GQL_STEP_SEC = 30
-_GQL_REQUEST_DELAY = 0.12
+_GQL_REQUEST_DELAY = 0.05
+_GQL_WORKERS = 4
+CHAT_SCAN_MAX_SEC = 8 * 60  # wall-clock cap so long VODs do not look hung
 
 ClipSource = Literal["phrase", "spike", "audio"]
 
@@ -86,6 +89,7 @@ class CreatedClip:
 class ChatMessage:
     offset_sec: float
     text: str
+    comment_id: str = ""
 
 
 def parse_helix_duration(raw: str | None) -> int:
@@ -237,9 +241,15 @@ def merge_clip_candidates(
 
 
 def fetch_vod_chat_messages(
-    vod_id: str, *, max_seconds: int = MAX_VOD_ANALYZE_SEC
+    vod_id: str,
+    *,
+    max_seconds: int = MAX_VOD_ANALYZE_SEC,
+    progress: Callable[[int, int], None] | None = None,
 ) -> list[ChatMessage]:
-    """Scan VOD chat via GQL time offsets. Empty list on failure (caller falls back)."""
+    """Scan VOD chat via GQL time offsets. Empty list on failure (caller falls back).
+
+    No durable files — HTTP only. Wall-clock capped by ``CHAT_SCAN_MAX_SEC``.
+    """
     vid = str(vod_id or "").strip()
     if not vid.isdigit():
         return []
@@ -247,86 +257,147 @@ def fetch_vod_chat_messages(
     if max_sec <= 0:
         return []
     try:
-        return _fetch_vod_chat_gql(vid, max_sec)
+        return _fetch_vod_chat_gql(vid, max_sec, progress=progress)
     except Exception:
         logger.warning("ai_clips chat GQL failed vod=%s", vid, exc_info=True)
         return []
 
 
-def _fetch_vod_chat_gql(vod_id: str, max_seconds: int) -> list[ChatMessage]:
-    device_id = str(uuid.uuid4())
-    headers = {
+def _gql_headers() -> dict[str, str]:
+    return {
         "Client-ID": _GQL_WEB_CLIENT_ID,
         "Content-Type": "application/json",
         "User-Agent": "twitch-telegram-bot/ai-clips",
-        "X-Device-Id": device_id,
+        "X-Device-Id": str(uuid.uuid4()),
     }
+
+
+def _fetch_comment_page(vod_id: str, offset: float, headers: dict[str, str]) -> list[ChatMessage]:
+    payload = [
+        {
+            "operationName": "VideoCommentsByOffsetOrCursor",
+            "variables": {
+                "videoID": vod_id,
+                "contentOffsetSeconds": float(offset),
+            },
+            "extensions": {
+                "persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": _GQL_COMMENTS_HASH,
+                }
+            },
+        }
+    ]
+    req = urllib.request.Request(
+        _GQL_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = resp.read()
+    data = json.loads(body)
+    row = data[0] if isinstance(data, list) else data
+    if not isinstance(row, dict):
+        return []
+    if row.get("errors"):
+        logger.warning(
+            "ai_clips GQL errors vod=%s offset=%s err=%s",
+            vod_id,
+            offset,
+            row.get("errors"),
+        )
+        return []
+    video = ((row.get("data") or {}).get("video")) or {}
+    edges = ((video.get("comments") or {}).get("edges")) or []
+    out: list[ChatMessage] = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        node = edge.get("node") or {}
+        if not isinstance(node, dict):
+            continue
+        t_off = node.get("contentOffsetSeconds")
+        try:
+            sec = float(t_off)
+        except (TypeError, ValueError):
+            continue
+        msg = node.get("message") or {}
+        fragments = msg.get("fragments") if isinstance(msg, dict) else None
+        text = _fragments_text(fragments)
+        if not text:
+            continue
+        cid = str(node.get("id") or "").strip()
+        out.append(ChatMessage(offset_sec=sec, text=text, comment_id=cid))
+    time.sleep(_GQL_REQUEST_DELAY)
+    return out
+
+
+def _fetch_vod_chat_gql(
+    vod_id: str,
+    max_seconds: int,
+    *,
+    progress: Callable[[int, int], None] | None = None,
+) -> list[ChatMessage]:
+    headers = _gql_headers()
+    offsets = list(range(0, max_seconds + 1, _GQL_STEP_SEC))
+    total = len(offsets)
+    deadline = time.monotonic() + CHAT_SCAN_MAX_SEC
     seen: set[str] = set()
     out: list[ChatMessage] = []
-    for offset in range(0, max_seconds + 1, _GQL_STEP_SEC):
-        payload = [
-            {
-                "operationName": "VideoCommentsByOffsetOrCursor",
-                "variables": {
-                    "videoID": vod_id,
-                    "contentOffsetSeconds": float(offset),
-                },
-                "extensions": {
-                    "persistedQuery": {
-                        "version": 1,
-                        "sha256Hash": _GQL_COMMENTS_HASH,
-                    }
-                },
-            }
-        ]
-        req = urllib.request.Request(
-            _GQL_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = resp.read()
-        data = json.loads(body)
-        row = data[0] if isinstance(data, list) else data
-        if not isinstance(row, dict):
-            continue
-        if row.get("errors"):
-            logger.warning(
-                "ai_clips GQL errors vod=%s offset=%s err=%s",
-                vod_id,
-                offset,
-                row.get("errors"),
+    done = 0
+
+    def _one(offset: int) -> list[ChatMessage]:
+        if time.monotonic() > deadline:
+            return []
+        try:
+            return _fetch_comment_page(vod_id, float(offset), headers)
+        except Exception:
+            logger.debug(
+                "ai_clips GQL page failed vod=%s offset=%s", vod_id, offset, exc_info=True
             )
-            break
-        video = ((row.get("data") or {}).get("video")) or {}
-        edges = ((video.get("comments") or {}).get("edges")) or []
-        for edge in edges:
-            if not isinstance(edge, dict):
-                continue
-            node = edge.get("node") or {}
-            if not isinstance(node, dict):
-                continue
-            cid = str(node.get("id") or "").strip()
-            if cid and cid in seen:
-                continue
-            if cid:
-                seen.add(cid)
-            t_off = node.get("contentOffsetSeconds")
-            try:
-                sec = float(t_off)
-            except (TypeError, ValueError):
-                continue
-            if sec > max_seconds:
-                continue
-            msg = node.get("message") or {}
-            fragments = msg.get("fragments") if isinstance(msg, dict) else None
-            text = _fragments_text(fragments)
-            if not text:
-                continue
-            out.append(ChatMessage(offset_sec=sec, text=text))
-        time.sleep(_GQL_REQUEST_DELAY)
+            return []
+
+    workers = min(_GQL_WORKERS, max(1, total))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_one, off): off for off in offsets}
+        for fut in as_completed(futures):
+            done += 1
+            if progress and done % 20 == 0:
+                try:
+                    progress(done, total)
+                except Exception:
+                    pass
+            if time.monotonic() > deadline:
+                logger.warning(
+                    "ai_clips chat scan deadline vod=%s done=%s/%s",
+                    vod_id,
+                    done,
+                    total,
+                )
+                for pending in futures:
+                    pending.cancel()
+                break
+            for msg in fut.result():
+                key = msg.comment_id or f"{msg.offset_sec}:{msg.text}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                if msg.offset_sec <= max_seconds:
+                    out.append(msg)
+    if progress:
+        try:
+            progress(min(done, total), total)
+        except Exception:
+            pass
     out.sort(key=lambda m: m.offset_sec)
+    logger.info(
+        "ai_clips chat scan vod=%s messages=%s offsets=%s/%s",
+        vod_id,
+        len(out),
+        done,
+        total,
+    )
     return out
 
 
@@ -344,8 +415,17 @@ def ai_clips_ready() -> bool:
     return bool(shutil.which("streamlink") and shutil.which("ffmpeg"))
 
 
-def analyze_vod_rms(vod_id: str, *, max_seconds: int = MAX_VOD_ANALYZE_SEC) -> list[float]:
-    """Stream audio_only → mono PCM → per-second RMS. No durable files left behind."""
+def analyze_vod_rms(
+    vod_id: str,
+    *,
+    max_seconds: int = MAX_VOD_ANALYZE_SEC,
+    progress: Callable[[int, int], None] | None = None,
+) -> list[float]:
+    """Stream audio_only → mono PCM → per-second RMS.
+
+    All child temp files go under a TemporaryDirectory (TMPDIR) and are removed
+    in ``finally`` on success or error. No durable media left behind.
+    """
     vid = str(vod_id or "").strip()
     if not vid.isdigit():
         return []
@@ -354,19 +434,31 @@ def analyze_vod_rms(vod_id: str, *, max_seconds: int = MAX_VOD_ANALYZE_SEC) -> l
 
     work = Path(tempfile.mkdtemp(prefix=f"ai_clips_{vid}_"))
     try:
-        return _analyze_vod_rms_in_dir(vid, work, max_seconds=max_seconds)
+        return _analyze_vod_rms_in_dir(
+            vid, work, max_seconds=max_seconds, progress=progress
+        )
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
 def _analyze_vod_rms_in_dir(
-    vod_id: str, work: Path, *, max_seconds: int
+    vod_id: str,
+    work: Path,
+    *,
+    max_seconds: int,
+    progress: Callable[[int, int], None] | None = None,
 ) -> list[float]:
     sl = shutil.which("streamlink")
     ff = shutil.which("ffmpeg")
     assert sl and ff
     url = f"https://www.twitch.tv/videos/{vod_id}"
-    (work / ".keep").write_text("1", encoding="utf-8")
+    # Isolate streamlink/ffmpeg scratch under ``work`` so finally wipes everything.
+    env = os.environ.copy()
+    env["TMPDIR"] = str(work)
+    env["TMP"] = str(work)
+    env["TEMP"] = str(work)
+    env["STREAMLINK_CONFIG_DIR"] = str(work / "sl_config")
+    (work / "sl_config").mkdir(parents=True, exist_ok=True)
 
     sl_cmd = [
         sl,
@@ -402,6 +494,8 @@ def _analyze_vod_rms_in_dir(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            env=env,
+            cwd=str(work),
         )
         ff_proc = subprocess.Popen(
             ff_cmd,
@@ -409,12 +503,15 @@ def _analyze_vod_rms_in_dir(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
+            env=env,
+            cwd=str(work),
         )
         if sl_proc.stdout:
             sl_proc.stdout.close()
         assert ff_proc.stdout is not None
         rms: list[float] = []
         buf = b""
+        last_prog = 0
         while len(rms) < max_seconds:
             if time.monotonic() > deadline:
                 logger.warning("ai_clips analyze timed out vod=%s", vod_id)
@@ -427,10 +524,30 @@ def _analyze_vod_rms_in_dir(
                 frame = buf[:_BYTES_PER_SEC]
                 buf = buf[_BYTES_PER_SEC:]
                 rms.append(_rms_s16le(frame))
+            if progress and len(rms) - last_prog >= 120:
+                last_prog = len(rms)
+                try:
+                    progress(len(rms), max_seconds)
+                except Exception:
+                    pass
+        if progress:
+            try:
+                progress(len(rms), max_seconds)
+            except Exception:
+                pass
         return rms
     finally:
         _kill_proc(ff_proc)
         _kill_proc(sl_proc)
+        # Second pass after kill — streamlink may drop late scratch files.
+        for leftover in work.iterdir():
+            try:
+                if leftover.is_dir():
+                    shutil.rmtree(leftover, ignore_errors=True)
+                else:
+                    leftover.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _rms_s16le(frame: bytes) -> float:
