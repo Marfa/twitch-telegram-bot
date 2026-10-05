@@ -931,6 +931,7 @@ async def receive_new_sub_other(
     import beta as beta_features
     from handlers.drops import DROPS_BETA_ID
     from handlers.follow_monitor import open_follow_monitor_menu
+    from handlers.ai_clips import start_ai_clips
     from handlers.game_info import start_game_info
     from handlers.settings import open_stream_chat, open_whisper_alerts_menu
     from handlers.stream_schedule import start_stream_schedule
@@ -965,6 +966,7 @@ async def receive_new_sub_other(
         return _wz()["ALERT_TYPE"]
     if action not in (
         "follow_monitor",
+        "ai_clips",
         "whisper_alerts",
         "create_schedule",
         "watch",
@@ -978,6 +980,9 @@ async def receive_new_sub_other(
     context.user_data.clear()
     if action == "follow_monitor":
         await open_follow_monitor_menu(update, context)
+        return ConversationHandler.END
+    if action == "ai_clips":
+        await start_ai_clips(update, context)
         return ConversationHandler.END
     if action == "whisper_alerts":
         await open_whisper_alerts_menu(update, context)

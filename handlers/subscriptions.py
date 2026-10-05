@@ -56,6 +56,7 @@ from handlers.delivery import _resolve_chat_display_name
 from handlers.monitoring import _is_unchanged_message_edit
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
 from handlers.follow_monitor import complete_follow_monitor_oauth
+from handlers.ai_clips import complete_ai_clips_oauth
 from handlers.stream_schedule import _complete_schedule_publish
 from i18n import (
     DEFAULT_LOCALE,
@@ -1815,6 +1816,9 @@ async def complete_twitch_import(
         return
     if purpose == "follow_monitor":
         await complete_follow_monitor_oauth(application, owner_id, error, token_info)
+        return
+    if purpose == "ai_clips":
+        await complete_ai_clips_oauth(application, owner_id, error, token_info)
         return
     if purpose == "chat":
         await complete_chat_oauth(application, owner_id, error, token_info)

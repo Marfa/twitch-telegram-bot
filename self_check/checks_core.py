@@ -98,6 +98,15 @@ def check_core() -> None:
     analytics_mod.capture(1, "self_check_noop")
     analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
 
+    from ai_clips import find_loud_peaks, parse_helix_duration
+
+    assert parse_helix_duration("1h2m3s") == 3723
+    assert parse_helix_duration("45s") == 45
+    rms = [1.0] * 40 + [100.0] * 30 + [1.0] * 40 + [80.0] * 30 + [1.0] * 50
+    peaks = find_loud_peaks(rms, n=5, duration=30, min_gap=60)
+    assert len(peaks) >= 2
+    assert "ai_clips" in FEATURE_IDS
+
     ops_py = Path(__file__).resolve().parents[1] / "scripts" / "posthog-ops-event.py"
     assert ops_py.is_file()
     op = subprocess.run(
@@ -887,10 +896,12 @@ def check_core() -> None:
     assert "offline_access" not in auth_url
     assert "state=abc" in auth_url
     assert "force_verify" not in auth_url
-    from twitch import BOT_TWITCH_OAUTH_SCOPES, FOLLOWERS_SCOPE
+    from twitch import BOT_TWITCH_OAUTH_SCOPES, CLIPS_MANAGE_SCOPE, FOLLOWERS_SCOPE
 
     assert "moderator:read:followers" in BOT_TWITCH_OAUTH_SCOPES
     assert "user:read:follows" in BOT_TWITCH_OAUTH_SCOPES
+    assert CLIPS_MANAGE_SCOPE in BOT_TWITCH_OAUTH_SCOPES
+    assert "channel:manage:clips" in BOT_TWITCH_OAUTH_SCOPES
     forced = t.build_authorize_url(
         redirect_uri="https://example.com/oauth/twitch/callback",
         state="abc",
@@ -1323,14 +1334,12 @@ def check_core() -> None:
         ]
         other_kb = other_menu(loc).keyboard
         assert [[b.text for b in row] for row in other_kb] == [
-            [btn("follow_monitor", loc), btn("whisper_alerts", loc)],
-            [btn("create_schedule", loc), btn("watch", loc)],
-            [btn("chat", loc), btn("game_info", loc)],
-            [btn("back", loc)],
+            [btn("follow_monitor", loc), btn("ai_clips", loc)],
+            [btn("whisper_alerts", loc), btn("create_schedule", loc)],
+            [btn("watch", loc), btn("chat", loc)],
+            [btn("game_info", loc), btn("back", loc)],
         ]
         for i, row in enumerate(other_kb):
-            if i == len(other_kb) - 1 and len(row) == 1:
-                continue
             assert len(row) == 2, (
                 f"other_menu row {i} must be paired: {[b.text for b in row]}"
             )

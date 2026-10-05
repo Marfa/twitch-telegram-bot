@@ -389,6 +389,10 @@ from handlers.follow_monitor import (
     receive_follow_monitor_search,
     start_follow_monitor_search,
 )
+from handlers.ai_clips import (
+    on_ai_clips_callback,
+    start_ai_clips,
+)
 
 from handlers.watch import (
     _WATCH_LANG_RE,
@@ -867,6 +871,7 @@ def _help_text(lang: str) -> str:
         btn_alert_history=btn("alert_history", lang),
         btn_other=btn("other", lang),
         btn_follow_monitor=btn("follow_monitor", lang),
+        btn_ai_clips=btn("ai_clips", lang),
         btn_whisper_alerts=btn("whisper_alerts", lang),
         btn_create_schedule=btn("create_schedule", lang),
         btn_watch=btn("watch", lang),
@@ -2579,6 +2584,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("ai_clips"), start_ai_clips),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_ai_clips_callback, pattern=r"^ai_clips:(cancel|vod:.+)$"
+        ),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("beta_mode"), open_beta_mode_menu),
         group=0,
     )
@@ -3004,7 +3019,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_new_sub_other,
-                    pattern=r"^new_sub_other:(back|follow_monitor|whisper_alerts|create_schedule|watch|chat|game_info)$",
+                    pattern=r"^new_sub_other:(back|follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info)$",
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,

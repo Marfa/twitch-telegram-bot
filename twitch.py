@@ -22,6 +22,8 @@ FOLLOWS_SCOPE = "user:read:follows"
 # Channel followers list (own channel / mod) — Follow/Unfollow monitor.
 FOLLOWERS_SCOPE = "moderator:read:followers"
 SCHEDULE_SCOPE = "channel:manage:schedule"
+# Create Clip From VOD (POST /helix/videos/clips) — broadcaster token.
+CLIPS_MANAGE_SCOPE = "channel:manage:clips"
 SUBSCRIPTIONS_SCOPE = "user:read:subscriptions"
 WHISPERS_SCOPE = "user:read:whispers"
 CHAT_READ_SCOPE = "user:read:chat"
@@ -35,6 +37,7 @@ BOT_TWITCH_OAUTH_SCOPES = " ".join(
         FOLLOWS_SCOPE,
         FOLLOWERS_SCOPE,
         SCHEDULE_SCOPE,
+        CLIPS_MANAGE_SCOPE,
         SUBSCRIPTIONS_SCOPE,
         WHISPERS_SCOPE,
         CHAT_READ_SCOPE,
@@ -1188,6 +1191,45 @@ class TwitchClient:
         resp.raise_for_status()
         users = resp.json().get("data", [])
         return users[0] if users else None
+
+    def create_clip_from_vod(
+        self,
+        user_access_token: str,
+        *,
+        editor_id: str,
+        broadcaster_id: str,
+        vod_id: str,
+        vod_offset: int,
+        title: str,
+        duration: float = 30.0,
+    ) -> dict[str, Any]:
+        """Helix Create Clip From VOD (POST /helix/videos/clips).
+
+        Requires channel:manage:clips (broadcaster) or editor:manage:clips.
+        vod_offset is the end second of the clip; start = vod_offset - duration.
+        """
+        dur = max(5.0, min(60.0, float(duration)))
+        offset = max(int(dur), int(vod_offset))
+        params = {
+            "editor_id": str(editor_id).strip(),
+            "broadcaster_id": str(broadcaster_id).strip(),
+            "vod_id": str(vod_id).strip(),
+            "vod_offset": str(offset),
+            "duration": f"{dur:.1f}",
+            "title": (title or "Clip")[:100],
+        }
+        resp = self._session.post(
+            "https://api.twitch.tv/helix/videos/clips",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {user_access_token}",
+            },
+            params=params,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        return data[0] if data else {}
 
     def send_chat_message(
         self,
