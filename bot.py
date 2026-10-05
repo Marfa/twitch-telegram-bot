@@ -2591,7 +2591,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(
-            on_ai_clips_callback, pattern=r"^ai_clips:(cancel|vod:.+|page:\d+)$"
+            on_ai_clips_callback,
+            pattern=r"^ai_clips:(cancel|status|vod:.+|page:\d+)$",
         ),
         group=0,
     )

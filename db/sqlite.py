@@ -1266,6 +1266,7 @@ class SqliteDatabase:
                 peaks_json TEXT NOT NULL DEFAULT '',
                 clips_json TEXT NOT NULL DEFAULT '',
                 error TEXT NOT NULL DEFAULT '',
+                progress_pct INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
@@ -1277,6 +1278,11 @@ class SqliteDatabase:
             ON ai_clips_jobs(status, id)
             """
         )
+        ai_cols = {row[1] for row in conn.execute("PRAGMA table_info(ai_clips_jobs)")}
+        if "progress_pct" not in ai_cols:
+            conn.execute(
+                "ALTER TABLE ai_clips_jobs ADD COLUMN progress_pct INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS premium_gifts (
@@ -7104,6 +7110,7 @@ owner_id, twitch_username, twitch_user_id,
         peaks_json: str | None = None,
         clips_json: str | None = None,
         error: str | None = None,
+        progress_pct: int | None = None,
     ) -> None:
         sets: list[str] = ["updated_at = datetime('now')"]
         args: list[object] = []
@@ -7119,6 +7126,9 @@ owner_id, twitch_username, twitch_user_id,
         if error is not None:
             sets.append("error = ?")
             args.append(error)
+        if progress_pct is not None:
+            sets.append("progress_pct = ?")
+            args.append(max(0, min(100, int(progress_pct))))
         if len(sets) == 1:
             return
         args.append(int(job_id))
@@ -7128,20 +7138,9 @@ owner_id, twitch_username, twitch_user_id,
                 args,
             )
 
-    def get_ai_clips_job(self, job_id: int):
+    def _ai_clips_job_from_row(self, row):
         from db.models import AiClipsJob
 
-        with self._conn() as conn:
-            row = conn.execute(
-                """
-                SELECT id, owner_id, vod_id, vod_title, status,
-                       peaks_json, clips_json, error, created_at, updated_at
-                FROM ai_clips_jobs WHERE id = ?
-                """,
-                (int(job_id),),
-            ).fetchone()
-        if not row:
-            return None
         return AiClipsJob(
             id=int(row["id"]),
             owner_id=int(row["owner_id"]),
@@ -7151,38 +7150,60 @@ owner_id, twitch_username, twitch_user_id,
             peaks_json=str(row["peaks_json"] or ""),
             clips_json=str(row["clips_json"] or ""),
             error=str(row["error"] or ""),
+            progress_pct=int(row["progress_pct"] or 0)
+            if "progress_pct" in row.keys()
+            else 0,
             created_at=str(row["created_at"] or ""),
             updated_at=str(row["updated_at"] or ""),
         )
 
-    def list_resumable_ai_clips_jobs(self) -> list:
-        from db.models import AiClipsJob
+    def get_ai_clips_job(self, job_id: int):
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, owner_id, vod_id, vod_title, status,
+                       peaks_json, clips_json, error, progress_pct,
+                       created_at, updated_at
+                FROM ai_clips_jobs WHERE id = ?
+                """,
+                (int(job_id),),
+            ).fetchone()
+        if not row:
+            return None
+        return self._ai_clips_job_from_row(row)
 
+    def get_active_ai_clips_job(self, owner_id: int):
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, owner_id, vod_id, vod_title, status,
+                       peaks_json, clips_json, error, progress_pct,
+                       created_at, updated_at
+                FROM ai_clips_jobs
+                WHERE owner_id = ?
+                  AND status IN ('queued', 'analyzing', 'creating')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (int(owner_id),),
+            ).fetchone()
+        if not row:
+            return None
+        return self._ai_clips_job_from_row(row)
+
+    def list_resumable_ai_clips_jobs(self) -> list:
         with self._conn() as conn:
             rows = conn.execute(
                 """
                 SELECT id, owner_id, vod_id, vod_title, status,
-                       peaks_json, clips_json, error, created_at, updated_at
+                       peaks_json, clips_json, error, progress_pct,
+                       created_at, updated_at
                 FROM ai_clips_jobs
                 WHERE status IN ('queued', 'analyzing', 'creating')
                 ORDER BY id
                 """
             ).fetchall()
-        return [
-            AiClipsJob(
-                id=int(r["id"]),
-                owner_id=int(r["owner_id"]),
-                vod_id=str(r["vod_id"] or ""),
-                vod_title=str(r["vod_title"] or ""),
-                status=str(r["status"] or ""),
-                peaks_json=str(r["peaks_json"] or ""),
-                clips_json=str(r["clips_json"] or ""),
-                error=str(r["error"] or ""),
-                created_at=str(r["created_at"] or ""),
-                updated_at=str(r["updated_at"] or ""),
-            )
-            for r in rows
-        ]
+        return [self._ai_clips_job_from_row(r) for r in rows]
 
     def count_active_ai_clips_jobs(self, *, owner_id: int | None = None) -> int:
         with self._conn() as conn:

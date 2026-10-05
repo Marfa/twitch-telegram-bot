@@ -66,7 +66,11 @@ async def _entitled(bot: Any, db: Database, user_id: int) -> tuple[bool, bool]:
 
 
 def _vod_pick_keyboard(
-    lang: str, videos: list[dict[str, Any]], *, page: int
+    lang: str,
+    videos: list[dict[str, Any]],
+    *,
+    page: int,
+    show_status: bool = False,
 ) -> InlineKeyboardMarkup:
     total = len(videos)
     pages = max(1, (total + VOD_PAGE_SIZE - 1) // VOD_PAGE_SIZE)
@@ -74,6 +78,15 @@ def _vod_pick_keyboard(
     start = page * VOD_PAGE_SIZE
     chunk = videos[start : start + VOD_PAGE_SIZE]
     rows: list[list[InlineKeyboardButton]] = []
+    if show_status:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_status_btn", lang),
+                    callback_data="ai_clips:status",
+                )
+            ]
+        )
     for v in chunk:
         vid = str(v.get("id") or "").strip()
         if not vid:
@@ -273,11 +286,14 @@ async def start_ai_clips(
 
     context.user_data["ai_clips_videos"] = archives
     context.user_data["ai_clips_page"] = 0
+    active = db.get_active_ai_clips_job(user_id)
     await context.bot.send_message(
         chat,
         t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
         parse_mode=ParseMode.HTML,
-        reply_markup=_vod_pick_keyboard(lang, archives, page=0),
+        reply_markup=_vod_pick_keyboard(
+            lang, archives, page=0, show_status=active is not None
+        ),
     )
 
 
@@ -288,9 +304,27 @@ async def on_ai_clips_callback(
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     data = (query.data or "").strip()
-    await query.answer()
     chat = reply_chat_id(update)
     db: Database = context.application.bot_data["db"]
+
+    if data == "ai_clips:status":
+        job = db.get_active_ai_clips_job(user_id)
+        if not job:
+            await query.answer(t("ai_clips_status_idle", lang), show_alert=True)
+            return
+        await query.answer(
+            t(
+                "ai_clips_status_text",
+                lang,
+                title=(job.vod_title or job.vod_id)[:60],
+                pct=max(0, min(100, int(job.progress_pct or 0))),
+                status=job.status,
+            ),
+            show_alert=True,
+        )
+        return
+
+    await query.answer()
 
     if data == "ai_clips:cancel":
         context.user_data.pop("ai_clips_videos", None)
@@ -317,11 +351,14 @@ async def on_ai_clips_callback(
         except ValueError:
             page = 0
         context.user_data["ai_clips_page"] = page
+        active = db.get_active_ai_clips_job(user_id)
         try:
             await query.edit_message_text(
                 t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
                 parse_mode=ParseMode.HTML,
-                reply_markup=_vod_pick_keyboard(lang, videos, page=page),
+                reply_markup=_vod_pick_keyboard(
+                    lang, videos, page=page, show_status=active is not None
+                ),
             )
         except BadRequest:
             pass
@@ -553,41 +590,6 @@ def _clips_from_json(raw: str) -> list[CreatedClip]:
     return out
 
 
-_PROGRESS_SEC = 120
-
-
-async def _progress_pulse(
-    application: Application,
-    *,
-    user_id: int,
-    job_id: int,
-    loc: str,
-    title: str,
-) -> None:
-    """Periodic “still working” so long chat/audio scans do not look hung."""
-    db: Database = application.bot_data["db"]
-    while True:
-        await asyncio.sleep(_PROGRESS_SEC)
-        job = db.get_ai_clips_job(job_id)
-        if not job or job.status in ("done", "failed"):
-            return
-        try:
-            await application.bot.send_message(
-                user_id,
-                t(
-                    "ai_clips_still_working",
-                    loc,
-                    title=html_escape((title or "")[:80]),
-                    status=job.status,
-                ),
-                parse_mode=ParseMode.HTML,
-            )
-            # Touch row so ops can see liveness.
-            db.update_ai_clips_job(job_id, status=job.status)
-        except Exception:
-            logger.debug("ai_clips progress pulse failed job=%s", job_id, exc_info=True)
-
-
 async def _run_job(
     application: Application,
     job_id: int,
@@ -600,7 +602,6 @@ async def _run_job(
         _RUNNING_JOB_IDS.add(job_id)
     db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
-    pulse: asyncio.Task[None] | None = None
     try:
         job = db.get_ai_clips_job(job_id)
         if not job or job.status in ("done", "failed"):
@@ -618,16 +619,7 @@ async def _run_job(
 
         peaks = _peaks_from_json(job.peaks_json)
         if job.status in ("queued", "analyzing") or not peaks:
-            db.update_ai_clips_job(job_id, status="analyzing")
-            pulse = asyncio.create_task(
-                _progress_pulse(
-                    application,
-                    user_id=user_id,
-                    job_id=job_id,
-                    loc=loc,
-                    title=job.vod_title or job.vod_id,
-                )
-            )
+            db.update_ai_clips_job(job_id, status="analyzing", progress_pct=1)
             vod_duration = 0
             try:
                 videos = await asyncio.to_thread(
@@ -649,10 +641,12 @@ async def _run_job(
             )
 
             def _chat_prog(done: int, total: int) -> None:
-                logger.info(
-                    "ai_clips chat progress job=%s %s/%s", job_id, done, total
+                pct = 1
+                if total > 0:
+                    pct = max(1, min(55, int(done * 55 / total)))
+                db.update_ai_clips_job(
+                    job_id, status="analyzing", progress_pct=pct
                 )
-                db.update_ai_clips_job(job_id, status="analyzing")
 
             chat_msgs = await asyncio.to_thread(
                 fetch_vod_chat_messages,
@@ -665,14 +659,17 @@ async def _run_job(
             audio_peaks: list[LoudPeak] = []
             need_audio = len(phrases) + len(spikes) < MAX_CLIPS
             if need_audio:
+                db.update_ai_clips_job(
+                    job_id, status="analyzing", progress_pct=56
+                )
+
                 def _audio_prog(done: int, total: int) -> None:
-                    logger.info(
-                        "ai_clips audio progress job=%s %ss/%ss",
-                        job_id,
-                        done,
-                        total,
+                    pct = 56
+                    if total > 0:
+                        pct = max(56, min(90, 56 + int(done * 34 / total)))
+                    db.update_ai_clips_job(
+                        job_id, status="analyzing", progress_pct=pct
                     )
-                    db.update_ai_clips_job(job_id, status="analyzing")
 
                 try:
                     rms = await asyncio.to_thread(
@@ -696,6 +693,10 @@ async def _run_job(
                             user_id, t("ai_clips_analyze_failed", loc)
                         )
                         return
+            else:
+                db.update_ai_clips_job(
+                    job_id, status="analyzing", progress_pct=90
+                )
             peaks = merge_clip_candidates(phrases, spikes, audio_peaks, n=MAX_CLIPS)
             if not peaks:
                 db.update_ai_clips_job(job_id, status="failed", error="no_peaks")
@@ -704,12 +705,15 @@ async def _run_job(
                 )
                 return
             db.update_ai_clips_job(
-                job_id, status="creating", peaks_json=_peaks_to_json(peaks)
+                job_id,
+                status="creating",
+                peaks_json=_peaks_to_json(peaks),
+                progress_pct=95,
             )
 
         clips = _clips_from_json(job.clips_json)
         if not clips:
-            db.update_ai_clips_job(job_id, status="creating")
+            db.update_ai_clips_job(job_id, status="creating", progress_pct=95)
             clips = await asyncio.to_thread(
                 _create_clips_blocking,
                 twitch,
@@ -729,10 +733,13 @@ async def _run_job(
                 )
                 return
             db.update_ai_clips_job(
-                job_id, status="done", clips_json=_clips_to_json(clips)
+                job_id,
+                status="done",
+                clips_json=_clips_to_json(clips),
+                progress_pct=100,
             )
         else:
-            db.update_ai_clips_job(job_id, status="done")
+            db.update_ai_clips_job(job_id, status="done", progress_pct=100)
 
         lines = [t("ai_clips_done_title", loc, count=len(clips))]
         for i, c in enumerate(clips, start=1):
@@ -760,14 +767,6 @@ async def _run_job(
             {"vod_id": job.vod_id, "clips": len(clips), "job_id": job_id},
         )
     finally:
-        if pulse is not None:
-            pulse.cancel()
-            try:
-                await pulse
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
         async with _RUNNING_LOCK:
             _RUNNING_JOB_IDS.discard(job_id)
 

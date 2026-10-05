@@ -177,10 +177,13 @@ def check_core() -> None:
         jid = jdb.create_ai_clips_job(7, vod_id="99", vod_title="t")
         assert jid > 0
         assert jdb.count_active_ai_clips_jobs() == 1
-        jdb.update_ai_clips_job(jid, status="analyzing", peaks_json="[]")
+        jdb.update_ai_clips_job(jid, status="analyzing", peaks_json="[]", progress_pct=42)
         assert len(jdb.list_resumable_ai_clips_jobs()) == 1
-        jdb.update_ai_clips_job(jid, status="done")
+        active = jdb.get_active_ai_clips_job(7)
+        assert active is not None and active.progress_pct == 42
+        jdb.update_ai_clips_job(jid, status="done", progress_pct=100)
         assert jdb.count_active_ai_clips_jobs() == 0
+        assert jdb.get_active_ai_clips_job(7) is None
 
     ops_py = Path(__file__).resolve().parents[1] / "scripts" / "posthog-ops-event.py"
     assert ops_py.is_file()

@@ -216,6 +216,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("lang_cancel", "lang:cancel"),
     ("ai_clips_cancel", "ai_clips:cancel"),
     ("ai_clips_vod", "ai_clips:vod:123456789"),
+    ("ai_clips_status", "ai_clips:status"),
     ("ai_clips_page", "ai_clips:page:1"),
     ("import_mode", "import_mode:once"),
     ("import_oauth_cancel", "import_oauth:cancel"),

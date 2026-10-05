@@ -786,6 +786,7 @@ class AiClipsJob:
     peaks_json: str = ""
     clips_json: str = ""
     error: str = ""
+    progress_pct: int = 0
     created_at: str = ""
     updated_at: str = ""
 
