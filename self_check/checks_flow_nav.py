@@ -3182,6 +3182,101 @@ async def _scenario_follow_monitor(db) -> None:
     _ = FEATURE_ID
 
 
+async def _scenario_ai_clips(db) -> None:
+    """§1.4 Other → AI clips: beta/premium gates and VOD pick Cancel escape."""
+    from handlers.ai_clips import (
+        BETA_FEATURE_ID,
+        FEATURE_ID,
+        on_ai_clips_callback,
+        start_ai_clips,
+    )
+    from handlers.settings import open_other_menu
+
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
+    ctx = _ctx(application)
+    await open_other_menu(update, ctx)
+    cap.assert_turn("open_other_menu_ai_clips")
+
+    # Without beta enrollment: soft stop + other_menu escape.
+    update = _msg_update(_FREE_UID, btn("ai_clips", "ru"), cap)
+    await start_ai_clips(update, ctx)
+    texts = [str(c.args[1]) if len(c.args) > 1 else "" for c in bot.send_message.await_args_list]
+    assert any("бета" in (t or "").lower() or "beta" in (t or "").lower() for t in texts) or any(
+        "AI-клип" in (t or "") or "AI clip" in (t or "") for t in texts
+    )
+    cap.assert_turn("other_ai_clips_beta_required")
+
+    db.set_beta_enrollment(_FREE_UID, BETA_FEATURE_ID, True)
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("ai_clips", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=False),
+    ):
+        with patch(
+            "premium_handlers.send_premium_screen",
+            new=AsyncMock(),
+        ):
+            await start_ai_clips(update, ctx)
+    cap.assert_turn("other_ai_clips_premium_required")
+
+    twitch = MagicMock()
+    twitch.refresh_user_token.return_value = {
+        "access_token": "access",
+        "refresh_token": "refresh",
+    }
+    twitch.token_has_scope.return_value = True
+    twitch.get_videos_by_user.return_value = [
+        {
+            "id": "123456789",
+            "title": "Test VOD",
+            "duration": "1h0m0s",
+        }
+    ]
+    db.upsert_twitch_sync(
+        _FREE_UID,
+        twitch_user_id="42",
+        refresh_token="rt",
+        period_days=7,
+        next_sync_at="2099-01-01T00:00:00+00:00",
+    )
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("ai_clips", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        with patch("handlers.ai_clips.ai_clips_ready", return_value=True):
+            await start_ai_clips(update, ctx)
+    callbacks = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ai_clips:cancel" in callbacks
+    assert any((c or "").startswith("ai_clips:vod:") for c in callbacks)
+    cap.assert_turn("other_ai_clips_pick_vod")
+
+    update, query = _cb_update(_FREE_UID, "ai_clips:cancel", cap)
+    await on_ai_clips_callback(update, ctx)
+    cap.assert_turn("other_ai_clips_cancel")
+    _ = FEATURE_ID
+
+
 async def _scenario_welcome_demo(db) -> None:
     """§1 welcome demo — paused seed keyboard has Enable + Delete escape."""
     from bot import _ensure_welcome_premium_channel_subscription
@@ -3295,6 +3390,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_publish_chain(db)
         await _scenario_settings_extended(db)
         await _scenario_follow_monitor(db)
+        await _scenario_ai_clips(db)
 
 
 def check_flow_nav() -> None:

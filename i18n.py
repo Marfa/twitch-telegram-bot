@@ -230,6 +230,7 @@ def all_menu_buttons() -> set[str]:
         "ignored_words",
         "whisper_alerts",
         "follow_monitor",
+        "ai_clips",
         "beta_mode",
         "sync_subs",
         "premium",
@@ -319,6 +320,7 @@ def subscriptions_menu(
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
     keys = [
         "follow_monitor",
+        "ai_clips",
         "whisper_alerts",
         "create_schedule",
         "watch",
@@ -1838,6 +1840,7 @@ def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
     """Other features from New subscription (§2.1); Back returns to alert type."""
     keys = [
         "follow_monitor",
+        "ai_clips",
         "whisper_alerts",
         "create_schedule",
         "watch",

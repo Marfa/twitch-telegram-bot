@@ -931,6 +931,7 @@ async def receive_new_sub_other(
     import beta as beta_features
     from handlers.drops import DROPS_BETA_ID
     from handlers.follow_monitor import open_follow_monitor_menu
+    from handlers.ai_clips import start_ai_clips
     from handlers.game_info import start_game_info
     from handlers.settings import open_stream_chat, open_whisper_alerts_menu
     from handlers.stream_schedule import start_stream_schedule
@@ -965,6 +966,7 @@ async def receive_new_sub_other(
         return _wz()["ALERT_TYPE"]
     if action not in (
         "follow_monitor",
+        "ai_clips",
         "whisper_alerts",
         "create_schedule",
         "watch",
@@ -978,6 +980,9 @@ async def receive_new_sub_other(
     context.user_data.clear()
     if action == "follow_monitor":
         await open_follow_monitor_menu(update, context)
+        return ConversationHandler.END
+    if action == "ai_clips":
+        await start_ai_clips(update, context)
         return ConversationHandler.END
     if action == "whisper_alerts":
         await open_whisper_alerts_menu(update, context)
@@ -3646,7 +3651,11 @@ async def _finish_subscription(
                 multistream_channels=str(data.get("multistream_channels") or "[]"),
                 button_style=str(data.get("button_style") or ""),
                 delay_minutes=int(data.get("delay_minutes", 0)),
-                suppress_repeat_minutes=int(data.get("suppress_repeat_minutes", 0)),
+                suppress_repeat_minutes=prem.suppress_repeat_minutes_for_create(
+                    twitch_username=str(data.get("twitch_username") or ""),
+                    is_demo=demo_mode.is_active(owner_id),
+                    requested=int(data.get("suppress_repeat_minutes", 0)),
+                ),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 use_global_ignore=bool(data.get("use_global_ignore")),
                 image_file_id=data.get("image_file_id") or None,
@@ -3769,7 +3778,11 @@ async def _finish_subscription(
                 suppress_repeat_minutes=(
                     0
                     if notify_on_category_change
-                    else int(data.get("suppress_repeat_minutes", 0))
+                    else prem.suppress_repeat_minutes_for_create(
+                        twitch_username=str(data.get("twitch_username") or ""),
+                        is_demo=demo_mode.is_active(owner_id),
+                        requested=int(data.get("suppress_repeat_minutes", 0)),
+                    )
                 ),
                 schedule_reminder_minutes=int(
                     data.get("schedule_reminder_minutes", 0)

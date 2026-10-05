@@ -45,6 +45,7 @@ FEATURE_IDS: tuple[str, ...] = (
     "deleted_subscriptions_cart",
     "stream_chat",
     "follow_monitor",
+    "ai_clips",
 )
 
 # Wizard steps bundled into advanced_mode (legacy à la carte ids still honored).
@@ -99,6 +100,7 @@ _FEATURE_LABEL_KEYS = {
     "deleted_subscriptions_cart": "premium_feat_deleted_subscriptions_cart",
     "stream_chat": "premium_feat_stream_chat",
     "follow_monitor": "premium_feat_follow_monitor",
+    "ai_clips": "premium_feat_ai_clips",
 }
 
 # Free Mini App chat: read unlimited; send capped unless stream_chat / full plan.
@@ -686,6 +688,36 @@ def trial_days() -> int:
 
 def twitch_channel_login() -> str:
     return PREMIUM_TWITCH_LOGIN
+
+
+# is_demo rows (+ welcome seed write path): mute repeats after a send.
+DEMO_SUPPRESS_REPEAT_MINUTES = 180
+# Back-compat alias for imports/tests.
+DEMO_PROMO_SUPPRESS_REPEAT_MINUTES = DEMO_SUPPRESS_REPEAT_MINUTES
+
+
+def effective_suppress_repeat_minutes(sub: Any) -> int:
+    """Minutes used at send/cooldown time (is_demo always 180)."""
+    if bool(getattr(sub, "is_demo", False)):
+        return DEMO_SUPPRESS_REPEAT_MINUTES
+    return max(0, int(getattr(sub, "suppress_repeat_minutes", 0) or 0))
+
+
+def suppress_repeat_minutes_for_create(
+    *,
+    twitch_username: str | None = None,
+    is_demo: bool = False,
+    requested: int = 0,
+) -> int:
+    """Persist 180 for is_demo creates; otherwise the wizard value.
+
+    Manual marfapr (is_demo=False) keeps ``requested`` — no forced mute.
+    ``twitch_username`` kept for call-site compat; login must not force mute.
+    """
+    _ = twitch_username
+    if is_demo:
+        return DEMO_SUPPRESS_REPEAT_MINUTES
+    return max(0, int(requested or 0))
 
 
 @dataclass(frozen=True)

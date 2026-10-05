@@ -892,8 +892,48 @@ def check_db_premium() -> None:
         assert sub is not None
         assert sub.notify_cooldown_until is not None
         from db import is_on_notify_cooldown
+        from types import SimpleNamespace
+
+        import premium as prem
 
         assert is_on_notify_cooldown(sub)
+        assert prem.DEMO_SUPPRESS_REPEAT_MINUTES == 180
+        # Manual marfapr: no forced mute.
+        assert (
+            prem.suppress_repeat_minutes_for_create(
+                twitch_username=prem.twitch_channel_login(), requested=0
+            )
+            == 0
+        )
+        assert (
+            prem.suppress_repeat_minutes_for_create(
+                twitch_username="someoneelse", is_demo=True, requested=0
+            )
+            == 180
+        )
+        assert (
+            prem.suppress_repeat_minutes_for_create(
+                twitch_username="someoneelse", requested=45
+            )
+            == 45
+        )
+        # Manual marfapr with stored 0: cooldown flag ignored.
+        marfa_manual = SimpleNamespace(
+            twitch_username=prem.twitch_channel_login(),
+            is_demo=False,
+            suppress_repeat_minutes=0,
+            notify_cooldown_until=sub.notify_cooldown_until,
+        )
+        assert prem.effective_suppress_repeat_minutes(marfa_manual) == 0
+        assert not is_on_notify_cooldown(marfa_manual)  # type: ignore[arg-type]
+        demo_cd = SimpleNamespace(
+            twitch_username="other",
+            is_demo=True,
+            suppress_repeat_minutes=0,
+            notify_cooldown_until=sub.notify_cooldown_until,
+        )
+        assert prem.effective_suppress_repeat_minutes(demo_cd) == 180
+        assert is_on_notify_cooldown(demo_cd)  # type: ignore[arg-type]
         assert db.get_receive_bot_updates(1) is True
         db.set_receive_bot_updates(1, False)
         assert db.get_receive_bot_updates(1) is False

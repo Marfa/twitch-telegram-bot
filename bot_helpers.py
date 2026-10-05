@@ -242,6 +242,7 @@ def group_setup_menu_filter():
             | _btn_filter("ignored_words")
             | _btn_filter("whisper_alerts")
             | _btn_filter("follow_monitor")
+            | _btn_filter("ai_clips")
             | _btn_filter("sync_subs")
             | _btn_filter("beta_mode")
             | _btn_filter("admin")
@@ -259,7 +260,7 @@ GROUP_SETUP_CALLBACK_PATTERN = (
     r"dup:|dest:|strip_name:|image_ask:|image_pos:|ignore_keywords:|"
     r"template_typo:|stored_typo_fix:|list_type:|delete_|enable_all|toggle:|sub_toggle:|alert_pause:|"
     r"sys_updates:|sys_availability:|sys_other:|sys_sync:|sys_beta:|"
-    r"whisper_alerts:|follow_monitor:|beta_mode:|premium:|alert_history:|lang:(?!cancel)|"
+    r"whisper_alerts:|follow_monitor:|ai_clips:|beta_mode:|premium:|alert_history:|lang:(?!cancel)|"
     r"sb_edit:|sb_sched:|import_oauth:|twitch_link:|gv:)"
 )
 

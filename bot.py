@@ -389,6 +389,10 @@ from handlers.follow_monitor import (
     receive_follow_monitor_search,
     start_follow_monitor_search,
 )
+from handlers.ai_clips import (
+    on_ai_clips_callback,
+    start_ai_clips,
+)
 
 from handlers.watch import (
     _WATCH_LANG_RE,
@@ -867,6 +871,7 @@ def _help_text(lang: str) -> str:
         btn_alert_history=btn("alert_history", lang),
         btn_other=btn("other", lang),
         btn_follow_monitor=btn("follow_monitor", lang),
+        btn_ai_clips=btn("ai_clips", lang),
         btn_whisper_alerts=btn("whisper_alerts", lang),
         btn_create_schedule=btn("create_schedule", lang),
         btn_watch=btn("watch", lang),
@@ -942,6 +947,8 @@ async def _ensure_welcome_premium_channel_subscription(
             disable_link_preview=True,
             enabled=False,
             delay_minutes=welcome_delay_minutes,
+            # Welcome seed is not is_demo, but still a first-run demo alert.
+            suppress_repeat_minutes=prem.DEMO_SUPPRESS_REPEAT_MINUTES,
             notify_on_live=True,
             notify_on_end=False,
             notify_on_category_change=False,
@@ -1751,6 +1758,13 @@ async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE
     minutes = int(raw)
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    sub = db.get_subscription(sub_id, owner_id)
+    if sub is not None:
+        minutes = prem.suppress_repeat_minutes_for_create(
+            twitch_username=sub.twitch_username,
+            is_demo=bool(sub.is_demo),
+            requested=minutes,
+        )
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(sub_id, owner_id, suppress_repeat_minutes=minutes):
         await update.effective_message.reply_text(t("sub_not_found", lang))
@@ -2012,6 +2026,9 @@ async def _enter_demo_mode(
                 image_file_id=GAME_COVER_IMAGE_ID,
                 image_position="before",
                 enabled=True,
+                suppress_repeat_minutes=prem.suppress_repeat_minutes_for_create(
+                    twitch_username=uname, is_demo=True
+                ),
                 notify_on_live=True,
                 notify_on_end=False,
                 is_demo=True,
@@ -2567,6 +2584,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("ai_clips"), start_ai_clips),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_ai_clips_callback, pattern=r"^ai_clips:(cancel|vod:.+)$"
+        ),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("beta_mode"), open_beta_mode_menu),
         group=0,
     )
@@ -2992,7 +3019,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_new_sub_other,
-                    pattern=r"^new_sub_other:(back|follow_monitor|whisper_alerts|create_schedule|watch|chat|game_info)$",
+                    pattern=r"^new_sub_other:(back|follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info)$",
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,

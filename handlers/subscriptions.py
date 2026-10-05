@@ -56,6 +56,7 @@ from handlers.delivery import _resolve_chat_display_name
 from handlers.monitoring import _is_unchanged_message_edit
 from handlers.settings import complete_chat_oauth, complete_whisper_oauth
 from handlers.follow_monitor import complete_follow_monitor_oauth
+from handlers.ai_clips import complete_ai_clips_oauth
 from handlers.stream_schedule import _complete_schedule_publish
 from i18n import (
     DEFAULT_LOCALE,
@@ -267,6 +268,9 @@ def import_followed_as_subscriptions(
             disable_link_preview=True,
             enabled=sub_enabled,
             from_twitch_sync=True,
+            suppress_repeat_minutes=prem.suppress_repeat_minutes_for_create(
+                twitch_username=login, is_demo=is_demo
+            ),
             is_demo=is_demo,
         )
         sub = db.get_subscription(sub_id, owner_id)
@@ -504,11 +508,12 @@ def _format_sub_line(
             and not sub.notify_on_end
             and not is_category_watch_sub(sub)
             and not is_drops_sub(sub)
-            and sub.suppress_repeat_minutes > 0
         ):
-            settings.append(
-                t("sub_list_repeat_mute", lang, minutes=sub.suppress_repeat_minutes)
-            )
+            repeat_m = prem.effective_suppress_repeat_minutes(sub)
+            if repeat_m > 0:
+                settings.append(
+                    t("sub_list_repeat_mute", lang, minutes=repeat_m)
+                )
     if sub.dest_type != "dm" and sub.delete_previous:
         settings.append(t("sub_list_delete_yes", lang))
         if sub.notify_on_category_change and sub.delete_other_alerts:
@@ -1811,6 +1816,9 @@ async def complete_twitch_import(
         return
     if purpose == "follow_monitor":
         await complete_follow_monitor_oauth(application, owner_id, error, token_info)
+        return
+    if purpose == "ai_clips":
+        await complete_ai_clips_oauth(application, owner_id, error, token_info)
         return
     if purpose == "chat":
         await complete_chat_oauth(application, owner_id, error, token_info)
@@ -3775,7 +3783,9 @@ async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     context.user_data.pop("edit_game_cooldown", None)
-    current = _repeat_current_label(sub.suppress_repeat_minutes, lang)
+    current = _repeat_current_label(
+        prem.effective_suppress_repeat_minutes(sub), lang
+    )
     sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     await query.edit_message_text("✓")
     await context.bot.send_message(
@@ -5158,7 +5168,11 @@ def _add_subscription_from_snapshot(
         multistream_channels=str(snapshot.get("multistream_channels") or "[]"),
         button_style=str(snapshot.get("button_style") or ""),
         delay_minutes=int(snapshot.get("delay_minutes") or 0),
-        suppress_repeat_minutes=int(snapshot.get("suppress_repeat_minutes") or 0),
+        suppress_repeat_minutes=prem.suppress_repeat_minutes_for_create(
+            twitch_username=str(snapshot.get("twitch_username") or ""),
+            is_demo=bool(snapshot.get("is_demo")),
+            requested=int(snapshot.get("suppress_repeat_minutes") or 0),
+        ),
         schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
         schedule_reminder_configured=bool(snapshot.get("schedule_reminder_configured")),
         ignore_keywords=str(snapshot.get("ignore_keywords") or ""),
