@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from .models import (
     AlertDeliveryLogEntry,
     AlertHistoryEntry,
+    AiClipsJob,
     BotStats,
     ChatAuth,
     DeletedSubscriptionCartItem,
@@ -1126,3 +1127,23 @@ class Database(Protocol):
     def has_pending_alert_job(self, job_name: str) -> bool: ...
 
     def list_pending_alert_jobs(self) -> list: ...
+
+    def create_ai_clips_job(
+        self, owner_id: int, *, vod_id: str, vod_title: str
+    ) -> int: ...
+
+    def update_ai_clips_job(
+        self,
+        job_id: int,
+        *,
+        status: str | None = None,
+        peaks_json: str | None = None,
+        clips_json: str | None = None,
+        error: str | None = None,
+    ) -> None: ...
+
+    def get_ai_clips_job(self, job_id: int) -> AiClipsJob | None: ...
+
+    def list_resumable_ai_clips_jobs(self) -> list: ...
+
+    def count_active_ai_clips_jobs(self, *, owner_id: int | None = None) -> int: ...

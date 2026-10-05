@@ -1495,6 +1495,28 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS ai_clips_jobs (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL,
+                    vod_id TEXT NOT NULL,
+                    vod_title TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    peaks_json TEXT NOT NULL DEFAULT '',
+                    clips_json TEXT NOT NULL DEFAULT '',
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ai_clips_jobs_status
+                ON ai_clips_jobs(status, id)
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS premium_gifts (
                     token TEXT PRIMARY KEY,
                     buyer_id BIGINT NOT NULL,
@@ -7748,6 +7770,136 @@ owner_id, twitch_username, twitch_user_id,
             )
         return out
 
+    def create_ai_clips_job(
+        self, owner_id: int, *, vod_id: str, vod_title: str
+    ) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO ai_clips_jobs (owner_id, vod_id, vod_title, status)
+                VALUES (%s, %s, %s, 'queued')
+                RETURNING id
+                """,
+                (int(owner_id), str(vod_id), str(vod_title or "")[:200]),
+            )
+            row = cur.fetchone()
+            return int(row["id"])
+
+    def update_ai_clips_job(
+        self,
+        job_id: int,
+        *,
+        status: str | None = None,
+        peaks_json: str | None = None,
+        clips_json: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        sets: list[str] = ["updated_at = NOW()"]
+        args: list[object] = []
+        if status is not None:
+            sets.append("status = %s")
+            args.append(status)
+        if peaks_json is not None:
+            sets.append("peaks_json = %s")
+            args.append(peaks_json)
+        if clips_json is not None:
+            sets.append("clips_json = %s")
+            args.append(clips_json)
+        if error is not None:
+            sets.append("error = %s")
+            args.append(error)
+        if len(sets) == 1:
+            return
+        args.append(int(job_id))
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                f"UPDATE ai_clips_jobs SET {', '.join(sets)} WHERE id = %s",
+                args,
+            )
+
+    def get_ai_clips_job(self, job_id: int):
+        from db.models import AiClipsJob
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, owner_id, vod_id, vod_title, status,
+                       peaks_json, clips_json, error, created_at, updated_at
+                FROM ai_clips_jobs WHERE id = %s
+                """,
+                (int(job_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return AiClipsJob(
+            id=int(row["id"]),
+            owner_id=int(row["owner_id"]),
+            vod_id=str(row["vod_id"] or ""),
+            vod_title=str(row["vod_title"] or ""),
+            status=str(row["status"] or ""),
+            peaks_json=str(row["peaks_json"] or ""),
+            clips_json=str(row["clips_json"] or ""),
+            error=str(row["error"] or ""),
+            created_at=str(row["created_at"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+        )
+
+    def list_resumable_ai_clips_jobs(self) -> list:
+        from db.models import AiClipsJob
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, owner_id, vod_id, vod_title, status,
+                       peaks_json, clips_json, error, created_at, updated_at
+                FROM ai_clips_jobs
+                WHERE status IN ('queued', 'analyzing', 'creating')
+                ORDER BY id
+                """
+            )
+            rows = cur.fetchall()
+        return [
+            AiClipsJob(
+                id=int(r["id"]),
+                owner_id=int(r["owner_id"]),
+                vod_id=str(r["vod_id"] or ""),
+                vod_title=str(r["vod_title"] or ""),
+                status=str(r["status"] or ""),
+                peaks_json=str(r["peaks_json"] or ""),
+                clips_json=str(r["clips_json"] or ""),
+                error=str(r["error"] or ""),
+                created_at=str(r["created_at"] or ""),
+                updated_at=str(r["updated_at"] or ""),
+            )
+            for r in rows
+        ]
+
+    def count_active_ai_clips_jobs(self, *, owner_id: int | None = None) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if owner_id is None:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS n FROM ai_clips_jobs
+                    WHERE status IN ('queued', 'analyzing', 'creating')
+                    """
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS n FROM ai_clips_jobs
+                    WHERE status IN ('queued', 'analyzing', 'creating')
+                      AND owner_id = %s
+                    """,
+                    (int(owner_id),),
+                )
+            row = cur.fetchone()
+        return int(row["n"] if row else 0)
 
     _IGDB_TABLES = frozenset({
         "igdb_games",

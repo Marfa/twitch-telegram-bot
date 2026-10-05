@@ -777,6 +777,20 @@ class PendingAlertJob:
 
 
 @dataclass
+class AiClipsJob:
+    id: int
+    owner_id: int
+    vod_id: str
+    vod_title: str
+    status: str
+    peaks_json: str = ""
+    clips_json: str = ""
+    error: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
 class TwitchSync:
     owner_id: int
     twitch_user_id: str

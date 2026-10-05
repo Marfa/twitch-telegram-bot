@@ -302,7 +302,7 @@
   "premium_channel_failed": "Impossibile verificare il canale Twitch. Riprova.",
   "new_sub_prompt": "Inserisci un canale Twitch: link, link mobile o username.",
   "alert_type_prompt": "Qui puoi configurare diversi avvisi sugli stream Twitch. Scegli quale tipo di avviso configurare:\n- quando uno stream inizia\n- quando cambia la categoria dello stream (nessun avviso all'inizio; ogni cambio fino a fine stream)\n- per uno stream in arrivo, se lo streamer ha un programma\n- quando uno stream termina\n- nuovi Twitch Drops per un gioco\n- avviso di gioco (nuovi stream nelle categorie selezionate)\n- avvisi di uscita (quando un gioco esce sulle piattaforme selezionate)\n- giveaway di giochi (giochi gratis per negozio e piattaforma)",
-  "new_sub_other_prompt": "Anche altre funzioni del bot sono disponibili qui. Scegli:\n- Follow/Unfollow per il tuo canale (monitoraggio e avvisi — Premium)\n- avvisi whisper Twitch\n- gestione del programma stream\n- consigli («Cosa guardare?»)\n- chat dello stream\n- info sul gioco (ricerca IGDB)",
+  "new_sub_other_prompt": "Anche altre funzioni del bot sono disponibili qui. Scegli:\n- Follow/Unfollow per il tuo canale (monitoraggio e avvisi — Premium)\n- Clip AI da VOD (beta + Premium)\n- avvisi whisper Twitch\n- gestione del programma stream\n- consigli («Cosa guardare?»)\n- chat dello stream\n- info sul gioco (ricerca IGDB)",
   "alert_type_live": "Inizio stream",
   "alert_type_category": "Cambio categoria ⭐",
   "alert_type_upcoming": "Stream in arrivo ⭐",
@@ -1264,7 +1264,7 @@
   "ai_clips_oauth_done": "✅ Twitch autorizzato per le clip AI. Apri Altro → Clip AI e scegli un VOD.",
   "ai_clips_list_failed": "Impossibile caricare l'elenco VOD. Riprova più tardi.",
   "ai_clips_no_vods": "Nessun VOD adatto sul tuo canale (serve una registrazione più lunga di 30 secondi).",
-  "ai_clips_pick_vod": "<b>Clip AI</b>\n\nScegli un VOD — il bot troverà fino a {max_clips} momenti rumorosi e creerà clip su Twitch. I file temporanei vengono eliminati al termine.",
+  "ai_clips_pick_vod": "<b>Clip AI</b>\n\nScegli un VOD (5 per pagina) — il bot troverà fino a {max_clips} momenti rumorosi e creerà clip su Twitch. I file temporanei vengono eliminati al termine.",
   "ai_clips_cancel": "Annulla",
   "ai_clips_canceled": "Clip AI annullate.",
   "ai_clips_busy": "Un VOD è già in elaborazione. Attendi la fine.",
@@ -1275,5 +1275,7 @@
   "ai_clips_create_failed": "Picchi trovati, ma Twitch non ha creato le clip. Verifica che le clip siano abilitate e che il VOD sia ancora disponibile.",
   "ai_clips_clip_title": "AI clip {n}: {title}",
   "ai_clips_done_title": "<b>Fatto — {count} clip:</b>",
-  "ai_clips_done_line": "{n}. a {offset}s — <a href=\"{url}\">{url}</a>"
+  "ai_clips_done_line": "{n}. a {offset}s — <a href=\"{url}\">{url}</a>",
+  "ai_clips_page_prev": "« Indietro",
+  "ai_clips_page_next": "Altre »"
 }

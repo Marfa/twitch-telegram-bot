@@ -2253,8 +2253,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         purge_stale_on_startup()
         await _restore_broadcast_jobs(application)
         from handlers.notifications import restore_pending_alert_jobs
+        from handlers.ai_clips import resume_ai_clips_jobs
 
         restore_pending_alert_jobs(application)
+        resume_ai_clips_jobs(application)
         loop = asyncio.get_running_loop()
         register_chat_webapp(db=db, twitch=twitch)
         register_health_probes(db_ping=db.ping)
@@ -2589,7 +2591,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(
-            on_ai_clips_callback, pattern=r"^ai_clips:(cancel|vod:.+)$"
+            on_ai_clips_callback, pattern=r"^ai_clips:(cancel|vod:.+|page:\d+)$"
         ),
         group=0,
     )

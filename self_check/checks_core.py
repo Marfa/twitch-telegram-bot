@@ -107,6 +107,21 @@ def check_core() -> None:
     assert len(peaks) >= 2
     assert "ai_clips" in FEATURE_IDS
 
+    # Durable AI clips job row survives restart (queued → resumable).
+    import tempfile as _tempfile
+
+    with _tempfile.TemporaryDirectory() as tmp:
+        from db import SqliteDatabase
+
+        jdb = SqliteDatabase(Path(tmp) / "ai_clips_jobs.db")
+        jid = jdb.create_ai_clips_job(7, vod_id="99", vod_title="t")
+        assert jid > 0
+        assert jdb.count_active_ai_clips_jobs() == 1
+        jdb.update_ai_clips_job(jid, status="analyzing", peaks_json="[]")
+        assert len(jdb.list_resumable_ai_clips_jobs()) == 1
+        jdb.update_ai_clips_job(jid, status="done")
+        assert jdb.count_active_ai_clips_jobs() == 0
+
     ops_py = Path(__file__).resolve().parents[1] / "scripts" / "posthog-ops-event.py"
     assert ops_py.is_file()
     op = subprocess.run(
@@ -1018,6 +1033,7 @@ def check_core() -> None:
     assert "личных сообщениях" in i18n_t("whisper_alerts_screen", "ru")
     assert i18n_t("btn_whisper_alerts", "ru")
     assert "Follow/Unfollow" in i18n_t("new_sub_other_prompt", "ru")
+    assert "AI-клип" in i18n_t("new_sub_other_prompt", "ru")
     assert "Premium" in i18n_t("new_sub_other_prompt", "ru")
     assert "информация об игре" in i18n_t("new_sub_other_prompt", "ru")
     fm_ru = i18n_t("follow_monitor_screen", "ru")
@@ -1025,6 +1041,7 @@ def check_core() -> None:
     assert "мониторинг" in fm_ru.lower() or "Monitor" in fm_ru
     assert "Premium" in i18n_t("follow_monitor_screen", "en")
     assert "Follow/Unfollow" in i18n_t("new_sub_other_prompt", "en")
+    assert "AI clip" in i18n_t("new_sub_other_prompt", "en")
     assert "game info" in i18n_t("new_sub_other_prompt", "en").lower()
 
     created = parse_posthog_issue_payload(

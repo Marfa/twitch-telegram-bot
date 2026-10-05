@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from html import escape as html_escape
 from typing import Any
@@ -19,13 +20,12 @@ from ai_clips import (
     MAX_CLIPS,
     MAX_VOD_ANALYZE_SEC,
     CreatedClip,
+    LoudPeak,
     ai_clips_ready,
     analyze_vod_rms,
     clip_watch_url,
-    end_job,
     find_loud_peaks,
     parse_helix_duration,
-    try_begin_job,
 )
 from bot_helpers import _user_lang, reply_chat_id, with_oauth_legal
 from db import Database
@@ -36,7 +36,12 @@ logger = logging.getLogger(__name__)
 
 BETA_FEATURE_ID = "ai-clips"
 FEATURE_ID = "ai_clips"
-_VOD_LIST_FIRST = 8
+VOD_PAGE_SIZE = 5
+_VOD_FETCH_FIRST = 50
+
+# In-process guard so the same job id is not started twice after resume.
+_RUNNING_JOB_IDS: set[int] = set()
+_RUNNING_LOCK = asyncio.Lock()
 
 
 def _oauth_ready() -> bool:
@@ -53,9 +58,16 @@ async def _entitled(bot: Any, db: Database, user_id: int) -> tuple[bool, bool]:
     return True, premium_ok
 
 
-def _vod_pick_keyboard(lang: str, videos: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+def _vod_pick_keyboard(
+    lang: str, videos: list[dict[str, Any]], *, page: int
+) -> InlineKeyboardMarkup:
+    total = len(videos)
+    pages = max(1, (total + VOD_PAGE_SIZE - 1) // VOD_PAGE_SIZE)
+    page = max(0, min(int(page), pages - 1))
+    start = page * VOD_PAGE_SIZE
+    chunk = videos[start : start + VOD_PAGE_SIZE]
     rows: list[list[InlineKeyboardButton]] = []
-    for v in videos:
+    for v in chunk:
         vid = str(v.get("id") or "").strip()
         if not vid:
             continue
@@ -65,6 +77,23 @@ def _vod_pick_keyboard(lang: str, videos: list[dict[str, Any]]) -> InlineKeyboar
         rows.append(
             [InlineKeyboardButton(label, callback_data=f"ai_clips:vod:{vid}")]
         )
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(
+            InlineKeyboardButton(
+                t("ai_clips_page_prev", lang),
+                callback_data=f"ai_clips:page:{page - 1}",
+            )
+        )
+    if page < pages - 1:
+        nav.append(
+            InlineKeyboardButton(
+                t("ai_clips_page_next", lang),
+                callback_data=f"ai_clips:page:{page + 1}",
+            )
+        )
+    if nav:
+        rows.append(nav)
     rows.append(
         [
             InlineKeyboardButton(
@@ -136,8 +165,25 @@ async def _ensure_clips_token(
         "access_token": access,
         "refresh_token": refresh,
         "twitch_user_id": sync.twitch_user_id,
-        "twitch_login": "",
     }
+
+
+def _archive_videos(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for v in videos:
+        vid = str(v.get("id") or "").strip()
+        if not vid.isdigit():
+            continue
+        if parse_helix_duration(str(v.get("duration") or "")) < CLIP_DURATION_SEC:
+            continue
+        out.append(
+            {
+                "id": vid,
+                "title": str(v.get("title") or vid),
+                "duration": str(v.get("duration") or ""),
+            }
+        )
+    return out
 
 
 async def start_ai_clips(
@@ -198,7 +244,7 @@ async def start_ai_clips(
         videos = await asyncio.to_thread(
             twitch.get_videos_by_user,
             token["twitch_user_id"],
-            first=_VOD_LIST_FIRST,
+            first=_VOD_FETCH_FIRST,
         )
     except Exception:
         logger.exception("ai_clips list VODs failed owner=%s", user_id)
@@ -209,12 +255,7 @@ async def start_ai_clips(
         )
         return
 
-    archives = [
-        v
-        for v in videos
-        if str(v.get("id") or "").isdigit()
-        and parse_helix_duration(str(v.get("duration") or "")) >= CLIP_DURATION_SEC
-    ]
+    archives = _archive_videos(videos)
     if not archives:
         await context.bot.send_message(
             chat,
@@ -223,15 +264,13 @@ async def start_ai_clips(
         )
         return
 
-    context.user_data["ai_clips_token"] = token
-    context.user_data["ai_clips_videos"] = {
-        str(v["id"]): v for v in archives if v.get("id")
-    }
+    context.user_data["ai_clips_videos"] = archives
+    context.user_data["ai_clips_page"] = 0
     await context.bot.send_message(
         chat,
         t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
         parse_mode=ParseMode.HTML,
-        reply_markup=_vod_pick_keyboard(lang, archives),
+        reply_markup=_vod_pick_keyboard(lang, archives, page=0),
     )
 
 
@@ -244,10 +283,11 @@ async def on_ai_clips_callback(
     data = (query.data or "").strip()
     await query.answer()
     chat = reply_chat_id(update)
+    db: Database = context.application.bot_data["db"]
 
     if data == "ai_clips:cancel":
-        context.user_data.pop("ai_clips_token", None)
         context.user_data.pop("ai_clips_videos", None)
+        context.user_data.pop("ai_clips_page", None)
         try:
             await query.edit_message_text(t("ai_clips_canceled", lang))
         except BadRequest:
@@ -257,16 +297,41 @@ async def on_ai_clips_callback(
         )
         return
 
+    if data.startswith("ai_clips:page:"):
+        videos: list[dict[str, Any]] = context.user_data.get("ai_clips_videos") or []
+        if not videos:
+            try:
+                await query.edit_message_text(t("ai_clips_failed", lang))
+            except BadRequest:
+                pass
+            return
+        try:
+            page = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            page = 0
+        context.user_data["ai_clips_page"] = page
+        try:
+            await query.edit_message_text(
+                t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
+                parse_mode=ParseMode.HTML,
+                reply_markup=_vod_pick_keyboard(lang, videos, page=page),
+            )
+        except BadRequest:
+            pass
+        return
+
     if not data.startswith("ai_clips:vod:"):
         return
 
     vod_id = data.split(":", 2)[-1].strip()
-    videos: dict[str, Any] = context.user_data.get("ai_clips_videos") or {}
-    token: dict[str, str] | None = context.user_data.get("ai_clips_token")
-    video = videos.get(vod_id)
-    db: Database = context.application.bot_data["db"]
+    videos_map = {
+        str(v["id"]): v
+        for v in (context.user_data.get("ai_clips_videos") or [])
+        if v.get("id")
+    }
+    video = videos_map.get(vod_id)
     beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
-    if not beta_ok or not premium_ok or not video or not token:
+    if not beta_ok or not premium_ok or not video:
         try:
             await query.edit_message_text(t("ai_clips_failed", lang))
         except BadRequest:
@@ -276,7 +341,7 @@ async def on_ai_clips_callback(
         )
         return
 
-    if not try_begin_job(user_id):
+    if db.count_active_ai_clips_jobs() > 0:
         try:
             await query.edit_message_text(t("ai_clips_busy", lang))
         except BadRequest:
@@ -287,6 +352,11 @@ async def on_ai_clips_callback(
         return
 
     title = html_escape(str(video.get("title") or vod_id)[:80])
+    job_id = db.create_ai_clips_job(
+        user_id,
+        vod_id=vod_id,
+        vod_title=str(video.get("title") or "Clip"),
+    )
     try:
         await query.edit_message_text(
             t("ai_clips_working", lang, title=title),
@@ -295,17 +365,13 @@ async def on_ai_clips_callback(
     except BadRequest:
         pass
 
-    context.user_data.pop("ai_clips_token", None)
     context.user_data.pop("ai_clips_videos", None)
+    context.user_data.pop("ai_clips_page", None)
     asyncio.create_task(
         _run_job(
             context.application,
-            user_id,
-            lang,
-            token=token,
-            vod_id=vod_id,
-            vod_title=str(video.get("title") or "Clip"),
-            vod_duration=parse_helix_duration(str(video.get("duration") or "")),
+            job_id,
+            lang=lang,
         )
     )
 
@@ -348,7 +414,7 @@ def _create_clips_blocking(
     broadcaster_id: str,
     vod_id: str,
     vod_title: str,
-    peaks: list,
+    peaks: list[LoudPeak],
     lang: str,
 ) -> list[CreatedClip]:
     out: list[CreatedClip] = []
@@ -391,62 +457,183 @@ def _create_clips_blocking(
     return out
 
 
+def _peaks_from_json(raw: str) -> list[LoudPeak]:
+    try:
+        data = json.loads(raw or "[]")
+    except Exception:
+        return []
+    out: list[LoudPeak] = []
+    if not isinstance(data, list):
+        return out
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            offset = int(item.get("vod_offset") or 0)
+            score = float(item.get("score") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if offset > 0:
+            out.append(LoudPeak(vod_offset=offset, score=score))
+    return out
+
+
+def _peaks_to_json(peaks: list[LoudPeak]) -> str:
+    return json.dumps(
+        [{"vod_offset": p.vod_offset, "score": p.score} for p in peaks],
+        ensure_ascii=False,
+    )
+
+
+def _clips_to_json(clips: list[CreatedClip]) -> str:
+    return json.dumps(
+        [
+            {
+                "clip_id": c.clip_id,
+                "edit_url": c.edit_url,
+                "vod_offset": c.vod_offset,
+                "url": c.url,
+            }
+            for c in clips
+        ],
+        ensure_ascii=False,
+    )
+
+
+def _clips_from_json(raw: str) -> list[CreatedClip]:
+    try:
+        data = json.loads(raw or "[]")
+    except Exception:
+        return []
+    out: list[CreatedClip] = []
+    if not isinstance(data, list):
+        return out
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("clip_id") or "").strip()
+        if not cid:
+            continue
+        out.append(
+            CreatedClip(
+                clip_id=cid,
+                edit_url=str(item.get("edit_url") or "").strip(),
+                vod_offset=int(item.get("vod_offset") or 0),
+                url=str(item.get("url") or clip_watch_url(cid)).strip(),
+            )
+        )
+    return out
+
+
 async def _run_job(
     application: Application,
-    user_id: int,
-    lang: str,
+    job_id: int,
     *,
-    token: dict[str, str],
-    vod_id: str,
-    vod_title: str,
-    vod_duration: int,
+    lang: str | None = None,
 ) -> None:
+    async with _RUNNING_LOCK:
+        if job_id in _RUNNING_JOB_IDS:
+            return
+        _RUNNING_JOB_IDS.add(job_id)
+    db: Database = application.bot_data["db"]
     twitch: TwitchClient = application.bot_data["twitch"]
     try:
-        max_sec = min(
-            MAX_VOD_ANALYZE_SEC,
-            vod_duration if vod_duration > 0 else MAX_VOD_ANALYZE_SEC,
-        )
-        try:
-            rms = await asyncio.to_thread(
-                analyze_vod_rms, vod_id, max_seconds=max_sec
-            )
-        except Exception:
-            logger.exception(
-                "ai_clips analyze failed owner=%s vod=%s", user_id, vod_id
-            )
-            await application.bot.send_message(
-                user_id, t("ai_clips_analyze_failed", lang)
-            )
+        job = db.get_ai_clips_job(job_id)
+        if not job or job.status in ("done", "failed"):
             return
-        peaks = find_loud_peaks(rms, n=MAX_CLIPS)
-        if not peaks:
+        user_id = job.owner_id
+        loc = lang or db.get_user_locale(user_id) or DEFAULT_LOCALE
+        token = await _ensure_clips_token(db, twitch, user_id)
+        if not token:
+            db.update_ai_clips_job(job_id, status="failed", error="oauth")
             await application.bot.send_message(
-                user_id, t("ai_clips_no_peaks", lang)
+                user_id, t("ai_clips_need_auth", loc)
             )
+            await _send_oauth_prompt(application.bot, twitch, user_id, loc)
             return
-        clips = await asyncio.to_thread(
-            _create_clips_blocking,
-            twitch,
-            access=token["access_token"],
-            broadcaster_id=token["twitch_user_id"],
-            vod_id=vod_id,
-            vod_title=vod_title,
-            peaks=peaks,
-            lang=lang,
-        )
+
+        peaks = _peaks_from_json(job.peaks_json)
+        if job.status in ("queued", "analyzing") or not peaks:
+            db.update_ai_clips_job(job_id, status="analyzing")
+            vod_duration = 0
+            try:
+                videos = await asyncio.to_thread(
+                    twitch.get_videos_by_user, token["twitch_user_id"], first=20
+                )
+                for v in videos:
+                    if str(v.get("id") or "") == job.vod_id:
+                        vod_duration = parse_helix_duration(
+                            str(v.get("duration") or "")
+                        )
+                        break
+            except Exception:
+                logger.warning(
+                    "ai_clips duration lookup failed job=%s", job_id, exc_info=True
+                )
+            max_sec = min(
+                MAX_VOD_ANALYZE_SEC,
+                vod_duration if vod_duration > 0 else MAX_VOD_ANALYZE_SEC,
+            )
+            try:
+                rms = await asyncio.to_thread(
+                    analyze_vod_rms, job.vod_id, max_seconds=max_sec
+                )
+            except Exception:
+                logger.exception(
+                    "ai_clips analyze failed owner=%s vod=%s", user_id, job.vod_id
+                )
+                db.update_ai_clips_job(
+                    job_id, status="failed", error="analyze"
+                )
+                await application.bot.send_message(
+                    user_id, t("ai_clips_analyze_failed", loc)
+                )
+                return
+            peaks = find_loud_peaks(rms, n=MAX_CLIPS)
+            if not peaks:
+                db.update_ai_clips_job(job_id, status="failed", error="no_peaks")
+                await application.bot.send_message(
+                    user_id, t("ai_clips_no_peaks", loc)
+                )
+                return
+            db.update_ai_clips_job(
+                job_id, status="creating", peaks_json=_peaks_to_json(peaks)
+            )
+
+        clips = _clips_from_json(job.clips_json)
         if not clips:
-            await application.bot.send_message(
-                user_id, t("ai_clips_create_failed", lang)
+            db.update_ai_clips_job(job_id, status="creating")
+            clips = await asyncio.to_thread(
+                _create_clips_blocking,
+                twitch,
+                access=token["access_token"],
+                broadcaster_id=token["twitch_user_id"],
+                vod_id=job.vod_id,
+                vod_title=job.vod_title,
+                peaks=peaks,
+                lang=loc,
             )
-            return
-        lines = [t("ai_clips_done_title", lang, count=len(clips))]
+            if not clips:
+                db.update_ai_clips_job(
+                    job_id, status="failed", error="create"
+                )
+                await application.bot.send_message(
+                    user_id, t("ai_clips_create_failed", loc)
+                )
+                return
+            db.update_ai_clips_job(
+                job_id, status="done", clips_json=_clips_to_json(clips)
+            )
+        else:
+            db.update_ai_clips_job(job_id, status="done")
+
+        lines = [t("ai_clips_done_title", loc, count=len(clips))]
         for i, c in enumerate(clips, start=1):
             link = html_escape(c.url or c.edit_url)
             lines.append(
                 t(
                     "ai_clips_done_line",
-                    lang,
+                    loc,
                     n=i,
                     offset=max(0, c.vod_offset - CLIP_DURATION_SEC),
                     url=link,
@@ -461,7 +648,19 @@ async def _run_job(
         analytics.capture(
             user_id,
             "ai_clips_created",
-            {"vod_id": vod_id, "clips": len(clips)},
+            {"vod_id": job.vod_id, "clips": len(clips), "job_id": job_id},
         )
     finally:
-        end_job(user_id)
+        async with _RUNNING_LOCK:
+            _RUNNING_JOB_IDS.discard(job_id)
+
+
+def resume_ai_clips_jobs(application: Application) -> None:
+    """Re-queue unfinished jobs after bot restart."""
+    db: Database = application.bot_data["db"]
+    jobs = db.list_resumable_ai_clips_jobs()
+    if not jobs:
+        return
+    logger.info("ai_clips resume %s job(s)", len(jobs))
+    for job in jobs:
+        asyncio.create_task(_run_job(application, job.id))
