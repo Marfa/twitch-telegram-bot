@@ -323,7 +323,7 @@ def oauth_legal_suffix(lang: str) -> str:
     base = (PUBLIC_BASE_URL or "").rstrip("/")
     if base:
         parts.append(t("oauth_privacy_link", loc, url=f"{base}/privacy?lang={loc}"))
-    return "\n\n" + "\n".join(parts)
+    return "\n\n" + "\n\n".join(parts)
 
 
 def with_oauth_legal(text: str, lang: str) -> str:

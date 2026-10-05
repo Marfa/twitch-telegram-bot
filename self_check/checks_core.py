@@ -241,6 +241,10 @@ def check_core() -> None:
     assert "encrypted" in i18n_t("oauth_privacy_notice", "en").lower()
     legal = oauth_legal_suffix("en")
     assert "not affiliated" in legal.lower()
+    assert "\n\n" in legal
+    notice = i18n_t("oauth_privacy_notice", "en")
+    affiliated = i18n_t("twitch_not_affiliated", "en")
+    assert f"{notice}\n\n{affiliated}" in legal
     assert with_oauth_legal("Auth now.", "en").startswith("Auth now.")
     assert b"Privacy" in _privacy_page("en") or b"privacy" in _privacy_page("en").lower()
     assert "Developer Services Agreement".encode() in _privacy_page("en")
