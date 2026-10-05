@@ -34,6 +34,7 @@ Authority: [Twitch Developer Services Agreement](https://legal.twitch.com/legal/
 - Attribute / link back to Twitch content when displaying Program Materials; show `twitch_not_affiliated` + OAuth privacy (`/privacy`, `with_oauth_legal`)
 - Do not sell or redistribute Helix metadata as a dataset
 - Do **not** use unofficial `gql.twitch.tv` — Chat Mini App has no About/panels Info UI (Helix has no panels API)
+- **Exception (AI clips only):** `ai_clips.py` may call `gql.twitch.tv` solely for VOD chat replay (`VideoCommentsByOffsetOrCursor`, time-offset scan) to pick clip moments. No other GQL. Code comments + self-check must name this gray area; upgrade path = official VOD chat API if Twitch ships one.
 
 ## IGDB
 

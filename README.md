@@ -1,6 +1,6 @@
 # Twitch → Telegram — уведомления о стримах, drops, сообщений в ЛС и работа с расписанием
 
-**Старт, смена категории, скоро стрим или конец эфира, доступен новый Drops или пришло сообщение в ЛС — бот напишет туда, куда вы скажете.** Настройка Расписания Twitch из Telegram.
+**Старт, смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
 
 > [!IMPORTANT]
 > **Готовый бот:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню
@@ -71,7 +71,7 @@ English: [README.en.md](README.en.md)
 | Корзина удалённых подписок на 30 дней | На бесплатном — 10 дней |
 | Безлимитный чат стримов в Mini App | На бесплатном — чтение + 20 сообщений/день |
 | Follow/Unfollow канала | Мониторинг и оповещения — Premium; списки Follow / новых Follow и Unfollow за 30 дней доступны без Premium |
-| AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (бета + Premium): до 5 громких моментов вашего VOD → клипы на Twitch (Helix Create Clip From VOD); временные файлы удаляются |
+| AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (бета + Premium / а-ля карт `ai_clips`): до 5 клипов — приоритет «clip»/«клип» в чате → всплеск сообщений → громкое аудио; Helix Create Clip From VOD; временные файлы удаляются |
 | Премиум-канал для стримеров | Бесплатные взаимодействия с ботом для зрителей, приоритет в «Оповещение по игре», welcome-рекомендация |
 
 Цены задаются env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.

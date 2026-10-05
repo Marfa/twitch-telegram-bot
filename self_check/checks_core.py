@@ -98,14 +98,74 @@ def check_core() -> None:
     analytics_mod.capture(1, "self_check_noop")
     analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
 
-    from ai_clips import find_loud_peaks, parse_helix_duration
+    from ai_clips import (
+        CLIP_PHRASE_RE,
+        ChatMessage,
+        ClipCandidate,
+        LoudPeak,
+        find_loud_peaks,
+        find_message_spikes,
+        find_phrase_peaks,
+        format_clip_timecode,
+        merge_clip_candidates,
+        parse_helix_duration,
+    )
 
     assert parse_helix_duration("1h2m3s") == 3723
     assert parse_helix_duration("45s") == 45
+    assert format_clip_timecode(0) == "0:00:00"
+    assert format_clip_timecode(65) == "0:01:05"
+    assert format_clip_timecode(3723) == "1:02:03"
     rms = [1.0] * 40 + [100.0] * 30 + [1.0] * 40 + [80.0] * 30 + [1.0] * 50
     peaks = find_loud_peaks(rms, n=5, duration=30, min_gap=60)
     assert len(peaks) >= 2
     assert "ai_clips" in FEATURE_IDS
+
+    # Phrase regex: mid-word, case-insensitive EN/RU.
+    assert CLIP_PHRASE_RE.search("makeAClipNow")
+    assert CLIP_PHRASE_RE.search("СУПЕРКлип!!!")
+    assert CLIP_PHRASE_RE.search("CLIP")
+    assert not CLIP_PHRASE_RE.search("hello world")
+
+    msgs = [
+        ChatMessage(40, "please clip this"),
+        ChatMessage(50, "клип ещё"),  # within 5 min of first → dropped
+        ChatMessage(400, "another CLIP"),
+    ]
+    phrases = find_phrase_peaks(msgs, duration=30, dedup_sec=300)
+    assert [p.vod_offset for p in phrases] == [40, 400]
+    assert all(p.source == "phrase" for p in phrases)
+
+    # Message spikes: quiet baseline then a burst bucket.
+    spike_msgs = [ChatMessage(float(t), "x") for t in range(0, 600, 30)]
+    spike_msgs += [ChatMessage(300.0 + i * 0.2, "spam") for i in range(20)]
+    spikes = find_message_spikes(spike_msgs, n=5, duration=30, min_gap=60)
+    assert spikes and spikes[0].source == "spike"
+    assert spikes[0].vod_offset >= 30
+
+    # Merge priority: phrase before spike before audio.
+    merged = merge_clip_candidates(
+        [ClipCandidate(90, 1.0, "phrase")],
+        [ClipCandidate(200, 10.0, "spike")],
+        [LoudPeak(vod_offset=300, score=99.0)],
+        n=5,
+        duration=30,
+        min_gap=60,
+    )
+    assert [c.source for c in merged] == ["phrase", "spike", "audio"]
+    assert [c.vod_offset for c in merged] == [90, 200, 300]
+    # Gray area: VOD chat via unofficial GQL (api-license-compliance exception).
+    assert "gql.twitch.tv" in __import__("ai_clips")._GQL_URL
+    # Phrase wins over nearby audio/spike when gap conflicts.
+    conflict = merge_clip_candidates(
+        [ClipCandidate(100, 1.0, "phrase")],
+        [ClipCandidate(110, 50.0, "spike")],
+        [LoudPeak(vod_offset=120, score=99.0)],
+        n=5,
+        duration=30,
+        min_gap=60,
+    )
+    assert len(conflict) == 1 and conflict[0].source == "phrase"
 
     # Durable AI clips job row survives restart (queued → resumable).
     import tempfile as _tempfile

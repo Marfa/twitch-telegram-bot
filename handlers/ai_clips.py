@@ -1,4 +1,4 @@
-"""AI clips: loud VOD peaks → Helix Create Clip From VOD (Premium)."""
+"""AI clips: chat cues + loud VOD peaks → Helix Create Clip From VOD (Premium)."""
 from __future__ import annotations
 
 import asyncio
@@ -19,12 +19,19 @@ from ai_clips import (
     CLIP_DURATION_SEC,
     MAX_CLIPS,
     MAX_VOD_ANALYZE_SEC,
+    ClipCandidate,
+    ClipSource,
     CreatedClip,
     LoudPeak,
     ai_clips_ready,
     analyze_vod_rms,
     clip_watch_url,
+    fetch_vod_chat_messages,
     find_loud_peaks,
+    find_message_spikes,
+    find_phrase_peaks,
+    format_clip_timecode,
+    merge_clip_candidates,
     parse_helix_duration,
 )
 from bot_helpers import _user_lang, reply_chat_id, with_oauth_legal
@@ -414,7 +421,7 @@ def _create_clips_blocking(
     broadcaster_id: str,
     vod_id: str,
     vod_title: str,
-    peaks: list[LoudPeak],
+    peaks: list[ClipCandidate] | list[LoudPeak],
     lang: str,
 ) -> list[CreatedClip]:
     out: list[CreatedClip] = []
@@ -457,12 +464,12 @@ def _create_clips_blocking(
     return out
 
 
-def _peaks_from_json(raw: str) -> list[LoudPeak]:
+def _peaks_from_json(raw: str) -> list[ClipCandidate]:
     try:
         data = json.loads(raw or "[]")
     except Exception:
         return []
-    out: list[LoudPeak] = []
+    out: list[ClipCandidate] = []
     if not isinstance(data, list):
         return out
     for item in data:
@@ -473,16 +480,37 @@ def _peaks_from_json(raw: str) -> list[LoudPeak]:
             score = float(item.get("score") or 0.0)
         except (TypeError, ValueError):
             continue
+        src_raw = str(item.get("source") or "audio").strip().lower()
+        source: ClipSource = (
+            src_raw if src_raw in ("phrase", "spike", "audio") else "audio"
+        )  # type: ignore[assignment]
         if offset > 0:
-            out.append(LoudPeak(vod_offset=offset, score=score))
+            out.append(
+                ClipCandidate(vod_offset=offset, score=score, source=source)
+            )
     return out
 
 
-def _peaks_to_json(peaks: list[LoudPeak]) -> str:
-    return json.dumps(
-        [{"vod_offset": p.vod_offset, "score": p.score} for p in peaks],
-        ensure_ascii=False,
-    )
+def _peaks_to_json(peaks: list[ClipCandidate] | list[LoudPeak]) -> str:
+    rows: list[dict[str, Any]] = []
+    for p in peaks:
+        if isinstance(p, ClipCandidate):
+            rows.append(
+                {
+                    "vod_offset": p.vod_offset,
+                    "score": p.score,
+                    "source": p.source,
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "vod_offset": p.vod_offset,
+                    "score": p.score,
+                    "source": "audio",
+                }
+            )
+    return json.dumps(rows, ensure_ascii=False)
 
 
 def _clips_to_json(clips: list[CreatedClip]) -> str:
@@ -574,22 +602,34 @@ async def _run_job(
                 MAX_VOD_ANALYZE_SEC,
                 vod_duration if vod_duration > 0 else MAX_VOD_ANALYZE_SEC,
             )
-            try:
-                rms = await asyncio.to_thread(
-                    analyze_vod_rms, job.vod_id, max_seconds=max_sec
-                )
-            except Exception:
-                logger.exception(
-                    "ai_clips analyze failed owner=%s vod=%s", user_id, job.vod_id
-                )
-                db.update_ai_clips_job(
-                    job_id, status="failed", error="analyze"
-                )
-                await application.bot.send_message(
-                    user_id, t("ai_clips_analyze_failed", loc)
-                )
-                return
-            peaks = find_loud_peaks(rms, n=MAX_CLIPS)
+            chat_msgs = await asyncio.to_thread(
+                fetch_vod_chat_messages, job.vod_id, max_seconds=max_sec
+            )
+            phrases = find_phrase_peaks(chat_msgs)
+            spikes = find_message_spikes(chat_msgs, n=MAX_CLIPS)
+            audio_peaks: list[LoudPeak] = []
+            need_audio = len(phrases) + len(spikes) < MAX_CLIPS
+            if need_audio:
+                try:
+                    rms = await asyncio.to_thread(
+                        analyze_vod_rms, job.vod_id, max_seconds=max_sec
+                    )
+                    audio_peaks = find_loud_peaks(rms, n=MAX_CLIPS)
+                except Exception:
+                    logger.exception(
+                        "ai_clips analyze failed owner=%s vod=%s",
+                        user_id,
+                        job.vod_id,
+                    )
+                    if not phrases and not spikes:
+                        db.update_ai_clips_job(
+                            job_id, status="failed", error="analyze"
+                        )
+                        await application.bot.send_message(
+                            user_id, t("ai_clips_analyze_failed", loc)
+                        )
+                        return
+            peaks = merge_clip_candidates(phrases, spikes, audio_peaks, n=MAX_CLIPS)
             if not peaks:
                 db.update_ai_clips_job(job_id, status="failed", error="no_peaks")
                 await application.bot.send_message(
@@ -635,7 +675,9 @@ async def _run_job(
                     "ai_clips_done_line",
                     loc,
                     n=i,
-                    offset=max(0, c.vod_offset - CLIP_DURATION_SEC),
+                    offset=format_clip_timecode(
+                        max(0, c.vod_offset - CLIP_DURATION_SEC)
+                    ),
                     url=link,
                 )
             )

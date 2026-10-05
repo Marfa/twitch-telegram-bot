@@ -106,7 +106,7 @@ Deep link `?start=share_{token}` (**Поделиться оповещением*
 
 Inline на экране Follow/Unfollow: `⬜️/✅ Включить мониторинг`; при включённом мониторинге ещё `⬜️/✅ Оповещать о новых Follow` и `⬜️/✅ Оповещать о новых Unfollow`; списки Follow / новых Follow (30 дней + дата подписки) / новых Unfollow (30 дней + дата) / Unfollow, поиск. Первое включение — OAuth Twitch (`moderator:read:followers`). Синхронизация раз в сутки; первая — baseline без «новых» событий. При активных оповещениях — одно сообщение с изменениями после sync. Списки/поиск доступны без Premium; мониторинг и оповещения — только Premium.
 
-**AI-клипы** (бета + Premium `ai_clips`): выбор своего VOD → анализ громкости audio-only (streamlink+ffmpeg, без хранения файлов) → до 5 клипов через Helix `POST /helix/videos/clips` (`channel:manage:clips`). OAuth при необходимости.
+**AI-клипы** (бета + Premium `ai_clips` / а-ля карт): выбор своего VOD → приоритет моментов: (1) «clip»/«клип» в чате VOD (GQL `VideoCommentsByOffsetOrCursor`, исключение в api-license-compliance), (2) всплеск сообщений, (3) громкость audio-only (streamlink+ffmpeg, без хранения файлов) → до 5 клипов через Helix `POST /helix/videos/clips` (`channel:manage:clips`). OAuth при необходимости.
 
 Inline на экране ЛС: `⬜️/✅ Включить`. Первое включение — OAuth Twitch (`user:read:whispers`). Входящее whisper: отправитель, текст, ссылка на переписку.
 
