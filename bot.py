@@ -3883,15 +3883,27 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         name=JOB_STREAM_PREVIEWS,
         job_kwargs=_stream_job_kwargs(JOB_STREAM_PREVIEWS, misfire_grace=180),
     )
+    # Same grace/coalesce as stream jobs — default 1s grace misfires when
+    # check_streams (or another long tick) blocks the loop for a few seconds.
     app.job_queue.run_repeating(
-        check_release_watch_alerts, interval=24 * 3600, first=120
+        check_release_watch_alerts,
+        interval=24 * 3600,
+        first=120,
+        name="check_release_watch_alerts",
+        job_kwargs=_stream_job_kwargs(
+            "check_release_watch_alerts", misfire_grace=24 * 3600
+        ),
     )
     app.job_queue.run_repeating(
-        announce_new_beta_features, interval=3600, first=90
+        announce_new_beta_features,
+        interval=3600,
+        first=90,
+        name="announce_new_beta_features",
+        job_kwargs=_stream_job_kwargs(
+            "announce_new_beta_features", misfire_grace=3600
+        ),
     )
     sync_optional_jobs(app.job_queue, db)
-    # Same grace/coalesce as stream jobs — default 1s grace misfires when
-    # check_streams' premium phase blocks the loop for tens of seconds.
     app.job_queue.run_repeating(
         process_scheduled_broadcasts,
         interval=60,
@@ -3944,33 +3956,77 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             "refresh_broadcast_feedback_keyboards", misfire_grace=3600
         ),
     )
-    app.job_queue.run_repeating(check_twitch_status, interval=120, first=40)
-    app.job_queue.run_repeating(check_posthog_status, interval=120, first=50)
-    app.job_queue.run_repeating(check_cursor_status, interval=120, first=55)
-    app.job_queue.run_repeating(poll_posthog_inbox_reports, interval=300, first=60)
+    app.job_queue.run_repeating(
+        check_twitch_status,
+        interval=120,
+        first=40,
+        name="check_twitch_status",
+        job_kwargs=_stream_job_kwargs("check_twitch_status", misfire_grace=120),
+    )
+    app.job_queue.run_repeating(
+        check_posthog_status,
+        interval=120,
+        first=50,
+        name="check_posthog_status",
+        job_kwargs=_stream_job_kwargs("check_posthog_status", misfire_grace=120),
+    )
+    app.job_queue.run_repeating(
+        check_cursor_status,
+        interval=120,
+        first=55,
+        name="check_cursor_status",
+        job_kwargs=_stream_job_kwargs("check_cursor_status", misfire_grace=120),
+    )
+    app.job_queue.run_repeating(
+        poll_posthog_inbox_reports,
+        interval=300,
+        first=60,
+        name="poll_posthog_inbox_reports",
+        job_kwargs=_stream_job_kwargs("poll_posthog_inbox_reports", misfire_grace=300),
+    )
     app.job_queue.run_repeating(
         weekly_new_users_report,
         interval=7 * 24 * 3600,
         first=_seconds_until_next_weekly_report(),
+        name="weekly_new_users_report",
+        job_kwargs=_stream_job_kwargs(
+            "weekly_new_users_report", misfire_grace=7 * 24 * 3600
+        ),
     )
     app.job_queue.run_monthly(
         monthly_new_users_report,
         when=time(10, 0, tzinfo=SCHEDULE_TZ),
         day=1,
+        name="monthly_new_users_report",
+        job_kwargs=_stream_job_kwargs(
+            "monthly_new_users_report", misfire_grace=24 * 3600
+        ),
     )
     app.job_queue.run_monthly(
         monthly_lucky_premium,
         when=time(10, 15, tzinfo=SCHEDULE_TZ),
         day=1,
+        name="monthly_lucky_premium",
+        job_kwargs=_stream_job_kwargs(
+            "monthly_lucky_premium", misfire_grace=24 * 3600
+        ),
     )
     app.job_queue.run_repeating(
         daily_bot_stats_snapshot,
         interval=24 * 3600,
         first=_seconds_until_next_daily_stats(),
+        name="daily_bot_stats_snapshot",
+        job_kwargs=_stream_job_kwargs(
+            "daily_bot_stats_snapshot", misfire_grace=24 * 3600
+        ),
     )
     app.job_queue.run_repeating(
         daily_premium_purchases_report,
         interval=24 * 3600,
         first=_seconds_until_next_premium_digest(),
+        name="daily_premium_purchases_report",
+        job_kwargs=_stream_job_kwargs(
+            "daily_premium_purchases_report", misfire_grace=24 * 3600
+        ),
     )
     return app
