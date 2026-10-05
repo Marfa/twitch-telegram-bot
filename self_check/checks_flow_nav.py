@@ -3237,10 +3237,11 @@ async def _scenario_ai_clips(db) -> None:
     twitch.token_has_scope.return_value = True
     twitch.get_videos_by_user.return_value = [
         {
-            "id": "123456789",
-            "title": "Test VOD",
+            "id": str(1000 + i),
+            "title": f"Test VOD {i}",
             "duration": "1h0m0s",
         }
+        for i in range(1, 12)
     ]
     db.upsert_twitch_sync(
         _FREE_UID,
@@ -3269,7 +3270,21 @@ async def _scenario_ai_clips(db) -> None:
     ]
     assert "ai_clips:cancel" in callbacks
     assert any((c or "").startswith("ai_clips:vod:") for c in callbacks)
+    assert "ai_clips:page:1" in callbacks
+    assert sum(1 for c in callbacks if (c or "").startswith("ai_clips:vod:")) == 5
     cap.assert_turn("other_ai_clips_pick_vod")
+
+    update, query = _cb_update(_FREE_UID, "ai_clips:page:1", cap)
+    await on_ai_clips_callback(update, ctx)
+    callbacks_p1 = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ai_clips:page:0" in callbacks_p1
+    cap.assert_turn("other_ai_clips_page")
 
     update, query = _cb_update(_FREE_UID, "ai_clips:cancel", cap)
     await on_ai_clips_callback(update, ctx)

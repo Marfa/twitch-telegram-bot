@@ -16,7 +16,6 @@ import signal
 import struct
 import subprocess
 import tempfile
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,10 +30,6 @@ _BYTES_PER_SEC = _SAMPLE_RATE * 2  # s16le mono
 _DURATION_RE = re.compile(
     r"^(?:(?P<h>\d+)h)?(?:(?P<m>\d+)m)?(?:(?P<s>\d+)s)?$"
 )
-
-# One analysis job at a time on the host (bot mem_limit 768m).
-_JOB_LOCK = threading.Lock()
-_OWNERS_RUNNING: set[int] = set()
 
 
 @dataclass(frozen=True)
@@ -93,19 +88,6 @@ def find_loud_peaks(
         if len(picked) >= n:
             break
     return sorted(picked, key=lambda p: p.vod_offset)
-
-
-def try_begin_job(owner_id: int) -> bool:
-    with _JOB_LOCK:
-        if owner_id in _OWNERS_RUNNING or _OWNERS_RUNNING:
-            return False
-        _OWNERS_RUNNING.add(owner_id)
-        return True
-
-
-def end_job(owner_id: int) -> None:
-    with _JOB_LOCK:
-        _OWNERS_RUNNING.discard(owner_id)
 
 
 def ai_clips_ready() -> bool:
