@@ -1,7 +1,9 @@
 """Post-VOD peaks → Helix Create Clip From VOD.
 
-Sources (priority): chat phrase clip/клип → spoken phrase (Groq Whisper on
-short windows) → message-volume spikes → audio RMS.
+Sources (priority): chat phrase clip/клип → Groq emotion (ASR+score>3) →
+Groq gaming chat context → remaining audio RMS → remaining chat spikes.
+Top-10 audio peaks get Whisper + emotion LLM; chat spikes get context LLM.
+If Groq is down/rate-limited, those tiers are skipped and older peaks still fill.
 Downloads no durable media: streamlink audio_only is piped through ffmpeg to
 PCM, RMS is scored in memory, then temp dirs (if any) are removed in finally.
 ponytail: streamlink/Twitch HLS is the same unofficial path as stream_capture;
@@ -39,18 +41,24 @@ MIN_GAP_SEC = 60
 CHAT_PHRASE_DEDUP_SEC = 300
 MSG_SPIKE_BUCKET_SEC = 30
 MAX_VOD_ANALYZE_SEC = 4 * 3600  # hard cap for VPS RAM/time
-# Groq free tier: short windows around existing peaks only (not full VOD).
+# Groq free tier: top audio/spike seeds only (not full VOD).
+AUDIO_SEED_N = 10
+SPIKE_SEED_N = 10
 ASR_WINDOW_SEC = 20
-ASR_MAX_WINDOWS = 6
-ASR_MIN_GAP_SEC = 45
+EMOTION_MIN_SCORE = 3  # candidate when score > this (4–5)
+CHAT_CONTEXT_WINDOW_SEC = 45
 _GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-_GROQ_MODEL = "whisper-large-v3-turbo"
+_GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+_GROQ_WHISPER_MODEL = "whisper-large-v3-turbo"
+# qwen returns plain content; gpt-oss often parks the answer in reasoning.
+_GROQ_CHAT_MODEL = "qwen/qwen3.8-27b"
 _SAMPLE_RATE = 8000
 _BYTES_PER_SEC = _SAMPLE_RATE * 2  # s16le mono
 _DURATION_RE = re.compile(
     r"^(?:(?P<h>\d+)h)?(?:(?P<m>\d+)m)?(?:(?P<s>\d+)s)?$"
 )
 CLIP_PHRASE_RE = re.compile(r"(?i)clip|клип")
+_EMOTION_SCORE_RE = re.compile(r"[1-5]")
 
 # Twitch web Client-ID required for persisted VideoComments query (partner Helix
 # Client-ID does not serve this GQL). Read-only; not used for Helix auth.
@@ -64,7 +72,33 @@ _GQL_REQUEST_DELAY = 0.05
 _GQL_WORKERS = 4
 CHAT_SCAN_MAX_SEC = 8 * 60  # wall-clock cap so long VODs do not look hung
 
-ClipSource = Literal["phrase", "asr", "spike", "audio"]
+# Emotion: ASR text → 1–5; clip candidate only when score > EMOTION_MIN_SCORE.
+GROQ_EMOTION_PROMPT = """You score emotional intensity of Twitch stream speech for highlight clips.
+Integer 1-5 only:
+1 = flat, calm, boring, silence filler
+2 = mild interest, soft reaction
+3 = moderate energy, ordinary stream talk
+4 = strong excitement, laughter, shock, hype, tilt, celebration
+5 = peak highlight emotion worth clipping
+
+Reply with ONLY one digit 1-5.
+
+Text:
+{text}"""
+
+# Chat spike: gameplay beat vs social chatter.
+GROQ_CONTEXT_PROMPT = """Classify a Twitch chat burst. Reply with ONLY one word:
+game — reactions to gameplay (fight, clutch, boss, win/lose, skill play, in-game event)
+chat — social talk, greetings, memes, emotes-only, off-topic, no clear game beat
+
+Chat:
+{text}"""
+
+ClipSource = Literal["phrase", "emotion", "game", "audio", "spike"]
+
+
+class GroqUnavailable(RuntimeError):
+    """Rate limit / outage — caller should skip remaining Groq work."""
 
 
 @dataclass(frozen=True)
@@ -208,45 +242,147 @@ def find_message_spikes(
     return sorted(picked, key=lambda p: p.vod_offset)
 
 
+def clip_start_offset(
+    vod_offset_end: int, *, duration: int = CLIP_DURATION_SEC
+) -> int:
+    """Helix Create Clip uses end offset; display/overlap use start."""
+    return max(0, int(vod_offset_end) - max(0, int(duration)))
+
+
+def start_is_occupied(
+    start: int,
+    occupied_starts: list[int] | tuple[int, ...] | set[int],
+    *,
+    min_gap: int = MIN_GAP_SEC,
+) -> bool:
+    """True when ``start`` is within ``min_gap`` of an existing clip start."""
+    if min_gap <= 0:
+        return int(start) in {int(o) for o in occupied_starts}
+    s = int(start)
+    return any(abs(s - int(o)) < min_gap for o in occupied_starts)
+
+
+def helix_vod_clip_starts(rows: list[dict[str, Any]]) -> list[int]:
+    """Helix Get Clips ``vod_offset`` values (clip start on the VOD)."""
+    out: list[int] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("vod_offset")
+        if raw is None or raw == "":
+            continue
+        try:
+            out.append(max(0, int(raw)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def filter_unoccupied(
+    items: list[ClipCandidate] | list[LoudPeak],
+    occupied_starts: list[int] | tuple[int, ...] | set[int],
+    *,
+    duration: int = CLIP_DURATION_SEC,
+    min_gap: int = MIN_GAP_SEC,
+) -> list:
+    """Drop peaks whose clip window overlaps an existing VOD clip."""
+    if not occupied_starts:
+        return list(items)
+    kept: list = []
+    for item in items:
+        start = clip_start_offset(int(item.vod_offset), duration=duration)
+        if start_is_occupied(start, occupied_starts, min_gap=min_gap):
+            continue
+        kept.append(item)
+    return kept
+
+
 def merge_clip_candidates(
     phrases: list[ClipCandidate],
-    spikes: list[ClipCandidate],
+    emotion: list[ClipCandidate],
+    game: list[ClipCandidate],
     audio: list[LoudPeak] | list[ClipCandidate],
+    spikes: list[ClipCandidate],
     *,
-    asr: list[ClipCandidate] | None = None,
     n: int = MAX_CLIPS,
     duration: int = CLIP_DURATION_SEC,
     min_gap: int = MIN_GAP_SEC,
+    occupied_starts: list[int] | tuple[int, ...] | set[int] | None = None,
 ) -> list[ClipCandidate]:
-    """Priority: phrase → asr → spike → audio; within tier by time; gap on start."""
+    """Priority: phrase → emotion → game → audio → spike; gap on clip start.
+
+    Skips candidates that overlap ``occupied_starts`` (existing Helix clips on
+    the VOD) and keeps walking tiers for the next free slot.
+    """
     if n <= 0:
         return []
+    occupied = [int(o) for o in (occupied_starts or ())]
     audio_cands: list[ClipCandidate] = []
     for a in audio:
         if isinstance(a, ClipCandidate):
-            audio_cands.append(a)
+            audio_cands.append(
+                a
+                if a.source == "audio"
+                else ClipCandidate(a.vod_offset, a.score, "audio")
+            )
         else:
             audio_cands.append(
                 ClipCandidate(vod_offset=a.vod_offset, score=a.score, source="audio")
             )
     tiers = (
         sorted(phrases, key=lambda c: c.vod_offset),
-        sorted(asr or [], key=lambda c: c.vod_offset),
-        sorted(spikes, key=lambda c: c.vod_offset),
-        sorted(audio_cands, key=lambda c: c.vod_offset),
+        sorted(emotion, key=lambda c: (-c.score, c.vod_offset)),
+        sorted(game, key=lambda c: c.vod_offset),
+        sorted(audio_cands, key=lambda c: (-c.score, c.vod_offset)),
+        sorted(spikes, key=lambda c: (-c.score, c.vod_offset)),
     )
     picked: list[ClipCandidate] = []
     for tier in tiers:
         for cand in tier:
             if len(picked) >= n:
                 break
-            start = cand.vod_offset - duration
-            if any(abs(start - (p.vod_offset - duration)) < min_gap for p in picked):
+            start = clip_start_offset(cand.vod_offset, duration=duration)
+            if start_is_occupied(start, occupied, min_gap=min_gap):
+                continue
+            if any(
+                abs(start - clip_start_offset(p.vod_offset, duration=duration))
+                < min_gap
+                for p in picked
+            ):
                 continue
             picked.append(cand)
         if len(picked) >= n:
             break
     return sorted(picked, key=lambda c: c.vod_offset)
+
+
+def parse_emotion_score(raw: str) -> int | None:
+    """First digit 1–5 in model reply; None if missing."""
+    m = _EMOTION_SCORE_RE.search((raw or "").strip())
+    return int(m.group(0)) if m else None
+
+
+def parse_context_label(raw: str) -> Literal["game", "chat"] | None:
+    """Normalize Groq context reply to game|chat."""
+    token = (raw or "").strip().lower().split()
+    if not token:
+        return None
+    word = token[0].strip(".,:;!?\"'")
+    if word in ("game", "gaming", "gameplay"):
+        return "game"
+    if word in ("chat", "talk", "social", "chatter"):
+        return "chat"
+    return None
+
+
+def normalize_clip_source(raw: str | None) -> ClipSource:
+    """Map stored/legacy source labels onto ClipSource."""
+    src = str(raw or "audio").strip().lower()
+    if src == "asr":
+        return "emotion"
+    if src in ("phrase", "emotion", "game", "audio", "spike"):
+        return src  # type: ignore[return-value]
+    return "audio"
 
 
 def fetch_vod_chat_messages(
@@ -429,78 +565,154 @@ def groq_api_key() -> str:
 
 
 def groq_asr_ready() -> bool:
-    """Groq Whisper + local streamlink/ffmpeg for short window extract."""
+    """Groq API key + local streamlink/ffmpeg for short window extract."""
     return bool(groq_api_key() and ai_clips_ready())
 
 
-def find_asr_phrase_peaks(
+def score_audio_peaks_with_groq(
     vod_id: str,
-    seeds: list[ClipCandidate] | list[LoudPeak],
+    peaks: list[LoudPeak],
     *,
-    max_windows: int = ASR_MAX_WINDOWS,
     window_sec: int = ASR_WINDOW_SEC,
     clip_duration: int = CLIP_DURATION_SEC,
-    min_gap: int = ASR_MIN_GAP_SEC,
-) -> list[ClipCandidate]:
-    """Transcribe short windows around ``seeds``; keep those with spoken clip/клип.
+) -> tuple[list[ClipCandidate], list[LoudPeak]]:
+    """ASR + emotion score top audio peaks. Returns (emotion, remaining audio).
 
-    No-op when Groq is not configured. Temp audio is deleted after each window.
+    Stops Groq work on rate-limit/outage; unscored peaks stay in remaining.
     """
-    if not groq_asr_ready() or max_windows <= 0 or window_sec <= 0:
-        return []
+    if not peaks:
+        return [], []
+    if not groq_asr_ready():
+        return [], list(peaks)
     vid = str(vod_id or "").strip()
     if not vid.isdigit():
-        return []
-    normalized: list[ClipCandidate] = []
-    for s in seeds:
-        if isinstance(s, ClipCandidate):
-            normalized.append(s)
-        else:
-            normalized.append(
-                ClipCandidate(vod_offset=s.vod_offset, score=s.score, source="audio")
-            )
-    # Prefer spike/audio seeds (chat phrase already covered); fill with phrases.
-    preferred = [c for c in normalized if c.source in ("spike", "audio")]
-    fillers = [c for c in normalized if c.source == "phrase"]
-    ordered = sorted(preferred, key=lambda c: c.vod_offset) + sorted(
-        fillers, key=lambda c: c.vod_offset
-    )
-    windows: list[int] = []
-    for cand in ordered:
-        if len(windows) >= max_windows:
-            break
-        # Helix offset is clip end; center the ASR window on the clip body.
-        center = max(0, int(cand.vod_offset) - clip_duration // 2)
-        start = max(0, center - window_sec // 2)
-        if any(abs(start - w) < min_gap for w in windows):
-            continue
-        windows.append(start)
+        return [], list(peaks)
 
-    out: list[ClipCandidate] = []
-    for start in windows:
+    emotion: list[ClipCandidate] = []
+    remaining: list[LoudPeak] = []
+    ordered = sorted(peaks, key=lambda p: -p.score)
+    for i, peak in enumerate(ordered):
+        center = max(0, int(peak.vod_offset) - clip_duration // 2)
+        start = max(0, center - window_sec // 2)
         try:
             text = _transcribe_vod_window(vid, start, window_sec)
+            if not text.strip():
+                remaining.append(peak)
+                continue
+            score = _groq_emotion_score(text)
+            if score is not None and score > EMOTION_MIN_SCORE:
+                emotion.append(
+                    ClipCandidate(
+                        vod_offset=peak.vod_offset,
+                        score=float(score),
+                        source="emotion",
+                    )
+                )
+            else:
+                remaining.append(peak)
+        except GroqUnavailable:
+            logger.warning(
+                "ai_clips groq unavailable during emotion vod=%s; keep %s audio",
+                vid,
+                len(ordered) - i,
+            )
+            remaining.extend(ordered[i:])
+            break
         except Exception:
             logger.warning(
-                "ai_clips groq window failed vod=%s start=%s",
+                "ai_clips groq emotion failed vod=%s offset=%s",
                 vid,
-                start,
+                peak.vod_offset,
                 exc_info=True,
             )
-            continue
-        if not text or not CLIP_PHRASE_RE.search(text):
-            continue
-        end = max(clip_duration, start + window_sec)
-        out.append(
-            ClipCandidate(vod_offset=end, score=float(end), source="asr")
-        )
+            remaining.append(peak)
     logger.info(
-        "ai_clips groq asr vod=%s windows=%s hits=%s",
+        "ai_clips groq emotion vod=%s scored=%s hits=%s remain=%s",
         vid,
-        len(windows),
-        len(out),
+        len(ordered),
+        len(emotion),
+        len(remaining),
     )
-    return out
+    return emotion, remaining
+
+
+def classify_spikes_with_groq(
+    messages: list[ChatMessage],
+    spikes: list[ClipCandidate],
+    *,
+    window_sec: int = CHAT_CONTEXT_WINDOW_SEC,
+) -> tuple[list[ClipCandidate], list[ClipCandidate]]:
+    """Label chat spikes game|chat. Returns (game candidates, remaining spikes)."""
+    if not spikes:
+        return [], []
+    if not groq_api_key():
+        return [], list(spikes)
+
+    game: list[ClipCandidate] = []
+    remaining: list[ClipCandidate] = []
+    ordered = sorted(spikes, key=lambda c: -c.score)
+    for i, spike in enumerate(ordered):
+        chat_text = _chat_text_near(
+            messages, spike.vod_offset, window_sec=window_sec
+        )
+        if not chat_text.strip():
+            remaining.append(spike)
+            continue
+        try:
+            label = _groq_context_label(chat_text)
+            if label == "game":
+                game.append(
+                    ClipCandidate(
+                        vod_offset=spike.vod_offset,
+                        score=spike.score,
+                        source="game",
+                    )
+                )
+            else:
+                remaining.append(spike)
+        except GroqUnavailable:
+            logger.warning(
+                "ai_clips groq unavailable during context; keep %s spikes",
+                len(ordered) - i,
+            )
+            remaining.extend(ordered[i:])
+            break
+        except Exception:
+            logger.warning(
+                "ai_clips groq context failed offset=%s",
+                spike.vod_offset,
+                exc_info=True,
+            )
+            remaining.append(spike)
+    logger.info(
+        "ai_clips groq context spikes=%s game=%s remain=%s",
+        len(ordered),
+        len(game),
+        len(remaining),
+    )
+    return game, remaining
+
+
+def _chat_text_near(
+    messages: list[ChatMessage],
+    end_offset: int,
+    *,
+    window_sec: int = CHAT_CONTEXT_WINDOW_SEC,
+    max_lines: int = 40,
+    max_chars: int = 2000,
+) -> str:
+    start = max(0, int(end_offset) - max(1, window_sec))
+    end = int(end_offset)
+    lines: list[str] = []
+    for msg in messages:
+        if msg.offset_sec < start or msg.offset_sec > end:
+            continue
+        text = (msg.text or "").strip()
+        if text:
+            lines.append(text)
+        if len(lines) >= max_lines:
+            break
+    return "\n".join(lines)[:max_chars]
 
 
 def _transcribe_vod_window(vod_id: str, start_sec: int, window_sec: int) -> str:
@@ -513,6 +725,66 @@ def _transcribe_vod_window(vod_id: str, start_sec: int, window_sec: int) -> str:
         return _groq_transcribe(audio_path)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _groq_emotion_score(text: str) -> int | None:
+    prompt = GROQ_EMOTION_PROMPT.format(text=(text or "").strip()[:2000])
+    raw = _groq_chat(prompt, max_tokens=8)
+    return parse_emotion_score(raw)
+
+
+def _groq_context_label(text: str) -> Literal["game", "chat"] | None:
+    prompt = GROQ_CONTEXT_PROMPT.format(text=(text or "").strip()[:2000])
+    raw = _groq_chat(prompt, max_tokens=8)
+    return parse_context_label(raw)
+
+
+def _groq_chat(prompt: str, *, max_tokens: int = 16) -> str:
+    key = groq_api_key()
+    if not key:
+        raise GroqUnavailable("no_key")
+    import requests
+
+    resp = requests.post(
+        _GROQ_CHAT_URL,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": _GROQ_CHAT_MODEL,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
+    )
+    if resp.status_code == 429 or resp.status_code >= 500:
+        logger.warning(
+            "ai_clips groq chat HTTP %s body=%s",
+            resp.status_code,
+            (resp.text or "")[:200],
+        )
+        raise GroqUnavailable(f"http_{resp.status_code}")
+    if resp.status_code >= 400:
+        logger.warning(
+            "ai_clips groq chat HTTP %s body=%s",
+            resp.status_code,
+            (resp.text or "")[:200],
+        )
+        resp.raise_for_status()
+    payload = resp.json() if resp.content else {}
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    if not isinstance(choices, list) or not choices:
+        return ""
+    msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+    if not isinstance(msg, dict):
+        return ""
+    content = str(msg.get("content") or "").strip()
+    if content:
+        return content
+    # Reasoning models may leave content empty.
+    return str(msg.get("reasoning") or "").strip()
 
 
 def _extract_vod_audio_window(
@@ -608,7 +880,7 @@ def _extract_vod_audio_window(
 def _groq_transcribe(audio_path: Path) -> str:
     key = groq_api_key()
     if not key:
-        return ""
+        raise GroqUnavailable("no_key")
     import requests
 
     with audio_path.open("rb") as fh:
@@ -617,15 +889,22 @@ def _groq_transcribe(audio_path: Path) -> str:
             headers={"Authorization": f"Bearer {key}"},
             files={"file": (audio_path.name, fh, "audio/mpeg")},
             data={
-                "model": _GROQ_MODEL,
+                "model": _GROQ_WHISPER_MODEL,
                 "response_format": "json",
                 "temperature": "0",
             },
             timeout=120,
         )
+    if resp.status_code == 429 or resp.status_code >= 500:
+        logger.warning(
+            "ai_clips groq STT HTTP %s body=%s",
+            resp.status_code,
+            (resp.text or "")[:200],
+        )
+        raise GroqUnavailable(f"http_{resp.status_code}")
     if resp.status_code >= 400:
         logger.warning(
-            "ai_clips groq HTTP %s body=%s",
+            "ai_clips groq STT HTTP %s body=%s",
             resp.status_code,
             (resp.text or "")[:200],
         )

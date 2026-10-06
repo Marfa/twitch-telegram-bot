@@ -133,7 +133,7 @@ AZURE_TRANSLATOR_ENDPOINT = (
     ).strip()
     or "https://api.cognitive.microsofttranslator.com"
 ).rstrip("/")
-# Optional: Groq Whisper for AI-clips spoken «clip»/«клип» on short peak windows.
+# Optional: Groq Whisper + LLM for AI-clips emotion/game scoring on peaks.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 # Optional: BotHub AI alert covers (Flash Lite by default). Prefer Eco key. Skip if unset.
 BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY", "").strip()

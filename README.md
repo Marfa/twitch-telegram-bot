@@ -71,7 +71,7 @@ English: [README.en.md](README.en.md)
 | Корзина удалённых подписок на 30 дней | На бесплатном — 10 дней |
 | Безлимитный чат стримов в Mini App | На бесплатном — чтение + 20 сообщений/день |
 | Follow/Unfollow канала | Мониторинг и оповещения — Premium; списки Follow / новых Follow и Unfollow за 30 дней доступны без Premium |
-| AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (бета + Premium / а-ля карт `ai_clips`): до 5 клипов — приоритет «clip»/«клип» в чате → spoken (Groq Whisper на коротких окнах) → всплеск сообщений → громкое аудио; Helix Create Clip From VOD; чекбокс авто для новых VOD; временные файлы удаляются |
+| AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (бета + Premium / а-ля карт `ai_clips`): до 5 клипов — «clip»/«клип» в чате → Groq emotion (ASR+балл>3) → Groq game-контекст всплеска → остальные audio → остальные spike; без Groq — как раньше по пикам; Helix Create Clip From VOD; авто для новых VOD |
 | Премиум-канал для стримеров | Бесплатные взаимодействия с ботом для зрителей, приоритет в «Оповещение по игре», welcome-рекомендация |
 
 Цены задаются env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
@@ -340,7 +340,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `AZURE_TRANSLATOR_KEY` | Fallback при исчерпании квоты DeepL (HTTP 456) |
 | `AZURE_TRANSLATOR_REGION` | Регион ресурса Azure Translator (`northeurope`, `eastus`, …) |
 | `AZURE_TRANSLATOR_ENDPOINT` | Опционально; по умолчанию global Translator API |
-| `GROQ_API_KEY` | (опц.) Groq Whisper — spoken «clip»/«клип» в AI-клипах на коротких окнах вокруг пиков |
+| `GROQ_API_KEY` | (опц.) Groq Whisper + LLM — emotion-скоринг топ-10 audio и game/chat-контекст всплесков чата в AI-клипах |
 | `BOTHUB_API_KEY` | (опц.) BotHub — ИИ-обложки алертов; без ключа фича недоступна |
 | `BOTHUB_IMAGE_MODEL` | Модель обложки (по умолчанию `gemini-3.1-flash-lite-image`) |
 | `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback при CAPS/`NOT_ENOUGH_TOKENS` (по умолчанию `gemini-2.5-flash-image`; пусто = без fallback) |

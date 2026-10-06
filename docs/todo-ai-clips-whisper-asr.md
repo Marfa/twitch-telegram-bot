@@ -26,9 +26,10 @@
 
 ### Статус (2026-10-06)
 
-Включено **временно через Groq Whisper API** (`GROQ_API_KEY`): короткие окна
-(~20 с) вокруг уже найденных chat/audio/spike пиков, не полный VOD.
-Приоритет: chat phrase → **asr** → spike → audio. Без ключа — no-op.
+Включено через Groq (`GROQ_API_KEY`): топ-10 audio → Whisper + emotion LLM
+(балл >3 → кандидат); всплески чата → game/chat LLM. Приоритет клипов:
+phrase → emotion → game → remaining audio → remaining spike. Без ключа /
+429 — Groq-тиры пропускаются.
 
 ### Блокеры (локальный Whisper)
 

@@ -17,25 +17,34 @@ import analytics
 import beta as beta_features
 import premium as prem
 from ai_clips import (
+    AUDIO_SEED_N,
     CLIP_DURATION_SEC,
     MAX_CLIPS,
     MAX_VOD_ANALYZE_SEC,
+    SPIKE_SEED_N,
     ClipCandidate,
     ClipSource,
     CreatedClip,
     LoudPeak,
     ai_clips_ready,
     analyze_vod_rms,
+    classify_spikes_with_groq,
+    clip_start_offset,
     clip_watch_url,
     fetch_vod_chat_messages,
-    find_asr_phrase_peaks,
+    filter_unoccupied,
     find_loud_peaks,
     find_message_spikes,
     find_phrase_peaks,
     format_clip_timecode,
+    groq_api_key,
     groq_asr_ready,
+    helix_vod_clip_starts,
     merge_clip_candidates,
+    normalize_clip_source,
     parse_helix_duration,
+    score_audio_peaks_with_groq,
+    start_is_occupied,
 )
 from bot_helpers import _user_lang, reply_chat_id, with_oauth_legal
 from db import Database
@@ -796,13 +805,27 @@ def _create_clips_blocking(
     vod_title: str,
     peaks: list[ClipCandidate] | list[LoudPeak],
     lang: str,
+    occupied_starts: list[int] | None = None,
+    max_clips: int = MAX_CLIPS,
 ) -> list[CreatedClip]:
+    """Create up to ``max_clips``; skip peaks that already have a nearby VOD clip."""
     out: list[CreatedClip] = []
-    for i, peak in enumerate(peaks, start=1):
+    occupied = [int(o) for o in (occupied_starts or [])]
+    for peak in peaks:
+        if len(out) >= max_clips:
+            break
+        start = clip_start_offset(int(peak.vod_offset))
+        if start_is_occupied(start, occupied):
+            logger.info(
+                "ai_clips skip existing clip vod=%s start=%s",
+                vod_id,
+                start,
+            )
+            continue
         title = t(
             "ai_clips_clip_title",
             lang,
-            n=i,
+            n=len(out) + 1,
             title=(vod_title or "Clip")[:60],
         )
         try:
@@ -826,6 +849,7 @@ def _create_clips_blocking(
         cid = str(row.get("id") or "").strip()
         if not cid:
             continue
+        occupied.append(start)
         out.append(
             CreatedClip(
                 clip_id=cid,
@@ -853,12 +877,9 @@ def _peaks_from_json(raw: str) -> list[ClipCandidate]:
             score = float(item.get("score") or 0.0)
         except (TypeError, ValueError):
             continue
-        src_raw = str(item.get("source") or "audio").strip().lower()
-        source: ClipSource = (
-            src_raw
-            if src_raw in ("phrase", "asr", "spike", "audio")
-            else "audio"
-        )  # type: ignore[assignment]
+        source: ClipSource = normalize_clip_source(
+            str(item.get("source") or "audio")
+        )
         if offset > 0:
             out.append(
                 ClipCandidate(vod_offset=offset, score=score, source=source)
@@ -959,6 +980,7 @@ async def _run_job(
         if job.status in ("queued", "analyzing") or not peaks:
             db.update_ai_clips_job(job_id, status="analyzing", progress_pct=1)
             vod_duration = 0
+            vod_started: datetime | None = None
             try:
                 videos = await asyncio.to_thread(
                     twitch.get_videos_by_user, token["twitch_user_id"], first=20
@@ -967,6 +989,9 @@ async def _run_job(
                     if str(v.get("id") or "") == job.vod_id:
                         vod_duration = parse_helix_duration(
                             str(v.get("duration") or "")
+                        )
+                        vod_started = _parse_rfc3339(
+                            str(v.get("created_at") or "")
                         )
                         break
             except Exception:
@@ -977,6 +1002,32 @@ async def _run_job(
                 MAX_VOD_ANALYZE_SEC,
                 vod_duration if vod_duration > 0 else MAX_VOD_ANALYZE_SEC,
             )
+            occupied_starts: list[int] = []
+            try:
+                since = vod_started or (
+                    datetime.now(timezone.utc) - timedelta(days=7)
+                )
+                if vod_started is not None:
+                    since = vod_started - timedelta(hours=6)
+                existing_rows = await asyncio.to_thread(
+                    twitch.get_clips_for_video,
+                    token["twitch_user_id"],
+                    job.vod_id,
+                    started_at=since,
+                )
+                occupied_starts = helix_vod_clip_starts(existing_rows)
+                if occupied_starts:
+                    logger.info(
+                        "ai_clips existing clips vod=%s n=%s",
+                        job.vod_id,
+                        len(occupied_starts),
+                    )
+            except Exception:
+                logger.warning(
+                    "ai_clips existing clips lookup failed vod=%s",
+                    job.vod_id,
+                    exc_info=True,
+                )
 
             def _chat_prog(done: int, total: int) -> None:
                 pct = 1
@@ -992,74 +1043,93 @@ async def _run_job(
                 max_seconds=max_sec,
                 progress=_chat_prog,
             )
-            phrases = find_phrase_peaks(chat_msgs)
-            spikes = find_message_spikes(chat_msgs, n=MAX_CLIPS)
+            phrases = filter_unoccupied(
+                find_phrase_peaks(chat_msgs), occupied_starts
+            )
+            spikes = filter_unoccupied(
+                find_message_spikes(chat_msgs, n=SPIKE_SEED_N), occupied_starts
+            )
             audio_peaks: list[LoudPeak] = []
-            need_audio = len(phrases) + len(spikes) < MAX_CLIPS
-            if need_audio:
+            db.update_ai_clips_job(job_id, status="analyzing", progress_pct=56)
+
+            def _audio_prog(done: int, total: int) -> None:
+                pct = 56
+                if total > 0:
+                    pct = max(56, min(85, 56 + int(done * 29 / total)))
                 db.update_ai_clips_job(
-                    job_id, status="analyzing", progress_pct=56
+                    job_id, status="analyzing", progress_pct=pct
                 )
 
-                def _audio_prog(done: int, total: int) -> None:
-                    pct = 56
-                    if total > 0:
-                        pct = max(56, min(90, 56 + int(done * 34 / total)))
+            try:
+                rms = await asyncio.to_thread(
+                    analyze_vod_rms,
+                    job.vod_id,
+                    max_seconds=max_sec,
+                    progress=_audio_prog,
+                )
+                audio_peaks = filter_unoccupied(
+                    find_loud_peaks(rms, n=AUDIO_SEED_N), occupied_starts
+                )
+            except Exception:
+                logger.exception(
+                    "ai_clips analyze failed owner=%s vod=%s",
+                    user_id,
+                    job.vod_id,
+                )
+                if not phrases and not spikes:
                     db.update_ai_clips_job(
-                        job_id, status="analyzing", progress_pct=pct
+                        job_id, status="failed", error="analyze"
                     )
+                    await application.bot.send_message(
+                        user_id, t("ai_clips_analyze_failed", loc)
+                    )
+                    return
 
-                try:
-                    rms = await asyncio.to_thread(
-                        analyze_vod_rms,
-                        job.vod_id,
-                        max_seconds=max_sec,
-                        progress=_audio_prog,
-                    )
-                    audio_peaks = find_loud_peaks(rms, n=MAX_CLIPS)
-                except Exception:
-                    logger.exception(
-                        "ai_clips analyze failed owner=%s vod=%s",
-                        user_id,
-                        job.vod_id,
-                    )
-                    if not phrases and not spikes:
-                        db.update_ai_clips_job(
-                            job_id, status="failed", error="analyze"
-                        )
-                        await application.bot.send_message(
-                            user_id, t("ai_clips_analyze_failed", loc)
-                        )
-                        return
-            else:
+            emotion_peaks: list[ClipCandidate] = []
+            game_peaks: list[ClipCandidate] = []
+            remain_audio: list[LoudPeak] = list(audio_peaks)
+            remain_spikes: list[ClipCandidate] = list(spikes)
+            if groq_api_key():
                 db.update_ai_clips_job(
-                    job_id, status="analyzing", progress_pct=90
+                    job_id, status="analyzing", progress_pct=88
                 )
-            asr_peaks: list[ClipCandidate] = []
-            seeds: list[ClipCandidate] = list(phrases) + list(spikes)
-            for a in audio_peaks:
-                seeds.append(
-                    ClipCandidate(
-                        vod_offset=a.vod_offset, score=a.score, source="audio"
-                    )
-                )
-            if seeds and groq_asr_ready():
-                db.update_ai_clips_job(
-                    job_id, status="analyzing", progress_pct=91
-                )
-                try:
-                    asr_peaks = await asyncio.to_thread(
-                        find_asr_phrase_peaks, job.vod_id, seeds
-                    )
-                except Exception:
-                    logger.warning(
-                        "ai_clips groq asr failed owner=%s vod=%s",
-                        user_id,
-                        job.vod_id,
-                        exc_info=True,
-                    )
+                if remain_audio and groq_asr_ready():
+                    try:
+                        emotion_peaks, remain_audio = await asyncio.to_thread(
+                            score_audio_peaks_with_groq,
+                            job.vod_id,
+                            remain_audio,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "ai_clips groq emotion failed owner=%s vod=%s",
+                            user_id,
+                            job.vod_id,
+                            exc_info=True,
+                        )
+                if remain_spikes:
+                    try:
+                        game_peaks, remain_spikes = await asyncio.to_thread(
+                            classify_spikes_with_groq,
+                            chat_msgs,
+                            remain_spikes,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "ai_clips groq context failed owner=%s vod=%s",
+                            user_id,
+                            job.vod_id,
+                            exc_info=True,
+                        )
+            # Spare slots so create can skip late-appearing Helix clips.
             peaks = merge_clip_candidates(
-                phrases, spikes, audio_peaks, asr=asr_peaks, n=MAX_CLIPS
+                phrases,
+                emotion_peaks,
+                game_peaks,
+                remain_audio,
+                remain_spikes,
+                n=max(MAX_CLIPS, AUDIO_SEED_N),
+                occupied_starts=occupied_starts,
             )
             if not peaks:
                 db.update_ai_clips_job(job_id, status="failed", error="no_peaks")
@@ -1077,6 +1147,21 @@ async def _run_job(
         clips = _clips_from_json(job.clips_json)
         if not clips:
             db.update_ai_clips_job(job_id, status="creating", progress_pct=95)
+            create_occupied: list[int] = []
+            try:
+                live_rows = await asyncio.to_thread(
+                    twitch.get_clips_for_video,
+                    token["twitch_user_id"],
+                    job.vod_id,
+                    started_at=datetime.now(timezone.utc) - timedelta(days=7),
+                )
+                create_occupied = helix_vod_clip_starts(live_rows)
+            except Exception:
+                logger.warning(
+                    "ai_clips refresh existing clips failed vod=%s",
+                    job.vod_id,
+                    exc_info=True,
+                )
             clips = await asyncio.to_thread(
                 _create_clips_blocking,
                 twitch,
@@ -1086,6 +1171,8 @@ async def _run_job(
                 vod_title=job.vod_title,
                 peaks=peaks,
                 lang=loc,
+                occupied_starts=create_occupied,
+                max_clips=MAX_CLIPS,
             )
             if not clips:
                 db.update_ai_clips_job(

@@ -71,7 +71,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
 | Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
-| AI clips from VOD | **📦 Other → 🎬 AI clips** (beta + Premium / à la carte `ai_clips`): up to 5 clips — priority chat «clip»/«клип» → spoken (Groq Whisper on short windows) → message spikes → loud audio; Helix Create Clip From VOD; auto checkbox for new VODs; temp files deleted |
+| AI clips from VOD | **📦 Other → 🎬 AI clips** (beta + Premium / à la carte `ai_clips`): up to 5 clips — chat «clip»/«клип» → Groq emotion (ASR+score>3) → Groq game context on chat spikes → remaining audio → remaining spikes; without Groq falls back to peaks; Helix Create Clip From VOD; auto for new VODs |
 | Premium channel for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
@@ -340,7 +340,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `AZURE_TRANSLATOR_KEY` | Fallback when DeepL quota is exhausted (HTTP 456) |
 | `AZURE_TRANSLATOR_REGION` | Azure Translator resource region (`northeurope`, `eastus`, …) |
 | `AZURE_TRANSLATOR_ENDPOINT` | Optional; default is the global Translator API |
-| `GROQ_API_KEY` | (opt.) Groq Whisper — spoken «clip»/«клип» in AI clips on short windows around peaks |
+| `GROQ_API_KEY` | (opt.) Groq Whisper + LLM — emotion score on top-10 audio and game/chat context on chat spikes for AI clips |
 | `BOTHUB_API_KEY` | (opt.) BotHub — AI alert covers; feature skipped if unset |
 | `BOTHUB_IMAGE_MODEL` | Cover model (default `gemini-3.1-flash-lite-image`) |
 | `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback on CAPS/`NOT_ENOUGH_TOKENS` (default `gemini-2.5-flash-image`; empty = no fallback) |
