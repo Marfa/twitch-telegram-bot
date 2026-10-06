@@ -300,6 +300,37 @@ def _format_clips_message(
     return "\n".join(lines)
 
 
+def _stored_clip_start(clip: CreatedClip) -> int:
+    """Create Clip From VOD stores end offset; UI / Helix use start."""
+    return clip_start_offset(int(clip.vod_offset))
+
+
+def _helix_offset_or_none(row: dict[str, Any]) -> int | None:
+    raw = row.get("vod_offset")
+    if raw is None or raw == "":
+        return None
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _merge_clip_row(
+    row: dict[str, Any],
+    *,
+    fallback_start: int | None = None,
+) -> dict[str, Any]:
+    """Copy Helix row; keep ``fallback_start`` when Helix ``vod_offset`` is null.
+
+    Create Clip From VOD often returns ``video_id=""`` and ``vod_offset=null``
+    for minutes (or longer); without a fallback the UI shows 0:00:00.
+    """
+    merged = dict(row)
+    if _helix_offset_or_none(merged) is None and fallback_start is not None:
+        merged["vod_offset"] = int(fallback_start)
+    return merged
+
+
 async def _fetch_live_vod_clips(
     twitch: TwitchClient,
     *,
@@ -310,24 +341,32 @@ async def _fetch_live_vod_clips(
 ) -> list[dict[str, Any]]:
     """Current Helix clips for a VOD (bot-made + user-made), newest-safe merge."""
     by_id: dict[str, dict[str, Any]] = {}
-    stored_ids = [c.clip_id for c in stored if c.clip_id]
+    stored_starts = {
+        c.clip_id: _stored_clip_start(c) for c in stored if c.clip_id
+    }
+    for c in stored:
+        if not c.clip_id:
+            continue
+        by_id[c.clip_id] = {
+            "id": c.clip_id,
+            "url": c.url or clip_watch_url(c.clip_id),
+            "vod_offset": stored_starts[c.clip_id],
+            "video_id": vod_id,
+        }
+    stored_ids = list(stored_starts)
     if stored_ids:
         try:
             for row in await asyncio.to_thread(twitch.get_clips_by_ids, stored_ids):
                 cid = str(row.get("id") or "").strip()
-                if cid:
-                    by_id[cid] = row
+                if not cid:
+                    continue
+                by_id[cid] = _merge_clip_row(
+                    row, fallback_start=stored_starts.get(cid)
+                )
         except Exception:
             logger.warning(
                 "ai_clips get_clips_by_ids failed vod=%s", vod_id, exc_info=True
             )
-            for c in stored:
-                by_id[c.clip_id] = {
-                    "id": c.clip_id,
-                    "url": c.url or clip_watch_url(c.clip_id),
-                    # Stored Create Clip offset is the clip end; Helix uses start.
-                    "vod_offset": max(0, int(c.vod_offset) - CLIP_DURATION_SEC),
-                }
     since = started_at
     if since is None:
         since = datetime.now(timezone.utc) - timedelta(days=7)
@@ -343,8 +382,13 @@ async def _fetch_live_vod_clips(
         )
         for row in live:
             cid = str(row.get("id") or "").strip()
-            if cid:
-                by_id[cid] = row
+            if not cid:
+                continue
+            prev = by_id.get(cid) or {}
+            fallback = stored_starts.get(cid)
+            if fallback is None:
+                fallback = _helix_offset_or_none(prev)
+            by_id[cid] = _merge_clip_row(row, fallback_start=fallback)
     except Exception:
         logger.warning(
             "ai_clips get_clips_for_video failed vod=%s", vod_id, exc_info=True
@@ -352,9 +396,8 @@ async def _fetch_live_vod_clips(
     clips = list(by_id.values())
 
     def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
-        try:
-            off = int(row.get("vod_offset") if row.get("vod_offset") is not None else 10**9)
-        except (TypeError, ValueError):
+        off = _helix_offset_or_none(row)
+        if off is None:
             off = 10**9
         return (off, str(row.get("created_at") or ""))
 
@@ -692,7 +735,7 @@ async def on_ai_clips_callback(
                 {
                     "id": c.clip_id,
                     "url": c.url or clip_watch_url(c.clip_id),
-                    "vod_offset": max(0, c.vod_offset - CLIP_DURATION_SEC),
+                    "vod_offset": _stored_clip_start(c),
                 }
                 for c in stored
             ]
@@ -1003,6 +1046,12 @@ async def _run_job(
                 vod_duration if vod_duration > 0 else MAX_VOD_ANALYZE_SEC,
             )
             occupied_starts: list[int] = []
+            prev_done = db.get_done_ai_clips_job(user_id, vod_id=job.vod_id)
+            if prev_done:
+                occupied_starts.extend(
+                    _stored_clip_start(c)
+                    for c in _clips_from_json(prev_done.clips_json)
+                )
             try:
                 since = vod_started or (
                     datetime.now(timezone.utc) - timedelta(days=7)
@@ -1015,7 +1064,9 @@ async def _run_job(
                     job.vod_id,
                     started_at=since,
                 )
-                occupied_starts = helix_vod_clip_starts(existing_rows)
+                for start in helix_vod_clip_starts(existing_rows):
+                    if not start_is_occupied(start, occupied_starts):
+                        occupied_starts.append(start)
                 if occupied_starts:
                     logger.info(
                         "ai_clips existing clips vod=%s n=%s",
@@ -1148,6 +1199,12 @@ async def _run_job(
         if not clips:
             db.update_ai_clips_job(job_id, status="creating", progress_pct=95)
             create_occupied: list[int] = []
+            prev_done = db.get_done_ai_clips_job(user_id, vod_id=job.vod_id)
+            if prev_done:
+                create_occupied.extend(
+                    _stored_clip_start(c)
+                    for c in _clips_from_json(prev_done.clips_json)
+                )
             try:
                 live_rows = await asyncio.to_thread(
                     twitch.get_clips_for_video,
@@ -1155,7 +1212,9 @@ async def _run_job(
                     job.vod_id,
                     started_at=datetime.now(timezone.utc) - timedelta(days=7),
                 )
-                create_occupied = helix_vod_clip_starts(live_rows)
+                for start in helix_vod_clip_starts(live_rows):
+                    if not start_is_occupied(start, create_occupied):
+                        create_occupied.append(start)
             except Exception:
                 logger.warning(
                     "ai_clips refresh existing clips failed vod=%s",
@@ -1199,9 +1258,7 @@ async def _run_job(
                     "ai_clips_done_line",
                     loc,
                     n=i,
-                    offset=format_clip_timecode(
-                        max(0, c.vod_offset - CLIP_DURATION_SEC)
-                    ),
+                    offset=format_clip_timecode(_stored_clip_start(c)),
                     url=link,
                 )
             )

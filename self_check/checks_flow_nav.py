@@ -3348,19 +3348,13 @@ async def _scenario_ai_clips(db) -> None:
         {
             "id": "botClip",
             "url": "https://clips.twitch.tv/botClip",
-            "video_id": "1001",
-            "vod_offset": 30,
+            # Create Clip From VOD often omits video_id / vod_offset for a while.
+            "video_id": "",
+            "vod_offset": None,
             "created_at": "2026-01-01T00:00:00Z",
         }
     ]
     twitch.get_clips_for_video.return_value = [
-        {
-            "id": "botClip",
-            "url": "https://clips.twitch.tv/botClip",
-            "video_id": "1001",
-            "vod_offset": 30,
-            "created_at": "2026-01-01T00:00:00Z",
-        },
         {
             "id": "userClip",
             "url": "https://clips.twitch.tv/userClip",
@@ -3380,6 +3374,9 @@ async def _scenario_ai_clips(db) -> None:
         for c in query.edit_message_text.await_args_list
     )
     assert "userClip" in edited and "botClip" in edited
+    # Stored end=60 → start 0:00:30 (not 0:00:00 from Helix null).
+    assert "0:00:30" in edited
+    assert "0:00:00" not in edited
     assert "ai_clips:rerun:1001" in [
         b.callback_data
         for m in cap.markups
