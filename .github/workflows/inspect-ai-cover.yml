@@ -38,9 +38,11 @@ jobs:
             print("BOTHUB_API_KEY_set", bool(key), "len", len(key))
             print("BOTHUB_BASE_URL", (os.getenv("BOTHUB_BASE_URL") or "")[:60] or "(default)")
             print("BOTHUB_IMAGE_MODEL", os.getenv("BOTHUB_IMAGE_MODEL") or "(default)")
+            print("BOTHUB_IMAGE_MODEL_FALLBACK", os.getenv("BOTHUB_IMAGE_MODEL_FALLBACK") or "(default)")
             try:
                 import bothub
                 print("bothub_configured", bothub.bothub_configured())
+                print("bothub_models", bothub.bothub_image_models())
             except Exception as exc:
                 print("bothub_import_error", type(exc).__name__, exc)
             PY

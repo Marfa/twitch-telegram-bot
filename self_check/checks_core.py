@@ -1,4 +1,5 @@
 """Core self-checks: analytics, twitch parse, templates, oauth, eventsub, posthog."""
+import base64
 import json
 import os
 import subprocess
@@ -448,9 +449,12 @@ def check_core() -> None:
     assert "marfapr" not in prompt.lower()
     from bothub import (
         BotHubInsufficientCapsError,
+        bothub_image_models,
         generate_alert_cover_bytes,
         is_bothub_insufficient_caps,
+        preferred_image_model,
     )
+    from config import BOTHUB_IMAGE_MODEL, BOTHUB_IMAGE_MODEL_FALLBACK
 
     assert is_bothub_insufficient_caps(
         403, '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
@@ -458,6 +462,9 @@ def check_core() -> None:
     assert not is_bothub_insufficient_caps(403, '{"error":{"code":"OTHER"}}')
     assert not is_bothub_insufficient_caps(500, "NOT_ENOUGH_TOKENS")
     assert issubclass(BotHubInsufficientCapsError, RuntimeError)
+    assert bothub_image_models()[0] == BOTHUB_IMAGE_MODEL
+    if BOTHUB_IMAGE_MODEL_FALLBACK and BOTHUB_IMAGE_MODEL_FALLBACK != BOTHUB_IMAGE_MODEL:
+        assert BOTHUB_IMAGE_MODEL_FALLBACK in bothub_image_models()
     import tempfile
     from db.sqlite import SqliteDatabase
     from unittest.mock import patch
@@ -473,7 +480,9 @@ def check_core() -> None:
 
         with patch("bothub.bothub_configured", return_value=True), patch(
             "bothub.generate_cover_image", side_effect=_fake_gen
-        ), patch("bothub.BOTHUB_IMAGE_MODEL", "test-model"):
+        ), patch("bothub.BOTHUB_IMAGE_MODEL", "test-model"), patch(
+            "bothub.BOTHUB_IMAGE_MODEL_FALLBACK", ""
+        ):
             first = generate_alert_cover_bytes(
                 stream={"game_id": "509658", "game_name": "Just Chatting"},
                 twitch=None,
@@ -490,7 +499,12 @@ def check_core() -> None:
         assert cached and cached["image_bytes"] == fake
         assert cached["model"] == "test-model"
 
+    import bothub as bothub_mod
+
+    bothub_mod._bothub_caps_fallback_run = False
     with patch("bothub.BOTHUB_API_KEY", "test-key"), patch(
+        "bothub.BOTHUB_IMAGE_MODEL", "primary-model"
+    ), patch("bothub.BOTHUB_IMAGE_MODEL_FALLBACK", ""), patch(
         "bothub._http"
     ) as http_mock, patch("bothub._report_insufficient_caps") as report_caps:
         caps_body = '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
@@ -508,6 +522,39 @@ def check_core() -> None:
             assert "CAPS insufficient" in str(exc)
             report_caps.assert_called_once()
             assert report_caps.call_args[0][0] is exc
+    bothub_mod._bothub_caps_fallback_run = False
+
+    # Primary CAPS → sticky fallback model succeeds; later calls skip primary.
+    with patch("bothub.BOTHUB_API_KEY", "test-key"), patch(
+        "bothub.BOTHUB_IMAGE_MODEL", "primary-model"
+    ), patch("bothub.BOTHUB_IMAGE_MODEL_FALLBACK", "fallback-model"), patch(
+        "bothub._http"
+    ) as http_mock:
+        caps_body = '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
+        caps_resp = type("R", (), {})()
+        caps_resp.ok = False
+        caps_resp.status_code = 403
+        caps_resp.text = caps_body
+        ok_resp = type("R", (), {})()
+        ok_resp.ok = True
+        ok_resp.status_code = 200
+        ok_resp.json = lambda: {
+            "data": [{"b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"y" * 300).decode()}]
+        }
+        http_mock.post.side_effect = [caps_resp, ok_resp]
+        from bothub import generate_cover_image
+
+        raw = generate_cover_image("test prompt")
+        assert raw.startswith(b"\x89PNG")
+        assert bothub_mod._bothub_caps_fallback_run is True
+        assert bothub_image_models() == ["fallback-model"]
+        assert preferred_image_model() == "fallback-model"
+        # Second call uses fallback only (no primary attempt).
+        http_mock.post.side_effect = [ok_resp]
+        generate_cover_image("again")
+        assert http_mock.post.call_count == 3
+        assert http_mock.post.call_args_list[2][1]["json"]["model"] == "fallback-model"
+    bothub_mod._bothub_caps_fallback_run = False
     on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
     on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)

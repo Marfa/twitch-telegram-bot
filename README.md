@@ -340,6 +340,9 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `AZURE_TRANSLATOR_KEY` | Fallback при исчерпании квоты DeepL (HTTP 456) |
 | `AZURE_TRANSLATOR_REGION` | Регион ресурса Azure Translator (`northeurope`, `eastus`, …) |
 | `AZURE_TRANSLATOR_ENDPOINT` | Опционально; по умолчанию global Translator API |
+| `BOTHUB_API_KEY` | (опц.) BotHub — ИИ-обложки алертов; без ключа фича недоступна |
+| `BOTHUB_IMAGE_MODEL` | Модель обложки (по умолчанию `gemini-3.1-flash-lite-image`) |
+| `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback при CAPS/`NOT_ENOUGH_TOKENS` (по умолчанию `gemini-2.5-flash-image`; пусто = без fallback) |
 | `ISTHEREANYDEAL_API_KEY` | (опц.) IsThereAnyDeal — раздачи игр; без ключа работает только GamerPower |
 | `YOUTUBE_API_KEY` | (опц.) YouTube Data API v3 — проверка онлайн для Мультистрима (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Интервал обновления превью/MP4 на эфире (по умолчанию 1800) |

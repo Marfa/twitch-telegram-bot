@@ -141,6 +141,10 @@ BOTHUB_BASE_URL = (
 BOTHUB_IMAGE_MODEL = (
     os.getenv("BOTHUB_IMAGE_MODEL", "").strip() or "gemini-3.1-flash-lite-image"
 )
+# Cheaper image model when primary hits NOT_ENOUGH_TOKENS / CAPS (empty = no fallback).
+BOTHUB_IMAGE_MODEL_FALLBACK = (
+    os.getenv("BOTHUB_IMAGE_MODEL_FALLBACK", "").strip() or "gemini-2.5-flash-image"
+)
 # Optional: IsThereAnyDeal API key for game giveaways (https://isthereanydeal.com/apps/register/)
 ISTHEREANYDEAL_API_KEY = os.getenv("ISTHEREANYDEAL_API_KEY", "").strip()
 # Optional: YouTube Data API v3 key — multistream live checks for YouTube channels.

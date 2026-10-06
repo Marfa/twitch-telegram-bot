@@ -340,6 +340,9 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `AZURE_TRANSLATOR_KEY` | Fallback when DeepL quota is exhausted (HTTP 456) |
 | `AZURE_TRANSLATOR_REGION` | Azure Translator resource region (`northeurope`, `eastus`, …) |
 | `AZURE_TRANSLATOR_ENDPOINT` | Optional; default is the global Translator API |
+| `BOTHUB_API_KEY` | (opt.) BotHub — AI alert covers; feature skipped if unset |
+| `BOTHUB_IMAGE_MODEL` | Cover model (default `gemini-3.1-flash-lite-image`) |
+| `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback on CAPS/`NOT_ENOUGH_TOKENS` (default `gemini-2.5-flash-image`; empty = no fallback) |
 | `ISTHEREANYDEAL_API_KEY` | (opt.) IsThereAnyDeal game giveaways; without it only GamerPower is used |
 | `YOUTUBE_API_KEY` | (opt.) YouTube Data API v3 — Multistream live checks (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Preview/MP4 refresh interval while live (default 1800) |
