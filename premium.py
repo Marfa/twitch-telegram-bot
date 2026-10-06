@@ -1102,6 +1102,11 @@ def refresh_twitch_premium(
         if status.twitch_active:
             db.set_premium_twitch(user_id, active=False)
         return False, False
+    # Dead token already flagged — wait for OAuth reauth; do not hammer Twitch hourly.
+    if db.get_premium_twitch_needs_reauth(user_id):
+        if status.twitch_active:
+            db.set_premium_twitch(user_id, active=False)
+        return False, False
     try:
         token_data = twitch.refresh_user_token(refresh)
         access = token_data.get("access_token") or ""

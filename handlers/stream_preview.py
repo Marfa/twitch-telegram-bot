@@ -8,7 +8,7 @@ from io import BytesIO
 from typing import Any
 
 from telegram import InputFile, InputMediaAnimation, InputMediaPhoto, InputMediaVideo
-from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.error import BadRequest, Forbidden, RetryAfter, TimedOut
 
 from db import Database, Subscription
 from stream_capture import (
@@ -650,6 +650,13 @@ async def _edit_preview_media(
         return True
     except RetryAfter as exc:
         await asyncio.sleep(float(exc.retry_after) + 0.5)
+        return False
+    except TimedOut:
+        logger.info(
+            "Stream preview refresh timed out sub=%s chat=%s",
+            sub.id,
+            sub.chat_id,
+        )
         return False
     except (BadRequest, Forbidden) as exc:
         # Permanent skip only for hard media-type failures (e.g. Animation↔Video).

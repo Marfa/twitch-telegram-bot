@@ -514,6 +514,20 @@ def check_db_premium() -> None:
         assert db.get_chat_auth(77) is not None
         assert db.get_whisper_alert(77) is not None
         assert db.get_premium_twitch_refresh(77) == "fanout-rt"
+        # needs_reauth skip: do not call Twitch until user re-OAuths.
+        import premium as prem
+        from unittest.mock import MagicMock
+
+        db.set_premium_twitch(
+            77, active=True, twitch_user_id="tw77", refresh_token="fanout-rt"
+        )
+        db.set_premium_twitch_needs_reauth(77, True)
+        twitch_skip = MagicMock()
+        still77, newly77 = prem.refresh_twitch_premium(db, twitch_skip, 77)
+        assert still77 is False and newly77 is False
+        twitch_skip.refresh_user_token.assert_not_called()
+        assert db.get_premium_status(77).twitch_active is False
+        db.set_premium_twitch_needs_reauth(77, False)
         db.upsert_twitch_sync(
             owner_id=77,
             twitch_user_id="tw77",
