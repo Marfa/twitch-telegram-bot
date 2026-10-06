@@ -1,4 +1,5 @@
 """Core self-checks: analytics, twitch parse, templates, oauth, eventsub, posthog."""
+import base64
 import json
 import os
 import subprocess
@@ -98,14 +99,132 @@ def check_core() -> None:
     analytics_mod.capture(1, "self_check_noop")
     analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
 
-    from ai_clips import find_loud_peaks, parse_helix_duration
+    from ai_clips import (
+        CLIP_PHRASE_RE,
+        ChatMessage,
+        ClipCandidate,
+        LoudPeak,
+        find_loud_peaks,
+        find_message_spikes,
+        find_phrase_peaks,
+        format_clip_timecode,
+        merge_clip_candidates,
+        parse_helix_duration,
+    )
 
     assert parse_helix_duration("1h2m3s") == 3723
     assert parse_helix_duration("45s") == 45
+    assert format_clip_timecode(0) == "0:00:00"
+    assert format_clip_timecode(65) == "0:01:05"
+    assert format_clip_timecode(3723) == "1:02:03"
     rms = [1.0] * 40 + [100.0] * 30 + [1.0] * 40 + [80.0] * 30 + [1.0] * 50
     peaks = find_loud_peaks(rms, n=5, duration=30, min_gap=60)
     assert len(peaks) >= 2
     assert "ai_clips" in FEATURE_IDS
+
+    # Phrase regex: mid-word, case-insensitive EN/RU.
+    assert CLIP_PHRASE_RE.search("makeAClipNow")
+    assert CLIP_PHRASE_RE.search("СУПЕРКлип!!!")
+    assert CLIP_PHRASE_RE.search("CLIP")
+    assert not CLIP_PHRASE_RE.search("hello world")
+
+    msgs = [
+        ChatMessage(40, "please clip this"),
+        ChatMessage(50, "клип ещё"),  # within 5 min of first → dropped
+        ChatMessage(400, "another CLIP"),
+    ]
+    phrases = find_phrase_peaks(msgs, duration=30, dedup_sec=300)
+    assert [p.vod_offset for p in phrases] == [40, 400]
+    assert all(p.source == "phrase" for p in phrases)
+
+    # Message spikes: quiet baseline then a burst bucket.
+    spike_msgs = [ChatMessage(float(t), "x") for t in range(0, 600, 30)]
+    spike_msgs += [ChatMessage(300.0 + i * 0.2, "spam") for i in range(20)]
+    spikes = find_message_spikes(spike_msgs, n=5, duration=30, min_gap=60)
+    assert spikes and spikes[0].source == "spike"
+    assert spikes[0].vod_offset >= 30
+
+    # Merge priority: phrase → emotion → game → audio → spike.
+    from ai_clips import (
+        normalize_clip_source,
+        parse_context_label,
+        parse_emotion_score,
+    )
+
+    assert parse_emotion_score("4") == 4
+    assert parse_emotion_score("Score: 5/5") == 5
+    assert parse_emotion_score("nope") is None
+    assert parse_context_label("game") == "game"
+    assert parse_context_label("CHAT please") == "chat"
+    assert parse_context_label("maybe") is None
+    assert normalize_clip_source("asr") == "emotion"
+
+    merged = merge_clip_candidates(
+        [ClipCandidate(90, 1.0, "phrase")],
+        [ClipCandidate(200, 5.0, "emotion")],
+        [ClipCandidate(320, 10.0, "game")],
+        [LoudPeak(vod_offset=450, score=99.0)],
+        [ClipCandidate(560, 8.0, "spike")],
+        n=5,
+        duration=30,
+        min_gap=60,
+    )
+    assert [c.source for c in merged] == [
+        "phrase",
+        "emotion",
+        "game",
+        "audio",
+        "spike",
+    ]
+    assert [c.vod_offset for c in merged] == [90, 200, 320, 450, 560]
+    # Gray area: VOD chat via unofficial GQL (api-license-compliance exception).
+    assert "gql.twitch.tv" in __import__("ai_clips")._GQL_URL
+    # Phrase wins over nearby audio/spike when gap conflicts.
+    conflict = merge_clip_candidates(
+        [ClipCandidate(100, 1.0, "phrase")],
+        [],
+        [],
+        [LoudPeak(vod_offset=120, score=99.0)],
+        [ClipCandidate(110, 50.0, "spike")],
+        n=5,
+        duration=30,
+        min_gap=60,
+    )
+    assert len(conflict) == 1 and conflict[0].source == "phrase"
+    # Emotion beats game/audio when both fit.
+    emotion_over = merge_clip_candidates(
+        [],
+        [ClipCandidate(80, 4.0, "emotion")],
+        [ClipCandidate(320, 10.0, "game")],
+        [],
+        [ClipCandidate(450, 8.0, "spike")],
+        n=5,
+        duration=30,
+        min_gap=60,
+    )
+    assert [c.source for c in emotion_over] == ["emotion", "game", "spike"]
+    # Existing Helix clip on VOD → skip that candidate, take next.
+    from ai_clips import filter_unoccupied, helix_vod_clip_starts
+
+    assert helix_vod_clip_starts([{"vod_offset": 70}, {"vod_offset": "x"}]) == [70]
+    # phrase at end=90 → start=60; occupied start=70 within gap 60 → skipped.
+    skip_existing = merge_clip_candidates(
+        [ClipCandidate(90, 1.0, "phrase"), ClipCandidate(400, 1.0, "phrase")],
+        [],
+        [],
+        [],
+        [],
+        n=5,
+        duration=30,
+        min_gap=60,
+        occupied_starts=[70],
+    )
+    assert [c.vod_offset for c in skip_existing] == [400]
+    assert len(filter_unoccupied([ClipCandidate(90, 1.0, "phrase")], [70])) == 0
+    from ai_clips import groq_asr_ready
+
+    # Without GROQ_API_KEY Groq path is off (no crash).
+    assert groq_asr_ready() is False or bool(__import__("os").environ.get("GROQ_API_KEY"))
 
     # Durable AI clips job row survives restart (queued → resumable).
     import tempfile as _tempfile
@@ -117,10 +236,27 @@ def check_core() -> None:
         jid = jdb.create_ai_clips_job(7, vod_id="99", vod_title="t")
         assert jid > 0
         assert jdb.count_active_ai_clips_jobs() == 1
-        jdb.update_ai_clips_job(jid, status="analyzing", peaks_json="[]")
+        jdb.update_ai_clips_job(jid, status="analyzing", peaks_json="[]", progress_pct=42)
         assert len(jdb.list_resumable_ai_clips_jobs()) == 1
-        jdb.update_ai_clips_job(jid, status="done")
+        active = jdb.get_active_ai_clips_job(7)
+        assert active is not None and active.progress_pct == 42
+        jdb.update_ai_clips_job(jid, status="done", progress_pct=100)
         assert jdb.count_active_ai_clips_jobs() == 0
+        assert jdb.get_active_ai_clips_job(7) is None
+        assert jdb.get_done_ai_clips_job(7, vod_id="99") is not None
+        assert jdb.get_done_ai_clips_job(7, vod_id="nope") is None
+
+        jdb.set_ai_clips_auto_enabled(
+            7, enabled=True, twitch_user_id="42", last_vod_id="99"
+        )
+        pref = jdb.get_ai_clips_auto(7)
+        assert pref is not None and pref.enabled and pref.last_vod_id == "99"
+        assert len(jdb.list_enabled_ai_clips_auto()) == 1
+        jdb.update_ai_clips_auto_last_vod(7, last_vod_id="100")
+        assert jdb.get_ai_clips_auto(7).last_vod_id == "100"
+        jdb.set_ai_clips_auto_enabled(7, enabled=False)
+        assert jdb.get_ai_clips_auto(7).enabled is False
+        assert jdb.list_enabled_ai_clips_auto() == []
 
     ops_py = Path(__file__).resolve().parents[1] / "scripts" / "posthog-ops-event.py"
     assert ops_py.is_file()
@@ -371,9 +507,12 @@ def check_core() -> None:
     assert "marfapr" not in prompt.lower()
     from bothub import (
         BotHubInsufficientCapsError,
+        bothub_image_models,
         generate_alert_cover_bytes,
         is_bothub_insufficient_caps,
+        preferred_image_model,
     )
+    from config import BOTHUB_IMAGE_MODEL, BOTHUB_IMAGE_MODEL_FALLBACK
 
     assert is_bothub_insufficient_caps(
         403, '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
@@ -381,6 +520,9 @@ def check_core() -> None:
     assert not is_bothub_insufficient_caps(403, '{"error":{"code":"OTHER"}}')
     assert not is_bothub_insufficient_caps(500, "NOT_ENOUGH_TOKENS")
     assert issubclass(BotHubInsufficientCapsError, RuntimeError)
+    assert bothub_image_models()[0] == BOTHUB_IMAGE_MODEL
+    if BOTHUB_IMAGE_MODEL_FALLBACK and BOTHUB_IMAGE_MODEL_FALLBACK != BOTHUB_IMAGE_MODEL:
+        assert BOTHUB_IMAGE_MODEL_FALLBACK in bothub_image_models()
     import tempfile
     from db.sqlite import SqliteDatabase
     from unittest.mock import patch
@@ -396,7 +538,9 @@ def check_core() -> None:
 
         with patch("bothub.bothub_configured", return_value=True), patch(
             "bothub.generate_cover_image", side_effect=_fake_gen
-        ), patch("bothub.BOTHUB_IMAGE_MODEL", "test-model"):
+        ), patch("bothub.BOTHUB_IMAGE_MODEL", "test-model"), patch(
+            "bothub.BOTHUB_IMAGE_MODEL_FALLBACK", ""
+        ):
             first = generate_alert_cover_bytes(
                 stream={"game_id": "509658", "game_name": "Just Chatting"},
                 twitch=None,
@@ -413,7 +557,12 @@ def check_core() -> None:
         assert cached and cached["image_bytes"] == fake
         assert cached["model"] == "test-model"
 
+    import bothub as bothub_mod
+
+    bothub_mod._bothub_caps_fallback_run = False
     with patch("bothub.BOTHUB_API_KEY", "test-key"), patch(
+        "bothub.BOTHUB_IMAGE_MODEL", "primary-model"
+    ), patch("bothub.BOTHUB_IMAGE_MODEL_FALLBACK", ""), patch(
         "bothub._http"
     ) as http_mock, patch("bothub._report_insufficient_caps") as report_caps:
         caps_body = '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
@@ -431,6 +580,39 @@ def check_core() -> None:
             assert "CAPS insufficient" in str(exc)
             report_caps.assert_called_once()
             assert report_caps.call_args[0][0] is exc
+    bothub_mod._bothub_caps_fallback_run = False
+
+    # Primary CAPS → sticky fallback model succeeds; later calls skip primary.
+    with patch("bothub.BOTHUB_API_KEY", "test-key"), patch(
+        "bothub.BOTHUB_IMAGE_MODEL", "primary-model"
+    ), patch("bothub.BOTHUB_IMAGE_MODEL_FALLBACK", "fallback-model"), patch(
+        "bothub._http"
+    ) as http_mock:
+        caps_body = '{"error":{"code":"NOT_ENOUGH_TOKENS","message":"Недостаточно CAPS"}}'
+        caps_resp = type("R", (), {})()
+        caps_resp.ok = False
+        caps_resp.status_code = 403
+        caps_resp.text = caps_body
+        ok_resp = type("R", (), {})()
+        ok_resp.ok = True
+        ok_resp.status_code = 200
+        ok_resp.json = lambda: {
+            "data": [{"b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"y" * 300).decode()}]
+        }
+        http_mock.post.side_effect = [caps_resp, ok_resp]
+        from bothub import generate_cover_image
+
+        raw = generate_cover_image("test prompt")
+        assert raw.startswith(b"\x89PNG")
+        assert bothub_mod._bothub_caps_fallback_run is True
+        assert bothub_image_models() == ["fallback-model"]
+        assert preferred_image_model() == "fallback-model"
+        # Second call uses fallback only (no primary attempt).
+        http_mock.post.side_effect = [ok_resp]
+        generate_cover_image("again")
+        assert http_mock.post.call_count == 3
+        assert http_mock.post.call_args_list[2][1]["json"]["model"] == "fallback-model"
+    bothub_mod._bothub_caps_fallback_run = False
     on_kb = image_ask_keyboard("ru", game_cover_on=True, stream_preview_on=False)
     on_labels = [b.text for row in on_kb.inline_keyboard for b in row]
     assert any(lab.startswith("✅ ") and "обложк" in lab.lower() for lab in on_labels)
@@ -715,6 +897,8 @@ def check_core() -> None:
     assert '_stream_job_kwargs("check_posthog_status"' in _bot_build
     assert '_stream_job_kwargs("check_twitch_status"' in _bot_build
     assert '_stream_job_kwargs("check_cursor_status"' in _bot_build
+    assert 'name="ai_clips_auto"' in _bot_build
+    assert "poll_ai_clips_auto" in _bot_build
     # Edit image: checkbox toggles memory only; Apply/Skip/Delete persist.
     from handlers.wizard import receive_image_ask as _recv_image_ask
 
