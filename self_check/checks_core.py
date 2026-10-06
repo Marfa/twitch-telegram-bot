@@ -144,17 +144,18 @@ def check_core() -> None:
     assert spikes and spikes[0].source == "spike"
     assert spikes[0].vod_offset >= 30
 
-    # Merge priority: phrase before spike before audio.
+    # Merge priority: phrase before asr before spike before audio.
     merged = merge_clip_candidates(
         [ClipCandidate(90, 1.0, "phrase")],
-        [ClipCandidate(200, 10.0, "spike")],
-        [LoudPeak(vod_offset=300, score=99.0)],
+        [ClipCandidate(320, 10.0, "spike")],
+        [LoudPeak(vod_offset=450, score=99.0)],
+        asr=[ClipCandidate(200, 2.0, "asr")],
         n=5,
         duration=30,
         min_gap=60,
     )
-    assert [c.source for c in merged] == ["phrase", "spike", "audio"]
-    assert [c.vod_offset for c in merged] == [90, 200, 300]
+    assert [c.source for c in merged] == ["phrase", "asr", "spike", "audio"]
+    assert [c.vod_offset for c in merged] == [90, 200, 320, 450]
     # Gray area: VOD chat via unofficial GQL (api-license-compliance exception).
     assert "gql.twitch.tv" in __import__("ai_clips")._GQL_URL
     # Phrase wins over nearby audio/spike when gap conflicts.
@@ -167,6 +168,21 @@ def check_core() -> None:
         min_gap=60,
     )
     assert len(conflict) == 1 and conflict[0].source == "phrase"
+    # ASR beats spike when both fit.
+    asr_over_spike = merge_clip_candidates(
+        [],
+        [ClipCandidate(320, 10.0, "spike")],
+        [],
+        asr=[ClipCandidate(80, 1.0, "asr")],
+        n=5,
+        duration=30,
+        min_gap=60,
+    )
+    assert [c.source for c in asr_over_spike] == ["asr", "spike"]
+    from ai_clips import groq_asr_ready
+
+    # Without GROQ_API_KEY ASR is off (no crash).
+    assert groq_asr_ready() is False or bool(__import__("os").environ.get("GROQ_API_KEY"))
 
     # Durable AI clips job row survives restart (queued → resumable).
     import tempfile as _tempfile

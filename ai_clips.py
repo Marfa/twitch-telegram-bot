@@ -1,6 +1,7 @@
 """Post-VOD peaks → Helix Create Clip From VOD.
 
-Sources (priority): chat phrase clip/клип → message-volume spikes → audio RMS.
+Sources (priority): chat phrase clip/клип → spoken phrase (Groq Whisper on
+short windows) → message-volume spikes → audio RMS.
 Downloads no durable media: streamlink audio_only is piped through ffmpeg to
 PCM, RMS is scored in memory, then temp dirs (if any) are removed in finally.
 ponytail: streamlink/Twitch HLS is the same unofficial path as stream_capture;
@@ -38,6 +39,12 @@ MIN_GAP_SEC = 60
 CHAT_PHRASE_DEDUP_SEC = 300
 MSG_SPIKE_BUCKET_SEC = 30
 MAX_VOD_ANALYZE_SEC = 4 * 3600  # hard cap for VPS RAM/time
+# Groq free tier: short windows around existing peaks only (not full VOD).
+ASR_WINDOW_SEC = 20
+ASR_MAX_WINDOWS = 6
+ASR_MIN_GAP_SEC = 45
+_GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+_GROQ_MODEL = "whisper-large-v3-turbo"
 _SAMPLE_RATE = 8000
 _BYTES_PER_SEC = _SAMPLE_RATE * 2  # s16le mono
 _DURATION_RE = re.compile(
@@ -57,7 +64,7 @@ _GQL_REQUEST_DELAY = 0.05
 _GQL_WORKERS = 4
 CHAT_SCAN_MAX_SEC = 8 * 60  # wall-clock cap so long VODs do not look hung
 
-ClipSource = Literal["phrase", "spike", "audio"]
+ClipSource = Literal["phrase", "asr", "spike", "audio"]
 
 
 @dataclass(frozen=True)
@@ -206,11 +213,12 @@ def merge_clip_candidates(
     spikes: list[ClipCandidate],
     audio: list[LoudPeak] | list[ClipCandidate],
     *,
+    asr: list[ClipCandidate] | None = None,
     n: int = MAX_CLIPS,
     duration: int = CLIP_DURATION_SEC,
     min_gap: int = MIN_GAP_SEC,
 ) -> list[ClipCandidate]:
-    """Priority: phrase → spike → audio; within tier by time; gap on clip start."""
+    """Priority: phrase → asr → spike → audio; within tier by time; gap on start."""
     if n <= 0:
         return []
     audio_cands: list[ClipCandidate] = []
@@ -223,6 +231,7 @@ def merge_clip_candidates(
             )
     tiers = (
         sorted(phrases, key=lambda c: c.vod_offset),
+        sorted(asr or [], key=lambda c: c.vod_offset),
         sorted(spikes, key=lambda c: c.vod_offset),
         sorted(audio_cands, key=lambda c: c.vod_offset),
     )
@@ -413,6 +422,218 @@ def _fragments_text(fragments: Any) -> str:
 
 def ai_clips_ready() -> bool:
     return bool(shutil.which("streamlink") and shutil.which("ffmpeg"))
+
+
+def groq_api_key() -> str:
+    return (os.getenv("GROQ_API_KEY") or "").strip()
+
+
+def groq_asr_ready() -> bool:
+    """Groq Whisper + local streamlink/ffmpeg for short window extract."""
+    return bool(groq_api_key() and ai_clips_ready())
+
+
+def find_asr_phrase_peaks(
+    vod_id: str,
+    seeds: list[ClipCandidate] | list[LoudPeak],
+    *,
+    max_windows: int = ASR_MAX_WINDOWS,
+    window_sec: int = ASR_WINDOW_SEC,
+    clip_duration: int = CLIP_DURATION_SEC,
+    min_gap: int = ASR_MIN_GAP_SEC,
+) -> list[ClipCandidate]:
+    """Transcribe short windows around ``seeds``; keep those with spoken clip/клип.
+
+    No-op when Groq is not configured. Temp audio is deleted after each window.
+    """
+    if not groq_asr_ready() or max_windows <= 0 or window_sec <= 0:
+        return []
+    vid = str(vod_id or "").strip()
+    if not vid.isdigit():
+        return []
+    normalized: list[ClipCandidate] = []
+    for s in seeds:
+        if isinstance(s, ClipCandidate):
+            normalized.append(s)
+        else:
+            normalized.append(
+                ClipCandidate(vod_offset=s.vod_offset, score=s.score, source="audio")
+            )
+    # Prefer spike/audio seeds (chat phrase already covered); fill with phrases.
+    preferred = [c for c in normalized if c.source in ("spike", "audio")]
+    fillers = [c for c in normalized if c.source == "phrase"]
+    ordered = sorted(preferred, key=lambda c: c.vod_offset) + sorted(
+        fillers, key=lambda c: c.vod_offset
+    )
+    windows: list[int] = []
+    for cand in ordered:
+        if len(windows) >= max_windows:
+            break
+        # Helix offset is clip end; center the ASR window on the clip body.
+        center = max(0, int(cand.vod_offset) - clip_duration // 2)
+        start = max(0, center - window_sec // 2)
+        if any(abs(start - w) < min_gap for w in windows):
+            continue
+        windows.append(start)
+
+    out: list[ClipCandidate] = []
+    for start in windows:
+        try:
+            text = _transcribe_vod_window(vid, start, window_sec)
+        except Exception:
+            logger.warning(
+                "ai_clips groq window failed vod=%s start=%s",
+                vid,
+                start,
+                exc_info=True,
+            )
+            continue
+        if not text or not CLIP_PHRASE_RE.search(text):
+            continue
+        end = max(clip_duration, start + window_sec)
+        out.append(
+            ClipCandidate(vod_offset=end, score=float(end), source="asr")
+        )
+    logger.info(
+        "ai_clips groq asr vod=%s windows=%s hits=%s",
+        vid,
+        len(windows),
+        len(out),
+    )
+    return out
+
+
+def _transcribe_vod_window(vod_id: str, start_sec: int, window_sec: int) -> str:
+    """Extract ``window_sec`` of audio and send to Groq Whisper. Deletes temps."""
+    work = Path(tempfile.mkdtemp(prefix=f"ai_clips_asr_{vod_id}_"))
+    try:
+        audio_path = _extract_vod_audio_window(vod_id, work, start_sec, window_sec)
+        if audio_path is None or not audio_path.is_file():
+            return ""
+        return _groq_transcribe(audio_path)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _extract_vod_audio_window(
+    vod_id: str,
+    work: Path,
+    start_sec: int,
+    window_sec: int,
+) -> Path | None:
+    sl = shutil.which("streamlink")
+    ff = shutil.which("ffmpeg")
+    if not sl or not ff:
+        return None
+    out = work / "window.mp3"
+    url = f"https://www.twitch.tv/videos/{vod_id}"
+    env = os.environ.copy()
+    env["TMPDIR"] = str(work)
+    env["TMP"] = str(work)
+    env["TEMP"] = str(work)
+    env["STREAMLINK_CONFIG_DIR"] = str(work / "sl_config")
+    (work / "sl_config").mkdir(parents=True, exist_ok=True)
+    start = max(0, int(start_sec))
+    dur = max(5, min(60, int(window_sec)))
+    sl_cmd = [
+        sl,
+        "--stdout",
+        "--twitch-disable-ads",
+        "--hls-start-offset",
+        str(start),
+        "--hls-duration",
+        str(dur),
+        "--retry-max",
+        "2",
+        url,
+        "audio_only,worst",
+    ]
+    ff_cmd = [
+        ff,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        "pipe:0",
+        "-t",
+        str(dur),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-b:a",
+        "64k",
+        str(out),
+    ]
+    sl_proc: subprocess.Popen[bytes] | None = None
+    ff_proc: subprocess.Popen[bytes] | None = None
+    try:
+        sl_proc = subprocess.Popen(
+            sl_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env=env,
+            cwd=str(work),
+        )
+        ff_proc = subprocess.Popen(
+            ff_cmd,
+            stdin=sl_proc.stdout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            env=env,
+            cwd=str(work),
+        )
+        if sl_proc.stdout:
+            sl_proc.stdout.close()
+        ff_proc.communicate(timeout=max(60, dur + 45))
+        if out.is_file() and out.stat().st_size > 256:
+            return out
+        return None
+    except Exception:
+        logger.warning(
+            "ai_clips extract window failed vod=%s start=%s",
+            vod_id,
+            start,
+            exc_info=True,
+        )
+        return None
+    finally:
+        _kill_proc(ff_proc)
+        _kill_proc(sl_proc)
+
+
+def _groq_transcribe(audio_path: Path) -> str:
+    key = groq_api_key()
+    if not key:
+        return ""
+    import requests
+
+    with audio_path.open("rb") as fh:
+        resp = requests.post(
+            _GROQ_STT_URL,
+            headers={"Authorization": f"Bearer {key}"},
+            files={"file": (audio_path.name, fh, "audio/mpeg")},
+            data={
+                "model": _GROQ_MODEL,
+                "response_format": "json",
+                "temperature": "0",
+            },
+            timeout=120,
+        )
+    if resp.status_code >= 400:
+        logger.warning(
+            "ai_clips groq HTTP %s body=%s",
+            resp.status_code,
+            (resp.text or "")[:200],
+        )
+        resp.raise_for_status()
+    payload = resp.json() if resp.content else {}
+    if isinstance(payload, dict):
+        return str(payload.get("text") or "").strip()
+    return str(payload or "").strip()
 
 
 def analyze_vod_rms(

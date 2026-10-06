@@ -28,10 +28,12 @@ from ai_clips import (
     analyze_vod_rms,
     clip_watch_url,
     fetch_vod_chat_messages,
+    find_asr_phrase_peaks,
     find_loud_peaks,
     find_message_spikes,
     find_phrase_peaks,
     format_clip_timecode,
+    groq_asr_ready,
     merge_clip_candidates,
     parse_helix_duration,
 )
@@ -853,7 +855,9 @@ def _peaks_from_json(raw: str) -> list[ClipCandidate]:
             continue
         src_raw = str(item.get("source") or "audio").strip().lower()
         source: ClipSource = (
-            src_raw if src_raw in ("phrase", "spike", "audio") else "audio"
+            src_raw
+            if src_raw in ("phrase", "asr", "spike", "audio")
+            else "audio"
         )  # type: ignore[assignment]
         if offset > 0:
             out.append(
@@ -1031,7 +1035,32 @@ async def _run_job(
                 db.update_ai_clips_job(
                     job_id, status="analyzing", progress_pct=90
                 )
-            peaks = merge_clip_candidates(phrases, spikes, audio_peaks, n=MAX_CLIPS)
+            asr_peaks: list[ClipCandidate] = []
+            seeds: list[ClipCandidate] = list(phrases) + list(spikes)
+            for a in audio_peaks:
+                seeds.append(
+                    ClipCandidate(
+                        vod_offset=a.vod_offset, score=a.score, source="audio"
+                    )
+                )
+            if seeds and groq_asr_ready():
+                db.update_ai_clips_job(
+                    job_id, status="analyzing", progress_pct=91
+                )
+                try:
+                    asr_peaks = await asyncio.to_thread(
+                        find_asr_phrase_peaks, job.vod_id, seeds
+                    )
+                except Exception:
+                    logger.warning(
+                        "ai_clips groq asr failed owner=%s vod=%s",
+                        user_id,
+                        job.vod_id,
+                        exc_info=True,
+                    )
+            peaks = merge_clip_candidates(
+                phrases, spikes, audio_peaks, asr=asr_peaks, n=MAX_CLIPS
+            )
             if not peaks:
                 db.update_ai_clips_job(job_id, status="failed", error="no_peaks")
                 await application.bot.send_message(
