@@ -129,6 +129,27 @@ async def _smoke_schedule(db) -> None:
         state = await start_stream_schedule(update, ctx)
     assert state == st["STREAM_SCHEDULE_MODE"]
 
+    # Linked Twitch + existing slots → mode intro includes week preview.
+    application, bot = _app(db)
+    db.set_schedule_twitch_user_id(_FREE_UID, "tw123")
+    update = _msg_update(_FREE_UID)
+    ctx = _ctx(application)
+    with (
+        patch("handlers.stream_schedule.beta_features.is_enabled", return_value=True),
+        patch(
+            "handlers.stream_schedule._slots_until_week_end",
+            return_value=[
+                {"date": date(2026, 10, 7), "time": "15:30", "game": "Deponia"},
+            ],
+        ),
+    ):
+        state = await start_stream_schedule(update, ctx)
+    assert state == st["STREAM_SCHEDULE_MODE"]
+    sent = update.effective_message.reply_text.await_args.args[0]
+    assert "Актуальные слоты до конца недели" in sent or "Current slots" in sent
+    assert "15:30" in sent and "Deponia" in sent
+    db.set_schedule_twitch_user_id(_FREE_UID, "")
+
     application, bot = _app(db)
     update, query = _cb_update(_FREE_UID, "stream_sched:tz:mode")
     ctx = _ctx(application)

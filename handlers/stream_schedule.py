@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
+from html import escape as html_escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -182,6 +183,16 @@ def _next_week_dates(today: date) -> list[date]:
         days_until_monday = 7
     monday = today + timedelta(days=days_until_monday)
     return [monday + timedelta(days=i) for i in range(7)]
+
+
+def _remaining_week_dates(today: date) -> list[date]:
+    """Mon–Sun of the week containing `today`, from `today` through Sunday."""
+    monday = today - timedelta(days=today.weekday())
+    return [
+        monday + timedelta(days=i)
+        for i in range(7)
+        if monday + timedelta(days=i) >= today
+    ]
 
 
 def _parse_stream_time(raw: str) -> str | None:
@@ -379,6 +390,42 @@ def _schedule_segment_game(seg: dict) -> str:
     return title
 
 
+def _slots_from_segments(
+    twitch: TwitchClient,
+    segs: list[dict],
+    *,
+    allowed_days: set[date],
+    local_tz: timezone,
+) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for seg in segs:
+        sid = str(seg.get("id") or "")
+        if not sid or sid in seen:
+            continue
+        raw = seg.get("start_time") or ""
+        try:
+            local = twitch._parse_schedule_time(str(raw)).astimezone(local_tz)
+        except Exception:
+            continue
+        day = local.date()
+        if day not in allowed_days:
+            continue
+        seen.add(sid)
+        out.append(
+            {
+                "id": sid,
+                "date": day,
+                "time": f"{local.hour:02d}:{local.minute:02d}",
+                "game": _schedule_segment_game(seg),
+            }
+        )
+    out.sort(
+        key=lambda s: (str(s.get("date") or ""), str(s.get("time") or ""))
+    )
+    return out
+
+
 def _slots_on_local_day(
     twitch: TwitchClient,
     broadcaster_id: str,
@@ -395,30 +442,80 @@ def _slots_on_local_day(
     segs = twitch.get_schedule_segments(
         broadcaster_id, first=25, start_time=start_iso, stop_before=stop_iso
     )
-    out: list[dict] = []
-    seen: set[str] = set()
-    for seg in segs:
-        sid = str(seg.get("id") or "")
-        if not sid or sid in seen:
-            continue
-        raw = seg.get("start_time") or ""
-        try:
-            local = twitch._parse_schedule_time(str(raw)).astimezone(tz)
-        except Exception:
-            continue
-        if local.date() != day:
-            continue
-        seen.add(sid)
-        out.append(
-            {
-                "id": sid,
-                "date": day,
-                "time": f"{local.hour:02d}:{local.minute:02d}",
-                "game": _schedule_segment_game(seg),
-            }
+    return _slots_from_segments(
+        twitch, segs, allowed_days={day}, local_tz=tz
+    )
+
+
+def _slots_until_week_end(
+    twitch: TwitchClient,
+    broadcaster_id: str,
+    *,
+    local_tz: timezone | None = None,
+) -> list[dict]:
+    """Twitch schedule slots from today through Sunday (user local TZ)."""
+    tz = local_tz or SCHEDULE_TZ
+    today = datetime.now(tz).date()
+    dates = _remaining_week_dates(today)
+    if not dates:
+        return []
+    day_start = datetime(today.year, today.month, today.day, 0, 0, tzinfo=tz)
+    week_end = dates[-1] + timedelta(days=1)
+    day_end = datetime(week_end.year, week_end.month, week_end.day, 0, 0, tzinfo=tz)
+    start_iso = day_start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stop_iso = day_end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    segs = twitch.get_schedule_segments(
+        broadcaster_id, first=25, start_time=start_iso, stop_before=stop_iso
+    )
+    return _slots_from_segments(
+        twitch, segs, allowed_days=set(dates), local_tz=tz
+    )
+
+
+def _format_week_slots_preview(lang: str, slots: list[dict]) -> str:
+    if not slots:
+        return ""
+    lines = [t("stream_schedule_mode_week_slots", lang), ""]
+    for slot in slots:
+        lines.append(
+            t(
+                "stream_schedule_line",
+                lang,
+                date=format_stream_schedule_date(slot["date"], lang),
+                time=slot.get("time") or "",
+                game=html_escape(str(slot.get("game") or "")),
+            )
         )
-    out.sort(key=lambda s: str(s.get("time") or ""))
-    return out
+    return "\n".join(lines)
+
+
+async def _stream_schedule_mode_text(
+    db: Database,
+    twitch: TwitchClient,
+    user_id: int,
+    lang: str,
+) -> str:
+    """Mode intro; appends remaining-week slots when Twitch id is known and slots exist."""
+    text = t("stream_schedule_mode_intro", lang)
+    broadcaster_id = _owner_schedule_broadcaster_id(db, user_id)
+    if not broadcaster_id:
+        return text
+    try:
+        slots = await asyncio.to_thread(
+            _slots_until_week_end,
+            twitch,
+            broadcaster_id,
+            local_tz=_user_schedule_tz(db, user_id),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to load week schedule preview for user=%s", user_id
+        )
+        return text
+    preview = _format_week_slots_preview(lang, slots)
+    if not preview:
+        return text
+    return f"{text}\n\n{preview}"
 
 
 def _day_slots_view(context: ContextTypes.DEFAULT_TYPE) -> list[dict]:
@@ -761,7 +858,12 @@ async def start_stream_schedule(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return STREAM_SCHEDULE_CONFIRM
     await update.effective_message.reply_text(
-        t("stream_schedule_mode_intro", lang),
+        await _stream_schedule_mode_text(
+            db,
+            context.application.bot_data["twitch"],
+            user_id,
+            lang,
+        ),
         parse_mode=ParseMode.HTML,
         reply_markup=stream_schedule_mode_keyboard(lang),
     )
@@ -828,7 +930,12 @@ async def stream_schedule_tz(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return STREAM_SCHEDULE_CONFIRM
     await update.effective_message.reply_text(
-        t("stream_schedule_mode_intro", lang),
+        await _stream_schedule_mode_text(
+            db,
+            context.application.bot_data["twitch"],
+            user_id,
+            lang,
+        ),
         parse_mode=ParseMode.HTML,
         reply_markup=stream_schedule_mode_keyboard(lang),
     )
@@ -903,8 +1010,7 @@ async def stream_schedule_mode_callback(
     db = context.application.bot_data["db"]
     local_tz = _user_schedule_tz(db, user_id)
     today = datetime.now(local_tz).date()
-    monday = today - timedelta(days=today.weekday())
-    dates = [monday + timedelta(days=i) for i in range(7) if monday + timedelta(days=i) >= today]
+    dates = _remaining_week_dates(today)
     context.user_data["stream_schedule_fix_dates"] = dates
     await query.edit_message_text(
         t("stream_schedule_fix_day_prompt", lang),
