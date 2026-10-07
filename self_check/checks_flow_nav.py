@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from db import open_database
 from i18n import (
     SUPPORTED_LOCALES,
+    t,
     admin_menu,
     admin_other_audience_keyboard,
     admin_type_keyboard,
@@ -3439,6 +3440,23 @@ async def _scenario_ai_clips(db) -> None:
         for b in row
     ]
     cap.assert_turn("other_ai_clips_existing_list")
+
+    # Clips deleted on Twitch must not reappear from the stored job payload.
+    twitch.get_clips_by_ids.return_value = []
+    twitch.get_clips_for_video.return_value = []
+    update, query = _cb_update(_FREE_UID, "ai_clips:vod:1001", cap)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_ai_clips_callback(update, ctx)
+    edited_gone = " ".join(
+        str(c.args[0]) if c.args else str(c.kwargs.get("text") or "")
+        for c in query.edit_message_text.await_args_list
+    )
+    assert "botClip" not in edited_gone and "userClip" not in edited_gone
+    assert edited_gone.strip() == t("ai_clips_existing_empty", "ru")
+    cap.assert_turn("other_ai_clips_existing_deleted")
     _ = FEATURE_ID
 
 

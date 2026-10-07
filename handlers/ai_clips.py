@@ -361,21 +361,19 @@ async def _fetch_live_vod_clips(
     vod_id: str,
     stored: list[CreatedClip],
     started_at: datetime | None,
-) -> list[dict[str, Any]]:
-    """Current Helix clips for a VOD (bot-made + user-made), newest-safe merge."""
+) -> tuple[list[dict[str, Any]], bool]:
+    """Current Helix clips for a VOD (bot-made + user-made).
+
+    Only clips Helix still returns are listed — deleted Twitch clips drop out.
+    ``stored`` is used for ``vod_offset`` fallback when Create Clip From VOD
+    leaves Helix ``vod_offset`` null. Returns ``(clips, helix_ok)``; on total
+    Helix failure the caller may fall back to the stored job payload.
+    """
     by_id: dict[str, dict[str, Any]] = {}
     stored_starts = {
         c.clip_id: _stored_clip_start(c) for c in stored if c.clip_id
     }
-    for c in stored:
-        if not c.clip_id:
-            continue
-        by_id[c.clip_id] = {
-            "id": c.clip_id,
-            "url": c.url or clip_watch_url(c.clip_id),
-            "vod_offset": stored_starts[c.clip_id],
-            "video_id": vod_id,
-        }
+    helix_ok = False
     stored_ids = list(stored_starts)
     if stored_ids:
         try:
@@ -386,6 +384,7 @@ async def _fetch_live_vod_clips(
                 by_id[cid] = _merge_clip_row(
                     row, fallback_start=stored_starts.get(cid)
                 )
+            helix_ok = True
         except Exception:
             logger.warning(
                 "ai_clips get_clips_by_ids failed vod=%s", vod_id, exc_info=True
@@ -403,6 +402,7 @@ async def _fetch_live_vod_clips(
             vod_id,
             started_at=since,
         )
+        helix_ok = True
         for row in live:
             cid = str(row.get("id") or "").strip()
             if not cid:
@@ -425,7 +425,7 @@ async def _fetch_live_vod_clips(
         return (off, str(row.get("created_at") or ""))
 
     clips.sort(key=_sort_key)
-    return clips
+    return clips, helix_ok
 
 
 async def _show_vod_picker(
@@ -745,15 +745,18 @@ async def on_ai_clips_callback(
             started = _parse_rfc3339(done.created_at)
         stored = _clips_from_json(done.clips_json)
         clips: list[dict[str, Any]] = []
+        helix_ok = False
         if broadcaster_id:
-            clips = await _fetch_live_vod_clips(
+            clips, helix_ok = await _fetch_live_vod_clips(
                 twitch,
                 broadcaster_id=broadcaster_id,
                 vod_id=vod_id,
                 stored=stored,
                 started_at=started,
             )
-        if not clips and stored:
+        # Only use the DB payload when Helix could not be queried — never when
+        # Helix answered (including empty: user deleted clips on Twitch).
+        if not clips and stored and not helix_ok:
             clips = [
                 {
                     "id": c.clip_id,
