@@ -37,6 +37,7 @@ from handlers.giveaways import catalog_entry_to_offer, ensure_giveaways_catalog
 from i18n import DEFAULT_LOCALE, btn, igdb_attribution, t
 from igdb_dumps import igdb_image_url
 from request_progress import request_progress
+from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
@@ -394,10 +395,13 @@ async def receive_giveaway_watch_game_text(
             disable_web_page_preview=True,
         )
         return _wz()["GIVEAWAY_WATCH_SEARCH"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
     async with request_progress(
         context.bot, update.effective_chat.id, lang
     ):
-        games = db.igdb_search_games_by_name(query, limit=_SEARCH_LIMIT)
+        games = await asyncio.to_thread(
+            twitch.search_igdb_games, query, limit=_SEARCH_LIMIT
+        )
     if not games:
         await update.effective_message.reply_text(
             t("release_game_not_found", lang),

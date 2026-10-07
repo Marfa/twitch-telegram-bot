@@ -1,6 +1,7 @@
 """Browse IGDB game info from Other menu — search like release alerts, card like releases."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -17,6 +18,7 @@ from handlers.release_watch import (
 )
 from i18n import DEFAULT_LOCALE, btn, t
 from request_progress import request_progress
+from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +101,13 @@ async def receive_game_info_text(
             disable_web_page_preview=True,
         )
         return _wz()["GAME_INFO_SEARCH"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
     async with request_progress(
         context.bot, update.effective_chat.id, lang
     ):
-        games = db.igdb_search_games_by_name(query, limit=_SEARCH_LIMIT)
+        games = await asyncio.to_thread(
+            twitch.search_igdb_games, query, limit=_SEARCH_LIMIT
+        )
     if not games:
         await update.effective_message.reply_text(
             t("release_game_not_found", lang),

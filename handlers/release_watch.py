@@ -32,6 +32,7 @@ from db.models import ReleasePlatformPref, ReleaseWatchPrefs, release_platform_k
 from i18n import DEFAULT_LOCALE, alert_dup_keyboard, btn, t
 from igdb_dumps import igdb_image_url
 from request_progress import request_progress
+from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
@@ -334,10 +335,13 @@ async def receive_release_game_text(
             disable_web_page_preview=True,
         )
         return _wz()["RELEASE_SEARCH"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
     async with request_progress(
         context.bot, update.effective_chat.id, lang
     ):
-        games = db.igdb_search_games_by_name(query, limit=_RELEASE_SEARCH_LIMIT)
+        games = await asyncio.to_thread(
+            twitch.search_igdb_games, query, limit=_RELEASE_SEARCH_LIMIT
+        )
     if not games:
         await update.effective_message.reply_text(
             t("release_game_not_found", lang),
@@ -494,6 +498,18 @@ async def _continue_release_with_game(
     game_id = int(game["id"])
     now = int(time.time())
     all_dates = db.igdb_release_dates_for_game(game_id)
+    if not all_dates:
+        twitch = context.application.bot_data.get("twitch")
+        if twitch is not None:
+            try:
+                all_dates = await asyncio.to_thread(
+                    twitch.igdb_ensure_release_dates, game_id
+                )
+            except Exception:
+                logger.exception(
+                    "IGDB live release_dates fallback failed game_id=%s", game_id
+                )
+                all_dates = []
     future = [r for r in all_dates if int(r["date"]) > now]
     name = str(game["name"])
     summary = str(game.get("summary") or "")

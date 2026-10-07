@@ -147,6 +147,85 @@ def _check_release_search_punct() -> None:
         assert any(h["id"] == 9 for h in hits)
 
 
+def _check_release_search_live_fallback() -> None:
+    """Dump miss → live IGDB search, cache game so pick/igdb_game_by_id works."""
+    from twitch import TwitchClient
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        client = TwitchClient()
+        client.bind_igdb_db(db)
+        assert db.igdb_search_games_by_name("The Conjuring: Unspoken", limit=5) == []
+
+        def _live(_query: str, *, limit: int = 10):
+            return [
+                {
+                    "id": 421960,
+                    "name": "The Conjuring: Unspoken",
+                    "slug": "the-conjuring-unspoken",
+                    "summary": "Horror game",
+                    "first_release_date": None,
+                    "cover_id": 99,
+                    "cover_image_id": "abc",
+                }
+            ][:limit]
+
+        client.igdb_search_games_live = _live  # type: ignore[method-assign]
+        hits = client.search_igdb_games("The Conjuring: Unspoken", limit=5)
+        assert len(hits) == 1
+        assert hits[0]["id"] == 421960
+        cached = db.igdb_game_by_id(421960)
+        assert cached is not None
+        assert cached["name"] == "The Conjuring: Unspoken"
+        assert cached["slug"] == "the-conjuring-unspoken"
+        assert db.igdb_cover_image_id_for_game(421960) == "abc"
+
+        # Local hit must skip live.
+        called = {"n": 0}
+
+        def _live_boom(*_a, **_k):
+            called["n"] += 1
+            raise AssertionError("live must not run when dump hits")
+
+        client.igdb_search_games_live = _live_boom  # type: ignore[method-assign]
+        again = client.search_igdb_games("The Conjuring: Unspoken", limit=5)
+        assert called["n"] == 0
+        assert any(h["id"] == 421960 for h in again)
+
+
+def _check_release_dates_live_fallback() -> None:
+    from twitch import TwitchClient
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        db.igdb_upsert_api_games(
+            [{"id": 7, "name": "Future Game", "slug": "future-game", "summary": ""}]
+        )
+        client = TwitchClient()
+        client.bind_igdb_db(db)
+        assert db.igdb_release_dates_for_game(7) == []
+
+        def _api(endpoint: str, body: str):
+            assert endpoint == "release_dates"
+            assert "game = 7" in body
+            return [
+                {
+                    "id": 7001,
+                    "game": 7,
+                    "platform": {"id": 6, "name": "PC (Microsoft Windows)"},
+                    "date": 2_000_000_000,
+                    "human": "Q1 2033",
+                }
+            ]
+
+        client._igdb_api = _api  # type: ignore[method-assign]
+        rows = client.igdb_ensure_release_dates(7)
+        assert len(rows) == 1
+        assert rows[0]["platform_id"] == 6
+        assert "PC" in rows[0]["platform_name"]
+        assert db.igdb_release_dates_for_game(7)[0]["id"] == 7001
+
+
 def _check_release_search_control_prefix() -> None:
     """'Control' prefers Control* titles (newest first), not Air Control."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -774,6 +853,8 @@ def run() -> None:
     _check_release_pick_disambiguates()
     _check_release_pick_pagination()
     _check_release_search_punct()
+    _check_release_search_live_fallback()
+    _check_release_dates_live_fallback()
     _check_release_search_control_prefix()
     _check_release_search_gta_alias()
     _check_release_search_exact_duplicates()

@@ -8936,6 +8936,122 @@ owner_id, twitch_username, twitch_user_id,
             g.pop("total_rating_count", None)
         return out
 
+    def igdb_upsert_api_games(self, games: list[dict[str, Any]]) -> None:
+        """Cache live-API game hits into dump tables (no deletes)."""
+        game_rows: list[tuple] = []
+        cover_rows: list[tuple] = []
+        for g in games or []:
+            try:
+                gid = int(g.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            name = str(g.get("name") or "").strip()
+            if gid <= 0 or not name:
+                continue
+            frd = g.get("first_release_date")
+            try:
+                first_release = int(frd) if frd is not None else None
+            except (TypeError, ValueError):
+                first_release = None
+            cover_id = g.get("cover_id")
+            try:
+                cover_id_i = int(cover_id) if cover_id is not None else None
+            except (TypeError, ValueError):
+                cover_id_i = None
+            slug = str(g.get("slug") or "").strip()
+            summary = str(g.get("summary") or "").strip()
+            game_rows.append((gid, name, first_release, cover_id_i, summary, slug))
+            image_id = str(g.get("cover_image_id") or "").strip()
+            if cover_id_i and image_id:
+                cover_rows.append((cover_id_i, gid, image_id))
+        if not game_rows:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.executemany(
+                """
+                INSERT INTO igdb_games (
+                    id, name, first_release_date, cover_id, summary, slug
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    first_release_date = COALESCE(
+                        EXCLUDED.first_release_date, igdb_games.first_release_date
+                    ),
+                    cover_id = COALESCE(EXCLUDED.cover_id, igdb_games.cover_id),
+                    summary = CASE
+                        WHEN EXCLUDED.summary != '' THEN EXCLUDED.summary
+                        ELSE igdb_games.summary
+                    END,
+                    slug = CASE
+                        WHEN EXCLUDED.slug != '' THEN EXCLUDED.slug
+                        ELSE igdb_games.slug
+                    END
+                """,
+                game_rows,
+            )
+            if cover_rows:
+                cur.executemany(
+                    """
+                    INSERT INTO igdb_covers (id, game_id, image_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        game_id = EXCLUDED.game_id,
+                        image_id = EXCLUDED.image_id
+                    """,
+                    cover_rows,
+                )
+            conn.commit()
+
+    def igdb_upsert_api_release_dates(self, rows: list[dict[str, Any]]) -> None:
+        """Cache live-API release_dates (+ platform names) without deletes."""
+        date_rows: list[tuple] = []
+        platforms: dict[int, str] = {}
+        for r in rows or []:
+            try:
+                rid = int(r.get("id") or 0)
+                gid = int(r.get("game_id") or 0)
+                date = int(r["date"]) if r.get("date") is not None else None
+            except (TypeError, ValueError, KeyError):
+                continue
+            if rid <= 0 or gid <= 0 or date is None:
+                continue
+            try:
+                platform_id = int(r.get("platform_id") or 0)
+            except (TypeError, ValueError):
+                platform_id = 0
+            human = str(r.get("human") or "").strip()
+            date_rows.append((rid, gid, platform_id, date, human))
+            pname = str(r.get("platform_name") or "").strip()
+            if platform_id > 0 and pname:
+                platforms[platform_id] = pname
+        if not date_rows:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if platforms:
+                cur.executemany(
+                    """
+                    INSERT INTO igdb_platforms (id, name) VALUES (%s, %s)
+                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+                    """,
+                    list(platforms.items()),
+                )
+            cur.executemany(
+                """
+                INSERT INTO igdb_release_dates
+                    (id, game_id, platform_id, date, human)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    game_id = EXCLUDED.game_id,
+                    platform_id = EXCLUDED.platform_id,
+                    date = EXCLUDED.date,
+                    human = EXCLUDED.human
+                """,
+                date_rows,
+            )
+            conn.commit()
+
     def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]:
         gid = int(game_id or 0)
         if gid <= 0:

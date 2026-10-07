@@ -1096,7 +1096,7 @@
   "sub_list_release_platforms": "• Платформы: {platforms}",
   "release_beta_required": "«Выход релизов» временно недоступен.",
   "release_game_prompt": "Введите название игры (поиск по IGDB):\n\nМетаданные игр предоставлены <a href=\"https://www.igdb.com\">IGDB.com</a>",
-  "release_game_not_found": "Игра не найдена в локальной базе IGDB. Попробуйте другое название.",
+  "release_game_not_found": "Игра не найдена в IGDB. Попробуйте другое название.",
   "release_game_pick": "Выберите игру:",
   "release_already_out": "Игра <b>{game}</b> уже вышла в релиз.",
   "release_planned_dates": "Планируемая дата игры <b>{game}</b>:\nВыберите даты/платформы:",

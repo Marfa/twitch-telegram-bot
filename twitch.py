@@ -1892,6 +1892,220 @@ class TwitchClient:
             "Accept": "application/json",
         }
 
+    def _igdb_api(self, endpoint: str, body: str) -> list[Any]:
+        """POST Apicalypse body to api.igdb.com/v4/{endpoint}."""
+        ep = (endpoint or "").strip().strip("/")
+        if not ep:
+            return []
+        resp = self._session.post(
+            f"https://api.igdb.com/v4/{ep}",
+            data=(body or "").encode("utf-8"),
+            headers={
+                **self._igdb_headers(),
+                "Content-Type": "text/plain",
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else []
+
+    @staticmethod
+    def _apicalypse_str(value: str) -> str:
+        return (value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+    @staticmethod
+    def _igdb_slug_from_query(query: str) -> str | None:
+        text = (query or "").strip()
+        if not text:
+            return None
+        m = re.search(
+            r"(?:https?://)?(?:www\.)?igdb\.com/games/([a-z0-9][a-z0-9-]*)",
+            text,
+            re.I,
+        )
+        if m:
+            return m.group(1).lower()
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)+", text, re.I):
+            return text.lower()
+        return None
+
+    def igdb_search_games_live(
+        self, query: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Live IGDB games search (dump miss fallback). Shape matches local hits."""
+        lim = max(1, min(20, int(limit)))
+        q = (query or "").strip()
+        if not q:
+            return []
+        fields = (
+            "fields id,name,slug,summary,first_release_date,"
+            "cover.id,cover.image_id;"
+        )
+        rows: list[Any] = []
+        slug = self._igdb_slug_from_query(q)
+        if slug:
+            body = (
+                f'{fields} where slug = "{self._apicalypse_str(slug)}"; limit 1;'
+            )
+            rows = self._igdb_api("games", body)
+        if not rows:
+            # Strip URL noise so search "https://…/games/foo" is not literal.
+            search_q = q
+            if slug and "igdb.com/games/" in q.lower():
+                search_q = slug.replace("-", " ")
+            body = (
+                f'{fields} search "{self._apicalypse_str(search_q)}"; '
+                f"limit {lim};"
+            )
+            rows = self._igdb_api("games", body)
+        out: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                gid = int(raw.get("id") or 0)
+            except (TypeError, ValueError):
+                gid = 0
+            name = str(raw.get("name") or "").strip()
+            if gid <= 0 or not name:
+                continue
+            cover = raw.get("cover")
+            cover_id: int | None = None
+            cover_image_id: str | None = None
+            if isinstance(cover, dict):
+                try:
+                    cover_id = int(cover["id"]) if cover.get("id") is not None else None
+                except (TypeError, ValueError):
+                    cover_id = None
+                cover_image_id = str(cover.get("image_id") or "").strip() or None
+            elif cover is not None:
+                try:
+                    cover_id = int(cover)
+                except (TypeError, ValueError):
+                    cover_id = None
+            frd = raw.get("first_release_date")
+            try:
+                first_release = int(frd) if frd is not None else None
+            except (TypeError, ValueError):
+                first_release = None
+            out.append(
+                {
+                    "id": gid,
+                    "name": name,
+                    "slug": str(raw.get("slug") or "").strip() or None,
+                    "summary": str(raw.get("summary") or "").strip(),
+                    "first_release_date": first_release,
+                    "cover_id": cover_id,
+                    "cover_image_id": cover_image_id,
+                }
+            )
+            if len(out) >= lim:
+                break
+        return out
+
+    def search_igdb_games(self, query: str, *, limit: int = 5) -> list[dict[str, Any]]:
+        """Local dump search first; live API only when the dump has no hits."""
+        lim = max(1, min(100, int(limit)))
+        db = self._igdb_db
+        if db is not None:
+            try:
+                local = db.igdb_search_games_by_name(query, limit=lim)
+            except Exception:
+                logger.exception("IGDB local game search failed")
+                local = []
+            if local:
+                return local
+        try:
+            live = self.igdb_search_games_live(query, limit=min(lim, 20))
+        except Exception:
+            logger.exception("IGDB live game search failed q=%r", (query or "")[:80])
+            return []
+        if live and db is not None:
+            try:
+                db.igdb_upsert_api_games(live)
+            except Exception:
+                logger.exception("IGDB API game upsert failed")
+        return live
+
+    def igdb_ensure_release_dates(self, game_id: int) -> list[dict[str, Any]]:
+        """Local release_dates, or live fetch + cache when the dump row is missing."""
+        gid = int(game_id or 0)
+        if gid <= 0:
+            return []
+        db = self._igdb_db
+        if db is not None:
+            try:
+                local = db.igdb_release_dates_for_game(gid)
+            except Exception:
+                logger.exception("IGDB local release_dates failed game_id=%s", gid)
+                local = []
+            if local:
+                return local
+        try:
+            body = (
+                "fields id,game,platform,date,human,platform.name; "
+                f"where game = {gid} & date != null; "
+                "sort date asc; limit 100;"
+            )
+            rows = self._igdb_api("release_dates", body)
+        except Exception:
+            logger.exception("IGDB live release_dates failed game_id=%s", gid)
+            return []
+        payload: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                rid = int(raw.get("id") or 0)
+                date = int(raw["date"]) if raw.get("date") is not None else None
+            except (TypeError, ValueError, KeyError):
+                continue
+            if rid <= 0 or date is None:
+                continue
+            plat = raw.get("platform")
+            platform_id = 0
+            platform_name = ""
+            if isinstance(plat, dict):
+                try:
+                    platform_id = int(plat.get("id") or 0)
+                except (TypeError, ValueError):
+                    platform_id = 0
+                platform_name = str(plat.get("name") or "").strip()
+            elif plat is not None:
+                try:
+                    platform_id = int(plat)
+                except (TypeError, ValueError):
+                    platform_id = 0
+            payload.append(
+                {
+                    "id": rid,
+                    "game_id": gid,
+                    "platform_id": platform_id,
+                    "date": date,
+                    "human": str(raw.get("human") or "").strip(),
+                    "platform_name": platform_name,
+                }
+            )
+        if payload and db is not None:
+            try:
+                db.igdb_upsert_api_release_dates(payload)
+                return db.igdb_release_dates_for_game(gid)
+            except Exception:
+                logger.exception("IGDB API release_dates upsert failed game_id=%s", gid)
+        return [
+            {
+                "id": int(r["id"]),
+                "game_id": gid,
+                "platform_id": int(r["platform_id"] or 0),
+                "platform_name": str(r.get("platform_name") or "").strip()
+                or (f"#{r['platform_id']}" if r.get("platform_id") else "—"),
+                "date": int(r["date"]),
+                "human": str(r.get("human") or "").strip(),
+            }
+            for r in payload
+        ]
+
     def random_igdb_game_name(self) -> str:
         """Pick a random main-game title from local IGDB dumps."""
         try:

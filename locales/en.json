@@ -1095,7 +1095,7 @@
   "sub_list_release_platforms": "• Platforms: {platforms}",
   "release_beta_required": "Release alerts are temporarily unavailable.",
   "release_game_prompt": "Enter a game name (IGDB search):\n\nGames metadata is powered by <a href=\"https://www.igdb.com\">IGDB.com</a>",
-  "release_game_not_found": "Game not found in the local IGDB database. Try another name.",
+  "release_game_not_found": "Game not found in IGDB. Try another name.",
   "release_game_pick": "Pick a game:",
   "release_already_out": "Game <b>{game}</b> is already released.",
   "release_planned_dates": "Planned release date for <b>{game}</b>:\nSelect dates/platforms:",
