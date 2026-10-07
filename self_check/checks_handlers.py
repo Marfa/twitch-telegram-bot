@@ -133,9 +133,10 @@ def check_handlers() -> None:
     # Bot API has no getForumTopic; 404 is mapped to PTB InvalidToken.
     assert "getForumTopic" not in bot_src
     # Edit ignore-keywords: single inline Cancel (no reply pulse / no junk carrier).
+    # Stop before category-filter helpers (they sit between ignore start/receive).
     edit_ignore_chunk = subscriptions_src.split(
         "async def start_edit_ignore_keywords", 1
-    )[1].split("async def receive_edit_ignore_keywords", 1)[0]
+    )[1].split("async def start_edit_category_filter", 1)[0]
     assert "as_cancel=True" in edit_ignore_chunk
     assert "_pulse_wizard_keyboard" not in edit_ignore_chunk
     assert "edit_message_reply_markup" not in edit_ignore_chunk
