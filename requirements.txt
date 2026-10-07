@@ -2,7 +2,7 @@ python-telegram-bot[job-queue]==22.8
 requests==2.34.2
 urllib3==2.8.0
 psycopg[binary]==3.3.6
-cryptography==50.0.1
+cryptography==50.0.2
 posthog==7.60.1
 opentelemetry-api==1.45.0
 opentelemetry-sdk==1.45.0
