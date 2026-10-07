@@ -946,7 +946,7 @@
   "advanced_options_hint_image": "• Cover — image or preview on the alert (above or below the text)",
   "advanced_options_hint_strip": "• Clean title — strips streamer mentions and commands from the stream title",
   "advanced_options_hint_ignore": "• Ignore keywords ⭐ — skip the alert if the title or category matches your list",
-  "advanced_options_hint_categories": "• Categories ⭐ — alert only when the streamer is in selected Twitch categories (start or mid-stream switch); several allowed",
+  "advanced_options_hint_categories": "• Categories ⭐ — alert only when the streamer is online in selected Twitch categories; several allowed",
   "advanced_options_hint_delay": "• Delayed send ⭐ — wait N minutes after the event, then send",
   "advanced_options_hint_repeat": "• Repeat mute ⭐ — don’t alert again if the stream restarts quickly",
   "advanced_options_hint_delete": "• Delete previous ⭐ — remove the bot’s last message in the channel/group",

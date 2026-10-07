@@ -1244,7 +1244,7 @@ async def receive_category_filter_text(
 ) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    if is_menu_button(update.effective_message.text or "", lang):
+    if is_menu_button(update.effective_message.text or ""):
         return _wz()["CATEGORY_FILTER"]
     cats = _category_filter_list(context)
     if len(cats) >= CATEGORY_FILTER_MAX:

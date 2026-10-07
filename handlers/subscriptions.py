@@ -3453,7 +3453,7 @@ async def receive_edit_category_filter_text(
 ) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    if is_menu_button(update.effective_message.text or "", lang):
+    if is_menu_button(update.effective_message.text or ""):
         return _sub_states()["EDIT_CATEGORY_FILTER"]
     cats: list[dict[str, str]] = context.user_data.setdefault(
         "category_filter_list", []

@@ -946,7 +946,7 @@
   "advanced_options_hint_image": "• Copertina — immagine o anteprima sull'avviso (sopra o sotto il testo)",
   "advanced_options_hint_strip": "• Titolo pulito — rimuove menzioni dello streamer e comandi dal titolo dello stream",
   "advanced_options_hint_ignore": "• Parole chiave da ignorare ⭐ — salta l'avviso se titolo o categoria corrispondono al tuo elenco",
-  "advanced_options_hint_categories": "• Categorie ⭐ — avvisa solo se lo streamer è in categorie Twitch selezionate (avvio o cambio mid-stream); se ne possono scegliere più di una",
+  "advanced_options_hint_categories": "• Categorie ⭐ — avvisa solo se lo streamer è online in categorie Twitch selezionate; se ne possono scegliere più di una",
   "advanced_options_hint_delay": "• Invio ritardato ⭐ — attendi N minuti dopo l'evento, poi invia",
   "advanced_options_hint_repeat": "• Silenzio ripetizioni ⭐ — non avvisare di nuovo se lo stream riparte subito",
   "advanced_options_hint_delete": "• Elimina precedente ⭐ — rimuove l'ultimo messaggio del bot nel canale/gruppo",
