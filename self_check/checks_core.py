@@ -907,7 +907,13 @@ def check_core() -> None:
             "last_live": {"u1": True, "u2": False},
             "last_streams": {"u1": {"user_login": "x", "thumbnail_url": "t"}},
         }
-    ) == {"u1": {"user_login": "x", "thumbnail_url": "t"}}
+    ) == {
+        "u1": {
+            "user_login": "x",
+            "thumbnail_url": "t",
+            "user_id": "u1",
+        }
+    }
     assert JOB_CHECK_STREAMS == "check_streams"
     assert JOB_STREAM_PREVIEWS == "check_stream_previews"
     import bot as _bot_mod
