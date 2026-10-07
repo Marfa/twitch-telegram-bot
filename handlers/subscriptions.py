@@ -33,16 +33,20 @@ from bot_helpers import (
     with_oauth_legal,
 )
 from db import (
+    CATEGORY_FILTER_MAX,
     CATEGORY_WATCH_DELIVERY_DIGEST,
     CATEGORY_WATCH_DELIVERY_REALTIME,
     Database,
     Subscription,
     TwitchSync,
     category_watch_is_digest,
+    dump_category_filter,
+    has_category_filter,
     is_category_watch_sub,
     is_drops_sub,
     is_giveaway_watch_sub,
     is_release_watch_sub,
+    parse_category_filter,
 )
 from db.models import (
     WatchPrefs,
@@ -63,6 +67,8 @@ from i18n import (
     SCHEDULE_TZ,
     all_wizard_nav_buttons,
     btn,
+    category_filter_nav_keyboard,
+    category_filter_pick_keyboard,
     dest_keyboard,
     dest_label,
     edit_game_options_keyboard,
@@ -104,6 +110,7 @@ _SHARE_BETA_ID = "share-alerts"
 def _sub_states() -> dict[str, int]:
     from bot import (
         DEST_TYPE,
+        EDIT_CATEGORY_FILTER,
         EDIT_CUSTOM_BUTTONS,
         EDIT_IGNORE_KEYWORDS,
         EDIT_MULTISTREAM,
@@ -115,6 +122,7 @@ def _sub_states() -> dict[str, int]:
 
     return {
         "DEST_TYPE": DEST_TYPE,
+        "EDIT_CATEGORY_FILTER": EDIT_CATEGORY_FILTER,
         "EDIT_CUSTOM_BUTTONS": EDIT_CUSTOM_BUTTONS,
         "EDIT_IGNORE_KEYWORDS": EDIT_IGNORE_KEYWORDS,
         "EDIT_MULTISTREAM": EDIT_MULTISTREAM,
@@ -493,6 +501,15 @@ def _format_sub_line(
         settings.append(t_bullet("ignore_keywords_yes_note", lang, keywords=keywords))
     elif sub.use_global_ignore:
         settings.append(t_bullet("ignore_keywords_global_only_note", lang))
+    cats = parse_category_filter(getattr(sub, "category_filter", "") or "")
+    if cats:
+        settings.append(
+            t(
+                "sub_list_category_filter",
+                lang,
+                list=", ".join(html.escape(c["name"]) for c in cats),
+            )
+        )
     is_upcoming = (
         sub.schedule_reminder_minutes > 0
         and not sub.notify_on_live
@@ -2581,6 +2598,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         reset_fields = {
             "ignore_keywords": "",
             "use_global_ignore": False,
+            "category_filter": "",
             "delay_minutes": 0,
             "suppress_repeat_minutes": 0,
             "attach_chat_button": False,
@@ -2596,6 +2614,7 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         needs_reset = (
             bool(sub.ignore_keywords.strip())
             or sub.use_global_ignore
+            or has_category_filter(sub)
             or sub.delay_minutes > 0
             or sub.suppress_repeat_minutes > 0
             or sub.attach_chat_button
@@ -3326,6 +3345,257 @@ async def start_edit_ignore_keywords(
         ),
     )
     return _sub_states()["EDIT_IGNORE_KEYWORDS"]
+
+
+def _edit_category_filter_current_label(raw: str, lang: str) -> str:
+    cats = parse_category_filter(raw)
+    if not cats:
+        return t("edit_category_filter_none", lang)
+    return ", ".join(c["name"] for c in cats)
+
+
+async def start_edit_category_filter(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if not await prem.has_feature(
+        context.bot,
+        db,
+        query.from_user.id,
+        "category_filter",
+        channel=sub.twitch_username,
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(
+            context.bot,
+            query.from_user.id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="edit_category_filter",
+            feature="category_filter",
+        )
+        return ConversationHandler.END
+    cats = parse_category_filter(getattr(sub, "category_filter", "") or "")
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    context.user_data["category_filter_list"] = cats
+    context.user_data["category_filter"] = dump_category_filter(cats)
+    context.user_data.pop("catfilt_candidates", None)
+    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    current = html.escape(_edit_category_filter_current_label(sub.category_filter, lang))
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        query.from_user.id,
+        t(
+            "edit_category_filter_prompt",
+            lang,
+            sub_id=sub_num,
+            current=current,
+            max=CATEGORY_FILTER_MAX,
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=category_filter_nav_keyboard(lang, has_cats=bool(cats)),
+    )
+    return _sub_states()["EDIT_CATEGORY_FILTER"]
+
+
+async def _edit_add_category_filter_cat(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    cat: dict,
+) -> int:
+    cats: list[dict[str, str]] = context.user_data.setdefault(
+        "category_filter_list", []
+    )
+    entry = {"id": str(cat["id"]), "name": str(cat.get("name") or "")}
+    if not any(c["id"] == entry["id"] for c in cats):
+        if len(cats) >= CATEGORY_FILTER_MAX:
+            await update.effective_message.reply_text(
+                t("category_filter_full", lang, max=CATEGORY_FILTER_MAX),
+                reply_markup=category_filter_nav_keyboard(lang, has_cats=True),
+            )
+            return _sub_states()["EDIT_CATEGORY_FILTER"]
+        cats.append(entry)
+    context.user_data.pop("catfilt_candidates", None)
+    context.user_data["category_filter"] = dump_category_filter(cats)
+    await update.effective_message.reply_text(
+        t(
+            "category_filter_added",
+            lang,
+            name=entry["name"],
+            count=len(cats),
+            max=CATEGORY_FILTER_MAX,
+            list=", ".join(c["name"] for c in cats),
+        ),
+        reply_markup=category_filter_nav_keyboard(lang, has_cats=True),
+        parse_mode=ParseMode.HTML,
+    )
+    return _sub_states()["EDIT_CATEGORY_FILTER"]
+
+
+async def receive_edit_category_filter_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    if is_menu_button(update.effective_message.text or "", lang):
+        return _sub_states()["EDIT_CATEGORY_FILTER"]
+    cats: list[dict[str, str]] = context.user_data.setdefault(
+        "category_filter_list", []
+    )
+    if len(cats) >= CATEGORY_FILTER_MAX:
+        await update.effective_message.reply_text(
+            t("category_filter_full", lang, max=CATEGORY_FILTER_MAX),
+            reply_markup=category_filter_nav_keyboard(lang, has_cats=True),
+        )
+        return _sub_states()["EDIT_CATEGORY_FILTER"]
+    query = (update.effective_message.text or "").strip()
+    if not query:
+        return _sub_states()["EDIT_CATEGORY_FILTER"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    try:
+        async with request_progress(
+            context.bot, update.effective_chat.id, lang
+        ):
+            found = await asyncio.to_thread(
+                twitch.search_categories, query, first=20
+            )
+    except Exception:
+        logger.exception("edit category filter search failed")
+        await update.effective_message.reply_text(
+            t("category_filter_not_found", lang, query=query),
+        )
+        return _sub_states()["EDIT_CATEGORY_FILTER"]
+    if not found:
+        await update.effective_message.reply_text(
+            t("category_filter_not_found", lang, query=query),
+        )
+        return _sub_states()["EDIT_CATEGORY_FILTER"]
+    want = query.strip().casefold()
+    exact = [
+        c
+        for c in found
+        if str(c.get("name") or "").strip().casefold() == want
+    ]
+    rest = [
+        c
+        for c in found
+        if str(c.get("name") or "").strip().casefold() != want
+    ]
+    exact.sort(key=lambda c: str(c.get("name") or "").casefold())
+    rest.sort(key=lambda c: str(c.get("name") or "").casefold())
+    if len(exact) >= 5:
+        found = exact[:20]
+    else:
+        found = exact + rest[: max(0, 5 - len(exact))]
+    found.sort(key=lambda c: (str(c.get("name") or "").casefold(), str(c.get("id") or "")))
+    if len(found) == 1:
+        return await _edit_add_category_filter_cat(update, context, lang, found[0])
+    candidates = [
+        {"id": str(c["id"]), "name": str(c.get("name") or "")} for c in found
+    ]
+    context.user_data["catfilt_candidates"] = candidates
+    db: Database = context.application.bot_data["db"]
+    companies = db.igdb_company_labels_for_twitch_uids(
+        [c["id"] for c in candidates]
+    )
+    await update.effective_message.reply_text(
+        t("category_filter_pick", lang),
+        reply_markup=category_filter_pick_keyboard(
+            lang, candidates, companies=companies
+        ),
+    )
+    return _sub_states()["EDIT_CATEGORY_FILTER"]
+
+
+async def receive_edit_category_filter_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = query.data or ""
+    db: Database = context.application.bot_data["db"]
+    user_id = query.from_user.id
+    sub_id = int(context.user_data.get("edit_sub_id") or 0)
+    if data == "catfilt:cancel":
+        context.user_data.clear()
+        await query.edit_message_text(t("cancelled", lang))
+        return ConversationHandler.END
+    if data == "catfilt:back":
+        context.user_data.clear()
+        sub = db.get_subscription(sub_id, user_id) if sub_id else None
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        show_adv = await prem.advanced_mode_on(
+            context.bot, db, user_id, channel=sub.twitch_username
+        )
+        sub_num = _owner_sub_number(db, user_id, sub_id)
+        await query.edit_message_text(
+            _edit_menu_text(
+                lang,
+                sub_id=sub_num,
+                username=sub.twitch_username,
+                show_advanced=show_adv,
+            ),
+            reply_markup=_edit_options_for_sub(
+                sub, lang, show_advanced=show_adv, db=db
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    if data == "catfilt:clear":
+        context.user_data["category_filter_list"] = []
+        context.user_data["category_filter"] = ""
+        context.user_data.pop("catfilt_candidates", None)
+        if sub_id:
+            db.update_subscription(sub_id, user_id, category_filter="")
+        await query.edit_message_text(t("edit_category_filter_cleared", lang))
+        context.user_data.clear()
+        return ConversationHandler.END
+    if data == "catfilt:done":
+        cats = list(context.user_data.get("category_filter_list") or [])
+        raw = dump_category_filter(cats)
+        if sub_id:
+            db.update_subscription(sub_id, user_id, category_filter=raw)
+        try:
+            await query.edit_message_text(
+                t("edit_category_filter_cleared", lang)
+                if not cats
+                else t("edit_category_filter_saved", lang)
+            )
+        except BadRequest:
+            pass
+        context.user_data.clear()
+        return ConversationHandler.END
+    if data.startswith("catfilt:pick:"):
+        try:
+            idx = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            return _sub_states()["EDIT_CATEGORY_FILTER"]
+        candidates = list(context.user_data.get("catfilt_candidates") or [])
+        if idx < 0 or idx >= len(candidates):
+            return _sub_states()["EDIT_CATEGORY_FILTER"]
+        return await _edit_add_category_filter_cat(
+            update, context, lang, candidates[idx]
+        )
+    return _sub_states()["EDIT_CATEGORY_FILTER"]
 
 
 async def start_edit_custom_buttons(
@@ -5179,6 +5449,7 @@ def _add_subscription_from_snapshot(
         schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
         schedule_reminder_configured=bool(snapshot.get("schedule_reminder_configured")),
         ignore_keywords=str(snapshot.get("ignore_keywords") or ""),
+        category_filter=str(snapshot.get("category_filter") or ""),
         use_global_ignore=bool(snapshot.get("use_global_ignore")),
         image_file_id=snapshot.get("image_file_id") or None,
         image_position=str(snapshot.get("image_position") or ""),

@@ -12,7 +12,9 @@ from bot_helpers import _user_notifications_paused
 from db import (
     Database,
     Subscription,
+    category_filter_allows,
     category_watch_is_digest,
+    has_category_filter,
     is_category_watch_sub,
     is_on_notify_cooldown,
     parse_category_watch_prefs,
@@ -95,6 +97,18 @@ async def _should_skip_ignored_alert(
     if meta is None:
         return False
     return should_ignore_igdb_categories(meta, stored)
+
+
+def _should_skip_category_filter(sub: Subscription, game_id: str | int | None) -> bool:
+    """True when allowlist is set and Helix game_id is not in it."""
+    return not category_filter_allows(sub, game_id)
+
+
+def _wants_category_change_alert(sub: Subscription) -> bool:
+    """Category-change type, or live sub with a category allowlist (mid-stream match)."""
+    if sub.notify_on_category_change:
+        return True
+    return bool(sub.notify_on_live) and has_category_filter(sub)
 
 
 def category_watch_cooldown_minutes(sub: Subscription) -> int:
@@ -380,6 +394,8 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
         sub, db, twitch, game, title, stream.get("game_id")
     ):
         return
+    if _should_skip_category_filter(sub, stream.get("game_id")):
+        return
     force_ms = bool(job_data.get("multistream_force"))
     if not force_ms and not await _multistream_gate_ok(sub):
         _schedule_multistream_wait(
@@ -462,7 +478,7 @@ async def _send_delayed_category_notification(
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     sub = db.get_subscription_by_id(sub_id)
-    if not sub or not sub.enabled or not sub.notify_on_category_change:
+    if not sub or not sub.enabled or not _wants_category_change_alert(sub):
         return
 
     try:
@@ -486,6 +502,8 @@ async def _send_delayed_category_notification(
     if await _should_skip_ignored_alert(
         sub, db, twitch, game, title, stream.get("game_id")
     ):
+        return
+    if _should_skip_category_filter(sub, stream.get("game_id")):
         return
     text = _render_sub_template(
         sub, username, game, title, twitch=twitch, stream=stream
@@ -762,6 +780,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         sub, db, twitch, game, title, stream.get("game_id")
                     ):
                         continue
+                    game_id = str(stream.get("game_id") or "").strip()
                     if sub.delay_minutes > 0:
                         # First stream_id arms the delay; further restarts wait until it fires.
                         schedule_delayed_live_notification(
@@ -773,7 +792,10 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         )
                         continue
                     # Helix often returns empty game_name for a few seconds after go-live.
-                    if needs_live_game_recheck(game, sub.delay_minutes):
+                    # With a category allowlist, also wait when game_id is still empty.
+                    if needs_live_game_recheck(game, sub.delay_minutes) or (
+                        has_category_filter(sub) and not game_id
+                    ):
                         schedule_alert_run_once(
                             context.job_queue,
                             _send_delayed_notification,
@@ -788,6 +810,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                             db=db,
                             kind=ALERT_JOB_LIVE_GAME,
                         )
+                        continue
+                    if _should_skip_category_filter(sub, game_id):
                         continue
                     if not await _multistream_gate_ok(sub):
                         _schedule_multistream_wait(
@@ -881,13 +905,15 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 for sub in db.get_enabled_by_twitch_user_id(uid):
                     if is_category_watch_sub(sub):
                         continue
-                    if not sub.notify_on_category_change:
+                    if not _wants_category_change_alert(sub):
                         continue
                     if is_on_notify_cooldown(sub):
                         continue
                     if await _should_skip_ignored_alert(
                         sub, db, twitch, game, title, stream.get("game_id")
                     ):
+                        continue
+                    if _should_skip_category_filter(sub, stream.get("game_id")):
                         continue
                     if sub.delay_minutes > 0:
                         game_id = str(stream.get("game_id") or "")
