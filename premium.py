@@ -53,6 +53,7 @@ ADVANCED_MODE_FEATURE_IDS: frozenset[str] = frozenset(
     {
         "advanced_mode",
         "ignore_keywords",
+        "category_filter",
         "delay",
         "repeat",
         "delete_prev",
@@ -86,6 +87,7 @@ _FEATURE_LABEL_KEYS = {
     "twitch_sync": "premium_feat_twitch_sync",
     "advanced_mode": "premium_feat_advanced_mode",
     "ignore_keywords": "premium_feat_ignore_keywords",
+    "category_filter": "premium_feat_category_filter",
     "delay": "premium_feat_delay",
     "repeat": "premium_feat_repeat",
     "delete_prev": "premium_feat_delete_prev",

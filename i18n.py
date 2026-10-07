@@ -1136,6 +1136,69 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def category_filter_nav_keyboard(
+    lang: str, *, has_cats: bool, show_done: bool = True
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_cats:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("category_filter_clear", lang), callback_data="catfilt:clear"
+                )
+            ]
+        )
+    if show_done:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("category_filter_done", lang), callback_data="catfilt:done"
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(btn("wizard_back", lang), callback_data="catfilt:back"),
+            InlineKeyboardButton(
+                btn("wizard_cancel", lang), callback_data="catfilt:cancel"
+            ),
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def category_filter_pick_keyboard(
+    lang: str,
+    cats: list[dict[str, str]],
+    *,
+    companies: dict[str, str] | None = None,
+) -> InlineKeyboardMarkup:
+    from collections import Counter
+
+    name_counts = Counter(
+        str(c.get("name") or "").strip().casefold()
+        for c in cats
+        if str(c.get("name") or "").strip()
+    )
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, c in enumerate(cats):
+        name = str(c.get("name") or "?").strip() or "?"
+        label = name
+        if name_counts[name.casefold()] > 1:
+            company = (companies or {}).get(str(c.get("id") or ""))
+            if company:
+                label = f"{name} ({company})"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    label[:64],
+                    callback_data=f"catfilt:pick:{i}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
 def advanced_options_keyboard(
     lang: str,
     *,
@@ -1153,6 +1216,7 @@ def advanced_options_keyboard(
     want_schedule_cancel: bool = False,
     want_multistream: bool = False,
     want_top_donations: bool = False,
+    want_categories: bool = False,
     button_style: str = "",
     show_delay: bool = True,
     show_repeat: bool = True,
@@ -1163,6 +1227,7 @@ def advanced_options_keyboard(
     show_schedule_cancel: bool = False,
     show_multistream: bool = False,
     show_top_donations: bool = False,
+    show_categories: bool = False,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER
@@ -1177,6 +1242,7 @@ def advanced_options_keyboard(
         "image": want_image,
         "strip": want_strip,
         "ignore": want_ignore,
+        "categories": want_categories,
         "delay": want_delay,
         "repeat": want_repeat,
         "delete": want_delete,
@@ -1191,6 +1257,7 @@ def advanced_options_keyboard(
         "multistream": want_multistream,
     }
     show = {
+        "categories": show_categories,
         "delay": show_delay,
         "repeat": show_repeat,
         "buttons": show_buttons,
@@ -2837,6 +2904,17 @@ def edit_options_keyboard(
             continue
         if sid == "ignore":
             if show_advanced:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=f"edit_f:{sub_id}:{field}",
+                        )
+                    ]
+                )
+            continue
+        if sid == "categories":
+            if show_advanced and (not is_upcoming) and not notify_on_end:
                 rows.append(
                     [
                         InlineKeyboardButton(

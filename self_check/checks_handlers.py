@@ -930,6 +930,7 @@ def check_handlers() -> None:
         assert "pin_message" not in FEATURE_IDS
         assert "custom_buttons" not in FEATURE_IDS
         assert "custom_buttons" in prem.ADVANCED_MODE_FEATURE_IDS
+        assert "category_filter" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "pin_message" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "stream_video_preview" in prem.ADVANCED_MODE_FEATURE_IDS
         assert "ai_image" in prem.ADVANCED_MODE_FEATURE_IDS
@@ -990,6 +991,7 @@ def check_handlers() -> None:
             "advanced_options_image",
             "advanced_options_strip",
             "advanced_options_ignore",
+            "advanced_options_categories",
             "advanced_options_delay",
             "advanced_options_repeat",
             "advanced_options_delete",
@@ -998,12 +1000,13 @@ def check_handlers() -> None:
         ):
             label = tr(key, "ru")
             assert any(label in text for text in edit_labels), key
-        # Shared block order: image → strip → ignore → delay → repeat → delete → pin → chat
+        # Shared block order: image → strip → ignore → categories → delay → …
         # (+ preview when template has a link — tested separately below)
         idx = {tr(k, "ru"): None for k in (
             "advanced_options_image",
             "advanced_options_strip",
             "advanced_options_ignore",
+            "advanced_options_categories",
             "advanced_options_delay",
             "advanced_options_repeat",
             "advanced_options_delete",
