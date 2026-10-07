@@ -1170,6 +1170,7 @@ async def _scenario_wizard_release_pick_pages(db) -> None:
         receive_release_game_text,
         receive_release_pick,
     )
+    from twitch import TwitchClient
 
     with db._conn() as conn:
         for i in range(12):
@@ -1183,7 +1184,9 @@ async def _scenario_wizard_release_pick_pages(db) -> None:
             )
         conn.commit()
 
-    application, bot = _app(db)
+    twitch = TwitchClient()
+    twitch.bind_igdb_db(db)
+    application, bot = _app(db, twitch=twitch)
     cap = _BotCapture()
     cap.wrap(bot)
 
