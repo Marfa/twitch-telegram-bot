@@ -590,6 +590,7 @@ from handlers.delivery import (
     _resolve_chat_display_name,
     _send_notification,
     _send_test,
+    delete_bot_pin_service_message,
     on_stored_template_typo_fix,
     purge_expired_blocked_users,
     purge_stale_log_tables,
@@ -2469,6 +2470,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(CallbackQueryHandler(on_sb_delete, pattern=r"^sb_delete:\d+$"), group=0)
     app.add_handler(
         ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.PINNED_MESSAGE, delete_bot_pin_service_message
+        ),
         group=0,
     )
     app.add_handler(

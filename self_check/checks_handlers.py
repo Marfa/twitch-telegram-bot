@@ -240,6 +240,8 @@ def check_handlers() -> None:
     assert "admin_refund" not in bot_src_full
     assert "filters.StatusUpdate.REFUNDED_PAYMENT" in bot_src_full
     assert "refunded_premium_payment_router" in bot_src_full
+    assert "filters.StatusUpdate.PINNED_MESSAGE" in bot_src_full
+    assert "delete_bot_pin_service_message" in bot_src_full
     assert "premium_cancel_done" in ph_src
     assert "set_premium_feature_canceled" in ph_src
     assert "clear_premium_feature" not in ph_src.split(

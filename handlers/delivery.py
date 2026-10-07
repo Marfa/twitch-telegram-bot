@@ -1032,6 +1032,49 @@ async def _unpin_one_message(bot, *, chat_id: int, message_id: int) -> bool:
         return False
 
 
+def _is_bot_pin_service_message(msg, bot_id: int, db: Database | None) -> bool:
+    """True when the service message is our alert pin («bot pinned a …»)."""
+    pinned = getattr(msg, "pinned_message", None)
+    if not pinned:
+        return False
+    from_user = getattr(msg, "from_user", None)
+    if from_user is not None and getattr(from_user, "id", None) == bot_id:
+        return True
+    pinned_from = getattr(pinned, "from_user", None)
+    if pinned_from is not None and getattr(pinned_from, "id", None) == bot_id:
+        return True
+    # Channels often omit from_user on the service post; match tracked alert pins.
+    if db is None:
+        return False
+    chat_id = getattr(msg, "chat_id", None)
+    pinned_id = getattr(pinned, "message_id", None)
+    if chat_id is None or pinned_id is None:
+        return False
+    return any(
+        sub.chat_id == chat_id and sub.pinned_message_id == pinned_id
+        for sub in db.get_subs_with_pinned_message()
+    )
+
+
+async def delete_bot_pin_service_message(update, context) -> None:
+    """Remove Telegram's «bot pinned a video/message» service line after we pin."""
+    msg = update.effective_message
+    if not msg or not getattr(msg, "pinned_message", None):
+        return
+    db = context.application.bot_data.get("db")
+    if not _is_bot_pin_service_message(msg, context.bot.id, db):
+        return
+    try:
+        await msg.delete()
+    except (BadRequest, Forbidden) as exc:
+        logger.info(
+            "Cannot delete pin service message %s in %s: %s",
+            msg.message_id,
+            msg.chat_id,
+            exc,
+        )
+
+
 async def _pin_after_send(
     bot, db: Database, sub: Subscription, message_id: int
 ) -> None:

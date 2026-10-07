@@ -1085,11 +1085,13 @@ async def _smoke_premium_and_menus(db) -> None:
 async def _smoke_delivery_and_helpers(db) -> None:
     from bot_helpers import _pulse_wizard_keyboard
     from handlers.delivery import (
+        _is_bot_pin_service_message,
         _is_chat_unreachable_error,
         _is_user_blocked_error,
         _mark_destination_unreachable,
         _resolve_chat_display_name,
         _send_notification,
+        delete_bot_pin_service_message,
     )
     from handlers.notifications import check_schedule_reminders
     from telegram.error import BadRequest, Forbidden
@@ -1106,6 +1108,62 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert "закрыта" in test_fail_user_text(BadRequest("Topic_closed"), "ru").lower()
     assert "closed" in test_fail_user_text(BadRequest("Topic_closed"), "en").lower()
     assert "прав" in test_fail_user_text(Forbidden("no rights"), "ru").lower()
+
+    # Pin service-message cleanup: delete «bot pinned a …» when we pinned.
+    bot_id = 42
+    pinned_content = SimpleNamespace(message_id=100, from_user=SimpleNamespace(id=bot_id))
+    svc_from_bot = SimpleNamespace(
+        pinned_message=pinned_content,
+        from_user=SimpleNamespace(id=bot_id),
+        chat_id=-1001,
+        message_id=101,
+        delete=AsyncMock(),
+    )
+    assert _is_bot_pin_service_message(svc_from_bot, bot_id, db) is True
+    foreign = SimpleNamespace(
+        pinned_message=SimpleNamespace(
+            message_id=200, from_user=SimpleNamespace(id=999)
+        ),
+        from_user=SimpleNamespace(id=999),
+        chat_id=-1001,
+        message_id=201,
+    )
+    assert _is_bot_pin_service_message(foreign, bot_id, db) is False
+    app, bot = _app(db)
+    bot.id = bot_id
+    ctx = _ctx(app)
+    update = MagicMock()
+    update.effective_message = svc_from_bot
+    await delete_bot_pin_service_message(update, ctx)
+    svc_from_bot.delete.assert_awaited_once()
+    update.effective_message = foreign
+    foreign.delete = AsyncMock()
+    await delete_bot_pin_service_message(update, ctx)
+    foreign.delete.assert_not_awaited()
+    # Channel: no from_user on service post — match stored pinned_message_id.
+    pin_chat_id = -1001936914999
+    pin_sub_id = db.add_subscription(
+        _FREE_UID,
+        "streamer",
+        "tw1",
+        "{username} live",
+        "channel",
+        pin_chat_id,
+        None,
+        pin_message=True,
+    )
+    db.set_pinned_message_id(pin_sub_id, 300)
+    channel_svc = SimpleNamespace(
+        pinned_message=SimpleNamespace(message_id=300, from_user=None),
+        from_user=None,
+        chat_id=pin_chat_id,
+        message_id=301,
+        delete=AsyncMock(),
+    )
+    assert _is_bot_pin_service_message(channel_svc, bot_id, db) is True
+    update.effective_message = channel_svc
+    await delete_bot_pin_service_message(update, ctx)
+    channel_svc.delete.assert_awaited_once()
 
     bot = AsyncMock()
     bot.send_message = AsyncMock(side_effect=Forbidden("blocked"))
