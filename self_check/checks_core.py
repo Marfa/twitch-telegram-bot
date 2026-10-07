@@ -221,10 +221,32 @@ def check_core() -> None:
     )
     assert [c.vod_offset for c in skip_existing] == [400]
     assert len(filter_unoccupied([ClipCandidate(90, 1.0, "phrase")], [70])) == 0
-    from ai_clips import groq_asr_ready
+    import os as _os
+    import time as _time
 
+    import ai_clips as _ai_clips_mod
+    from ai_clips import groq_api_ready, groq_asr_ready, groq_rate_limited
+
+    _ai_clips_mod._groq_rate_limited_at = None
     # Without GROQ_API_KEY Groq path is off (no crash).
-    assert groq_asr_ready() is False or bool(__import__("os").environ.get("GROQ_API_KEY"))
+    assert groq_asr_ready() is False or bool(_os.environ.get("GROQ_API_KEY"))
+    _prev_groq = _os.environ.get("GROQ_API_KEY")
+    _os.environ["GROQ_API_KEY"] = "self_check_groq_sticky"
+    try:
+        _ai_clips_mod._mark_groq_rate_limited()
+        assert groq_rate_limited() is True
+        assert groq_api_ready() is False
+        _ai_clips_mod._groq_rate_limited_at = (
+            _time.monotonic() - _ai_clips_mod._GROQ_RATE_LIMIT_STICKY_SEC - 1
+        )
+        assert groq_rate_limited() is False
+        assert groq_api_ready() is True
+    finally:
+        _ai_clips_mod._groq_rate_limited_at = None
+        if _prev_groq is None:
+            _os.environ.pop("GROQ_API_KEY", None)
+        else:
+            _os.environ["GROQ_API_KEY"] = _prev_groq
 
     # Durable AI clips job row survives restart (queued → resumable).
     import tempfile as _tempfile

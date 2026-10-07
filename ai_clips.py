@@ -3,7 +3,8 @@
 Sources (priority): chat phrase clip/клип → Groq emotion (ASR+score>3) →
 Groq gaming chat context → remaining audio RMS → remaining chat spikes.
 Top-10 audio peaks get Whisper + emotion LLM; chat spikes get context LLM.
-If Groq is down/rate-limited, those tiers are skipped and older peaks still fill.
+If Groq is down/rate-limited, those tiers are skipped; HTTP 429 sets a sticky
+24h cooldown before the next Groq attempt.
 Downloads no durable media: streamlink audio_only is piped through ffmpeg to
 PCM, RMS is scored in memory, then temp dirs (if any) are removed in finally.
 ponytail: streamlink/Twitch HLS is the same unofficial path as stream_capture;
@@ -99,6 +100,40 @@ ClipSource = Literal["phrase", "emotion", "game", "audio", "spike"]
 
 class GroqUnavailable(RuntimeError):
     """Rate limit / outage — caller should skip remaining Groq work."""
+
+
+# After Groq HTTP 429, skip Groq for a day (then probe on next job).
+_GROQ_RATE_LIMIT_STICKY_SEC = 24 * 3600
+_groq_rate_limited_at: float | None = None
+_groq_rate_limit_sticky_sec: float = float(_GROQ_RATE_LIMIT_STICKY_SEC)
+
+
+def groq_rate_limited() -> bool:
+    """True while sticky cooldown after Groq 429 is still active."""
+    global _groq_rate_limited_at, _groq_rate_limit_sticky_sec
+    if _groq_rate_limited_at is None:
+        return False
+    if time.monotonic() - _groq_rate_limited_at >= _groq_rate_limit_sticky_sec:
+        _groq_rate_limited_at = None
+        logger.info("Groq rate-limit sticky expired; retrying Groq")
+        return False
+    return True
+
+
+def _mark_groq_rate_limited(*, sticky_sec: float | None = None) -> None:
+    global _groq_rate_limited_at, _groq_rate_limit_sticky_sec
+    _groq_rate_limited_at = time.monotonic()
+    sec = float(
+        sticky_sec if sticky_sec is not None else _GROQ_RATE_LIMIT_STICKY_SEC
+    )
+    _groq_rate_limit_sticky_sec = max(60.0, min(24 * 3600, sec))
+
+
+def _groq_apply_rate_limit_sticky(resp: Any) -> None:
+    """Set sticky from HTTP 429."""
+    if getattr(resp, "status_code", None) != 429:
+        return
+    _mark_groq_rate_limited()
 
 
 @dataclass(frozen=True)
@@ -564,9 +599,14 @@ def groq_api_key() -> str:
     return (os.getenv("GROQ_API_KEY") or "").strip()
 
 
+def groq_api_ready() -> bool:
+    """Groq key present and not in post-429 sticky cooldown."""
+    return bool(groq_api_key()) and not groq_rate_limited()
+
+
 def groq_asr_ready() -> bool:
-    """Groq API key + local streamlink/ffmpeg for short window extract."""
-    return bool(groq_api_key() and ai_clips_ready())
+    """Groq API + streamlink/ffmpeg; respects rate-limit sticky."""
+    return groq_api_ready() and ai_clips_ready()
 
 
 def score_audio_peaks_with_groq(
@@ -645,7 +685,7 @@ def classify_spikes_with_groq(
     """Label chat spikes game|chat. Returns (game candidates, remaining spikes)."""
     if not spikes:
         return [], []
-    if not groq_api_key():
+    if not groq_api_ready():
         return [], list(spikes)
 
     game: list[ClipCandidate] = []
@@ -759,7 +799,15 @@ def _groq_chat(prompt: str, *, max_tokens: int = 16) -> str:
         },
         timeout=60,
     )
-    if resp.status_code == 429 or resp.status_code >= 500:
+    if resp.status_code == 429:
+        _groq_apply_rate_limit_sticky(resp)
+        logger.warning(
+            "ai_clips groq chat HTTP 429 body=%s sticky_sec=%s",
+            (resp.text or "")[:200],
+            _groq_rate_limit_sticky_sec,
+        )
+        raise GroqUnavailable("http_429")
+    if resp.status_code >= 500:
         logger.warning(
             "ai_clips groq chat HTTP %s body=%s",
             resp.status_code,
@@ -895,7 +943,15 @@ def _groq_transcribe(audio_path: Path) -> str:
             },
             timeout=120,
         )
-    if resp.status_code == 429 or resp.status_code >= 500:
+    if resp.status_code == 429:
+        _groq_apply_rate_limit_sticky(resp)
+        logger.warning(
+            "ai_clips groq STT HTTP 429 body=%s sticky_sec=%s",
+            (resp.text or "")[:200],
+            _groq_rate_limit_sticky_sec,
+        )
+        raise GroqUnavailable("http_429")
+    if resp.status_code >= 500:
         logger.warning(
             "ai_clips groq STT HTTP %s body=%s",
             resp.status_code,

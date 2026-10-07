@@ -37,7 +37,7 @@ from ai_clips import (
     find_message_spikes,
     find_phrase_peaks,
     format_clip_timecode,
-    groq_api_key,
+    groq_api_ready,
     groq_asr_ready,
     helix_vod_clip_starts,
     merge_clip_candidates,
@@ -1140,7 +1140,7 @@ async def _run_job(
             game_peaks: list[ClipCandidate] = []
             remain_audio: list[LoudPeak] = list(audio_peaks)
             remain_spikes: list[ClipCandidate] = list(spikes)
-            if groq_api_key():
+            if groq_api_ready():
                 db.update_ai_clips_job(
                     job_id, status="analyzing", progress_pct=88
                 )
