@@ -2025,6 +2025,30 @@ def check_db_premium() -> None:
     assert peek_premium_attribution(ctx, 42) == {}
     assert take_premium_attribution(ctx, 42) == {}
 
+    with tempfile.TemporaryDirectory() as attr_tmp:
+        attr_db = SqliteDatabase(Path(attr_tmp) / "attr.db")
+        attr_app = SimpleNamespace(bot_data={"db": attr_db})
+        attr_ctx = SimpleNamespace(application=attr_app)
+        remember_premium_attribution(
+            attr_ctx, 77, source="premium_gate", feature="alert_types"
+        )
+        assert attr_db.get_premium_pay_attribution(77) == {
+            "source": "premium_gate",
+            "feature": "alert_types",
+        }
+        # Simulate bot restart: in-memory store gone, DB still has the row.
+        attr_app.bot_data = {"db": attr_db}
+        assert peek_premium_attribution(attr_ctx, 77) == {
+            "source": "premium_gate",
+            "feature": "alert_types",
+        }
+        assert take_premium_attribution(attr_ctx, 77) == {
+            "source": "premium_gate",
+            "feature": "alert_types",
+        }
+        assert peek_premium_attribution(attr_ctx, 77) == {}
+        assert attr_db.get_premium_pay_attribution(77) is None
+
     from premium_handlers import _attribution_for_payment
 
     invoice_only = parse_invoice_payload(

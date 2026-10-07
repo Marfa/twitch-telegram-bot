@@ -668,6 +668,9 @@ class PostgresDatabase:
                 "premium_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
                 "premium_features TEXT NOT NULL DEFAULT ''",
                 "premium_refund_surcharge TEXT NOT NULL DEFAULT ''",
+                "premium_attr_source TEXT NOT NULL DEFAULT ''",
+                "premium_attr_feature TEXT NOT NULL DEFAULT ''",
+                "premium_attr_at BIGINT NOT NULL DEFAULT 0",
                 "advanced_mode INTEGER",
                 "message_draft INTEGER",
                 "notifications_paused_until BIGINT NOT NULL DEFAULT 0",
@@ -2698,6 +2701,81 @@ owner_id, twitch_username, twitch_user_id,
                     premium_refund_surcharge = EXCLUDED.premium_refund_surcharge
                 """,
                 (int(user_id), blob),
+            )
+
+    _PREMIUM_PAY_ATTR_TTL_SEC = 24 * 3600
+
+    def set_premium_pay_attribution(
+        self, user_id: int, source: str, feature: str = ""
+    ) -> None:
+        src = str(source or "").strip()
+        if not src:
+            return
+        import time
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (
+                    user_id, premium_attr_source, premium_attr_feature, premium_attr_at
+                )
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    premium_attr_source = EXCLUDED.premium_attr_source,
+                    premium_attr_feature = EXCLUDED.premium_attr_feature,
+                    premium_attr_at = EXCLUDED.premium_attr_at
+                """,
+                (
+                    int(user_id),
+                    src,
+                    str(feature or "").strip(),
+                    int(time.time()),
+                ),
+            )
+
+    def get_premium_pay_attribution(self, user_id: int) -> dict[str, str] | None:
+        import time
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT COALESCE(premium_attr_source, '') AS premium_attr_source,
+                       COALESCE(premium_attr_feature, '') AS premium_attr_feature,
+                       COALESCE(premium_attr_at, 0) AS premium_attr_at
+                FROM users WHERE user_id = %s
+                """,
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        source = str(row["premium_attr_source"] or "").strip()
+        if not source:
+            return None
+        at = int(row["premium_attr_at"] or 0)
+        if at and (time.time() - at) > self._PREMIUM_PAY_ATTR_TTL_SEC:
+            self.clear_premium_pay_attribution(user_id)
+            return None
+        out: dict[str, str] = {"source": source}
+        feature = str(row["premium_attr_feature"] or "").strip()
+        if feature:
+            out["feature"] = feature
+        return out
+
+    def clear_premium_pay_attribution(self, user_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users
+                SET premium_attr_source = '',
+                    premium_attr_feature = '',
+                    premium_attr_at = 0
+                WHERE user_id = %s
+                """,
+                (int(user_id),),
             )
 
     def list_undigested_premium_purchases(self) -> list[PremiumPurchase]:

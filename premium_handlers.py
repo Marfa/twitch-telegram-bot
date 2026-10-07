@@ -63,8 +63,22 @@ async def _cancel_telegram_star_subscription(
 
 
 # Survives ConversationHandler user_data.clear() (gate → get Premium).
+# Mirrored to users.premium_attr_* so Pay after bot restart still has source.
 _PREMIUM_ATTR_STORE = "premium_attribution"
 _PREMIUM_ATTR_TTL_SEC = 24 * 3600
+
+
+def _premium_attr_db(context: ContextTypes.DEFAULT_TYPE) -> Database | None:
+    db = (context.application.bot_data or {}).get("db")
+    return db if db is not None else None
+
+
+def _premium_attr_props(source: str, feature: str = "") -> dict[str, str]:
+    out = {"source": source}
+    feat = str(feature or "").strip()
+    if feat:
+        out["feature"] = feat
+    return out
 
 
 def remember_premium_attribution(
@@ -78,33 +92,46 @@ def remember_premium_attribution(
     src = str(source or "").strip()
     if not src:
         return
+    feat = str(feature or "").strip()
     store = context.application.bot_data.setdefault(_PREMIUM_ATTR_STORE, {})
     store[int(user_id)] = {
         "source": src,
-        "feature": str(feature or "").strip(),
+        "feature": feat,
         "at": time.time(),
     }
+    db = _premium_attr_db(context)
+    if db is not None:
+        db.set_premium_pay_attribution(int(user_id), src, feat)
 
 
 def peek_premium_attribution(
     context: ContextTypes.DEFAULT_TYPE, user_id: int
 ) -> dict[str, str]:
+    uid = int(user_id)
     store = context.application.bot_data.get(_PREMIUM_ATTR_STORE) or {}
-    raw = store.get(int(user_id))
-    if not isinstance(raw, dict):
+    raw = store.get(uid)
+    if isinstance(raw, dict):
+        at = float(raw.get("at") or 0)
+        if at and (time.time() - at) > _PREMIUM_ATTR_TTL_SEC:
+            store.pop(uid, None)
+        else:
+            source = str(raw.get("source") or "").strip()
+            if source:
+                return _premium_attr_props(source, str(raw.get("feature") or ""))
+            store.pop(uid, None)
+    db = _premium_attr_db(context)
+    if db is None:
         return {}
-    at = float(raw.get("at") or 0)
-    if at and (time.time() - at) > _PREMIUM_ATTR_TTL_SEC:
-        store.pop(int(user_id), None)
+    persisted = db.get_premium_pay_attribution(uid)
+    if not persisted:
         return {}
-    source = str(raw.get("source") or "").strip()
+    source = str(persisted.get("source") or "").strip()
     if not source:
         return {}
-    feature = str(raw.get("feature") or "").strip()
-    out = {"source": source}
-    if feature:
-        out["feature"] = feature
-    return out
+    feat = str(persisted.get("feature") or "").strip()
+    store = context.application.bot_data.setdefault(_PREMIUM_ATTR_STORE, {})
+    store[uid] = {"source": source, "feature": feat, "at": time.time()}
+    return _premium_attr_props(source, feat)
 
 
 def take_premium_attribution(
@@ -114,6 +141,9 @@ def take_premium_attribution(
     store = context.application.bot_data.get(_PREMIUM_ATTR_STORE)
     if isinstance(store, dict):
         store.pop(int(user_id), None)
+    db = _premium_attr_db(context)
+    if db is not None:
+        db.clear_premium_pay_attribution(int(user_id))
     return props
 
 
