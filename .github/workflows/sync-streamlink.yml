@@ -1,0 +1,75 @@
+name: Sync streamlink
+
+on:
+  schedule:
+    # Mondays 07:00 UTC (same cadence as ghost-text-prepper vendor sync)
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Bump streamlink pin from PyPI
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          code=0
+          python scripts/sync_streamlink.py || code=$?
+          if [ "$code" -eq 2 ]; then
+            echo "already up to date"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
+          version=$(grep -E '^streamlink==' requirements.txt | cut -d= -f3)
+          pip install -r requirements.txt
+          python -c "import streamlink; assert streamlink.__version__ == '${version}', streamlink.__version__"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.sync.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="chore/sync-streamlink-${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add requirements.txt
+          git status --short
+          git commit -m "chore: sync streamlink to ${VERSION}"
+          git push -u origin HEAD:"$branch" --force
+          existing=$(gh pr list --head "$branch" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "PR #${existing} already open for ${branch}"
+            exit 0
+          fi
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore: sync streamlink to ${VERSION}" \
+            --body "## Summary
+          - Auto-bump \`streamlink\` pin in \`requirements.txt\` to [\`${VERSION}\`](https://pypi.org/project/streamlink/${VERSION}/) (upstream [streamlink/streamlink](https://github.com/streamlink/streamlink)).
+          - Weekly Cron: \`.github/workflows/sync-streamlink.yml\`.
+
+          ## Test plan
+          - [ ] CI Security (\`pip-audit\`) / self-check green
+          - [ ] Spot-check stream preview capture after deploy"
