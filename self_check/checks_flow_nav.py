@@ -3243,9 +3243,11 @@ async def _scenario_ai_clips(db) -> None:
             "id": str(1000 + i),
             "title": f"Test VOD {i}",
             "duration": "1h0m0s",
+            "stream_id": f"sid-{1000 + i}",
         }
         for i in range(1, 12)
     ]
+    twitch.get_live_streams.return_value = {}
     db.upsert_twitch_sync(
         _FREE_UID,
         twitch_user_id="42",
@@ -3309,6 +3311,55 @@ async def _scenario_ai_clips(db) -> None:
             await poll_ai_clips_auto(poll_ctx)
     assert db.count_active_ai_clips_jobs() == 0
     assert db.get_ai_clips_auto(_FREE_UID).last_vod_id == "1001"
+
+    # While live, the new archive matching stream_id must not be enqueued.
+    twitch.get_videos_by_user.return_value = [
+        {
+            "id": "2001",
+            "title": "Live now",
+            "duration": "5m0s",
+            "stream_id": "live-sid",
+        },
+        {
+            "id": "1001",
+            "title": "Test VOD 1",
+            "duration": "1h0m0s",
+            "stream_id": "sid-1001",
+        },
+    ]
+    twitch.get_live_streams.return_value = {"42": {"id": "live-sid"}}
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        with patch("handlers.ai_clips.ai_clips_ready", return_value=True):
+            with patch(
+                "handlers.ai_clips._run_job",
+                new=AsyncMock(),
+            ):
+                await poll_ai_clips_auto(poll_ctx)
+    assert db.count_active_ai_clips_jobs() == 0
+    assert db.get_ai_clips_auto(_FREE_UID).last_vod_id == "1001"
+
+    # After the stream ends, the same VOD becomes eligible.
+    twitch.get_live_streams.return_value = {}
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        with patch("handlers.ai_clips.ai_clips_ready", return_value=True):
+            with patch(
+                "handlers.ai_clips._run_job",
+                new=AsyncMock(),
+            ) as run_job:
+                await poll_ai_clips_auto(poll_ctx)
+    assert db.count_active_ai_clips_jobs() == 1
+    assert db.get_ai_clips_auto(_FREE_UID).last_vod_id == "2001"
+    run_job.assert_called_once()
+    # Mark done so later picker steps are not blocked by an active job.
+    active = db.get_active_ai_clips_job(_FREE_UID)
+    assert active is not None and active.vod_id == "2001"
+    db.update_ai_clips_job(active.id, status="done", progress_pct=100)
 
     update, query = _cb_update(_FREE_UID, "ai_clips:page:1", cap)
     await on_ai_clips_callback(update, ctx)

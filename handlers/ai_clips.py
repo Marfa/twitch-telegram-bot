@@ -231,9 +231,32 @@ def _archive_videos(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "title": str(v.get("title") or vid),
                 "duration": str(v.get("duration") or ""),
                 "created_at": str(v.get("created_at") or ""),
+                "stream_id": str(v.get("stream_id") or "").strip(),
             }
         )
     return out
+
+
+def _archives_excluding_live_recording(
+    archives: list[dict[str, Any]],
+    live_stream: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Drop the in-progress archive while the channel is live.
+
+    Twitch creates an archive VOD at stream start; Helix ``stream_id`` matches
+    the live stream ``id``. Auto clips must wait until the stream ends.
+    """
+    if not archives or not live_stream:
+        return archives
+    live_sid = str(live_stream.get("id") or "").strip()
+    if live_sid:
+        filtered = [
+            v for v in archives if str(v.get("stream_id") or "").strip() != live_sid
+        ]
+        if len(filtered) < len(archives):
+            return filtered
+    # Fallback when Helix omits stream_id: newest archive is the recording.
+    return archives[1:]
 
 
 def _parse_rfc3339(raw: str) -> datetime | None:
@@ -1327,14 +1350,30 @@ async def poll_ai_clips_auto(context: ContextTypes.DEFAULT_TYPE) -> None:
         archives = _archive_videos(videos)
         if not archives:
             continue
+        live_stream: dict[str, Any] | None = None
+        try:
+            live_map = await asyncio.to_thread(
+                twitch.get_live_streams, [channel_id]
+            )
+            live_stream = live_map.get(channel_id)
+        except Exception:
+            logger.warning(
+                "ai_clips auto live check failed owner=%s", owner_id, exc_info=True
+            )
+            # Fail closed: treat as live so we never clip a still-recording VOD.
+            live_stream = {"id": ""}
+        ready = _archives_excluding_live_recording(archives, live_stream)
+        if not ready:
+            continue
         last = (pref.last_vod_id or "").strip()
         if not last:
+            # Baseline to newest *ready* archive (not the live recording).
             db.update_ai_clips_auto_last_vod(
-                owner_id, last_vod_id=str(archives[0]["id"])
+                owner_id, last_vod_id=str(ready[0]["id"])
             )
             continue
         newer: list[dict[str, Any]] = []
-        for v in archives:
+        for v in ready:
             if str(v["id"]) == last:
                 break
             newer.append(v)
