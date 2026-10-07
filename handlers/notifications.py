@@ -1496,6 +1496,17 @@ def build_stream_poll_snapshot(bot_data: dict) -> dict:
     last_games = bot_data.get("last_games") or {}
     last_game_names = bot_data.get("last_game_names") or {}
     last_streams = bot_data.get("last_streams") or {}
+    refresh_at = bot_data.get("stream_preview_refresh_at") or {}
+    preview_refresh_at: dict[str, float] = {}
+    if isinstance(refresh_at, dict):
+        for k, v in refresh_at.items():
+            try:
+                sid = int(k)
+                ts = float(v)
+            except (TypeError, ValueError):
+                continue
+            if sid > 0 and ts > 0:
+                preview_refresh_at[str(sid)] = ts
     return {
         "last_live": {str(k): bool(v) for k, v in last_live.items()},
         "last_stream_ids": {str(k): str(v or "") for k, v in last_stream_ids.items()},
@@ -1504,6 +1515,8 @@ def build_stream_poll_snapshot(bot_data: dict) -> dict:
         "last_streams": {
             str(k): dict(v) for k, v in last_streams.items() if isinstance(v, dict)
         },
+        # Keep 30-min preview cadence across deploys (missing → due immediately).
+        "stream_preview_refresh_at": preview_refresh_at,
     }
 
 
@@ -1515,6 +1528,7 @@ def apply_stream_poll_snapshot(bot_data: dict, payload: dict | None) -> bool:
         bot_data["last_games"] = {}
         bot_data["last_game_names"] = {}
         bot_data["last_streams"] = {}
+        bot_data["stream_preview_refresh_at"] = {}
         bot_data["last_live_primed"] = False
         return False
     raw_live = payload.get("last_live")
@@ -1551,11 +1565,23 @@ def apply_stream_poll_snapshot(bot_data: dict, payload: dict | None) -> bool:
         if isinstance(raw_streams, dict)
         else {}
     )
+    raw_refresh = payload.get("stream_preview_refresh_at")
+    preview_refresh_at: dict[int, float] = {}
+    if isinstance(raw_refresh, dict):
+        for k, v in raw_refresh.items():
+            try:
+                sid = int(k)
+                ts = float(v)
+            except (TypeError, ValueError):
+                continue
+            if sid > 0 and ts > 0:
+                preview_refresh_at[sid] = ts
     bot_data["last_live"] = last_live
     bot_data["last_stream_ids"] = last_stream_ids
     bot_data["last_games"] = last_games
     bot_data["last_game_names"] = last_game_names
     bot_data["last_streams"] = last_streams
+    bot_data["stream_preview_refresh_at"] = preview_refresh_at
     primed = bool(last_live or last_stream_ids or last_games or last_streams)
     bot_data["last_live_primed"] = primed
     return primed

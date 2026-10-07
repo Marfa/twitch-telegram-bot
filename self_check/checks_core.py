@@ -1925,7 +1925,9 @@ def check_core() -> None:
         from db import open_database
 
         snap_db = open_database(Path(tmp) / "poll_snap.db", None)
+        restored["stream_preview_refresh_at"] = {42: 1_700_000_000.5}
         payload = build_stream_poll_snapshot(restored)
+        assert payload["stream_preview_refresh_at"]["42"] == 1_700_000_000.5
         snap_db.set_stream_poll_snapshot(payload)
         loaded = snap_db.get_stream_poll_snapshot()
         assert loaded is not None
@@ -1934,7 +1936,54 @@ def check_core() -> None:
         assert roundtrip["last_live"] == restored["last_live"]
         assert roundtrip["last_stream_ids"] == restored["last_stream_ids"]
         assert roundtrip["last_streams"]["1"]["user_login"] == "a"
+        assert roundtrip["stream_preview_refresh_at"] == {42: 1_700_000_000.5}
         assert apply_stream_poll_snapshot({}, None) is False
+        empty_bd: dict = {"stream_preview_refresh_at": {1: 1.0}}
+        assert apply_stream_poll_snapshot(empty_bd, None) is False
+        assert empty_bd.get("stream_preview_refresh_at") == {}
+
+    # After restart: restored live map + refresh_at → preview job still sees the stream.
+    from handlers.stream_preview import (
+        live_streams_from_poll_snapshot as _live_from_snap,
+        preview_active_twitch_user_ids as _preview_uids,
+    )
+
+    restarted_bd = {
+        "last_live": {"9": True, "8": False},
+        "last_streams": {
+            "9": {"user_login": "stilllive", "thumbnail_url": "https://t/{width}x{height}.jpg"}
+        },
+        "stream_preview_refresh_at": {77: 1_700_000_100.0},
+    }
+    assert _live_from_snap(restarted_bd)["9"]["user_login"] == "stilllive"
+    assert _live_from_snap(restarted_bd)["9"]["user_id"] == "9"
+    assert apply_stream_poll_snapshot(
+        {},
+        {
+            "last_live": restarted_bd["last_live"],
+            "last_streams": restarted_bd["last_streams"],
+            "stream_preview_refresh_at": {"77": 1_700_000_100.0},
+        },
+    )
+    # Empty poll maps: Helix fallback helper still finds tracked preview mids.
+    class _PreviewDb:
+        def get_unique_twitch_user_ids(self):
+            return ["9", "8"]
+
+        def get_enabled_by_twitch_user_id(self, uid: str):
+            from types import SimpleNamespace
+            from twitch import STREAM_PREVIEW_IMAGE_ID
+
+            if uid != "9":
+                return []
+            return [
+                SimpleNamespace(
+                    last_message_id=55,
+                    image_file_id=STREAM_PREVIEW_IMAGE_ID,
+                )
+            ]
+
+    assert _preview_uids(_PreviewDb()) == ["9"]
 
     assert needs_live_game_recheck("", 0) is True
     assert needs_live_game_recheck("   ", 0) is True

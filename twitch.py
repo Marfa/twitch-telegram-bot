@@ -2778,6 +2778,7 @@ _TEMPLATE_PLACEHOLDERS = (
     "youtube_status",
 )
 _STREAM_SNAPSHOT_KEYS = (
+    "user_id",
     "user_login",
     "user_name",
     "game_id",

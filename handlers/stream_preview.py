@@ -245,7 +245,29 @@ def live_streams_from_poll_snapshot(bot_data: dict[str, Any]) -> dict[str, dict]
             continue
         snap = last_streams.get(uid)
         if isinstance(snap, dict) and snap:
-            out[str(uid)] = snap
+            row = dict(snap)
+            # stream_end_snapshot omits user_id; restore it from the map key.
+            if not str(row.get("user_id") or "").strip():
+                row["user_id"] = str(uid)
+            out[str(uid)] = row
+    return out
+
+
+def preview_active_twitch_user_ids(db: Database) -> list[str]:
+    """Broadcasters with an enabled stream-preview alert that still has a tracked mid."""
+    out: list[str] = []
+    for uid in db.get_unique_twitch_user_ids():
+        uid_s = str(uid or "").strip()
+        if not uid_s:
+            continue
+        for sub in db.get_enabled_by_twitch_user_id(uid_s):
+            if not sub.last_message_id:
+                continue
+            if is_stream_preview_image(sub.image_file_id) or is_stream_capture_preview_image(
+                sub.image_file_id
+            ):
+                out.append(uid_s)
+                break
     return out
 
 
@@ -265,14 +287,30 @@ async def check_stream_previews(context) -> None:
 
     Video MP4 capture alone is ~30s+ per streamer; running it inside check_streams
     made that job overrun its interval and skip ticks (max_instances=1).
+
+    Prefer the restored poll snapshot (survives bot restart). If it has no live
+    rows yet — e.g. empty last_streams after a cold start — fall back to Helix
+    for streamers that still have a tracked preview message.
     """
     started = time.monotonic()
     bot_data = context.application.bot_data
-    live_streams = live_streams_from_poll_snapshot(bot_data)
-    if not live_streams:
-        return
     db: Database = bot_data["db"]
     twitch: TwitchClient = bot_data["twitch"]
+    live_streams = live_streams_from_poll_snapshot(bot_data)
+    if not live_streams:
+        uids = preview_active_twitch_user_ids(db)
+        if uids:
+            try:
+                live_streams = await asyncio.to_thread(
+                    twitch.get_live_streams, uids
+                )
+            except Exception:
+                logger.warning(
+                    "stream preview Helix fallback failed", exc_info=True
+                )
+                return
+    if not live_streams:
+        return
     kinds: set[str] = set()
     try:
         kinds = await refresh_live_stream_previews(
@@ -283,6 +321,15 @@ async def check_stream_previews(context) -> None:
             bot_data,
         )
     finally:
+        # Persist refresh timestamps so a deploy mid-stream keeps the 30-min cadence.
+        try:
+            from handlers.notifications import persist_stream_poll_snapshot
+
+            persist_stream_poll_snapshot(db, bot_data)
+        except Exception:
+            logger.warning(
+                "stream preview snapshot persist failed", exc_info=True
+            )
         elapsed = time.monotonic() - started
         label = "+".join(sorted(kinds)) if kinds else "idle"
         # Captures are expected to be long; warn so PostHog still sees backlog here.
