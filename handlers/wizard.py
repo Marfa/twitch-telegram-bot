@@ -26,6 +26,11 @@ from bot_helpers import (
     reply_chat_id,
 )
 from db import Database, Subscription
+from db.models import (
+    CATEGORY_FILTER_MAX,
+    dump_category_filter,
+    parse_category_filter,
+)
 from handlers.watch import (
     _go_watch_categories_prompt,
     _go_watch_filters_prompt,
@@ -41,6 +46,8 @@ from i18n import (
     all_btn_texts,
     all_wizard_nav_buttons,
     broadcast_menu,
+    category_filter_nav_keyboard,
+    category_filter_pick_keyboard,
     channel_dup_keyboard,
     chat_button_keyboard,
     delay_keyboard,
@@ -114,6 +121,8 @@ def _wz() -> dict[str, int]:
         DELETE_SIBLING_ALERTS,
         DEST_CHAT,
         DEST_TYPE,
+        CATEGORY_FILTER,
+        EDIT_CATEGORY_FILTER,
         EDIT_IGNORE_KEYWORDS,
         EDIT_TEMPLATE,
         IGNORE_KEYWORDS,
@@ -151,12 +160,14 @@ def _wz() -> dict[str, int]:
         "CHAT_BUTTON_ASK": CHAT_BUTTON_ASK,
         "CUSTOM_BUTTONS": CUSTOM_BUTTONS,
         "MULTISTREAM": MULTISTREAM,
+        "CATEGORY_FILTER": CATEGORY_FILTER,
         "DELAY_MINUTES": DELAY_MINUTES,
         "DELAY_SEND": DELAY_SEND,
         "DELETE_OLD": DELETE_OLD,
         "DELETE_SIBLING_ALERTS": DELETE_SIBLING_ALERTS,
         "DEST_CHAT": DEST_CHAT,
         "DEST_TYPE": DEST_TYPE,
+        "EDIT_CATEGORY_FILTER": EDIT_CATEGORY_FILTER,
         "EDIT_IGNORE_KEYWORDS": EDIT_IGNORE_KEYWORDS,
         "EDIT_TEMPLATE": EDIT_TEMPLATE,
         "IGNORE_KEYWORDS": IGNORE_KEYWORDS,
@@ -416,6 +427,7 @@ _GATE_FEATURE_LABEL = {
     "alert_types": "premium_feat_alert_types",
     "sync": "premium_feat_twitch_sync",
     "ignore_keywords": "premium_feat_ignore_keywords",
+    "category_filter": "premium_feat_category_filter",
     "delay": "premium_feat_delay",
     "repeat": "premium_feat_repeat",
     "delete_old": "premium_feat_delete_prev",
@@ -476,6 +488,11 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.user_data["ignore_keywords"] = ""
         context.user_data["use_global_ignore"] = False
         return await _go_after_ignore_keywords(update, context, lang)
+    if feature == "category_filter":
+        context.user_data["category_filter"] = ""
+        context.user_data["category_filter_list"] = []
+        context.user_data["adv_want_categories"] = False
+        return await _go_ignore_keywords_prompt(update, context, lang)
     if feature == "delay":
         context.user_data["delay_minutes"] = 0
         return await _continue_after_delay(update, context, lang)
@@ -1104,11 +1121,12 @@ async def _go_after_image_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     """After image upload/skip: continue wizard (Extras already done)."""
-    return await _go_ignore_keywords_prompt(update, context, lang)
+    return await _go_category_filter_prompt(update, context, lang)
 
 
 _ADVOPT_FEATURE = {
     "ignore": "ignore_keywords",
+    "categories": "category_filter",
     "delay": "delay",
     "repeat": "repeat",
     "delete": "delete_prev",
@@ -1117,6 +1135,230 @@ _ADVOPT_FEATURE = {
     "schedule_cancel": "schedule_cancel",
     "multistream": "multistream",
 }
+
+
+def _show_category_filter_option(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    alert = context.user_data.get("alert_type")
+    return alert in (None, "", "live", "category")
+
+
+def _category_filter_list(context: ContextTypes.DEFAULT_TYPE) -> list[dict[str, str]]:
+    cats = context.user_data.get("category_filter_list")
+    if isinstance(cats, list):
+        return cats  # type: ignore[return-value]
+    parsed = parse_category_filter(str(context.user_data.get("category_filter") or ""))
+    context.user_data["category_filter_list"] = parsed
+    return parsed
+
+
+def _persist_category_filter_ud(context: ContextTypes.DEFAULT_TYPE) -> None:
+    cats = _category_filter_list(context)
+    context.user_data["category_filter"] = dump_category_filter(cats)
+    context.user_data["category_filter_list"] = cats
+
+
+async def _go_category_filter_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if not _show_category_filter_option(context):
+        context.user_data["category_filter"] = ""
+        context.user_data["category_filter_list"] = []
+        context.user_data["adv_want_categories"] = False
+        return await _go_ignore_keywords_prompt(update, context, lang)
+    if context.user_data.get("advanced_options_done") and not context.user_data.get(
+        "adv_want_categories"
+    ):
+        context.user_data["category_filter"] = ""
+        context.user_data["category_filter_list"] = []
+        return await _go_ignore_keywords_prompt(update, context, lang)
+    if not await prem.has_feature(
+        context.bot, db, user_id, "category_filter", channel=_wizard_channel(context)
+    ):
+        return await _show_premium_gate(
+            update, context, feature="category_filter", first_step=False
+        )
+    cats = _category_filter_list(context)
+    if cats:
+        text = t(
+            "category_filter_added",
+            lang,
+            name=cats[-1]["name"],
+            count=len(cats),
+            max=CATEGORY_FILTER_MAX,
+            list=", ".join(c["name"] for c in cats),
+        )
+    else:
+        text = t("category_filter_prompt", lang, max=CATEGORY_FILTER_MAX)
+    markup = category_filter_nav_keyboard(lang, has_cats=bool(cats))
+    msg = update.effective_message
+    if update.callback_query and update.callback_query.message:
+        try:
+            await update.callback_query.edit_message_text(
+                text, reply_markup=markup, parse_mode=ParseMode.HTML
+            )
+        except BadRequest:
+            await msg.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    else:
+        await msg.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    _set_wizard_back(context, _wz()["CATEGORY_FILTER"])
+    return _wz()["CATEGORY_FILTER"]
+
+
+async def _add_category_filter_cat(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+    cat: dict,
+) -> int:
+    cats = _category_filter_list(context)
+    entry = {"id": str(cat["id"]), "name": str(cat.get("name") or "")}
+    if not any(c["id"] == entry["id"] for c in cats):
+        if len(cats) >= CATEGORY_FILTER_MAX:
+            await update.effective_message.reply_text(
+                t("category_filter_full", lang, max=CATEGORY_FILTER_MAX),
+                reply_markup=category_filter_nav_keyboard(lang, has_cats=True),
+            )
+            return _wz()["CATEGORY_FILTER"]
+        cats.append(entry)
+    context.user_data.pop("catfilt_candidates", None)
+    _persist_category_filter_ud(context)
+    await update.effective_message.reply_text(
+        t(
+            "category_filter_added",
+            lang,
+            name=entry["name"],
+            count=len(cats),
+            max=CATEGORY_FILTER_MAX,
+            list=", ".join(c["name"] for c in cats),
+        ),
+        reply_markup=category_filter_nav_keyboard(lang, has_cats=True),
+        parse_mode=ParseMode.HTML,
+    )
+    return _wz()["CATEGORY_FILTER"]
+
+
+async def receive_category_filter_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    if is_menu_button(update.effective_message.text or ""):
+        return _wz()["CATEGORY_FILTER"]
+    cats = _category_filter_list(context)
+    if len(cats) >= CATEGORY_FILTER_MAX:
+        await update.effective_message.reply_text(
+            t("category_filter_full", lang, max=CATEGORY_FILTER_MAX),
+            reply_markup=category_filter_nav_keyboard(lang, has_cats=True),
+        )
+        return _wz()["CATEGORY_FILTER"]
+    query = (update.effective_message.text or "").strip()
+    if not query:
+        return _wz()["CATEGORY_FILTER"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    from request_progress import request_progress
+
+    try:
+        async with request_progress(
+            context.bot, update.effective_chat.id, lang
+        ):
+            found = await asyncio.to_thread(
+                twitch.search_categories, query, first=20
+            )
+    except Exception:
+        logger.exception("category filter search failed")
+        await update.effective_message.reply_text(
+            t("category_filter_not_found", lang, query=query),
+        )
+        return _wz()["CATEGORY_FILTER"]
+    if not found:
+        await update.effective_message.reply_text(
+            t("category_filter_not_found", lang, query=query),
+        )
+        return _wz()["CATEGORY_FILTER"]
+    want = query.strip().casefold()
+    exact = [
+        c
+        for c in found
+        if str(c.get("name") or "").strip().casefold() == want
+    ]
+    rest = [
+        c
+        for c in found
+        if str(c.get("name") or "").strip().casefold() != want
+    ]
+    exact.sort(key=lambda c: str(c.get("name") or "").casefold())
+    rest.sort(key=lambda c: str(c.get("name") or "").casefold())
+    if len(exact) >= 5:
+        found = exact[:20]
+    else:
+        found = exact + rest[: max(0, 5 - len(exact))]
+    found.sort(key=lambda c: (str(c.get("name") or "").casefold(), str(c.get("id") or "")))
+    if len(found) == 1:
+        return await _add_category_filter_cat(update, context, lang, found[0])
+    candidates = [
+        {"id": str(c["id"]), "name": str(c.get("name") or "")} for c in found
+    ]
+    context.user_data["catfilt_candidates"] = candidates
+    db: Database = context.application.bot_data["db"]
+    companies = db.igdb_company_labels_for_twitch_uids(
+        [c["id"] for c in candidates]
+    )
+    await update.effective_message.reply_text(
+        t("category_filter_pick", lang),
+        reply_markup=category_filter_pick_keyboard(
+            lang, candidates, companies=companies
+        ),
+    )
+    return _wz()["CATEGORY_FILTER"]
+
+
+async def receive_category_filter_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    data = query.data or ""
+    if data == "catfilt:cancel":
+        return await cancel(update, context)
+    if data == "catfilt:back":
+        return await wizard_back(update, context)
+    if data == "catfilt:clear":
+        context.user_data["category_filter_list"] = []
+        context.user_data["category_filter"] = ""
+        context.user_data.pop("catfilt_candidates", None)
+        await query.edit_message_text(
+            t("category_filter_prompt", lang, max=CATEGORY_FILTER_MAX),
+            reply_markup=category_filter_nav_keyboard(lang, has_cats=False),
+        )
+        return _wz()["CATEGORY_FILTER"]
+    if data == "catfilt:done":
+        cats = _category_filter_list(context)
+        _persist_category_filter_ud(context)
+        if not cats:
+            context.user_data["adv_want_categories"] = False
+            try:
+                await query.edit_message_text(t("category_filter_empty_done", lang))
+            except BadRequest:
+                pass
+        else:
+            try:
+                await query.edit_message_text("✓")
+            except BadRequest:
+                pass
+        return await _go_ignore_keywords_prompt(update, context, lang)
+    if data.startswith("catfilt:pick:"):
+        try:
+            idx = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            return _wz()["CATEGORY_FILTER"]
+        candidates = list(context.user_data.get("catfilt_candidates") or [])
+        if idx < 0 or idx >= len(candidates):
+            return _wz()["CATEGORY_FILTER"]
+        return await _add_category_filter_cat(update, context, lang, candidates[idx])
+    return _wz()["CATEGORY_FILTER"]
 
 
 async def _advopt_locked(
@@ -1154,12 +1396,14 @@ async def _advanced_options_markup(
     show_top_donations = alert == "end" and beta_features.is_enabled(
         db, user_id, da.BETA_FEATURE_ID
     )
+    show_categories = _show_category_filter_option(context)
     _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
         want_image=bool(context.user_data.get("adv_want_image")),
         want_strip=bool(context.user_data.get("adv_want_strip")),
         want_ignore=bool(context.user_data.get("adv_want_ignore")),
+        want_categories=bool(context.user_data.get("adv_want_categories")),
         want_delay=bool(context.user_data.get("adv_want_delay")),
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
         want_delete=bool(context.user_data.get("adv_want_delete")),
@@ -1172,6 +1416,7 @@ async def _advanced_options_markup(
         want_top_donations=bool(context.user_data.get("adv_want_top_donations")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
         button_style=str(context.user_data.get("button_style") or ""),
+        show_categories=show_categories,
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
         show_preview=show_preview,
@@ -1205,6 +1450,8 @@ def _advanced_options_prompt_text(
         t("advanced_options_hint_strip", lang),
         t("advanced_options_hint_ignore", lang),
     ]
+    if _show_category_filter_option(context):
+        lines.append(t("advanced_options_hint_categories", lang))
     if alert != "upcoming":
         lines.append(t("advanced_options_hint_delay", lang))
     if alert == "live" or not alert:
@@ -1239,6 +1486,10 @@ async def _go_advanced_options_prompt(
         "adv_want_strip", bool(context.user_data.get("strip_name_mentions"))
     )
     context.user_data.setdefault("adv_want_ignore", False)
+    if _show_category_filter_option(context):
+        context.user_data.setdefault("adv_want_categories", False)
+    else:
+        context.user_data.pop("adv_want_categories", None)
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
     context.user_data.setdefault("adv_want_delete", False)
@@ -1295,6 +1546,7 @@ async def receive_advanced_options_toggle(
         "image": "adv_want_image",
         "strip": "adv_want_strip",
         "ignore": "adv_want_ignore",
+        "categories": "adv_want_categories",
         "delay": "adv_want_delay",
         "repeat": "adv_want_repeat",
         "delete": "adv_want_delete",
@@ -1308,6 +1560,9 @@ async def receive_advanced_options_toggle(
         "multistream": "adv_want_multistream",
     }.get(flag)
     if not key:
+        await query.answer()
+        return _wz()["ADVANCED_OPTIONS"]
+    if flag == "categories" and not _show_category_filter_option(context):
         await query.answer()
         return _wz()["ADVANCED_OPTIONS"]
     if flag == "live_remind":
@@ -1422,6 +1677,7 @@ async def receive_advanced_options_next(
     locked = await _advopt_locked(context, query.from_user.id)
     for toggle, ud_key in (
         ("ignore", "adv_want_ignore"),
+        ("categories", "adv_want_categories"),
         ("delay", "adv_want_delay"),
         ("repeat", "adv_want_repeat"),
         ("delete", "adv_want_delete"),
@@ -1436,6 +1692,9 @@ async def receive_advanced_options_next(
     if not context.user_data.get("adv_want_ignore"):
         context.user_data["ignore_keywords"] = ""
         context.user_data["use_global_ignore"] = False
+    if not context.user_data.get("adv_want_categories"):
+        context.user_data["category_filter"] = ""
+        context.user_data["category_filter_list"] = []
     if not context.user_data.get("adv_want_delay"):
         context.user_data["delay_minutes"] = 0
     if not context.user_data.get("adv_want_repeat"):
@@ -1506,7 +1765,7 @@ async def receive_advanced_options_next(
         return await _go_image_ask_prompt(update, context, lang)
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
-    return await _go_ignore_keywords_prompt(update, context, lang)
+    return await _go_category_filter_prompt(update, context, lang)
 
 
 async def _maybe_prompt_donationalerts_oauth(
@@ -1584,7 +1843,7 @@ async def receive_top_donations_template(
         return await _go_image_ask_prompt(update, context, lang)
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
-    return await _go_ignore_keywords_prompt(update, context, lang)
+    return await _go_category_filter_prompt(update, context, lang)
 
 
 async def complete_donationalerts_oauth(
@@ -1771,10 +2030,14 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "image_position",
             "ignore_keywords",
             "use_global_ignore",
+            "category_filter",
+            "category_filter_list",
+            "catfilt_candidates",
             "advanced_options_done",
             "adv_want_image",
             "adv_want_strip",
             "adv_want_ignore",
+            "adv_want_categories",
             "adv_want_delay",
             "adv_want_repeat",
             "adv_want_delete",
@@ -1849,8 +2112,14 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, _wz()["IMAGE_UPLOAD"])
         return _wz()["IMAGE_UPLOAD"]
+    if state == _wz()["CATEGORY_FILTER"]:
+        if context.user_data.get("adv_want_image"):
+            return await _go_image_ask_prompt(update, context, lang)
+        return await _go_advanced_options_prompt(update, context, lang)
     if state == _wz()["IGNORE_KEYWORDS"]:
         if context.user_data.get("advanced_options_done"):
+            if context.user_data.get("adv_want_categories"):
+                return await _go_category_filter_prompt(update, context, lang)
             if context.user_data.get("adv_want_image"):
                 return await _go_image_ask_prompt(update, context, lang)
             return await _go_advanced_options_prompt(update, context, lang)
@@ -3658,6 +3927,7 @@ async def _finish_subscription(
                 ),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 use_global_ignore=bool(data.get("use_global_ignore")),
+                category_filter=str(data.get("category_filter") or ""),
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
                 notify_on_live=True,
@@ -3793,6 +4063,7 @@ async def _finish_subscription(
                 or int(data.get("schedule_reminder_minutes", 0)) > 0,
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 use_global_ignore=bool(data.get("use_global_ignore")),
+                category_filter=str(data.get("category_filter") or ""),
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
                 enabled=create_enabled,

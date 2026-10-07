@@ -10,7 +10,7 @@ snapshots/
 migration_dump.sql
 migration_vps_status.txt
 .tmp_*
-# Local git helper: HTTP CONNECT bridge to Cursor SOCKS (socks5://127.0.0.1:1080).
+# Local git helper: HTTP CONNECT bridge (listen 18081) → Cursor SOCKS 1080-1090.
 scripts/git-http-socks-bridge.py
 AGENTS.md
 *.pem

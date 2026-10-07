@@ -1942,6 +1942,55 @@ def check_core() -> None:
     assert needs_live_game_recheck("", 5) is False
     assert SCHEDULE_CHECK_INTERVAL >= 60
 
+    from db.models import (
+        CATEGORY_FILTER_MAX,
+        category_filter_allows,
+        dump_category_filter,
+        has_category_filter,
+        parse_category_filter,
+    )
+    from handlers.notifications import (
+        _should_skip_category_filter,
+        _wants_category_change_alert,
+    )
+    from types import SimpleNamespace
+
+    assert CATEGORY_FILTER_MAX == 5
+    assert parse_category_filter("") == []
+    assert parse_category_filter("not-json") == []
+    dumped = dump_category_filter(
+        [{"id": "509658", "name": "Just Chatting"}, {"id": "509658", "name": "dup"}]
+    )
+    assert parse_category_filter(dumped) == [
+        {"id": "509658", "name": "Just Chatting"}
+    ]
+    multi = dump_category_filter(
+        [
+            {"id": "1", "name": "A"},
+            {"id": "2", "name": "B"},
+            {"id": "3", "name": "C"},
+        ]
+    )
+    assert len(parse_category_filter(multi)) == 3
+    empty_sub = SimpleNamespace(category_filter="", notify_on_live=True, notify_on_category_change=False)
+    filtered = SimpleNamespace(
+        category_filter=multi, notify_on_live=True, notify_on_category_change=False
+    )
+    cat_only = SimpleNamespace(
+        category_filter="", notify_on_live=False, notify_on_category_change=True
+    )
+    assert category_filter_allows(empty_sub, "999") is True
+    assert category_filter_allows(filtered, "2") is True
+    assert category_filter_allows(filtered, "9") is False
+    assert category_filter_allows(filtered, "") is False
+    assert has_category_filter(filtered) is True
+    assert has_category_filter(empty_sub) is False
+    assert _should_skip_category_filter(filtered, "9") is True
+    assert _should_skip_category_filter(filtered, "1") is False
+    assert _wants_category_change_alert(filtered) is True
+    assert _wants_category_change_alert(empty_sub) is False
+    assert _wants_category_change_alert(cat_only) is True
+
     games: dict[str, str] = {}
     names: dict[str, str] = {}
     streams = {"1": {"game_id": "111", "game_name": "Just Chatting"}}

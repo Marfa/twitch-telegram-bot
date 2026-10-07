@@ -59,6 +59,7 @@ class Database(Protocol):
         schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
         use_global_ignore: bool = False,
+        category_filter: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
