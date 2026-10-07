@@ -1944,6 +1944,8 @@ def check_core() -> None:
 
     from db.models import (
         CATEGORY_FILTER_MAX,
+        CATEGORY_PICK_PAGE_SIZE,
+        CATEGORY_SEARCH_LIMIT,
         category_filter_allows,
         dump_category_filter,
         has_category_filter,
@@ -1953,9 +1955,13 @@ def check_core() -> None:
         _should_skip_category_filter,
         _wants_category_change_alert,
     )
+    from i18n import category_filter_pick_keyboard
+    from search_normalize import rank_twitch_category_hits
     from types import SimpleNamespace
 
     assert CATEGORY_FILTER_MAX == 5
+    assert CATEGORY_SEARCH_LIMIT == 100
+    assert CATEGORY_PICK_PAGE_SIZE == 5
     assert parse_category_filter("") == []
     assert parse_category_filter("not-json") == []
     dumped = dump_category_filter(
@@ -1990,6 +1996,38 @@ def check_core() -> None:
     assert _wants_category_change_alert(filtered) is True
     assert _wants_category_change_alert(empty_sub) is False
     assert _wants_category_change_alert(cat_only) is True
+
+    # Keep ranked pool (not A-Z top-5) so "The Sims" survives Sims search.
+    sims_raw = [
+        {"id": "1", "name": "Animal Crossing"},
+        {"id": "2", "name": "Fall Guys"},
+        {"id": "3", "name": "Fortnite"},
+        {"id": "4", "name": "Minecraft"},
+        {"id": "5", "name": "Roblox"},
+        {"id": "6", "name": "Sims FreePlay"},
+        {"id": "7", "name": "Sims 4"},
+        {"id": "8", "name": "Sims Medieval"},
+        {"id": "9", "name": "The Sims"},
+        {"id": "10", "name": "The Sims 4"},
+        {"id": "11", "name": "Zelda"},
+    ]
+    sims_hits = rank_twitch_category_hits(
+        sims_raw, "Sims", limit=CATEGORY_SEARCH_LIMIT
+    )
+    sims_names = [h["name"] for h in sims_hits]
+    assert "The Sims" in sims_names
+    assert sims_names.index("The Sims") < 5
+    kb = category_filter_pick_keyboard(
+        "en", sims_hits, page=0, page_size=CATEGORY_PICK_PAGE_SIZE
+    )
+    assert any(
+        (b.callback_data or "").startswith("catfilt:page:")
+        for row in kb.inline_keyboard
+        for b in row
+    )
+    assert any(
+        "The Sims" == (b.text or "") for row in kb.inline_keyboard for b in row
+    )
 
     games: dict[str, str] = {}
     names: dict[str, str] = {}

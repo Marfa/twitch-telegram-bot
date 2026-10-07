@@ -244,6 +244,8 @@ def parse_category_watch_prefs(raw: str | None) -> WatchPrefs | None:
 
 # Max Twitch categories in a channel-alert allowlist (live / mid-stream filter).
 CATEGORY_FILTER_MAX = 5
+CATEGORY_SEARCH_LIMIT = 100
+CATEGORY_PICK_PAGE_SIZE = 5
 
 
 def parse_category_filter(raw: str | None) -> list[dict[str, str]]:

@@ -107,6 +107,21 @@ def _tokens_prefix_match(name_toks: list[str], query_toks: list[str]) -> bool:
     return head == want
 
 
+def _name_rank_prefix(name: str, token_sets: list[list[str]]) -> int:
+    """0 if leading tokens match a query set (e.g. Control*), else 1."""
+    name_toks = search_tokens(name)
+    for ts in token_sets:
+        if not ts:
+            continue
+        if _tokens_prefix_match(name_toks, ts):
+            return 0
+        if len(ts) == 1 and name_toks and _canon_num_token(name_toks[0]) == _canon_num_token(
+            ts[0]
+        ):
+            return 0
+    return 1
+
+
 def rank_igdb_game_hit(
     game: dict[str, Any], *, query: str, token_sets: list[list[str]]
 ) -> tuple:
@@ -115,20 +130,7 @@ def rank_igdb_game_hit(
     nf = name.casefold()
     qf = (query or "").strip().casefold()
     exact = 0 if nf == qf else 1
-    name_toks = search_tokens(name)
-    # Prefer titles whose leading words match a query token set (e.g. Control*).
-    prefix = 1
-    for ts in token_sets:
-        if not ts:
-            continue
-        if _tokens_prefix_match(name_toks, ts):
-            prefix = 0
-            break
-        if len(ts) == 1 and name_toks and _canon_num_token(name_toks[0]) == _canon_num_token(
-            ts[0]
-        ):
-            prefix = 0
-            break
+    prefix = _name_rank_prefix(name, token_sets)
     released = int(game.get("first_release_date") or 0)
     rating = int(game.get("total_rating_count") or 0)
     return (
@@ -140,3 +142,62 @@ def rank_igdb_game_hit(
         nf,
         int(game.get("id") or 0),
     )
+
+
+def rank_twitch_category_hit(
+    cat: dict[str, Any],
+    *,
+    query: str,
+    token_sets: list[list[str]],
+    helix_index: int,
+) -> tuple:
+    """Sort key: exact → prefix → token hit → Helix relevance → shorter → A–Z."""
+    name = str(cat.get("name") or "")
+    nf = name.casefold()
+    qf = (query or "").strip().casefold()
+    exact = 0 if nf == qf else 1
+    prefix = _name_rank_prefix(name, token_sets)
+    # "Sims" → "The Sims" (tokens match, not only leading-word prefix).
+    tokens_hit = 0 if name_matches_any_token_set(name, token_sets) else 1
+    return (
+        exact,
+        prefix,
+        tokens_hit,
+        int(helix_index),
+        len(name),
+        nf,
+        str(cat.get("id") or ""),
+    )
+
+
+def rank_twitch_category_hits(
+    cats: list[dict[str, Any]],
+    query: str,
+    *,
+    limit: int = 100,
+) -> list[dict[str, str]]:
+    """Dedupe Helix hits, rank like IGDB pick lists, return [{id, name}, …]."""
+    token_sets = expand_search_token_sets(query)
+    q = (query or "").strip()
+    seen: set[str] = set()
+    scored: list[tuple[tuple, dict[str, str]]] = []
+    for i, c in enumerate(cats or []):
+        cid = str(c.get("id") or "").strip()
+        if not cid or cid in seen:
+            continue
+        name = str(c.get("name") or "").strip()
+        if not name:
+            continue
+        seen.add(cid)
+        row = {"id": cid, "name": name}
+        scored.append(
+            (
+                rank_twitch_category_hit(
+                    row, query=q, token_sets=token_sets, helix_index=i
+                ),
+                row,
+            )
+        )
+    scored.sort(key=lambda x: x[0])
+    lim = max(1, min(100, int(limit)))
+    return [row for _, row in scored[:lim]]

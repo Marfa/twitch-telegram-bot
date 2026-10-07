@@ -49,6 +49,8 @@ from db import (
     parse_category_filter,
 )
 from db.models import (
+    CATEGORY_PICK_PAGE_SIZE,
+    CATEGORY_SEARCH_LIMIT,
     WatchPrefs,
     _subscription_cart_snapshot,
     alert_type_from_payload,
@@ -3468,12 +3470,17 @@ async def receive_edit_category_filter_text(
     if not query:
         return _sub_states()["EDIT_CATEGORY_FILTER"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
+    from search_normalize import rank_twitch_category_hits
+
     try:
         async with request_progress(
             context.bot, update.effective_chat.id, lang
         ):
-            found = await asyncio.to_thread(
-                twitch.search_categories, query, first=20
+            raw = await asyncio.to_thread(
+                twitch.search_categories,
+                query,
+                first=CATEGORY_SEARCH_LIMIT,
+                max_pages=2,
             )
     except Exception:
         logger.exception("edit category filter search failed")
@@ -3481,43 +3488,33 @@ async def receive_edit_category_filter_text(
             t("category_filter_not_found", lang, query=query),
         )
         return _sub_states()["EDIT_CATEGORY_FILTER"]
-    if not found:
+    candidates = rank_twitch_category_hits(
+        raw, query, limit=CATEGORY_SEARCH_LIMIT
+    )
+    if not candidates:
         await update.effective_message.reply_text(
             t("category_filter_not_found", lang, query=query),
         )
         return _sub_states()["EDIT_CATEGORY_FILTER"]
-    want = query.strip().casefold()
-    exact = [
-        c
-        for c in found
-        if str(c.get("name") or "").strip().casefold() == want
-    ]
-    rest = [
-        c
-        for c in found
-        if str(c.get("name") or "").strip().casefold() != want
-    ]
-    exact.sort(key=lambda c: str(c.get("name") or "").casefold())
-    rest.sort(key=lambda c: str(c.get("name") or "").casefold())
-    if len(exact) >= 5:
-        found = exact[:20]
-    else:
-        found = exact + rest[: max(0, 5 - len(exact))]
-    found.sort(key=lambda c: (str(c.get("name") or "").casefold(), str(c.get("id") or "")))
-    if len(found) == 1:
-        return await _edit_add_category_filter_cat(update, context, lang, found[0])
-    candidates = [
-        {"id": str(c["id"]), "name": str(c.get("name") or "")} for c in found
-    ]
+    if len(candidates) == 1:
+        return await _edit_add_category_filter_cat(
+            update, context, lang, candidates[0]
+        )
     context.user_data["catfilt_candidates"] = candidates
+    context.user_data["catfilt_search_page"] = 0
     db: Database = context.application.bot_data["db"]
     companies = db.igdb_company_labels_for_twitch_uids(
         [c["id"] for c in candidates]
     )
+    context.user_data["catfilt_companies"] = companies
     await update.effective_message.reply_text(
         t("category_filter_pick", lang),
         reply_markup=category_filter_pick_keyboard(
-            lang, candidates, companies=companies
+            lang,
+            candidates,
+            companies=companies,
+            page=0,
+            page_size=CATEGORY_PICK_PAGE_SIZE,
         ),
     )
     return _sub_states()["EDIT_CATEGORY_FILTER"]
@@ -3564,6 +3561,8 @@ async def receive_edit_category_filter_callback(
         context.user_data["category_filter_list"] = []
         context.user_data["category_filter"] = ""
         context.user_data.pop("catfilt_candidates", None)
+        context.user_data.pop("catfilt_companies", None)
+        context.user_data.pop("catfilt_search_page", None)
         if sub_id:
             db.update_subscription(sub_id, user_id, category_filter="")
         await query.edit_message_text(t("edit_category_filter_cleared", lang))
@@ -3584,6 +3583,34 @@ async def receive_edit_category_filter_callback(
             pass
         context.user_data.clear()
         return ConversationHandler.END
+    if data == "catfilt:page:noop":
+        return _sub_states()["EDIT_CATEGORY_FILTER"]
+    if data.startswith("catfilt:page:"):
+        try:
+            page = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            return _sub_states()["EDIT_CATEGORY_FILTER"]
+        candidates = list(context.user_data.get("catfilt_candidates") or [])
+        if not candidates:
+            return _sub_states()["EDIT_CATEGORY_FILTER"]
+        companies = context.user_data.get("catfilt_companies") or {}
+        if not isinstance(companies, dict):
+            companies = {}
+        context.user_data["catfilt_search_page"] = page
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=category_filter_pick_keyboard(
+                    lang,
+                    candidates,
+                    companies=companies,
+                    page=page,
+                    page_size=CATEGORY_PICK_PAGE_SIZE,
+                )
+            )
+        except BadRequest as exc:
+            if "not modified" not in str(exc).lower():
+                raise
+        return _sub_states()["EDIT_CATEGORY_FILTER"]
     if data.startswith("catfilt:pick:"):
         try:
             idx = int(data.rsplit(":", 1)[-1])

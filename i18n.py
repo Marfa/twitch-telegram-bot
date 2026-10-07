@@ -1172,16 +1172,26 @@ def category_filter_pick_keyboard(
     cats: list[dict[str, str]],
     *,
     companies: dict[str, str] | None = None,
+    page: int = 0,
+    page_size: int = 5,
 ) -> InlineKeyboardMarkup:
     from collections import Counter
 
+    usable = [
+        (i, c)
+        for i, c in enumerate(cats)
+        if str(c.get("id") or "").strip() and str(c.get("name") or "").strip()
+    ]
+    size = max(1, int(page_size))
+    total_pages = max(1, (len(usable) + size - 1) // size) if usable else 1
+    page = max(0, min(int(page), total_pages - 1))
+    chunk = usable[page * size : (page + 1) * size]
+    # Counts over the full hit list so duplicates stay labeled across pages.
     name_counts = Counter(
-        str(c.get("name") or "").strip().casefold()
-        for c in cats
-        if str(c.get("name") or "").strip()
+        str(c.get("name") or "").strip().casefold() for _, c in usable
     )
     rows: list[list[InlineKeyboardButton]] = []
-    for i, c in enumerate(cats):
+    for i, c in chunk:
         name = str(c.get("name") or "?").strip() or "?"
         label = name
         if name_counts[name.casefold()] > 1:
@@ -1196,6 +1206,22 @@ def category_filter_pick_keyboard(
                 )
             ]
         )
+    if total_pages > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton("‹", callback_data=f"catfilt:page:{page - 1}")
+            )
+        nav.append(
+            InlineKeyboardButton(
+                f"{page + 1}/{total_pages}", callback_data="catfilt:page:noop"
+            )
+        )
+        if page < total_pages - 1:
+            nav.append(
+                InlineKeyboardButton("›", callback_data=f"catfilt:page:{page + 1}")
+            )
+        rows.append(nav)
     return InlineKeyboardMarkup(rows)
 
 

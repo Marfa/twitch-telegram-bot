@@ -1545,21 +1545,44 @@ class TwitchClient:
                 break
         return out
 
-    def search_categories(self, query: str, *, first: int = 1) -> list[dict[str, Any]]:
-        """Search Twitch categories/games by name. Returns list of {id, name, ...}."""
+    def search_categories(
+        self, query: str, *, first: int = 1, max_pages: int = 1
+    ) -> list[dict[str, Any]]:
+        """Search Twitch categories/games by name. Returns list of {id, name, ...}.
+
+        ``first`` is the total cap (Helix page size ≤100). ``max_pages`` allows
+        cursor pagination when the caller wants more than one page.
+        """
         from search_normalize import normalize_search_query
 
         q = normalize_search_query(query) or (query or "").strip()
         if not q:
             return []
-        resp = self._session.get(
-            "https://api.twitch.tv/helix/search/categories",
-            headers=self._headers(),
-            params={"query": q, "first": max(1, min(20, first))},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.json().get("data") or []
+        want = max(1, min(100, int(first)))
+        pages = max(1, min(5, int(max_pages)))
+        out: list[dict[str, Any]] = []
+        cursor: str | None = None
+        for _ in range(pages):
+            page_size = min(100, want - len(out))
+            if page_size <= 0:
+                break
+            params: dict[str, str | int] = {"query": q, "first": page_size}
+            if cursor:
+                params["after"] = cursor
+            resp = self._session.get(
+                "https://api.twitch.tv/helix/search/categories",
+                headers=self._headers(),
+                params=params,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            batch = payload.get("data") or []
+            out.extend(batch)
+            cursor = (payload.get("pagination") or {}).get("cursor") or None
+            if not cursor or not batch:
+                break
+        return out[:want]
 
     def get_games(self, game_ids: list[str]) -> list[dict[str, Any]]:
         ids = [str(i).strip() for i in game_ids if str(i).strip()]

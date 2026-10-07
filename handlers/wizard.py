@@ -28,6 +28,8 @@ from bot_helpers import (
 from db import Database, Subscription
 from db.models import (
     CATEGORY_FILTER_MAX,
+    CATEGORY_PICK_PAGE_SIZE,
+    CATEGORY_SEARCH_LIMIT,
     dump_category_filter,
     parse_category_filter,
 )
@@ -1259,12 +1261,17 @@ async def receive_category_filter_text(
     twitch: TwitchClient = context.application.bot_data["twitch"]
     from request_progress import request_progress
 
+    from search_normalize import rank_twitch_category_hits
+
     try:
         async with request_progress(
             context.bot, update.effective_chat.id, lang
         ):
-            found = await asyncio.to_thread(
-                twitch.search_categories, query, first=20
+            raw = await asyncio.to_thread(
+                twitch.search_categories,
+                query,
+                first=CATEGORY_SEARCH_LIMIT,
+                max_pages=2,
             )
     except Exception:
         logger.exception("category filter search failed")
@@ -1272,43 +1279,31 @@ async def receive_category_filter_text(
             t("category_filter_not_found", lang, query=query),
         )
         return _wz()["CATEGORY_FILTER"]
-    if not found:
+    candidates = rank_twitch_category_hits(
+        raw, query, limit=CATEGORY_SEARCH_LIMIT
+    )
+    if not candidates:
         await update.effective_message.reply_text(
             t("category_filter_not_found", lang, query=query),
         )
         return _wz()["CATEGORY_FILTER"]
-    want = query.strip().casefold()
-    exact = [
-        c
-        for c in found
-        if str(c.get("name") or "").strip().casefold() == want
-    ]
-    rest = [
-        c
-        for c in found
-        if str(c.get("name") or "").strip().casefold() != want
-    ]
-    exact.sort(key=lambda c: str(c.get("name") or "").casefold())
-    rest.sort(key=lambda c: str(c.get("name") or "").casefold())
-    if len(exact) >= 5:
-        found = exact[:20]
-    else:
-        found = exact + rest[: max(0, 5 - len(exact))]
-    found.sort(key=lambda c: (str(c.get("name") or "").casefold(), str(c.get("id") or "")))
-    if len(found) == 1:
-        return await _add_category_filter_cat(update, context, lang, found[0])
-    candidates = [
-        {"id": str(c["id"]), "name": str(c.get("name") or "")} for c in found
-    ]
+    if len(candidates) == 1:
+        return await _add_category_filter_cat(update, context, lang, candidates[0])
     context.user_data["catfilt_candidates"] = candidates
+    context.user_data["catfilt_search_page"] = 0
     db: Database = context.application.bot_data["db"]
     companies = db.igdb_company_labels_for_twitch_uids(
         [c["id"] for c in candidates]
     )
+    context.user_data["catfilt_companies"] = companies
     await update.effective_message.reply_text(
         t("category_filter_pick", lang),
         reply_markup=category_filter_pick_keyboard(
-            lang, candidates, companies=companies
+            lang,
+            candidates,
+            companies=companies,
+            page=0,
+            page_size=CATEGORY_PICK_PAGE_SIZE,
         ),
     )
     return _wz()["CATEGORY_FILTER"]
@@ -1329,6 +1324,8 @@ async def receive_category_filter_callback(
         context.user_data["category_filter_list"] = []
         context.user_data["category_filter"] = ""
         context.user_data.pop("catfilt_candidates", None)
+        context.user_data.pop("catfilt_companies", None)
+        context.user_data.pop("catfilt_search_page", None)
         await query.edit_message_text(
             t("category_filter_prompt", lang, max=CATEGORY_FILTER_MAX),
             reply_markup=category_filter_nav_keyboard(lang, has_cats=False),
@@ -1349,6 +1346,34 @@ async def receive_category_filter_callback(
             except BadRequest:
                 pass
         return await _go_ignore_keywords_prompt(update, context, lang)
+    if data == "catfilt:page:noop":
+        return _wz()["CATEGORY_FILTER"]
+    if data.startswith("catfilt:page:"):
+        try:
+            page = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            return _wz()["CATEGORY_FILTER"]
+        candidates = list(context.user_data.get("catfilt_candidates") or [])
+        if not candidates:
+            return _wz()["CATEGORY_FILTER"]
+        companies = context.user_data.get("catfilt_companies") or {}
+        if not isinstance(companies, dict):
+            companies = {}
+        context.user_data["catfilt_search_page"] = page
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=category_filter_pick_keyboard(
+                    lang,
+                    candidates,
+                    companies=companies,
+                    page=page,
+                    page_size=CATEGORY_PICK_PAGE_SIZE,
+                )
+            )
+        except BadRequest as exc:
+            if "not modified" not in str(exc).lower():
+                raise
+        return _wz()["CATEGORY_FILTER"]
     if data.startswith("catfilt:pick:"):
         try:
             idx = int(data.rsplit(":", 1)[-1])
@@ -1362,8 +1387,11 @@ async def receive_category_filter_callback(
 
 
 async def _advopt_locked(
-    context: ContextTypes.DEFAULT_TYPE, user_id: int
+    context: ContextTypes.DEFAULT_TYPE, user_id: int, *, refresh: bool = False
 ) -> frozenset[str]:
+    cached = context.user_data.get("advopt_locked_cache")
+    if not refresh and isinstance(cached, (set, frozenset)):
+        return frozenset(cached)
     db: Database = context.application.bot_data["db"]
     channel = _wizard_channel(context)
     locked: set[str] = set()
@@ -1372,7 +1400,9 @@ async def _advopt_locked(
             context.bot, db, user_id, feature, channel=channel
         ):
             locked.add(toggle)
-    return frozenset(locked)
+    frozen = frozenset(locked)
+    context.user_data["advopt_locked_cache"] = frozen
+    return frozen
 
 
 async def _advanced_options_markup(
@@ -1524,6 +1554,8 @@ async def _go_advanced_options_prompt(
         context.user_data.pop("adv_want_preview", None)
     _sync_adv_preview_conflict(context)
     context.user_data.pop("advanced_options_done", None)
+    # Fresh premium-lock snapshot for this screen; toggles reuse the cache.
+    context.user_data.pop("advopt_locked_cache", None)
     chat_id = reply_chat_id(update)
     user_id = update.effective_user.id
     text = _advanced_options_prompt_text(context, lang, user_id)
@@ -1626,12 +1658,8 @@ async def receive_advanced_options_toggle(
                 feature=str(feature or ""),
             )
             return _wz()["ADVANCED_OPTIONS"]
-    await query.answer()
+    # Flip + answer immediately; locked premium flags are cached for this screen.
     context.user_data[key] = turning_on
-    if flag == "top_donations" and turning_on:
-        await _maybe_prompt_donationalerts_oauth(
-            context.bot, context.application.bot_data["db"], query.from_user.id, lang
-        )
     if not (
         context.user_data.get("adv_want_buttons")
         or context.user_data.get("adv_want_chat")
@@ -1639,9 +1667,16 @@ async def receive_advanced_options_toggle(
     ):
         context.user_data["button_style"] = ""
     _sync_adv_preview_conflict(context)
+    await query.answer()
     await query.edit_message_reply_markup(
-        reply_markup=await _advanced_options_markup(context, lang, query.from_user.id)
+        reply_markup=await _advanced_options_markup(
+            context, lang, query.from_user.id
+        )
     )
+    if flag == "top_donations" and turning_on:
+        await _maybe_prompt_donationalerts_oauth(
+            context.bot, context.application.bot_data["db"], query.from_user.id, lang
+        )
     return _wz()["ADVANCED_OPTIONS"]
 
 
