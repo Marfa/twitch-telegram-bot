@@ -544,6 +544,8 @@ from handlers.wizard import (
     receive_delete_sibling,
     receive_dest_chat,
     receive_dest_type,
+    receive_category_filter_callback,
+    receive_category_filter_text,
     receive_ignore_keywords,
     receive_ignore_keywords_back,
     receive_ignore_keywords_global_toggle,
@@ -713,6 +715,7 @@ from handlers.subscriptions import (
     receive_pause_notifications_days,
     receive_sync_days,
     start_edit_dest,
+    start_edit_category_filter,
     start_edit_ignore_keywords,
     start_edit_custom_buttons,
     start_edit_multistream,
@@ -723,6 +726,8 @@ from handlers.subscriptions import (
     start_twitch_import,
     cancel_twitch_import,
     sync_twitch_follows,
+    receive_edit_category_filter_callback,
+    receive_edit_category_filter_text,
     receive_edit_ignore_keywords,
     receive_edit_ignore_keywords_skip,
     receive_edit_custom_buttons_callback,
@@ -744,6 +749,7 @@ logger = logging.getLogger(__name__)
     IMAGE_UPLOAD,
     IMAGE_POSITION,
     IGNORE_KEYWORDS,
+    CATEGORY_FILTER,
     ADVANCED_OPTIONS,
     LINK_PREVIEW,
     DELAY_SEND,
@@ -764,6 +770,7 @@ logger = logging.getLogger(__name__)
     SCHEDULE_LIVE_ASK,
     EDIT_TEMPLATE,
     EDIT_IGNORE_KEYWORDS,
+    EDIT_CATEGORY_FILTER,
     EDIT_DELAY,
     EDIT_REPEAT,
     EDIT_SCHEDULE_REMINDER,
@@ -818,7 +825,7 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_DISCOUNT,
     GAME_INFO_SEARCH,
     GAME_INFO_PICK,
-) = range(84)
+) = range(86)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -2957,6 +2964,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 pattern=r"^edit_f:\d+:ignore_keywords$",
             ),
             CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_category_filter),
+                pattern=r"^edit_f:\d+:category_filter$",
+            ),
+            CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_custom_buttons),
                 pattern=r"^edit_f:\d+:custom_buttons$",
             ),
@@ -3088,7 +3099,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_cancel|multistream)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|categories|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_cancel|multistream)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_style,
@@ -3121,6 +3132,16 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_wizard_multistream_text
+                ),
+            ],
+            CATEGORY_FILTER: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_category_filter_callback, pattern=r"^catfilt:"
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_category_filter_text
                 ),
             ],
             IGNORE_KEYWORDS: [
@@ -3242,6 +3263,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(cancel, pattern=r"^ignore_keywords:cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_ignore_keywords),
+            ],
+            EDIT_CATEGORY_FILTER: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_edit_category_filter_callback, pattern=r"^catfilt:"
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_edit_category_filter_text
+                ),
             ],
             EDIT_DELAY: [
                 _wiz_cancel,

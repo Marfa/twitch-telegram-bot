@@ -232,6 +232,7 @@ def check_alert_setting_order() -> None:
         "image",
         "strip",
         "ignore",
+        "categories",
         "delay",
         "repeat",
         "delete",
@@ -246,12 +247,14 @@ def check_alert_setting_order() -> None:
         "multistream",
     )
     assert set(EDIT_FIELD) == set(ALERT_SETTING_ORDER)
+    assert EDIT_FIELD["categories"] == "category_filter"
 
     adv = advanced_options_keyboard(
         "en",
         want_image=False,
         want_strip=False,
         want_ignore=False,
+        want_categories=False,
         want_delay=False,
         want_repeat=False,
         want_delete=False,
@@ -263,6 +266,7 @@ def check_alert_setting_order() -> None:
         want_preview=False,
         want_schedule_cancel=False,
         want_multistream=False,
+        show_categories=True,
         show_delay=True,
         show_repeat=True,
         show_buttons=True,
@@ -327,7 +331,17 @@ def check_alert_setting_order() -> None:
     assert _edit_setting_ids(upcoming_edit) == [
         sid
         for sid in ALERT_SETTING_ORDER
-        if sid not in ("delay", "repeat", "delete", "pin", "buttons", "multistream", "top_donations")
+        if sid
+        not in (
+            "categories",
+            "delay",
+            "repeat",
+            "delete",
+            "pin",
+            "buttons",
+            "multistream",
+            "top_donations",
+        )
     ]
     upcoming_labels = {
         (btn.callback_data or ""): btn.text
@@ -361,6 +375,7 @@ def check_alert_setting_order() -> None:
     }
     assert end_labels["edit_f:1:top_donations"].startswith("✅ ")
     assert "edit_f:1:live_remind" not in end_labels
+    assert "edit_f:1:category_filter" not in end_labels
 
     off = edit_options_keyboard(
         1,

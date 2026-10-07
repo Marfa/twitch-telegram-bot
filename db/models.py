@@ -242,6 +242,83 @@ def parse_category_watch_prefs(raw: str | None) -> WatchPrefs | None:
     return _parse_watch_prefs_dict(data)
 
 
+# Max Twitch categories in a channel-alert allowlist (live / mid-stream filter).
+CATEGORY_FILTER_MAX = 5
+
+
+def parse_category_filter(raw: str | None) -> list[dict[str, str]]:
+    """Parse subscriptions.category_filter JSON → [{id, name}, …]."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    items: list[Any]
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict) and isinstance(data.get("categories"), list):
+        items = data["categories"]
+    else:
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("id") or "").strip()
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        name = str(item.get("name") or cid).strip() or cid
+        out.append({"id": cid, "name": name})
+        if len(out) >= CATEGORY_FILTER_MAX:
+            break
+    return out
+
+
+def dump_category_filter(categories: list[dict[str, str]] | None) -> str:
+    """Stable JSON for channel-alert category allowlist."""
+    cats: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in list(categories or []):
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("id") or "").strip()
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        name = str(item.get("name") or cid).strip() or cid
+        cats.append({"id": cid, "name": name})
+        if len(cats) >= CATEGORY_FILTER_MAX:
+            break
+    if not cats:
+        return ""
+    return json.dumps(cats, ensure_ascii=False)
+
+
+def category_filter_id_set(raw: str | None) -> frozenset[str]:
+    return frozenset(c["id"] for c in parse_category_filter(raw))
+
+
+def has_category_filter(sub: object) -> bool:
+    raw = getattr(sub, "category_filter", "") or ""
+    return bool(parse_category_filter(str(raw)))
+
+
+def category_filter_allows(sub: object, game_id: str | int | None) -> bool:
+    """True if alert may fire for this Helix game_id (empty allowlist = no filter)."""
+    raw = getattr(sub, "category_filter", "") or ""
+    cats = parse_category_filter(str(raw))
+    if not cats:
+        return True
+    gid = str(game_id or "").strip()
+    if not gid:
+        return False
+    return gid in {c["id"] for c in cats}
+
+
 @dataclass
 class ReleasePlatformPref:
     platform_id: int
@@ -473,6 +550,7 @@ class Subscription:
     drops_game_id: str = ""
     ignore_keywords: str = ""
     use_global_ignore: bool = False
+    category_filter: str = ""
     image_file_id: str | None = None
     image_position: str = ""
     notify_cooldown_until: str | None = None
@@ -659,6 +737,8 @@ def migrate_sub_fields_for_alert_type(
     if new_type != "end":
         out["top_donations"] = False
         out["top_donations_template"] = ""
+    if new_type not in ("live", "category"):
+        out["category_filter"] = ""
     return out
 
 
@@ -730,6 +810,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         ),
         "ignore_keywords": sub.ignore_keywords or "",
         "use_global_ignore": bool(sub.use_global_ignore),
+        "category_filter": getattr(sub, "category_filter", "") or "",
         "image_file_id": sub.image_file_id,
         "image_position": sub.image_position or "",
         "enabled": bool(sub.enabled),
@@ -1185,6 +1266,9 @@ def _row_to_sub(row: Any) -> Subscription:
         use_global_ignore=bool(row["use_global_ignore"])
         if "use_global_ignore" in keys
         else False,
+        category_filter=str(row["category_filter"] or "")
+        if "category_filter" in keys
+        else "",
         image_file_id=image_file_id,
         image_position=image_position if image_file_id else "",
         notify_cooldown_until=(

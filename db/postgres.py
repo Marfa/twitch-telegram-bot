@@ -277,6 +277,12 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS category_filter TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS image_file_id TEXT
                 """
             )
@@ -1633,6 +1639,7 @@ class PostgresDatabase:
         schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
         use_global_ignore: bool = False,
+        category_filter: str = "",
         image_file_id: str | None = None,
         image_position: str = "",
         enabled: bool = True,
@@ -1666,6 +1673,7 @@ owner_id, twitch_username, twitch_user_id,
                     custom_buttons, multistream_channels, button_style,
                     delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
+                    category_filter,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs, release_watch_prefs, giveaway_watch_prefs,
                     notify_on_live, notify_on_end, notify_on_category_change,
@@ -1673,7 +1681,7 @@ owner_id, twitch_username, twitch_user_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1708,6 +1716,7 @@ owner_id, twitch_username, twitch_user_id,
                     bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0,
                     ignore_keywords,
                     bool(use_global_ignore),
+                    str(category_filter or ""),
                     image_file_id or None,
                     (image_position or "") if image_file_id else "",
                     enabled,
@@ -2070,6 +2079,7 @@ owner_id, twitch_username, twitch_user_id,
                     "schedule_reminder_configured",
                     "ignore_keywords",
                     "use_global_ignore",
+                    "category_filter",
                     "image_file_id",
                     "image_position",
                     "enabled",
@@ -2167,6 +2177,7 @@ owner_id, twitch_username, twitch_user_id,
             "top_donations_template",
             "ignore_keywords",
             "use_global_ignore",
+            "category_filter",
             "image_file_id",
             "image_position",
             "twitch_username",
@@ -2211,6 +2222,7 @@ owner_id, twitch_username, twitch_user_id,
                 values.append(max(0, int(value)))
             elif key in (
                 "ignore_keywords",
+                "category_filter",
                 "drops_game_id",
                 "twitch_username",
                 "twitch_user_id",
