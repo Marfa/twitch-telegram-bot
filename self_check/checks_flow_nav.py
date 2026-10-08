@@ -3441,6 +3441,63 @@ async def _scenario_ai_clips(db) -> None:
     ]
     cap.assert_turn("other_ai_clips_existing_list")
 
+    # >5 Helix clips → 5 per page with clips_page nav.
+    many = [
+        {
+            "id": f"c{i}",
+            "url": f"https://clips.twitch.tv/c{i}",
+            "video_id": "1001",
+            "vod_offset": i * 10,
+            "created_at": f"2026-01-01T00:0{i}:00Z",
+        }
+        for i in range(1, 7)
+    ]
+    twitch.get_clips_by_ids.return_value = []
+    twitch.get_clips_for_video.return_value = many
+    update, query = _cb_update(_FREE_UID, "ai_clips:vod:1001", cap)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_ai_clips_callback(update, ctx)
+    page0 = " ".join(
+        str(c.args[0]) if c.args else str(c.kwargs.get("text") or "")
+        for c in query.edit_message_text.await_args_list
+    )
+    assert "c1" in page0 and "c5" in page0 and "c6" not in page0
+    assert "— 6:" in page0
+    callbacks_clips = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ai_clips:clips_page:1" in callbacks_clips
+    cap.assert_turn("other_ai_clips_clips_page0")
+
+    update, query = _cb_update(_FREE_UID, "ai_clips:clips_page:1", cap)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_ai_clips_callback(update, ctx)
+    page1 = " ".join(
+        str(c.args[0]) if c.args else str(c.kwargs.get("text") or "")
+        for c in query.edit_message_text.await_args_list
+    )
+    assert "c6" in page1 and "c1" not in page1
+    assert "6." in page1
+    callbacks_clips1 = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ai_clips:clips_page:0" in callbacks_clips1
+    cap.assert_turn("other_ai_clips_clips_page1")
+
     # Clips deleted on Twitch must not reappear from the stored job payload.
     twitch.get_clips_by_ids.return_value = []
     twitch.get_clips_for_video.return_value = []

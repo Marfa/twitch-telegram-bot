@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 BETA_FEATURE_ID = "ai-clips"
 FEATURE_ID = "ai_clips"
 VOD_PAGE_SIZE = 5
+CLIPS_PAGE_SIZE = 5
 _VOD_FETCH_FIRST = 50
 
 # In-process guard so the same job id is not started twice after resume.
@@ -274,23 +275,50 @@ def _parse_rfc3339(raw: str) -> datetime | None:
     return dt
 
 
-def _existing_clips_keyboard(lang: str, vod_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+def _existing_clips_keyboard(
+    lang: str,
+    vod_id: str,
+    *,
+    page: int = 0,
+    total: int = 0,
+) -> InlineKeyboardMarkup:
+    pages = max(1, (total + CLIPS_PAGE_SIZE - 1) // CLIPS_PAGE_SIZE) if total else 1
+    page = max(0, min(int(page), pages - 1))
+    rows: list[list[InlineKeyboardButton]] = []
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(
+            InlineKeyboardButton(
+                t("ai_clips_page_prev", lang),
+                callback_data=f"ai_clips:clips_page:{page - 1}",
+            )
+        )
+    if page < pages - 1:
+        nav.append(
+            InlineKeyboardButton(
+                t("ai_clips_page_next", lang),
+                callback_data=f"ai_clips:clips_page:{page + 1}",
+            )
+        )
+    if nav:
+        rows.append(nav)
+    rows.append(
         [
-            [
-                InlineKeyboardButton(
-                    t("ai_clips_rerun", lang),
-                    callback_data=f"ai_clips:rerun:{vod_id}",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("ai_clips_back_vods", lang),
-                    callback_data="ai_clips:back",
-                )
-            ],
+            InlineKeyboardButton(
+                t("ai_clips_rerun", lang),
+                callback_data=f"ai_clips:rerun:{vod_id}",
+            )
         ]
     )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("ai_clips_back_vods", lang),
+                callback_data="ai_clips:back",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def _format_clips_message(
@@ -298,11 +326,17 @@ def _format_clips_message(
     clips: list[dict[str, Any]],
     *,
     title_key: str = "ai_clips_existing_title",
+    page: int = 0,
 ) -> str:
     if not clips:
         return t("ai_clips_existing_empty", lang)
-    lines = [t(title_key, lang, count=len(clips))]
-    for i, c in enumerate(clips, start=1):
+    total = len(clips)
+    pages = max(1, (total + CLIPS_PAGE_SIZE - 1) // CLIPS_PAGE_SIZE)
+    page = max(0, min(int(page), pages - 1))
+    start = page * CLIPS_PAGE_SIZE
+    chunk = clips[start : start + CLIPS_PAGE_SIZE]
+    lines = [t(title_key, lang, count=total)]
+    for i, c in enumerate(chunk, start=start + 1):
         url = html_escape(
             str(c.get("url") or clip_watch_url(str(c.get("id") or ""))).strip()
         )
@@ -321,6 +355,23 @@ def _format_clips_message(
             )
         )
     return "\n".join(lines)
+
+
+def _store_clip_list(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    vod_id: str,
+    clips: list[dict[str, Any]],
+) -> None:
+    context.user_data["ai_clips_clip_list"] = clips
+    context.user_data["ai_clips_clip_vod"] = vod_id
+    context.user_data["ai_clips_clip_page"] = 0
+
+
+def _clear_clip_list(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop("ai_clips_clip_list", None)
+    context.user_data.pop("ai_clips_clip_vod", None)
+    context.user_data.pop("ai_clips_clip_page", None)
 
 
 def _stored_clip_start(clip: CreatedClip) -> int:
@@ -642,6 +693,7 @@ async def on_ai_clips_callback(
     if data == "ai_clips:cancel":
         context.user_data.pop("ai_clips_videos", None)
         context.user_data.pop("ai_clips_page", None)
+        _clear_clip_list(context)
         try:
             await query.edit_message_text(t("ai_clips_canceled", lang))
         except BadRequest:
@@ -681,7 +733,35 @@ async def on_ai_clips_callback(
             pass
         return
 
+    if data.startswith("ai_clips:clips_page:"):
+        clips = context.user_data.get("ai_clips_clip_list") or []
+        vod_id = str(context.user_data.get("ai_clips_clip_vod") or "").strip()
+        if not clips or not vod_id:
+            try:
+                await query.edit_message_text(t("ai_clips_failed", lang))
+            except BadRequest:
+                pass
+            return
+        try:
+            page = int(data.rsplit(":", 1)[-1])
+        except ValueError:
+            page = 0
+        context.user_data["ai_clips_clip_page"] = page
+        try:
+            await query.edit_message_text(
+                _format_clips_message(lang, clips, page=page),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=_existing_clips_keyboard(
+                    lang, vod_id, page=page, total=len(clips)
+                ),
+            )
+        except BadRequest:
+            pass
+        return
+
     if data == "ai_clips:back":
+        _clear_clip_list(context)
         await _show_vod_picker(
             query, context, lang=lang, db=db, user_id=user_id
         )
@@ -765,12 +845,15 @@ async def on_ai_clips_callback(
                 }
                 for c in stored
             ]
+        _store_clip_list(context, vod_id=vod_id, clips=clips)
         try:
             await query.edit_message_text(
-                _format_clips_message(lang, clips),
+                _format_clips_message(lang, clips, page=0),
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
-                reply_markup=_existing_clips_keyboard(lang, vod_id),
+                reply_markup=_existing_clips_keyboard(
+                    lang, vod_id, page=0, total=len(clips)
+                ),
             )
         except BadRequest:
             pass
@@ -825,6 +908,7 @@ async def _start_vod_job(
 
     context.user_data.pop("ai_clips_videos", None)
     context.user_data.pop("ai_clips_page", None)
+    _clear_clip_list(context)
     asyncio.create_task(
         _run_job(
             context.application,

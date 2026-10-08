@@ -221,6 +221,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("ai_clips_back", "ai_clips:back"),
     ("ai_clips_rerun", "ai_clips:rerun:123456789"),
     ("ai_clips_page", "ai_clips:page:1"),
+    ("ai_clips_clips_page", "ai_clips:clips_page:1"),
     ("import_mode", "import_mode:once"),
     ("import_oauth_cancel", "import_oauth:cancel"),
     ("import_oauth_manual", "import_oauth:manual"),
