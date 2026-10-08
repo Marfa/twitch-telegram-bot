@@ -2693,6 +2693,7 @@ def _template_values(
 ) -> dict[str, str]:
     values: dict[str, str] = {
         "username": username or "",
+        "url": "",
         "game": game or "—",
         "name": name or "—",
         "started_at": "—",
@@ -2715,47 +2716,48 @@ def _template_values(
         "vkplay_status": "—",
         "youtube_status": "—",
     }
-    if not stream:
-        return values
-    started = stream.get("started_at")
-    if started:
-        values["started_at"] = str(started)
-    if stream.get("viewer_count") is not None:
-        values["viewer_count"] = str(stream.get("viewer_count"))
-    if stream.get("viewer_avg") is not None:
-        values["viewer_avg"] = str(stream.get("viewer_avg"))
-    if stream.get("viewer_peak") is not None:
-        values["viewer_peak"] = str(stream.get("viewer_peak"))
-    thumb = str(stream.get("thumbnail_url") or "")
-    if thumb:
-        values["thumbnail_url"] = thumb.replace("{width}", "480").replace(
-            "{height}", "270"
-        )
-    tags = stream.get("tags") or []
-    if isinstance(tags, list) and tags:
-        values["tags"] = ", ".join(str(t) for t in tags if t)
-    lang = stream.get("language")
-    if lang:
-        values["language"] = str(lang)
-    if "is_mature" in stream:
-        values["is_mature"] = "18+" if stream.get("is_mature") else "—"
-    if stream.get("game_id"):
-        values["game_id"] = str(stream.get("game_id"))
-    if stream.get("id"):
-        values["id"] = str(stream.get("id"))
-    if stream.get("type"):
-        values["type"] = str(stream.get("type"))
-    if stream.get("game_name") and not game:
-        values["game"] = str(stream.get("game_name"))
-    if stream.get("title") and not name:
-        values["name"] = str(stream.get("title"))
-    if stream.get("user_login") and not username:
-        values["username"] = str(stream.get("user_login"))
+    if stream:
+        started = stream.get("started_at")
+        if started:
+            values["started_at"] = str(started)
+        if stream.get("viewer_count") is not None:
+            values["viewer_count"] = str(stream.get("viewer_count"))
+        if stream.get("viewer_avg") is not None:
+            values["viewer_avg"] = str(stream.get("viewer_avg"))
+        if stream.get("viewer_peak") is not None:
+            values["viewer_peak"] = str(stream.get("viewer_peak"))
+        thumb = str(stream.get("thumbnail_url") or "")
+        if thumb:
+            values["thumbnail_url"] = thumb.replace("{width}", "480").replace(
+                "{height}", "270"
+            )
+        tags = stream.get("tags") or []
+        if isinstance(tags, list) and tags:
+            values["tags"] = ", ".join(str(t) for t in tags if t)
+        lang = stream.get("language")
+        if lang:
+            values["language"] = str(lang)
+        if "is_mature" in stream:
+            values["is_mature"] = "18+" if stream.get("is_mature") else "—"
+        if stream.get("game_id"):
+            values["game_id"] = str(stream.get("game_id"))
+        if stream.get("id"):
+            values["id"] = str(stream.get("id"))
+        if stream.get("type"):
+            values["type"] = str(stream.get("type"))
+        if stream.get("game_name") and not game:
+            values["game"] = str(stream.get("game_name"))
+        if stream.get("title") and not name:
+            values["name"] = str(stream.get("title"))
+        if stream.get("user_login") and not username:
+            values["username"] = str(stream.get("user_login"))
+    values["url"] = twitch_profile_url(values["username"])
     return values
 
 
 _TEMPLATE_PLACEHOLDERS = (
     "username",
+    "url",
     "game",
     "name",
     "started_at",
@@ -2805,6 +2807,12 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "channel": "username",
     "login": "username",
     "user": "username",
+    "link": "url",
+    "twitch_url": "url",
+    "stream_url": "url",
+    "channel_url": "url",
+    "profile_url": "url",
+    "streamer_url": "url",
     "viewers": "viewer_count",
     "viewercount": "viewer_count",
     "viewer": "viewer_count",
@@ -2854,7 +2862,12 @@ _TEMPLATE_LINK_RE = re.compile(
 
 def template_has_link(template: str) -> bool:
     """True if the template text is likely to produce a Telegram link preview."""
-    return bool(_TEMPLATE_LINK_RE.search(template or ""))
+    text = template or ""
+    if "{url}" in text:
+        return True
+    return bool(_TEMPLATE_LINK_RE.search(text))
+
+
 _KNOWN_PLACEHOLDER_TOKENS = frozenset(f"{{{p}}}" for p in _TEMPLATE_PLACEHOLDERS)
 # Brace-ish tokens: {game}, {game), (game}, [name}, {User_Name}, …
 _PLACEHOLDER_CANDIDATE_RE = re.compile(

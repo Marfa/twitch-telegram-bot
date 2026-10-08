@@ -355,6 +355,10 @@ def _alert_chat_button_markup(
         url = str(btn_def.get("url") or "")
         if login and "{username}" in url:
             url = url.replace("{username}", login)
+        if "{url}" in url:
+            from twitch import twitch_profile_url
+
+            url = url.replace("{url}", twitch_profile_url(login))
         buttons.append(
             cbtn.styled_inline_button(
                 str(btn_def.get("text") or "")[:64],

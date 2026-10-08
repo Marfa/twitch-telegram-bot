@@ -449,6 +449,14 @@ def check_core() -> None:
 
     out = render_template("{username}: {game} / {name}", CHANNEL, "Just Chatting", "Test")
     assert out == "marfapr: Just Chatting / Test"
+    assert (
+        render_template("{url}", CHANNEL)
+        == "https://www.twitch.tv/marfapr"
+    )
+    assert (
+        render_template("{url}", "", stream={"user_login": "shroud"})
+        == "https://www.twitch.tv/shroud"
+    )
 
     class _FakeTwitch:
         def get_user(self, login: str):
@@ -1125,6 +1133,7 @@ def check_core() -> None:
 
     assert template_has_link("https://twitch.tv/{username}")
     assert template_has_link("see twitch.tv/foo")
+    assert template_has_link("{username} live\n{url}")
     assert not template_has_link("Скоро стрим. Не забудь сделать анон")
     auth_url = t.build_authorize_url(
         redirect_uri="https://example.com/oauth/twitch/callback",
@@ -2136,6 +2145,8 @@ def check_core() -> None:
     }
 
     assert find_placeholder_typos("{username} {game} {name}") == []
+    assert find_placeholder_typos("{url}") == []
+    assert find_placeholder_typos("{twitch_url}") == [("{twitch_url}", "{url}")]
     assert find_placeholder_typos("{game)") == [("{game)", "{game}")]
     assert find_placeholder_typos("(game}") == [("(game}", "{game}")]
     assert find_placeholder_typos("{Game}") == [("{Game}", "{game}")]
@@ -2746,6 +2757,7 @@ def check_core() -> None:
         assert "{game_description}" in tr("placeholders_page_body", loc)
         assert "{game_igdb}" in tr("placeholders_page_body", loc)
         assert "{game_steam}" in tr("placeholders_page_body", loc)
+        assert "{url}" in tr("placeholders_page_body", loc)
         assert tr("duration_n_unit", loc, n=2, unit=tr("duration_unit_hour_few", loc))
         assert tr("watch_cats_prompt", loc)
         assert tr("watch_cats_lucky", loc)
