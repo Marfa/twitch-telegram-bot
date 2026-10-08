@@ -38,6 +38,8 @@ def fan_out_twitch_refresh(
 async def restore_after_twitch_oauth(
     application: Application,
     owner_id: int,
+    *,
+    sync_follow_monitor: bool = True,
 ) -> None:
     import premium as prem
     from handlers.background_jobs import sync_optional_jobs
@@ -80,6 +82,11 @@ async def restore_after_twitch_oauth(
             )
 
     sync_optional_jobs(application.job_queue, db)
+
+    # Schedule publish/vacation reuse this restore but must not force an early
+    # Follow/Unfollow sync — that stays on the daily job (next_sync_at).
+    if not sync_follow_monitor:
+        return
 
     mon = db.get_follow_monitor(owner_id)
     if mon and mon.enabled and mon.refresh_token and not mon.needs_reauth:

@@ -1839,7 +1839,9 @@ async def _complete_schedule_publish(
     from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
 
     apply_oauth_success_tokens(db, owner_id, token_info)
-    await restore_after_twitch_oauth(application, owner_id)
+    await restore_after_twitch_oauth(
+        application, owner_id, sync_follow_monitor=False
+    )
     _remember_schedule_broadcaster(db, owner_id, twitch_user_id, refresh)
 
     # clear/create briefly empties Helix days — do not treat that as user cancels.
@@ -2094,7 +2096,9 @@ async def _complete_schedule_vacation(
     from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
 
     apply_oauth_success_tokens(db, owner_id, token_info)
-    await restore_after_twitch_oauth(application, owner_id)
+    await restore_after_twitch_oauth(
+        application, owner_id, sync_follow_monitor=False
+    )
     try:
         if disable:
             await asyncio.to_thread(

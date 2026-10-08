@@ -1803,6 +1803,11 @@ def check_handlers() -> None:
         all_unf_text = "\n".join(all_unf)
         assert "gone" in all_unf_text.lower()
         assert _format_event_date(recent_iso) in all_unf_text
+    # Schedule publish/vacation must not kick Follow/Unfollow sync early.
+    _sched_src = (
+        Path(__file__).resolve().parents[1] / "handlers" / "stream_schedule.py"
+    ).read_text(encoding="utf-8")
+    assert _sched_src.count("sync_follow_monitor=False") >= 2
     assert "stream-chat" not in {f.id for f in beta_mod.list_features()}
     assert "deleted-subscriptions-cart" not in {f.id for f in beta_mod.list_features()}
     sc_feat = beta_mod.get_feature("stream-chat")
