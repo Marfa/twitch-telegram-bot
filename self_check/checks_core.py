@@ -158,6 +158,16 @@ def check_core() -> None:
     assert parse_context_label("CHAT please") == "chat"
     assert parse_context_label("maybe") is None
     assert normalize_clip_source("asr") == "emotion"
+    from ai_clips import GROQ_CONTEXT_PROMPT
+
+    ctx_prompt = GROQ_CONTEXT_PROMPT.format(
+        category="Escape from Tarkov",
+        title="Стрим 14 !glist",
+        text="POGGERS\nACE",
+    )
+    assert "Escape from Tarkov" in ctx_prompt
+    assert "Стрим 14 !glist" in ctx_prompt
+    assert "POGGERS" in ctx_prompt
 
     merged = merge_clip_candidates(
         [ClipCandidate(90, 1.0, "phrase")],

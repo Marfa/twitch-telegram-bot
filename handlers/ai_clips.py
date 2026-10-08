@@ -1185,11 +1185,29 @@ async def _run_job(
                             exc_info=True,
                         )
                 if remain_spikes:
+                    # Helix VOD has no game_id; use channel last/current category.
+                    stream_category = ""
+                    try:
+                        channel = await asyncio.to_thread(
+                            twitch.get_channel, token["twitch_user_id"]
+                        )
+                        if channel:
+                            stream_category = str(
+                                channel.get("game_name") or ""
+                            ).strip()
+                    except Exception:
+                        logger.warning(
+                            "ai_clips category lookup failed vod=%s",
+                            job.vod_id,
+                            exc_info=True,
+                        )
                     try:
                         game_peaks, remain_spikes = await asyncio.to_thread(
                             classify_spikes_with_groq,
                             chat_msgs,
                             remain_spikes,
+                            category=stream_category,
+                            title=job.vod_title or "",
                         )
                     except Exception:
                         logger.warning(

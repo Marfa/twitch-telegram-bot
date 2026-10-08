@@ -88,9 +88,14 @@ Text:
 {text}"""
 
 # Chat spike: gameplay beat vs social chatter.
+# Category/title help disambiguate (Helix VOD has no game_id — caller passes
+# channel last/current category + VOD title).
 GROQ_CONTEXT_PROMPT = """Classify a Twitch chat burst. Reply with ONLY one word:
 game — reactions to gameplay (fight, clutch, boss, win/lose, skill play, in-game event)
 chat — social talk, greetings, memes, emotes-only, off-topic, no clear game beat
+
+Category: {category}
+Stream title: {title}
 
 Chat:
 {text}"""
@@ -680,6 +685,8 @@ def classify_spikes_with_groq(
     messages: list[ChatMessage],
     spikes: list[ClipCandidate],
     *,
+    category: str = "",
+    title: str = "",
     window_sec: int = CHAT_CONTEXT_WINDOW_SEC,
 ) -> tuple[list[ClipCandidate], list[ClipCandidate]]:
     """Label chat spikes game|chat. Returns (game candidates, remaining spikes)."""
@@ -699,7 +706,9 @@ def classify_spikes_with_groq(
             remaining.append(spike)
             continue
         try:
-            label = _groq_context_label(chat_text)
+            label = _groq_context_label(
+                chat_text, category=category, title=title
+            )
             if label == "game":
                 game.append(
                     ClipCandidate(
@@ -773,8 +782,17 @@ def _groq_emotion_score(text: str) -> int | None:
     return parse_emotion_score(raw)
 
 
-def _groq_context_label(text: str) -> Literal["game", "chat"] | None:
-    prompt = GROQ_CONTEXT_PROMPT.format(text=(text or "").strip()[:2000])
+def _groq_context_label(
+    text: str,
+    *,
+    category: str = "",
+    title: str = "",
+) -> Literal["game", "chat"] | None:
+    prompt = GROQ_CONTEXT_PROMPT.format(
+        category=(category or "").strip()[:200] or "unknown",
+        title=(title or "").strip()[:300] or "unknown",
+        text=(text or "").strip()[:2000],
+    )
     raw = _groq_chat(prompt, max_tokens=8)
     return parse_context_label(raw)
 
