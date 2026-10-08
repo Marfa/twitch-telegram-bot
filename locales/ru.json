@@ -828,7 +828,7 @@
   "edit_repeat_mute_prompt": "Подписка #{sub_id}\nСейчас: {current}\n\nУкажите минуты заглушки (0 — разрешить повторы):",
   "edit_repeat_current_allow": "разрешены",
   "edit_repeat_current_mute": "заглушка {minutes} мин.",
-  "edit_template_prompt": "Подписка #{sub_id}\n\nТекущий формат:\n<code>{current}</code>\n\nКак будет выглядеть:\n{preview}\n\nОтправьте новый шаблон сообщения.\n\nПример ключевых слов:\n• <code>{{username}}</code> — имя канала\n• <code>{{game}}</code> — категория стрима\n• <code>{{name}}</code> — название стрима\n\n{placeholders_link}",
+  "edit_template_prompt": "Подписка #{sub_id}\n\nТекущий формат:\n{current}\n\nКак будет выглядеть:\n{preview}\n\nОтправьте новый шаблон сообщения.\n\nПример ключевых слов:\n• <code>{{username}}</code> — имя канала\n• <code>{{game}}</code> — категория стрима\n• <code>{{name}}</code> — название стрима\n\n{placeholders_link}",
   "edit_ignore_keywords_prompt": "Подписка #{sub_id}\nСейчас: {current}\n\nОтправьте ключевые слова через запятую.\nПоддерживается regexp (без учёта регистра), например <code>just.?chatting|irl</code>.\nНажмите «Использовать глобальный список», чтобы применить Настройки → Игнорируемые слова и завершить.\n{hint}",
   "edit_ignore_keywords_hint_skip": "«Пропустить» — отключить фильтр.",
   "edit_ignore_keywords_hint_empty": "Отправьте слова, чтобы добавить в список. «Отменить» — без изменений.",

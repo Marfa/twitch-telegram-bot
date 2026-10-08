@@ -1344,10 +1344,12 @@ async def _prompt_edit_template(
         t("preview_stream", lang),
         escape_html=uses_html,
     )
-    # Source stays escaped inside <code>; live preview is outside <code> so
-    # <tg-emoji> / <b> actually render (Telegram ignores custom emoji in code).
-    current_s = html.escape(tmpl)
-    preview_s = preview if uses_html else html.escape(preview)
+    # Both blocks are outside <code> so <tg-emoji> can render (Telegram
+    # ignores custom emoji inside code; escaped tags look "broken").
+    if uses_html:
+        current_s, preview_s = tmpl, preview
+    else:
+        current_s, preview_s = html.escape(tmpl), html.escape(preview)
     kb = (
         reply_markup
         if reply_markup is not None

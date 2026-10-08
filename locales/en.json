@@ -827,7 +827,7 @@
   "edit_repeat_mute_prompt": "Subscription #{sub_id}\nCurrent: {current}\n\nEnter suppression minutes (0 — allow repeats):",
   "edit_repeat_current_allow": "allowed",
   "edit_repeat_current_mute": "suppress {minutes} min",
-  "edit_template_prompt": "Subscription #{sub_id}\n\nCurrent format:\n<code>{current}</code>\n\nHow it will look:\n{preview}\n\nSend a new message template.\n\nExample placeholders:\n• <code>{{username}}</code> — channel name\n• <code>{{game}}</code> — stream category\n• <code>{{name}}</code> — stream title\n\n{placeholders_link}",
+  "edit_template_prompt": "Subscription #{sub_id}\n\nCurrent format:\n{current}\n\nHow it will look:\n{preview}\n\nSend a new message template.\n\nExample placeholders:\n• <code>{{username}}</code> — channel name\n• <code>{{game}}</code> — stream category\n• <code>{{name}}</code> — stream title\n\n{placeholders_link}",
   "edit_ignore_keywords_prompt": "Subscription #{sub_id}\nCurrent: {current}\n\nSend keywords separated by commas.\nRegexp is supported (case-insensitive), e.g. <code>just.?chatting|irl</code>.\nTap «Use global list» to apply Settings → Ignored words and finish.\n{hint}",
   "edit_ignore_keywords_hint_skip": "Skip — disable the filter.",
   "edit_ignore_keywords_hint_empty": "Send words to add to the list. Cancel — leave unchanged.",

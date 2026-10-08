@@ -827,7 +827,7 @@
   "edit_repeat_mute_prompt": "Підписка #{sub_id}\nЗараз: {current}\n\nВкажіть хвилини заглушки (0 — дозволити повтори):",
   "edit_repeat_current_allow": "дозволені",
   "edit_repeat_current_mute": "заглушка {minutes} хв.",
-  "edit_template_prompt": "Підписка #{sub_id}\n\nПоточний формат:\n<code>{current}</code>\n\nЯк виглядатиме:\n{preview}\n\nНадішліть новий шаблон повідомлення.\n\nПриклад ключових слів:\n• <code>{{username}}</code> — ім’я каналу\n• <code>{{game}}</code> — категорія стріму\n• <code>{{name}}</code> — назва стріму\n\n{placeholders_link}",
+  "edit_template_prompt": "Підписка #{sub_id}\n\nПоточний формат:\n{current}\n\nЯк виглядатиме:\n{preview}\n\nНадішліть новий шаблон повідомлення.\n\nПриклад ключових слів:\n• <code>{{username}}</code> — ім’я каналу\n• <code>{{game}}</code> — категорія стріму\n• <code>{{name}}</code> — назва стріму\n\n{placeholders_link}",
   "edit_ignore_keywords_prompt": "Підписка #{sub_id}\nЗараз: {current}\n\nНадішліть ключові слова через кому.\nПідтримується regexp (без урахування регістру), наприклад <code>just.?chatting|irl</code>.\nНатисніть «Використати глобальний список», щоб застосувати Налаштування → Ігноровані слова і завершити.\n{hint}",
   "edit_ignore_keywords_hint_skip": "«Пропустити» — вимкнути фільтр.",
   "edit_ignore_keywords_hint_empty": "Надішліть слова, щоб додати до списку. «Скасувати» — без змін.",
