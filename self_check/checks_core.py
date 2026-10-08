@@ -1109,6 +1109,9 @@ def check_core() -> None:
     )
     assert template_uses_html("<b>{username}</b> live")
     assert template_uses_html('<a href="https://x">{name}</a>')
+    assert template_uses_html(
+        '<tg-emoji emoji-id="123">😀</tg-emoji> {username}'
+    )
     assert not template_uses_html("{username} is live")
     assert (
         render_template(
@@ -2663,6 +2666,45 @@ def check_core() -> None:
         link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
     assert _is_link_preview_disabled(no_preview)
+
+    from bot_helpers import message_text_for_template
+    from telegram import MessageEntity, User, Chat
+    from datetime import datetime as _dt
+
+    def _tmpl_msg(text, entities=None):
+        return Message(
+            message_id=1,
+            date=_dt.utcnow(),
+            chat=Chat(1, "private"),
+            from_user=User(1, "u", False),
+            text=text,
+            entities=entities or [],
+        )
+
+    assert message_text_for_template(_tmpl_msg("A & B < C")) == "A & B < C"
+    assert message_text_for_template(_tmpl_msg("plain {username}")) == (
+        "plain {username}"
+    )
+    custom = _tmpl_msg(
+        "😀 live",
+        [
+            MessageEntity(
+                type=MessageEntity.CUSTOM_EMOJI,
+                offset=0,
+                length=2,
+                custom_emoji_id="5535034915403333642",
+            )
+        ],
+    )
+    html_tmpl = message_text_for_template(custom)
+    assert 'emoji-id="5535034915403333642"' in html_tmpl
+    assert "<tg-emoji" in html_tmpl
+    assert message_text_for_template(
+        _tmpl_msg(
+            "#RRSTREAMS hi",
+            [MessageEntity(type=MessageEntity.HASHTAG, offset=0, length=10)],
+        )
+    ) == "#RRSTREAMS hi"
 
     from i18n import default_utc_offset_minutes_for_locale
 

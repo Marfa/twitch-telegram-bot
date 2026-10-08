@@ -290,6 +290,42 @@ def _is_link_preview_disabled(message) -> bool:
     return bool(opts and opts.is_disabled)
 
 
+# Entities that require HTML when re-sent (custom emoji ids live only here).
+_TEMPLATE_HTML_ENTITY_TYPES = frozenset(
+    {
+        "bold",
+        "italic",
+        "underline",
+        "strikethrough",
+        "spoiler",
+        "code",
+        "pre",
+        "text_link",
+        "text_mention",
+        "custom_emoji",
+        "blockquote",
+        "expandable_blockquote",
+    }
+)
+
+
+def message_text_for_template(message) -> str:
+    """Plain text, or HTML when the message has formatting / custom emoji.
+
+    Telegram puts only the fallback glyph in ``message.text`` (e.g. 😀); the
+    premium ``custom_emoji_id`` is in entities. Always using ``text_html`` would
+    also escape bare ``&`` / ``<`` and break plain templates sent without
+    parse_mode — so HTML is used only when formatting entities are present.
+    """
+    plain = (getattr(message, "text", None) or "").strip()
+    if not plain:
+        return ""
+    ents = getattr(message, "entities", None) or ()
+    if any(getattr(e, "type", None) in _TEMPLATE_HTML_ENTITY_TYPES for e in ents):
+        return (getattr(message, "text_html", None) or plain).strip()
+    return plain
+
+
 def _inline_btn_label(text: str, *, limit: int = 64) -> str:
     text = " ".join(str(text).split())
     if len(text) <= limit:

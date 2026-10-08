@@ -2548,7 +2548,8 @@ def _tidy_stream_title(text: str) -> str:
 # Allowed Telegram HTML tags users may put in alert templates (not full rich blocks).
 _TEMPLATE_HTML_RE = re.compile(
     r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|tg-spoiler)\b"
-    r"|<a\s+href\s*=",
+    r"|<a\s+href\s*="
+    r"|<tg-emoji\b",
     re.IGNORECASE,
 )
 

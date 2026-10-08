@@ -23,6 +23,7 @@ from bot_helpers import (
     _user_lang,
     _wizard,
     is_private_chat,
+    message_text_for_template,
     reply_chat_id,
 )
 from db import Database, Subscription
@@ -1872,7 +1873,9 @@ async def receive_top_donations_template(
     if not text:
         await update.effective_message.reply_text(t("template_empty", lang))
         return _wz()["TOP_DONATIONS_TEMPLATE"]
-    context.user_data["top_donations_template"] = text
+    context.user_data["top_donations_template"] = message_text_for_template(
+        update.effective_message
+    )
     context.user_data["top_donations"] = True
     if context.user_data.get("adv_want_image"):
         return await _go_image_ask_prompt(update, context, lang)
@@ -2856,13 +2859,14 @@ async def receive_channel_dup(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def receive_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
-    template = (update.effective_message.text or "").strip()
-    if is_menu_button(template):
+    plain = (update.effective_message.text or "").strip()
+    if is_menu_button(plain):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return _wz()["TEMPLATE"]
-    if not template:
+    if not plain:
         await update.effective_message.reply_text(t("template_empty", lang))
         return _wz()["TEMPLATE"]
+    template = message_text_for_template(update.effective_message)
 
     if await _offer_template_typo_fix(update, context, lang, template):
         return _wz()["TEMPLATE_TYPO_CONFIRM"]
@@ -3414,7 +3418,9 @@ async def receive_schedule_cancel_template(
             reply_markup=_wizard(lang),
         )
         return _wz()["SCHEDULE_CANCEL_TEMPLATE"]
-    context.user_data["schedule_cancel_template"] = raw
+    context.user_data["schedule_cancel_template"] = message_text_for_template(
+        update.effective_message
+    )
     context.user_data["notify_on_schedule_cancel"] = True
     context.user_data["adv_want_schedule_cancel"] = True
     return await _go_before_dest_step(update, context, lang)

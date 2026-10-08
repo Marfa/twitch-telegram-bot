@@ -174,6 +174,7 @@ from bot_helpers import (
     GROUP_SETUP_CALLBACK_PATTERN,
     is_private_chat,
     handle_group_setup_rejection,
+    message_text_for_template,
     reply_chat_id,
     reply_setup_private_only,
 )
@@ -1332,12 +1333,21 @@ async def _prompt_edit_template(
     sub_num: int,
     reply_markup=None,
 ) -> None:
+    from twitch import template_uses_html
+
+    tmpl = sub.message_template or ""
     preview = render_template(
-        sub.message_template,
+        tmpl,
         sub.twitch_username,
         "Just Chatting",
         t("preview_stream", lang),
+        escape_html=template_uses_html(tmpl),
     )
+    # Keep HTML (incl. <tg-emoji>) so premium emoji render in the prompt.
+    if template_uses_html(tmpl):
+        current_s, preview_s = tmpl, preview
+    else:
+        current_s, preview_s = html.escape(tmpl), html.escape(preview)
     kb = (
         reply_markup
         if reply_markup is not None
@@ -1353,8 +1363,8 @@ async def _prompt_edit_template(
             lang,
             sub_id=sub_num,
             placeholders_link=placeholders_link_html(lang),
-            current=html.escape(sub.message_template or ""),
-            preview=html.escape(preview),
+            current=current_s,
+            preview=preview_s,
         ),
         lang,
         inline_markup=kb,
@@ -1661,15 +1671,15 @@ async def receive_edit_schedule_cancel(
     if not sub_id:
         return ConversationHandler.END
 
-    raw = (update.effective_message.text or "").strip()
-    if is_menu_button(raw):
+    plain = (update.effective_message.text or "").strip()
+    if is_menu_button(plain):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_SCHEDULE_CANCEL
 
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
     sub_num = _owner_sub_number(db, owner_id, sub_id)
-    if not raw or raw == "0":
+    if not plain or plain == "0":
         ok = db.update_subscription(
             sub_id,
             owner_id,
@@ -1681,7 +1691,9 @@ async def receive_edit_schedule_cancel(
             sub_id,
             owner_id,
             notify_on_schedule_cancel=True,
-            schedule_cancel_template=raw,
+            schedule_cancel_template=message_text_for_template(
+                update.effective_message
+            ),
         )
     if not ok:
         await update.effective_message.reply_text(t("sub_not_found", lang))
@@ -1700,13 +1712,14 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
     if not sub_id:
         return ConversationHandler.END
 
-    template = (update.effective_message.text or "").strip()
-    if is_menu_button(template):
+    plain = (update.effective_message.text or "").strip()
+    if is_menu_button(plain):
         await update.effective_message.reply_text(t("finish_setup_first", lang))
         return EDIT_TEMPLATE
-    if not template:
+    if not plain:
         await update.effective_message.reply_text(t("template_empty", lang))
         return EDIT_TEMPLATE
+    template = message_text_for_template(update.effective_message)
 
     if context.user_data.get("editing_top_donations_template"):
         db: Database = context.application.bot_data["db"]
