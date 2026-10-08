@@ -827,7 +827,7 @@
   "edit_repeat_mute_prompt": "Iscrizione #{sub_id}\nAttuale: {current}\n\nInserisci i minuti di soppressione (0 — consenti ripetizioni):",
   "edit_repeat_current_allow": "consentite",
   "edit_repeat_current_mute": "sopprimi {minutes} min",
-  "edit_template_prompt": "Iscrizione #{sub_id}\n\nFormato attuale:\n<code>{current}</code>\n\nCome apparirà:\n<code>{preview}</code>\n\nInvia un nuovo template di messaggio.\n\nEsempi di placeholder:\n• <code>{{username}}</code> — nome del canale\n• <code>{{game}}</code> — categoria dello stream\n• <code>{{name}}</code> — titolo dello stream\n\n{placeholders_link}",
+  "edit_template_prompt": "Iscrizione #{sub_id}\n\nFormato attuale:\n<code>{current}</code>\n\nCome apparirà:\n{preview}\n\nInvia un nuovo template di messaggio.\n\nEsempi di placeholder:\n• <code>{{username}}</code> — nome del canale\n• <code>{{game}}</code> — categoria dello stream\n• <code>{{name}}</code> — titolo dello stream\n\n{placeholders_link}",
   "edit_ignore_keywords_prompt": "Iscrizione #{sub_id}\nAttuale: {current}\n\nInvia le parole chiave separate da virgole.\nRegexp supportata (case-insensitive), es. <code>just.?chatting|irl</code>.\nTocca «Usa elenco globale» per applicare Impostazioni → Parole ignorate e terminare.\n{hint}",
   "edit_ignore_keywords_hint_skip": "Salta — disattiva il filtro.",
   "edit_ignore_keywords_hint_empty": "Invia le parole da aggiungere all'elenco. Annulla — lascia invariato.",

@@ -1336,18 +1336,18 @@ async def _prompt_edit_template(
     from twitch import template_uses_html
 
     tmpl = sub.message_template or ""
+    uses_html = template_uses_html(tmpl)
     preview = render_template(
         tmpl,
         sub.twitch_username,
         "Just Chatting",
         t("preview_stream", lang),
-        escape_html=template_uses_html(tmpl),
+        escape_html=uses_html,
     )
-    # Keep HTML (incl. <tg-emoji>) so premium emoji render in the prompt.
-    if template_uses_html(tmpl):
-        current_s, preview_s = tmpl, preview
-    else:
-        current_s, preview_s = html.escape(tmpl), html.escape(preview)
+    # Source stays escaped inside <code>; live preview is outside <code> so
+    # <tg-emoji> / <b> actually render (Telegram ignores custom emoji in code).
+    current_s = html.escape(tmpl)
+    preview_s = preview if uses_html else html.escape(preview)
     kb = (
         reply_markup
         if reply_markup is not None
