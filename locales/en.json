@@ -1311,7 +1311,7 @@
   "ai_clips_no_peaks": "No suitable clip moments found (no chat cues or loud peaks).",
   "ai_clips_create_failed": "Peaks found, but Twitch did not create clips. Check that clips are enabled and the VOD is still available.",
   "ai_clips_clip_title": "AI clip {n}: {title}",
-  "ai_clips_done_title": "<b>Done — {count} clip(s):</b>",
+  "ai_clips_done_title": "<b>Clips for VOD {title} created:</b>",
   "ai_clips_done_line": "{n}. at {offset} — <a href=\"{url}\">{url}</a>",
   "ai_clips_existing_title": "<b>Clips for this VOD — {count}:</b>",
   "ai_clips_existing_empty": "No clips for this VOD right now (deleted or not ready yet).",

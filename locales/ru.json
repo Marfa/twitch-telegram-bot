@@ -1312,7 +1312,7 @@
   "ai_clips_no_peaks": "Не нашлось подходящих моментов для клипов (нет подсказок в чате и громких пиков).",
   "ai_clips_create_failed": "Пики найдены, но Twitch не создал клипы. Проверьте, что клипы включены на канале и VOD ещё доступен.",
   "ai_clips_clip_title": "AI clip {n}: {title}",
-  "ai_clips_done_title": "<b>Готово — {count} клип(ов):</b>",
+  "ai_clips_done_title": "<b>Клипы по VOD {title} созданы:</b>",
   "ai_clips_done_line": "{n}. с {offset} — <a href=\"{url}\">{url}</a>",
   "ai_clips_existing_title": "<b>Клипы для этого VOD — {count}:</b>",
   "ai_clips_existing_empty": "Клипов по этому VOD сейчас нет (удалены или ещё не готовы).",

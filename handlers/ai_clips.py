@@ -1294,7 +1294,8 @@ async def _run_job(
         else:
             db.update_ai_clips_job(job_id, status="done", progress_pct=100)
 
-        lines = [t("ai_clips_done_title", loc, count=len(clips))]
+        title = html_escape(str(job.vod_title or job.vod_id)[:80])
+        lines = [t("ai_clips_done_title", loc, title=title)]
         for i, c in enumerate(clips, start=1):
             link = html_escape(c.url or c.edit_url)
             lines.append(

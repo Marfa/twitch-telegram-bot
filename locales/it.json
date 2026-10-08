@@ -1300,7 +1300,7 @@
   "ai_clips_no_peaks": "Nessun momento adatto per le clip (né segnali in chat né picchi audio).",
   "ai_clips_create_failed": "Picchi trovati, ma Twitch non ha creato le clip. Verifica che le clip siano abilitate e che il VOD sia ancora disponibile.",
   "ai_clips_clip_title": "AI clip {n}: {title}",
-  "ai_clips_done_title": "<b>Fatto — {count} clip:</b>",
+  "ai_clips_done_title": "<b>Clip per VOD {title} create:</b>",
   "ai_clips_done_line": "{n}. a {offset} — <a href=\"{url}\">{url}</a>",
   "ai_clips_existing_title": "<b>Clip per questo VOD — {count}:</b>",
   "ai_clips_existing_empty": "Nessuna clip per questo VOD al momento (eliminate o non ancora pronte).",
