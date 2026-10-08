@@ -100,6 +100,7 @@ from twitch import (
     render_template,
     resolve_sub_image_photo,
     template_has_link,
+    template_uses_html,
 )
 
 logger = logging.getLogger(__name__)
@@ -4203,11 +4204,14 @@ async def _finish_subscription(
             thread_note=thread_note,
         )
     else:
+        tmpl = data["message_template"] or ""
+        uses_html = template_uses_html(tmpl)
         preview = render_template(
-            data["message_template"],
+            tmpl,
             data["twitch_username"],
             "Just Chatting",
             t("preview_stream", lang),
+            escape_html=uses_html,
         )
         thread_note = (
             t("thread_note", lang, thread_id=thread_id) if thread_id else ""
@@ -4323,6 +4327,7 @@ async def _finish_subscription(
                 image_file_id=preview_image,
                 image_position=str(data.get("image_position") or ""),
                 disable_link_preview=preview_disabled,
+                parse_mode=ParseMode.HTML if uses_html else None,
             )
         except (BadRequest, Forbidden) as exc:
             logger.warning("Cannot send setup preview to %s: %s", owner_id, exc)
