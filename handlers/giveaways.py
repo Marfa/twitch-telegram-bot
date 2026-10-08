@@ -1225,24 +1225,33 @@ async def on_giveaways_callback(
                     stores=set(prefs.stores),
                     platforms=set(prefs.platforms),
                 )
+                if entries:
+                    entries = _store_browse(
+                        context.application, user_id, entries, lang
+                    )
+                    await _send_cards_batch(
+                        context.bot,
+                        chat_id,
+                        db=db,
+                        entries=entries,
+                        lang=lang,
+                        offset=0,
+                    )
             if not entries:
                 await context.bot.send_message(
                     chat_id, t("giveaways_empty", lang)
                 )
-                return
-            entries = _store_browse(
-                context.application, user_id, entries, lang
-            )
-            loaded = (entries, lang)
+            return
         entries, browse_lang = loaded
-        await _send_cards_batch(
-            context.bot,
-            chat_id,
-            db=db,
-            entries=entries,
-            lang=browse_lang or lang,
-            offset=0,
-        )
+        async with request_progress(context.bot, chat_id, lang):
+            await _send_cards_batch(
+                context.bot,
+                chat_id,
+                db=db,
+                entries=entries,
+                lang=browse_lang or lang,
+                offset=0,
+            )
         return
 
     if data.startswith("gv:more:"):
@@ -1258,14 +1267,15 @@ async def on_giveaways_callback(
             )
             return
         entries, browse_lang = loaded
-        await _send_cards_batch(
-            context.bot,
-            chat_id,
-            db=db,
-            entries=entries,
-            lang=browse_lang or lang,
-            offset=offset,
-        )
+        async with request_progress(context.bot, chat_id, lang):
+            await _send_cards_batch(
+                context.bot,
+                chat_id,
+                db=db,
+                entries=entries,
+                lang=browse_lang or lang,
+                offset=offset,
+            )
         return
 
     if data.startswith("gv:streams:"):

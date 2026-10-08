@@ -494,6 +494,98 @@ def _check_card_keyboard() -> None:
     assert det.inline_keyboard[0][0].callback_data == "gv:details"
 
 
+def _check_details_shows_loading() -> None:
+    """Digest «Подробнее» shows request_progress while cards are enriched/sent."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from db.models import GiveawayCatalogEntry
+    from handlers.giveaways import _store_browse, on_giveaways_callback
+
+    entry = GiveawayCatalogEntry(
+        source="gamerpower",
+        external_id="1",
+        title="Demo",
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url="https://example.com",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", "Demo"),
+        igdb_id=1,
+        name="Demo",
+        year="2020",
+        publisher="P",
+        developer="D",
+        summary="s",
+        cover_url="",
+        refreshed_at=100,
+    )
+    app = MagicMock()
+    app.bot_data = {"db": MagicMock()}
+    app.bot_data["db"].get_user_lang.return_value = "ru"
+    _store_browse(app, 42, [entry], "ru")
+
+    bot = AsyncMock()
+    context = MagicMock()
+    context.application = app
+    context.bot = bot
+
+    query = AsyncMock()
+    query.data = "gv:details"
+    query.from_user = MagicMock(id=42)
+    query.message = MagicMock(chat_id=42)
+    update = MagicMock()
+    update.callback_query = query
+    update.effective_user = query.from_user
+
+    progress_entered = {"n": 0}
+    cards_sent = {"n": 0}
+
+    class _FakeProgress:
+        async def __aenter__(self):
+            progress_entered["n"] += 1
+            return None
+
+        async def __aexit__(self, *args):
+            return None
+
+    async def _fake_send_cards(*_a, **_k):
+        cards_sent["n"] += 1
+        assert progress_entered["n"] == 1
+        return 1
+
+    with (
+        patch(
+            "handlers.giveaways.request_progress",
+            return_value=_FakeProgress(),
+        ),
+        patch(
+            "handlers.giveaways._send_cards_batch",
+            side_effect=_fake_send_cards,
+        ),
+        patch(
+            "handlers.giveaways.reply_chat_id",
+            return_value=42,
+        ),
+        patch(
+            "handlers.giveaways._user_lang",
+            return_value="ru",
+        ),
+        patch(
+            "handlers.giveaways.giveaways_feature_available",
+            return_value=True,
+        ),
+    ):
+        asyncio.run(on_giveaways_callback(update, context))
+
+    assert progress_entered["n"] == 1
+    assert cards_sent["n"] == 1
+    query.answer.assert_awaited()
+
+
 def _check_beta_manifest() -> None:
     import json
     from pathlib import Path
@@ -601,6 +693,7 @@ def run() -> None:
     _check_deal_page_enrich_lazy()
     _check_deal_merge_and_card_cut()
     _check_card_keyboard()
+    _check_details_shows_loading()
     _check_card_html_caption_budget()
     _check_unified_card_dates_after_platforms()
     _check_beta_manifest()
