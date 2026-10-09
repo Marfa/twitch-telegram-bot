@@ -418,6 +418,7 @@ def _slots_from_segments(
                 "date": day,
                 "time": f"{local.hour:02d}:{local.minute:02d}",
                 "game": _schedule_segment_game(seg),
+                "is_recurring": bool(seg.get("is_recurring")),
             }
         )
     out.sort(
@@ -549,10 +550,11 @@ def _schedule_publish_error_text(exc: BaseException, date_raw: str, lang: str) -
         pass
     detail = TwitchClient._schedule_error_detail(exc)
     raw = str(exc).lower()
-    if TwitchClient.is_recurring_start_forbidden(exc):
-        key = "stream_schedule_err_recurring_time"
-    elif TwitchClient.is_overlapping_schedule(exc):
+    # Overlap before recurring-start: conflict copy must not look like FirstOccurrenceDate.
+    if TwitchClient.is_overlapping_schedule(exc):
         key = "stream_schedule_err_overlap"
+    elif TwitchClient.is_recurring_start_forbidden(exc):
+        key = "stream_schedule_err_recurring_time"
     elif TwitchClient.is_one_off_schedule_forbidden(exc):
         key = "stream_schedule_err_one_off"
     elif "401" in raw or "unauthorized" in detail:
@@ -763,6 +765,7 @@ async def _queue_schedule_publish_and_auth(
                 "date": _schedule_iso_date(u["date"]),
                 "time": u["time"],
                 "game": u.get("game") or "",
+                "is_recurring": bool(u.get("is_recurring")),
             }
             for u in updates
             if u.get("id")
@@ -1319,12 +1322,18 @@ async def stream_schedule_fix_game(
     rest = slots[1:]
     if edit_id:
         updates: list[dict] = context.user_data.setdefault("stream_schedule_updates", [])
+        was_recurring = False
+        for slot in context.user_data.get("stream_schedule_existing") or []:
+            if str(slot.get("id") or "") == str(edit_id):
+                was_recurring = bool(slot.get("is_recurring"))
+                break
         found = False
         for upd in updates:
             if upd.get("id") == edit_id:
                 upd["date"] = day_date
                 upd["time"] = first_time
                 upd["game"] = first_game
+                upd["is_recurring"] = was_recurring or bool(upd.get("is_recurring"))
                 found = True
                 break
         if not found:
@@ -1334,6 +1343,7 @@ async def stream_schedule_fix_game(
                     "date": day_date,
                     "time": first_time,
                     "game": first_game,
+                    "is_recurring": was_recurring,
                 }
             )
         return await _show_day_slots(update, context, lang)
@@ -1849,7 +1859,9 @@ async def _complete_schedule_publish(
 
     suppress_schedule_cancel(application.bot_data, twitch_user_id)
 
-    if clear_mode not in ("overlap", "none"):
+    async def _clear_helix() -> None:
+        if clear_mode in ("overlap", "none"):
+            return
         try:
             unique_dates = {e.get("date") for e in entries if e.get("date")}
             if clear_mode == "day" and len(unique_dates) == 1:
@@ -1965,6 +1977,8 @@ async def _complete_schedule_publish(
         for upd, slot_duration in zip(updates, update_durations):
             start_iso, game_text, category_id = _start_and_category(upd)
             try:
+                # Recurring / non-affiliate: Helix forbids PATCH start_time — replace.
+                use_recurring = prefer_recurring or bool(upd.get("is_recurring"))
                 _, recurring = twitch.update_schedule_segment_with_overlap_replace(
                     access,
                     twitch_user_id,
@@ -1974,8 +1988,10 @@ async def _complete_schedule_publish(
                     duration=slot_duration,
                     title=game_text or "",
                     category_id=category_id,
+                    prefer_recurring=use_recurring,
                 )
                 if recurring:
+                    prefer_recurring = True
                     used_recurring = True
                 ok += 1
             except Exception as exc:
@@ -2008,6 +2024,8 @@ async def _complete_schedule_publish(
                 )
         return ok, errs, used_recurring
 
+    from request_progress import request_progress
+
     logger.info(
         "Schedule publish mutate broadcaster=%s entries=%s updates=%s deletes=%s",
         twitch_user_id,
@@ -2015,23 +2033,26 @@ async def _complete_schedule_publish(
         len(updates),
         len(deletes),
     )
-    ok_count, errors, used_recurring_fallback = await asyncio.to_thread(_mutate_helix)
+    async with request_progress(application.bot, owner_id, lang):
+        await _clear_helix()
+        ok_count, errors, used_recurring_fallback = await asyncio.to_thread(
+            _mutate_helix
+        )
+        try:
+            await asyncio.to_thread(
+                refresh_schedule_day_snapshot, db, twitch, twitch_user_id
+            )
+        except Exception:
+            logger.exception(
+                "Schedule day snapshot refresh failed after publish for %s",
+                twitch_user_id,
+            )
     logger.info(
         "Schedule publish mutate done broadcaster=%s ok=%s errors=%s",
         twitch_user_id,
         ok_count,
         len(errors),
     )
-
-    try:
-        await asyncio.to_thread(
-            refresh_schedule_day_snapshot, db, twitch, twitch_user_id
-        )
-    except Exception:
-        logger.exception(
-            "Schedule day snapshot refresh failed after publish for %s",
-            twitch_user_id,
-        )
 
     total = len(entries) + len(updates) + len(deletes)
     if ok_count == total:

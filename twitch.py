@@ -1706,15 +1706,32 @@ class TwitchClient:
     @classmethod
     def is_overlapping_schedule(cls, exc: BaseException) -> bool:
         """True when Twitch rejects a segment that overlaps an existing one."""
-        return "overlapping segment" in cls._schedule_error_detail(exc)
+        detail = cls._schedule_error_detail(exc)
+        if "overlapping segment" in detail:
+            return True
+        if "overlap" in detail and "segment" in detail:
+            return True
+        # Helix sometimes says "conflicts" instead of "overlapping segment".
+        if "conflict" in detail and "segment" in detail:
+            return True
+        return False
 
     @classmethod
     def is_recurring_start_forbidden(cls, exc: BaseException) -> bool:
-        """True when Twitch rejects start_time on a recurring segment."""
+        """True when Twitch rejects PATCH start_time on a recurring segment.
+
+        Keep this narrow (FirstOccurrenceDate / can't-set phrasing only). Broader
+        ``start`` + ``recurring`` matches false-positive on overlap/conflict copy
+        and blocks the create→weekly-recurring fallback for non-affiliates.
+        """
         detail = cls._schedule_error_detail(exc)
-        return "firstoccurrencedate" in detail or (
-            "recurring" in detail and "start" in detail
-        )
+        if "firstoccurrencedate" in detail:
+            return True
+        if "can't set" in detail and "recurring" in detail:
+            return True
+        if "cannot set" in detail and "recurring" in detail:
+            return True
+        return False
 
     def create_schedule_segment(
         self,
@@ -1823,62 +1840,28 @@ class TwitchClient:
         duration: int = 120,
         title: str = "",
         category_id: str = "",
+        prefer_recurring: bool = False,
     ) -> tuple[dict[str, Any], bool]:
-        """Update a segment; on overlap or recurring-time restriction, replace.
+        """Replace a segment via delete + create (Helix-safe start_time change).
 
-        Recurring segments cannot get a new start_time (Twitch 400 FirstOccurrenceDate).
-        In that case the old segment is deleted and a new one is created.
+        Twitch forbids PATCH ``start_time`` on recurring segments (FirstOccurrenceDate)
+        and only partners/affiliates may change start_time on one-off segments.
+        Delete + create with the one-off→recurring fallback covers non-affiliates.
         Returns (response_json, used_recurring_create).
         """
-        kwargs = dict(
-            user_access_token=user_access_token,
-            broadcaster_id=broadcaster_id,
-            segment_id=segment_id,
+        self.delete_schedule_segment(user_access_token, broadcaster_id, segment_id)
+        return self.create_schedule_segment_with_fallback(
+            user_access_token,
+            broadcaster_id,
             start_time=start_time,
             timezone=timezone,
             duration=duration,
             title=title,
             category_id=category_id,
+            # After removing a recurring series, skip a doomed one-off attempt when
+            # the batch already knows weekly slots are required.
+            prefer_recurring=prefer_recurring,
         )
-
-        def _update() -> dict[str, Any]:
-            return self.update_schedule_segment(**kwargs)
-
-        def _recreate() -> tuple[dict[str, Any], bool]:
-            self.delete_schedule_segment(
-                user_access_token, broadcaster_id, segment_id
-            )
-            return self.create_schedule_segment_with_fallback(
-                user_access_token,
-                broadcaster_id,
-                start_time=start_time,
-                timezone=timezone,
-                duration=int(kwargs.get("duration") or duration),
-                title=title,
-                category_id=category_id,
-            )
-
-        try:
-            return _update(), False
-        except Exception as exc:
-            if self.is_overlapping_schedule(exc):
-                capped = self.delete_overlapping_schedule_segments(
-                    user_access_token,
-                    broadcaster_id,
-                    start_time=start_time,
-                    duration=duration,
-                    exclude_ids=(segment_id,),
-                )
-                kwargs["duration"] = capped
-                try:
-                    return _update(), False
-                except Exception as retry_exc:
-                    if self.is_recurring_start_forbidden(retry_exc):
-                        return _recreate()
-                    raise
-            if self.is_recurring_start_forbidden(exc):
-                return _recreate()
-            raise
 
     def create_schedule_segment_with_fallback(
         self,

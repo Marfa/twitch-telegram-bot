@@ -1409,6 +1409,18 @@ def check_core() -> None:
             "on recurring segments for url: https://api.twitch.tv/helix/schedule/segment"
         )
     )
+    # Overlap / conflict copy must not look like FirstOccurrenceDate (blocks recurring fallback).
+    assert not TwitchClient.is_recurring_start_forbidden(
+        Exception(
+            "400 Client Error: start time conflicts with an existing recurring "
+            "segment for url: https://api.twitch.tv/helix/schedule/segment"
+        )
+    )
+    assert TwitchClient.is_recurring_start_forbidden(
+        Exception(
+            "400 Client Error: can't set start time on recurring segments for url: x"
+        )
+    )
     assert TwitchClient.is_overlapping_schedule(
         Exception("400 Client Error: Segment cannot create overlapping segment for url: x")
     )
@@ -1517,6 +1529,42 @@ def check_core() -> None:
     assert deleted == ["occ-0"]
     assert page_calls[0].get("max_pages") == 1
     assert all(c.get("max_pages") == 1 for c in page_calls)
+    # Non-affiliate replace: delete + create with prefer_recurring (no PATCH start_time).
+    replace_client = TwitchClient()
+    replace_calls: list[tuple] = []
+
+    def _fake_replace_delete(*args, **kwargs):
+        sid = args[2] if len(args) > 2 else kwargs.get("segment_id")
+        replace_calls.append(("delete", sid))
+
+    def _fake_replace_create(*_args, **kwargs):
+        replace_calls.append(("create", kwargs.get("is_recurring")))
+        if not kwargs.get("is_recurring"):
+            raise Exception(
+                "403 Client Error: single segment creation not authorized for url: x"
+            )
+        return {"data": {"segments": [{"id": "new"}]}}
+
+    with (
+        patch.object(
+            replace_client, "delete_schedule_segment", side_effect=_fake_replace_delete
+        ),
+        patch.object(
+            replace_client, "create_schedule_segment", side_effect=_fake_replace_create
+        ),
+    ):
+        _body, used_rec = replace_client.update_schedule_segment_with_overlap_replace(
+            "tok",
+            "broadcaster",
+            "old-seg",
+            start_time="2026-10-09T12:30:00Z",
+            timezone="Europe/Moscow",
+            duration=120,
+            title="Roulette",
+            prefer_recurring=True,
+        )
+    assert used_rec is True
+    assert replace_calls == [("delete", "old-seg"), ("create", True)]
     from datetime import date as _date, timezone as _tzinfo, timedelta as _td
     from handlers.stream_schedule import (
         _format_week_slots_preview,
