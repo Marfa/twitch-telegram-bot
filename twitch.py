@@ -221,6 +221,11 @@ def resolve_sub_image_photo(
 
 _RATE_LIMIT_MAX_RETRIES = 4
 _RATE_LIMIT_MAX_WAIT_SEC = 60.0
+# Helix/Fastly blips: Twitch advises retrying timeouts (not permanent failures).
+_TRANSIENT_REQUEST_ERRORS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+)
 
 
 def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
@@ -246,12 +251,18 @@ def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
     return min(_RATE_LIMIT_MAX_WAIT_SEC, float(2 ** attempt))
 
 
+def _transient_backoff_seconds(attempt: int) -> float:
+    """Capped exponential wait after a timeout / connection error."""
+    return min(_RATE_LIMIT_MAX_WAIT_SEC, float(2 ** attempt))
+
+
 def _install_rate_limit_backoff(
     session: requests.Session,
     on_unauthorized: Any | None = None,
 ) -> None:
-    """Wrap Session.request: refresh a rejected token once on 401, then retry on
-    429 with Retry-After / exponential backoff.
+    """Wrap Session.request: refresh a rejected token once on 401, retry on
+    429 with Retry-After / exponential backoff, and retry transient network
+    timeouts / connection errors the same way.
 
     `on_unauthorized` takes the request headers and returns rebuilt headers to
     retry with (after refreshing the token), or None to leave the 401 as-is.
@@ -262,7 +273,22 @@ def _install_rate_limit_backoff(
         last: requests.Response | None = None
         token_refreshed = False
         for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
-            last = orig(method, url, **kwargs)
+            try:
+                last = orig(method, url, **kwargs)
+            except _TRANSIENT_REQUEST_ERRORS as exc:
+                if attempt >= _RATE_LIMIT_MAX_RETRIES:
+                    raise
+                wait = _transient_backoff_seconds(attempt)
+                logger.warning(
+                    "HTTP %s method=%s url=%s wait=%.1fs attempt=%s",
+                    type(exc).__name__,
+                    method,
+                    url,
+                    wait,
+                    attempt + 1,
+                )
+                time.sleep(wait)
+                continue
             if (
                 last.status_code == 401
                 and not token_refreshed

@@ -363,6 +363,39 @@ def check_core() -> None:
     assert out.status_code == 200 and calls["n"] == 2
     sleep_mock.assert_called_once()
 
+    # Transient ReadTimeout: retry once, then success (Helix/Fastly blip).
+    import requests as _requests
+
+    to_calls = {"n": 0}
+
+    def _orig_timeout(method, url, **kwargs):
+        to_calls["n"] += 1
+        if to_calls["n"] == 1:
+            raise _requests.exceptions.ReadTimeout("read timed out")
+        return fake200
+
+    sess_to = MagicMock()
+    sess_to.request = _orig_timeout
+    _install_rate_limit_backoff(sess_to)
+    with patch("twitch.time.sleep") as sleep_to:
+        out = sess_to.request("GET", "https://api.twitch.tv/helix/streams")
+    assert out.status_code == 200 and to_calls["n"] == 2
+    sleep_to.assert_called_once()
+
+    # Exhausted ReadTimeout retries: re-raise after max attempts.
+    def _always_timeout(method, url, **kwargs):
+        raise _requests.exceptions.ReadTimeout("read timed out")
+
+    sess_fail = MagicMock()
+    sess_fail.request = _always_timeout
+    _install_rate_limit_backoff(sess_fail)
+    with patch("twitch.time.sleep"):
+        try:
+            sess_fail.request("GET", "https://api.twitch.tv/helix/streams")
+            raise AssertionError("expected ReadTimeout")
+        except _requests.exceptions.ReadTimeout:
+            pass
+
     # 401 rejected token: refresh headers once, then retry succeeds.
     fake401 = MagicMock()
     fake401.status_code = 401
