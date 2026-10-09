@@ -417,7 +417,6 @@
   "stream_schedule_publish_auth": "Авторизуйте бота для керування розкладом на Twitch.",
   "stream_schedule_publish_auth_button": "Авторизуватися на Twitch",
   "stream_schedule_publish_auth_unavailable": "Публікацію розкладу не налаштовано (потрібен PUBLIC_BASE_URL).",
-  "stream_schedule_publishing": "Публікую розклад на Twitch…",
   "stream_schedule_publish_ok": "✅ Розклад опубліковано на Twitch!",
   "stream_schedule_publish_ok_recurring": "✅ Розклад опубліковано на Twitch як щотижневі слоти (разові сегменти доступні лише Partner/Affiliate).",
   "stream_schedule_publish_fail": "❌ Не вдалося опублікувати розклад: {error}",

@@ -1739,7 +1739,7 @@ async def _start_schedule_publish_auth(
                         next_sync_at=sync.next_sync_at,
                     )
                 if query:
-                    await query.edit_message_text(t("stream_schedule_publishing", lang))
+                    await query.edit_message_text("✓")
                 await _complete_schedule_publish(
                     context.application,
                     user_id,

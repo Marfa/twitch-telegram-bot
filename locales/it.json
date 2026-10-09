@@ -417,7 +417,6 @@
   "stream_schedule_publish_auth": "Autorizza il bot a gestire il tuo programma Twitch.",
   "stream_schedule_publish_auth_button": "Autorizza su Twitch",
   "stream_schedule_publish_auth_unavailable": "La pubblicazione del programma Twitch non è configurata (imposta PUBLIC_BASE_URL).",
-  "stream_schedule_publishing": "Pubblicazione del programma su Twitch…",
   "stream_schedule_publish_ok": "✅ Programma pubblicato su Twitch!",
   "stream_schedule_publish_ok_recurring": "✅ Programma pubblicato su Twitch come segmenti ricorrenti settimanali (gli slot una tantum sono disponibili solo per Partner/Affiliate).",
   "stream_schedule_publish_fail": "❌ Impossibile pubblicare il programma: {error}",

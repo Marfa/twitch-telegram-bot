@@ -1621,8 +1621,6 @@ def check_core() -> None:
 
     assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "en")
     assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "ru")
-    assert tr("stream_schedule_publishing", "ru")
-    assert tr("stream_schedule_publishing", "en")
     assert "UTC+3" in tr("stream_schedule_tz_prompt", "ru")
     assert "UTC-5" in tr("stream_schedule_tz_prompt", "en")
     assert "New York" in tr("stream_schedule_tz_prompt", "en")

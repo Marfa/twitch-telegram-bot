@@ -417,7 +417,6 @@
   "stream_schedule_publish_auth": "Authorize the bot to manage your Twitch schedule.",
   "stream_schedule_publish_auth_button": "Authorize on Twitch",
   "stream_schedule_publish_auth_unavailable": "Twitch schedule publishing is not configured (set PUBLIC_BASE_URL).",
-  "stream_schedule_publishing": "Publishing schedule on Twitch…",
   "stream_schedule_publish_ok": "✅ Schedule published on Twitch!",
   "stream_schedule_publish_ok_recurring": "✅ Schedule published on Twitch as weekly recurring segments (one-off slots are only available for Partner/Affiliate).",
   "stream_schedule_publish_fail": "❌ Failed to publish schedule: {error}",
