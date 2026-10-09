@@ -364,7 +364,13 @@ async def _smoke_schedule(db) -> None:
         state = await stream_schedule_fix_game(update, ctx)
     assert state == st["STREAM_SCHEDULE_FIX_SLOTS"]
     assert ctx.user_data["stream_schedule_updates"] == [
-        {"id": "seg1", "date": day, "time": "19:30", "game": "Game"}
+        {
+            "id": "seg1",
+            "date": day,
+            "time": "19:30",
+            "game": "Game",
+            "is_recurring": False,
+        }
     ]
 
     application, bot = _app(db)
