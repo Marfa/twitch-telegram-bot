@@ -346,8 +346,6 @@ def settings_menu(
                 KeyboardButton(btn("sync_subs", lang)),
             ]
         )
-        # Own row so «язык» stays paired with system notifications.
-        rows.append([KeyboardButton(btn("default_alert_settings", lang))])
     else:
         rows.append(
             [
@@ -366,10 +364,32 @@ def settings_menu(
         )
     )
     if show_partner_ui():
+        if show_premium_ui():
+            rows.append(
+                [
+                    KeyboardButton(btn("default_alert_settings", lang)),
+                    KeyboardButton(btn("auth_tokens", lang)),
+                ]
+            )
+            rows.append(
+                [
+                    KeyboardButton(btn("partner", lang)),
+                    KeyboardButton(btn("back", lang)),
+                ]
+            )
+        else:
+            rows.append(
+                [
+                    KeyboardButton(btn("auth_tokens", lang)),
+                    KeyboardButton(btn("partner", lang)),
+                ]
+            )
+            rows.append([KeyboardButton(btn("back", lang))])
+    elif show_premium_ui():
         rows.append(
             [
+                KeyboardButton(btn("default_alert_settings", lang)),
                 KeyboardButton(btn("auth_tokens", lang)),
-                KeyboardButton(btn("partner", lang)),
             ]
         )
         rows.append([KeyboardButton(btn("back", lang))])

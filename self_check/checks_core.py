@@ -1719,15 +1719,32 @@ def check_core() -> None:
         ]
         from i18n import beta_mode_btn
 
+        from config import show_premium_ui
+
         partner_row = next(
             row
             for row in settings_kb
             if btn("partner", loc) in [b.text for b in row]
         )
-        assert [b.text for b in partner_row] == [
-            btn("auth_tokens", loc),
-            btn("partner", loc),
-        ]
+        if show_premium_ui():
+            assert [b.text for b in partner_row] == [
+                btn("partner", loc),
+                btn("back", loc),
+            ]
+            defaults_row = next(
+                row
+                for row in settings_kb
+                if btn("default_alert_settings", loc) in [b.text for b in row]
+            )
+            assert [b.text for b in defaults_row] == [
+                btn("default_alert_settings", loc),
+                btn("auth_tokens", loc),
+            ]
+        else:
+            assert [b.text for b in partner_row] == [
+                btn("auth_tokens", loc),
+                btn("partner", loc),
+            ]
         assert any(
             btn("back", loc) in [b.text for b in row] for row in settings_kb
         )

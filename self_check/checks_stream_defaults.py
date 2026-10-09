@@ -21,12 +21,20 @@ def run() -> None:
         assert t("edit_apply_defaults", loc)
         assert t("stream_defaults_locked", loc)
         assert t("stream_defaults_save", loc)
-        texts = [b.text for row in settings_menu(loc).keyboard for b in row]
+        kb = settings_menu(loc).keyboard
+        texts = [b.text for row in kb for b in row]
         sync = btn("sync_subs", loc)
         defaults = btn("default_alert_settings", loc)
+        auth = btn("auth_tokens", loc)
         assert sync in texts and defaults in texts
-        # Defaults follows Sync (same row when no Premium, else next row alone).
-        assert texts.index(defaults) == texts.index(sync) + 1
+        from config import show_premium_ui
+
+        if show_premium_ui():
+            default_row = next(row for row in kb if defaults in [b.text for b in row])
+            assert len(default_row) == 2
+            assert auth in [b.text for b in default_row]
+        else:
+            assert texts.index(defaults) == texts.index(sync) + 1
 
     kb = edit_options_keyboard(
         7,
