@@ -101,6 +101,9 @@ def main() -> None:
     from .checks_top_donations import check_top_donations
 
     check_top_donations()
+    from .checks_stream_defaults import run as check_stream_defaults
+
+    check_stream_defaults()
     from .checks_drops import run as check_drops
 
     check_drops()

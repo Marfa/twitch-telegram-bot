@@ -3171,11 +3171,28 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
-    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    if context.user_data.get("editing_defaults") or (
+        query.data or ""
+    ).startswith("defedit:"):
+        from stream_alert_defaults import (
+            draft_as_subscription,
+            ensure_defaults_draft,
+        )
+
+        context.user_data["editing_defaults"] = True
+        draft = ensure_defaults_draft(context.user_data, db, query.from_user.id)
+        sub = draft_as_subscription(draft, owner_id=query.from_user.id)
+        sub_id = 0
+        sub_num = 0
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        if bool(getattr(sub, "use_stream_defaults", False)):
+            await query.answer(t("stream_defaults_locked", lang), show_alert=True)
+            return ConversationHandler.END
+        sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     context.user_data["strip_name_mentions"] = bool(sub.strip_name_mentions)
@@ -3281,16 +3298,32 @@ async def start_edit_ignore_keywords(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
+    if context.user_data.get("editing_defaults") or (
+        query.data or ""
+    ).startswith("defedit:"):
+        from stream_alert_defaults import (
+            draft_as_subscription,
+            ensure_defaults_draft,
+        )
+
+        context.user_data["editing_defaults"] = True
+        draft = ensure_defaults_draft(context.user_data, db, query.from_user.id)
+        sub = draft_as_subscription(draft, owner_id=query.from_user.id)
+        sub_id = 0
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        if bool(getattr(sub, "use_stream_defaults", False)):
+            await query.answer(t("stream_defaults_locked", lang), show_alert=True)
+            return ConversationHandler.END
     if not await prem.has_feature(
         context.bot,
         db,
         query.from_user.id,
         "ignore_keywords",
-        channel=sub.twitch_username,
+        channel=sub.twitch_username if sub.twitch_username != "—" else None,
     ):
         from premium_handlers import send_premium_screen
 
@@ -3321,7 +3354,11 @@ async def start_edit_ignore_keywords(
         "edit_ignore_keywords_hint_edit" if has_keywords else "edit_ignore_keywords_hint_empty",
         lang,
     )
-    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    sub_num = (
+        0
+        if context.user_data.get("editing_defaults")
+        else _owner_sub_number(db, query.from_user.id, sub_id)
+    )
     from handlers.settings import _igdb_kb_flags
 
     show_igdb, has_igdb = _igdb_kb_flags(db, query.from_user.id)
@@ -3979,7 +4016,7 @@ async def receive_edit_ignore_keywords(
 ) -> int:
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
 
     text = (update.effective_message.text or "").strip()
@@ -3994,6 +4031,23 @@ async def receive_edit_ignore_keywords(
 
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import (
+            ensure_defaults_draft,
+            update_defaults_draft,
+        )
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        draft = ensure_defaults_draft(context.user_data, db, owner_id)
+        keywords = merge_ignore_keywords(str(draft.get("ignore_keywords") or ""), added)
+        update_defaults_draft(
+            context.user_data,
+            ignore_keywords=keywords,
+            use_global_ignore=bool(context.user_data.get("use_global_ignore")),
+        )
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
     sub = db.get_subscription(sub_id, owner_id)
     if not sub:
         await update.effective_message.reply_text(t("sub_not_found", lang))
@@ -4134,11 +4188,30 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     parts = query.data.split(":")
     sub_id = int(parts[1])
     field = parts[2]
+    if field == "defaults_locked":
+        from handlers.stream_defaults import on_defaults_locked
+
+        await on_defaults_locked(update, context)
+        return
+    if field == "apply_defaults":
+        from handlers.stream_defaults import on_edit_apply_defaults
+
+        await on_edit_apply_defaults(update, context)
+        return
     db: Database = context.application.bot_data["db"]
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub:
         await query.answer()
         await query.edit_message_text(t("sub_not_found", lang))
+        return
+    if bool(getattr(sub, "use_stream_defaults", False)) and field not in (
+        "dest",
+        "change_type",
+        "copy",
+        "copy_change",
+        "apply_defaults",
+    ):
+        await query.answer(t("stream_defaults_locked", lang), show_alert=True)
         return
 
     async def _reshow_edit_menu(current: Subscription) -> None:
@@ -5495,6 +5568,7 @@ def _add_subscription_from_snapshot(
         is_demo=bool(snapshot.get("is_demo")),
         notify_on_schedule_cancel=bool(snapshot.get("notify_on_schedule_cancel")),
         schedule_cancel_template=str(snapshot.get("schedule_cancel_template") or ""),
+        use_stream_defaults=bool(snapshot.get("use_stream_defaults")),
     )
 
 

@@ -22,7 +22,10 @@ def _advopt_ids(markup) -> list[str]:
         for btn in row:
             data = btn.callback_data or ""
             if data.startswith("advopt:toggle:"):
-                out.append(data.rsplit(":", 1)[-1])
+                tid = data.rsplit(":", 1)[-1]
+                if tid == "apply_defaults":
+                    continue
+                out.append(tid)
     return out
 
 

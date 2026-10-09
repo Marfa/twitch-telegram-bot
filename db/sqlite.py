@@ -293,6 +293,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN pin_message "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "use_stream_defaults" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN use_stream_defaults "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         if "pinned_message_id" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN pinned_message_id INTEGER"
@@ -426,6 +431,11 @@ class SqliteDatabase:
         if "global_ignore_keywords" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN global_ignore_keywords "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        if "stream_alert_defaults" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN stream_alert_defaults "
                 "TEXT NOT NULL DEFAULT ''"
             )
         if "global_ignore_igdb" not in user_cols:
@@ -1420,6 +1430,7 @@ class SqliteDatabase:
         is_demo: bool = False,
         notify_on_schedule_cancel: bool = False,
         schedule_cancel_template: str = "",
+        use_stream_defaults: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
@@ -1439,8 +1450,9 @@ owner_id, twitch_username, twitch_user_id,
                     notify_on_drops, drops_game_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
-                    notify_on_schedule_cancel, schedule_cancel_template
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    notify_on_schedule_cancel, schedule_cancel_template,
+                    use_stream_defaults
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1493,6 +1505,7 @@ owner_id, twitch_username, twitch_user_id,
                     int(bool(is_demo)),
                     int(bool(notify_on_schedule_cancel)),
                     str(schedule_cancel_template or ""),
+                    int(bool(use_stream_defaults)),
                 ),
             )
             return int(cur.lastrowid)
@@ -1806,8 +1819,9 @@ owner_id, twitch_username, twitch_user_id,
                         notify_on_drops, drops_game_id,
                         delete_other_alerts, pin_message,
                         top_donations, top_donations_template, is_demo,
-                        notify_on_schedule_cancel, schedule_cancel_template
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        notify_on_schedule_cancel, schedule_cancel_template,
+                        use_stream_defaults
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         owner_id,
@@ -1858,6 +1872,7 @@ owner_id, twitch_username, twitch_user_id,
                         int(bool(payload.get("is_demo"))),
                         int(bool(payload.get("notify_on_schedule_cancel"))),
                         str(payload.get("schedule_cancel_template") or ""),
+                        int(bool(payload.get("use_stream_defaults"))),
                     ),
                 )
                 sub_id = int(
@@ -1936,6 +1951,7 @@ owner_id, twitch_username, twitch_user_id,
             "notify_on_schedule_cancel",
             "schedule_cancel_template",
             "schedule_cancel_notified_days",
+            "use_stream_defaults",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -1960,6 +1976,7 @@ owner_id, twitch_username, twitch_user_id,
                 "top_donations",
                 "use_global_ignore",
                 "notify_on_schedule_cancel",
+                "use_stream_defaults",
             ):
                 values.append(int(bool(value)))
             elif key in (
@@ -3423,6 +3440,66 @@ owner_id, twitch_username, twitch_user_id,
                 """,
                 (user_id, str(keywords or "")),
             )
+
+    def get_stream_alert_defaults(self, user_id: int) -> dict:
+        from stream_alert_defaults import parse_stream_alert_defaults
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT stream_alert_defaults FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return parse_stream_alert_defaults("")
+        return parse_stream_alert_defaults(row["stream_alert_defaults"])
+
+    def set_stream_alert_defaults(self, user_id: int, defaults: dict) -> None:
+        from stream_alert_defaults import dump_stream_alert_defaults
+
+        raw = dump_stream_alert_defaults(defaults)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, stream_alert_defaults) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    stream_alert_defaults = excluded.stream_alert_defaults
+                """,
+                (user_id, raw),
+            )
+
+    def resync_bound_stream_alert_defaults(self, user_id: int) -> int:
+        """Re-apply saved defaults onto subscriptions with use_stream_defaults."""
+        from db.models import alert_type_from_payload
+        from stream_alert_defaults import subscription_update_from_defaults
+
+        defaults = self.get_stream_alert_defaults(user_id)
+        subs = [
+            s
+            for s in self.get_subscriptions_by_owner(user_id)
+            if bool(getattr(s, "use_stream_defaults", False))
+        ]
+        updated = 0
+        for sub in subs:
+            kind = alert_type_from_payload(
+                {
+                    "notify_on_live": sub.notify_on_live,
+                    "notify_on_end": sub.notify_on_end,
+                    "notify_on_category_change": sub.notify_on_category_change,
+                    "notify_on_drops": bool(getattr(sub, "notify_on_drops", False)),
+                    "category_watch_prefs": sub.category_watch_prefs,
+                    "release_watch_prefs": sub.release_watch_prefs,
+                    "giveaway_watch_prefs": getattr(sub, "giveaway_watch_prefs", ""),
+                    "schedule_reminder_minutes": sub.schedule_reminder_minutes,
+                }
+            )
+            if kind not in ("live", "end", "category", "upcoming"):
+                continue
+            fields = subscription_update_from_defaults(defaults, alert_type=kind)
+            if self.update_subscription(
+                sub.id, user_id, mark_sync_edited=False, **fields
+            ):
+                updated += 1
+        return updated
 
     def get_global_ignore_igdb(self, user_id: int) -> list[dict]:
         from twitch import parse_ignore_igdb_entries

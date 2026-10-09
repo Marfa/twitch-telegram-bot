@@ -250,7 +250,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
 | ↳ 🎲 What to watch? | Feeling lucky immediately; suggest again |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
-| ⚙️ Settings | Premium, sync, ignored words (incl. IGDB categories), system alerts, language, auth tokens, partner program |
+| ⚙️ Settings | Premium, sync, default stream-alert settings, ignored words (incl. IGDB categories), system alerts, language, auth tokens, partner program |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
 | ↳ 🔑 Auth tokens | Separate buttons to revoke Twitch or DonationAlerts |

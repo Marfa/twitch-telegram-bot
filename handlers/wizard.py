@@ -1447,6 +1447,7 @@ async def _advanced_options_markup(
         want_multistream=bool(context.user_data.get("adv_want_multistream")),
         want_top_donations=bool(context.user_data.get("adv_want_top_donations")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
+        want_apply_defaults=bool(context.user_data.get("use_stream_defaults")),
         button_style=str(context.user_data.get("button_style") or ""),
         show_categories=show_categories,
         show_delay=alert != "upcoming",
@@ -1576,6 +1577,30 @@ async def receive_advanced_options_toggle(
     query = update.callback_query
     lang = _user_lang(context, query.from_user.id)
     flag = query.data.split(":")[-1]
+    if flag == "apply_defaults":
+        db: Database = context.application.bot_data["db"]
+        turning_on = not bool(context.user_data.get("use_stream_defaults"))
+        if turning_on:
+            from stream_alert_defaults import apply_defaults_to_user_data
+
+            defaults = db.get_stream_alert_defaults(query.from_user.id)
+            apply_defaults_to_user_data(
+                context.user_data,
+                defaults,
+                alert_type=str(context.user_data.get("alert_type") or "live"),
+            )
+        else:
+            context.user_data["use_stream_defaults"] = False
+        await query.answer()
+        await query.edit_message_reply_markup(
+            reply_markup=await _advanced_options_markup(
+                context, lang, query.from_user.id
+            )
+        )
+        return _wz()["ADVANCED_OPTIONS"]
+    if context.user_data.get("use_stream_defaults"):
+        await query.answer(t("stream_defaults_locked", lang), show_alert=True)
+        return _wz()["ADVANCED_OPTIONS"]
     key = {
         "image": "adv_want_image",
         "strip": "adv_want_strip",
@@ -1687,6 +1712,9 @@ async def receive_advanced_options_style(
 ) -> int:
     query = update.callback_query
     lang = _user_lang(context, query.from_user.id)
+    if context.user_data.get("use_stream_defaults"):
+        await query.answer(t("stream_defaults_locked", lang), show_alert=True)
+        return _wz()["ADVANCED_OPTIONS"]
     choice = query.data.rsplit(":", 1)[-1]
     from custom_buttons import button_style_from_choice
 
@@ -4116,6 +4144,7 @@ async def _finish_subscription(
                 drops_game_id=drops_game_id,
                 delete_other_alerts=delete_other_alerts,
                 is_demo=demo_mode.is_active(owner_id),
+                use_stream_defaults=bool(data.get("use_stream_defaults")),
             )
             if not create_enabled:
                 context.user_data["premium_created_disabled"] = True

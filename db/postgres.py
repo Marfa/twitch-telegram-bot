@@ -512,6 +512,13 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS use_stream_defaults
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT
                 """
             )
@@ -635,6 +642,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS global_ignore_keywords TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS stream_alert_defaults TEXT NOT NULL DEFAULT ''
                 """
             )
             cur.execute(
@@ -1660,6 +1673,7 @@ class PostgresDatabase:
         is_demo: bool = False,
         notify_on_schedule_cancel: bool = False,
         schedule_cancel_template: str = "",
+        use_stream_defaults: bool = False,
     ) -> int:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -1680,8 +1694,9 @@ owner_id, twitch_username, twitch_user_id,
                     notify_on_drops, drops_game_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
-                    notify_on_schedule_cancel, schedule_cancel_template
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    notify_on_schedule_cancel, schedule_cancel_template,
+                    use_stream_defaults
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1737,6 +1752,7 @@ owner_id, twitch_username, twitch_user_id,
                     bool(is_demo),
                     bool(notify_on_schedule_cancel),
                     str(schedule_cancel_template or ""),
+                    bool(use_stream_defaults),
                 ),
             )
             row = cur.fetchone()
@@ -2100,6 +2116,7 @@ owner_id, twitch_username, twitch_user_id,
                     "is_demo",
                     "notify_on_schedule_cancel",
                     "schedule_cancel_template",
+                    "use_stream_defaults",
                 )
                 if k in payload
             })
@@ -2188,6 +2205,7 @@ owner_id, twitch_username, twitch_user_id,
             "notify_on_schedule_cancel",
             "schedule_cancel_template",
             "schedule_cancel_notified_days",
+            "use_stream_defaults",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -2212,6 +2230,7 @@ owner_id, twitch_username, twitch_user_id,
                 "top_donations",
                 "use_global_ignore",
                 "notify_on_schedule_cancel",
+                "use_stream_defaults",
             ):
                 values.append(bool(value))
             elif key in (
@@ -3800,6 +3819,68 @@ owner_id, twitch_username, twitch_user_id,
                 """,
                 (user_id, str(keywords or "")),
             )
+
+    def get_stream_alert_defaults(self, user_id: int) -> dict:
+        from stream_alert_defaults import parse_stream_alert_defaults
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT stream_alert_defaults FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return parse_stream_alert_defaults("")
+        return parse_stream_alert_defaults(row["stream_alert_defaults"])
+
+    def set_stream_alert_defaults(self, user_id: int, defaults: dict) -> None:
+        from stream_alert_defaults import dump_stream_alert_defaults
+
+        raw = dump_stream_alert_defaults(defaults)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, stream_alert_defaults) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    stream_alert_defaults = EXCLUDED.stream_alert_defaults
+                """,
+                (user_id, raw),
+            )
+
+    def resync_bound_stream_alert_defaults(self, user_id: int) -> int:
+        from db.models import alert_type_from_payload
+        from stream_alert_defaults import subscription_update_from_defaults
+
+        defaults = self.get_stream_alert_defaults(user_id)
+        subs = [
+            s
+            for s in self.get_subscriptions_by_owner(user_id)
+            if bool(getattr(s, "use_stream_defaults", False))
+        ]
+        updated = 0
+        for sub in subs:
+            kind = alert_type_from_payload(
+                {
+                    "notify_on_live": sub.notify_on_live,
+                    "notify_on_end": sub.notify_on_end,
+                    "notify_on_category_change": sub.notify_on_category_change,
+                    "notify_on_drops": bool(getattr(sub, "notify_on_drops", False)),
+                    "category_watch_prefs": sub.category_watch_prefs,
+                    "release_watch_prefs": sub.release_watch_prefs,
+                    "giveaway_watch_prefs": getattr(sub, "giveaway_watch_prefs", ""),
+                    "schedule_reminder_minutes": sub.schedule_reminder_minutes,
+                }
+            )
+            if kind not in ("live", "end", "category", "upcoming"):
+                continue
+            fields = subscription_update_from_defaults(defaults, alert_type=kind)
+            if self.update_subscription(
+                sub.id, user_id, mark_sync_edited=False, **fields
+            ):
+                updated += 1
+        return updated
 
     def get_global_ignore_igdb(self, user_id: int) -> list[dict]:
         from twitch import parse_ignore_igdb_entries

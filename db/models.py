@@ -580,6 +580,7 @@ class Subscription:
     notify_on_schedule_cancel: bool = False
     schedule_cancel_template: str = ""
     schedule_cancel_notified_days: str = "[]"
+    use_stream_defaults: bool = False
 
 
 @dataclass(frozen=True)
@@ -831,6 +832,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "top_donations": bool(getattr(sub, "top_donations", False)),
         "top_donations_template": str(getattr(sub, "top_donations_template", "") or ""),
         "is_demo": bool(sub.is_demo),
+        "use_stream_defaults": bool(getattr(sub, "use_stream_defaults", False)),
     }
 
 
@@ -1342,6 +1344,9 @@ def _row_to_sub(row: Any) -> Subscription:
         )
         if "schedule_cancel_notified_days" in keys
         else "[]",
+        use_stream_defaults=bool(row["use_stream_defaults"])
+        if "use_stream_defaults" in keys
+        else False,
     )
 
 

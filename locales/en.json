@@ -1318,5 +1318,13 @@
   "ai_clips_rerun": "Generate again",
   "ai_clips_back_vods": "« Back to VODs",
   "ai_clips_page_prev": "« Back",
-  "ai_clips_page_next": "More »"
+  "ai_clips_page_next": "More »",
+  "btn_default_alert_settings": "⚙️ Default settings",
+  "stream_defaults_menu": "Default settings for stream alerts.\n\nSet the template and options — they apply to alerts with the «Default settings» checkbox on.\nSave when you are done.",
+  "stream_defaults_save": "💾 Save",
+  "stream_defaults_saved": "✅ Default settings saved.",
+  "stream_defaults_synced": "Updated bound alerts: {count}.",
+  "stream_defaults_field_saved": "Change saved to the draft. Tap Save to apply.",
+  "stream_defaults_locked": "Settings are locked — turn off «Default settings» to edit them.",
+  "edit_apply_defaults": "Default settings"
 }

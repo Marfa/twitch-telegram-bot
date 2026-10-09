@@ -244,6 +244,7 @@ def group_setup_menu_filter():
             | _btn_filter("follow_monitor")
             | _btn_filter("ai_clips")
             | _btn_filter("sync_subs")
+            | _btn_filter("default_alert_settings")
             | _btn_filter("beta_mode")
             | _btn_filter("admin")
             | _btn_filter("broadcast")

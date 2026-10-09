@@ -377,6 +377,11 @@ from handlers.settings import (
     sync_stream_chat_menu_button,
     announce_new_beta_features,
 )
+from handlers.stream_defaults import (
+    on_advopt_locked,
+    on_defedit_callback,
+    open_stream_defaults_editor,
+)
 from handlers.follow_monitor import (
     FM_SEARCH,
     cancel_follow_monitor_search,
@@ -1190,11 +1195,10 @@ async def _save_edit_image(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
-    sub_num = _owner_sub_number(db, owner_id, sub_id)
     file_id = context.user_data.get("image_file_id") or None
     position = str(context.user_data.get("image_position") or "") if file_id else ""
     fields: dict = {
@@ -1203,6 +1207,15 @@ async def _save_edit_image(
     }
     if file_id:
         fields["disable_link_preview"] = True
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import update_defaults_draft
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        update_defaults_draft(context.user_data, **fields)
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(sub_id, owner_id, **fields):
         await context.bot.send_message(owner_id, t("sub_not_found", lang))
     else:
@@ -1221,10 +1234,26 @@ async def start_edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
+    if context.user_data.get("editing_defaults") or (
+        query.data or ""
+    ).startswith("defedit:"):
+        from stream_alert_defaults import (
+            draft_as_subscription,
+            ensure_defaults_draft,
+        )
+
+        context.user_data["editing_defaults"] = True
+        draft = ensure_defaults_draft(context.user_data, db, query.from_user.id)
+        sub = draft_as_subscription(draft, owner_id=query.from_user.id)
+        sub_id = 0
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        if bool(getattr(sub, "use_stream_defaults", False)):
+            await query.answer(t("stream_defaults_locked", lang), show_alert=True)
+            return ConversationHandler.END
     has_image = bool(sub.image_file_id)
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
@@ -1288,22 +1317,38 @@ async def _save_edit_template(
     template: str,
 ) -> int:
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
 
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
-    sub_num = _owner_sub_number(db, owner_id, sub_id)
     preview_disabled = context.user_data.pop("pending_template_preview_disabled", None)
     if preview_disabled is None and update.effective_message:
         preview_disabled = _is_link_preview_disabled(update.effective_message)
     if preview_disabled is None:
         preview_disabled = False
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import update_defaults_draft
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        fields: dict[str, object] = {
+            "message_template": template,
+            "disable_link_preview": bool(preview_disabled),
+        }
+        if "strip_name_mentions" in context.user_data:
+            fields["strip_name_mentions"] = bool(
+                context.user_data.get("strip_name_mentions")
+            )
+        update_defaults_draft(context.user_data, **fields)
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
+    sub_num = _owner_sub_number(db, owner_id, sub_id)
     sub = db.get_subscription(sub_id, owner_id)
     # Chat button and link preview cannot both be on (Telegram); force preview off.
     if sub and sub.attach_chat_button:
         preview_disabled = True
-    fields: dict[str, object] = {
+    fields = {
         "message_template": template,
         "disable_link_preview": bool(preview_disabled),
     }
@@ -1381,12 +1426,32 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
+    if context.user_data.get("editing_defaults") or (
+        query.data or ""
+    ).startswith("defedit:"):
+        from stream_alert_defaults import (
+            draft_as_subscription,
+            ensure_defaults_draft,
+        )
+
+        context.user_data["editing_defaults"] = True
+        draft = ensure_defaults_draft(context.user_data, db, query.from_user.id)
+        sub = draft_as_subscription(draft, owner_id=query.from_user.id)
+        sub_id = 0
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        if bool(getattr(sub, "use_stream_defaults", False)):
+            await query.answer(t("stream_defaults_locked", lang), show_alert=True)
+            return ConversationHandler.END
     if not await prem.has_feature(
-        context.bot, db, query.from_user.id, "delay", channel=sub.twitch_username
+        context.bot,
+        db,
+        query.from_user.id,
+        "delay",
+        channel=sub.twitch_username if sub.twitch_username != "—" else None,
     ):
         from premium_handlers import send_premium_screen
 
@@ -1407,7 +1472,11 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     current = _delay_current_label(sub.delay_minutes, lang)
-    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    sub_num = (
+        0
+        if context.user_data.get("editing_defaults")
+        else _owner_sub_number(db, query.from_user.id, sub_id)
+    )
     await query.edit_message_text("✓")
     await context.bot.send_message(
         query.from_user.id,
@@ -1420,7 +1489,7 @@ async def start_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
 
     raw = (update.effective_message.text or "").strip()
@@ -1436,6 +1505,14 @@ async def receive_edit_delay(update: Update, context: ContextTypes.DEFAULT_TYPE)
     delay_minutes = int(raw)
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import update_defaults_draft
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        update_defaults_draft(context.user_data, delay_minutes=delay_minutes)
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(sub_id, owner_id, delay_minutes=delay_minutes):
         await update.effective_message.reply_text(t("sub_not_found", lang))
@@ -1885,6 +1962,8 @@ def _edit_options_for_sub(
         multistream_count=len(
             ms.parse_multistream_channels(getattr(sub, "multistream_channels", None))
         ),
+        use_stream_defaults=bool(getattr(sub, "use_stream_defaults", False)),
+        show_apply_defaults=alert_type in ("live", "end", "category", "upcoming"),
     )
 
 
@@ -2586,6 +2665,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("sync_subs"), open_sync_settings),
         group=0,
     )
+    app.add_handler(
+        MessageHandler(
+            _btn_filter("default_alert_settings"), open_stream_defaults_editor
+        ),
+        group=0,
+    )
     app.add_handler(CommandHandler("settings", open_settings_menu), group=0)
     app.add_handler(
         CallbackQueryHandler(on_import_mode_once, pattern=r"^import_mode:once$"),
@@ -2903,7 +2988,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_other|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back)$",
+            pattern=r"^edit_f:\d+:(delete_old|delete_other|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults)$",
         ),
         group=0,
     )
@@ -2967,6 +3052,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_sync_change_period), pattern=r"^sync:period$"
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(on_defedit_callback),
+                pattern=r"^defedit:0:(save|cancel|template|image|image_del|strip|ignore_keywords|category_filter|delay|repeat|delete_old|delete_other|pin_message|custom_buttons|chat_button|live_remind|top_donations|preview|button_style|sched_remind|schedule_cancel|multistream)$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_template), pattern=r"^edit_f:\d+:template$"
@@ -3121,12 +3210,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|categories|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_cancel|multistream)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|categories|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_cancel|multistream|apply_defaults)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_style,
                     pattern=r"^advopt:style:(default|primary|success|danger)$",
                 ),
+                CallbackQueryHandler(on_advopt_locked, pattern=r"^advopt:locked$"),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"
                 ),

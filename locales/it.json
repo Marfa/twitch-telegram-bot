@@ -1307,5 +1307,13 @@
   "ai_clips_rerun": "Genera di nuovo",
   "ai_clips_back_vods": "« Torna ai VOD",
   "ai_clips_page_prev": "« Indietro",
-  "ai_clips_page_next": "Altre »"
+  "ai_clips_page_next": "Altre »",
+  "btn_default_alert_settings": "⚙️ Impostazioni predefinite",
+  "stream_defaults_menu": "Impostazioni predefinite per gli avvisi sullo stream.\n\nImposta modello e opzioni — si applicano agli avvisi con la spunta «Impostazioni predefinite».\nSalva quando hai finito.",
+  "stream_defaults_save": "💾 Salva",
+  "stream_defaults_saved": "✅ Impostazioni predefinite salvate.",
+  "stream_defaults_synced": "Avvisi collegati aggiornati: {count}.",
+  "stream_defaults_field_saved": "Modifica salvata bozza. Tocca Salva per applicare.",
+  "stream_defaults_locked": "Impostazioni bloccate — disattiva «Impostazioni predefinite» per modificarle.",
+  "edit_apply_defaults": "Impostazioni predefinite"
 }

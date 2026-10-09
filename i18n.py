@@ -233,6 +233,7 @@ def all_menu_buttons() -> set[str]:
         "ai_clips",
         "beta_mode",
         "sync_subs",
+        "default_alert_settings",
         "premium",
         "auth_tokens",
         "auth_tokens_revoke_twitch",
@@ -337,19 +338,33 @@ def settings_menu(
 ) -> ReplyKeyboardMarkup:
     from config import show_partner_ui, show_premium_ui
 
-    buttons: list[KeyboardButton] = []
+    rows: list[list[KeyboardButton]] = []
     if show_premium_ui():
-        buttons.append(KeyboardButton(btn("premium", lang)))
-    buttons.extend(
-        [
-            KeyboardButton(btn("sync_subs", lang)),
-            KeyboardButton(btn("ignored_words", lang)),
-            KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
-            KeyboardButton(btn("sys_notifications", lang)),
-            KeyboardButton(btn("language", lang)),
-        ]
+        rows.append(
+            [
+                KeyboardButton(btn("premium", lang)),
+                KeyboardButton(btn("sync_subs", lang)),
+            ]
+        )
+        # Own row so «язык» stays paired with system notifications.
+        rows.append([KeyboardButton(btn("default_alert_settings", lang))])
+    else:
+        rows.append(
+            [
+                KeyboardButton(btn("sync_subs", lang)),
+                KeyboardButton(btn("default_alert_settings", lang)),
+            ]
+        )
+    rows.extend(
+        _pair_reply_rows(
+            [
+                KeyboardButton(btn("ignored_words", lang)),
+                KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
+                KeyboardButton(btn("sys_notifications", lang)),
+                KeyboardButton(btn("language", lang)),
+            ]
+        )
     )
-    rows = _pair_reply_rows(buttons)
     if show_partner_ui():
         rows.append(
             [
@@ -1243,6 +1258,7 @@ def advanced_options_keyboard(
     want_multistream: bool = False,
     want_top_donations: bool = False,
     want_categories: bool = False,
+    want_apply_defaults: bool = False,
     button_style: str = "",
     show_delay: bool = True,
     show_repeat: bool = True,
@@ -1262,8 +1278,10 @@ def advanced_options_keyboard(
         BUTTON_STYLE_LABEL_KEYS,
         button_style_choice_id,
     )
+    from stream_alert_defaults import LOCKED_ADVOPT_TOGGLES
 
     locked = frozenset(locked or ())
+    settings_locked = bool(want_apply_defaults)
     want = {
         "image": want_image,
         "strip": want_strip,
@@ -1300,10 +1318,15 @@ def advanced_options_keyboard(
         label = t(label_key, lang)
         if toggle in locked and not flag:
             label = f"🔒 {label}"
+        cb = (
+            "advopt:locked"
+            if settings_locked and toggle in LOCKED_ADVOPT_TOGGLES
+            else f"advopt:toggle:{toggle}"
+        )
         return [
             InlineKeyboardButton(
                 mark + label,
-                callback_data=f"advopt:toggle:{toggle}",
+                callback_data=cb,
             )
         ]
 
@@ -1320,7 +1343,11 @@ def advanced_options_keyboard(
             style_row.append(
                 InlineKeyboardButton(
                     mark + t(BUTTON_STYLE_LABEL_KEYS[choice], lang),
-                    callback_data=f"advopt:style:{choice}",
+                    callback_data=(
+                        "advopt:locked"
+                        if settings_locked
+                        else f"advopt:style:{choice}"
+                    ),
                 )
             )
             if len(style_row) == 2:
@@ -1328,6 +1355,15 @@ def advanced_options_keyboard(
                 style_row = []
         if style_row:
             rows.append(style_row)
+    apply_mark = "✅ " if want_apply_defaults else "⬜️ "
+    rows.append(
+        [
+            InlineKeyboardButton(
+                apply_mark + t("edit_apply_defaults", lang),
+                callback_data="advopt:toggle:apply_defaults",
+            )
+        ]
+    )
     rows.append(
         [
             InlineKeyboardButton(
@@ -2888,13 +2924,24 @@ def edit_options_keyboard(
     button_style: str = "",
     custom_buttons_count: int = 0,
     multistream_count: int = 0,
+    use_stream_defaults: bool = False,
+    for_defaults_editor: bool = False,
+    show_apply_defaults: bool = True,
 ) -> InlineKeyboardMarkup:
     # Shared block order: alert_settings.ALERT_SETTING_ORDER. Edit-only around it:
     # template, image_del, delete_other, schedule, dest, type/copy.
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER, EDIT_FIELD
 
+    prefix = "defedit" if for_defaults_editor else "edit_f"
+    locked = bool(use_stream_defaults) and not for_defaults_editor
+
+    def _cb(field: str) -> str:
+        if locked and field not in ("apply_defaults", "dest", "change_type", "copy", "copy_change"):
+            return f"edit_f:{sub_id}:defaults_locked"
+        return f"{prefix}:{sub_id}:{field}"
+
     rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(t("edit_template", lang), callback_data=f"edit_f:{sub_id}:template")],
+        [InlineKeyboardButton(t("edit_template", lang), callback_data=_cb("template"))],
     ]
     for sid in ALERT_SETTING_ORDER:
         field = EDIT_FIELD[sid]
@@ -2903,7 +2950,7 @@ def edit_options_keyboard(
                 [
                     InlineKeyboardButton(
                         t(ADVOPT_LABEL_KEY[sid], lang),
-                        callback_data=f"edit_f:{sub_id}:{field}",
+                        callback_data=_cb(field),
                     )
                 ]
             )
@@ -2912,7 +2959,7 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             t("edit_image_delete", lang),
-                            callback_data=f"edit_f:{sub_id}:image_del",
+                            callback_data=_cb("image_del"),
                         )
                     ]
                 )
@@ -2923,7 +2970,7 @@ def edit_options_keyboard(
                 [
                     InlineKeyboardButton(
                         strip_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                        callback_data=f"edit_f:{sub_id}:{field}",
+                        callback_data=_cb(field),
                     )
                 ]
             )
@@ -2934,80 +2981,87 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
             continue
         if sid == "categories":
-            if show_advanced and (not is_upcoming) and not notify_on_end:
+            # Defaults editor shows categories; edit hides for upcoming/end.
+            if show_advanced and (
+                for_defaults_editor or ((not is_upcoming) and not notify_on_end)
+            ):
                 rows.append(
                     [
                         InlineKeyboardButton(
                             t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
             continue
         if sid == "delay":
-            if show_advanced and not is_upcoming:
+            if show_advanced and (for_defaults_editor or not is_upcoming):
                 rows.append(
                     [
                         InlineKeyboardButton(
                             t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
             continue
         if sid == "repeat":
-            if (
-                show_advanced
-                and not is_upcoming
-                and not notify_on_category_change
-                and not notify_on_end
+            if show_advanced and (
+                for_defaults_editor
+                or (
+                    not is_upcoming
+                    and not notify_on_category_change
+                    and not notify_on_end
+                )
             ):
                 # Plain label like delay — opens minutes step, not an in-place toggle.
                 rows.append(
                     [
                         InlineKeyboardButton(
                             t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
             continue
         if sid == "delete":
-            if show_advanced and dest_type != "dm":
+            if show_advanced and (for_defaults_editor or dest_type != "dm"):
                 delete_mark = "✅ " if delete_previous else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
                             delete_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
-                if delete_previous and notify_on_category_change:
+                if delete_previous and (
+                    for_defaults_editor or notify_on_category_change
+                ):
                     other_mark = "✅ " if delete_other_alerts else "⬜️ "
                     rows.append(
                         [
                             InlineKeyboardButton(
                                 other_mark + t("edit_delete_other", lang),
-                                callback_data=f"edit_f:{sub_id}:delete_other",
+                                callback_data=_cb("delete_other"),
                             )
                         ]
                     )
             continue
         if sid == "pin":
-            if show_advanced and dest_type != "dm":
+            if show_advanced and (for_defaults_editor or dest_type != "dm"):
                 pin_mark = "✅ " if pin_message else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
                             pin_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
@@ -3018,7 +3072,7 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
@@ -3030,7 +3084,7 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             chat_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
@@ -3042,19 +3096,19 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             remind_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
             continue
         if sid == "schedule_remind":
-            if schedule_reminder_configured:
+            if for_defaults_editor or schedule_reminder_configured:
                 remind_mark = "✅ " if schedule_reminder_minutes > 0 else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
                             remind_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
@@ -3066,7 +3120,7 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             cancel_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
@@ -3078,7 +3132,7 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             ms_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
@@ -3090,7 +3144,7 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             top_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
@@ -3115,7 +3169,7 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             t("edit_button_style", lang, style=style_label),
-                            callback_data=f"edit_f:{sub_id}:button_style",
+                            callback_data=_cb("button_style"),
                         )
                     ]
                 )
@@ -3126,11 +3180,39 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             preview_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=f"edit_f:{sub_id}:{field}",
+                            callback_data=_cb(field),
                         )
                     ]
                 )
             continue
+    if for_defaults_editor:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    t("stream_defaults_save", lang),
+                    callback_data="defedit:0:save",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("wizard_cancel", lang),
+                    callback_data="defedit:0:cancel",
+                )
+            ]
+        )
+        return InlineKeyboardMarkup(rows)
+    if show_apply_defaults:
+        apply_mark = "✅ " if use_stream_defaults else "⬜️ "
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    apply_mark + t("edit_apply_defaults", lang),
+                    callback_data=f"edit_f:{sub_id}:apply_defaults",
+                )
+            ]
+        )
     rows.append(
         [InlineKeyboardButton(t("edit_dest", lang), callback_data=f"edit_f:{sub_id}:dest")]
     )

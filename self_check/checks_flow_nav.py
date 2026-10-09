@@ -3082,6 +3082,40 @@ async def _scenario_settings_extended(db) -> None:
     cap.assert_turn("settings_premium_open")
 
 
+async def _scenario_settings_stream_defaults(db) -> None:
+    """§8 — Settings → default stream alert editor (Save / Cancel)."""
+    from handlers.settings import open_settings_menu
+    from handlers.stream_defaults import on_defedit_callback, open_stream_defaults_editor
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("settings", "ru"), cap)
+    ctx = _ctx(application)
+    await open_settings_menu(update, ctx)
+    cap.assert_turn("settings_open_for_defaults")
+
+    update = _msg_update(_FREE_UID, btn("default_alert_settings", "ru"), cap)
+    await open_stream_defaults_editor(update, ctx)
+    editor_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "defedit:0:save" in editor_cbs
+    assert "defedit:0:cancel" in editor_cbs
+    cap.assert_turn("settings_stream_defaults_editor")
+    assert ctx.user_data.get("editing_defaults") is True
+
+    update, query = _cb_update(_FREE_UID, "defedit:0:cancel", cap)
+    query.answer = AsyncMock()
+    await on_defedit_callback(update, ctx)
+    cap.assert_turn("settings_stream_defaults_cancel")
+    assert "editing_defaults" not in ctx.user_data
+
+
 async def _scenario_follow_monitor(db) -> None:
     """§1.4 Follow/Unfollow screen: enable + lists + search (escape hatch via menu)."""
     from handlers.follow_monitor import (
@@ -3629,6 +3663,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_vacation(db)
         await _scenario_schedule_publish_chain(db)
         await _scenario_settings_extended(db)
+        await _scenario_settings_stream_defaults(db)
         await _scenario_follow_monitor(db)
         await _scenario_ai_clips(db)
 
