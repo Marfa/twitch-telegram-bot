@@ -257,13 +257,16 @@ async def on_defedit_callback(
 async def _handoff_edit_field(
     update: Update, context: ContextTypes.DEFAULT_TYPE, field: str
 ) -> int:
-    """Rewrite callback to edit_f:0:field and call the matching starter."""
+    """Call the matching edit starter with defaults-edit flags set.
+
+    Leave ``query.data`` as ``defedit:0:<field>`` — CallbackQuery is frozen in
+    PTB 21+, and starters that support defaults already honor
+    ``editing_defaults`` / the ``defedit:`` prefix (``split(':')[1]`` is still 0).
+    """
     query = update.callback_query
     context.user_data["editing_defaults"] = True
     context.user_data["edit_sub_id"] = 0
     context.user_data["wizard_edit"] = True
-    # Pretend edit_f callback for existing handlers.
-    query.data = f"edit_f:0:{field}"
 
     from handlers import subscriptions as subs
     from bot import start_edit_delay, start_edit_image, start_edit_schedule_reminder

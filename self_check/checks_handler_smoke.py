@@ -1559,6 +1559,37 @@ async def _smoke_pause_sub_start(db) -> None:
     )
 
 
+async def _smoke_defedit_handoff_frozen_callback(db) -> None:
+    """Defaults editor handoff must not mutate frozen CallbackQuery.data (PTB 21+)."""
+    from telegram import CallbackQuery, User, Update
+
+    from handlers.stream_defaults import _handoff_edit_field
+
+    application, _bot = _app(db)
+    ctx = _ctx(application)
+    user = User(id=_FREE_UID, first_name="t", is_bot=False)
+    query = CallbackQuery(
+        id="1",
+        from_user=user,
+        chat_instance="x",
+        data="defedit:0:template",
+    )
+    update = MagicMock(spec=Update)
+    update.callback_query = query
+
+    starter = AsyncMock(return_value=ConversationHandler.END)
+    with patch(
+        "handlers.subscriptions.start_edit_template", starter
+    ):
+        state = await _handoff_edit_field(update, ctx, "template")
+
+    assert state == ConversationHandler.END
+    assert query.data == "defedit:0:template"
+    assert ctx.user_data.get("editing_defaults") is True
+    assert ctx.user_data.get("edit_sub_id") == 0
+    starter.assert_awaited_once_with(update, ctx)
+
+
 async def _run_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "smoke.db")
@@ -1577,6 +1608,7 @@ async def _run_smoke() -> None:
         await _smoke_delivery_and_helpers(db)
         await _smoke_pause_sub_start(db)
         await _smoke_welcome_demo_locale(db)
+        await _smoke_defedit_handoff_frozen_callback(db)
 
 
 def check_handler_smoke() -> None:
