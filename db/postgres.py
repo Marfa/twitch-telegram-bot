@@ -2503,6 +2503,27 @@ owner_id, twitch_username, twitch_user_id,
                 (user_id,),
             )
 
+    def get_user_first_seen(self, user_id: int) -> datetime | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT first_seen FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row or row["first_seen"] is None:
+            return None
+        raw = row["first_seen"]
+        if isinstance(raw, datetime):
+            return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        try:
+            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
     def user_exists(self, user_id: int) -> bool:
         with self._conn() as conn:
             cur = self._cursor(conn)

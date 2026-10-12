@@ -22,6 +22,7 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^alert_type:cancel$|"
     r"^edit_type_pick_cancel:|"
     r"^premium_gate:(?:cancel|skip)$|"
+    r"^premium_early:back$|"
     r"^lang:cancel$|"
     r"^admin_type:cancel$|"
     r"^admin_audience:cancel$|"

@@ -177,6 +177,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("bcf_down", f"bcf:down:{_SAMPLE_SUB}"),
     ("premium_month", "premium:month"),
     ("premium_gate", "premium_gate:skip"),
+    ("premium_early", "premium_early:continue"),
     ("beta_toggle", "beta:toggle:demo_feat"),
     ("ref_wd", f"ref_wd:paid:{_SAMPLE_WD}"),
     ("welcome_en", f"welcome_en:{_SAMPLE_SUB}"),

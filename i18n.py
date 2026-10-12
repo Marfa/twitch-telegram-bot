@@ -810,13 +810,27 @@ def welcome_demo_keyboard(
             callback_data=f"welcome_en:{sub_id}",
         )
     )
+    delete = InlineKeyboardButton(
+        btn("welcome_demo_delete", lang),
+        callback_data=f"welcome_del:{sub_id}",
+    )
+    # Enable/edit + delete on one row so soft-exit (delete) is as visible as opt-in.
+    return InlineKeyboardMarkup([[first, delete]])
+
+
+def premium_early_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [first],
             [
                 InlineKeyboardButton(
-                    btn("welcome_demo_delete", lang),
-                    callback_data=f"welcome_del:{sub_id}",
+                    btn("premium_early_continue", lang),
+                    callback_data="premium_early:continue",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("premium_early_back", lang),
+                    callback_data="premium_early:back",
                 )
             ],
         ]

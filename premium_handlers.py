@@ -23,11 +23,34 @@ from i18n import (
     btn,
     main_menu,
     premium_actions_keyboard,
+    premium_early_keyboard,
     premium_features_keyboard,
     premium_gift_keyboard,
     premium_owned_keyboard,
     t,
 )
+
+# Soft Premium intro for brand-new users who have not received an alert yet.
+_EARLY_PREMIUM_HOURS = 24
+
+
+def user_needs_early_premium_soft(db: Database, user_id: int) -> bool:
+    """True when Premium menu should soft-introduce free plan first."""
+    hist = getattr(db, "list_alert_history", None)
+    if callable(hist) and (hist(user_id, limit=1) or []):
+        return False
+    get_first = getattr(db, "get_user_first_seen", None)
+    if not callable(get_first):
+        return True
+    first = get_first(user_id)
+    if first is None:
+        return True
+    if getattr(first, "tzinfo", None) is None:
+        first = first.replace(tzinfo=timezone.utc)
+    age_h = (
+        datetime.now(timezone.utc) - first.astimezone(timezone.utc)
+    ).total_seconds() / 3600.0
+    return age_h < _EARLY_PREMIUM_HOURS
 from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
@@ -470,6 +493,7 @@ async def send_premium_screen(
 
 async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _user_lang
+    from bot_helpers import reply_chat_id
     from config import show_premium_ui
 
     if not show_premium_ui():
@@ -477,6 +501,19 @@ async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
+    if user_needs_early_premium_soft(db, user_id):
+        analytics.capture(
+            user_id,
+            "premium_early_soft_shown",
+            {"source": "menu"},
+        )
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("premium_early_soft", lang, limit=prem.free_active_limit()),
+            reply_markup=premium_early_keyboard(lang),
+            disable_web_page_preview=True,
+        )
+        return
     await send_premium_screen(
         context.bot,
         user_id,
@@ -485,6 +522,44 @@ async def open_premium_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         update=update,
         context=context,
         source="menu",
+    )
+
+
+async def on_premium_early(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot import _user_lang
+    from bot_helpers import _menu, reply_chat_id
+
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    action = (query.data or "").split(":", 1)[-1]
+    if action == "continue":
+        analytics.capture(user_id, "premium_early_soft_continue", {})
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+        await send_premium_screen(
+            context.bot,
+            user_id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="menu_early",
+        )
+        return
+    analytics.capture(user_id, "premium_early_soft_back", {})
+    try:
+        await query.edit_message_text(t("premium_early_soft_back_ack", lang))
+    except BadRequest:
+        pass
+    await context.bot.send_message(
+        reply_chat_id(update),
+        t("menu_main", lang),
+        reply_markup=_menu(lang, user_id),
     )
 
 

@@ -2843,6 +2843,21 @@ def check_core() -> None:
         assert btn("welcome_demo_enable", loc)
         assert btn("welcome_demo_edit", loc)
         assert btn("welcome_demo_delete", loc)
+        active_note = tr("import_active_limit_note", loc, limit=5, slots=5)
+        assert "5" in active_note
+        assert active_note in tr(
+            "import_success",
+            loc,
+            imported=1,
+            skipped=0,
+            removed_note="",
+            limit_note="",
+            active_note=active_note,
+        )
+        assert "5" in tr("enable_first_n", loc, limit=5)
+        assert "5" in tr("premium_early_soft", loc, limit=5)
+        assert btn("premium_early_continue", loc)
+        assert btn("premium_early_back", loc)
         assert tr("alert_pause_button", loc)
         assert tr("alert_pause_done", loc, channel="x")
         assert tr("alert_pause_already", loc, channel="x")
@@ -3139,13 +3154,45 @@ def check_core() -> None:
         assert b"twitch2telegram_bot" in guide_html
     assert _guide_page("xx") is not None  # falls back to default locale
 
-    from i18n import welcome_demo_keyboard
+    from i18n import premium_early_keyboard, welcome_demo_keyboard
+    from handlers.subscriptions import _import_result_keyboard
+    from premium_handlers import user_needs_early_premium_soft
 
     kb = welcome_demo_keyboard("ru", 42)
     assert kb.inline_keyboard[0][0].callback_data == "welcome_en:42"
-    assert kb.inline_keyboard[1][0].callback_data == "welcome_del:42"
+    assert kb.inline_keyboard[0][1].callback_data == "welcome_del:42"
     kb_on = welcome_demo_keyboard("ru", 42, enabled=True)
     assert kb_on.inline_keyboard[0][0].callback_data == "edit:42"
+    assert kb_on.inline_keyboard[0][1].callback_data == "welcome_del:42"
+
+    pek = premium_early_keyboard("ru")
+    assert pek.inline_keyboard[0][0].callback_data == "premium_early:continue"
+    assert pek.inline_keyboard[1][0].callback_data == "premium_early:back"
+
+    class _EarlyDb:
+        def list_alert_history(self, uid, *, limit=1):
+            return []
+
+        def get_user_first_seen(self, uid):
+            from datetime import datetime, timezone
+
+            return datetime.now(timezone.utc)
+
+    assert user_needs_early_premium_soft(_EarlyDb(), 1) is True
+
+    class _ImpSub:
+        def __init__(self, i: int):
+            self.id = i
+            self.twitch_user_id = str(i)
+            self.twitch_username = f"ch{i}"
+            self.enabled = False
+
+    imp_kb = _import_result_keyboard(
+        "ru", [_ImpSub(1), _ImpSub(2), _ImpSub(3)], free_active_limit=2
+    )
+    assert "2" in (imp_kb.inline_keyboard[0][0].text or "")
+    assert imp_kb.inline_keyboard[0][0].callback_data == "enable_all"
+    assert "1/2" in (imp_kb.inline_keyboard[1][0].text or "")
 
     from db.models import migrate_sub_fields_for_alert_type
 

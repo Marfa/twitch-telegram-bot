@@ -589,7 +589,10 @@ def resume_delivery_for_chat(db: Database, chat_id: int) -> int:
 
 def user_block_analytics_props(db: Database, user_id: int) -> dict[str, Any]:
     """DB context for bot_blocked (esp. my_chat_member, which has no delivery props)."""
+    import premium as prem
+
     props: dict[str, Any] = {}
+    subs: list[Any] = []
     get_subs = getattr(db, "get_subscriptions_by_owner", None)
     if callable(get_subs):
         subs = list(get_subs(user_id) or [])
@@ -597,14 +600,24 @@ def user_block_analytics_props(db: Database, user_id: int) -> dict[str, Any]:
         props["active_subs"] = len(enabled)
         props["total_subs"] = len(subs)
         props["has_demo_sub"] = any(bool(getattr(s, "is_demo", False)) for s in subs)
+        props["from_import"] = any(
+            bool(getattr(s, "from_twitch_sync", False)) for s in subs
+        )
+        props["welcome_seed_only"] = (
+            len(subs) == 1
+            and not bool(getattr(subs[0], "enabled", False))
+            and prem.is_promo_channel(getattr(subs[0], "twitch_username", None), db)
+        )
     try:
         props["notifications_paused"] = bool(_user_notifications_paused(db, user_id))
     except Exception:
         pass
+    props["had_alert_ever"] = False
     list_hist = getattr(db, "list_alert_history", None)
     if callable(list_hist):
         history = list_hist(user_id, limit=1) or []
         if history:
+            props["had_alert_ever"] = True
             last = history[0]
             props["last_alert_type"] = getattr(last, "alert_type", None)
             props["last_alert_channel"] = getattr(last, "twitch_username", None)
@@ -620,6 +633,19 @@ def user_block_analytics_props(db: Database, user_id: int) -> dict[str, Any]:
                 props["last_alert_age_hours"] = round(max(0.0, age_h), 2)
             except (TypeError, ValueError, AttributeError):
                 pass
+    get_first = getattr(db, "get_user_first_seen", None)
+    if callable(get_first):
+        try:
+            first = get_first(user_id)
+            if first is not None:
+                if getattr(first, "tzinfo", None) is None:
+                    first = first.replace(tzinfo=timezone.utc)
+                minutes = (
+                    datetime.now(timezone.utc) - first.astimezone(timezone.utc)
+                ).total_seconds() / 60.0
+                props["minutes_since_first_start"] = round(max(0.0, minutes), 1)
+        except Exception:
+            pass
     return props
 
 

@@ -174,7 +174,7 @@ The bot polls live streams by `game_id` and notifies when a **new** matching str
 - if a refresh token is already stored (sync or schedule) — **Import subscriptions manually** instead of authorize (one-time import, paused);
 - one-time — same as before, token not stored;
 - sync — period in days, refresh token stored encrypted; each run adds new follows (**enabled**) and removes unedited sync imports on unfollow; if an alert was **edited** or is **manual**, the bot asks “Delete alerts?” (Yes / No);
-- on import, alerts are created **paused** (DM to self); Settings → **Sync** (change period / disable).
+- on import, alerts are created **paused** (DM to self); the bot explains the free active-alert cap and offers **«Enable first N»** or pick channels; Settings → **Sync** (change period / disable).
 
 Twitch Console needs Redirect URL: `https://<service>/oauth/twitch/callback` (see `PUBLIC_BASE_URL`).
 

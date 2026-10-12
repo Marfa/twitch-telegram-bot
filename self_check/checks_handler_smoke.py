@@ -1269,6 +1269,11 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert capture.call_args.args[2]["source"] == "delivery"
     assert capture.call_args.args[2]["dest_type"] == "dm"
     assert "active_subs" in capture.call_args.args[2]
+    props = capture.call_args.args[2]
+    assert "had_alert_ever" in props
+    assert "from_import" in props
+    assert "welcome_seed_only" in props
+    assert "minutes_since_first_start" in props
     clear_user_blocked(db, _FREE_UID)
     db.set_chat_unreachable(channel_id, False)
 

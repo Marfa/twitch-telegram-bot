@@ -352,11 +352,18 @@ def migrate_import_sync_subscriptions(
 
 
 def _import_result_keyboard(
-    lang: str, subs: list[Subscription]
+    lang: str,
+    subs: list[Subscription],
+    *,
+    free_active_limit: int | None = None,
 ) -> InlineKeyboardMarkup:
     """Post-import: enable + edit per channel (no shared-only keyboard)."""
+    if free_active_limit is not None and free_active_limit > 0:
+        enable_label = t("enable_first_n", lang, limit=free_active_limit)
+    else:
+        enable_label = t("enable_all", lang)
     rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(t("enable_all", lang), callback_data="enable_all")]
+        [InlineKeyboardButton(enable_label, callback_data="enable_all")]
     ]
     seen: set[str] = set()
     unique: list[Subscription] = []
@@ -367,6 +374,13 @@ def _import_result_keyboard(
         unique.append(sub)
     for i, sub in enumerate(unique, 1):
         tag = f"#{i} {sub.twitch_username}"
+        if (
+            free_active_limit is not None
+            and free_active_limit > 0
+            and not sub.enabled
+            and i <= free_active_limit
+        ):
+            tag = f"{tag} · {i}/{free_active_limit}"
         enable_label = f"✅ {tag}" if sub.enabled else f"{t('toggle_on', lang)} {tag}"
         rows.append(
             [
@@ -375,7 +389,7 @@ def _import_result_keyboard(
                     callback_data=f"imp_en:{sub.id}",
                 ),
                 InlineKeyboardButton(
-                    _inline_btn_label(f"{t('sub_list_edit', lang)} {tag}"),
+                    _inline_btn_label(f"{t('sub_list_edit', lang)} #{i} {sub.twitch_username}"),
                     callback_data=f"edit:{sub.id}",
                 ),
             ]
@@ -1616,6 +1630,20 @@ async def _deliver_import_result(
         removed_note = t(
             "import_removed_note", lang, list=", ".join(removed_names)
         )
+    db: Database = application.bot_data["db"]
+    free_limit: int | None = None
+    active_note = ""
+    if imported > 0 or new_subs:
+        demo = demo_mode.is_active(owner_id)
+        slots = prem.active_subscription_slots(db, owner_id, demo=demo)
+        if not slots.unlimited:
+            free_limit = prem.free_active_limit()
+            active_note = t(
+                "import_active_limit_note",
+                lang,
+                limit=free_limit,
+                slots=max(0, slots.remaining),
+            )
     header = t(
         "import_success",
         lang,
@@ -1623,8 +1651,13 @@ async def _deliver_import_result(
         skipped=skipped,
         limit_note=limit_note,
         removed_note=removed_note,
+        active_note=active_note,
     )
-    markup = _import_result_keyboard(lang, new_subs) if new_subs else None
+    markup = (
+        _import_result_keyboard(lang, new_subs, free_active_limit=free_limit)
+        if new_subs
+        else None
+    )
     analytics.capture(
         owner_id,
         "twitch_import_completed",
@@ -1634,6 +1667,7 @@ async def _deliver_import_result(
             "limited": limited,
             "removed": len(removed_names),
             "empty": False,
+            "free_active_limit": free_limit,
         },
     )
     await application.bot.send_message(
@@ -2294,7 +2328,12 @@ async def _refresh_import_result_message(
     ]
     if not subs:
         return
-    markup = _import_result_keyboard(lang, subs)
+    free_limit: int | None = None
+    demo = demo_mode.is_active(owner_id)
+    slots = prem.active_subscription_slots(db, owner_id, demo=demo)
+    if not slots.unlimited:
+        free_limit = prem.free_active_limit()
+    markup = _import_result_keyboard(lang, subs, free_active_limit=free_limit)
     try:
         await query.edit_message_text(
             header,
@@ -2369,21 +2408,25 @@ async def on_import_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not await prem.can_enable_more_async(
         context.bot, db, owner_id, twitch_username=sub.twitch_username
     ):
-        from premium_handlers import send_premium_screen
+        from premium_handlers import (
+            send_premium_screen,
+            user_needs_early_premium_soft,
+        )
 
         await query.edit_message_text(
             t("premium_active_limit", lang, limit=prem.free_active_limit())
         )
-        await send_premium_screen(
-            context.bot,
-            owner_id,
-            lang,
-            db,
-            update=update,
-            context=context,
-            source="enable_sub",
-            feature="active_limit",
-        )
+        if not user_needs_early_premium_soft(db, owner_id):
+            await send_premium_screen(
+                context.bot,
+                owner_id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="enable_sub",
+                feature="active_limit",
+            )
         return
     new_state = db.toggle_subscription(sub_id, owner_id)
     if new_state is None:
@@ -2449,21 +2492,26 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
             return
         if paused and remaining is not None and remaining <= 0:
-            from premium_handlers import send_premium_screen
+            from premium_handlers import (
+                send_premium_screen,
+                user_needs_early_premium_soft,
+            )
 
             await query.edit_message_text(
                 t("premium_active_limit", lang, limit=prem.free_active_limit())
             )
-            await send_premium_screen(
-                context.bot,
-                owner_id,
-                lang,
-                db,
-                update=update,
-                context=context,
-                source="enable_all",
-                feature="active_limit",
-            )
+            # First-day users without alerts: explain the free cap without paywall dump.
+            if not user_needs_early_premium_soft(db, owner_id):
+                await send_premium_screen(
+                    context.bot,
+                    owner_id,
+                    lang,
+                    db,
+                    update=update,
+                    context=context,
+                    source="enable_all",
+                    feature="active_limit",
+                )
             return
         await query.edit_message_text(t("enable_all_none", lang))
         return

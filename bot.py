@@ -2211,6 +2211,14 @@ async def on_premium_callback_router(
     await on_premium_callback(update, context)
 
 
+async def on_premium_early_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from premium_handlers import on_premium_early
+
+    await on_premium_early(update, context)
+
+
 async def precheckout_premium_router(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -2782,6 +2790,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(
             on_premium_callback_router,
             pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+|gift|gift_month|gift_year|gift_life)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_premium_early_router, pattern=r"^premium_early:(continue|back)$"
         ),
         group=0,
     )
@@ -3904,7 +3918,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"sys_updates:|sys_availability:|sys_other:|sys_sync:|sys_beta:|"
                 r"whisper_alerts:|"
                 r"follow_monitor:|"
-                r"import_mode:|sync:|premium:|ref_wd:|watch:|alert_history:)"
+                r"import_mode:|sync:|premium:|premium_early:|ref_wd:|watch:|alert_history:)"
             ),
         ),
         group=-1,

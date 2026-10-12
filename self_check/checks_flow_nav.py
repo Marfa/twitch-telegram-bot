@@ -26,6 +26,7 @@ from i18n import (
     new_sub_other_keyboard,
     other_menu,
     partner_menu,
+    premium_early_keyboard,
     premium_gate_keyboard,
     premium_gift_keyboard,
     settings_menu,
@@ -224,6 +225,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("new_sub_other_keyboard", new_sub_other_keyboard(loc)),
             ("premium_gate_first", premium_gate_keyboard(loc, first_step=True)),
             ("premium_gate_later", premium_gate_keyboard(loc, first_step=False)),
+            ("premium_early_soft", premium_early_keyboard(loc)),
             ("stream_schedule_confirm", stream_schedule_confirm_keyboard(loc)),
             ("stream_schedule_mode", stream_schedule_mode_keyboard(loc)),
             ("stream_schedule_vacation_auto", stream_schedule_vacation_auto_keyboard(loc)),
@@ -3576,6 +3578,10 @@ async def _scenario_welcome_demo(db) -> None:
     assert enabled is False
     markup = welcome_demo_keyboard("ru", sub_id, enabled=False)
     assert markup_has_escape_hatch(markup)
+    assert len(markup.inline_keyboard) == 1
+    assert len(markup.inline_keyboard[0]) == 2
+    assert markup.inline_keyboard[0][0].callback_data == f"welcome_en:{sub_id}"
+    assert markup.inline_keyboard[0][1].callback_data == f"welcome_del:{sub_id}"
     cbs = {
         cell.callback_data
         for row in markup.inline_keyboard
@@ -3615,6 +3621,55 @@ async def _scenario_welcome_demo(db) -> None:
     cap.assert_turn("welcome_demo_deleted")
 
 
+async def _scenario_premium_early_soft(db) -> None:
+    """§8 Premium — soft intro before paywall for first-day users without alerts."""
+    from premium_handlers import on_premium_early, open_premium_menu
+
+    uid = _FREE_UID + 22
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(uid, btn("premium", "ru"), cap)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True):
+        await open_premium_menu(update, ctx)
+    soft_cbs = {
+        cell.callback_data
+        for markup in cap.markups
+        for row in (getattr(markup, "inline_keyboard", None) or [])
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium_early:continue" in soft_cbs
+    assert "premium_early:back" in soft_cbs
+    assert markup_has_escape_hatch(premium_early_keyboard("ru"))
+    cap.assert_turn("premium_early_soft_shown")
+
+    update, query = _cb_update(uid, "premium_early:back", cap)
+    with patch("config.show_premium_ui", return_value=True):
+        await on_premium_early(update, ctx)
+    cap.assert_turn("premium_early_soft_back")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(uid, btn("premium", "ru"), cap)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True):
+        await open_premium_menu(update, ctx)
+    cap.markups.clear()
+    update, query = _cb_update(uid, "premium_early:continue", cap)
+    with patch("config.show_premium_ui", return_value=True), patch(
+        "premium_handlers.send_premium_screen", new=AsyncMock()
+    ) as send_prem:
+        await on_premium_early(update, ctx)
+    send_prem.assert_awaited()
+    assert send_prem.await_args.kwargs.get("source") == "menu_early"
+
+
 async def _run_flow_nav_checks() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "flow_nav.db")
@@ -3622,6 +3677,7 @@ async def _run_flow_nav_checks() -> None:
         db.set_user_locale(_FREE_UID, "ru")
         await _scenario_menus_and_wizards(db)
         await _scenario_welcome_demo(db)
+        await _scenario_premium_early_soft(db)
         await _scenario_wizard_channel_step(db)
         await _scenario_subscriptions(db)
         await _scenario_settings_and_partner(db)
