@@ -86,7 +86,7 @@ from db import (
 from i18n import SUPPORTED_LOCALES, btn, format_duration_hm, t as tr
 from health import create_pending_login_state, parse_posthog_issue_payload, pop_pending_login_state
 from telegram.error import BadRequest, Forbidden
-from premium import FEATURE_IDS
+from premium import FEATURE_IDS, purchasable_feature_ids
 from telegram import LinkPreviewOptions, Message
 
 
@@ -121,6 +121,7 @@ def check_core() -> None:
     peaks = find_loud_peaks(rms, n=5, duration=30, min_gap=60)
     assert len(peaks) >= 2
     assert "ai_clips" in FEATURE_IDS
+    assert "ai_clips" in purchasable_feature_ids()
 
     # Phrase regex: mid-word, case-insensitive EN/RU.
     assert CLIP_PHRASE_RE.search("makeAClipNow")

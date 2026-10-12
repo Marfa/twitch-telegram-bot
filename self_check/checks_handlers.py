@@ -1661,10 +1661,18 @@ def check_handlers() -> None:
     assert "stream_chat" in FEATURE_IDS
     assert "follow_monitor" in FEATURE_IDS
     assert "follow_monitor" in prem.purchasable_feature_ids()
+    assert "ai_clips" in FEATURE_IDS
+    assert "ai_clips" in prem.purchasable_feature_ids()
     assert not prem.premium_feature_in_unreleased_beta("follow_monitor")
+    assert not prem.premium_feature_in_unreleased_beta("ai_clips")
     fm_feat = beta_mod.get_feature("follow-monitor")
     assert fm_feat is not None and fm_feat.premium_feature_id == "follow_monitor"
     assert fm_feat.stage == "ga"
+    ai_feat = beta_mod.get_feature("ai-clips")
+    assert ai_feat is not None and ai_feat.premium_feature_id == "ai_clips"
+    assert ai_feat.stage == "ga"
+    assert tr("premium_feat_ai_clips", "ru")
+    assert tr("premium_feat_ai_clips_desc", "ru")
     assert tr("premium_feat_follow_monitor", "ru")
     assert tr("beta_feat_follow_monitor", "en")
     from handlers.follow_monitor import _sync_owner_blocking

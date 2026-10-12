@@ -3223,9 +3223,8 @@ async def _scenario_follow_monitor(db) -> None:
 
 
 async def _scenario_ai_clips(db) -> None:
-    """§1.4 Other → AI clips: beta/premium gates and VOD pick Cancel escape."""
+    """§1.4 Other → AI clips: Premium gate and VOD pick Cancel escape."""
     from handlers.ai_clips import (
-        BETA_FEATURE_ID,
         FEATURE_ID,
         on_ai_clips_callback,
         start_ai_clips,
@@ -3243,21 +3242,8 @@ async def _scenario_ai_clips(db) -> None:
     await open_other_menu(update, ctx)
     cap.assert_turn("open_other_menu_ai_clips")
 
-    # Without beta enrollment: soft stop + other_menu escape.
+    # Without Premium: soft stop + premium screen + other_menu escape.
     update = _msg_update(_FREE_UID, btn("ai_clips", "ru"), cap)
-    await start_ai_clips(update, ctx)
-    texts = [str(c.args[1]) if len(c.args) > 1 else "" for c in bot.send_message.await_args_list]
-    assert any("бета" in (t or "").lower() or "beta" in (t or "").lower() for t in texts) or any(
-        "AI-клип" in (t or "") or "AI clip" in (t or "") for t in texts
-    )
-    cap.assert_turn("other_ai_clips_beta_required")
-
-    db.set_beta_enrollment(_FREE_UID, BETA_FEATURE_ID, True)
-    application, bot = _app(db)
-    cap = _BotCapture()
-    cap.wrap(bot)
-    update = _msg_update(_FREE_UID, btn("ai_clips", "ru"), cap)
-    ctx = _ctx(application)
     with patch(
         "handlers.ai_clips.prem.has_feature",
         new=AsyncMock(return_value=False),
@@ -3267,6 +3253,11 @@ async def _scenario_ai_clips(db) -> None:
             new=AsyncMock(),
         ):
             await start_ai_clips(update, ctx)
+    texts = [
+        str(c.args[1]) if len(c.args) > 1 else ""
+        for c in bot.send_message.await_args_list
+    ]
+    assert any("Premium" in (t or "") or "premium" in (t or "").lower() for t in texts)
     cap.assert_turn("other_ai_clips_premium_required")
 
     twitch = MagicMock()
