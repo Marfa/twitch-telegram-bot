@@ -494,6 +494,7 @@
   "ignored_words_igdb": "Ignore genres, publishers",
   "ignored_words_igdb_delete": "Delete categories",
   "igdb_attribution": "Games metadata is powered by <a href=\"{url}\">IGDB.com</a>",
+  "just_chatting_description": "Just Chatting is a Twitch Category that showcases content where the streamer(s) broadcasting the live-stream interact with the Community chat in real-time. Most of the time, another game is featured, but a streamer will prefer to put themselves under this category for the activity of chatting rather than the game itself, and to reach a broader audience.",
   "ignore_igdb_prompt": "Specify the developer, publisher, or game genre you want to ignore.\n\nGames metadata is powered by <a href=\"https://www.igdb.com\">IGDB.com</a>",
   "ignore_igdb_pick": "Select a match:",
   "ignore_igdb_not_found": "Nothing found for «{query}». Try another name.",

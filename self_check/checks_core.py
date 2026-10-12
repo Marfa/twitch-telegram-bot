@@ -2608,7 +2608,8 @@ def check_core() -> None:
             twitch=client,
             lang="en",
         )
-        assert "Hang out" in desc
+        assert "Community chat" in desc
+        assert "Hang out" not in desc
         linked = render_template(
             "{game_igdb} / {game_steam}",
             "x",

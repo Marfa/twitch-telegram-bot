@@ -76,6 +76,9 @@ _FALLBACK_GAMES = (
 )
 
 
+# Twitch Helix category id for Just Chatting (non-game; IGDB summary is unsuitable).
+JUST_CHATTING_GAME_ID = "509658"
+
 GAME_COVER_IMAGE_ID = "__game_cover__"
 # BotHub Nano Banana 2 cover from game description — generated at alert send time.
 AI_GAME_COVER_IMAGE_ID = "__ai_game_cover__"
@@ -2346,7 +2349,13 @@ class TwitchClient:
     ) -> str:
         """Helix category id → IGDB summary, localized to bot UI language."""
         gid = str(twitch_game_id or "").strip()
-        if not gid or self._igdb_db is None:
+        if not gid:
+            return "—"
+        if gid == JUST_CHATTING_GAME_ID:
+            from i18n import t
+
+            return t("just_chatting_description", lang)
+        if self._igdb_db is None:
             return "—"
         try:
             summary = self._igdb_db.igdb_summary_for_twitch(gid)
