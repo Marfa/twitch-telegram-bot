@@ -229,6 +229,8 @@ _TRANSIENT_REQUEST_ERRORS = (
     requests.exceptions.Timeout,
     requests.exceptions.ConnectionError,
 )
+# Helix 5xx blips; GET only so a retried write cannot apply twice.
+_TRANSIENT_STATUS_CODES = frozenset({500, 502, 503, 504})
 
 
 def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
@@ -265,7 +267,7 @@ def _install_rate_limit_backoff(
 ) -> None:
     """Wrap Session.request: refresh a rejected token once on 401, retry on
     429 with Retry-After / exponential backoff, and retry transient network
-    timeouts / connection errors the same way.
+    timeouts / connection errors and GET 5xx responses the same way.
 
     `on_unauthorized` takes the request headers and returns rebuilt headers to
     retry with (after refreshing the token), or None to leave the 401 as-is.
@@ -307,6 +309,22 @@ def _install_rate_limit_backoff(
                         url,
                     )
                     continue
+            if (
+                last.status_code in _TRANSIENT_STATUS_CODES
+                and method.upper() == "GET"
+                and attempt < _RATE_LIMIT_MAX_RETRIES
+            ):
+                wait = _transient_backoff_seconds(attempt)
+                logger.warning(
+                    "HTTP %s method=%s url=%s wait=%.1fs attempt=%s",
+                    last.status_code,
+                    method,
+                    url,
+                    wait,
+                    attempt + 1,
+                )
+                time.sleep(wait)
+                continue
             if last.status_code != 429 or attempt >= _RATE_LIMIT_MAX_RETRIES:
                 return last
             wait = _retry_after_seconds(last, attempt)

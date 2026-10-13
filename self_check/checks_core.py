@@ -397,6 +397,29 @@ def check_core() -> None:
         except _requests.exceptions.ReadTimeout:
             pass
 
+    # Helix 5xx on GET: retry, then success; on POST: no retry.
+    fake500 = MagicMock()
+    fake500.status_code = 500
+    fake500.headers = {}
+    s5_calls: list = []
+
+    def _orig500(method, url, **kwargs):
+        s5_calls.append(method)
+        return fake500 if len(s5_calls) == 1 else fake200
+
+    sess500 = MagicMock()
+    sess500.request = _orig500
+    _install_rate_limit_backoff(sess500)
+    with patch("twitch.time.sleep") as sleep_500:
+        out = sess500.request("GET", "https://api.twitch.tv/helix/schedule")
+    assert out.status_code == 200 and len(s5_calls) == 2
+    sleep_500.assert_called_once()
+    s5_calls.clear()
+    with patch("twitch.time.sleep") as sleep_post:
+        out = sess500.request("POST", "https://api.twitch.tv/helix/schedule/segment")
+    assert out.status_code == 500 and len(s5_calls) == 1
+    sleep_post.assert_not_called()
+
     # 401 rejected token: refresh headers once, then retry succeeds.
     fake401 = MagicMock()
     fake401.status_code = 401
