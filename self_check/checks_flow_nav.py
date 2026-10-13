@@ -1289,6 +1289,93 @@ async def _scenario_release_notify_delete(db) -> None:
     _ = ctx
 
 
+async def _scenario_subscriptions_edit_release(db) -> None:
+    """§6.3 Release editor — days always; platforms only when date is known."""
+    from db.models import (
+        ReleasePlatformPref,
+        ReleaseWatchPrefs,
+        dump_release_watch_prefs,
+    )
+    from handlers.release_watch import RELEASE_BETA_ID
+    from handlers.subscriptions import edit_menu, on_edit_pick
+
+    db.upsert_user(_FREE_UID)
+    db.set_beta_enrollment(_FREE_UID, RELEASE_BETA_ID, True)
+
+    unknown = ReleaseWatchPrefs(
+        igdb_game_id=88,
+        game_name="TBA Flow",
+        days_before=3,
+        platforms=[],
+        date_unknown=True,
+    )
+    unknown_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="TBA Flow",
+        twitch_user_id=f"rel:{_FREE_UID}:tba",
+        message_template="release",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        notify_on_live=False,
+        release_watch_prefs=dump_release_watch_prefs(unknown),
+    )
+    known = ReleaseWatchPrefs(
+        igdb_game_id=89,
+        game_name="Dated Flow",
+        days_before=2,
+        platforms=[ReleasePlatformPref(6, "PC", 2_000_000_000, "2030")],
+        date_unknown=False,
+    )
+    known_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="Dated Flow",
+        twitch_user_id=f"rel:{_FREE_UID}:dated",
+        message_template="release",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        notify_on_live=False,
+        release_watch_prefs=dump_release_watch_prefs(known),
+    )
+
+    def _edit_cbs(cap: _BotCapture) -> set[str]:
+        return {
+            b.callback_data or ""
+            for m in cap.markups
+            if getattr(m, "inline_keyboard", None)
+            for row in m.inline_keyboard
+            for b in row
+        }
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    await edit_menu(_msg_update(_FREE_UID, btn("edit", "ru"), cap), ctx)
+    update, _query = _cb_update(_FREE_UID, f"edit:{unknown_id}", cap)
+    await on_edit_pick(update, ctx)
+    cbs = _edit_cbs(cap)
+    assert f"edit_r:{unknown_id}:days" in cbs
+    assert f"edit_r:{unknown_id}:platforms" not in cbs
+    cap.assert_turn("subscriptions_edit_release_unknown_date")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    await edit_menu(_msg_update(_FREE_UID, btn("edit", "ru"), cap), ctx)
+    update, _query = _cb_update(_FREE_UID, f"edit:{known_id}", cap)
+    await on_edit_pick(update, ctx)
+    cbs = _edit_cbs(cap)
+    assert f"edit_r:{known_id}:days" in cbs
+    assert f"edit_r:{known_id}:platforms" in cbs
+    cap.assert_turn("subscriptions_edit_release_known_date")
+
+    assert db.delete_subscription(unknown_id, _FREE_UID)
+    assert db.delete_subscription(known_id, _FREE_UID)
+
+
 async def _scenario_wizard_giveaways_hub(db) -> None:
     """§6.4 Giveaways — alert_type:giveaways → hub with close; stores has Back."""
     from handlers.giveaways import (
@@ -3685,6 +3772,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_release_alert(db)
         await _scenario_wizard_release_pick_pages(db)
         await _scenario_release_notify_delete(db)
+        await _scenario_subscriptions_edit_release(db)
         await _scenario_wizard_giveaways_hub(db)
         await _scenario_wizard_giveaways_discount(db)
         await _scenario_wizard_alert_type_other(db)

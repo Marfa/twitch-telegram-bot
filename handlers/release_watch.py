@@ -178,23 +178,28 @@ def release_dates_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def edit_release_options_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+def edit_release_options_keyboard(
+    sub_id: int, lang: str, *, date_unknown: bool = False
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
         [
-            [
-                InlineKeyboardButton(
-                    t("edit_release_days", lang),
-                    callback_data=f"edit_r:{sub_id}:days",
-                )
-            ],
+            InlineKeyboardButton(
+                t("edit_release_days", lang),
+                callback_data=f"edit_r:{sub_id}:days",
+            )
+        ]
+    ]
+    # No platforms to pick while the release date is still unknown.
+    if not date_unknown:
+        rows.append(
             [
                 InlineKeyboardButton(
                     t("edit_release_platforms", lang),
                     callback_data=f"edit_r:{sub_id}:platforms",
                 )
-            ],
-        ]
-    )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def _release_delete_keyboard(sub_id: int, lang: str) -> InlineKeyboardMarkup:
@@ -943,6 +948,9 @@ async def start_edit_release_platforms(
     prefs = parse_release_watch_prefs(sub.release_watch_prefs) if sub else None
     if not prefs:
         await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if prefs.date_unknown:
+        await query.edit_message_text(t("release_no_dates_edit", lang))
         return ConversationHandler.END
     now = int(time.time())
     all_dates = db.igdb_release_dates_for_game(prefs.igdb_game_id)

@@ -2590,7 +2590,9 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 game=html.escape(prefs.game_name),
                 days=prefs.days_before,
             ),
-            reply_markup=edit_release_options_keyboard(sub_id, lang),
+            reply_markup=edit_release_options_keyboard(
+                sub_id, lang, date_unknown=prefs.date_unknown
+            ),
             parse_mode=ParseMode.HTML,
         )
         return ConversationHandler.END
@@ -6276,7 +6278,9 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 game=html.escape(prefs.game_name),
                 days=prefs.days_before,
             ),
-            reply_markup=edit_release_options_keyboard(sub_id, lang),
+            reply_markup=edit_release_options_keyboard(
+                sub_id, lang, date_unknown=prefs.date_unknown
+            ),
             parse_mode=ParseMode.HTML,
         )
         try:

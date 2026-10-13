@@ -330,6 +330,8 @@ def _check_release_search_exact_duplicates() -> None:
 
 
 def _check_release_keyboard() -> None:
+    from handlers.release_watch import edit_release_options_keyboard
+
     hidden = alert_type_keyboard("en")
     assert not any(
         (b.callback_data or "") == "alert_type:release"
@@ -353,6 +355,23 @@ def _check_release_keyboard() -> None:
     assert t("release_find_streams_none", "en", game="X")
     assert "паузу" in t("release_notify_paused_note", "ru").lower()
     assert "paused" in t("release_notify_paused_note", "en").lower()
+
+    known_cbs = [
+        b.callback_data
+        for r in edit_release_options_keyboard(9, "en").inline_keyboard
+        for b in r
+    ]
+    assert "edit_r:9:days" in known_cbs
+    assert "edit_r:9:platforms" in known_cbs
+    unknown_cbs = [
+        b.callback_data
+        for r in edit_release_options_keyboard(
+            9, "en", date_unknown=True
+        ).inline_keyboard
+        for b in r
+    ]
+    assert "edit_r:9:days" in unknown_cbs
+    assert "edit_r:9:platforms" not in unknown_cbs
 
 
 def _check_release_pause_when_all_notified() -> None:
@@ -774,6 +793,7 @@ def _check_alert_dup_edit_opens_type_menu() -> None:
             await on_share_dup_edit(update, ctx)
             rel_cbs = _inline_cbs(bot)
             assert f"edit_r:{rel_id}:days" in rel_cbs
+            assert f"edit_r:{rel_id}:platforms" not in rel_cbs
             assert not any(c.startswith(f"edit_f:{rel_id}:") for c in rel_cbs)
 
             bot.send_message.reset_mock()
