@@ -600,6 +600,14 @@ class PremiumChannel:
     owner_telegram_id: int
     charge_id: str
     paid_at: str
+    until_unix: int = 0
+    canceled: bool = False
+
+    def is_active(self, now: int | None = None) -> bool:
+        import time
+
+        n = int(now) if now is not None else int(time.time())
+        return int(self.until_unix or 0) > n
 
 
 @dataclass(frozen=True)

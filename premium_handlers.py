@@ -321,16 +321,18 @@ def _premium_markup(
             user_id=user_id,
         )
     st = prem.get_status(db, user_id)
+    owned_channels = db.list_premium_channels_for_owner(user_id)
+    has_owned_channels = bool(owned_channels)
     # Custom 1⭐ (etc.) testers still need pay buttons even with free-chat Premium.
     if (st.permanent or free_chat) and not prem.has_custom_stars_price(user_id):
-        if show_gift:
+        if show_gift or has_owned_channels:
             return premium_actions_keyboard(
                 lang,
                 show_trial=False,
                 show_plans=False,
                 show_features=False,
-                show_owned=False,
-                show_gift=True,
+                show_owned=has_owned_channels,
+                show_gift=show_gift,
                 user_id=user_id,
             )
         return None
@@ -341,14 +343,14 @@ def _premium_markup(
         and not st.has_active_features
         and not prem.has_custom_stars_price(user_id)
     ):
-        if show_gift:
+        if show_gift or has_owned_channels:
             return premium_actions_keyboard(
                 lang,
                 show_trial=False,
                 show_plans=False,
                 show_features=False,
-                show_owned=False,
-                show_gift=True,
+                show_owned=has_owned_channels,
+                show_gift=show_gift,
                 user_id=user_id,
             )
         return None
@@ -356,6 +358,7 @@ def _premium_markup(
     show_owned = bool(
         st.has_active_features
         or (st.stars_active and st.stars_charge_id)
+        or has_owned_channels
     )
     # Full plan → no purchases. À la carte → more features only (not month/year/life).
     show_plans = not full and not st.has_active_features
@@ -415,6 +418,20 @@ async def _show_owned_subscriptions(
                 until=_fmt_until(st.feature_until(fid)),
             )
         )
+    channels = db.list_premium_channels_for_owner(user_id)
+    channel_cancelable: list[tuple[str, str]] = []
+    for ch in channels:
+        label = ch.display_name or ch.twitch_login
+        key = (
+            "premium_owned_channel_canceled"
+            if ch.canceled
+            else "premium_owned_channel"
+        )
+        lines.append(
+            t(key, lang, channel=label, until=_fmt_until(ch.until_unix))
+        )
+        if ch.charge_id and not ch.canceled:
+            channel_cancelable.append((ch.twitch_user_id, label))
     text = (
         t("premium_owned_title", lang, items="\n".join(lines))
         if lines
@@ -426,6 +443,7 @@ async def _show_owned_subscriptions(
             lang,
             stars_cancelable=stars_cancelable,
             feature_ids=cancelable_feats,
+            channel_cancelable=channel_cancelable,
         ),
     )
 
@@ -793,6 +811,45 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
+    if data.startswith("premium:cancel_channel:"):
+        tid = data.split(":", 2)[2]
+        ch = db.get_premium_channel(tid)
+        if (
+            ch is None
+            or int(ch.owner_telegram_id) != int(user_id)
+            or not ch.is_active()
+        ):
+            await query.answer(t("premium_cancel_none", lang), show_alert=True)
+            return
+        if ch.canceled:
+            await query.answer(
+                t(
+                    "premium_cancel_done",
+                    lang,
+                    until=_fmt_until(ch.until_unix),
+                ),
+                show_alert=True,
+            )
+            return
+        if ch.charge_id:
+            ok = await _cancel_telegram_star_subscription(
+                context.bot,
+                user_id,
+                ch.charge_id,
+                log_label=f"channel={ch.twitch_login}",
+            )
+            if not ok:
+                await query.answer()
+                await query.edit_message_text(t("premium_cancel_failed", lang))
+                return
+        db.set_premium_channel_canceled(tid, True)
+        until = _fmt_until(ch.until_unix)
+        await query.answer()
+        await query.edit_message_text(
+            t("premium_cancel_done", lang, until=until)
+        )
+        return
+
     if data == "premium:feat_pay":
         if _blocks_feature_purchase(db, user_id):
             await query.answer(t("premium_plans_blocked", lang), show_alert=True)
@@ -1053,7 +1110,8 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not login or not tid:
             await query.edit_message_text(t("premium_channel_failed", lang))
             return
-        if db.get_premium_channel(tid) is not None or prem.is_promo_channel(login, db):
+        existing = db.get_premium_channel(tid)
+        if (existing is not None and existing.is_active()) or login == prem.twitch_channel_login():
             await query.edit_message_text(t("premium_channel_already", lang))
             return
         stars = prem.stars_channel_price(user_id)
@@ -1062,7 +1120,10 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             query,
             title=t("premium_channel_pay_title", lang),
             description=t(
-                "premium_channel_pay_description", lang, channel=login
+                "premium_channel_pay_description",
+                lang,
+                channel=login,
+                stars=stars,
             ),
             payload=prem.invoice_payload(
                 user_id,
@@ -1072,7 +1133,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             ),
             stars=stars,
             lang=lang,
-            subscription_period=None,
+            subscription_period=prem.stars_period(),
             context=context,
             user_id=user_id,
             kind="channel",
@@ -1109,7 +1170,8 @@ async def complete_premium_channel_oauth(
             owner_id, t("premium_channel_failed", lang), reply_markup=menu
         )
         return
-    if db.get_premium_channel(tid) is not None or (
+    existing = db.get_premium_channel(tid)
+    if (existing is not None and existing.is_active()) or (
         login == prem.twitch_channel_login()
     ):
         await application.bot.send_message(
@@ -1393,8 +1455,13 @@ async def successful_premium_payment(
     elif parsed.kind == "channel":
         pending = context.application.bot_data.get("pending_premium_channel") or {}
         info = pending.pop(parsed.user_id, None) or {}
-        display = str(info.get("display_name") or parsed.twitch_login)
-        until_unix = 0
+        existing = db.get_premium_channel(parsed.twitch_user_id)
+        display = str(
+            info.get("display_name")
+            or (existing.display_name if existing else "")
+            or parsed.twitch_login
+        )
+        until_unix = until_sub if until_sub > 0 else now + prem.stars_period()
         features_s = str(parsed.twitch_login or "")
         stars_eff = stars_paid or prem.stars_channel_price(parsed.user_id)
         prem.apply_premium_channel_payment(
@@ -1404,6 +1471,7 @@ async def successful_premium_payment(
             twitch_login=parsed.twitch_login,
             display_name=display,
             charge_id=charge_id,
+            until_unix=until_unix,
             stars_paid=stars_eff,
         )
         db.record_premium_purchase(
@@ -1427,18 +1495,21 @@ async def successful_premium_payment(
                 "stars": stars_eff,
                 "twitch_login": parsed.twitch_login,
                 "twitch_user_id": parsed.twitch_user_id,
+                "is_renewal": is_renewal,
                 **attr,
             },
         )
-        await msg.reply_text(
-            t(
-                "premium_channel_pay_done",
-                lang,
-                channel=display or parsed.twitch_login,
-                user_id=parsed.user_id,
-            ),
-            parse_mode=ParseMode.HTML,
-        )
+        if not is_renewal:
+            await msg.reply_text(
+                t(
+                    "premium_channel_pay_done",
+                    lang,
+                    channel=display or parsed.twitch_login,
+                    user_id=parsed.user_id,
+                    until=_fmt_until(until_unix),
+                ),
+                parse_mode=ParseMode.HTML,
+            )
         return
 
     kind = parsed.kind if parsed.kind != "legacy" else "month"

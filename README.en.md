@@ -56,7 +56,7 @@ Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the
 | Lifetime | 2000 | permanent |
 | Gift (month / year / forever) | 100 / 1000 / 2000 | one-time, no renew; link for recipient |
 | Single feature | 20 | 30 days each |
-| Streamer premium channel | 1500 | one-time for that channel |
+| Channel advertising (streamers) | 300 | Stars subscription / month |
 
 Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars. With Russian locale — **Buy Stars with RF card** button (external link).
 
@@ -72,7 +72,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
 | Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
 | AI clips from VOD | **📦 Other → 🎬 AI clips** (Premium / à la carte `ai_clips`): up to 5 clips — chat «clip»/«клип» → Groq emotion (ASR+score>3) → Groq game context on chat spikes → remaining audio → remaining spikes; without Groq falls back to peaks; Helix Create Clip From VOD; auto for new VODs |
-| Premium channel for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend |
+| Channel advertising for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend (Stars subscription) |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
 
@@ -327,7 +327,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `PREMIUM_STARS_YEAR` | Yearly Stars one-shot (default 1000) |
 | `PREMIUM_STARS_LIFETIME` | Lifetime Premium Stars (default 2000) |
 | `PREMIUM_STARS_FEATURE` | Per-feature monthly Stars (default 20) |
-| `PREMIUM_CHANNEL_STARS` | One-time Premium channel for streamers, Stars (default 1500) |
+| `PREMIUM_CHANNEL_STARS` | Channel advertising for streamers, Stars / month (default 300) |
 | `PREMIUM_TRIAL_DAYS` | Trial length in days (default 7) |
 | `PREMIUM_SUBSCRIPTION_PERIOD` | Stars subscription period, seconds (default 2592000 ≈ 30 days) |
 | `PREMIUM_TWITCH_LOGIN` | Twitch login for free Premium via sub (default `marfapr`) |

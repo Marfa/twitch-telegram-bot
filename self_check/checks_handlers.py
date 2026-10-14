@@ -3,6 +3,7 @@ import json
 import re
 from pathlib import Path
 import os
+import time
 from urllib.parse import urlparse
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -129,6 +130,7 @@ def check_handlers() -> None:
         )
     )
     assert "cancel_feat:.+" in bot_src
+    assert "cancel_channel:.+" in bot_src
     assert "owned|" in bot_src
     # Bot API has no getForumTopic; 404 is mapped to PTB InvalidToken.
     assert "getForumTopic" not in bot_src
@@ -213,13 +215,24 @@ def check_handlers() -> None:
     )[0]
     feat_cancel_block = ph_src.split(
         'if data.startswith("premium:cancel_feat:")', 1
+    )[1].split('if data.startswith("premium:cancel_channel:")', 1)[0]
+    channel_cancel_block = ph_src.split(
+        'if data.startswith("premium:cancel_channel:")', 1
     )[1].split('if data == "premium:feat_pay":', 1)[0]
     assert 't("import_failed"' not in cancel_block
     assert 't("premium_cancel_failed"' in cancel_block
     assert 't("premium_cancel_failed"' in feat_cancel_block
+    assert 't("premium_cancel_failed"' in channel_cancel_block
+    assert "set_premium_channel_canceled" in channel_cancel_block
+    channel_pay_block = ph_src.split('if action == "channel_pay":', 1)[1].split(
+        "async def complete_premium_channel_oauth", 1
+    )[0]
+    assert "subscription_period=prem.stars_period()" in channel_pay_block
+    assert "subscription_period=None" not in channel_pay_block
     # User cancel = stop auto-renew only; never refund Stars.
     assert "refund_star_payment" not in cancel_block
     assert "refund_star_payment" not in feat_cancel_block
+    assert "refund_star_payment" not in channel_cancel_block
     cancel_helper = ph_src.split(
         "async def _cancel_telegram_star_subscription", 1
     )[1].split("async def ", 1)[0]
@@ -244,9 +257,7 @@ def check_handlers() -> None:
     assert "delete_bot_pin_service_message" in bot_src_full
     assert "premium_cancel_done" in ph_src
     assert "set_premium_feature_canceled" in ph_src
-    assert "clear_premium_feature" not in ph_src.split(
-        'if data.startswith("premium:cancel_feat:")', 1
-    )[1].split("if data == \"premium:feat_pay\":", 1)[0]
+    assert "clear_premium_feature" not in feat_cancel_block
     assert "{until}" in tr("premium_cancel_done", "ru")
     assert "{until}" in tr("premium_cancel_done", "en")
     assert tr("premium_cancel_failed", "ru")
@@ -271,7 +282,10 @@ def check_handlers() -> None:
     assert tr("broadcast_audience_ids", "ru") == "Указать ID"
     assert tr("broadcast_audience_all", "ru") == "Разослать всем"
     owned_kb = premium_owned_keyboard(
-        "ru", stars_cancelable=True, feature_ids=["alert_types"]
+        "ru",
+        stars_cancelable=True,
+        feature_ids=["alert_types"],
+        channel_cancelable=[("42", "Streamer")],
     )
     owned_cb = {
         b.callback_data
@@ -281,6 +295,7 @@ def check_handlers() -> None:
     }
     assert "premium:cancel" in owned_cb
     assert "premium:cancel_feat:alert_types" in owned_cb
+    assert "premium:cancel_channel:42" in owned_cb
     assert _dump_broadcast_recipient_ids([9, 9, 8, "x"]) == "9,8"
 
     with tempfile.TemporaryDirectory() as d:
@@ -366,6 +381,7 @@ def check_handlers() -> None:
             display_name="Paid Streamer",
             owner_telegram_id=1,
             charge_id="ch_test",
+            until_unix=int(time.time()) + 86400,
         )
         assert prem.is_promo_channel("paidstreamer", db) is True
         assert "paidstreamer" in prem.list_promo_channel_logins(db)
@@ -503,7 +519,7 @@ def check_handlers() -> None:
     )
     assert "Продвинутые опции оповещений" in _pt
     assert "мини-приложении" in _pt
-    assert "Премиум-канал" in _pt
+    assert "Реклама канала" in _pt
     assert "рекомендация" in _pt
     # Full plan + à la carte share the same feature labels.
     for fid in FEATURE_IDS:
@@ -2161,6 +2177,7 @@ def check_handlers() -> None:
             display_name="Paid Streamer",
             owner_telegram_id=1,
             charge_id="pc_test",
+            until_unix=int(time.time()) + 86400,
         )
         cdb.add_subscription(
             owner_id=779,

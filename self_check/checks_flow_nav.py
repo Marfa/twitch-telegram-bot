@@ -3699,6 +3699,85 @@ async def _scenario_welcome_demo(db) -> None:
     cap.assert_turn("welcome_demo_deleted")
 
 
+async def _scenario_premium_channel_ad(db) -> None:
+    """§8 Premium — channel advertising intro Back; owned cancel escape."""
+    import time
+
+    from i18n import premium_owned_keyboard
+    from premium_handlers import on_premium_callback
+
+    uid = _FREE_UID + 31
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(uid, "premium:channel", cap)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True):
+        await on_premium_callback(update, ctx)
+    query.edit_message_text.assert_awaited()
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    assert markup_has_escape_hatch(markup), "channel ad intro missing Back"
+    cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium:channel_confirm" in cbs
+    assert "premium:feat_back" in cbs
+    cap.assert_turn("premium_channel_ad_intro")
+
+    db.upsert_premium_channel(
+        twitch_user_id="flow_ch_ad",
+        twitch_login="flowadstreamer",
+        display_name="Flow Ad",
+        owner_telegram_id=uid,
+        charge_id="chg_flow_ch_ad",
+        until_unix=int(time.time()) + 86400,
+    )
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(uid, "premium:owned", cap)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True):
+        await on_premium_callback(update, ctx)
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    assert markup_has_escape_hatch(markup), "owned channel ad missing Back"
+    owned_cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium:cancel_channel:flow_ch_ad" in owned_cbs
+    assert "premium:feat_back" in owned_cbs
+    assert markup_has_escape_hatch(
+        premium_owned_keyboard(
+            "ru",
+            stars_cancelable=False,
+            feature_ids=[],
+            channel_cancelable=[("flow_ch_ad", "Flow Ad")],
+        )
+    )
+    cap.assert_turn("premium_channel_ad_owned")
+
+    update, query = _cb_update(uid, "premium:cancel_channel:flow_ch_ad", cap)
+    with patch("config.show_premium_ui", return_value=True), patch(
+        "premium_handlers._cancel_telegram_star_subscription",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_premium_callback(update, ctx)
+    ch = db.get_premium_channel("flow_ch_ad")
+    assert ch is not None and ch.canceled is True
+    query.edit_message_text.assert_awaited()
+
+
 async def _scenario_premium_early_soft(db) -> None:
     """§8 Premium — soft intro before paywall for first-day users without alerts."""
     from premium_handlers import on_premium_early, open_premium_menu
@@ -3756,6 +3835,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_menus_and_wizards(db)
         await _scenario_welcome_demo(db)
         await _scenario_premium_early_soft(db)
+        await _scenario_premium_channel_ad(db)
         await _scenario_wizard_channel_step(db)
         await _scenario_subscriptions(db)
         await _scenario_settings_and_partner(db)

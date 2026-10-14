@@ -1073,6 +1073,8 @@ class Database(Protocol):
 
     def list_premium_channels(self) -> list[PremiumChannel]: ...
 
+    def list_premium_channels_for_owner(self, owner_telegram_id: int) -> list[PremiumChannel]: ...
+
     def get_premium_channel(self, twitch_user_id: str) -> PremiumChannel | None: ...
 
     def upsert_premium_channel(
@@ -1083,7 +1085,11 @@ class Database(Protocol):
         display_name: str,
         owner_telegram_id: int,
         charge_id: str,
+        until_unix: int = 0,
+        canceled: bool = False,
     ) -> None: ...
+
+    def set_premium_channel_canceled(self, twitch_user_id: str, canceled: bool) -> None: ...
 
     def get_premium_channel_by_charge(self, charge_id: str) -> PremiumChannel | None: ...
 

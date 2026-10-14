@@ -2789,7 +2789,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_premium_callback_router,
-            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+|gift|gift_month|gift_year|gift_life)$",
+            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|cancel_channel:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+|gift|gift_month|gift_year|gift_life)$",
         ),
         group=0,
     )

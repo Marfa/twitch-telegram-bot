@@ -1462,8 +1462,22 @@ class PostgresDatabase:
                     display_name TEXT NOT NULL DEFAULT '',
                     owner_telegram_id BIGINT NOT NULL,
                     charge_id TEXT NOT NULL DEFAULT '',
-                    paid_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    paid_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    until_unix BIGINT NOT NULL DEFAULT 0,
+                    canceled BOOLEAN NOT NULL DEFAULT FALSE
                 )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE premium_channels
+                ADD COLUMN IF NOT EXISTS until_unix BIGINT NOT NULL DEFAULT 0
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE premium_channels
+                ADD COLUMN IF NOT EXISTS canceled BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             cur.execute(
@@ -7358,55 +7372,88 @@ owner_id, twitch_username, twitch_user_id,
                 (fid,),
             )
 
+    @staticmethod
+    def _premium_channel_from_row(row) -> PremiumChannel:
+        paid = row["paid_at"]
+        paid_s = paid.isoformat() if hasattr(paid, "isoformat") else str(paid or "")
+        return PremiumChannel(
+            twitch_user_id=str(row["twitch_user_id"]),
+            twitch_login=str(row["twitch_login"]).lower(),
+            display_name=str(row["display_name"] or row["twitch_login"]),
+            owner_telegram_id=int(row["owner_telegram_id"]),
+            charge_id=str(row["charge_id"] or ""),
+            paid_at=paid_s,
+            until_unix=int(row["until_unix"] or 0),
+            canceled=bool(row["canceled"]),
+        )
+
     def is_premium_channel_login(self, login: str) -> bool:
         key = (login or "").strip().lower()
         if not key:
             return False
+        now = int(time.time())
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
-                "SELECT 1 FROM premium_channels WHERE twitch_login = %s",
-                (key,),
+                """
+                SELECT 1 FROM premium_channels
+                WHERE twitch_login = %s AND until_unix > %s
+                """,
+                (key, now),
             )
             row = cur.fetchone()
         return row is not None
 
     def list_premium_channel_logins(self) -> list[str]:
+        now = int(time.time())
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
-                "SELECT twitch_login FROM premium_channels ORDER BY twitch_login"
+                """
+                SELECT twitch_login FROM premium_channels
+                WHERE until_unix > %s
+                ORDER BY twitch_login
+                """,
+                (now,),
             )
             rows = cur.fetchall()
         return [str(r["twitch_login"]).lower() for r in rows]
 
     def list_premium_channels(self) -> list[PremiumChannel]:
+        now = int(time.time())
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
                 """
                 SELECT twitch_user_id, twitch_login, display_name,
-                       owner_telegram_id, charge_id, paid_at
+                       owner_telegram_id, charge_id, paid_at,
+                       until_unix, canceled
                 FROM premium_channels
+                WHERE until_unix > %s
                 ORDER BY paid_at DESC
-                """
+                """,
+                (now,),
             )
             rows = cur.fetchall()
-        out: list[PremiumChannel] = []
-        for r in rows:
-            paid = r["paid_at"]
-            paid_s = paid.isoformat() if hasattr(paid, "isoformat") else str(paid or "")
-            out.append(
-                PremiumChannel(
-                    twitch_user_id=str(r["twitch_user_id"]),
-                    twitch_login=str(r["twitch_login"]).lower(),
-                    display_name=str(r["display_name"] or r["twitch_login"]),
-                    owner_telegram_id=int(r["owner_telegram_id"]),
-                    charge_id=str(r["charge_id"] or ""),
-                    paid_at=paid_s,
-                )
+        return [self._premium_channel_from_row(r) for r in rows]
+
+    def list_premium_channels_for_owner(self, owner_telegram_id: int) -> list[PremiumChannel]:
+        now = int(time.time())
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT twitch_user_id, twitch_login, display_name,
+                       owner_telegram_id, charge_id, paid_at,
+                       until_unix, canceled
+                FROM premium_channels
+                WHERE owner_telegram_id = %s AND until_unix > %s
+                ORDER BY paid_at DESC
+                """,
+                (int(owner_telegram_id), now),
             )
-        return out
+            rows = cur.fetchall()
+        return [self._premium_channel_from_row(r) for r in rows]
 
     def get_premium_channel(self, twitch_user_id: str) -> PremiumChannel | None:
         uid = str(twitch_user_id or "").strip()
@@ -7417,7 +7464,8 @@ owner_id, twitch_username, twitch_user_id,
             cur.execute(
                 """
                 SELECT twitch_user_id, twitch_login, display_name,
-                       owner_telegram_id, charge_id, paid_at
+                       owner_telegram_id, charge_id, paid_at,
+                       until_unix, canceled
                 FROM premium_channels WHERE twitch_user_id = %s
                 """,
                 (uid,),
@@ -7425,16 +7473,7 @@ owner_id, twitch_username, twitch_user_id,
             row = cur.fetchone()
         if not row:
             return None
-        paid = row["paid_at"]
-        paid_s = paid.isoformat() if hasattr(paid, "isoformat") else str(paid or "")
-        return PremiumChannel(
-            twitch_user_id=str(row["twitch_user_id"]),
-            twitch_login=str(row["twitch_login"]).lower(),
-            display_name=str(row["display_name"] or row["twitch_login"]),
-            owner_telegram_id=int(row["owner_telegram_id"]),
-            charge_id=str(row["charge_id"] or ""),
-            paid_at=paid_s,
-        )
+        return self._premium_channel_from_row(row)
 
     def upsert_premium_channel(
         self,
@@ -7444,6 +7483,8 @@ owner_id, twitch_username, twitch_user_id,
         display_name: str,
         owner_telegram_id: int,
         charge_id: str,
+        until_unix: int = 0,
+        canceled: bool = False,
     ) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -7451,14 +7492,17 @@ owner_id, twitch_username, twitch_user_id,
                 """
                 INSERT INTO premium_channels (
                     twitch_user_id, twitch_login, display_name,
-                    owner_telegram_id, charge_id, paid_at
-                ) VALUES (%s, %s, %s, %s, %s, NOW())
+                    owner_telegram_id, charge_id, paid_at,
+                    until_unix, canceled
+                ) VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s)
                 ON CONFLICT (twitch_user_id) DO UPDATE SET
                     twitch_login = EXCLUDED.twitch_login,
                     display_name = EXCLUDED.display_name,
                     owner_telegram_id = EXCLUDED.owner_telegram_id,
                     charge_id = EXCLUDED.charge_id,
-                    paid_at = NOW()
+                    paid_at = NOW(),
+                    until_unix = EXCLUDED.until_unix,
+                    canceled = EXCLUDED.canceled
                 """,
                 (
                     str(twitch_user_id),
@@ -7466,7 +7510,20 @@ owner_id, twitch_username, twitch_user_id,
                     str(display_name or twitch_login),
                     int(owner_telegram_id),
                     str(charge_id or ""),
+                    int(until_unix or 0),
+                    bool(canceled),
                 ),
+            )
+
+    def set_premium_channel_canceled(self, twitch_user_id: str, canceled: bool) -> None:
+        uid = str(twitch_user_id or "").strip()
+        if not uid:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE premium_channels SET canceled = %s WHERE twitch_user_id = %s",
+                (bool(canceled), uid),
             )
 
     def get_premium_channel_by_charge(self, charge_id: str) -> PremiumChannel | None:
@@ -7478,7 +7535,8 @@ owner_id, twitch_username, twitch_user_id,
             cur.execute(
                 """
                 SELECT twitch_user_id, twitch_login, display_name,
-                       owner_telegram_id, charge_id, paid_at
+                       owner_telegram_id, charge_id, paid_at,
+                       until_unix, canceled
                 FROM premium_channels
                 WHERE charge_id = %s
                 """,
@@ -7487,16 +7545,7 @@ owner_id, twitch_username, twitch_user_id,
             row = cur.fetchone()
         if not row:
             return None
-        paid = row["paid_at"]
-        paid_s = paid.isoformat() if hasattr(paid, "isoformat") else str(paid or "")
-        return PremiumChannel(
-            twitch_user_id=str(row["twitch_user_id"]),
-            twitch_login=str(row["twitch_login"]).lower(),
-            display_name=str(row["display_name"] or row["twitch_login"]),
-            owner_telegram_id=int(row["owner_telegram_id"]),
-            charge_id=str(row["charge_id"] or ""),
-            paid_at=paid_s,
-        )
+        return self._premium_channel_from_row(row)
 
     def delete_premium_channel_by_charge(self, charge_id: str) -> bool:
         cid = str(charge_id or "").strip()

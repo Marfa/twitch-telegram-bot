@@ -615,6 +615,7 @@ def premium_owned_keyboard(
     *,
     stars_cancelable: bool,
     feature_ids: list[str],
+    channel_cancelable: list[tuple[str, str]] | None = None,
 ) -> InlineKeyboardMarkup:
     from config import PREMIUM_FREE_ACTIVE_LIMIT
     from premium import feature_label_key
@@ -640,6 +641,15 @@ def premium_owned_keyboard(
                 InlineKeyboardButton(
                     f"{btn('premium_cancel_feat', lang)} — {name}",
                     callback_data=f"premium:cancel_feat:{fid}",
+                )
+            ]
+        )
+    for tid, label in channel_cancelable or []:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{btn('premium_cancel_channel', lang)} — {label}",
+                    callback_data=f"premium:cancel_channel:{tid}",
                 )
             ]
         )

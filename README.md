@@ -56,7 +56,7 @@ English: [README.en.md](README.en.md)
 | Lifetime | 2000 | бессрочно |
 | Подарок (месяц / год / forever) | 100 / 1000 / 2000 | разовый, без продления; ссылка для получателя |
 | Одна функция | 20 | 30 дней за каждую |
-| Премиум-канал стримера | 1500 | разовый, для канала |
+| Реклама канала (стримеры) | 300 | Stars-подписка / мес |
 
 Также: саб на Twitch-канал `PREMIUM_TWITCH_LOGIN` (по умолчанию `marfapr`) даёт полный Premium без Stars. При русской локали — кнопка **Купить Stars картой РФ** (внешняя ссылка).
 
@@ -72,7 +72,7 @@ English: [README.en.md](README.en.md)
 | Безлимитный чат стримов в Mini App | На бесплатном — чтение + 20 сообщений/день |
 | Follow/Unfollow канала | Мониторинг и оповещения — Premium; списки Follow / новых Follow и Unfollow за 30 дней доступны без Premium |
 | AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (Premium / а-ля карт `ai_clips`): до 5 клипов — «clip»/«клип» в чате → Groq emotion (ASR+балл>3) → Groq game-контекст всплеска → остальные audio → остальные spike; без Groq — как раньше по пикам; Helix Create Clip From VOD; авто для новых VOD |
-| Премиум-канал для стримеров | Бесплатные взаимодействия с ботом для зрителей, приоритет в «Оповещение по игре», welcome-рекомендация |
+| Реклама канала для стримеров | Бесплатные взаимодействия с ботом для зрителей, приоритет в «Оповещение по игре», welcome-рекомендация (подписка Stars) |
 
 Цены задаются env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
 
@@ -327,7 +327,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `PREMIUM_STARS_YEAR` | Год Stars разово (по умолчанию 1000) |
 | `PREMIUM_STARS_LIFETIME` | Пожизненный Premium, Stars (по умолчанию 2000) |
 | `PREMIUM_STARS_FEATURE` | Цена одной функции в месяц, Stars (по умолчанию 20) |
-| `PREMIUM_CHANNEL_STARS` | Разовая цена Премиум-канала для стримеров, Stars (по умолчанию 1500) |
+| `PREMIUM_CHANNEL_STARS` | Цена рекламы канала для стримеров, Stars / мес (по умолчанию 300) |
 | `PREMIUM_TRIAL_DAYS` | Длительность триала (по умолчанию 7) |
 | `PREMIUM_SUBSCRIPTION_PERIOD` | Период Stars-подписки, сек (по умолчанию 2592000 ≈ 30 дней) |
 | `PREMIUM_TWITCH_LOGIN` | Twitch-логин для бесплатного Premium за саб (по умолчанию `marfapr`) |

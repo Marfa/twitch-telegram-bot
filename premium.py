@@ -450,6 +450,11 @@ def is_purchase_renewal(db: Database, parsed: ParsedInvoice) -> bool:
         return bool(st.stars_charge_id) or st.stars_until > 0 or st.stars_active
     if parsed.kind == "life":
         return bool(st.permanent)
+    if parsed.kind == "channel":
+        existing = db.get_premium_channel(parsed.twitch_user_id)
+        return existing is not None and (
+            existing.is_active() or int(existing.until_unix or 0) > 0
+        )
     return False
 
 
@@ -958,15 +963,18 @@ def apply_premium_channel_payment(
     twitch_login: str,
     display_name: str,
     charge_id: str,
+    until_unix: int,
     stars_paid: int | None = None,
 ) -> None:
-    """One-time Stars purchase: channel gets promo (free-tier Premium) status."""
+    """Stars subscription: channel gets promo status until until_unix."""
     db.upsert_premium_channel(
         twitch_user_id=str(twitch_user_id),
         twitch_login=str(twitch_login).strip().lower(),
         display_name=str(display_name or twitch_login),
         owner_telegram_id=int(user_id),
         charge_id=charge_id,
+        until_unix=int(until_unix or 0),
+        canceled=False,
     )
     credit_referral_commission(
         db,

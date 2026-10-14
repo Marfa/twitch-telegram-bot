@@ -1438,7 +1438,59 @@ def check_db_premium() -> None:
     from config import FREE_CHAT_ID, PREMIUM_CHANNEL_STARS
 
     assert FREE_CHAT_ID == -1002155969539
-    assert PREMIUM_CHANNEL_STARS == 1500
+    assert PREMIUM_CHANNEL_STARS >= 1
+    _cfg_src = Path(__file__).resolve().parents[1].joinpath("config.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'PREMIUM_CHANNEL_STARS", "300")' in _cfg_src
+    # Channel advertising: monthly Stars sub — active only while until_unix > now.
+    with tempfile.TemporaryDirectory() as _ch_dir:
+        ch_db = SqliteDatabase(Path(_ch_dir) / "channel_ad.db")
+        now = int(time.time())
+        ch_db.upsert_premium_channel(
+            twitch_user_id="ch1",
+            twitch_login="adstreamer",
+            display_name="Ad Streamer",
+            owner_telegram_id=42,
+            charge_id="chg_ch1",
+            until_unix=now + 3600,
+        )
+        assert ch_db.is_premium_channel_login("adstreamer")
+        assert prem.is_promo_channel("adstreamer", ch_db)
+        assert [c.twitch_login for c in ch_db.list_premium_channels_for_owner(42)] == [
+            "adstreamer"
+        ]
+        ch_parsed = parse_invoice_payload(
+            invoice_payload(
+                42, "channel", twitch_user_id="ch1", twitch_login="adstreamer"
+            )
+        )
+        assert ch_parsed is not None
+        assert prem.is_purchase_renewal(ch_db, ch_parsed) is True
+        prem.apply_premium_channel_payment(
+            ch_db,
+            42,
+            twitch_user_id="ch1",
+            twitch_login="adstreamer",
+            display_name="Ad Streamer",
+            charge_id="chg_ch1_renew",
+            until_unix=now + 7200,
+            stars_paid=300,
+        )
+        renewed = ch_db.get_premium_channel("ch1")
+        assert renewed is not None and renewed.until_unix == now + 7200
+        assert renewed.charge_id == "chg_ch1_renew"
+        ch_db.upsert_premium_channel(
+            twitch_user_id="ch1",
+            twitch_login="adstreamer",
+            display_name="Ad Streamer",
+            owner_telegram_id=42,
+            charge_id="chg_ch1_renew",
+            until_unix=now - 10,
+        )
+        assert not ch_db.is_premium_channel_login("adstreamer")
+        assert not prem.is_promo_channel("adstreamer", ch_db)
+        assert ch_db.list_premium_channels() == []
     from telegram.constants import ChatMemberStatus
 
     assert hasattr(ChatMemberStatus, "OWNER")
