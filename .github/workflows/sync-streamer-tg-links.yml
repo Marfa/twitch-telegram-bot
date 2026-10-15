@@ -21,9 +21,5 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/twitch-telegram-bot
-            docker compose -f compose.vps.yml cp \
-              scripts/sync-streamer-telegram-links.py bot:/tmp/sync_streamer_tg.py
             docker compose -f compose.vps.yml exec -T bot \
-              python /tmp/sync_streamer_tg.py
-            docker compose -f compose.vps.yml exec -T bot \
-              rm -f /tmp/sync_streamer_tg.py
+              python scripts/sync-streamer-telegram-links.py

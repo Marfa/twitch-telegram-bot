@@ -15,9 +15,19 @@ import logging
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# Prefer the app root (image WORKDIR). When the file is docker-cp'd to /tmp,
+# __file__ is not under the package tree — fall back to cwd /app.
+_HERE = Path(__file__).resolve()
+_CANDIDATES = (
+    _HERE.parents[1],
+    Path("/app"),
+    Path.cwd(),
+)
+for _root in _CANDIDATES:
+    if (_root / "streamer_telegram.py").is_file() and (_root / "config.py").is_file():
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
+        break
 
 import requests
 
