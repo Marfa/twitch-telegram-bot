@@ -292,8 +292,11 @@ async def after_subscription_created_telegram_hint(
     chat_id: int,
     alert_type: str | None = None,
 ) -> None:
-    """Sync curated from Helix, record non-DM dest, send notice if any URLs exist."""
-    from bot_helpers import _menu, _pulse_reply_keyboard
+    """Sync curated from Helix, record non-DM dest, send notice if any URLs exist.
+
+    Sends an inline-only message. Caller must follow with a lasting reply-keyboard
+    message (menu / wizard) — pulse-after-inline is flaky on some Telegram clients.
+    """
     from i18n import t
 
     if not should_send_streamer_telegram_notice(alert_type):
@@ -369,7 +372,6 @@ async def after_subscription_created_telegram_hint(
             disable_web_page_preview=True,
             reply_markup=markup,
         )
-        await _pulse_reply_keyboard(bot, owner_id, _menu(lang, owner_id))
     except Exception:
         logger.warning(
             "Failed to send streamer TG notice to %s for %s",

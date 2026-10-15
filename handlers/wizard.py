@@ -4223,6 +4223,7 @@ async def _finish_subscription(
         await _maybe_streamer_telegram_notice()
         context.user_data.clear()
         context.user_data["pending_live_sub_id"] = sub_id
+        # Reply keyboard after inline TG tip (last bot message must carry it).
         await context.bot.send_message(
             reply_chat_id(update),
             t("schedule_live_add_prompt", lang),
@@ -4390,12 +4391,18 @@ async def _finish_subscription(
         except BadRequest:
             pass
 
-    await context.bot.send_message(reply_chat_id(update), text, reply_markup=_menu(lang, owner_id))
+    # Inline TG tip before the lasting menu message (reply keyboard cannot share
+    # a message with inline buttons; last send must re-apply the menu).
+    await _maybe_streamer_telegram_notice()
+    menu_kb = _menu(lang, owner_id)
+    await context.bot.send_message(
+        reply_chat_id(update), text, reply_markup=menu_kb
+    )
     if created_disabled:
         await context.bot.send_message(
             reply_chat_id(update),
             t("premium_created_disabled", lang, limit=prem.free_active_limit()),
+            reply_markup=menu_kb,
         )
-    await _maybe_streamer_telegram_notice()
     return ConversationHandler.END
 
