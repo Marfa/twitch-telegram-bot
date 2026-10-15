@@ -398,6 +398,11 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN receive_beta_updates INTEGER NOT NULL DEFAULT 0"
             )
+        if "hide_streamer_telegram_all" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN hide_streamer_telegram_all "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         if "bot_blocked" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN bot_blocked INTEGER NOT NULL DEFAULT 0"
@@ -1259,6 +1264,15 @@ class SqliteDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_streamer_telegram_links_login
             ON streamer_telegram_links(twitch_login)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS streamer_telegram_hidden (
+                user_id INTEGER NOT NULL,
+                twitch_login TEXT NOT NULL,
+                PRIMARY KEY (user_id, twitch_login)
+            )
             """
         )
         conn.execute(
@@ -6950,21 +6964,156 @@ owner_id, twitch_username, twitch_user_id,
                 (login, link, src, chat_id),
             )
 
-    def list_streamer_telegram_urls(self, twitch_login: str) -> list[str]:
+    def list_streamer_telegram_urls(
+        self, twitch_login: str, *, source: str | None = None
+    ) -> list[str]:
         login = str(twitch_login or "").strip().lower()
         if not login:
             return []
+        src = str(source or "").strip().lower() or None
         with self._conn() as conn:
-            rows = conn.execute(
+            if src:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT url
+                    FROM streamer_telegram_links
+                    WHERE twitch_login = ? AND source = ?
+                    ORDER BY url
+                    """,
+                    (login, src),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT url
+                    FROM streamer_telegram_links
+                    WHERE twitch_login = ?
+                    ORDER BY url
+                    """,
+                    (login,),
+                ).fetchall()
+        return [str(r["url"]) for r in rows if r["url"]]
+
+    def replace_curated_streamer_telegram_links(
+        self, twitch_login: str, urls: list[str]
+    ) -> None:
+        login = str(twitch_login or "").strip().lower()
+        if not login:
+            return
+        wanted = sorted({str(u).strip() for u in urls if str(u or "").strip()})
+        with self._conn() as conn:
+            for link in wanted:
+                conn.execute(
+                    """
+                    INSERT INTO streamer_telegram_links (
+                        twitch_login, url, source, chat_id, updated_at
+                    ) VALUES (?, ?, 'curated', NULL, datetime('now'))
+                    ON CONFLICT(twitch_login, url, source) DO UPDATE SET
+                        updated_at = datetime('now')
+                    """,
+                    (login, link),
+                )
+            if wanted:
+                placeholders = ",".join("?" for _ in wanted)
+                conn.execute(
+                    f"""
+                    DELETE FROM streamer_telegram_links
+                    WHERE twitch_login = ? AND source = 'curated'
+                      AND url NOT IN ({placeholders})
+                    """,
+                    (login, *wanted),
+                )
+            else:
+                conn.execute(
+                    """
+                    DELETE FROM streamer_telegram_links
+                    WHERE twitch_login = ? AND source = 'curated'
+                    """,
+                    (login,),
+                )
+            conn.execute(
                 """
-                SELECT DISTINCT url
-                FROM streamer_telegram_links
-                WHERE twitch_login = ?
-                ORDER BY url
+                DELETE FROM streamer_telegram_links
+                WHERE twitch_login = ? AND source = 'helix'
                 """,
                 (login,),
-            ).fetchall()
-        return [str(r["url"]) for r in rows if r["url"]]
+            )
+
+    def get_hide_streamer_telegram_all(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT hide_streamer_telegram_all FROM users WHERE user_id = ?",
+                (int(user_id),),
+            ).fetchone()
+        return bool(row["hide_streamer_telegram_all"]) if row else False
+
+    def set_hide_streamer_telegram_all(self, user_id: int, hidden: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, hide_streamer_telegram_all) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    hide_streamer_telegram_all = excluded.hide_streamer_telegram_all
+                """,
+                (int(user_id), 1 if hidden else 0),
+            )
+
+    def is_streamer_telegram_hidden_for(
+        self, user_id: int, twitch_login: str
+    ) -> bool:
+        login = str(twitch_login or "").strip().lower()
+        if not login:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM streamer_telegram_hidden
+                WHERE user_id = ? AND twitch_login = ?
+                """,
+                (int(user_id), login),
+            ).fetchone()
+        return row is not None
+
+    def set_streamer_telegram_hidden_for(
+        self, user_id: int, twitch_login: str, hidden: bool
+    ) -> None:
+        login = str(twitch_login or "").strip().lower()
+        if not login:
+            return
+        uid = int(user_id)
+        with self._conn() as conn:
+            if hidden:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO streamer_telegram_hidden
+                        (user_id, twitch_login) VALUES (?, ?)
+                    """,
+                    (uid, login),
+                )
+            else:
+                conn.execute(
+                    """
+                    DELETE FROM streamer_telegram_hidden
+                    WHERE user_id = ? AND twitch_login = ?
+                    """,
+                    (uid, login),
+                )
+
+    def has_streamer_telegram_hides(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM streamer_telegram_hidden WHERE user_id = ? LIMIT 1",
+                (int(user_id),),
+            ).fetchone()
+        return row is not None
+
+    def clear_streamer_telegram_hides(self, user_id: int) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM streamer_telegram_hidden WHERE user_id = ?",
+                (int(user_id),),
+            )
+            return int(cur.rowcount)
 
     def find_user_id_by_premium_charge(self, charge_id: str) -> int | None:
         from premium import parse_premium_features_blob

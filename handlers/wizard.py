@@ -4205,6 +4205,7 @@ async def _finish_subscription(
             twitch_login=str(data.get("twitch_username") or ""),
             dest_type=str(dest_type or ""),
             chat_id=int(chat_id),
+            alert_type=str(data.get("alert_type") or ""),
         )
 
     if schedule_only_pending and alert_type != "upcoming":

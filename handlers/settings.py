@@ -386,6 +386,19 @@ async def start_language_change(update: Update, context: ContextTypes.DEFAULT_TY
     )
     return _lang_select_state()
 
+def _sys_notifications_markup(db: Database, user_id: int, lang: str):
+    return sys_notifications_keyboard(
+        lang,
+        updates_enabled=db.get_receive_bot_updates(user_id),
+        availability_enabled=db.get_receive_availability_updates(user_id),
+        other_enabled=db.get_receive_other_updates(user_id),
+        sync_enabled=db.get_receive_sync_updates(user_id),
+        beta_enabled=db.get_receive_beta_updates(user_id),
+        show_stg_enable_streamers=db.has_streamer_telegram_hides(user_id),
+        show_stg_enable_all=db.get_hide_streamer_telegram_all(user_id),
+    )
+
+
 async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -393,14 +406,7 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
     db.upsert_user(user_id)
     await update.effective_message.reply_text(
         t("sys_notifications_menu", lang),
-        reply_markup=sys_notifications_keyboard(
-            lang,
-            updates_enabled=db.get_receive_bot_updates(user_id),
-            availability_enabled=db.get_receive_availability_updates(user_id),
-            other_enabled=db.get_receive_other_updates(user_id),
-            sync_enabled=db.get_receive_sync_updates(user_id),
-            beta_enabled=db.get_receive_beta_updates(user_id),
-        ),
+        reply_markup=_sys_notifications_markup(db, user_id, lang),
     )
 
 def _beta_mode_features_block(
@@ -1321,14 +1327,7 @@ async def _refresh_sys_notifications_menu(
     db: Database = context.application.bot_data["db"]
     await query.edit_message_text(
         t("sys_notifications_menu", lang),
-        reply_markup=sys_notifications_keyboard(
-            lang,
-            updates_enabled=db.get_receive_bot_updates(user_id),
-            availability_enabled=db.get_receive_availability_updates(user_id),
-            other_enabled=db.get_receive_other_updates(user_id),
-            sync_enabled=db.get_receive_sync_updates(user_id),
-            beta_enabled=db.get_receive_beta_updates(user_id),
-        ),
+        reply_markup=_sys_notifications_markup(db, user_id, lang),
     )
 
 async def on_sys_updates_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1383,6 +1382,61 @@ async def on_sys_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db.upsert_user(user_id)
     db.set_receive_beta_updates(user_id, not db.get_receive_beta_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+
+async def on_sys_stg_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Re-enable streamer Telegram tips from system notifications settings."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    data = str(query.data or "")
+    if data == "sys_stg:streamers":
+        db.clear_streamer_telegram_hides(user_id)
+    elif data == "sys_stg:all":
+        db.set_hide_streamer_telegram_all(user_id, False)
+    await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+
+async def on_streamer_telegram_pref(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Toggle hide-for-streamer / hide-all checkboxes on the TG channels notice."""
+    from streamer_telegram import streamer_telegram_notice_keyboard
+
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.upsert_user(user_id)
+    raw = str(query.data or "")
+    # stg_pref:s:{login} | stg_pref:a:{login}
+    parts = raw.split(":", 2)
+    if len(parts) != 3 or parts[0] != "stg_pref":
+        return
+    kind, login = parts[1], parts[2].strip().lower()
+    if not login:
+        return
+    if kind == "s":
+        now_hidden = not db.is_streamer_telegram_hidden_for(user_id, login)
+        db.set_streamer_telegram_hidden_for(user_id, login, now_hidden)
+    elif kind == "a":
+        now_hidden = not db.get_hide_streamer_telegram_all(user_id)
+        db.set_hide_streamer_telegram_all(user_id, now_hidden)
+    else:
+        return
+    try:
+        await query.edit_message_reply_markup(
+            reply_markup=streamer_telegram_notice_keyboard(
+                lang,
+                twitch_login=login,
+                hide_streamer=db.is_streamer_telegram_hidden_for(user_id, login),
+                hide_all=db.get_hide_streamer_telegram_all(user_id),
+            )
+        )
+    except BadRequest:
+        pass
 
 
 async def announce_new_beta_features(context: ContextTypes.DEFAULT_TYPE) -> None:
