@@ -4189,6 +4189,24 @@ async def _finish_subscription(
         and not notify_on_category_change
         and int(data.get("schedule_reminder_minutes", 0)) > 0
     )
+
+    async def _maybe_streamer_telegram_notice() -> None:
+        if edit_sub_id:
+            return
+        from streamer_telegram import after_subscription_created_telegram_hint
+
+        twitch_client = context.application.bot_data.get("twitch")
+        await after_subscription_created_telegram_hint(
+            bot=context.bot,
+            db=db,
+            twitch=twitch_client,
+            owner_id=owner_id,
+            lang=lang,
+            twitch_login=str(data.get("twitch_username") or ""),
+            dest_type=str(dest_type or ""),
+            chat_id=int(chat_id),
+        )
+
     if schedule_only_pending and alert_type != "upcoming":
         if update.callback_query:
             try:
@@ -4201,6 +4219,7 @@ async def _finish_subscription(
                 )
             except BadRequest:
                 pass
+        await _maybe_streamer_telegram_notice()
         context.user_data.clear()
         context.user_data["pending_live_sub_id"] = sub_id
         await context.bot.send_message(
@@ -4376,5 +4395,6 @@ async def _finish_subscription(
             reply_chat_id(update),
             t("premium_created_disabled", lang, limit=prem.free_active_limit()),
         )
+    await _maybe_streamer_telegram_notice()
     return ConversationHandler.END
 

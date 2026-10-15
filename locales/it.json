@@ -277,6 +277,7 @@
   "premium_active_limit": "Il piano gratuito consente fino a {limit} avvisi attivi.\nDisattivanene uno oppure ottieni Premium.",
   "premium_enable_need_feature": "⭐ {feature} richiede Premium.\nOttieni Premium per abilitare questo avviso.",
   "premium_created_disabled": "Avviso creato in pausa: il piano gratuito consente {limit} avvisi attivi. Abilitalo dopo l'upgrade o mettendo in pausa un altro.",
+  "streamer_telegram_notice": "Possibili canali Telegram per {twitch_username}:\n{links}\n\nQuesto elenco non è un'informazione ufficiale e potrebbe non riguardare lo streamer.",
   "premium_trial_paused_enable": "Questo avviso è stato messo in pausa dopo la prova. Ottieni Premium per riabilitarlo.",
   "lucky_premium_nth": "La fortuna ti ha scelto. Hai Premium gratis fino al {until}.\n\nGrazie per aver provato il nostro bot!",
   "lucky_premium_monthly": "La fortuna ti ha scelto. Hai Premium gratis fino al {until}.\n\nGrazie per usare il nostro bot!",

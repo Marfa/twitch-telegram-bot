@@ -1095,6 +1095,17 @@ class Database(Protocol):
 
     def delete_premium_channel_by_charge(self, charge_id: str) -> bool: ...
 
+    def upsert_streamer_telegram_link(
+        self,
+        *,
+        twitch_login: str,
+        url: str,
+        source: str,
+        chat_id: int | None = None,
+    ) -> None: ...
+
+    def list_streamer_telegram_urls(self, twitch_login: str) -> list[str]: ...
+
     def find_user_id_by_premium_charge(self, charge_id: str) -> int | None: ...
 
     def create_premium_gift(

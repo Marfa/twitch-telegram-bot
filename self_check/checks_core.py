@@ -3541,3 +3541,92 @@ def check_core() -> None:
     assert schedule_cancel_suppressed(bot_data_sc, "42") is True
     assert schedule_cancel_suppressed(bot_data_sc, "42", now_ts=1e12) is False
 
+    _check_streamer_telegram_links()
+
+
+def _check_streamer_telegram_links() -> None:
+    """Helix-bio parse + curated/crowd upsert + notice i18n (no network)."""
+    import tempfile
+    from pathlib import Path
+
+    from db.sqlite import SqliteDatabase
+    from i18n import t
+    from streamer_telegram import (
+        SOURCE_CURATED,
+        SOURCE_HELIX,
+        SOURCE_SUBSCRIPTION,
+        collect_helix_description_links,
+        extract_telegram_urls_from_text,
+        format_links_block,
+        list_possible_telegram_urls,
+        normalize_telegram_public_url,
+        record_subscription_dest_link,
+    )
+
+    assert normalize_telegram_public_url("https://t.me/RetrogamesPub") == (
+        "https://t.me/retrogamespub"
+    )
+    assert normalize_telegram_public_url("t.me/joinchat/AAAA") is None
+    assert extract_telegram_urls_from_text(
+        "tg https://t.me/Foo_Bar and telegram.me/s/Foo_Bar also t.me/BazChan123"
+    ) == ["https://t.me/foo_bar", "https://t.me/bazchan123"]
+
+    class _Twitch:
+        def get_user(self, login: str):
+            assert login == "chelovekgleb"
+            return {
+                "login": "chelovekgleb",
+                "description": "links: https://t.me/FromBioOnly other text",
+            }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = SqliteDatabase(Path(tmp) / "streamer_tg.db")
+        collect_helix_description_links(db, _Twitch(), "ChelovekGleb")
+        db.upsert_streamer_telegram_link(
+            twitch_login="chelovekgleb",
+            url="https://t.me/curatedchan",
+            source=SOURCE_CURATED,
+        )
+        assert (
+            record_subscription_dest_link(
+                db,
+                twitch_login="chelovekgleb",
+                dest_type="channel",
+                chat_username="CrowdDest",
+                chat_id=-1001,
+            )
+            == "https://t.me/crowddest"
+        )
+        assert (
+            record_subscription_dest_link(
+                db,
+                twitch_login="chelovekgleb",
+                dest_type="dm",
+                chat_username="ShouldSkip",
+            )
+            is None
+        )
+        urls = list_possible_telegram_urls(db, "chelovekgleb")
+        assert urls == [
+            "https://t.me/crowddest",
+            "https://t.me/curatedchan",
+            "https://t.me/frombioonly",
+        ]
+        # Same URL from two sources stays one list entry.
+        db.upsert_streamer_telegram_link(
+            twitch_login="chelovekgleb",
+            url="https://t.me/frombioonly",
+            source=SOURCE_SUBSCRIPTION,
+        )
+        assert list_possible_telegram_urls(db, "chelovekgleb") == urls
+        notice = t(
+            "streamer_telegram_notice",
+            "ru",
+            twitch_username="chelovekgleb",
+            links=format_links_block(urls),
+        )
+        assert "chelovekgleb" in notice
+        assert "https://t.me/crowddest" in notice
+        assert "не является официальной" in notice
+        assert SOURCE_HELIX and SOURCE_CURATED and SOURCE_SUBSCRIPTION
+

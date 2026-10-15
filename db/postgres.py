@@ -1488,6 +1488,24 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS streamer_telegram_links (
+                    twitch_login TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    chat_id BIGINT,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (twitch_login, url, source)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_streamer_telegram_links_login
+                ON streamer_telegram_links(twitch_login)
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS alert_share_tokens (
                     token TEXT PRIMARY KEY,
                     owner_id BIGINT NOT NULL,
@@ -7558,6 +7576,51 @@ owner_id, twitch_username, twitch_user_id,
                 (cid,),
             )
             return int(cur.rowcount or 0) > 0
+
+    def upsert_streamer_telegram_link(
+        self,
+        *,
+        twitch_login: str,
+        url: str,
+        source: str,
+        chat_id: int | None = None,
+    ) -> None:
+        login = str(twitch_login or "").strip().lower()
+        link = str(url or "").strip()
+        src = str(source or "").strip().lower()
+        if not login or not link or not src:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO streamer_telegram_links (
+                    twitch_login, url, source, chat_id, updated_at
+                ) VALUES (%s, %s, %s, %s, NOW())
+                ON CONFLICT (twitch_login, url, source) DO UPDATE SET
+                    chat_id = COALESCE(EXCLUDED.chat_id, streamer_telegram_links.chat_id),
+                    updated_at = NOW()
+                """,
+                (login, link, src, chat_id),
+            )
+
+    def list_streamer_telegram_urls(self, twitch_login: str) -> list[str]:
+        login = str(twitch_login or "").strip().lower()
+        if not login:
+            return []
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT DISTINCT url
+                FROM streamer_telegram_links
+                WHERE twitch_login = %s
+                ORDER BY url
+                """,
+                (login,),
+            )
+            rows = cur.fetchall()
+        return [str(r["url"]) for r in rows if r["url"]]
 
     def find_user_id_by_premium_charge(self, charge_id: str) -> int | None:
         from premium import parse_premium_features_blob
