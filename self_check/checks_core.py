@@ -3561,6 +3561,7 @@ def _check_streamer_telegram_links() -> None:
         list_possible_telegram_urls,
         normalize_telegram_public_url,
         record_subscription_dest_link,
+        seed_curated_links,
     )
 
     assert normalize_telegram_public_url("https://t.me/RetrogamesPub") == (
@@ -3629,4 +3630,9 @@ def _check_streamer_telegram_links() -> None:
         assert "https://t.me/crowddest" in notice
         assert "не является официальной" in notice
         assert SOURCE_HELIX and SOURCE_CURATED and SOURCE_SUBSCRIPTION
+        assert seed_curated_links(db) >= 1
+        marfa = list_possible_telegram_urls(db, "marfapr")
+        assert "https://t.me/themarfa" in marfa
+        assert "https://t.me/themarfa_gaming" in marfa
+        assert seed_curated_links(db) == 0
 

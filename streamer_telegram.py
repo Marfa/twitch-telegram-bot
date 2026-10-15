@@ -20,6 +20,12 @@ SOURCE_HELIX = "helix"
 SOURCE_CURATED = "curated"
 SOURCE_SUBSCRIPTION = "subscription"
 
+# Manual ToS-safe seeds (public channel usernames known to belong to the streamer).
+CURATED_LINKS: tuple[tuple[str, str], ...] = (
+    ("marfapr", "https://t.me/themarfa"),
+    ("marfapr", "https://t.me/themarfa_gaming"),
+)
+
 # Public t.me / telegram.me usernames in free text (Helix description).
 _TG_IN_TEXT = re.compile(
     r"(?:https?://)?(?:t\.me|telegram\.me)/(?:s/)?(@?[A-Za-z0-9_]{4,32})\b",
@@ -158,6 +164,24 @@ def list_possible_telegram_urls(db: Database, twitch_login: str) -> list[str]:
 
 def format_links_block(urls: list[str]) -> str:
     return "\n".join(f"• {u}" for u in urls)
+
+
+def seed_curated_links(db: Database) -> int:
+    """Upsert CURATED_LINKS. Returns how many URLs were newly listed for their login."""
+    added = 0
+    for login, url in CURATED_LINKS:
+        canon = normalize_telegram_public_url(url)
+        if not canon:
+            continue
+        before = set(list_possible_telegram_urls(db, login))
+        db.upsert_streamer_telegram_link(
+            twitch_login=login,
+            url=canon,
+            source=SOURCE_CURATED,
+        )
+        after = set(list_possible_telegram_urls(db, login))
+        added += len(after - before)
+    return added
 
 
 async def after_subscription_created_telegram_hint(
