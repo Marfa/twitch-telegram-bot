@@ -24,6 +24,7 @@ SOURCE_SUBSCRIPTION = "subscription"
 CURATED_LINKS: tuple[tuple[str, str], ...] = (
     ("marfapr", "https://t.me/themarfa"),
     ("marfapr", "https://t.me/themarfa_gaming"),
+    ("marfapr", "https://t.me/aipchat"),
 )
 
 # Public t.me / telegram.me usernames in free text (Helix description).

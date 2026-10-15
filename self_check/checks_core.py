@@ -3634,5 +3634,6 @@ def _check_streamer_telegram_links() -> None:
         marfa = list_possible_telegram_urls(db, "marfapr")
         assert "https://t.me/themarfa" in marfa
         assert "https://t.me/themarfa_gaming" in marfa
+        assert "https://t.me/aipchat" in marfa
         assert seed_curated_links(db) == 0
 
