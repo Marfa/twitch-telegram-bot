@@ -4190,17 +4190,16 @@ async def _finish_subscription(
         and int(data.get("schedule_reminder_minutes", 0)) > 0
     )
 
-    async def _maybe_streamer_telegram_notice() -> None:
+    async def _prepare_telegram_channels_note() -> str:
         if edit_sub_id:
-            return
-        from streamer_telegram import after_subscription_created_telegram_hint
+            return ""
+        from streamer_telegram import prepare_streamer_telegram_for_setup
 
         twitch_client = context.application.bot_data.get("twitch")
-        await after_subscription_created_telegram_hint(
+        return await prepare_streamer_telegram_for_setup(
             bot=context.bot,
             db=db,
             twitch=twitch_client,
-            owner_id=owner_id,
             lang=lang,
             twitch_login=str(data.get("twitch_username") or ""),
             dest_type=str(dest_type or ""),
@@ -4220,10 +4219,9 @@ async def _finish_subscription(
                 )
             except BadRequest:
                 pass
-        await _maybe_streamer_telegram_notice()
+        await _prepare_telegram_channels_note()
         context.user_data.clear()
         context.user_data["pending_live_sub_id"] = sub_id
-        # Reply keyboard after inline TG tip (last bot message must carry it).
         await context.bot.send_message(
             reply_chat_id(update),
             t("schedule_live_add_prompt", lang),
@@ -4233,6 +4231,7 @@ async def _finish_subscription(
 
     created_disabled = bool(context.user_data.pop("premium_created_disabled", False))
     context.user_data.clear()
+    telegram_channels_note = ""
 
     if edit_sub_id and not live_addon:
         text = t("edit_updated", lang, sub_id=sub_id)
@@ -4341,6 +4340,7 @@ async def _finish_subscription(
                 lang,
                 twitch_username=data["twitch_username"],
             )
+        telegram_channels_note = await _prepare_telegram_channels_note()
         user_sub_num = _owner_sub_number(db, owner_id, sub_id)
         text = t(
             "setup_done",
@@ -4359,6 +4359,7 @@ async def _finish_subscription(
             repeat_note=repeat_note,
             schedule_reminder_note=schedule_reminder_note,
             alert_note=alert_note,
+            telegram_channels_note=telegram_channels_note,
         )
         try:
             twitch: TwitchClient = context.application.bot_data["twitch"]
@@ -4391,13 +4392,12 @@ async def _finish_subscription(
         except BadRequest:
             pass
 
-    # Inline TG tip before the lasting menu message (reply keyboard cannot share
-    # a message with inline buttons; last send must re-apply the menu).
-    await _maybe_streamer_telegram_notice()
     menu_kb = _menu(lang, owner_id)
-    await context.bot.send_message(
-        reply_chat_id(update), text, reply_markup=menu_kb
-    )
+    setup_kwargs: dict = {"reply_markup": menu_kb}
+    if telegram_channels_note or "<b>" in text:
+        setup_kwargs["parse_mode"] = ParseMode.HTML
+        setup_kwargs["disable_web_page_preview"] = True
+    await context.bot.send_message(reply_chat_id(update), text, **setup_kwargs)
     if created_disabled:
         await context.bot.send_message(
             reply_chat_id(update),

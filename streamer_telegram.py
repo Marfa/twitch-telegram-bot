@@ -3,7 +3,7 @@
 Helix bio + manual seeds are stored as curated. Crowd subscription destinations
 are best-effort; the unofficial disclaimer applies only when no curated URLs exist.
 
-Notice is sent only after manual stream-alert create (live/end/category/upcoming).
+On manual stream-alert create the channel list is appended to setup_done.
 """
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ import logging
 import re
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
-
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 if TYPE_CHECKING:
     from db.protocol import Database
@@ -159,7 +157,6 @@ def sync_curated_from_helix(
         db.replace_curated_streamer_telegram_links(login, wanted)
         return wanted
 
-    # Helix unavailable: do not wipe curated; ensure seeds still present.
     for url in seeds:
         db.upsert_streamer_telegram_link(
             twitch_login=login,
@@ -205,7 +202,7 @@ def record_subscription_dest_link(
 
 
 def list_possible_telegram_urls(db: Database, twitch_login: str) -> list[str]:
-    """URLs for the notice: curated only when any exist, else all sources."""
+    """URLs for setup_done: curated only when any exist, else all sources."""
     login = (twitch_login or "").strip().lower()
     if not login:
         return []
@@ -219,46 +216,34 @@ def format_links_block(urls: list[str]) -> str:
     return "\n".join(f"• {u}" for u in urls)
 
 
-def should_send_streamer_telegram_notice(alert_type: str | None) -> bool:
+def should_include_streamer_telegram_in_setup(alert_type: str | None) -> bool:
     kind = str(alert_type or "").strip().lower()
     return kind in STREAM_ALERT_NOTICE_TYPES
 
 
-def streamer_telegram_notice_suppressed(
-    db: Database, user_id: int, twitch_login: str
-) -> bool:
-    if db.get_hide_streamer_telegram_all(int(user_id)):
-        return True
-    return db.is_streamer_telegram_hidden_for(int(user_id), twitch_login)
-
-
-def streamer_telegram_notice_keyboard(
-    lang: str,
-    *,
-    twitch_login: str,
-    hide_streamer: bool,
-    hide_all: bool,
-) -> InlineKeyboardMarkup:
+def format_telegram_channels_setup_note(
+    db: Database, lang: str, twitch_login: str
+) -> str:
+    """HTML fragment for setup_done after alert_note, or empty string."""
     from i18n import t
 
     login = (twitch_login or "").strip().lower()
-    s_mark = "✅ " if hide_streamer else "⬜️ "
-    a_mark = "✅ " if hide_all else "⬜️ "
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    s_mark + t("streamer_telegram_hide_streamer", lang),
-                    callback_data=f"stg_pref:s:{login}",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    a_mark + t("streamer_telegram_hide_all", lang),
-                    callback_data=f"stg_pref:a:{login}",
-                )
-            ],
-        ]
+    if not login:
+        return ""
+    urls = list_possible_telegram_urls(db, login)
+    if not urls:
+        return ""
+    curated = db.list_streamer_telegram_urls(login, source=SOURCE_CURATED)
+    key = (
+        "streamer_telegram_setup_curated"
+        if curated
+        else "streamer_telegram_setup_crowd"
+    )
+    return t(
+        key,
+        lang,
+        twitch_username=login,
+        links=format_links_block(urls),
     )
 
 
@@ -280,33 +265,25 @@ def seed_curated_links(db: Database) -> int:
     return added
 
 
-async def after_subscription_created_telegram_hint(
+async def prepare_streamer_telegram_for_setup(
     *,
     bot,
     db: Database,
     twitch: TwitchClient | None,
-    owner_id: int,
     lang: str,
     twitch_login: str,
     dest_type: str,
     chat_id: int,
     alert_type: str | None = None,
-) -> None:
-    """Sync curated from Helix, record non-DM dest, send notice if any URLs exist.
-
-    Sends an inline-only message. Caller must follow with a lasting reply-keyboard
-    message (menu / wizard) — pulse-after-inline is flaky on some Telegram clients.
-    """
-    from i18n import t
-
-    if not should_send_streamer_telegram_notice(alert_type):
-        return
+) -> str:
+    """Sync Helix + dest links; return setup_done HTML note (may be empty)."""
+    if not should_include_streamer_telegram_in_setup(alert_type):
+        return ""
 
     login = (twitch_login or "").strip().lower()
     if not login:
-        return
+        return ""
 
-    # Always sync/record so curated table stays fresh even when notice is hidden.
     if twitch is not None:
         try:
             await asyncio.to_thread(sync_curated_from_helix, db, twitch, login)
@@ -339,43 +316,4 @@ async def after_subscription_created_telegram_hint(
             chat_id=chat_id,
         )
 
-    if streamer_telegram_notice_suppressed(db, owner_id, login):
-        return
-
-    urls = list_possible_telegram_urls(db, login)
-    if not urls:
-        return
-    curated = db.list_streamer_telegram_urls(login, source=SOURCE_CURATED)
-    notice_key = (
-        "streamer_telegram_notice_curated"
-        if curated
-        else "streamer_telegram_notice"
-    )
-    text = t(
-        notice_key,
-        lang,
-        twitch_username=login,
-        links=format_links_block(urls),
-    )
-    hide_streamer = db.is_streamer_telegram_hidden_for(owner_id, login)
-    hide_all = db.get_hide_streamer_telegram_all(owner_id)
-    markup = streamer_telegram_notice_keyboard(
-        lang,
-        twitch_login=login,
-        hide_streamer=hide_streamer,
-        hide_all=hide_all,
-    )
-    try:
-        await bot.send_message(
-            owner_id,
-            text,
-            disable_web_page_preview=True,
-            reply_markup=markup,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to send streamer TG notice to %s for %s",
-            owner_id,
-            login,
-            exc_info=True,
-        )
+    return format_telegram_channels_setup_note(db, lang, login)

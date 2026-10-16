@@ -2142,65 +2142,46 @@ def sys_notifications_keyboard(
     other_enabled: bool,
     sync_enabled: bool,
     beta_enabled: bool = False,
-    show_stg_enable_streamers: bool = False,
-    show_stg_enable_all: bool = False,
 ) -> InlineKeyboardMarkup:
     updates_mark = "✅ " if updates_enabled else "❌ "
     availability_mark = "✅ " if availability_enabled else "❌ "
     other_mark = "✅ " if other_enabled else "❌ "
     sync_mark = "✅ " if sync_enabled else "❌ "
     beta_mark = "✅ " if beta_enabled else "❌ "
-    rows = [
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton(
-                updates_mark + t("sys_updates_label", lang),
-                callback_data="sys_updates:toggle",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                availability_mark + t("sys_availability_label", lang),
-                callback_data="sys_availability:toggle",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                other_mark + t("sys_other_label", lang),
-                callback_data="sys_other:toggle",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                sync_mark + t("sys_sync_label", lang),
-                callback_data="sys_sync:toggle",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                beta_mark + t("sys_beta_label", lang),
-                callback_data="sys_beta:toggle",
-            )
-        ],
-    ]
-    if show_stg_enable_streamers:
-        rows.append(
             [
                 InlineKeyboardButton(
-                    t("sys_stg_enable_streamers", lang),
-                    callback_data="sys_stg:streamers",
+                    updates_mark + t("sys_updates_label", lang),
+                    callback_data="sys_updates:toggle",
                 )
-            ]
-        )
-    if show_stg_enable_all:
-        rows.append(
+            ],
             [
                 InlineKeyboardButton(
-                    t("sys_stg_enable_all", lang),
-                    callback_data="sys_stg:all",
+                    availability_mark + t("sys_availability_label", lang),
+                    callback_data="sys_availability:toggle",
                 )
-            ]
-        )
-    return InlineKeyboardMarkup(rows)
+            ],
+            [
+                InlineKeyboardButton(
+                    other_mark + t("sys_other_label", lang),
+                    callback_data="sys_other:toggle",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    sync_mark + t("sys_sync_label", lang),
+                    callback_data="sys_sync:toggle",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    beta_mark + t("sys_beta_label", lang),
+                    callback_data="sys_beta:toggle",
+                )
+            ],
+        ]
+    )
 
 
 _WEEKDAYS = {

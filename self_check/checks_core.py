@@ -3069,8 +3069,10 @@ def check_core() -> None:
             delete_fail_note="",
             pin_note="",
             alert_note="ALERT_NOTE_OK",
+            telegram_channels_note="",
         )
         assert "ALERT_NOTE_OK" in done
+        assert "<b>" in done
         assert tr("pin_yes", loc)
         assert tr("pin_no", loc)
         assert tr("sub_list_pin_yes", loc)
@@ -3545,12 +3547,12 @@ def check_core() -> None:
 
 
 def _check_streamer_telegram_links() -> None:
-    """Helix→curated sync, curated-vs-crowd notice, hide prefs (no network)."""
+    """Helix→curated sync and setup_done channel block (no network)."""
     import tempfile
     from pathlib import Path
 
     from db.sqlite import SqliteDatabase
-    from i18n import sys_notifications_keyboard, t
+    from i18n import t
     from streamer_telegram import (
         SOURCE_CURATED,
         SOURCE_HELIX,
@@ -3558,13 +3560,12 @@ def _check_streamer_telegram_links() -> None:
         collect_helix_description_links,
         extract_telegram_urls_from_text,
         format_links_block,
+        format_telegram_channels_setup_note,
         list_possible_telegram_urls,
         normalize_telegram_public_url,
         record_subscription_dest_link,
         seed_curated_links,
-        should_send_streamer_telegram_notice,
-        streamer_telegram_notice_keyboard,
-        streamer_telegram_notice_suppressed,
+        should_include_streamer_telegram_in_setup,
         sync_curated_from_helix,
     )
 
@@ -3591,7 +3592,6 @@ def _check_streamer_telegram_links() -> None:
         db = SqliteDatabase(Path(tmp) / "streamer_tg.db")
         tw = _Twitch()
         collect_helix_description_links(db, tw, "ChelovekGleb")
-        # Helix bio is stored as curated (not legacy helix).
         assert db.list_streamer_telegram_urls(
             "chelovekgleb", source=SOURCE_CURATED
         ) == ["https://t.me/frombioonly"]
@@ -3618,20 +3618,39 @@ def _check_streamer_telegram_links() -> None:
             )
             is None
         )
-        # Curated present → crowd dest hidden from notice list.
         urls = list_possible_telegram_urls(db, "chelovekgleb")
         assert urls == ["https://t.me/frombioonly"]
-        curated_notice = t(
-            "streamer_telegram_notice_curated",
-            "ru",
-            twitch_username="chelovekgleb",
-            links=format_links_block(urls),
+        curated_note = format_telegram_channels_setup_note(
+            db, "ru", "chelovekgleb"
         )
-        assert "chelovekgleb" in curated_notice
-        assert "https://t.me/frombioonly" in curated_notice
-        assert "не является официальной" not in curated_notice
+        assert "<b>Telegram-каналы для chelovekgleb:</b>" in curated_note
+        assert "https://t.me/frombioonly" in curated_note
+        assert "не является официальной" not in curated_note
+        done = t(
+            "setup_done",
+            "ru",
+            sub_id=1,
+            twitch_username="chelovekgleb",
+            image_note="",
+            ignore_keywords_note="",
+            preview_note="",
+            delay_note="",
+            repeat_note="",
+            schedule_reminder_note="",
+            dest="ЛС",
+            thread_note="",
+            delete_note="",
+            delete_fail_note="",
+            pin_note="",
+            alert_note=t(
+                "alert_note_live", "ru", twitch_username="chelovekgleb"
+            ),
+            telegram_channels_note=curated_note,
+        )
+        assert "<b>✅ Настройка завершена!</b>" in done
+        assert "Когда chelovekgleb начнёт стрим" in done
+        assert done.index("начнёт стрим") < done.index("Telegram-каналы")
 
-        # Bio change drops old curated bio URL; subscription row stays.
         tw.description = "now https://t.me/NewBioChan"
         sync_curated_from_helix(db, tw, "chelovekgleb")
         assert list_possible_telegram_urls(db, "chelovekgleb") == [
@@ -3641,7 +3660,6 @@ def _check_streamer_telegram_links() -> None:
             "chelovekgleb", source=SOURCE_SUBSCRIPTION
         ) == ["https://t.me/crowddest"]
 
-        # Crowd-only streamer: unofficial disclaimer.
         db2 = SqliteDatabase(Path(tmp) / "streamer_tg_crowd.db")
         assert (
             record_subscription_dest_link(
@@ -3653,17 +3671,10 @@ def _check_streamer_telegram_links() -> None:
             )
             == "https://t.me/onlycrowd"
         )
-        crowd_urls = list_possible_telegram_urls(db2, "crowdonly")
-        assert crowd_urls == ["https://t.me/onlycrowd"]
-        crowd_notice = t(
-            "streamer_telegram_notice",
-            "ru",
-            twitch_username="crowdonly",
-            links=format_links_block(crowd_urls),
-        )
-        assert "не является официальной" in crowd_notice
+        crowd_note = format_telegram_channels_setup_note(db2, "ru", "crowdonly")
+        assert "<b>Возможные Telegram-каналы" in crowd_note
+        assert "не является официальной" in crowd_note
 
-        # Seeds survive Helix sync for marfapr; multiple curated OK.
         assert SOURCE_HELIX and SOURCE_CURATED and SOURCE_SUBSCRIPTION
         assert seed_curated_links(db) >= 1
         marfa = list_possible_telegram_urls(db, "marfapr")
@@ -3684,61 +3695,11 @@ def _check_streamer_telegram_links() -> None:
         marfa_after = list_possible_telegram_urls(db, "marfapr")
         assert "https://t.me/fromhelixmarfa" in marfa_after
         assert "https://t.me/themarfa" in marfa_after
-        assert "https://t.me/themarfa_gaming" in marfa_after
-        assert "https://t.me/aipchat" in marfa_after
 
-        # Manual stream alerts only (not game/drops).
-        assert should_send_streamer_telegram_notice("live")
-        assert should_send_streamer_telegram_notice("upcoming")
-        assert should_send_streamer_telegram_notice("")
-        assert not should_send_streamer_telegram_notice("game")
-        assert not should_send_streamer_telegram_notice("drops")
-
-        # Hide prefs: per-streamer and global.
-        uid = 4242
-        db.upsert_user(uid)
-        assert not streamer_telegram_notice_suppressed(db, uid, "chelovekgleb")
-        db.set_streamer_telegram_hidden_for(uid, "chelovekgleb", True)
-        assert streamer_telegram_notice_suppressed(db, uid, "chelovekgleb")
-        assert not streamer_telegram_notice_suppressed(db, uid, "otherstreamer")
-        assert db.has_streamer_telegram_hides(uid)
-        kb = streamer_telegram_notice_keyboard(
-            "ru",
-            twitch_login="chelovekgleb",
-            hide_streamer=True,
-            hide_all=False,
-        )
-        labels = [b.text for row in kb.inline_keyboard for b in row]
-        assert any(x.startswith("✅ ") and "стримера" in x for x in labels)
-        assert any(x.startswith("⬜️ ") and "всех" in x for x in labels)
-        db.clear_streamer_telegram_hides(uid)
-        assert not db.has_streamer_telegram_hides(uid)
-        db.set_hide_streamer_telegram_all(uid, True)
-        assert streamer_telegram_notice_suppressed(db, uid, "anyone")
-        sys_kb = sys_notifications_keyboard(
-            "ru",
-            updates_enabled=True,
-            availability_enabled=True,
-            other_enabled=True,
-            sync_enabled=True,
-            beta_enabled=False,
-            show_stg_enable_streamers=False,
-            show_stg_enable_all=True,
-        )
-        sys_labels = [b.text for row in sys_kb.inline_keyboard for b in row]
-        assert any("Telegram для всех" in x for x in sys_labels)
-        assert not any("Telegram для стримеров" in x for x in sys_labels)
-        db.set_hide_streamer_telegram_all(uid, False)
-        db.set_streamer_telegram_hidden_for(uid, "a", True)
-        sys_kb2 = sys_notifications_keyboard(
-            "ru",
-            updates_enabled=True,
-            availability_enabled=True,
-            other_enabled=True,
-            sync_enabled=True,
-            show_stg_enable_streamers=True,
-            show_stg_enable_all=False,
-        )
-        sys_labels2 = [b.text for row in sys_kb2.inline_keyboard for b in row]
-        assert any("Telegram для стримеров" in x for x in sys_labels2)
+        assert should_include_streamer_telegram_in_setup("live")
+        assert should_include_streamer_telegram_in_setup("upcoming")
+        assert should_include_streamer_telegram_in_setup("")
+        assert not should_include_streamer_telegram_in_setup("game")
+        assert not should_include_streamer_telegram_in_setup("drops")
+        assert format_links_block(["https://t.me/a"]) == "• https://t.me/a"
 

@@ -348,11 +348,9 @@ from handlers.settings import (
     complete_whisper_oauth,
     notify_whisper_received,
     on_beta_toggle,
-    on_streamer_telegram_pref,
     on_sys_availability_toggle,
     on_sys_beta_toggle,
     on_sys_other_toggle,
-    on_sys_stg_enable,
     on_sys_sync_toggle,
     on_sys_updates_toggle,
     on_whisper_alerts_toggle,
@@ -2783,14 +2781,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         CallbackQueryHandler(on_sys_beta_toggle, pattern=r"^sys_beta:toggle$"),
         group=0,
     )
-    app.add_handler(
-        CallbackQueryHandler(on_sys_stg_enable, pattern=r"^sys_stg:(streamers|all)$"),
-        group=0,
-    )
-    app.add_handler(
-        CallbackQueryHandler(on_streamer_telegram_pref, pattern=r"^stg_pref:[sa]:"),
-        group=0,
-    )
     app.add_handler(CallbackQueryHandler(on_toggle, pattern=r"^toggle:"), group=0)
     app.add_handler(
         CallbackQueryHandler(on_alert_pause, pattern=r"^alert_pause:\d+$"),
@@ -3925,7 +3915,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|list_del:\d+$|list_del_ok:\d+$|list_del_no:\d+$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
-                r"sys_updates:|sys_availability:|sys_other:|sys_sync:|sys_beta:|sys_stg:|stg_pref:|"
+                r"sys_updates:|sys_availability:|sys_other:|sys_sync:|sys_beta:|"
                 r"whisper_alerts:|"
                 r"follow_monitor:|"
                 r"import_mode:|sync:|premium:|premium_early:|ref_wd:|watch:|alert_history:)"

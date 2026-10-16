@@ -3116,8 +3116,6 @@ async def _scenario_schedule_vacation(db) -> None:
 async def _scenario_settings_extended(db) -> None:
     from bot import open_premium_from_settings
     from handlers.settings import (
-        on_streamer_telegram_pref,
-        on_sys_stg_enable,
         open_settings_menu,
         open_sys_notifications_menu,
         open_whisper_alerts_menu,
@@ -3133,57 +3131,6 @@ async def _scenario_settings_extended(db) -> None:
     await open_settings_menu(update, ctx)
     await open_sys_notifications_menu(update, ctx)
     cap.assert_turn("settings_sys_notifications")
-
-    # §8 — hide streamer Telegram tips → enable buttons in sys notifications.
-    application, bot = _app(db)
-    cap = _BotCapture()
-    cap.wrap(bot)
-    update = _msg_update(_FREE_UID, btn("settings", "ru"), cap)
-    ctx = _ctx(application)
-    await open_settings_menu(update, ctx)
-    update, query = _cb_update(_FREE_UID, "stg_pref:s:flowstreamer", cap)
-    await on_streamer_telegram_pref(update, ctx)
-    query.edit_message_reply_markup.assert_awaited()
-    assert db.is_streamer_telegram_hidden_for(_FREE_UID, "flowstreamer")
-    update, query = _cb_update(_FREE_UID, "stg_pref:a:flowstreamer", cap)
-    await on_streamer_telegram_pref(update, ctx)
-    assert db.get_hide_streamer_telegram_all(_FREE_UID)
-    await open_sys_notifications_menu(
-        _msg_update(_FREE_UID, btn("sys_notifications", "ru"), cap), ctx
-    )
-    stg_cbs = [
-        b.callback_data or ""
-        for m in cap.markups
-        if getattr(m, "inline_keyboard", None)
-        for row in m.inline_keyboard
-        for b in row
-    ]
-    assert "sys_stg:streamers" in stg_cbs
-    assert "sys_stg:all" in stg_cbs
-    cap.assert_turn("settings_sys_notifications_stg_enable")
-    update, query = _cb_update(_FREE_UID, "sys_stg:streamers", cap)
-    await on_sys_stg_enable(update, ctx)
-    assert not db.has_streamer_telegram_hides(_FREE_UID)
-    update, query = _cb_update(_FREE_UID, "sys_stg:all", cap)
-    await on_sys_stg_enable(update, ctx)
-    assert not db.get_hide_streamer_telegram_all(_FREE_UID)
-    query.edit_message_text.assert_awaited()
-    cleared_cbs = [
-        b.callback_data or ""
-        for row in (
-            query.edit_message_text.await_args.kwargs.get("reply_markup").inline_keyboard
-            or []
-        )
-        for b in row
-    ]
-    assert "sys_stg:streamers" not in cleared_cbs
-    assert "sys_stg:all" not in cleared_cbs
-    # Inline-only refresh after enable; reopen settings for escape hatch.
-    cap.markups.clear()
-    await open_settings_menu(
-        _msg_update(_FREE_UID, btn("settings", "ru"), cap), ctx
-    )
-    cap.assert_turn("settings_after_stg_cleared")
 
     application, bot = _app(db)
     cap = _BotCapture()
