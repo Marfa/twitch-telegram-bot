@@ -2936,8 +2936,31 @@ async def receive_template_typo_confirm(
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     fix = query.data.endswith(":1")
-    template = context.user_data.pop("pending_template", "")
     is_edit = bool(context.user_data.get("edit_sub_id"))
+    # A repeated tap on this keyboard already consumed pending_template; saving the
+    # leftover "" wipes the template and the create aborts later at the save step.
+    template = context.user_data.pop(
+        "pending_template", ""
+    ) or str(context.user_data.get("message_template") or "")
+
+    if not template.strip():
+        logger.warning(
+            "template_typo without pending template for %s edit=%s keys=%s",
+            query.from_user.id,
+            is_edit,
+            sorted(context.user_data.keys()),
+        )
+        await query.edit_message_text("✓")
+        if is_edit:
+            owner_id = query.from_user.id
+            context.user_data.clear()
+            await context.bot.send_message(
+                reply_chat_id(update),
+                t("cancelled", lang),
+                reply_markup=_menu(lang, owner_id),
+            )
+            return ConversationHandler.END
+        return await _go_template_prompt(update, context, lang)
 
     if fix:
         template = fix_placeholder_typos(template)
@@ -3544,9 +3567,15 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             and context.user_data.get("twitch_user_id")
             and context.user_data.get("message_template")
         ):
+            missing = [
+                key
+                for key in ("twitch_username", "twitch_user_id", "message_template")
+                if not context.user_data.get(key)
+            ]
             logger.warning(
-                "dest:dm without create payload for %s keys=%s",
+                "dest:dm without create payload for %s missing=%s keys=%s",
                 query.from_user.id,
+                missing,
                 sorted(context.user_data.keys()),
             )
             await context.bot.send_message(
