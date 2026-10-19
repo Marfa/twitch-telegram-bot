@@ -74,7 +74,6 @@ from i18n import (
     default_utc_offset_minutes_for_locale,
     delete_old_keyboard,
     delivery_fail_notice_keyboard,
-    delete_sibling_keyboard,
     dest_keyboard,
     dest_label,
     delay_keyboard,
@@ -547,7 +546,6 @@ from handlers.wizard import (
     receive_delete_fail_notify,
     receive_drops_game_callback,
     receive_delete_old,
-    receive_delete_sibling,
     receive_dest_chat,
     receive_dest_type,
     receive_category_filter_callback,
@@ -805,7 +803,6 @@ logger = logging.getLogger(__name__)
     WATCH_VIEWERS,
     WATCH_LANGUAGE,
     WATCH_DELIVERY,
-    DELETE_SIBLING_ALERTS,
     GLOBAL_IGNORE_KEYWORDS,
     GLOBAL_IGNORE_IGDB,
     GLOBAL_IGNORE_IGDB_DELETE,
@@ -832,7 +829,7 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_DISCOUNT,
     GAME_INFO_SEARCH,
     GAME_INFO_PICK,
-) = range(86)
+) = range(85)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -3027,7 +3024,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|delete_other|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults)$",
+            pattern=r"^edit_f:\d+:(delete_old|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults)$",
         ),
         group=0,
     )
@@ -3042,7 +3039,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_set,
-            pattern=r"^edit_set:\d+:(delete_old|delete_other|preview|chat_button):[01]$|^edit_set:\d+:button_style:(default|primary|success|danger)$",
+            pattern=r"^edit_set:\d+:(delete_old|preview|chat_button):[01]$|^edit_set:\d+:button_style:(default|primary|success|danger)$",
         ),
         group=0,
     )
@@ -3094,7 +3091,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_defedit_callback),
-                pattern=r"^defedit:0:(save|cancel|template|image|image_del|strip|ignore_keywords|category_filter|delay|repeat|delete_old|delete_other|pin_message|custom_buttons|chat_button|live_remind|top_donations|preview|button_style|sched_remind|schedule_cancel|multistream)$",
+                pattern=r"^defedit:0:(save|cancel|template|image|image_del|strip|ignore_keywords|category_filter|delay|repeat|delete_old|pin_message|custom_buttons|chat_button|live_remind|top_donations|preview|button_style|sched_remind|schedule_cancel|multistream)$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_template), pattern=r"^edit_f:\d+:template$"
@@ -3490,13 +3487,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_cancel,
                 _wiz_back,
                 CallbackQueryHandler(receive_delete_old, pattern=r"^delete_old:"),
-            ],
-            DELETE_SIBLING_ALERTS: [
-                _wiz_cancel,
-                _wiz_back,
-                CallbackQueryHandler(
-                    receive_delete_sibling, pattern=r"^delete_sibling:"
-                ),
             ],
             DELETE_FAIL_NOTIFY: [
                 _wiz_cancel,

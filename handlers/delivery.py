@@ -1037,25 +1037,29 @@ async def _delete_one_previous_message(
 
 
 async def _delete_previous_before_send(bot, db: Database, sub: Subscription) -> None:
+    """Delete prior bot alerts for the same streamer in this chat/topic.
+
+    Template id and alert type do not matter — only twitch_user_id (plus owner,
+    chat_id, thread_id). Messages for other streamers are left alone.
+    """
     to_delete: list[tuple[int, int]] = []
     seen_msg: set[int] = set()
     if sub.last_message_id and sub.last_message_id not in seen_msg:
         to_delete.append((sub.id, sub.last_message_id))
         seen_msg.add(sub.last_message_id)
-    if sub.delete_other_alerts:
-        for sibling in db.get_enabled_by_twitch_user_id(sub.twitch_user_id):
-            if sibling.id == sub.id:
-                continue
-            if sibling.owner_id != sub.owner_id:
-                continue
-            if sibling.chat_id != sub.chat_id:
-                continue
-            if (sibling.thread_id or None) != (sub.thread_id or None):
-                continue
-            if not sibling.last_message_id or sibling.last_message_id in seen_msg:
-                continue
-            to_delete.append((sibling.id, sibling.last_message_id))
-            seen_msg.add(sibling.last_message_id)
+    for sibling in db.get_subscriptions_by_owner(sub.owner_id):
+        if sibling.id == sub.id:
+            continue
+        if sibling.twitch_user_id != sub.twitch_user_id:
+            continue
+        if sibling.chat_id != sub.chat_id:
+            continue
+        if (sibling.thread_id or None) != (sub.thread_id or None):
+            continue
+        if not sibling.last_message_id or sibling.last_message_id in seen_msg:
+            continue
+        to_delete.append((sibling.id, sibling.last_message_id))
+        seen_msg.add(sibling.last_message_id)
     for owner_sub_id, message_id in to_delete:
         ok = await _delete_one_previous_message(
             bot,
@@ -1470,11 +1474,12 @@ async def _send_notification(
         clear_chat_unreachable(db, sub.chat_id)
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
         clear_user_blocked(db, sub.chat_id)
-    # Track message id for delete_previous (channels/groups) and for live
-    # stream photo/video preview refresh — including DM, so editMessageMedia works.
+    # Track message id for live preview refresh (incl. DM) and so delete_previous
+    # on any same-streamer subscription can remove prior alerts in channels/groups
+    # (template / alert type do not matter).
     track_preview = bool(msg) and is_dynamic_alert_image(sub.image_file_id)
-    track_delete_prev = bool(msg) and sub.dest_type != "dm" and bool(sub.delete_previous)
-    if track_preview or track_delete_prev:
+    track_channel_msg = bool(msg) and sub.dest_type != "dm"
+    if track_preview or track_channel_msg:
         db.set_last_message_id(sub.id, msg.message_id)
         if track_preview:
             from handlers.stream_preview import (

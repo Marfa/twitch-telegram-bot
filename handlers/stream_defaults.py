@@ -188,7 +188,6 @@ async def on_defedit_callback(
         "live_remind": ("attach_live_remind_button", None),
         "pin_message": ("pin_message", None),
         "delete_old": ("delete_previous", "notify_delete_fail"),
-        "delete_other": ("delete_other_alerts", None),
         "preview": ("disable_link_preview", None),
         "top_donations": ("top_donations", None),
         "schedule_cancel": ("notify_on_schedule_cancel", None),
@@ -203,13 +202,12 @@ async def on_defedit_callback(
             )
         elif field == "delete_old":
             new_val = not bool(draft.get("delete_previous"))
-            kwargs = {
-                "delete_previous": new_val,
-                "notify_delete_fail": new_val,
-            }
-            if not new_val:
-                kwargs["delete_other_alerts"] = False
-            update_defaults_draft(context.user_data, **kwargs)
+            update_defaults_draft(
+                context.user_data,
+                delete_previous=new_val,
+                notify_delete_fail=new_val,
+                delete_other_alerts=False,
+            )
         elif field == "chat_button":
             new_val = not bool(draft.get("attach_chat_button"))
             kwargs: dict = {"attach_chat_button": new_val}

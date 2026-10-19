@@ -1703,7 +1703,6 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
         _prompt_repeat_step,
         receive_advanced_options_next,
         receive_delete_old,
-        receive_delete_sibling,
         _wz,
     )
     from telegram.ext import ConversationHandler
@@ -1793,34 +1792,6 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
         for b in row
     )
     cap.assert_turn("wizard_delete_old_yes_no_fail_step")
-
-    # §2.12 sibling answer → finish (still no fail-notify step).
-    application, bot = _app(db)
-    cap = _BotCapture()
-    cap.wrap(bot)
-    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
-    update, _query = _cb_update(_FREE_UID, "delete_sibling:1", cap)
-    ctx = _ctx(application)
-    ctx.user_data.update(
-        {
-            "twitch_username": "sib",
-            "twitch_user_id": "102",
-            "alert_type": "category",
-            "dest_type": "channel",
-            "pending_chat_id": -1003,
-            "pending_thread_id": None,
-            "message_template": "hi",
-            "delete_previous": True,
-        }
-    )
-    state = await receive_delete_sibling(update, ctx)
-    assert state == ConversationHandler.END
-    sib = [
-        s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.twitch_username == "sib"
-    ]
-    assert sib and sib[-1].delete_other_alerts is True
-    assert sib[-1].notify_delete_fail is True
-    cap.assert_turn("wizard_delete_sibling_no_fail_step")
 
     application, bot = _app(db)
     cap = _BotCapture()

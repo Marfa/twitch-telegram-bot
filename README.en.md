@@ -127,7 +127,7 @@ Then the wizard (for stream start / category change / stream end):
 7. Repeat mute (minutes) — if checked; **stream start** only
 8. Destination: DM or channel/group (one button)
 9. For channel or group — add the bot and confirm the chat
-10. Delete previous bot message? — if checked (category change defaults to its own alerts; if other subs for the same streamer share the destination — asks whether to delete those too)
+10. Delete previous bot message? — if checked, before a new alert the bot deletes prior ones for the same streamer in that chat (type and template do not matter; other streamers are left alone)
 
 Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, “Reminder button”, clean title, and image are free.
 
@@ -279,7 +279,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report (Mon 10:00 MSK): total users (parentheses = change vs the previous mailing), new users and Stars payers for the week, active trials. On the 1st at 10:00 MSK — the same for the previous calendar month.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (+ delete other for category) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), repeat mute, ignore and **categories** / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (same streamer in chat) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), repeat mute, ignore and **categories** / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

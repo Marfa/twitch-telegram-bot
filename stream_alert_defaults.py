@@ -46,7 +46,6 @@ LOCKED_EDIT_FIELDS: frozenset[str] = frozenset(
         "delay",
         "repeat",
         "delete_old",
-        "delete_other",
         "pin_message",
         "custom_buttons",
         "chat_button",
