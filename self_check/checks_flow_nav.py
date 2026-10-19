@@ -1891,15 +1891,18 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
 
 
 async def _scenario_wizard_repeats_overlap(db) -> None:
-    """§2 Extras — repeats + overlap guard (live/beta): hidden on end; toggle + CSV."""
+    """§2 Extras — repeats + overlap (live/beta): dedicated overlap screen; CSV repeats."""
     from handlers.wizard import (
         _go_advanced_options_prompt,
+        _go_after_image_step,
         _go_after_repeat,
         receive_advanced_options_next,
         receive_advanced_options_toggle,
+        receive_overlap_options,
         receive_repeats_minutes,
         _wz,
     )
+    from i18n import t
 
     # End alert: no repeats/overlap rows.
     application, bot = _app(db)
@@ -1931,7 +1934,7 @@ async def _scenario_wizard_repeats_overlap(db) -> None:
     assert "advopt:toggle:overlap" not in end_cbs
     cap.assert_turn("wizard_repeats_overlap_hidden_on_end")
 
-    # Live + beta: rows visible; overlap master turns on both subs.
+    # Live + beta: master rows only (no nested Extras checkboxes).
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)
@@ -1960,6 +1963,7 @@ async def _scenario_wizard_repeats_overlap(db) -> None:
     assert "advopt:toggle:repeats" in live_cbs
     assert "advopt:toggle:overlap" in live_cbs
     assert "advopt:toggle:overlap_block" not in live_cbs
+    assert "advopt:toggle:overlap_block_repeats" not in live_cbs
     cap.assert_turn("wizard_repeats_overlap_shown_on_live")
 
     update, _query = _cb_update(_FREE_UID, "advopt:toggle:overlap", cap)
@@ -1969,8 +1973,8 @@ async def _scenario_wizard_repeats_overlap(db) -> None:
         state = await receive_advanced_options_toggle(update, ctx)
     assert state == _wz()["ADVANCED_OPTIONS"]
     assert ctx.user_data.get("adv_want_overlap") is True
-    assert ctx.user_data.get("adv_want_overlap_block") is True
-    assert ctx.user_data.get("adv_want_overlap_block_repeats") is True
+    assert ctx.user_data.get("adv_want_overlap_block") is False
+    assert ctx.user_data.get("adv_want_overlap_block_repeats") is False
     after_overlap = [
         b.callback_data or ""
         for m in cap.markups
@@ -1978,11 +1982,10 @@ async def _scenario_wizard_repeats_overlap(db) -> None:
         for row in m.inline_keyboard
         for b in row
     ]
-    assert "advopt:toggle:overlap_block" in after_overlap
-    assert "advopt:toggle:overlap_block_repeats" in after_overlap
-    # Extras only edits inline markup; wizard Reply Cancel stays from prior screen.
+    assert "advopt:toggle:overlap_block" not in after_overlap
+    assert "advopt:toggle:overlap_block_repeats" not in after_overlap
     cap.note_pulse()
-    cap.assert_turn("wizard_overlap_master_enables_subs")
+    cap.assert_turn("wizard_overlap_master_defaults_off")
 
     update, _query = _cb_update(_FREE_UID, "advopt:toggle:repeats", cap)
     with patch(
@@ -1997,21 +2000,82 @@ async def _scenario_wizard_repeats_overlap(db) -> None:
     with patch(
         "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
     ), patch(
-        "handlers.wizard._go_category_filter_prompt",
-        new=AsyncMock(return_value=_wz()["CATEGORY_FILTER"]),
+        "handlers.wizard._go_after_image_step",
+        new=AsyncMock(return_value=_wz()["OVERLAP_OPTIONS"]),
     ):
         state = await receive_advanced_options_next(update, ctx)
-    assert ctx.user_data.get("block_overlap") is True
-    assert ctx.user_data.get("block_repeat_when_last") is True
+    assert state == _wz()["OVERLAP_OPTIONS"]
+    assert ctx.user_data.get("block_overlap") is False
+    assert ctx.user_data.get("block_repeat_when_last") is False
     assert ctx.user_data.get("adv_want_repeats") is True
     cap.note_pulse()
     cap.assert_turn("wizard_repeats_overlap_next_flags")
 
-    # After restart-mute step → CSV prompt when repeats checked + beta.
+    # Dedicated overlap screen: description + two checkboxes (default off).
+    update = _msg_update(_FREE_UID, "x", cap)
+    with patch(
+        "handlers.wizard._go_category_filter_prompt",
+        new=AsyncMock(return_value=_wz()["CATEGORY_FILTER"]),
+    ):
+        state = await _go_after_image_step(update, ctx, "ru")
+    assert state == _wz()["OVERLAP_OPTIONS"]
+    overlap_texts = [
+        str(c.args[1]) if len(c.args) > 1 else str(c.kwargs.get("text") or "")
+        for c in bot.send_message.call_args_list
+    ] + [
+        str(c.args[0]) if c.args else str(c.kwargs.get("text") or "")
+        for c in update.effective_message.reply_text.call_args_list
+    ]
+    assert any(
+        "Запрет перекрытия" in t or "Overlap" in t for t in overlap_texts
+    ), overlap_texts
+    opt_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "overlap_opt:toggle:block" in opt_cbs
+    assert "overlap_opt:toggle:block_repeats" in opt_cbs
+    assert "overlap_opt:next" in opt_cbs
+    assert ctx.user_data.get("adv_want_overlap_block") is False
+    assert ctx.user_data.get("adv_want_overlap_block_repeats") is False
+    # Inline-only screen; Reply Cancel from prior wizard step covers escape.
+    cap.note_pulse()
+    cap.assert_turn("wizard_overlap_options_screen")
+
+    update, _query = _cb_update(_FREE_UID, "overlap_opt:toggle:block", cap)
+    state = await receive_overlap_options(update, ctx)
+    assert state == _wz()["OVERLAP_OPTIONS"]
+    assert ctx.user_data.get("adv_want_overlap_block") is True
+    update, _query = _cb_update(_FREE_UID, "overlap_opt:toggle:block_repeats", cap)
+    state = await receive_overlap_options(update, ctx)
+    assert ctx.user_data.get("adv_want_overlap_block_repeats") is True
+    update, _query = _cb_update(_FREE_UID, "overlap_opt:next", cap)
+    with patch(
+        "handlers.wizard._go_category_filter_prompt",
+        new=AsyncMock(return_value=_wz()["CATEGORY_FILTER"]),
+    ):
+        state = await receive_overlap_options(update, ctx)
+    assert state == _wz()["CATEGORY_FILTER"]
+    assert ctx.user_data.get("block_overlap") is True
+    assert ctx.user_data.get("block_repeat_when_last") is True
+    cap.note_pulse()
+    cap.assert_turn("wizard_overlap_options_saved")
+
+    # After restart-mute step → CSV prompt with function description.
     update = _msg_update(_FREE_UID, "x", cap)
     with patch("beta.is_enabled", return_value=True):
         state = await _go_after_repeat(update, ctx, "ru")
     assert state == _wz()["REPEATS_MINUTES"]
+    repeats_texts = [
+        str(c.args[0]) if c.args else str(c.kwargs.get("text") or "")
+        for c in update.effective_message.reply_text.call_args_list
+    ]
+    prompt = t("repeats_minutes_prompt", "ru")
+    assert any(prompt == txt or "Повторы" in txt for txt in repeats_texts), repeats_texts
+    assert any("онлайн" in txt for txt in repeats_texts), repeats_texts
     cap.assert_turn("wizard_repeats_minutes_prompt")
 
     update = _msg_update(_FREE_UID, "5, 15, 30", cap)

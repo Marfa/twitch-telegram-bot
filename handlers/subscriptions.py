@@ -117,6 +117,7 @@ def _sub_states() -> dict[str, int]:
         EDIT_IGNORE_KEYWORDS,
         EDIT_MULTISTREAM,
         EDIT_REPEAT,
+        EDIT_OVERLAP,
         EDIT_REPEATS,
         EDIT_TEMPLATE,
         PAUSE_ALERTS_DAYS,
@@ -129,6 +130,7 @@ def _sub_states() -> dict[str, int]:
         "EDIT_CUSTOM_BUTTONS": EDIT_CUSTOM_BUTTONS,
         "EDIT_IGNORE_KEYWORDS": EDIT_IGNORE_KEYWORDS,
         "EDIT_MULTISTREAM": EDIT_MULTISTREAM,
+        "EDIT_OVERLAP": EDIT_OVERLAP,
         "EDIT_REPEAT": EDIT_REPEAT,
         "EDIT_REPEATS": EDIT_REPEATS,
         "EDIT_TEMPLATE": EDIT_TEMPLATE,
@@ -4321,6 +4323,164 @@ async def receive_edit_repeats(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
+async def start_edit_overlap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Edit path: dedicated overlap screen (description + two checkboxes)."""
+    import alert_repeats as alert_reps
+    from i18n import overlap_options_keyboard
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    if context.user_data.get("editing_defaults") or (
+        query.data or ""
+    ).startswith("defedit:"):
+        from stream_alert_defaults import (
+            draft_as_subscription,
+            ensure_defaults_draft,
+        )
+
+        context.user_data["editing_defaults"] = True
+        draft = ensure_defaults_draft(context.user_data, db, query.from_user.id)
+        sub = draft_as_subscription(draft, owner_id=query.from_user.id)
+        sub_id = 0
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        if bool(getattr(sub, "use_stream_defaults", False)):
+            await query.answer(t("stream_defaults_locked", lang), show_alert=True)
+            return ConversationHandler.END
+        if (
+            sub.dest_type == "dm"
+            or _alert_type_from_sub(sub) != "live"
+            or not beta_features.is_enabled(
+                db, query.from_user.id, alert_reps.BETA_FEATURE_ID
+            )
+        ):
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        has_adv = await prem.has_feature(
+            context.bot,
+            db,
+            query.from_user.id,
+            "advanced_mode",
+            channel=sub.twitch_username,
+        )
+        if not alert_reps.beta_or_advanced_mode(
+            db, query.from_user.id, has_advanced_mode=has_adv
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_field",
+                feature="advanced_mode",
+            )
+            return ConversationHandler.END
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    context.user_data["adv_want_overlap_block"] = bool(
+        getattr(sub, "block_overlap", False)
+    )
+    context.user_data["adv_want_overlap_block_repeats"] = bool(
+        getattr(sub, "block_repeat_when_last", False)
+    )
+    sub_num = (
+        0
+        if context.user_data.get("editing_defaults")
+        else _owner_sub_number(db, query.from_user.id, sub_id)
+    )
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        reply_chat_id(update),
+        t("edit_overlap_prompt", lang, sub_id=sub_num),
+        reply_markup=overlap_options_keyboard(
+            lang,
+            block_overlap=bool(context.user_data.get("adv_want_overlap_block")),
+            block_repeat_when_last=bool(
+                context.user_data.get("adv_want_overlap_block_repeats")
+            ),
+        ),
+    )
+    return _sub_states()["EDIT_OVERLAP"]
+
+
+async def receive_edit_overlap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    from i18n import overlap_options_keyboard
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if sub_id is None:
+        return ConversationHandler.END
+    action = (query.data or "").rsplit(":", 1)[-1]
+    if action == "block":
+        context.user_data["adv_want_overlap_block"] = not bool(
+            context.user_data.get("adv_want_overlap_block")
+        )
+    elif action == "block_repeats":
+        context.user_data["adv_want_overlap_block_repeats"] = not bool(
+            context.user_data.get("adv_want_overlap_block_repeats")
+        )
+    elif action == "next":
+        block = bool(context.user_data.get("adv_want_overlap_block"))
+        reps = bool(context.user_data.get("adv_want_overlap_block_repeats"))
+        db: Database = context.application.bot_data["db"]
+        owner_id = query.from_user.id
+        if context.user_data.get("editing_defaults"):
+            from stream_alert_defaults import update_defaults_draft
+            from handlers.stream_defaults import reshow_defaults_after_edit
+
+            update_defaults_draft(
+                context.user_data,
+                block_overlap=block,
+                block_repeat_when_last=reps,
+            )
+            await query.edit_message_text("✓")
+            return await reshow_defaults_after_edit(update, context, lang)
+        sub_num = _owner_sub_number(db, owner_id, int(sub_id))
+        if not db.update_subscription(
+            int(sub_id),
+            owner_id,
+            block_overlap=block,
+            block_repeat_when_last=reps,
+        ):
+            await query.edit_message_text(t("sub_not_found", lang))
+        else:
+            await query.edit_message_text("✓")
+            await context.bot.send_message(
+                reply_chat_id(update),
+                t("edit_updated", lang, sub_id=sub_num),
+                reply_markup=_menu(lang, owner_id),
+            )
+        context.user_data.clear()
+        return ConversationHandler.END
+    else:
+        return _sub_states()["EDIT_OVERLAP"]
+    await query.edit_message_reply_markup(
+        reply_markup=overlap_options_keyboard(
+            lang,
+            block_overlap=bool(context.user_data.get("adv_want_overlap_block")),
+            block_repeat_when_last=bool(
+                context.user_data.get("adv_want_overlap_block_repeats")
+            ),
+        )
+    )
+    return _sub_states()["EDIT_OVERLAP"]
+
+
 async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -4419,66 +4579,6 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer()
         enabled = not bool(sub.strip_name_mentions)
         db.update_subscription(sub_id, query.from_user.id, strip_name_mentions=enabled)
-        sub = db.get_subscription(sub_id, query.from_user.id) or sub
-        await _reshow_edit_menu(sub)
-        return
-    if field in ("overlap", "overlap_block", "overlap_block_repeats"):
-        import alert_repeats as alert_reps
-
-        if (
-            sub.dest_type == "dm"
-            or _alert_type_from_sub(sub) != "live"
-            or not beta_features.is_enabled(
-                db, query.from_user.id, alert_reps.BETA_FEATURE_ID
-            )
-        ):
-            await query.answer()
-            return
-        has_adv = await prem.has_feature(
-            context.bot,
-            db,
-            query.from_user.id,
-            "advanced_mode",
-            channel=sub.twitch_username,
-        )
-        if not alert_reps.beta_or_advanced_mode(
-            db, query.from_user.id, has_advanced_mode=has_adv
-        ):
-            from premium_handlers import send_premium_screen
-
-            await query.answer()
-            await query.edit_message_text(
-                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-            )
-            await send_premium_screen(
-                context.bot,
-                query.from_user.id,
-                lang,
-                db,
-                update=update,
-                context=context,
-                source="edit_field",
-                feature="advanced_mode",
-            )
-            return
-        await query.answer()
-        cur_block = bool(getattr(sub, "block_overlap", False))
-        cur_reps = bool(getattr(sub, "block_repeat_when_last", False))
-        if field == "overlap":
-            turning_on = not (cur_block or cur_reps)
-            kwargs = {
-                "block_overlap": turning_on,
-                "block_repeat_when_last": turning_on,
-            }
-        elif field == "overlap_block":
-            kwargs = {"block_overlap": not cur_block}
-            if not kwargs["block_overlap"] and not cur_reps:
-                kwargs["block_repeat_when_last"] = False
-        else:
-            kwargs = {"block_repeat_when_last": not cur_reps}
-            if not kwargs["block_repeat_when_last"] and not cur_block:
-                kwargs["block_overlap"] = False
-        db.update_subscription(sub_id, query.from_user.id, **kwargs)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return

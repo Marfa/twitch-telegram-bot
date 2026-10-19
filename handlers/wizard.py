@@ -133,6 +133,7 @@ def _wz() -> dict[str, int]:
         IMAGE_UPLOAD,
         LINK_PREVIEW,
         PREMIUM_GATE,
+        OVERLAP_OPTIONS,
         REPEAT_ALLOW,
         REPEAT_MUTE_MINUTES,
         REPEATS_MINUTES,
@@ -179,6 +180,7 @@ def _wz() -> dict[str, int]:
         "IMAGE_UPLOAD": IMAGE_UPLOAD,
         "LINK_PREVIEW": LINK_PREVIEW,
         "PREMIUM_GATE": PREMIUM_GATE,
+        "OVERLAP_OPTIONS": OVERLAP_OPTIONS,
         "REPEAT_ALLOW": REPEAT_ALLOW,
         "REPEAT_MUTE_MINUTES": REPEAT_MUTE_MINUTES,
         "REPEATS_MINUTES": REPEATS_MINUTES,
@@ -1123,8 +1125,80 @@ async def _go_ignore_keywords_prompt(update: Update, context: ContextTypes.DEFAU
 async def _go_after_image_step(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    """After image upload/skip: continue wizard (Extras already done)."""
-    return await _go_category_filter_prompt(update, context, lang)
+    """After image upload/skip: optional overlap screen, then continue."""
+    return await _go_overlap_options_prompt(update, context, lang)
+
+
+async def _go_overlap_options_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """Dedicated overlap-guard screen (like cover options)."""
+    from i18n import overlap_options_keyboard
+
+    if not context.user_data.get("adv_want_overlap"):
+        context.user_data["block_overlap"] = False
+        context.user_data["block_repeat_when_last"] = False
+        context.user_data["adv_want_overlap_block"] = False
+        context.user_data["adv_want_overlap_block_repeats"] = False
+        return await _go_category_filter_prompt(update, context, lang)
+    # Defaults off until the user ticks boxes on this screen.
+    context.user_data.setdefault("adv_want_overlap_block", False)
+    context.user_data.setdefault("adv_want_overlap_block_repeats", False)
+    chat_id = reply_chat_id(update)
+    text = t("overlap_options_prompt", lang)
+    markup = overlap_options_keyboard(
+        lang,
+        block_overlap=bool(context.user_data.get("adv_want_overlap_block")),
+        block_repeat_when_last=bool(
+            context.user_data.get("adv_want_overlap_block_repeats")
+        ),
+    )
+    if update.callback_query:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+    _set_wizard_back(context, _wz()["OVERLAP_OPTIONS"])
+    return _wz()["OVERLAP_OPTIONS"]
+
+
+async def receive_overlap_options(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from i18n import overlap_options_keyboard
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    action = (query.data or "").rsplit(":", 1)[-1]
+    if action == "block":
+        context.user_data["adv_want_overlap_block"] = not bool(
+            context.user_data.get("adv_want_overlap_block")
+        )
+    elif action == "block_repeats":
+        context.user_data["adv_want_overlap_block_repeats"] = not bool(
+            context.user_data.get("adv_want_overlap_block_repeats")
+        )
+    elif action == "next":
+        block = bool(context.user_data.get("adv_want_overlap_block"))
+        reps = bool(context.user_data.get("adv_want_overlap_block_repeats"))
+        if not block and not reps:
+            context.user_data["adv_want_overlap"] = False
+        context.user_data["block_overlap"] = block
+        context.user_data["block_repeat_when_last"] = reps
+        await query.edit_message_text("✓")
+        return await _go_category_filter_prompt(update, context, lang)
+    else:
+        return _wz()["OVERLAP_OPTIONS"]
+    await query.edit_message_reply_markup(
+        reply_markup=overlap_options_keyboard(
+            lang,
+            block_overlap=bool(context.user_data.get("adv_want_overlap_block")),
+            block_repeat_when_last=bool(
+                context.user_data.get("adv_want_overlap_block_repeats")
+            ),
+        )
+    )
+    return _wz()["OVERLAP_OPTIONS"]
 
 
 _ADVOPT_FEATURE = {
@@ -1134,8 +1208,6 @@ _ADVOPT_FEATURE = {
     "repeat": "repeat",
     "repeats": "advanced_mode",
     "overlap": "advanced_mode",
-    "overlap_block": "advanced_mode",
-    "overlap_block_repeats": "advanced_mode",
     "delete": "delete_prev",
     "pin": "pin_message",
     "buttons": "custom_buttons",
@@ -1406,12 +1478,7 @@ async def _advopt_locked(
         entitled = await prem.has_feature(
             context.bot, db, user_id, feature, channel=channel
         )
-        if toggle in (
-            "repeats",
-            "overlap",
-            "overlap_block",
-            "overlap_block_repeats",
-        ):
+        if toggle in ("repeats", "overlap"):
             entitled = alert_reps.beta_or_advanced_mode(
                 db, user_id, has_advanced_mode=entitled
             )
@@ -1460,10 +1527,6 @@ async def _advanced_options_markup(
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
         want_repeats=bool(context.user_data.get("adv_want_repeats")),
         want_overlap=bool(context.user_data.get("adv_want_overlap")),
-        want_overlap_block=bool(context.user_data.get("adv_want_overlap_block")),
-        want_overlap_block_repeats=bool(
-            context.user_data.get("adv_want_overlap_block_repeats")
-        ),
         want_delete=bool(context.user_data.get("adv_want_delete")),
         want_pin=bool(context.user_data.get("adv_want_pin")),
         want_buttons=bool(context.user_data.get("adv_want_buttons")),
@@ -1647,8 +1710,6 @@ async def receive_advanced_options_toggle(
         "repeat": "adv_want_repeat",
         "repeats": "adv_want_repeats",
         "overlap": "adv_want_overlap",
-        "overlap_block": "adv_want_overlap_block",
-        "overlap_block_repeats": "adv_want_overlap_block_repeats",
         "delete": "adv_want_delete",
         "pin": "adv_want_pin",
         "buttons": "adv_want_buttons",
@@ -1665,7 +1726,7 @@ async def receive_advanced_options_toggle(
     if flag == "categories" and not _show_category_filter_option(context):
         await query.answer()
         return _wz()["ADVANCED_OPTIONS"]
-    if flag in ("repeats", "overlap", "overlap_block", "overlap_block_repeats"):
+    if flag in ("repeats", "overlap"):
         import alert_repeats as alert_reps
         import beta as beta_features
 
@@ -1722,7 +1783,7 @@ async def receive_advanced_options_toggle(
             feature,
             channel=_wizard_channel(context),
         )
-        if flag in ("repeats", "overlap", "overlap_block", "overlap_block_repeats"):
+        if flag in ("repeats", "overlap"):
             import alert_repeats as alert_reps
 
             entitled = alert_reps.beta_or_advanced_mode(
@@ -1745,18 +1806,12 @@ async def receive_advanced_options_toggle(
             return _wz()["ADVANCED_OPTIONS"]
     # Flip + answer immediately; locked premium flags are cached for this screen.
     context.user_data[key] = turning_on
-    if flag == "overlap":
-        if turning_on:
-            context.user_data["adv_want_overlap_block"] = True
-            context.user_data["adv_want_overlap_block_repeats"] = True
-        else:
-            context.user_data["adv_want_overlap_block"] = False
-            context.user_data["adv_want_overlap_block_repeats"] = False
-    elif flag in ("overlap_block", "overlap_block_repeats"):
-        context.user_data["adv_want_overlap"] = bool(
-            context.user_data.get("adv_want_overlap_block")
-            or context.user_data.get("adv_want_overlap_block_repeats")
-        )
+    if flag == "overlap" and not turning_on:
+        # Subs stay off by default; cleared when master is unchecked.
+        context.user_data["adv_want_overlap_block"] = False
+        context.user_data["adv_want_overlap_block_repeats"] = False
+        context.user_data["block_overlap"] = False
+        context.user_data["block_repeat_when_last"] = False
     if not (
         context.user_data.get("adv_want_buttons")
         or context.user_data.get("adv_want_chat")
@@ -1844,12 +1899,11 @@ async def receive_advanced_options_next(
         context.user_data["adv_want_overlap_block"] = False
         context.user_data["adv_want_overlap_block_repeats"] = False
     else:
-        context.user_data["block_overlap"] = bool(
-            context.user_data.get("adv_want_overlap_block")
-        )
-        context.user_data["block_repeat_when_last"] = bool(
-            context.user_data.get("adv_want_overlap_block_repeats")
-        )
+        # Final flags set on dedicated OVERLAP_OPTIONS screen (defaults off).
+        context.user_data.setdefault("adv_want_overlap_block", False)
+        context.user_data.setdefault("adv_want_overlap_block_repeats", False)
+        context.user_data["block_overlap"] = False
+        context.user_data["block_repeat_when_last"] = False
     if not context.user_data.get("adv_want_delete"):
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
@@ -1916,7 +1970,7 @@ async def receive_advanced_options_next(
         return await _go_image_ask_prompt(update, context, lang)
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
-    return await _go_category_filter_prompt(update, context, lang)
+    return await _go_after_image_step(update, context, lang)
 
 
 async def _maybe_prompt_donationalerts_oauth(
@@ -1996,7 +2050,7 @@ async def receive_top_donations_template(
         return await _go_image_ask_prompt(update, context, lang)
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
-    return await _go_category_filter_prompt(update, context, lang)
+    return await _go_after_image_step(update, context, lang)
 
 
 async def complete_donationalerts_oauth(
@@ -2296,6 +2350,10 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return await _go_channel_prompt(update, context, lang)
     if state == _wz()["CHANNEL_DUP"]:
         return await _go_channel_prompt(update, context, lang)
+    if state == _wz()["OVERLAP_OPTIONS"]:
+        if context.user_data.get("adv_want_image"):
+            return await _go_image_ask_prompt(update, context, lang)
+        return await _go_advanced_options_prompt(update, context, lang)
     if state == _wz()["IMAGE_ASK"]:
         if context.user_data.get("edit_sub_id"):
             owner_id = update.effective_user.id
@@ -2318,6 +2376,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         _set_wizard_back(context, _wz()["IMAGE_UPLOAD"])
         return _wz()["IMAGE_UPLOAD"]
     if state == _wz()["CATEGORY_FILTER"]:
+        if context.user_data.get("adv_want_overlap"):
+            return await _go_overlap_options_prompt(update, context, lang)
         if context.user_data.get("adv_want_image"):
             return await _go_image_ask_prompt(update, context, lang)
         return await _go_advanced_options_prompt(update, context, lang)

@@ -535,6 +535,7 @@ from handlers.wizard import (
     receive_advanced_options_next,
     receive_advanced_options_style,
     receive_advanced_options_toggle,
+    receive_overlap_options,
     receive_top_donations_template,
     complete_donationalerts_oauth,
     receive_channel,
@@ -727,6 +728,8 @@ from handlers.subscriptions import (
     start_edit_repeat_mute,
     start_edit_repeats,
     receive_edit_repeats,
+    start_edit_overlap,
+    receive_edit_overlap,
     start_edit_template,
     start_edit_top_donations,
     start_pause_notifications,
@@ -764,6 +767,7 @@ logger = logging.getLogger(__name__)
     REPEAT_ALLOW,
     REPEAT_MUTE_MINUTES,
     REPEATS_MINUTES,
+    OVERLAP_OPTIONS,
     SCHEDULE_REMINDER_ASK,
     SCHEDULE_REMINDER_MINUTES,
     SCHEDULE_CANCEL_TEMPLATE,
@@ -782,6 +786,7 @@ logger = logging.getLogger(__name__)
     EDIT_DELAY,
     EDIT_REPEAT,
     EDIT_REPEATS,
+    EDIT_OVERLAP,
     EDIT_SCHEDULE_REMINDER,
     EDIT_SCHEDULE_CANCEL,
     EDIT_CUSTOM_BUTTONS,
@@ -833,7 +838,7 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_DISCOUNT,
     GAME_INFO_SEARCH,
     GAME_INFO_PICK,
-) = range(87)
+) = range(89)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -3039,7 +3044,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults|overlap|overlap_block|overlap_block_repeats)$",
+            pattern=r"^edit_f:\d+:(delete_old|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults)$",
         ),
         group=0,
     )
@@ -3158,6 +3163,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_repeats),
                 pattern=r"^edit_f:\d+:repeats$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_overlap),
+                pattern=r"^edit_f:\d+:overlap$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_edit_pick), pattern=r"^edit:\d+$"
@@ -3389,6 +3398,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_repeats_minutes),
             ],
+            OVERLAP_OPTIONS: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_overlap_options,
+                    pattern=r"^overlap_opt:(toggle:block|toggle:block_repeats|next)$",
+                ),
+            ],
             SCHEDULE_REMINDER_ASK: [
                 _wiz_cancel,
                 _wiz_back,
@@ -3465,6 +3482,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             EDIT_REPEATS: [
                 _wiz_cancel,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_repeats),
+            ],
+            EDIT_OVERLAP: [
+                _wiz_cancel,
+                CallbackQueryHandler(
+                    receive_edit_overlap,
+                    pattern=r"^overlap_opt:(toggle:block|toggle:block_repeats|next)$",
+                ),
             ],
             EDIT_SCHEDULE_REMINDER: [
                 _wiz_cancel,

@@ -1304,8 +1304,6 @@ def advanced_options_keyboard(
     want_categories: bool = False,
     want_repeats: bool = False,
     want_overlap: bool = False,
-    want_overlap_block: bool = False,
-    want_overlap_block_repeats: bool = False,
     want_apply_defaults: bool = False,
     button_style: str = "",
     show_delay: bool = True,
@@ -1341,8 +1339,6 @@ def advanced_options_keyboard(
         "repeat": want_repeat,
         "repeats": want_repeats,
         "overlap": want_overlap,
-        "overlap_block": want_overlap_block,
-        "overlap_block_repeats": want_overlap_block_repeats,
         "delete": want_delete,
         "pin": want_pin,
         "buttons": want_buttons,
@@ -1360,8 +1356,6 @@ def advanced_options_keyboard(
         "repeat": show_repeat,
         "repeats": show_repeats,
         "overlap": show_overlap,
-        "overlap_block": show_overlap and want_overlap,
-        "overlap_block_repeats": show_overlap and want_overlap,
         "buttons": show_buttons,
         "live_remind": show_live_remind,
         "top_donations": show_top_donations,
@@ -2436,6 +2430,39 @@ def template_strip_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def overlap_options_keyboard(
+    lang: str,
+    *,
+    block_overlap: bool = False,
+    block_repeat_when_last: bool = False,
+) -> InlineKeyboardMarkup:
+    """Dedicated overlap-guard screen (create + edit): description + two checkboxes."""
+    block_mark = "✅ " if block_overlap else "⬜️ "
+    reps_mark = "✅ " if block_repeat_when_last else "⬜️ "
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    block_mark + t("advanced_options_overlap_block", lang),
+                    callback_data="overlap_opt:toggle:block",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    reps_mark + t("advanced_options_overlap_block_repeats", lang),
+                    callback_data="overlap_opt:toggle:block_repeats",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("overlap_options_next", lang),
+                    callback_data="overlap_opt:next",
+                )
+            ],
+        ]
+    )
+
+
 def image_ask_keyboard(
     lang: str,
     *,
@@ -3091,6 +3118,7 @@ def edit_options_keyboard(
                 )
             continue
         if sid == "overlap":
+            # Opens dedicated options screen (like cover) — plain label, not in-place toggle.
             if show_advanced and show_repeats_overlap and (
                 for_defaults_editor or dest_type != "dm"
             ) and (
@@ -3101,42 +3129,11 @@ def edit_options_keyboard(
                     and not notify_on_end
                 )
             ):
-                master_on = bool(block_overlap or block_repeat_when_last)
-                mark = "✅ " if master_on else "⬜️ "
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
+                mark = (
+                    "✅ "
+                    if (block_overlap or block_repeat_when_last)
+                    else ""
                 )
-            continue
-        if sid == "overlap_block":
-            if (
-                show_advanced
-                and show_repeats_overlap
-                and (for_defaults_editor or dest_type != "dm")
-                and (block_overlap or block_repeat_when_last)
-            ):
-                mark = "✅ " if block_overlap else "⬜️ "
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
-            continue
-        if sid == "overlap_block_repeats":
-            if (
-                show_advanced
-                and show_repeats_overlap
-                and (for_defaults_editor or dest_type != "dm")
-                and (block_overlap or block_repeat_when_last)
-            ):
-                mark = "✅ " if block_repeat_when_last else "⬜️ "
                 rows.append(
                     [
                         InlineKeyboardButton(
