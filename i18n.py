@@ -1302,10 +1302,16 @@ def advanced_options_keyboard(
     want_multistream: bool = False,
     want_top_donations: bool = False,
     want_categories: bool = False,
+    want_repeats: bool = False,
+    want_overlap: bool = False,
+    want_overlap_block: bool = False,
+    want_overlap_block_repeats: bool = False,
     want_apply_defaults: bool = False,
     button_style: str = "",
     show_delay: bool = True,
     show_repeat: bool = True,
+    show_repeats: bool = False,
+    show_overlap: bool = False,
     show_preview: bool = False,
     show_buttons: bool = False,
     show_live_remind: bool = False,
@@ -1333,6 +1339,10 @@ def advanced_options_keyboard(
         "categories": want_categories,
         "delay": want_delay,
         "repeat": want_repeat,
+        "repeats": want_repeats,
+        "overlap": want_overlap,
+        "overlap_block": want_overlap_block,
+        "overlap_block_repeats": want_overlap_block_repeats,
         "delete": want_delete,
         "pin": want_pin,
         "buttons": want_buttons,
@@ -1348,6 +1358,10 @@ def advanced_options_keyboard(
         "categories": show_categories,
         "delay": show_delay,
         "repeat": show_repeat,
+        "repeats": show_repeats,
+        "overlap": show_overlap,
+        "overlap_block": show_overlap and want_overlap,
+        "overlap_block_repeats": show_overlap and want_overlap,
         "buttons": show_buttons,
         "live_remind": show_live_remind,
         "top_donations": show_top_donations,
@@ -2946,6 +2960,9 @@ def edit_options_keyboard(
     show_schedule_cancel: bool = False,
     show_multistream: bool = False,
     show_top_donations: bool = False,
+    show_repeats_overlap: bool = False,
+    block_overlap: bool = False,
+    block_repeat_when_last: bool = False,
     button_style: str = "",
     custom_buttons_count: int = 0,
     multistream_count: int = 0,
@@ -3050,6 +3067,80 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=_cb(field),
+                        )
+                    ]
+                )
+            continue
+        if sid == "repeats":
+            if show_advanced and show_repeats_overlap and (
+                for_defaults_editor
+                or (
+                    not is_upcoming
+                    and not notify_on_category_change
+                    and not notify_on_end
+                )
+            ):
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=_cb(field),
+                        )
+                    ]
+                )
+            continue
+        if sid == "overlap":
+            if show_advanced and show_repeats_overlap and (
+                for_defaults_editor or dest_type != "dm"
+            ) and (
+                for_defaults_editor
+                or (
+                    not is_upcoming
+                    and not notify_on_category_change
+                    and not notify_on_end
+                )
+            ):
+                master_on = bool(block_overlap or block_repeat_when_last)
+                mark = "✅ " if master_on else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=_cb(field),
+                        )
+                    ]
+                )
+            continue
+        if sid == "overlap_block":
+            if (
+                show_advanced
+                and show_repeats_overlap
+                and (for_defaults_editor or dest_type != "dm")
+                and (block_overlap or block_repeat_when_last)
+            ):
+                mark = "✅ " if block_overlap else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=_cb(field),
+                        )
+                    ]
+                )
+            continue
+        if sid == "overlap_block_repeats":
+            if (
+                show_advanced
+                and show_repeats_overlap
+                and (for_defaults_editor or dest_type != "dm")
+                and (block_overlap or block_repeat_when_last)
+            ):
+                mark = "✅ " if block_repeat_when_last else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=_cb(field),
                         )
                     ]

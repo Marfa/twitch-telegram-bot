@@ -5,6 +5,7 @@ Expected model (matches .cursor/rules/beta-feature-branch.mdc):
   1. Feature PR is already merged into main (code live, gated by enrollment).
   2. Label beta/ready-to-merge marks the start of the 7-day beta window.
   3. This script flips stage beta → ga when the window elapsed and no open issues.
+  4. Doc spans marked <!--beta:<id>-->…<!--/beta:<id>--> are removed on promote.
 
 Run locally or from .github/workflows/beta-lifecycle.yml (needs gh + GITHUB_TOKEN).
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -23,6 +25,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = REPO_ROOT / "beta" / "manifest.json"
 READY_LABEL = "beta/ready-to-merge"
 MIN_MERGED_AGE_DAYS = 7
+
+# Docs that may carry <!--beta:<id>-->…<!--/beta:<id>--> marks.
+DOC_STRIP_PATHS: tuple[Path, ...] = (
+    REPO_ROOT / "README.md",
+    REPO_ROOT / "README.en.md",
+    REPO_ROOT / "docs" / "user-flow-map.ru.md",
+    REPO_ROOT / "webapp" / "guide" / "ru.html",
+    REPO_ROOT / "webapp" / "guide" / "en.html",
+    REPO_ROOT / "webapp" / "guide" / "uk.html",
+    REPO_ROOT / "webapp" / "guide" / "it.html",
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -121,6 +134,43 @@ def _find_merged_ready_pr(
     return candidates[0]
 
 
+def strip_beta_doc_marks(text: str, feature_id: str) -> str:
+    """Remove <!--beta:<id>-->…<!--/beta:<id>--> spans for one feature."""
+    fid = re.escape(feature_id)
+    pattern = re.compile(
+        rf"<!--\s*beta:{fid}\s*-->.*?<!--\s*/beta:{fid}\s*-->",
+        re.DOTALL | re.IGNORECASE,
+    )
+    out = pattern.sub("", text)
+    # Collapse horizontal whitespace left by removals; keep newlines.
+    out = re.sub(r"[^\S\n]{2,}", " ", out)
+    out = re.sub(r"[ \t]+\n", "\n", out)
+    # Tighten common punctuation leftovers: "word ," / "( ; foo)" / "foo ; bar"
+    out = re.sub(r" +\.", ".", out)
+    out = re.sub(r" +,", ",", out)
+    out = re.sub(r"\( +", "(", out)
+    out = re.sub(r" +\)", ")", out)
+    out = re.sub(r";\s*;", ";", out)
+    out = re.sub(r"\(\s*;\s*", "(", out)
+    out = re.sub(r"\s*;\s*\)", ")", out)
+    return out
+
+
+def strip_beta_marks_in_docs(feature_id: str) -> list[Path]:
+    """Strip beta doc marks for feature_id. Return paths that changed."""
+    changed: list[Path] = []
+    for path in DOC_STRIP_PATHS:
+        if not path.is_file():
+            continue
+        original = path.read_text(encoding="utf-8")
+        updated = strip_beta_doc_marks(original, feature_id)
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            changed.append(path)
+            logger.info("stripped beta marks for %s in %s", feature_id, path.relative_to(REPO_ROOT))
+    return changed
+
+
 def main() -> int:
     if not MANIFEST.is_file():
         logger.error("manifest missing: %s", MANIFEST)
@@ -177,6 +227,7 @@ def main() -> int:
             )
             continue
         entry["stage"] = "ga"
+        strip_beta_marks_in_docs(fid)
         changed = True
         logger.info(
             "promoted %s to ga (PR #%s, merged %.1f days ago)",
@@ -196,5 +247,23 @@ def main() -> int:
     return 0
 
 
+def _self_check() -> None:
+    sample = (
+        "Repeats ⭐<!--beta:alert-repeats-overlap--> / beta “X”<!--/beta:alert-repeats-overlap--> "
+        "and (start<!--beta:alert-repeats-overlap-->; beta<!--/beta:alert-repeats-overlap--> — DM)."
+    )
+    out = strip_beta_doc_marks(sample, "alert-repeats-overlap")
+    assert "beta" not in out.lower()
+    assert "<!--" not in out
+    assert "Repeats ⭐ and (start — DM)." == out
+    # Other feature marks untouched.
+    other = "keep <!--beta:other-feat-->beta<!--/beta:other-feat-->"
+    assert strip_beta_doc_marks(other, "alert-repeats-overlap") == other
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-check":
+        _self_check()
+        print("beta-lifecycle self-check ok")
+        sys.exit(0)
     sys.exit(main())

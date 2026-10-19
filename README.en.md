@@ -29,10 +29,12 @@
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Cover | Optional alert cover — stream preview (frame, 30‑min refresh), stream GIF preview ⭐ (~30s autoplay MP4, 30‑min refresh), stream video preview ⭐ (~30s muted MP4, 30‑min refresh), game cover, **AI image** ⭐ (generated from the game description when the alert is sent; Advanced options), or your own photo; caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
-| Repeat suppression | For stream start: skip repeats for X minutes after the first alert; ⭐ on Extras |
+| Restart mute | For stream start: don’t alert again for X minutes if the stream restarts quickly; ⭐ on Extras |
+| Repeats | For stream start: re-send the same alert at CSV minute offsets (e.g. `5,15,30`) while still live; `0` = off; ⭐<!--beta:alert-repeats-overlap--> / beta “Repeats and overlap guard”<!--/beta:alert-repeats-overlap--> |
+| Overlap guard | Channel/group: don’t send a new alert while the previous one for that streamer is still in chat; optionally skip repeats while your message is still the latest; ⭐<!--beta:alert-repeats-overlap--> / same beta<!--/beta:alert-repeats-overlap--> |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks, “viewed all below”, **To unwatched** pagination jump |
-| Advanced options | Extras checklist for everyone: image, clean title, ignore / **categories** (alert only when the streamer is online in selected Twitch games) / delay / repeat mute / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** ⭐, chat button, remind about stream (upcoming), **top donations** (stream end: DonationAlerts), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button). DM alerts include a **⏸ Pause alert** button (disables that subscription without blocking the bot; not shown in groups/channels) |
+| Advanced options | Extras checklist for everyone: image, clean title, ignore / **categories** (alert only when the streamer is online in selected Twitch games) / delay / restart mute / **repeats** / **overlap guard** (stream start<!--beta:alert-repeats-overlap-->; beta<!--/beta:alert-repeats-overlap-->) / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** ⭐, chat button, remind about stream (upcoming), **top donations** (stream end: DonationAlerts), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button). DM alerts include a **⏸ Pause alert** button (disables that subscription without blocking the bot; not shown in groups/channels) |
 | Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share**; **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed + Helix send / Simple IRC |
 | Streamer Telegram | After manually creating a stream alert, TG channels are appended to the “Setup complete” message after the alert note (Helix/seeds = curated, no disclaimer; otherwise crowd with disclaimer) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
@@ -66,7 +68,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | More than 5 active alerts | Removes the free-plan cap of 5 active alerts |
 | Alert types beyond live start | Category change, upcoming (schedule), stream end, Drops (JSON catalog from twitchdrops.app with attribution, hourly digest, stream alerts up to 5 live with Drops-tag priority, description + game page link) |
 | Twitch follow auto-sync | Periodic import of new follows / removal of unfollows |
-| Advanced alert options | Ignore keywords, **category filter** (alert only when the streamer is online in selected Twitch games; up to 5), delayed send, repeat mute, delete previous, pin until stream ends, multistream (prefer GG/VK/YouTube online; send after 15 min anyway), AI cover from the game description on send, schedule stream cancel |
+| Advanced alert options | Ignore keywords, **category filter** (alert only when the streamer is online in selected Twitch games; up to 5), delayed send, restart mute, repeats and overlap guard<!--beta:alert-repeats-overlap--> (beta)<!--/beta:alert-repeats-overlap-->, delete previous, pin until stream ends, multistream (prefer GG/VK/YouTube online; send after 15 min anyway), AI cover from the game description on send, schedule stream cancel |
 | Twitch schedule tools | Publish slots, fix a day, vacation mode on Twitch |
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
@@ -120,16 +122,17 @@ Then the wizard (for stream start / category change / stream end):
 
 1. Twitch channel (if an alert already exists — open editor or continue)
 2. Message template — write your own with placeholders
-3. **Extras** — checklist: image, clean title, ignore keywords ⭐, **categories ⭐** (stream start / category change: allowlist of up to 5 Twitch games — alert only when the streamer is online in selected ones), delayed send ⭐, repeat mute ⭐ (stream start), delete previous in channel/group ⭐, pin message until stream ends ⭐, custom URL buttons ⭐, chat button, “Reminder button” (upcoming), **“Top donations”** (stream end, DonationAlerts), **“Stream cancel” ⭐** (upcoming), **“Multistream” ⭐** (stream start: GoodGame / VK Play / YouTube links — prefer all online, send after 15 min anyway), button color (default / blue / green / red — shown when any button option is on), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
+3. **Extras** — checklist: image, clean title, ignore keywords ⭐, **categories ⭐** (stream start / category change: allowlist of up to 5 Twitch games — alert only when the streamer is online in selected ones), delayed send ⭐, restart mute ⭐ (stream start), **repeats ⭐** / **overlap guard ⭐** (stream start<!--beta:alert-repeats-overlap-->; beta<!--/beta:alert-repeats-overlap--> — overlap is channel/group only), delete previous in channel/group ⭐, pin message until stream ends ⭐, custom URL buttons ⭐, chat button, “Reminder button” (upcoming), **“Top donations”** (stream end, DonationAlerts), **“Stream cancel” ⭐** (upcoming), **“Multistream” ⭐** (stream start: GoodGame / VK Play / YouTube links — prefer all online, send after 15 min anyway), button color (default / blue / green / red — shown when any button option is on), link preview (if the template has a URL); free users see ⭐ options but cannot enable them; unchecked steps are skipped; preview turns off quietly with an image or chat button
 4. Cover (if checked) — `⬜️/✅ Stream preview` (Helix live frame, refreshed every 30 min), `⬜️/✅ Stream GIF preview ⭐` (~30s MP4 as autoplay animation, refreshed every 30 min; Advanced options), `⬜️/✅ Stream video preview ⭐` (~30s muted MP4 as video, refreshed every 30 min; Advanced options), `⬜️/✅ Use game cover`, `🎨 AI image ⭐` (from game description, generated when the alert is sent; Advanced options), or your own photo and position: start or end of caption
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
-7. Repeat mute (minutes) — if checked; **stream start** only
-8. Destination: DM or channel/group (one button)
-9. For channel or group — add the bot and confirm the chat
-10. Delete previous bot message? — if checked, before a new alert the bot deletes prior ones for the same streamer in that chat (type and template do not matter; other streamers are left alone)
+7. Restart mute (minutes) — if checked; **stream start** only
+8. Repeats (comma-separated minutes, e.g. `5,15,30`) — if checked; **stream start** only; `0` = off
+9. Destination: DM or channel/group (one button)
+10. For channel or group — add the bot and confirm the chat
+11. Delete previous bot message? — if checked, before a new alert the bot deletes prior ones for the same streamer in that chat (type and template do not matter; other streamers are left alone)
 
-Steps 4 / 6 / 7 / 10 only after checking Extras (and Premium for ⭐). Chat button, “Reminder button”, clean title, and image are free.
+Steps 4 / 6 / 7 / 8 / 11 only after checking Extras (and Premium for ⭐). Chat button, “Reminder button”, clean title, and image are free.
 
 For **upcoming stream**, after the channel and schedule check — template and settings (“Reminder button” — a button with a share link for a stream-start alert; optional “Stream cancel” ⭐ — separate template when a day’s schedule slots are removed without replacement), then reminder minutes and destination (no “do you want reminders?” ask).
 
@@ -279,7 +282,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report (Mon 10:00 MSK): total users (parentheses = change vs the previous mailing), new users and Stars payers for the week, active trials. On the 1st at 10:00 MSK — the same for the previous calendar month.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (same streamer in chat) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), repeat mute, ignore and **categories** / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (same streamer in chat) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), restart mute, repeats / overlap guard (<!--beta:alert-repeats-overlap-->beta, <!--/beta:alert-repeats-overlap-->live), ignore and **categories** / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

@@ -87,6 +87,9 @@ def main() -> None:
     check_callback_wiring()
     check_alert_setting_order()
     check_button_style_options()
+    from .checks_alert_repeats import check_alert_repeats
+
+    check_alert_repeats()
     from .checks_multistream import (
         check_multistream_dump_roundtrip,
         check_multistream_parse_urls,

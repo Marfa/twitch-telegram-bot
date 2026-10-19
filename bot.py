@@ -563,6 +563,7 @@ from handlers.wizard import (
     receive_link_preview,
     receive_repeat_allow,
     receive_repeat_mute_minutes,
+    receive_repeats_minutes,
     receive_schedule_live_add,
     receive_schedule_reminder_ask,
     receive_schedule_reminder_minutes,
@@ -724,6 +725,8 @@ from handlers.subscriptions import (
     start_edit_custom_buttons,
     start_edit_multistream,
     start_edit_repeat_mute,
+    start_edit_repeats,
+    receive_edit_repeats,
     start_edit_template,
     start_edit_top_donations,
     start_pause_notifications,
@@ -760,6 +763,7 @@ logger = logging.getLogger(__name__)
     DELAY_MINUTES,
     REPEAT_ALLOW,
     REPEAT_MUTE_MINUTES,
+    REPEATS_MINUTES,
     SCHEDULE_REMINDER_ASK,
     SCHEDULE_REMINDER_MINUTES,
     SCHEDULE_CANCEL_TEMPLATE,
@@ -777,6 +781,7 @@ logger = logging.getLogger(__name__)
     EDIT_CATEGORY_FILTER,
     EDIT_DELAY,
     EDIT_REPEAT,
+    EDIT_REPEATS,
     EDIT_SCHEDULE_REMINDER,
     EDIT_SCHEDULE_CANCEL,
     EDIT_CUSTOM_BUTTONS,
@@ -828,7 +833,7 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_DISCOUNT,
     GAME_INFO_SEARCH,
     GAME_INFO_PICK,
-) = range(85)
+) = range(87)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -1946,6 +1951,13 @@ def _edit_options_for_sub(
         and db is not None
         and beta_features.is_enabled(db, sub.owner_id, da.BETA_FEATURE_ID)
     )
+    import alert_repeats as alert_reps
+
+    show_repeats_overlap = (
+        alert_type == "live"
+        and db is not None
+        and beta_features.is_enabled(db, sub.owner_id, alert_reps.BETA_FEATURE_ID)
+    )
     return edit_options_keyboard(
         sub.id,
         lang,
@@ -1976,6 +1988,9 @@ def _edit_options_for_sub(
         show_schedule_cancel=alert_type == "upcoming",
         show_multistream=alert_type == "live",
         show_top_donations=show_top_donations,
+        show_repeats_overlap=show_repeats_overlap,
+        block_overlap=bool(getattr(sub, "block_overlap", False)),
+        block_repeat_when_last=bool(getattr(sub, "block_repeat_when_last", False)),
         button_style=str(getattr(sub, "button_style", "") or ""),
         custom_buttons_count=len(
             cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None))
@@ -2387,6 +2402,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         from handlers.notifications import restore_pending_alert_jobs
         from handlers.ai_clips import resume_ai_clips_jobs
 
+        application.bot_data["job_queue"] = application.job_queue
         restore_pending_alert_jobs(application)
         resume_ai_clips_jobs(application)
         loop = asyncio.get_running_loop()
@@ -3023,7 +3039,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults)$",
+            pattern=r"^edit_f:\d+:(delete_old|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults|overlap|overlap_block|overlap_block_repeats)$",
         ),
         group=0,
     )
@@ -3138,6 +3154,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_repeat_mute),
                 pattern=r"^edit_f:\d+:repeat$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_edit_repeats),
+                pattern=r"^edit_f:\d+:repeats$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_edit_pick), pattern=r"^edit:\d+$"
@@ -3364,6 +3384,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_repeat_mute_minutes),
             ],
+            REPEATS_MINUTES: [
+                _wiz_cancel,
+                _wiz_back,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_repeats_minutes),
+            ],
             SCHEDULE_REMINDER_ASK: [
                 _wiz_cancel,
                 _wiz_back,
@@ -3436,6 +3461,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     receive_edit_game_language_callback, pattern=r"^watch_lang:"
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_repeat),
+            ],
+            EDIT_REPEATS: [
+                _wiz_cancel,
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit_repeats),
             ],
             EDIT_SCHEDULE_REMINDER: [
                 _wiz_cancel,

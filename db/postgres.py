@@ -519,6 +519,27 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS repeat_notify_minutes
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS block_overlap
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS block_repeat_when_last
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT
                 """
             )
@@ -1697,6 +1718,9 @@ class PostgresDatabase:
         button_style: str = "",
         delay_minutes: int = 0,
         suppress_repeat_minutes: int = 0,
+        repeat_notify_minutes: str = "",
+        block_overlap: bool = False,
+        block_repeat_when_last: bool = False,
         schedule_reminder_minutes: int = 0,
         schedule_reminder_configured: bool = False,
         ignore_keywords: str = "",
@@ -1734,7 +1758,8 @@ owner_id, twitch_username, twitch_user_id,
                     delete_previous, notify_delete_fail, disable_link_preview,
                     strip_name_mentions, attach_chat_button, attach_live_remind_button,
                     custom_buttons, multistream_channels, button_style,
-                    delay_minutes, suppress_repeat_minutes, schedule_reminder_minutes,
+                    delay_minutes, suppress_repeat_minutes, repeat_notify_minutes,
+                    block_overlap, block_repeat_when_last, schedule_reminder_minutes,
                     schedule_reminder_configured, ignore_keywords, use_global_ignore,
                     category_filter,
                     image_file_id, image_position, enabled, from_twitch_sync,
@@ -1745,7 +1770,7 @@ owner_id, twitch_username, twitch_user_id,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
                     use_stream_defaults
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1776,6 +1801,9 @@ owner_id, twitch_username, twitch_user_id,
                     ),
                     max(0, int(delay_minutes)),
                     max(0, int(suppress_repeat_minutes)),
+                    str(repeat_notify_minutes or ""),
+                    bool(block_overlap),
+                    bool(block_repeat_when_last),
                     max(0, int(schedule_reminder_minutes)),
                     bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0,
                     ignore_keywords,
@@ -2140,6 +2168,9 @@ owner_id, twitch_username, twitch_user_id,
                     "button_style",
                     "delay_minutes",
                     "suppress_repeat_minutes",
+                    "repeat_notify_minutes",
+                    "block_overlap",
+                    "block_repeat_when_last",
                     "schedule_reminder_minutes",
                     "schedule_reminder_configured",
                     "ignore_keywords",
@@ -2230,6 +2261,9 @@ owner_id, twitch_username, twitch_user_id,
             "button_style",
             "delay_minutes",
             "suppress_repeat_minutes",
+            "repeat_notify_minutes",
+            "block_overlap",
+            "block_repeat_when_last",
             "schedule_reminder_minutes",
             "schedule_reminder_configured",
             "notify_on_live",
@@ -2280,6 +2314,8 @@ owner_id, twitch_username, twitch_user_id,
                 "use_global_ignore",
                 "notify_on_schedule_cancel",
                 "use_stream_defaults",
+                "block_overlap",
+                "block_repeat_when_last",
             ):
                 values.append(bool(value))
             elif key in (
@@ -2290,6 +2326,7 @@ owner_id, twitch_username, twitch_user_id,
                 values.append(max(0, int(value)))
             elif key in (
                 "ignore_keywords",
+                "repeat_notify_minutes",
                 "category_filter",
                 "drops_game_id",
                 "twitch_username",

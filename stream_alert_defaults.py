@@ -16,6 +16,9 @@ STREAM_ALERT_DEFAULT_KEYS: tuple[str, ...] = (
     "category_filter",
     "delay_minutes",
     "suppress_repeat_minutes",
+    "repeat_notify_minutes",
+    "block_overlap",
+    "block_repeat_when_last",
     "delete_previous",
     "notify_delete_fail",
     "delete_other_alerts",
@@ -45,6 +48,10 @@ LOCKED_EDIT_FIELDS: frozenset[str] = frozenset(
         "category_filter",
         "delay",
         "repeat",
+        "repeats",
+        "overlap",
+        "overlap_block",
+        "overlap_block_repeats",
         "delete_old",
         "pin_message",
         "custom_buttons",
@@ -69,6 +76,10 @@ LOCKED_ADVOPT_TOGGLES: frozenset[str] = frozenset(
         "categories",
         "delay",
         "repeat",
+        "repeats",
+        "overlap",
+        "overlap_block",
+        "overlap_block_repeats",
         "delete",
         "pin",
         "buttons",
@@ -95,6 +106,8 @@ _BOOL_KEYS = frozenset(
         "disable_link_preview",
         "schedule_reminder_configured",
         "notify_on_schedule_cancel",
+        "block_overlap",
+        "block_repeat_when_last",
     }
 )
 _INT_KEYS = frozenset(
@@ -117,6 +130,9 @@ def empty_stream_alert_defaults() -> dict[str, Any]:
         "category_filter": "",
         "delay_minutes": 0,
         "suppress_repeat_minutes": 0,
+        "repeat_notify_minutes": "",
+        "block_overlap": False,
+        "block_repeat_when_last": False,
         "delete_previous": False,
         "notify_delete_fail": False,
         "delete_other_alerts": False,
@@ -213,6 +229,10 @@ def filter_defaults_for_alert_type(
     if kind == "end":
         out["category_filter"] = ""
         out["delay_minutes"] = 0
+    if kind != "live":
+        out["repeat_notify_minutes"] = ""
+        out["block_overlap"] = False
+        out["block_repeat_when_last"] = False
     return out
 
 
@@ -231,6 +251,18 @@ def apply_defaults_to_user_data(
     user_data["adv_want_categories"] = bool((fields.get("category_filter") or "").strip())
     user_data["adv_want_delay"] = int(fields.get("delay_minutes") or 0) > 0
     user_data["adv_want_repeat"] = int(fields.get("suppress_repeat_minutes") or 0) > 0
+    from alert_repeats import parse_repeat_notify_minutes
+
+    user_data["adv_want_repeats"] = bool(
+        parse_repeat_notify_minutes(fields.get("repeat_notify_minutes"))
+    )
+    user_data["adv_want_overlap"] = bool(fields.get("block_overlap")) or bool(
+        fields.get("block_repeat_when_last")
+    )
+    user_data["adv_want_overlap_block"] = bool(fields.get("block_overlap"))
+    user_data["adv_want_overlap_block_repeats"] = bool(
+        fields.get("block_repeat_when_last")
+    )
     user_data["adv_want_delete"] = bool(fields.get("delete_previous"))
     user_data["adv_want_pin"] = bool(fields.get("pin_message"))
     from custom_buttons import parse_custom_buttons
@@ -293,6 +325,9 @@ def draft_as_subscription(draft: dict[str, Any], *, owner_id: int = 0) -> Any:
         button_style=str(fields.get("button_style") or ""),
         delay_minutes=int(fields.get("delay_minutes") or 0),
         suppress_repeat_minutes=int(fields.get("suppress_repeat_minutes") or 0),
+        repeat_notify_minutes=str(fields.get("repeat_notify_minutes") or ""),
+        block_overlap=bool(fields.get("block_overlap")),
+        block_repeat_when_last=bool(fields.get("block_repeat_when_last")),
         schedule_reminder_minutes=int(fields.get("schedule_reminder_minutes") or 0),
         schedule_reminder_configured=bool(fields.get("schedule_reminder_configured")),
         notify_on_live=True,
