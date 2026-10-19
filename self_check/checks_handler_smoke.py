@@ -1376,6 +1376,8 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert len(alert_calls) == 1
     assert alert_calls[0].args[2]["alert_type"] == "live"
     assert alert_calls[0].args[2]["dest_type"] == "dm"
+    dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
+    assert dm_sub.last_message_id == 99
     sent_kwargs = bot.send_message.await_args.kwargs
     pause_markup = sent_kwargs.get("reply_markup")
     assert pause_markup is not None

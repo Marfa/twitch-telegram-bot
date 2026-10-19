@@ -1474,12 +1474,11 @@ async def _send_notification(
         clear_chat_unreachable(db, sub.chat_id)
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
         clear_user_blocked(db, sub.chat_id)
-    # Track message id for live preview refresh (incl. DM) and so delete_previous
-    # on any same-streamer subscription can remove prior alerts in channels/groups
-    # (template / alert type do not matter).
+    # Track message id for every successful send (DM + channel/group) so
+    # delete_previous / same-streamer cleanup can remove prior alerts; also
+    # drives live preview refresh when the image is dynamic.
     track_preview = bool(msg) and is_dynamic_alert_image(sub.image_file_id)
-    track_channel_msg = bool(msg) and sub.dest_type != "dm"
-    if track_preview or track_channel_msg:
+    if msg:
         db.set_last_message_id(sub.id, msg.message_id)
         if track_preview:
             from handlers.stream_preview import (

@@ -1416,6 +1416,32 @@ def check_core() -> None:
         assert _load_posthog_seen_report_ids(seen_path) == set()
         _save_posthog_seen_report_ids(seen_path, {"b", "a"})
         assert _load_posthog_seen_report_ids(seen_path) == {"a", "b"}
+        from handlers.monitoring import (
+            mark_posthog_issue_notified,
+            should_notify_posthog_issue,
+        )
+
+        cooldown_path = Path(tmp) / "posthog_issue_notify_cooldown.json"
+        payload_a = {
+            "kind": "created",
+            "name": "ValueError: boom",
+            "fingerprint": "fp-cooldown",
+        }
+        payload_reopen = {
+            "kind": "reopened",
+            "name": "ValueError: boom",
+            "fingerprint": "fp-cooldown",
+        }
+        assert should_notify_posthog_issue(
+            payload_a, now=1_000.0, path=cooldown_path, cooldown_sec=60
+        )
+        mark_posthog_issue_notified(payload_a, now=1_000.0, path=cooldown_path)
+        assert not should_notify_posthog_issue(
+            payload_reopen, now=1_030.0, path=cooldown_path, cooldown_sec=60
+        )
+        assert should_notify_posthog_issue(
+            payload_reopen, now=1_070.0, path=cooldown_path, cooldown_sec=60
+        )
     assert _is_http_timeout(TimeoutError("timed out"))
     import urllib.error
 
