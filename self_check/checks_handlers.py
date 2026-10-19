@@ -2464,6 +2464,40 @@ def check_handlers() -> None:
         assert tr("lucky_premium_reason_monthly", "ru", month="2026-10")
 
         _check_category_watch_digest_and_legacy()
+    _check_broadcast_feedback_refresh()
+
+
+def _check_broadcast_feedback_refresh() -> None:
+    """Broadcast votes: a network error skips one delivery; shutdown stops the refresh."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from telegram.error import NetworkError
+
+    from handlers.broadcast import _refresh_broadcast_feedback_keyboards
+
+    class _Db:
+        def get_broadcast_feedback_counts(self, broadcast_id):
+            return 1, 0
+
+        def get_broadcast_deliveries(self, broadcast_id):
+            return [(1, 10), (2, 20), (3, 30)]
+
+    def _ctx(bot, running=True):
+        app = SimpleNamespace(bot_data={"db": _Db()}, running=running)
+        return SimpleNamespace(application=app, bot=bot)
+
+    bot = AsyncMock()
+    bot.edit_message_reply_markup.side_effect = [None, NetworkError("blip"), None]
+    stopped_bot = AsyncMock()
+    with patch("handlers.broadcast.asyncio.sleep", new_callable=AsyncMock):
+        asyncio.run(_refresh_broadcast_feedback_keyboards(_ctx(bot), 16))
+        asyncio.run(
+            _refresh_broadcast_feedback_keyboards(_ctx(stopped_bot, running=False), 16)
+        )
+    assert bot.edit_message_reply_markup.await_count == 3
+    assert stopped_bot.edit_message_reply_markup.await_count == 0
 
 
 def _check_category_watch_digest_and_legacy() -> None:

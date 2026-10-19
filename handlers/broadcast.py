@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from telegram import InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, NetworkError
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import analytics
@@ -694,6 +694,9 @@ async def _refresh_broadcast_feedback_keyboards(
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
     markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
     for uid, message_id in db.get_broadcast_deliveries(broadcast_id):
+        # Application.stop() waits for this task; end it quickly.
+        if not context.application.running:
+            return
         try:
             await context.bot.edit_message_reply_markup(
                 chat_id=uid,
@@ -702,7 +705,32 @@ async def _refresh_broadcast_feedback_keyboards(
             )
         except (BadRequest, Forbidden):
             pass
+        except NetworkError as exc:
+            logger.warning(
+                "Broadcast %s feedback refresh failed for %s: %s",
+                broadcast_id,
+                uid,
+                exc,
+            )
         await asyncio.sleep(0.05)
+
+
+# broadcast_id -> another vote arrived while the refresh was running.
+_feedback_refresh_pending: dict[int, bool] = {}
+
+
+async def _run_broadcast_feedback_refresh(
+    context: ContextTypes.DEFAULT_TYPE,
+    broadcast_id: int,
+) -> None:
+    try:
+        while True:
+            await _refresh_broadcast_feedback_keyboards(context, broadcast_id)
+            if not _feedback_refresh_pending[broadcast_id]:
+                return
+            _feedback_refresh_pending[broadcast_id] = False
+    finally:
+        _feedback_refresh_pending.pop(broadcast_id, None)
 
 
 async def refresh_broadcast_feedback_keyboards(
@@ -751,8 +779,14 @@ async def on_broadcast_feedback(
             pass
     # History copies are not in broadcast_deliveries. A tap rewrites only the
     # clicked message unless we also push the same counts to every delivery.
-    asyncio.create_task(
-        _refresh_broadcast_feedback_keyboards(context, broadcast_id),
+    # One refresh per broadcast; repeat votes re-run it with fresh counts.
+    if broadcast_id in _feedback_refresh_pending:
+        _feedback_refresh_pending[broadcast_id] = True
+        return
+    _feedback_refresh_pending[broadcast_id] = False
+    context.application.create_task(
+        _run_broadcast_feedback_refresh(context, broadcast_id),
+        update=update,
         name=f"broadcast_feedback_refresh_{broadcast_id}",
     )
 
