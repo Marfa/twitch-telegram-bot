@@ -1919,6 +1919,142 @@ async def _scenario_wizard_extras_checkboxes(db) -> None:
     assert state == _wz()["IGNORE_KEYWORDS"]
 
 
+async def _scenario_wizard_repeats_overlap(db) -> None:
+    """§2 Extras — repeats + overlap guard (live/beta): hidden on end; toggle + CSV."""
+    from handlers.wizard import (
+        _go_advanced_options_prompt,
+        _go_after_repeat,
+        receive_advanced_options_next,
+        receive_advanced_options_toggle,
+        receive_repeats_minutes,
+        _wz,
+    )
+
+    # End alert: no repeats/overlap rows.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "bye",
+            "alert_type": "end",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    end_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:toggle:repeats" not in end_cbs
+    assert "advopt:toggle:overlap" not in end_cbs
+    cap.assert_turn("wizard_repeats_overlap_hidden_on_end")
+
+    # Live + beta: rows visible; overlap master turns on both subs.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "hi https://twitch.tv/x",
+            "alert_type": "live",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    live_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:toggle:repeats" in live_cbs
+    assert "advopt:toggle:overlap" in live_cbs
+    assert "advopt:toggle:overlap_block" not in live_cbs
+    cap.assert_turn("wizard_repeats_overlap_shown_on_live")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:toggle:overlap", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await receive_advanced_options_toggle(update, ctx)
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    assert ctx.user_data.get("adv_want_overlap") is True
+    assert ctx.user_data.get("adv_want_overlap_block") is True
+    assert ctx.user_data.get("adv_want_overlap_block_repeats") is True
+    after_overlap = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:toggle:overlap_block" in after_overlap
+    assert "advopt:toggle:overlap_block_repeats" in after_overlap
+    # Extras only edits inline markup; wizard Reply Cancel stays from prior screen.
+    cap.note_pulse()
+    cap.assert_turn("wizard_overlap_master_enables_subs")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:toggle:repeats", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await receive_advanced_options_toggle(update, ctx)
+    assert ctx.user_data.get("adv_want_repeats") is True
+    cap.note_pulse()
+    cap.assert_turn("wizard_repeats_toggled")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:next", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch(
+        "handlers.wizard._go_category_filter_prompt",
+        new=AsyncMock(return_value=_wz()["CATEGORY_FILTER"]),
+    ):
+        state = await receive_advanced_options_next(update, ctx)
+    assert ctx.user_data.get("block_overlap") is True
+    assert ctx.user_data.get("block_repeat_when_last") is True
+    assert ctx.user_data.get("adv_want_repeats") is True
+    cap.note_pulse()
+    cap.assert_turn("wizard_repeats_overlap_next_flags")
+
+    # After restart-mute step → CSV prompt when repeats checked + beta.
+    update = _msg_update(_FREE_UID, "x", cap)
+    with patch("beta.is_enabled", return_value=True):
+        state = await _go_after_repeat(update, ctx, "ru")
+    assert state == _wz()["REPEATS_MINUTES"]
+    cap.assert_turn("wizard_repeats_minutes_prompt")
+
+    update = _msg_update(_FREE_UID, "5, 15, 30", cap)
+    with patch(
+        "handlers.wizard._go_after_repeats",
+        new=AsyncMock(return_value=_wz()["DEST_TYPE"]),
+    ):
+        state = await receive_repeats_minutes(update, ctx)
+    assert state == _wz()["DEST_TYPE"]
+    assert ctx.user_data.get("repeat_notify_minutes") == "5,15,30"
+    cap.note_pulse()
+    cap.assert_turn("wizard_repeats_minutes_saved")
+
+
 async def _scenario_wizard_top_donations(db) -> None:
     """§2 Extras — top donations (end alert): toggle, OAuth prompt, template step."""
     from handlers.wizard import (
@@ -3858,6 +3994,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_alert_type_other(db)
         await _scenario_other_game_info(db)
         await _scenario_wizard_extras_checkboxes(db)
+        await _scenario_wizard_repeats_overlap(db)
         await _scenario_wizard_top_donations(db)
         await _scenario_wizard_button_style(db)
         await _scenario_wizard_image_ask(db)

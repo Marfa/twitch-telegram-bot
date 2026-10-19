@@ -117,6 +117,7 @@ def _sub_states() -> dict[str, int]:
         EDIT_IGNORE_KEYWORDS,
         EDIT_MULTISTREAM,
         EDIT_REPEAT,
+        EDIT_REPEATS,
         EDIT_TEMPLATE,
         PAUSE_ALERTS_DAYS,
         SYNC_DAYS,
@@ -129,6 +130,7 @@ def _sub_states() -> dict[str, int]:
         "EDIT_IGNORE_KEYWORDS": EDIT_IGNORE_KEYWORDS,
         "EDIT_MULTISTREAM": EDIT_MULTISTREAM,
         "EDIT_REPEAT": EDIT_REPEAT,
+        "EDIT_REPEATS": EDIT_REPEATS,
         "EDIT_TEMPLATE": EDIT_TEMPLATE,
         "PAUSE_ALERTS_DAYS": PAUSE_ALERTS_DAYS,
         "SYNC_DAYS": SYNC_DAYS,
@@ -548,6 +550,26 @@ def _format_sub_line(
                 settings.append(
                     t("sub_list_repeat_mute", lang, minutes=repeat_m)
                 )
+            from alert_repeats import (
+                format_repeat_notify_minutes,
+                parse_repeat_notify_minutes,
+            )
+
+            reps = parse_repeat_notify_minutes(
+                getattr(sub, "repeat_notify_minutes", "")
+            )
+            if reps:
+                settings.append(
+                    t(
+                        "sub_list_repeats",
+                        lang,
+                        minutes=format_repeat_notify_minutes(reps),
+                    )
+                )
+            if bool(getattr(sub, "block_overlap", False)):
+                settings.append(t("sub_list_overlap_block", lang))
+            if bool(getattr(sub, "block_repeat_when_last", False)):
+                settings.append(t("sub_list_overlap_block_repeats", lang))
     if sub.dest_type != "dm" and sub.delete_previous:
         settings.append(t("sub_list_delete_yes", lang))
         if sub.notify_on_category_change and sub.delete_other_alerts:
@@ -4200,6 +4222,107 @@ async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_T
     return _sub_states()["EDIT_REPEAT"]
 
 
+async def start_edit_repeats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    import alert_repeats as alert_reps
+    from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
+
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    sub_id = int(query.data.split(":")[1])
+    db: Database = context.application.bot_data["db"]
+    sub = db.get_subscription(sub_id, query.from_user.id)
+    if not sub:
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    if _alert_type_from_sub(sub) != "live" or not beta_features.is_enabled(
+        db, query.from_user.id, alert_reps.BETA_FEATURE_ID
+    ):
+        await query.edit_message_text(t("sub_not_found", lang))
+        return ConversationHandler.END
+    has_adv = await prem.has_feature(
+        context.bot,
+        db,
+        query.from_user.id,
+        "advanced_mode",
+        channel=sub.twitch_username,
+    )
+    if not alert_reps.beta_or_advanced_mode(
+        db, query.from_user.id, has_advanced_mode=has_adv
+    ):
+        from premium_handlers import send_premium_screen
+
+        await query.edit_message_text(
+            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+        )
+        await send_premium_screen(
+            context.bot,
+            query.from_user.id,
+            lang,
+            db,
+            update=update,
+            context=context,
+            source="edit_field",
+            feature="advanced_mode",
+        )
+        return ConversationHandler.END
+    mins = parse_repeat_notify_minutes(getattr(sub, "repeat_notify_minutes", ""))
+    current = (
+        t("edit_repeats_current_off", lang)
+        if not mins
+        else t(
+            "edit_repeats_current",
+            lang,
+            minutes=format_repeat_notify_minutes(mins),
+        )
+    )
+    context.user_data["edit_sub_id"] = sub_id
+    context.user_data["wizard_edit"] = True
+    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    await query.edit_message_text("✓")
+    await context.bot.send_message(
+        reply_chat_id(update),
+        t("edit_repeats_prompt", lang, sub_id=sub_num, current=current),
+        reply_markup=_wizard(lang, back=False),
+    )
+    return _sub_states()["EDIT_REPEATS"]
+
+
+async def receive_edit_repeats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
+
+    lang = _user_lang(context, update.effective_user.id)
+    sub_id = context.user_data.get("edit_sub_id")
+    if not sub_id:
+        return ConversationHandler.END
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw):
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _sub_states()["EDIT_REPEATS"]
+    if raw == "0":
+        stored = ""
+    else:
+        mins = parse_repeat_notify_minutes(raw)
+        if not mins:
+            await update.effective_message.reply_text(t("repeats_invalid", lang))
+            return _sub_states()["EDIT_REPEATS"]
+        stored = format_repeat_notify_minutes(mins)
+    db: Database = context.application.bot_data["db"]
+    owner_id = update.effective_user.id
+    sub_num = _owner_sub_number(db, owner_id, int(sub_id))
+    if not db.update_subscription(
+        int(sub_id), owner_id, repeat_notify_minutes=stored
+    ):
+        await update.effective_message.reply_text(t("sub_not_found", lang))
+    else:
+        await update.effective_message.reply_text(
+            t("edit_updated", lang, sub_id=sub_num),
+            reply_markup=_menu(lang, owner_id),
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
 async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -4298,6 +4421,66 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer()
         enabled = not bool(sub.strip_name_mentions)
         db.update_subscription(sub_id, query.from_user.id, strip_name_mentions=enabled)
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
+    if field in ("overlap", "overlap_block", "overlap_block_repeats"):
+        import alert_repeats as alert_reps
+
+        if (
+            sub.dest_type == "dm"
+            or _alert_type_from_sub(sub) != "live"
+            or not beta_features.is_enabled(
+                db, query.from_user.id, alert_reps.BETA_FEATURE_ID
+            )
+        ):
+            await query.answer()
+            return
+        has_adv = await prem.has_feature(
+            context.bot,
+            db,
+            query.from_user.id,
+            "advanced_mode",
+            channel=sub.twitch_username,
+        )
+        if not alert_reps.beta_or_advanced_mode(
+            db, query.from_user.id, has_advanced_mode=has_adv
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.answer()
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_field",
+                feature="advanced_mode",
+            )
+            return
+        await query.answer()
+        cur_block = bool(getattr(sub, "block_overlap", False))
+        cur_reps = bool(getattr(sub, "block_repeat_when_last", False))
+        if field == "overlap":
+            turning_on = not (cur_block or cur_reps)
+            kwargs = {
+                "block_overlap": turning_on,
+                "block_repeat_when_last": turning_on,
+            }
+        elif field == "overlap_block":
+            kwargs = {"block_overlap": not cur_block}
+            if not kwargs["block_overlap"] and not cur_reps:
+                kwargs["block_repeat_when_last"] = False
+        else:
+            kwargs = {"block_repeat_when_last": not cur_reps}
+            if not kwargs["block_repeat_when_last"] and not cur_block:
+                kwargs["block_overlap"] = False
+        db.update_subscription(sub_id, query.from_user.id, **kwargs)
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
@@ -5509,6 +5692,9 @@ _TYPE_MIGRATION_KEYS = (
     "top_donations_template",
     "delay_minutes",
     "suppress_repeat_minutes",
+    "repeat_notify_minutes",
+    "block_overlap",
+    "block_repeat_when_last",
     "schedule_reminder_minutes",
     "schedule_reminder_configured",
     "notify_on_live",
@@ -5596,6 +5782,9 @@ def _add_subscription_from_snapshot(
             is_demo=bool(snapshot.get("is_demo")),
             requested=int(snapshot.get("suppress_repeat_minutes") or 0),
         ),
+        repeat_notify_minutes=str(snapshot.get("repeat_notify_minutes") or ""),
+        block_overlap=bool(snapshot.get("block_overlap")),
+        block_repeat_when_last=bool(snapshot.get("block_repeat_when_last")),
         schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
         schedule_reminder_configured=bool(snapshot.get("schedule_reminder_configured")),
         ignore_keywords=str(snapshot.get("ignore_keywords") or ""),

@@ -581,6 +581,9 @@ class Subscription:
     schedule_cancel_template: str = ""
     schedule_cancel_notified_days: str = "[]"
     use_stream_defaults: bool = False
+    repeat_notify_minutes: str = ""
+    block_overlap: bool = False
+    block_repeat_when_last: bool = False
 
 
 @dataclass(frozen=True)
@@ -738,6 +741,8 @@ def migrate_sub_fields_for_alert_type(
         out["notify_delete_fail"] = False
         out["delete_other_alerts"] = False
         out["pin_message"] = False
+        out["block_overlap"] = False
+        out["block_repeat_when_last"] = False
     out["notify_delete_fail"] = bool(out.get("delete_previous"))
     if not out.get("notify_on_category_change") or not out.get("delete_previous"):
         out["delete_other_alerts"] = False
@@ -750,6 +755,10 @@ def migrate_sub_fields_for_alert_type(
         out["top_donations_template"] = ""
     if new_type not in ("live", "category"):
         out["category_filter"] = ""
+    if new_type != "live":
+        out["repeat_notify_minutes"] = ""
+        out["block_overlap"] = False
+        out["block_repeat_when_last"] = False
     return out
 
 
@@ -811,6 +820,13 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "button_style": str(getattr(sub, "button_style", "") or ""),
         "delay_minutes": int(sub.delay_minutes),
         "suppress_repeat_minutes": int(sub.suppress_repeat_minutes),
+        "repeat_notify_minutes": str(
+            getattr(sub, "repeat_notify_minutes", "") or ""
+        ),
+        "block_overlap": bool(getattr(sub, "block_overlap", False)),
+        "block_repeat_when_last": bool(
+            getattr(sub, "block_repeat_when_last", False)
+        ),
         "schedule_reminder_minutes": int(sub.schedule_reminder_minutes),
         "schedule_reminder_configured": bool(sub.schedule_reminder_configured),
         "notify_on_schedule_cancel": bool(
@@ -1261,6 +1277,15 @@ def _row_to_sub(row: Any) -> Subscription:
         else "",
         delay_minutes=int(row["delay_minutes"] or 0),
         suppress_repeat_minutes=int(row["suppress_repeat_minutes"] or 0),
+        repeat_notify_minutes=str(row["repeat_notify_minutes"] or "")
+        if "repeat_notify_minutes" in keys
+        else "",
+        block_overlap=bool(row["block_overlap"])
+        if "block_overlap" in keys
+        else False,
+        block_repeat_when_last=bool(row["block_repeat_when_last"])
+        if "block_repeat_when_last" in keys
+        else False,
         schedule_reminder_minutes=int(row["schedule_reminder_minutes"] or 0)
         if "schedule_reminder_minutes" in keys
         else 0,

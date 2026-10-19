@@ -137,6 +137,7 @@ def _wz() -> dict[str, int]:
         PREMIUM_GATE,
         REPEAT_ALLOW,
         REPEAT_MUTE_MINUTES,
+        REPEATS_MINUTES,
         SCHEDULE_LIVE_ASK,
         SCHEDULE_REMINDER_ASK,
         SCHEDULE_REMINDER_MINUTES,
@@ -183,6 +184,7 @@ def _wz() -> dict[str, int]:
         "PREMIUM_GATE": PREMIUM_GATE,
         "REPEAT_ALLOW": REPEAT_ALLOW,
         "REPEAT_MUTE_MINUTES": REPEAT_MUTE_MINUTES,
+        "REPEATS_MINUTES": REPEATS_MINUTES,
         "SCHEDULE_LIVE_ASK": SCHEDULE_LIVE_ASK,
         "SCHEDULE_REMINDER_ASK": SCHEDULE_REMINDER_ASK,
         "SCHEDULE_REMINDER_MINUTES": SCHEDULE_REMINDER_MINUTES,
@@ -1133,6 +1135,10 @@ _ADVOPT_FEATURE = {
     "categories": "category_filter",
     "delay": "delay",
     "repeat": "repeat",
+    "repeats": "advanced_mode",
+    "overlap": "advanced_mode",
+    "overlap_block": "advanced_mode",
+    "overlap_block_repeats": "advanced_mode",
     "delete": "delete_prev",
     "pin": "pin_message",
     "buttons": "custom_buttons",
@@ -1394,13 +1400,25 @@ async def _advopt_locked(
     cached = context.user_data.get("advopt_locked_cache")
     if not refresh and isinstance(cached, (set, frozenset)):
         return frozenset(cached)
+    import alert_repeats as alert_reps
+
     db: Database = context.application.bot_data["db"]
     channel = _wizard_channel(context)
     locked: set[str] = set()
     for toggle, feature in _ADVOPT_FEATURE.items():
-        if not await prem.has_feature(
+        entitled = await prem.has_feature(
             context.bot, db, user_id, feature, channel=channel
+        )
+        if toggle in (
+            "repeats",
+            "overlap",
+            "overlap_block",
+            "overlap_block_repeats",
         ):
+            entitled = alert_reps.beta_or_advanced_mode(
+                db, user_id, has_advanced_mode=entitled
+            )
+        if not entitled:
             locked.add(toggle)
     frozen = frozenset(locked)
     context.user_data["advopt_locked_cache"] = frozen
@@ -1429,6 +1447,11 @@ async def _advanced_options_markup(
         db, user_id, da.BETA_FEATURE_ID
     )
     show_categories = _show_category_filter_option(context)
+    import alert_repeats as alert_reps
+
+    show_reps = (alert == "live" or not alert) and beta_features.is_enabled(
+        db, user_id, alert_reps.BETA_FEATURE_ID
+    )
     _sync_adv_preview_conflict(context)
     return advanced_options_keyboard(
         lang,
@@ -1438,6 +1461,12 @@ async def _advanced_options_markup(
         want_categories=bool(context.user_data.get("adv_want_categories")),
         want_delay=bool(context.user_data.get("adv_want_delay")),
         want_repeat=bool(context.user_data.get("adv_want_repeat")),
+        want_repeats=bool(context.user_data.get("adv_want_repeats")),
+        want_overlap=bool(context.user_data.get("adv_want_overlap")),
+        want_overlap_block=bool(context.user_data.get("adv_want_overlap_block")),
+        want_overlap_block_repeats=bool(
+            context.user_data.get("adv_want_overlap_block_repeats")
+        ),
         want_delete=bool(context.user_data.get("adv_want_delete")),
         want_pin=bool(context.user_data.get("adv_want_pin")),
         want_buttons=bool(context.user_data.get("adv_want_buttons")),
@@ -1452,6 +1481,8 @@ async def _advanced_options_markup(
         show_categories=show_categories,
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
+        show_repeats=show_reps,
+        show_overlap=show_reps,
         show_preview=show_preview,
         show_buttons=show_buttons,
         show_live_remind=show_live_remind,
@@ -1476,6 +1507,7 @@ def _advanced_options_prompt_text(
     import donationalerts as da
 
     alert = context.user_data.get("alert_type")
+    db: Database = context.application.bot_data["db"]
     lines = [
         t("advanced_options_prompt", lang),
         "",
@@ -1489,9 +1521,13 @@ def _advanced_options_prompt_text(
         lines.append(t("advanced_options_hint_delay", lang))
     if alert == "live" or not alert:
         lines.append(t("advanced_options_hint_repeat", lang))
+        import alert_repeats as alert_reps
+
+        if beta_features.is_enabled(db, user_id, alert_reps.BETA_FEATURE_ID):
+            lines.append(t("advanced_options_hint_repeats", lang))
+            lines.append(t("advanced_options_hint_overlap", lang))
     lines.append(t("advanced_options_hint_delete", lang))
     lines.append(t("advanced_options_hint_pin", lang))
-    db: Database = context.application.bot_data["db"]
     if beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID):
         lines.append(t("advanced_options_hint_buttons", lang))
     lines.append(t("advanced_options_hint_chat", lang))
@@ -1525,6 +1561,10 @@ async def _go_advanced_options_prompt(
         context.user_data.pop("adv_want_categories", None)
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
+    context.user_data.setdefault("adv_want_repeats", False)
+    context.user_data.setdefault("adv_want_overlap", False)
+    context.user_data.setdefault("adv_want_overlap_block", False)
+    context.user_data.setdefault("adv_want_overlap_block_repeats", False)
     context.user_data.setdefault("adv_want_delete", False)
     context.user_data.setdefault("adv_want_pin", False)
     context.user_data.setdefault("adv_want_buttons", False)
@@ -1608,6 +1648,10 @@ async def receive_advanced_options_toggle(
         "categories": "adv_want_categories",
         "delay": "adv_want_delay",
         "repeat": "adv_want_repeat",
+        "repeats": "adv_want_repeats",
+        "overlap": "adv_want_overlap",
+        "overlap_block": "adv_want_overlap_block",
+        "overlap_block_repeats": "adv_want_overlap_block_repeats",
         "delete": "adv_want_delete",
         "pin": "adv_want_pin",
         "buttons": "adv_want_buttons",
@@ -1624,6 +1668,16 @@ async def receive_advanced_options_toggle(
     if flag == "categories" and not _show_category_filter_option(context):
         await query.answer()
         return _wz()["ADVANCED_OPTIONS"]
+    if flag in ("repeats", "overlap", "overlap_block", "overlap_block_repeats"):
+        import alert_repeats as alert_reps
+        import beta as beta_features
+
+        db: Database = context.application.bot_data["db"]
+        if context.user_data.get("alert_type") not in (None, "", "live") or not (
+            beta_features.is_enabled(db, query.from_user.id, alert_reps.BETA_FEATURE_ID)
+        ):
+            await query.answer()
+            return _wz()["ADVANCED_OPTIONS"]
     if flag == "live_remind":
         import beta as beta_features
 
@@ -1664,13 +1718,20 @@ async def receive_advanced_options_toggle(
     feature = _ADVOPT_FEATURE.get(flag)
     if turning_on and feature:
         db: Database = context.application.bot_data["db"]
-        if not await prem.has_feature(
+        entitled = await prem.has_feature(
             context.bot,
             db,
             query.from_user.id,
             feature,
             channel=_wizard_channel(context),
-        ):
+        )
+        if flag in ("repeats", "overlap", "overlap_block", "overlap_block_repeats"):
+            import alert_repeats as alert_reps
+
+            entitled = alert_reps.beta_or_advanced_mode(
+                db, query.from_user.id, has_advanced_mode=entitled
+            )
+        if not entitled:
             from premium_handlers import send_premium_screen
 
             await query.answer(t("advanced_options_premium_only", lang), show_alert=True)
@@ -1687,6 +1748,18 @@ async def receive_advanced_options_toggle(
             return _wz()["ADVANCED_OPTIONS"]
     # Flip + answer immediately; locked premium flags are cached for this screen.
     context.user_data[key] = turning_on
+    if flag == "overlap":
+        if turning_on:
+            context.user_data["adv_want_overlap_block"] = True
+            context.user_data["adv_want_overlap_block_repeats"] = True
+        else:
+            context.user_data["adv_want_overlap_block"] = False
+            context.user_data["adv_want_overlap_block_repeats"] = False
+    elif flag in ("overlap_block", "overlap_block_repeats"):
+        context.user_data["adv_want_overlap"] = bool(
+            context.user_data.get("adv_want_overlap_block")
+            or context.user_data.get("adv_want_overlap_block_repeats")
+        )
     if not (
         context.user_data.get("adv_want_buttons")
         or context.user_data.get("adv_want_chat")
@@ -1745,6 +1818,8 @@ async def receive_advanced_options_next(
         ("categories", "adv_want_categories"),
         ("delay", "adv_want_delay"),
         ("repeat", "adv_want_repeat"),
+        ("repeats", "adv_want_repeats"),
+        ("overlap", "adv_want_overlap"),
         ("delete", "adv_want_delete"),
         ("pin", "adv_want_pin"),
         ("buttons", "adv_want_buttons"),
@@ -1764,6 +1839,20 @@ async def receive_advanced_options_next(
         context.user_data["delay_minutes"] = 0
     if not context.user_data.get("adv_want_repeat"):
         context.user_data["suppress_repeat_minutes"] = 0
+    if not context.user_data.get("adv_want_repeats"):
+        context.user_data["repeat_notify_minutes"] = ""
+    if not context.user_data.get("adv_want_overlap"):
+        context.user_data["block_overlap"] = False
+        context.user_data["block_repeat_when_last"] = False
+        context.user_data["adv_want_overlap_block"] = False
+        context.user_data["adv_want_overlap_block_repeats"] = False
+    else:
+        context.user_data["block_overlap"] = bool(
+            context.user_data.get("adv_want_overlap_block")
+        )
+        context.user_data["block_repeat_when_last"] = bool(
+            context.user_data.get("adv_want_overlap_block_repeats")
+        )
     if not context.user_data.get("adv_want_delete"):
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
@@ -2051,10 +2140,63 @@ async def _go_schedule_reminder_minutes(
     _set_wizard_back(context, _wz()["SCHEDULE_REMINDER_MINUTES"])
     return _wz()["SCHEDULE_REMINDER_MINUTES"]
 
+async def _go_repeats_minutes_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    await update.effective_message.reply_text(
+        t("repeats_minutes_prompt", lang),
+        reply_markup=_wizard(lang),
+    )
+    _set_wizard_back(context, _wz()["REPEATS_MINUTES"])
+    return _wz()["REPEATS_MINUTES"]
+
+
+async def receive_repeats_minutes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
+
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw):
+        await update.effective_message.reply_text(t("finish_setup_first", lang))
+        return _wz()["REPEATS_MINUTES"]
+    if raw == "0":
+        context.user_data["repeat_notify_minutes"] = ""
+        return await _go_after_repeats(update, context, lang)
+    mins = parse_repeat_notify_minutes(raw)
+    if not mins:
+        await update.effective_message.reply_text(t("repeats_invalid", lang))
+        return _wz()["REPEATS_MINUTES"]
+    context.user_data["repeat_notify_minutes"] = format_repeat_notify_minutes(mins)
+    return await _go_after_repeats(update, context, lang)
+
+
 async def _go_after_repeat(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    """After repeat step: offer schedule reminders if Twitch schedule exists."""
+    """After restart-mute step: optional repeats CSV, then schedule reminders."""
+    import alert_repeats as alert_reps
+    import beta as beta_features
+
+    db: Database = context.application.bot_data["db"]
+    user_id = update.effective_user.id
+    if (
+        context.user_data.get("advanced_options_done")
+        and context.user_data.get("adv_want_repeats")
+        and (context.user_data.get("alert_type") in (None, "", "live"))
+        and beta_features.is_enabled(db, user_id, alert_reps.BETA_FEATURE_ID)
+    ):
+        return await _go_repeats_minutes_prompt(update, context, lang)
+    if not context.user_data.get("adv_want_repeats"):
+        context.user_data["repeat_notify_minutes"] = ""
+    return await _go_after_repeats(update, context, lang)
+
+
+async def _go_after_repeats(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
+) -> int:
+    """After optional scheduled repeats: schedule reminders / dest."""
     context.user_data.setdefault("schedule_reminder_minutes", 0)
     context.user_data.setdefault("schedule_reminder_configured", False)
     context.user_data.pop("schedule_reminder_offered", None)
@@ -2227,6 +2369,8 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return await _go_delay_minutes_prompt(update, context, lang)
         return await _go_delay_prompt(update, context, lang)
     if state == _wz()["REPEAT_MUTE_MINUTES"]:
+        return await _go_repeat_prompt(update, context, lang)
+    if state == _wz()["REPEATS_MINUTES"]:
         return await _go_repeat_prompt(update, context, lang)
     if state == _wz()["SCHEDULE_REMINDER_ASK"]:
         return await _go_repeat_prompt(update, context, lang)
@@ -3954,7 +4098,30 @@ async def _finish_subscription(
         bool(data.get("pin_message", False) or data.get("adv_want_pin", False))
         and dest_type != "dm"
     )
+    from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
+
     alert_type = str(data.get("alert_type") or "")
+    repeat_notify_minutes = (
+        format_repeat_notify_minutes(
+            parse_repeat_notify_minutes(str(data.get("repeat_notify_minutes") or ""))
+        )
+        if alert_type in ("", "live") or not alert_type
+        else ""
+    )
+    # Treat missing alert_type as live (wizard default).
+    if alert_type and alert_type != "live":
+        repeat_notify_minutes = ""
+    block_overlap = (
+        bool(data.get("block_overlap")) and dest_type != "dm" and alert_type in ("", "live")
+    )
+    block_repeat_when_last = (
+        bool(data.get("block_repeat_when_last"))
+        and dest_type != "dm"
+        and alert_type in ("", "live")
+    )
+    if alert_type and alert_type != "live":
+        block_overlap = False
+        block_repeat_when_last = False
     notify_on_end = bool(data.get("notify_on_end", False)) or alert_type == "end"
     notify_on_category_change = (
         bool(data.get("notify_on_category_change", False)) or alert_type == "category"
@@ -4024,6 +4191,9 @@ async def _finish_subscription(
                     is_demo=demo_mode.is_active(owner_id),
                     requested=int(data.get("suppress_repeat_minutes", 0)),
                 ),
+                repeat_notify_minutes=repeat_notify_minutes,
+                block_overlap=block_overlap,
+                block_repeat_when_last=block_repeat_when_last,
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 use_global_ignore=bool(data.get("use_global_ignore")),
                 category_filter=str(data.get("category_filter") or ""),
@@ -4152,6 +4322,13 @@ async def _finish_subscription(
                         is_demo=demo_mode.is_active(owner_id),
                         requested=int(data.get("suppress_repeat_minutes", 0)),
                     )
+                ),
+                repeat_notify_minutes=(
+                    repeat_notify_minutes if notify_on_live else ""
+                ),
+                block_overlap=block_overlap if notify_on_live else False,
+                block_repeat_when_last=(
+                    block_repeat_when_last if notify_on_live else False
                 ),
                 schedule_reminder_minutes=int(
                     data.get("schedule_reminder_minutes", 0)

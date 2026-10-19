@@ -54,6 +54,7 @@ ALERT_JOB_END = "end"
 ALERT_JOB_CATEGORY = "category"
 ALERT_JOB_MULTISTREAM = "multistream"
 ALERT_JOB_LIVE_GAME = "live_game"
+ALERT_JOB_REPEAT = "repeat"
 
 
 async def _should_skip_ignored_alert(
@@ -293,18 +294,81 @@ def schedule_delayed_live_notification(
     return True
 
 
+def schedule_repeat_notify_jobs(
+    job_queue,
+    *,
+    db: Database,
+    sub: Subscription,
+    stream_id: str,
+) -> None:
+    """Arm CSV-minute repeat sends after a successful live alert."""
+    from alert_repeats import (
+        format_repeat_notify_minutes,
+        parse_repeat_notify_minutes,
+        repeat_notify_job_name,
+    )
+
+    if job_queue is None:
+        return
+    minutes_list = parse_repeat_notify_minutes(
+        getattr(sub, "repeat_notify_minutes", "")
+    )
+    if not minutes_list:
+        return
+    # Normalize stored blob once (empty string stays empty).
+    _ = format_repeat_notify_minutes(minutes_list)
+    sid = str(stream_id or "").strip()
+    for minutes in minutes_list:
+        name = repeat_notify_job_name(sub.id, minutes)
+        schedule_alert_run_once(
+            job_queue,
+            _send_repeat_notification,
+            when=int(minutes) * 60,
+            data={"sub_id": sub.id, "stream_id": sid, "minutes": minutes},
+            name=name,
+            replace_existing=True,
+            db=db,
+            kind=ALERT_JOB_REPEAT,
+        )
+
+
+def cancel_repeat_notify_jobs(
+    job_queue,
+    db: Database | None,
+    sub_id: int,
+) -> None:
+    from alert_repeats import repeat_notify_job_prefix
+
+    prefix = repeat_notify_job_prefix(sub_id)
+    if job_queue is not None:
+        try:
+            for job in list(job_queue.jobs()):
+                name = getattr(job, "name", None) or getattr(job, "id", None)
+                if name and str(name).startswith(prefix):
+                    job.schedule_removal()
+        except Exception:
+            logger.exception("Failed removing repeat jobs for sub %s", sub_id)
+    if db is None:
+        return
+    for row in db.list_pending_alert_jobs():
+        if str(row.job_name).startswith(prefix):
+            db.delete_pending_alert_job(row.job_name)
+
+
 def restore_pending_alert_jobs(application: Application) -> int:
     """Re-arm delayed alert jobs after process restart. Returns restored count."""
     db: Database | None = application.bot_data.get("db")
     jq = application.job_queue
     if db is None or jq is None:
         return 0
+    application.bot_data["job_queue"] = jq
     kind_cb = {
         ALERT_JOB_LIVE: _send_delayed_notification,
         ALERT_JOB_END: _send_delayed_end_notification,
         ALERT_JOB_CATEGORY: _send_delayed_category_notification,
         ALERT_JOB_MULTISTREAM: _send_delayed_notification,
         ALERT_JOB_LIVE_GAME: _send_delayed_notification,
+        ALERT_JOB_REPEAT: _send_repeat_notification,
     }
     now = datetime.now(timezone.utc)
     restored = 0
@@ -415,6 +479,65 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
         stream_id=str(job_data.get("stream_id") or ""),
         twitch=twitch,
         bot_data=context.application.bot_data,
+        job_queue=context.application.job_queue,
+    )
+
+
+async def _send_repeat_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Re-send the same live alert at a configured offset; skip if offline / when-last."""
+    from alert_repeats import is_last_alert_in_chat
+    from bot import _render_sub_template
+
+    _consume_pending_alert_job(context)
+    job_data = context.job.data or {}
+    sub_id = int(job_data.get("sub_id") or 0)
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    sub = db.get_subscription_by_id(sub_id)
+    if not sub or not sub.enabled or not sub.notify_on_live:
+        return
+    try:
+        live_streams = await asyncio.to_thread(
+            twitch.get_live_streams, [sub.twitch_user_id]
+        )
+    except Exception:
+        logger.exception("Twitch poll failed for repeat notification sub %s", sub_id)
+        return
+    if sub.twitch_user_id not in live_streams:
+        return
+    if bool(getattr(sub, "block_repeat_when_last", False)) and is_last_alert_in_chat(
+        db, sub
+    ):
+        logger.info(
+            "Skip repeat sub=%s: block_repeat_when_last and alert is still last",
+            sub.id,
+        )
+        return
+    stream = live_streams[sub.twitch_user_id]
+    username = stream.get("user_login", stream.get("user_name", ""))
+    game = stream.get("game_name", "")
+    title = stream.get("title", "")
+    if await _should_skip_ignored_alert(
+        sub, db, twitch, game, title, stream.get("game_id")
+    ):
+        return
+    if _should_skip_category_filter(sub, stream.get("game_id")):
+        return
+    text = _render_sub_template(
+        sub, username, game, title, twitch=twitch, stream=stream
+    )
+    await _send_notification(
+        context.bot,
+        db,
+        sub,
+        text,
+        alert_type="live",
+        stream=stream,
+        stream_id=str(job_data.get("stream_id") or stream.get("id") or ""),
+        twitch=twitch,
+        bot_data=context.application.bot_data,
+        job_queue=context.application.job_queue,
+        is_scheduled_repeat=True,
     )
 
 
@@ -713,6 +836,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 stream_id = restart_old_sids.get(uid, "")
                 end_stream = restart_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):
+                    cancel_repeat_notify_jobs(context.job_queue, db, sub.id)
                     if is_category_watch_sub(sub):
                         continue
                     if not sub.notify_on_end:
@@ -844,6 +968,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 stream_id = offline_stream_ids.get(uid, "")
                 end_stream = offline_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):
+                    cancel_repeat_notify_jobs(context.job_queue, db, sub.id)
                     if is_category_watch_sub(sub):
                         continue
                     if not sub.notify_on_end:

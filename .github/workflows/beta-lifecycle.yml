@@ -27,18 +27,18 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python scripts/beta-lifecycle.py
 
-      - name: Commit manifest updates
+      - name: Commit GA promotion (manifest + stripped beta doc marks)
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if git diff --quiet beta/manifest.json; then
-            echo "No manifest changes"
+          git add beta/manifest.json README.md README.en.md docs/user-flow-map.ru.md webapp/guide/
+          if git diff --cached --quiet; then
+            echo "No lifecycle changes"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add beta/manifest.json
           git commit -m "Promote beta features to GA"
           git push
           # GITHUB_TOKEN pushes do not trigger other workflows; deploy explicitly.

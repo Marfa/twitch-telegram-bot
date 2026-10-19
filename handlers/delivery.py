@@ -1243,6 +1243,53 @@ async def purge_stale_previous_messages(context) -> None:
         logger.info("Purged %s stale previous alert message(s)", purged)
 
 
+async def _probe_alert_message_exists(
+    bot,
+    db: Database,
+    sub: Subscription,
+    *,
+    lang: str | None = None,
+    bot_username: str | None = None,
+) -> bool:
+    """True if last_message_id still exists (Bot API probe via edit_reply_markup)."""
+    mid = getattr(sub, "last_message_id", None)
+    if mid is None:
+        return False
+    locale = lang or db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    markup = _alert_chat_button_markup(
+        sub, locale, db=db, bot_username=bot_username
+    )
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=sub.chat_id,
+            message_id=int(mid),
+            reply_markup=markup,
+        )
+        return True
+    except BadRequest as exc:
+        err = str(exc).lower()
+        if "message is not modified" in err:
+            return True
+        if any(
+            token in err
+            for token in (
+                "message to edit not found",
+                "message not found",
+                "message identifier is not specified",
+            )
+        ):
+            return False
+        logger.warning(
+            "Overlap probe failed for sub %s mid %s: %s",
+            sub.id,
+            mid,
+            exc,
+        )
+        return True
+    except Forbidden:
+        return True
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -1256,6 +1303,8 @@ async def _send_notification(
     twitch: TwitchClient | None = None,
     parse_mode: str | None = None,
     bot_data: dict | None = None,
+    job_queue=None,
+    is_scheduled_repeat: bool = False,
 ) -> bool:
     if _user_notifications_paused(db, sub.owner_id):
         return True
@@ -1263,6 +1312,26 @@ async def _send_notification(
         return True
     if db.is_chat_unreachable(sub.chat_id):
         return True
+    # Overlap block: skip new alerts while previous message for this sub still exists.
+    # Scheduled repeats use block_repeat_when_last instead (checked by the job).
+    if (
+        not is_scheduled_repeat
+        and sub.dest_type != "dm"
+        and bool(getattr(sub, "block_overlap", False))
+        and getattr(sub, "last_message_id", None)
+    ):
+        bot_username = await _cached_bot_username(bot, bot_data)
+        exists = await _probe_alert_message_exists(
+            bot, db, sub, bot_username=bot_username
+        )
+        if exists:
+            logger.info(
+                "Skip alert sub=%s: overlap block, message %s still present",
+                sub.id,
+                sub.last_message_id,
+            )
+            return False
+        db.set_last_message_id(sub.id, None)
     await _maybe_notify_stored_template_typos(bot, db, sub)
     if sub.delete_previous and sub.dest_type != "dm":
         await _delete_previous_before_send(bot, db, sub)
@@ -1470,11 +1539,13 @@ async def _send_notification(
         clear_chat_unreachable(db, sub.chat_id)
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
         clear_user_blocked(db, sub.chat_id)
-    # Track message id for delete_previous (channels/groups) and for live
-    # stream photo/video preview refresh — including DM, so editMessageMedia works.
+    # Track message id for delete_previous / overlap / repeats (channels/groups)
+    # and for live stream photo/video preview refresh — including DM for preview.
+    from alert_repeats import sub_tracks_last_message_for_overlap
+
     track_preview = bool(msg) and is_dynamic_alert_image(sub.image_file_id)
-    track_delete_prev = bool(msg) and sub.dest_type != "dm" and bool(sub.delete_previous)
-    if track_preview or track_delete_prev:
+    track_overlap = bool(msg) and sub_tracks_last_message_for_overlap(sub)
+    if track_preview or track_overlap:
         db.set_last_message_id(sub.id, msg.message_id)
         if track_preview:
             from handlers.stream_preview import (
@@ -1496,9 +1567,29 @@ async def _send_notification(
         await _pin_after_send(bot, db, sub, msg.message_id)
     import premium as prem
 
-    suppress_m = prem.effective_suppress_repeat_minutes(sub)
-    if suppress_m > 0:
-        db.set_notify_cooldown(sub.id, suppress_m)
+    # Intentional scheduled repeats must not arm / refresh restart mute cooldown.
+    if not is_scheduled_repeat:
+        suppress_m = prem.effective_suppress_repeat_minutes(sub)
+        if suppress_m > 0:
+            db.set_notify_cooldown(sub.id, suppress_m)
+    jq = job_queue
+    if jq is None and bot_data is not None:
+        jq = bot_data.get("job_queue")
+    if (
+        alert_type == "live"
+        and not is_scheduled_repeat
+        and msg is not None
+        and jq is not None
+    ):
+        from handlers.notifications import schedule_repeat_notify_jobs
+
+        schedule_repeat_notify_jobs(
+            jq,
+            db=db,
+            sub=sub,
+            stream_id=stream_id
+            or (str(stream.get("id") or "") if stream else ""),
+        )
     # DM inbox history is user-facing; group/channel goes to ops-only delivery log.
     stream_uid = str((stream or {}).get("user_id") or "").strip()
     history_uid = (
