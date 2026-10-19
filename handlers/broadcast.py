@@ -694,7 +694,7 @@ async def _refresh_broadcast_feedback_keyboards(
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
     markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
     for uid, message_id in db.get_broadcast_deliveries(broadcast_id):
-        # Stop before shutdown closes the HTTP client.
+        # Application.stop() waits for this task; end it quickly.
         if not context.application.running:
             return
         try:
@@ -725,13 +725,10 @@ async def _run_broadcast_feedback_refresh(
 ) -> None:
     try:
         while True:
-            _feedback_refresh_pending[broadcast_id] = False
             await _refresh_broadcast_feedback_keyboards(context, broadcast_id)
-            if (
-                not _feedback_refresh_pending.get(broadcast_id)
-                or not context.application.running
-            ):
+            if not _feedback_refresh_pending[broadcast_id]:
                 return
+            _feedback_refresh_pending[broadcast_id] = False
     finally:
         _feedback_refresh_pending.pop(broadcast_id, None)
 

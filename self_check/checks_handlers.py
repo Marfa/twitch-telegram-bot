@@ -2490,15 +2490,13 @@ def _check_broadcast_feedback_refresh() -> None:
 
     bot = AsyncMock()
     bot.edit_message_reply_markup.side_effect = [None, NetworkError("blip"), None]
-    with patch("handlers.broadcast.asyncio.sleep", new_callable=AsyncMock):
-        asyncio.run(_refresh_broadcast_feedback_keyboards(_ctx(bot), 16))
-    assert bot.edit_message_reply_markup.await_count == 3
-
     stopped_bot = AsyncMock()
     with patch("handlers.broadcast.asyncio.sleep", new_callable=AsyncMock):
+        asyncio.run(_refresh_broadcast_feedback_keyboards(_ctx(bot), 16))
         asyncio.run(
             _refresh_broadcast_feedback_keyboards(_ctx(stopped_bot, running=False), 16)
         )
+    assert bot.edit_message_reply_markup.await_count == 3
     assert stopped_bot.edit_message_reply_markup.await_count == 0
 
 
