@@ -515,7 +515,6 @@ from handlers.wizard import (
     _go_schedule_reminder_ask,
     _go_schedule_reminder_minutes,
     _go_template_prompt,
-    _has_sibling_publication_subs,
     _membership_check_blocked,
     _offer_template_typo_fix,
     _parse_dest_input,
