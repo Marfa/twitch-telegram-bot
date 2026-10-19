@@ -892,6 +892,10 @@ def check_handlers() -> None:
         assert db.set_referred_by(20, 11) is False  # already set
         assert db.get_referred_by(20) == 10
         assert db.set_referred_by(10, 10) is False  # self
+        db.set_user_start_arg(20, "referral")
+        assert db.get_user_start_arg(20) == "referral"
+        db.set_user_start_arg(20, "share")
+        assert db.get_user_start_arg(20) == "share"
         apply_stars_payment(
             db, 20, charge_id="pay1", until_unix=10**12, stars_paid=100
         )

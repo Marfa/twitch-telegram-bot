@@ -296,7 +296,7 @@
   "lang_pick": "Scegli la lingua:",
   "lang_set": "Lingua impostata: italiano.",
   "start_welcome": "Ciao! Invio notifiche quando gli stream Twitch vanno in diretta.\nComandi di aiuto: /help\nTocca Nuova iscrizione per aggiungerne una.",
-  "start_welcome_demo": "È stato aggiunto un avviso demo di inizio live per {channel} (per ora in pausa). Quando andrà in diretta, il bot scriverà qui dopo un breve ritardo — tocca Attiva avviso per riceverlo, oppure Elimina iscrizione se non ti serve.\n\nSuggerimento: non serve bloccare il bot — lascia il demo in pausa o eliminalo quando vuoi.",
+  "start_welcome_demo": "È stato aggiunto un avviso demo di inizio live per {channel} (per ora in pausa). Quando andrà in diretta, il bot scriverà qui dopo un breve ritardo — tocca Attiva avviso per riceverlo, oppure Elimina iscrizione se non ti serve.\n\nIl demo può essere disattivato o eliminato in qualsiasi momento.",
   "welcome_demo_enabled": "Avviso demo per {channel} attivo. Quando andrà in diretta, riceverai un messaggio in questa chat circa 10 minuti dopo l'inizio.",
   "welcome_demo_deleted": "Iscrizione demo rimossa.",
   "premium_channel_intro": "Se possiedi un canale Twitch, puoi rendere gratuite per gli utenti del bot tutte le interazioni con esso.\n\nIl tuo canale apparirà sempre anche nei risultati di ricerca Avviso di gioco quando corrisponde alla query. E verrà consigliato ai nuovi utenti del bot.\n\nConferma la proprietà del canale con il pulsante sotto. Costo: {stars} Stars al mese (abbonamento Stars).",

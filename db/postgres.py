@@ -690,6 +690,7 @@ class PostgresDatabase:
                 "premium_twitch_checked_at TIMESTAMPTZ",
                 "premium_stars_paid_at TIMESTAMPTZ",
                 "referred_by BIGINT",
+                "start_arg TEXT NOT NULL DEFAULT ''",
                 "premium_trial_until BIGINT NOT NULL DEFAULT 0",
                 "premium_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
                 "premium_features TEXT NOT NULL DEFAULT ''",
@@ -2371,6 +2372,28 @@ owner_id, twitch_username, twitch_user_id,
                 ON CONFLICT (user_id) DO UPDATE SET locale = EXCLUDED.locale
                 """,
                 (user_id, locale),
+            )
+
+    def get_user_start_arg(self, user_id: int) -> str:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT start_arg FROM users WHERE user_id = %s", (user_id,)
+            )
+            row = cur.fetchone()
+        if not row or not row["start_arg"]:
+            return ""
+        return str(row["start_arg"])
+
+    def set_user_start_arg(self, user_id: int, start_arg: str) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO users (user_id, start_arg) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET start_arg = EXCLUDED.start_arg
+                """,
+                (user_id, start_arg),
             )
 
     def get_unique_twitch_user_ids(self) -> list[str]:

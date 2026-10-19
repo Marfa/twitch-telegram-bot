@@ -997,12 +997,15 @@ async def _send_welcome_bundle(
 
     db: Database = application.bot_data["db"]
     await sync_stream_chat_menu_button(bot, db, user_id)
+    from outbound_messages import note_outbound
+
     with message_fx_disabled():
         await bot.send_message(
             chat_id,
             t("start_welcome", lang),
             reply_markup=_menu(lang, user_id),
         )
+    note_outbound(user_id, "welcome")
     if lucky_nth:
         await grant_and_announce_lucky_nth(
             bot, db, user_id=user_id, lang=lang, user_count=int(lucky_nth)
@@ -1020,6 +1023,7 @@ async def _send_welcome_bundle(
         t("start_welcome_demo", lang, channel=channel),
         reply_markup=welcome_demo_keyboard(lang, sub_id, enabled=enabled),
     )
+    note_outbound(user_id, "welcome_demo")
 
 
 async def _send_welcome(
@@ -1084,6 +1088,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     from handlers.premium_gift import apply_gift_start_arg
 
     apply_gift_start_arg(db, context, context.args)
+    start_arg = _start_arg_kind(context.args)
+    if start_arg:
+        db.set_user_start_arg(user_id, start_arg)
     lang = db.get_user_locale(user_id)
     analytics.capture(
         user_id,
@@ -1091,6 +1098,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         {
             "has_locale": bool(lang),
             "has_start_arg": bool(context.args),
+            "start_arg": start_arg,
             "is_first_start": is_first_start,
         },
     )
@@ -1103,6 +1111,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return await _send_welcome(
         update, context, lang, first_start=is_first_start, lucky_nth=lucky_nth
     )
+
+
+def _start_arg_kind(args: list[str] | None) -> str:
+    if not args:
+        return ""
+    raw = (args[0] or "").strip()
+    if raw.startswith("ref_"):
+        return "referral"
+    if raw.startswith("share_"):
+        return "share"
+    if raw.startswith("gift_"):
+        return "gift"
+    if raw.startswith("ah_"):
+        return "alert_history"
+    if raw.startswith("pause_"):
+        return "pause"
+    return "other" if raw else ""
 
 
 def _apply_referral_start_arg(db: Database, user_id: int, args: list[str] | None) -> None:

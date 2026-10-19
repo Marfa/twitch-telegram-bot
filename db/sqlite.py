@@ -471,6 +471,7 @@ class SqliteDatabase:
             ("premium_twitch_checked_at", "TEXT"),
             ("premium_stars_paid_at", "TEXT"),
             ("referred_by", "INTEGER"),
+            ("start_arg", "TEXT NOT NULL DEFAULT ''"),
             ("premium_trial_until", "INTEGER NOT NULL DEFAULT 0"),
             ("premium_trial_used", "INTEGER NOT NULL DEFAULT 0"),
             ("premium_features", "TEXT NOT NULL DEFAULT ''"),
@@ -2112,6 +2113,23 @@ owner_id, twitch_username, twitch_user_id,
                 "INSERT INTO users (user_id, locale) VALUES (?, ?) "
                 "ON CONFLICT(user_id) DO UPDATE SET locale = excluded.locale",
                 (user_id, locale),
+            )
+
+    def get_user_start_arg(self, user_id: int) -> str:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT start_arg FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        if not row or not row["start_arg"]:
+            return ""
+        return str(row["start_arg"])
+
+    def set_user_start_arg(self, user_id: int, start_arg: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO users (user_id, start_arg) VALUES (?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET start_arg = excluded.start_arg",
+                (user_id, start_arg),
             )
 
     def get_unique_twitch_user_ids(self) -> list[str]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
@@ -593,20 +594,25 @@ def user_block_analytics_props(db: Database, user_id: int) -> dict[str, Any]:
 
     props: dict[str, Any] = {}
     subs: list[Any] = []
+    enabled: list[Any] = []
+    has_demo = False
+    promo_only = False
     get_subs = getattr(db, "get_subscriptions_by_owner", None)
     if callable(get_subs):
         subs = list(get_subs(user_id) or [])
         enabled = [s for s in subs if getattr(s, "enabled", False)]
+        has_demo = any(bool(getattr(s, "is_demo", False)) for s in subs)
+        promo_only = len(subs) == 1 and prem.is_promo_channel(
+            getattr(subs[0], "twitch_username", None), db
+        )
         props["active_subs"] = len(enabled)
         props["total_subs"] = len(subs)
-        props["has_demo_sub"] = any(bool(getattr(s, "is_demo", False)) for s in subs)
+        props["has_demo_sub"] = has_demo
         props["from_import"] = any(
             bool(getattr(s, "from_twitch_sync", False)) for s in subs
         )
-        props["welcome_seed_only"] = (
-            len(subs) == 1
-            and not bool(getattr(subs[0], "enabled", False))
-            and prem.is_promo_channel(getattr(subs[0], "twitch_username", None), db)
+        props["welcome_seed_only"] = promo_only and not bool(
+            getattr(subs[0], "enabled", False)
         )
     try:
         props["notifications_paused"] = bool(_user_notifications_paused(db, user_id))
@@ -644,6 +650,47 @@ def user_block_analytics_props(db: Database, user_id: int) -> dict[str, Any]:
                     datetime.now(timezone.utc) - first.astimezone(timezone.utc)
                 ).total_seconds() / 60.0
                 props["minutes_since_first_start"] = round(max(0.0, minutes), 1)
+        except Exception:
+            pass
+    from outbound_messages import last_outbound
+
+    tracked = last_outbound(user_id)
+    if tracked is not None:
+        kind, sent_at = tracked
+        props["last_bot_message_kind"] = kind
+        props["seconds_since_last_bot_message"] = round(
+            max(0.0, time.time() - sent_at), 1
+        )
+    elif "last_alert_age_hours" in props:
+        alert_kind = props.get("last_alert_type") or "unknown"
+        props["last_bot_message_kind"] = f"alert_{alert_kind}"
+        props["seconds_since_last_bot_message"] = round(
+            float(props["last_alert_age_hours"]) * 3600, 1
+        )
+    get_locale = getattr(db, "get_user_locale", None)
+    locale = None
+    if callable(get_locale):
+        try:
+            locale = get_locale(user_id)
+        except Exception:
+            pass
+    if not locale:
+        step = "language_pick"
+    elif not subs:
+        step = "welcome"
+    elif not enabled:
+        step = "demo_paused" if (has_demo or promo_only) else "alerts_paused"
+    elif not props.get("had_alert_ever"):
+        step = "demo_enabled" if (has_demo or promo_only) else "alerts_enabled"
+    else:
+        step = "active"
+    props["onboarding_step"] = step
+    get_start_arg = getattr(db, "get_user_start_arg", None)
+    if callable(get_start_arg):
+        try:
+            start_arg = get_start_arg(user_id)
+            if start_arg:
+                props["start_arg"] = start_arg
         except Exception:
             pass
     return props
@@ -1407,6 +1454,11 @@ async def _send_notification(
         await _maybe_notify_delivery_failure(bot, db, sub, exc)
         # Keep captured MP4 pending until stream ends.
         return False
+
+    if sub.dest_type == "dm":
+        from outbound_messages import note_outbound
+
+        note_outbound(sub.owner_id, f"alert_{alert_type}")
 
     if captured_preview is not None:
         from stream_capture import forget_and_unlink

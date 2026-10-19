@@ -164,6 +164,14 @@ def _draft_on_for(bot, chat_id: object) -> bool:
         return True
 
 
+async def _send_and_note(original, chat_id: object, args: tuple, kwargs: dict):
+    msg = await original(*args, **kwargs)
+    from outbound_messages import note_outbound
+
+    note_outbound(int(chat_id), "reply")
+    return msg
+
+
 async def _fx_send(bot, original, args: tuple, kwargs: dict):
     if _fx_disabled.get():
         return await original(*args, **kwargs)
@@ -174,15 +182,15 @@ async def _fx_send(bot, original, args: tuple, kwargs: dict):
 
     # Draft stream before sendMessage can drop ReplyKeyboard on some clients.
     if isinstance(kwargs.get("reply_markup"), ReplyKeyboardMarkup):
-        return await original(*args, **kwargs)
+        return await _send_and_note(original, chat_id, args, kwargs)
 
     if not _draft_on_for(bot, chat_id):
-        return await original(*args, **kwargs)
+        return await _send_and_note(original, chat_id, args, kwargs)
 
     # Entities-only formatting is too brittle to preview mid-string.
     if kwargs.get("entities"):
         await send_typing(bot, chat_id, thread_id)
-        return await original(*args, **kwargs)
+        return await _send_and_note(original, chat_id, args, kwargs)
 
     await send_typing(bot, chat_id, thread_id)
     await stream_draft_then(
@@ -192,7 +200,7 @@ async def _fx_send(bot, original, args: tuple, kwargs: dict):
         parse_mode=parse_mode,
         message_thread_id=thread_id,
     )
-    return await original(*args, **kwargs)
+    return await _send_and_note(original, chat_id, args, kwargs)
 
 
 def _remember_draft_pref(bot, draft_enabled: Callable[[int], bool] | None) -> None:

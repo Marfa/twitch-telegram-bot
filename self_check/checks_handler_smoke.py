@@ -1259,6 +1259,10 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert dm_sub.delivery_paused is False
     assert dm_sub.enabled is True
 
+    from outbound_messages import note_outbound
+
+    db.set_user_start_arg(_FREE_UID, "referral")
+    note_outbound(_FREE_UID, "welcome_demo")
     with patch("handlers.delivery.analytics.capture") as capture:
         _mark_destination_unreachable(
             db, dm_sub, Forbidden("Forbidden: bot was blocked by the user")
@@ -1274,6 +1278,18 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert "from_import" in props
     assert "welcome_seed_only" in props
     assert "minutes_since_first_start" in props
+    assert props["start_arg"] == "referral"
+    assert props["last_bot_message_kind"] == "welcome_demo"
+    assert props["seconds_since_last_bot_message"] >= 0
+    assert props["onboarding_step"] in {
+        "language_pick",
+        "welcome",
+        "demo_paused",
+        "alerts_paused",
+        "demo_enabled",
+        "alerts_enabled",
+        "active",
+    }
     clear_user_blocked(db, _FREE_UID)
     db.set_chat_unreachable(channel_id, False)
 

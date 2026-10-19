@@ -399,6 +399,10 @@ async def _send_dm_html(
                 return await bot.send_message(uid, message, **kwargs)
 
     def _result(status: str, msg: object | None = None) -> str | tuple[str, int | None]:
+        if status == "sent":
+            from outbound_messages import note_outbound
+
+            note_outbound(uid, "system_dm")
         if return_message_id:
             mid = getattr(msg, "message_id", None)
             return status, int(mid) if mid is not None else None

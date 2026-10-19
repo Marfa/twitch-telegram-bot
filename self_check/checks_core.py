@@ -3361,6 +3361,14 @@ def check_core() -> None:
         assert await stream_draft_then(bot2, 42, "plain " * 20) is True
         assert bot2.send_message_draft.await_count >= 1
 
+        from outbound_messages import last_outbound
+
+        tracked_uid = 987654321
+        assert last_outbound(tracked_uid) is None
+        await bot.send_message(tracked_uid, "tracked")
+        tracked = last_outbound(tracked_uid)
+        assert tracked is not None and tracked[0] == "reply"
+
     asyncio.run(_fx_roundtrip())
 
     # request_progress: rich thinking draft with timer; classic fallback
