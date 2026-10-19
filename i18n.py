@@ -2056,25 +2056,6 @@ def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def delete_sibling_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t("delete_sibling_yes", lang),
-                    callback_data="delete_sibling:1",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    t("delete_sibling_no", lang),
-                    callback_data="delete_sibling:0",
-                )
-            ],
-        ]
-    )
-
-
 def schedule_live_add_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -2990,7 +2971,7 @@ def edit_options_keyboard(
     show_apply_defaults: bool = True,
 ) -> InlineKeyboardMarkup:
     # Shared block order: alert_settings.ALERT_SETTING_ORDER. Edit-only around it:
-    # template, image_del, delete_other, schedule, dest, type/copy.
+    # template, image_del, schedule, dest, type/copy.
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER, EDIT_FIELD
 
     prefix = "defedit" if for_defaults_editor else "edit_f"
@@ -3176,18 +3157,6 @@ def edit_options_keyboard(
                         )
                     ]
                 )
-                if delete_previous and (
-                    for_defaults_editor or notify_on_category_change
-                ):
-                    other_mark = "✅ " if delete_other_alerts else "⬜️ "
-                    rows.append(
-                        [
-                            InlineKeyboardButton(
-                                other_mark + t("edit_delete_other", lang),
-                                callback_data=_cb("delete_other"),
-                            )
-                        ]
-                    )
             continue
         if sid == "pin":
             if show_advanced and (for_defaults_editor or dest_type != "dm"):
@@ -3433,23 +3402,6 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
             [
                 [InlineKeyboardButton(t("repeat_yes", lang), callback_data=f"edit_set:{sub_id}:repeat:1")],
                 [InlineKeyboardButton(t("repeat_no", lang), callback_data=f"edit_set:{sub_id}:repeat:0")],
-            ]
-        )
-    if field == "delete_other":
-        return InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        t("delete_sibling_yes", lang),
-                        callback_data=f"edit_set:{sub_id}:delete_other:1",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        t("delete_sibling_no", lang),
-                        callback_data=f"edit_set:{sub_id}:delete_other:0",
-                    )
-                ],
             ]
         )
     return InlineKeyboardMarkup(

@@ -55,7 +55,6 @@ from i18n import (
     chat_button_keyboard,
     delay_keyboard,
     delete_old_keyboard,
-    delete_sibling_keyboard,
     dest_keyboard,
     dest_label,
     advanced_options_keyboard,
@@ -122,7 +121,6 @@ def _wz() -> dict[str, int]:
         DELAY_MINUTES,
         DELAY_SEND,
         DELETE_OLD,
-        DELETE_SIBLING_ALERTS,
         DEST_CHAT,
         DEST_TYPE,
         CATEGORY_FILTER,
@@ -169,7 +167,6 @@ def _wz() -> dict[str, int]:
         "DELAY_MINUTES": DELAY_MINUTES,
         "DELAY_SEND": DELAY_SEND,
         "DELETE_OLD": DELETE_OLD,
-        "DELETE_SIBLING_ALERTS": DELETE_SIBLING_ALERTS,
         "DEST_CHAT": DEST_CHAT,
         "DEST_TYPE": DEST_TYPE,
         "EDIT_CATEGORY_FILTER": EDIT_CATEGORY_FILTER,
@@ -2283,7 +2280,6 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "pin_message",
             "notify_delete_fail",
             "delete_other_alerts",
-            "delete_sibling_asked",
             "pending_chat_id",
             "pending_thread_id",
             "alert_type",
@@ -2418,13 +2414,6 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         _set_wizard_back(context, _wz()["DEST_CHAT"])
         return _wz()["DEST_CHAT"]
-    if state == _wz()["DELETE_SIBLING_ALERTS"]:
-        await update.effective_message.reply_text(
-            _delete_old_prompt_text(context, lang),
-            reply_markup=delete_old_keyboard(lang),
-        )
-        _set_wizard_back(context, _wz()["DELETE_OLD"])
-        return _wz()["DELETE_OLD"]
     if state == _wz()["ADMIN_MSG_TEXT"]:
         if context.user_data.get("admin_msg_type") == "other":
             await update.effective_message.reply_text(
@@ -3922,7 +3911,6 @@ async def _prompt_delete_old(
         "adv_want_delete"
     ):
         context.user_data["delete_previous"] = True
-        context.user_data.pop("delete_sibling_asked", None)
         return await _continue_after_delete_old_yes(update, context, lang)
     text = _delete_old_prompt_text(context, lang)
     target = update.effective_message
@@ -3944,36 +3932,9 @@ async def _prompt_delete_old(
 async def _continue_after_delete_old_yes(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
-    """After delete_previous=True: optional sibling ask, then finish."""
+    """After delete_previous=True: finish (same-streamer prior alerts are deleted)."""
     context.user_data["notify_delete_fail"] = True
-    if context.user_data.get("alert_type") == "category":
-        db: Database = context.application.bot_data["db"]
-        chat_id = context.user_data["pending_chat_id"]
-        thread_id = context.user_data.get("pending_thread_id")
-        twitch_user_id = str(context.user_data.get("twitch_user_id") or "")
-        owner_id = update.effective_user.id
-        if twitch_user_id and _has_sibling_publication_subs(
-            db,
-            owner_id,
-            twitch_user_id,
-            chat_id,
-            thread_id,
-            exclude_sub_id=context.user_data.get("edit_sub_id"),
-        ):
-            context.user_data["delete_sibling_asked"] = True
-            text = t("delete_sibling_text", lang)
-            markup = delete_sibling_keyboard(lang)
-            if update.callback_query:
-                await update.callback_query.edit_message_text(text, reply_markup=markup)
-            else:
-                await context.bot.send_message(
-                    reply_chat_id(update), text, reply_markup=markup
-                )
-            _set_wizard_back(context, _wz()["DELETE_SIBLING_ALERTS"])
-            return _wz()["DELETE_SIBLING_ALERTS"]
-        context.user_data["delete_other_alerts"] = False
-    else:
-        context.user_data["delete_other_alerts"] = False
+    context.user_data["delete_other_alerts"] = False
     chat_id = context.user_data["pending_chat_id"]
     thread_id = context.user_data.get("pending_thread_id")
     return await _finish_subscription(
@@ -3985,34 +3946,12 @@ def _delete_old_prompt_text(context: ContextTypes.DEFAULT_TYPE, lang: str) -> st
         return t("delete_old_text_category", lang)
     return t("delete_old_text", lang)
 
-def _has_sibling_publication_subs(
-    db: Database,
-    owner_id: int,
-    twitch_user_id: str,
-    chat_id: int,
-    thread_id: int | None,
-    *,
-    exclude_sub_id: int | None = None,
-) -> bool:
-    for sub in _subs_for_owner(db, owner_id):
-        if exclude_sub_id is not None and sub.id == exclude_sub_id:
-            continue
-        if sub.twitch_user_id != twitch_user_id:
-            continue
-        if sub.chat_id != chat_id:
-            continue
-        if (sub.thread_id or None) != (thread_id or None):
-            continue
-        return True
-    return False
-
 async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     delete_previous = query.data.endswith(":1")
     context.user_data["delete_previous"] = delete_previous
-    context.user_data.pop("delete_sibling_asked", None)
     if not delete_previous:
         context.user_data["notify_delete_fail"] = False
         context.user_data["delete_other_alerts"] = False
@@ -4022,19 +3961,6 @@ async def receive_delete_old(update: Update, context: ContextTypes.DEFAULT_TYPE)
             update, context, query.from_user.id, chat_id, thread_id
         )
     return await _continue_after_delete_old_yes(update, context, lang)
-
-async def receive_delete_sibling(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    context.user_data["delete_other_alerts"] = query.data.endswith(":1")
-    context.user_data["notify_delete_fail"] = True
-    chat_id = context.user_data["pending_chat_id"]
-    thread_id = context.user_data.get("pending_thread_id")
-    return await _finish_subscription(
-        update, context, query.from_user.id, chat_id, thread_id
-    )
 
 async def receive_delete_fail_notify(
     update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -4126,11 +4052,8 @@ async def _finish_subscription(
     notify_on_category_change = (
         bool(data.get("notify_on_category_change", False)) or alert_type == "category"
     )
-    delete_other_alerts = (
-        bool(data.get("delete_other_alerts", False))
-        and delete_previous
-        and notify_on_category_change
-    )
+    # Legacy column; delivery always deletes same-streamer priors when delete_previous.
+    delete_other_alerts = False
     if alert_type == "live":
         notify_on_live = True
         notify_on_end = False
@@ -4476,12 +4399,6 @@ async def _finish_subscription(
             if delete_previous
             else t("delete_no", lang)
         )
-        if delete_previous and notify_on_category_change:
-            delete_note = (
-                t("delete_yes_all", lang)
-                if delete_other_alerts
-                else t("delete_yes_category", lang)
-            )
         pin_note = t("pin_yes", lang) if pin_message else t("pin_no", lang)
         has_image = bool(data.get("image_file_id"))
         preview_disabled = bool(data.get("disable_link_preview", False)) or has_image

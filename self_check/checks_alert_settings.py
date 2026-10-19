@@ -430,7 +430,6 @@ def check_alert_setting_order() -> None:
         "en",
         dest_type="channel",
         delete_previous=True,
-        delete_other_alerts=True,
         notify_on_category_change=True,
         schedule_reminder_configured=True,
         schedule_reminder_minutes=15,
@@ -442,7 +441,8 @@ def check_alert_setting_order() -> None:
         for btn in row
     }
     assert "edit_f:1:delete_fail" not in fail_labels
-    assert fail_labels["edit_f:1:delete_other"].startswith("✅ ")
+    assert "edit_f:1:delete_other" not in fail_labels
+    assert fail_labels["edit_f:1:delete_old"].startswith("✅ ")
     assert fail_labels["edit_f:1:sched_remind"].startswith("✅ ")
     assert "edit_f:1:repeat" not in fail_labels  # hidden for category alerts
 

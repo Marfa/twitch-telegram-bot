@@ -1,0 +1,51 @@
+---
+description: Do not git push when GitHub Actions/API/Git are degraded (githubstatus.com)
+alwaysApply: true
+---
+
+# GitHub status gate before push
+
+Before every `git push` (and before `gh workflow run` that depends on Actions runners):
+
+1. Check https://www.githubstatus.com/ (or `https://www.githubstatus.com/api/v2/summary.json`).
+2. Inspect components that affect deploy/CI: **Actions**, **Git Operations**, **API Requests**, **Webhooks**.
+3. If any of those is `degraded_performance`, `partial_outage`, or `major_outage`, **or** there is an unresolved incident mentioning Actions/deploy runners — **do not push**.
+
+## What to do instead
+
+- Keep the commit local (or commit only if the user asked for a commit).
+- Tell the user GitHub is degraded and push is deferred.
+- Prefer HostKey / SSH VPS hotfix for production emergencies (`HOST_KEY_API` → InvAPI → SSH), not a broken Actions deploy.
+- Re-check status later; push only when Actions (and Git Operations) are `operational` again.
+
+## Half-deploy / Actions stuck
+
+Deploy already rolls back when `/health` does not become ready (`scripts/vps-deploy.sh`). That does **not** mean production is fine while Actions still shows Running/queued.
+
+On any half-deploy, crash-loop, or 502/503 on `https://bot.themarfa.name/health`:
+
+1. Inspect the live container immediately — `docker compose -f compose.vps.yml logs --tail=80 bot` (via HostKey/SSH). Do **not** wait for a green Actions run.
+2. Fix or roll forward on the VPS; treat Actions UI as advisory during a GitHub outage.
+3. Only after `/health` is `ok` (public + in-container) claim the bot is up.
+
+## Missed live alerts after downtime
+
+On restart the bot **already catch-up**s still-live streams (`check_streams` / went_live). Do **not** manually resend live alerts “just in case”.
+
+Before any manual resend / force-notify:
+
+1. Query prod (`scripts/vps-psql.sh`) — `alert_history` (DM) and/or `alert_delivery_log` (channel/group) for that `stream_id` / login since bot recovery.
+2. Resend **only** rows that are still live on Twitch **and** have no delivery for this stream after the outage.
+3. If catch-up already wrote history/log (~recovery time), leave them alone — a second send duplicates the user (as with snowboy_man / pen1ciodeltoro / sad_moustache).
+
+## Why
+
+A push to `main` triggers Deploy VPS. During Actions outages jobs stay `queued`/`in_progress` for a long time, half-deploy, or fail health checks while the live bot is already broken — prolonging downtime and confusing monitors.
+
+## Exceptions
+
+Only skip this gate if the user **explicitly** insists on pushing despite the outage after you warned them.
+
+## Admin downtime alerts (PostHog)
+
+Bot downtime often surfaces as PostHog Error Tracking `created` + `reopened` (or webhook retries). Admin Telegram notify is cooldown/deduped by issue fingerprint (see `notify_admins_posthog_issue` / `should_notify_posthog_issue`) so the same incident does not DM twice within ~45 minutes.

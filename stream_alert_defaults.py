@@ -53,7 +53,6 @@ LOCKED_EDIT_FIELDS: frozenset[str] = frozenset(
         "overlap_block",
         "overlap_block_repeats",
         "delete_old",
-        "delete_other",
         "pin_message",
         "custom_buttons",
         "chat_button",

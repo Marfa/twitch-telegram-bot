@@ -1244,6 +1244,76 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert ch_logs[0].chat_id == channel_id
     assert ch_logs[0].message_id == 77
     assert all(h.subscription_id != sub_id for h in db.list_alert_history(_FREE_UID))
+    # Channel/group sends always store last_message_id (for same-streamer delete).
+    channel_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == sub_id)
+    assert channel_sub.last_message_id == 77
+
+    # delete_previous removes prior alerts for the same streamer only (any template).
+    from handlers.delivery import _delete_previous_before_send
+
+    del_chat = -1001936914077
+    marfa_a = db.add_subscription(
+        _FREE_UID,
+        "marfapr",
+        "tu_marfa",
+        "tpl1 {username}",
+        "channel",
+        del_chat,
+        None,
+        delete_previous=False,
+    )
+    marfa_b = db.add_subscription(
+        _FREE_UID,
+        "marfapr",
+        "tu_marfa",
+        "tpl2 {username}",
+        "channel",
+        del_chat,
+        None,
+        delete_previous=True,
+        delete_other_alerts=False,
+    )
+    stop_b = db.add_subscription(
+        _FREE_UID,
+        "stopgame",
+        "tu_stop",
+        "tpl2 {username}",
+        "channel",
+        del_chat,
+        None,
+        delete_previous=True,
+        delete_other_alerts=False,
+    )
+    db.set_last_message_id(marfa_a, 501)
+    db.set_last_message_id(marfa_b, 502)
+    db.set_last_message_id(stop_b, 601)
+    marfa_b_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == marfa_b)
+    stop_b_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == stop_b)
+    def _deleted_message_ids(mock_bot) -> list[int]:
+        out: list[int] = []
+        for c in mock_bot.delete_message.await_args_list:
+            mid = c.kwargs.get("message_id")
+            if mid is None and len(c.args) >= 2:
+                mid = c.args[1]
+            out.append(mid)
+        return out
+
+    bot = AsyncMock()
+    bot.delete_message = AsyncMock(return_value=True)
+    await _delete_previous_before_send(bot, db, marfa_b_sub)
+    assert sorted(_deleted_message_ids(bot)) == [501, 502]
+    marfa_a_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == marfa_a)
+    assert marfa_a_sub.last_message_id is None
+    stop_still = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == stop_b)
+    assert stop_still.last_message_id == 601
+
+    bot.delete_message.reset_mock()
+    await _delete_previous_before_send(bot, db, stop_b_sub)
+    assert _deleted_message_ids(bot) == [601]
+    marfa_b_after = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == marfa_b)
+    # stopgame must not clear marfapr ids; own mid is not nulled by the helper.
+    assert marfa_b_after.last_message_id == 502
+    assert marfa_a_sub.last_message_id is None
 
     apply_user_blocked(db, _FREE_UID)
     dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
@@ -1306,6 +1376,8 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert len(alert_calls) == 1
     assert alert_calls[0].args[2]["alert_type"] == "live"
     assert alert_calls[0].args[2]["dest_type"] == "dm"
+    dm_sub = next(s for s in db.get_subscriptions_by_owner(_FREE_UID) if s.id == dm_sub_id)
+    assert dm_sub.last_message_id == 99
     sent_kwargs = bot.send_message.await_args.kwargs
     pause_markup = sent_kwargs.get("reply_markup")
     assert pause_markup is not None

@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 import logging
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -769,6 +770,96 @@ async def monthly_lucky_premium(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+# Same issue can fire created + reopened (or webhook retries) within minutes —
+# collapse to one admin DM per fingerprint/name for this window.
+_POSTHOG_ISSUE_NOTIFY_COOLDOWN_SEC = 45 * 60
+_POSTHOG_ISSUE_NOTIFY_MAX_KEYS = 200
+
+
+def _posthog_issue_notify_cooldown_path() -> Path:
+    from config import DATABASE_PATH
+
+    return (
+        Path(DATABASE_PATH).expanduser().resolve().parent
+        / "posthog_issue_notify_cooldown.json"
+    )
+
+
+def _posthog_issue_notify_key(payload: dict[str, str]) -> str:
+    fingerprint = (payload.get("fingerprint") or "").strip()
+    if fingerprint:
+        return f"fp:{fingerprint}"
+    name = (payload.get("name") or "").strip().lower()
+    if name:
+        return f"name:{name}"
+    return f"kind:{(payload.get('kind') or 'created').strip()}"
+
+
+def _load_posthog_issue_notify_times(path: Path) -> dict[str, float]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, float] = {}
+    for key, ts in raw.items():
+        try:
+            out[str(key)] = float(ts)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _save_posthog_issue_notify_times(path: Path, times: dict[str, float]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep freshest keys only.
+    kept = sorted(times.items(), key=lambda item: item[1])[-_POSTHOG_ISSUE_NOTIFY_MAX_KEYS:]
+    path.write_text(
+        json.dumps({k: v for k, v in kept}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def should_notify_posthog_issue(
+    payload: dict[str, str],
+    *,
+    now: float | None = None,
+    path: Path | None = None,
+    cooldown_sec: int = _POSTHOG_ISSUE_NOTIFY_COOLDOWN_SEC,
+) -> bool:
+    """False when this issue key was already notified within cooldown_sec."""
+    key = _posthog_issue_notify_key(payload)
+    if not key:
+        return True
+    path = path or _posthog_issue_notify_cooldown_path()
+    now = time.time() if now is None else now
+    times = _load_posthog_issue_notify_times(path)
+    last = times.get(key)
+    if last is not None and (now - last) < cooldown_sec:
+        return False
+    return True
+
+
+def mark_posthog_issue_notified(
+    payload: dict[str, str],
+    *,
+    now: float | None = None,
+    path: Path | None = None,
+) -> None:
+    key = _posthog_issue_notify_key(payload)
+    if not key:
+        return
+    path = path or _posthog_issue_notify_cooldown_path()
+    now = time.time() if now is None else now
+    times = _load_posthog_issue_notify_times(path)
+    times[key] = now
+    try:
+        _save_posthog_issue_notify_times(path, times)
+    except OSError:
+        logger.warning("Could not persist PostHog issue notify cooldown", exc_info=True)
+
+
 async def notify_admins_posthog_issue(
     application: Application, payload: dict[str, str]
 ) -> None:
@@ -777,6 +868,13 @@ async def notify_admins_posthog_issue(
     from translate import markdown_to_telegram_html, translate_text
 
     if not ADMIN_USER_IDS:
+        return
+    if not should_notify_posthog_issue(payload):
+        logger.info(
+            "Skipping duplicate PostHog admin notify key=%s kind=%s",
+            _posthog_issue_notify_key(payload),
+            payload.get("kind"),
+        )
         return
     db: Database = application.bot_data["db"]
     kind = payload.get("kind") or "created"
@@ -803,6 +901,7 @@ async def notify_admins_posthog_issue(
             desc_ru = desc_ru[:1197] + "…"
     link_block = f"\n\n{html.escape(url)}" if url else ""
     desc_block = desc_ru + "\n" if desc_ru else ""
+    delivered = False
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
         if kind == "report":
@@ -826,8 +925,11 @@ async def notify_admins_posthog_issue(
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
+            delivered = True
         except (BadRequest, Forbidden) as exc:
             logger.warning("Cannot send PostHog issue to admin %s: %s", admin_id, exc)
+    if delivered:
+        mark_posthog_issue_notified(payload)
 
 
 _POSTHOG_SEEN_REPORTS_MAX = 200

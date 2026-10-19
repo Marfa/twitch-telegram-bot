@@ -1416,6 +1416,32 @@ def check_core() -> None:
         assert _load_posthog_seen_report_ids(seen_path) == set()
         _save_posthog_seen_report_ids(seen_path, {"b", "a"})
         assert _load_posthog_seen_report_ids(seen_path) == {"a", "b"}
+        from handlers.monitoring import (
+            mark_posthog_issue_notified,
+            should_notify_posthog_issue,
+        )
+
+        cooldown_path = Path(tmp) / "posthog_issue_notify_cooldown.json"
+        payload_a = {
+            "kind": "created",
+            "name": "ValueError: boom",
+            "fingerprint": "fp-cooldown",
+        }
+        payload_reopen = {
+            "kind": "reopened",
+            "name": "ValueError: boom",
+            "fingerprint": "fp-cooldown",
+        }
+        assert should_notify_posthog_issue(
+            payload_a, now=1_000.0, path=cooldown_path, cooldown_sec=60
+        )
+        mark_posthog_issue_notified(payload_a, now=1_000.0, path=cooldown_path)
+        assert not should_notify_posthog_issue(
+            payload_reopen, now=1_030.0, path=cooldown_path, cooldown_sec=60
+        )
+        assert should_notify_posthog_issue(
+            payload_reopen, now=1_070.0, path=cooldown_path, cooldown_sec=60
+        )
     assert _is_http_timeout(TimeoutError("timed out"))
     import urllib.error
 
@@ -3034,12 +3060,9 @@ def check_core() -> None:
         assert tr("alert_note_category", loc, twitch_username="x")
         assert tr("alert_note_end", loc, twitch_username="x")
         assert tr("delete_old_text_category", loc)
-        assert tr("delete_sibling_text", loc)
         assert tr("sub_list_alert_category", loc)
         assert tr("sub_list_alert_game", loc)
         assert tr("game_type_change_unsupported", loc)
-        assert tr("edit_delete_other", loc)
-        assert tr("edit_delete_other_menu", loc)
         assert tr("edit_delete_old_menu_category", loc)
         assert tr("edit_change_type", loc)
         assert tr("edit_copy", loc)
@@ -3047,8 +3070,6 @@ def check_core() -> None:
         assert tr("edit_type_changed", loc, alert_type="x")
         assert tr("edit_copied", loc, sub_id=1, username="x")
         assert tr("edit_copy_cancelled", loc)
-        assert tr("sub_list_delete_other_yes", loc)
-        assert tr("sub_list_delete_other_no", loc)
         assert tr("btn_demo", loc)
         assert tr("demo_on", loc)
         assert tr("demo_off", loc)

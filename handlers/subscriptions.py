@@ -572,8 +572,6 @@ def _format_sub_line(
                 settings.append(t("sub_list_overlap_block_repeats", lang))
     if sub.dest_type != "dm" and sub.delete_previous:
         settings.append(t("sub_list_delete_yes", lang))
-        if sub.notify_on_category_change and sub.delete_other_alerts:
-            settings.append(t("sub_list_delete_other_yes", lang))
     if sub.dest_type != "dm" and getattr(sub, "pin_message", False):
         settings.append(t("sub_list_pin_yes", lang))
     custom_btns = parse_custom_buttons(getattr(sub, "custom_buttons", None))
@@ -4345,7 +4343,7 @@ async def start_edit_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["notify_on_live"] = sub.notify_on_live
     context.user_data["notify_on_end"] = sub.notify_on_end
     context.user_data["notify_on_category_change"] = sub.notify_on_category_change
-    context.user_data["delete_other_alerts"] = sub.delete_other_alerts
+    context.user_data["delete_other_alerts"] = False
     context.user_data["wizard_edit"] = True
     await query.edit_message_text(
         t("dest_prompt", lang),
@@ -4548,10 +4546,13 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         await query.answer()
         enabled = not bool(sub.delete_previous)
-        kwargs = {"delete_previous": enabled, "notify_delete_fail": enabled}
-        if not enabled:
-            kwargs["delete_other_alerts"] = False
-        db.update_subscription(sub_id, query.from_user.id, **kwargs)
+        db.update_subscription(
+            sub_id,
+            query.from_user.id,
+            delete_previous=enabled,
+            notify_delete_fail=enabled,
+            delete_other_alerts=False,
+        )
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
@@ -4613,44 +4614,6 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
-    if field == "delete_other":
-        if (
-            sub.dest_type == "dm"
-            or not sub.delete_previous
-            or not sub.notify_on_category_change
-        ):
-            await query.answer()
-            await _reshow_edit_menu(sub)
-            return
-        if not await prem.has_feature(
-            context.bot, db, query.from_user.id, "delete_prev", channel=sub.twitch_username
-        ):
-            from premium_handlers import send_premium_screen
-
-            await query.answer()
-            await query.edit_message_text(
-                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-            )
-            await send_premium_screen(
-                context.bot,
-                query.from_user.id,
-                lang,
-                db,
-                update=update,
-                context=context,
-                source="edit_field",
-                feature="delete_prev",
-            )
-            return
-        await query.answer()
-        db.update_subscription(
-            sub_id,
-            query.from_user.id,
-            delete_other_alerts=not bool(sub.delete_other_alerts),
-        )
-        sub = db.get_subscription(sub_id, query.from_user.id) or sub
-        await _reshow_edit_menu(sub)
-        return
     await query.answer()
     await _reshow_edit_menu(sub)
 
@@ -4693,11 +4656,11 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     value = parts[3] == "1"
-    if field in ("delete_old", "delete_other") and sub.dest_type == "dm":
+    if field == "delete_old" and sub.dest_type == "dm":
         await query.edit_message_text(t("sub_not_found", lang))
         return
-    if field in ("delete_old", "delete_other"):
-        # Same gate as edit_f:delete_* — crafted edit_set must not bypass Premium.
+    if field == "delete_old":
+        # Same gate as edit_f:delete_old — crafted edit_set must not bypass Premium.
         if not await prem.has_feature(
             context.bot,
             db,
@@ -4722,14 +4685,11 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             return
     if field == "delete_old":
-        kwargs: dict = {"delete_previous": value, "notify_delete_fail": value}
-        if not value:
-            kwargs["delete_other_alerts"] = False
-    elif field == "delete_other":
-        if not sub.notify_on_category_change or not sub.delete_previous:
-            await query.edit_message_text(t("sub_not_found", lang))
-            return
-        kwargs = {"delete_other_alerts": value}
+        kwargs: dict = {
+            "delete_previous": value,
+            "notify_delete_fail": value,
+            "delete_other_alerts": False,
+        }
     elif field == "preview":
         # value True = disable preview; False = show preview.
         # Image / chat conflict: quietly keep preview off.
@@ -5802,7 +5762,7 @@ def _add_subscription_from_snapshot(
         notify_on_category_change=bool(snapshot.get("notify_on_category_change")),
         notify_on_drops=bool(snapshot.get("notify_on_drops")),
         drops_game_id=str(snapshot.get("drops_game_id") or ""),
-        delete_other_alerts=bool(snapshot.get("delete_other_alerts")),
+        delete_other_alerts=False,
         pin_message=bool(snapshot.get("pin_message")),
         is_demo=bool(snapshot.get("is_demo")),
         notify_on_schedule_cancel=bool(snapshot.get("notify_on_schedule_cancel")),
