@@ -74,8 +74,19 @@ async def reply_setup_private_only(update, lang: str) -> None:
         await update.effective_message.reply_text(text)
 
 
-# ponytail: in-memory; one hint per (chat, user) for non-admins until restart
+# ponytail: in-memory; one hint per (chat, user) until restart (incl. bot admins)
 _group_setup_notified: set[tuple[int, int]] = set()
+
+# Slash commands that configure or control the bot — DM only. /when is allowed in groups.
+GROUP_DM_ONLY_COMMANDS = (
+    "start",
+    "help",
+    "cancel",
+    "schedule",
+    "feedback",
+    "settings",
+    "stats",
+)
 
 
 def reset_group_setup_notified() -> None:
@@ -83,9 +94,7 @@ def reset_group_setup_notified() -> None:
 
 
 def should_send_group_setup_hint(chat_id: int, user_id: int) -> bool:
-    """Admins get the hint every time; other users once per chat."""
-    if _is_admin(user_id):
-        return True
+    """One private-only hint per (chat, user); bot admins included."""
     key = (chat_id, user_id)
     if key in _group_setup_notified:
         return False
@@ -96,7 +105,7 @@ def should_send_group_setup_hint(chat_id: int, user_id: int) -> bool:
 async def handle_group_setup_rejection(
     update, context: ContextTypes.DEFAULT_TYPE
 ) -> bool:
-    """Block group/channel bot setup. Returns True if the update was consumed."""
+    """Block all bot management in group/channel. Returns True if consumed."""
     if is_private_chat(update):
         return False
     user_id = update.effective_user.id
@@ -210,17 +219,22 @@ _NON_PRIVATE = ~filters.ChatType.PRIVATE
 
 
 def group_setup_menu_filter():
-    """Reply-keyboard actions that configure the bot — DM only (not stream chat)."""
+    """Reply-keyboard bot controls — DM only. /when (and its free text) stay allowed."""
     return _NON_PRIVATE & (
         filters.UpdateType.MESSAGE
         & (
             _btn_filter("manage")
             | _btn_filter("import_twitch")
             | _btn_filter("list")
+            | _btn_filter("cart")
             | _btn_filter("edit")
             | _btn_filter("delete")
             | _btn_filter("pause_notifications")
             | _btn_filter("alert_history")
+            | _btn_filter("other")
+            | _btn_filter("chat")
+            | _btn_filter("feedback")
+            | _btn_filter("back")
             | _btn_filter("settings")
             | _btn_filter("premium")
             | _btn_filter("auth_tokens")
@@ -248,10 +262,13 @@ def group_setup_menu_filter():
             | _btn_filter("beta_mode")
             | _btn_filter("admin")
             | _btn_filter("broadcast")
+            | _btn_filter("broadcast_new")
             | _btn_filter("scheduled_broadcasts")
             | _btn_filter("sent_broadcasts")
             | _btn_filter("stats")
             | _btn_filter("demo")
+            | _btn_filter("wizard_cancel")
+            | _btn_filter("wizard_back")
         )
     )
 

@@ -242,7 +242,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
-| `/when` | When is the stream? (in a group/channel with an alert — next Twitch schedule slot; witty reply if none; 1 min cooldown). Also the text “When stream?” / «Когда стрим?» |
+| `/when` | When is the stream? **Only** command that runs in a group/channel (with an alert to that chat — next Twitch schedule slot; witty reply if none; 1 min cooldown). Also “When stream?” / «Когда стрим?». All other bot management is DM-only |
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |

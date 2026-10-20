@@ -10,18 +10,18 @@ globs:
 
 # Group chat vs private DM
 
-## Setup (configuration) — DM only
+## Setup / management — DM only
 
-Users configure subscriptions, settings, Premium, import, wizards **only in a private chat** with the bot.
+All bot management (commands, reply-menu, setup callbacks, admin) runs **only in a private chat** with the bot — including for bot `ADMIN_USER_IDS`.
 
-- Gate: `reject_group_bot_setup` (group `-2`) + `dm_only_conv_entry()` on ConversationHandler entry points
-- User message: `setup_private_only` (i18n)
-- **Admins** in a group: hint **every** attempt
-- **Non-admins** in a group: hint **once per (chat_id, user_id)**; further attempts are silent
+- Gate: `reject_group_bot_setup` (group `-2`, raises `ApplicationHandlerStop`) + `dm_only_conv_entry()` on ConversationHandler entry points
+- User message: `setup_private_only` (i18n) — «управление только в ЛС»
+- Hint **once per (chat_id, user_id)** (admins included); further attempts silent
 - Analytics: `group_setup_private_hint` event (includes `chat_id`, `chat_type`, `is_admin`)
-- **Not blocked in groups:** `chat` (stream Mini App), `other`, `feedback`, `back`, `/help`, `/when` (and free-text «Когда стрим?» / «When stream?»)
+- **Allowed in groups/channels:** only `/when` and free-text «Когда стрим?» / «When stream?»
+- DM-only slash commands: `GROUP_DM_ONLY_COMMANDS` in `bot_helpers.py` (`start`, `help`, `cancel`, `schedule`, `feedback`, `settings`, `stats`)
 
-When adding a new **setup** menu button or inline callback, register it in `group_setup_menu_filter()` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.
+When adding a new menu button, slash command (except `/when`), or setup inline callback, register it in `group_setup_menu_filter()` / `GROUP_DM_ONLY_COMMANDS` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.
 
 ## Replies — current chat, not user DM
 

@@ -585,7 +585,7 @@
   "menu_btn_chat": "Chat",
   "chat_open_hint": "Apri la chat dello stream con il pulsante sotto (o il pulsante menu «Chat» accanto all'input).",
   "chat_beta_required": "La chat dello stream Twitch non è disponibile.",
-  "setup_private_only": "La configurazione del bot è disponibile solo in chat privata con il bot. Apri il bot in DM e riprova.",
+  "setup_private_only": "La gestione del bot è disponibile solo in chat privata con il bot. Apri il bot in DM.",
   "chat_oauth_done": "Account Twitch collegato per la chat. Apri di nuovo il pulsante menu Chat.",
   "chat_oauth_failed": "Impossibile collegare Twitch per la chat. Riprova dalla Mini App.",
   "wizard_simple_mode_note": "<b>Sei in modalità semplificata. Apri Impostazioni → Modalità avanzata per mostrare tutti i passaggi della procedura.</b>",

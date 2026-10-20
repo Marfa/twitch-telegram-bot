@@ -14,6 +14,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 def _check_premium_and_helpers() -> None:
     from bot_helpers import (
+        GROUP_DM_ONLY_COMMANDS,
         GROUP_SETUP_CALLBACK_PATTERN,
         chat_context_properties,
         group_setup_menu_filter,
@@ -45,10 +46,22 @@ def _check_premium_and_helpers() -> None:
     assert group_btn.inline_keyboard[0][0].url
     assert group_setup_menu_filter() is not None
     assert GROUP_SETUP_CALLBACK_PATTERN.startswith("^")
+    assert "when" not in GROUP_DM_ONLY_COMMANDS
+    for cmd in ("start", "help", "cancel", "schedule", "feedback", "settings", "stats"):
+        assert cmd in GROUP_DM_ONLY_COMMANDS
+    helpers_src = (_ROOT / "bot_helpers.py").read_text(encoding="utf-8")
+    for btn_key in ("chat", "other", "feedback", "back", "cart", "admin", "stats"):
+        assert f'_btn_filter("{btn_key}")' in helpers_src
     error_src = (_ROOT / "bot.py").read_text(encoding="utf-8")
     assert "chat_context_properties(update)" in error_src
     assert "when_stream_command" in error_src
     assert 'CommandHandler("when"' in error_src
+    assert "GROUP_DM_ONLY_COMMANDS" in error_src
+    assert "raise ApplicationHandlerStop" in error_src
+    from i18n import t as _t
+
+    assert "личн" in _t("setup_private_only", "ru").lower()
+    assert "private chat" in _t("setup_private_only", "en").lower()
 
 
 def _check_when_stream_helpers() -> None:
@@ -209,9 +222,10 @@ async def _check_group_setup_gate() -> None:
     assert should_send_group_setup_hint(group_id, 900002)
     assert not should_send_group_setup_hint(group_id, 900002)
     assert should_send_group_setup_hint(group_id, 900003)
+    # Bot admins: same once-per-chat rule (no admin bypass in groups).
     with patch("bot_helpers._is_admin", return_value=True):
         assert should_send_group_setup_hint(group_id, 900001)
-        assert should_send_group_setup_hint(group_id, 900001)
+        assert not should_send_group_setup_hint(group_id, 900001)
     reset_group_setup_notified()
 
     async def _ok_handler(_update, _context):

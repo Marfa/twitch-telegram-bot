@@ -169,6 +169,7 @@ from bot_helpers import (
     _wizard,
     chat_context_properties,
     dm_only_conv_entry,
+    GROUP_DM_ONLY_COMMANDS,
     group_setup_menu_filter,
     GROUP_SETUP_CALLBACK_PATTERN,
     is_private_chat,
@@ -2615,8 +2616,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         if is_private_chat(update):
             return
         if await handle_group_setup_rejection(update, context):
-            if update.callback_query:
-                raise ApplicationHandlerStop
+            raise ApplicationHandlerStop
 
     app.add_handler(
         MessageHandler(group_setup_menu_filter(), reject_group_bot_setup),
@@ -2632,7 +2632,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CommandHandler(
-            ["start", "schedule"],
+            list(GROUP_DM_ONLY_COMMANDS),
             reject_group_bot_setup,
             filters=~filters.ChatType.PRIVATE,
         ),
