@@ -201,6 +201,7 @@ from handlers.monitoring import (
     _format_twitch_status_message,
     _is_http_timeout,
     _is_stale_callback_query,
+    _is_transient_network_error,
     _is_unchanged_message_edit,
     _load_posthog_seen_report_ids,
     _save_posthog_seen_report_ids,

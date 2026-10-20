@@ -978,6 +978,17 @@ def _is_http_timeout(exc: BaseException) -> bool:
     return isinstance(getattr(exc, "reason", None), TimeoutError)
 
 
+def _is_transient_network_error(exc: BaseException) -> bool:
+    """True for timeouts and connection-level failures (DNS, unreachable, reset)."""
+    import ssl
+    import urllib.error
+
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        return isinstance(reason, OSError) and not isinstance(reason, ssl.SSLError)
+    return isinstance(exc, (TimeoutError, ConnectionError))
+
+
 async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Poll PostHog Inbox reports API and notify admins about new ones."""
     from config import POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID
@@ -1004,9 +1015,9 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
         )
         data = json.loads(raw)
     except Exception as exc:
-        # Transient API slowness: next 5m poll recovers; avoid ERROR→Scout noise.
-        if _is_http_timeout(exc):
-            logger.warning("PostHog Inbox reports poll timed out: %s", exc)
+        # Transient API slowness or network blip: next 5m poll recovers; avoid ERROR→Scout noise.
+        if _is_transient_network_error(exc):
+            logger.warning("PostHog Inbox reports poll network error: %s", exc)
             return
         logger.exception("PostHog Inbox reports poll failed")
         return
