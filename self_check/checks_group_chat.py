@@ -16,11 +16,15 @@ def _check_premium_and_helpers() -> None:
     from bot_helpers import (
         GROUP_DM_ONLY_COMMANDS,
         GROUP_SETUP_CALLBACK_PATTERN,
+        bot_admin_lang,
         chat_context_properties,
         group_setup_menu_filter,
         is_private_chat,
         reply_chat_id,
+        reply_lang,
     )
+    from i18n import DEFAULT_LOCALE
+    from unittest.mock import patch
     from chat_webapp import stream_chat_open_markup
 
     premium_src = (_ROOT / "premium_handlers.py").read_text(encoding="utf-8")
@@ -68,6 +72,28 @@ def _check_premium_and_helpers() -> None:
 
     assert "личн" in _t("setup_private_only", "ru").lower()
     assert "private chat" in _t("setup_private_only", "en").lower()
+
+    db_lang = MagicMock()
+    db_lang.get_user_locale = MagicMock(side_effect=lambda uid: "ru" if uid == 7 else "en")
+    with patch("config.ADMIN_USER_IDS", frozenset({7, 99})):
+        assert bot_admin_lang(db_lang) == "ru"
+    db_empty = MagicMock(get_user_locale=MagicMock(return_value=None))
+    with patch("config.ADMIN_USER_IDS", frozenset({7})):
+        assert bot_admin_lang(db_empty) == DEFAULT_LOCALE
+    ctx_lang = MagicMock()
+    ctx_lang.application.bot_data = {"db": db_lang}
+    with patch("config.ADMIN_USER_IDS", frozenset({7})):
+        assert reply_lang(ctx_lang, msg_update, uid) == "ru"
+    priv_update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=uid),
+        effective_chat=SimpleNamespace(id=uid, type=ChatType.PRIVATE),
+        effective_message=MagicMock(),
+        callback_query=None,
+    )
+    assert reply_lang(ctx_lang, priv_update, uid) == "en"
+    when_src = (_ROOT / "handlers/when_stream.py").read_text(encoding="utf-8")
+    assert "reply_lang(" in when_src
+    assert "_user_lang(" not in when_src
 
 
 def _check_when_stream_helpers() -> None:

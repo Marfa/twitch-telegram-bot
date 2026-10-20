@@ -20,6 +20,7 @@ All bot management (commands, reply-menu, setup callbacks, bot-admin tools) runs
 - Never execute the underlying command in a group/channel (even for bot `ADMIN_USER_IDS`)
 - Analytics: `group_setup_private_hint` (`chat_id`, `chat_type`, `is_chat_admin`, `is_bot_admin`)
 - **Allowed in groups/channels:** `/when`, `/day`, `/week` and free-text «Когда стрим?» / «расписание на день|неделю» (EN/UK variants)
+- **Reply language in groups/channels:** `reply_lang` / `bot_admin_lang` — locale of the first `ADMIN_USER_IDS` user with a saved language (else `DEFAULT_LOCALE`), not the command author
 - DM-only slash commands: `GROUP_DM_ONLY_COMMANDS` in `bot_helpers.py`
 
 When adding a new menu button, slash command (except `/when` `/day` `/week`), or setup inline callback, register it in `group_setup_menu_filter()` / `GROUP_DM_ONLY_COMMANDS` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.

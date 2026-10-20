@@ -201,7 +201,7 @@ async def handle_group_setup_rejection(
         return True
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
-    lang = _user_lang(context, user_id)
+    lang = bot_admin_lang(db)
     import analytics
 
     analytics.capture(
@@ -212,6 +212,7 @@ async def handle_group_setup_rejection(
             **chat_context_properties(update),
             "is_chat_admin": True,
             "is_bot_admin": _is_admin(user_id),
+            "lang": lang,
         },
     )
     await reply_setup_private_only(update, lang, bot=context.bot)
@@ -384,6 +385,25 @@ def _can_use_admin_tools(user_id: int) -> bool:
 def _user_lang(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> str:
     db: Database = context.application.bot_data["db"]
     return db.get_user_locale(user_id) or DEFAULT_LOCALE
+
+
+def bot_admin_lang(db: Database) -> str:
+    """Locale for public group/channel replies — first bot admin with a saved locale."""
+    from config import ADMIN_USER_IDS
+
+    for admin_id in sorted(ADMIN_USER_IDS):
+        loc = db.get_user_locale(admin_id)
+        if loc:
+            return loc
+    return DEFAULT_LOCALE
+
+
+def reply_lang(context: ContextTypes.DEFAULT_TYPE, update, user_id: int) -> str:
+    """DM → caller locale; group/channel → bot admin locale."""
+    if is_private_chat(update):
+        return _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    return bot_admin_lang(db)
 
 
 def _is_link_preview_disabled(message) -> bool:

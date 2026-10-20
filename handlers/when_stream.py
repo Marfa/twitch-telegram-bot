@@ -13,7 +13,7 @@ from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from bot_helpers import _user_lang, clear_group_reply_keyboard
+from bot_helpers import clear_group_reply_keyboard, reply_lang
 from db import Database
 from handlers.notifications import _parse_segment_start
 from i18n import SCHEDULE_TZ, format_stream_schedule_date, t
@@ -416,7 +416,7 @@ async def _schedule_query_command(
 
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    lang = _user_lang(context, user.id)
+    lang = reply_lang(context, update, user.id)
 
     streamers = unique_streamers_for_chat(
         db.get_enabled_subscriptions_by_chat_id(chat_id)
@@ -485,7 +485,7 @@ async def on_schedule_query_callback(
 
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    lang = _user_lang(context, user.id)
+    lang = reply_lang(context, update, user.id)
     now = datetime.now(timezone.utc)
 
     list_m = re.fullmatch(r"schq:list:(when|day|week)", raw)
