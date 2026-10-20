@@ -222,10 +222,6 @@ async def _check_group_setup_gate() -> None:
     assert should_send_group_setup_hint(group_id, 900002)
     assert not should_send_group_setup_hint(group_id, 900002)
     assert should_send_group_setup_hint(group_id, 900003)
-    # Bot admins: same once-per-chat rule (no admin bypass in groups).
-    with patch("bot_helpers._is_admin", return_value=True):
-        assert should_send_group_setup_hint(group_id, 900001)
-        assert not should_send_group_setup_hint(group_id, 900001)
     reset_group_setup_notified()
 
     async def _ok_handler(_update, _context):
@@ -239,10 +235,29 @@ async def _check_group_setup_gate() -> None:
         callback_query=None,
     )
     ctx = MagicMock()
+    ctx.bot = MagicMock()
     ctx.application.bot_data = {"db": MagicMock(get_user_locale=MagicMock(return_value="ru"))}
-    state = await wrapped(update, ctx)
-    assert state == ConversationHandler.END
-    update.effective_message.reply_text.assert_awaited()
+
+    # Chat admin → DM-only hint once.
+    with patch(
+        "bot_helpers.user_is_telegram_chat_admin",
+        new=AsyncMock(return_value=True),
+    ):
+        reset_group_setup_notified()
+        state = await wrapped(update, ctx)
+        assert state == ConversationHandler.END
+        update.effective_message.reply_text.assert_awaited()
+
+    # Non-admin member → silent (no help / no hint).
+    update.effective_message.reply_text.reset_mock()
+    with patch(
+        "bot_helpers.user_is_telegram_chat_admin",
+        new=AsyncMock(return_value=False),
+    ):
+        reset_group_setup_notified()
+        state = await wrapped(update, ctx)
+        assert state == ConversationHandler.END
+        update.effective_message.reply_text.assert_not_awaited()
 
     update.effective_message.reply_text.reset_mock()
     update.effective_chat = SimpleNamespace(id=900001, type=ChatType.PRIVATE)
@@ -265,6 +280,7 @@ async def _check_group_setup_gate() -> None:
     cb_update.callback_query.answer.assert_awaited()
 
     ctx = MagicMock()
+    ctx.bot = MagicMock()
     ctx.application.bot_data = {"db": MagicMock(get_user_locale=MagicMock(return_value="ru"))}
     group_update = SimpleNamespace(
         effective_user=SimpleNamespace(id=900002),
@@ -272,12 +288,19 @@ async def _check_group_setup_gate() -> None:
         effective_message=AsyncMock(),
         callback_query=None,
     )
+    with patch(
+        "bot_helpers.user_is_telegram_chat_admin",
+        new=AsyncMock(return_value=True),
+    ):
+        reset_group_setup_notified()
+        assert await handle_group_setup_rejection(group_update, ctx) is True
+        group_update.effective_message.reply_text.assert_awaited_once()
+        assert await handle_group_setup_rejection(group_update, ctx) is True
+        group_update.effective_message.reply_text.assert_awaited_once()
     reset_group_setup_notified()
-    assert await handle_group_setup_rejection(group_update, ctx) is True
-    group_update.effective_message.reply_text.assert_awaited_once()
-    assert await handle_group_setup_rejection(group_update, ctx) is True
-    group_update.effective_message.reply_text.assert_awaited_once()
-    reset_group_setup_notified()
+
+    bot_src = (_ROOT / "bot.py").read_text(encoding="utf-8")
+    assert 'CommandHandler("help", dm_only_conv_entry(help_command))' in bot_src
 
 
 def _check_wizard_schedule_reply_targets() -> None:

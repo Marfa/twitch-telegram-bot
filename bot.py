@@ -3189,7 +3189,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", dm_only_conv_entry(start)),
-            CommandHandler("help", help_command),
+            CommandHandler("help", dm_only_conv_entry(help_command)),
             CommandHandler("schedule", dm_only_conv_entry(start_stream_schedule)),
             MessageHandler(_btn_filter("new"), dm_only_conv_entry(start_new_subscription)),
             CallbackQueryHandler(
@@ -3972,8 +3972,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ],
         },
         fallbacks=[
-            CommandHandler("cancel", cancel),
-            CommandHandler("help", help_command),
+            CommandHandler("cancel", dm_only_conv_entry(cancel)),
+            CommandHandler("help", dm_only_conv_entry(help_command)),
             MessageHandler(_btn_filter("wizard_cancel"), cancel),
         ],
         allow_reentry=True,

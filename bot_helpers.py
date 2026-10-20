@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 from telegram import ReplyKeyboardMarkup
-from telegram.constants import ChatType, ParseMode
+from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
 from telegram.ext import ContextTypes, ConversationHandler, filters
 
@@ -74,7 +74,7 @@ async def reply_setup_private_only(update, lang: str) -> None:
         await update.effective_message.reply_text(text)
 
 
-# ponytail: in-memory; one hint per (chat, user) until restart (incl. bot admins)
+# ponytail: in-memory; one hint per (chat, chat-admin user) until restart
 _group_setup_notified: set[tuple[int, int]] = set()
 
 # Slash commands that configure or control the bot — DM only. /when is allowed in groups.
@@ -94,7 +94,7 @@ def reset_group_setup_notified() -> None:
 
 
 def should_send_group_setup_hint(chat_id: int, user_id: int) -> bool:
-    """One private-only hint per (chat, user); bot admins included."""
+    """One private-only hint per (chat, user) for Telegram chat admins."""
     key = (chat_id, user_id)
     if key in _group_setup_notified:
         return False
@@ -102,20 +102,55 @@ def should_send_group_setup_hint(chat_id: int, user_id: int) -> bool:
     return True
 
 
+async def user_is_telegram_chat_admin(bot, chat_id: int, user_id: int) -> bool:
+    """True if user is owner/administrator of the Telegram chat."""
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except (BadRequest, Forbidden):
+        return False
+    except Exception:
+        logger.exception(
+            "getChatMember failed for user %s in chat %s", user_id, chat_id
+        )
+        return False
+    return member.status in (
+        ChatMemberStatus.OWNER,
+        ChatMemberStatus.ADMINISTRATOR,
+    )
+
+
+async def _ack_callback_quietly(update) -> None:
+    if update.callback_query:
+        try:
+            await update.callback_query.answer()
+        except BadRequest:
+            pass
+
+
 async def handle_group_setup_rejection(
     update, context: ContextTypes.DEFAULT_TYPE
 ) -> bool:
-    """Block all bot management in group/channel. Returns True if consumed."""
+    """Block all bot management in group/channel. Returns True if consumed.
+
+    Non-admins: silent. Chat admins: one-time «management only in DM» hint.
+    Never runs the underlying command.
+    """
     if is_private_chat(update):
         return False
-    user_id = update.effective_user.id
+    user = update.effective_user
+    if user is None:
+        await _ack_callback_quietly(update)
+        return True
+    user_id = user.id
     chat_id = reply_chat_id(update)
+    is_chat_admin = await user_is_telegram_chat_admin(
+        context.bot, chat_id, user_id
+    )
+    if not is_chat_admin:
+        await _ack_callback_quietly(update)
+        return True
     if not should_send_group_setup_hint(chat_id, user_id):
-        if update.callback_query:
-            try:
-                await update.callback_query.answer()
-            except BadRequest:
-                pass
+        await _ack_callback_quietly(update)
         return True
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
@@ -128,7 +163,8 @@ async def handle_group_setup_rejection(
         {
             "chat_id": chat_id,
             **chat_context_properties(update),
-            "is_admin": _is_admin(user_id),
+            "is_chat_admin": True,
+            "is_bot_admin": _is_admin(user_id),
         },
     )
     await reply_setup_private_only(update, lang)

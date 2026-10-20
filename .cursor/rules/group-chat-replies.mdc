@@ -12,14 +12,15 @@ globs:
 
 ## Setup / management — DM only
 
-All bot management (commands, reply-menu, setup callbacks, admin) runs **only in a private chat** with the bot — including for bot `ADMIN_USER_IDS`.
+All bot management (commands, reply-menu, setup callbacks, bot-admin tools) runs **only in a private chat** with the bot.
 
-- Gate: `reject_group_bot_setup` (group `-2`, raises `ApplicationHandlerStop`) + `dm_only_conv_entry()` on ConversationHandler entry points
-- User message: `setup_private_only` (i18n) — «управление только в ЛС»
-- Hint **once per (chat_id, user_id)** (admins included); further attempts silent
-- Analytics: `group_setup_private_hint` event (includes `chat_id`, `chat_type`, `is_admin`)
+- Gate: `reject_group_bot_setup` (group `-2`, raises `ApplicationHandlerStop`) + `dm_only_conv_entry()` on ConversationHandler entry/fallbacks (incl. `/help`)
+- **Telegram chat non-admins:** silent (no command, no hint)
+- **Telegram chat admins:** one-time `setup_private_only` («управление только в ЛС»); further attempts silent
+- Never execute the underlying command in a group/channel (even for bot `ADMIN_USER_IDS`)
+- Analytics: `group_setup_private_hint` (`chat_id`, `chat_type`, `is_chat_admin`, `is_bot_admin`)
 - **Allowed in groups/channels:** only `/when` and free-text «Когда стрим?» / «When stream?»
-- DM-only slash commands: `GROUP_DM_ONLY_COMMANDS` in `bot_helpers.py` (`start`, `help`, `cancel`, `schedule`, `feedback`, `settings`, `stats`)
+- DM-only slash commands: `GROUP_DM_ONLY_COMMANDS` in `bot_helpers.py`
 
 When adding a new menu button, slash command (except `/when`), or setup inline callback, register it in `group_setup_menu_filter()` / `GROUP_DM_ONLY_COMMANDS` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.
 
