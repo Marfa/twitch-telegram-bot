@@ -119,6 +119,9 @@ def main() -> None:
     from .checks_giveaway_watch import run as check_giveaway_watch
 
     check_giveaway_watch()
+    from .checks_startup import run as check_startup
+
+    check_startup()
     print("ok")
 
 
