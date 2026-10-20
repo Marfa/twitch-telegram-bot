@@ -3289,6 +3289,28 @@ async def start_edit_top_donations(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
+    from stream_alert_defaults import resolve_defaults_edit_target
+
+    defaults_target = resolve_defaults_edit_target(
+        context.user_data, db, query.from_user.id, query_data=query.data
+    )
+    if defaults_target is not None:
+        sub, sub_id = defaults_target
+        await query.answer()
+        await _maybe_prompt_donationalerts_oauth(
+            context.bot, db, query.from_user.id, lang
+        )
+        context.user_data["edit_sub_id"] = 0
+        context.user_data["wizard_edit"] = True
+        context.user_data["editing_top_donations_template"] = True
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("top_donations_template_prompt", lang),
+            reply_markup=_wizard(lang),
+        )
+        return _sub_states()["EDIT_TEMPLATE"]
+
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub:
         await query.answer()
@@ -3473,40 +3495,52 @@ async def start_edit_category_filter(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
-    if not await prem.has_feature(
-        context.bot,
-        db,
-        query.from_user.id,
-        "category_filter",
-        channel=sub.twitch_username,
-    ):
-        from premium_handlers import send_premium_screen
+    from stream_alert_defaults import resolve_defaults_edit_target
 
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(
+    defaults_target = resolve_defaults_edit_target(
+        context.user_data, db, query.from_user.id, query_data=query.data
+    )
+    if defaults_target is not None:
+        sub, sub_id = defaults_target
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        if not await prem.has_feature(
             context.bot,
-            query.from_user.id,
-            lang,
             db,
-            update=update,
-            context=context,
-            source="edit_category_filter",
-            feature="category_filter",
-        )
-        return ConversationHandler.END
+            query.from_user.id,
+            "category_filter",
+            channel=sub.twitch_username,
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_category_filter",
+                feature="category_filter",
+            )
+            return ConversationHandler.END
     cats = parse_category_filter(getattr(sub, "category_filter", "") or "")
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     context.user_data["category_filter_list"] = cats
     context.user_data["category_filter"] = dump_category_filter(cats)
     context.user_data.pop("catfilt_candidates", None)
-    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    sub_num = (
+        0
+        if context.user_data.get("editing_defaults")
+        else _owner_sub_number(db, query.from_user.id, sub_id)
+    )
     current = html.escape(_edit_category_filter_current_label(sub.category_filter, lang))
     await query.edit_message_text("✓")
     await context.bot.send_message(
@@ -3638,21 +3672,44 @@ async def receive_edit_category_filter_callback(
     data = query.data or ""
     db: Database = context.application.bot_data["db"]
     user_id = query.from_user.id
-    sub_id = int(context.user_data.get("edit_sub_id") or 0)
+    sub_id = context.user_data.get("edit_sub_id")
+    editing_defaults = bool(context.user_data.get("editing_defaults"))
     if data == "catfilt:cancel":
+        if editing_defaults:
+            from stream_alert_defaults import keep_defaults_editor_state
+            from handlers.stream_defaults import show_defaults_editor
+
+            kept = keep_defaults_editor_state(context.user_data)
+            context.user_data.clear()
+            context.user_data.update(kept)
+            context.user_data["editing_defaults"] = True
+            await query.edit_message_text("✓")
+            await show_defaults_editor(update, context)
+            return ConversationHandler.END
         context.user_data.clear()
         await query.edit_message_text(t("cancelled", lang))
         return ConversationHandler.END
     if data == "catfilt:back":
+        if editing_defaults:
+            from stream_alert_defaults import keep_defaults_editor_state
+            from handlers.stream_defaults import show_defaults_editor
+
+            kept = keep_defaults_editor_state(context.user_data)
+            context.user_data.clear()
+            context.user_data.update(kept)
+            context.user_data["editing_defaults"] = True
+            await query.edit_message_text("✓")
+            await show_defaults_editor(update, context)
+            return ConversationHandler.END
         context.user_data.clear()
-        sub = db.get_subscription(sub_id, user_id) if sub_id else None
+        sub = db.get_subscription(int(sub_id), user_id) if sub_id else None
         if not sub:
             await query.edit_message_text(t("sub_not_found", lang))
             return ConversationHandler.END
         show_adv = await prem.advanced_mode_on(
             context.bot, db, user_id, channel=sub.twitch_username
         )
-        sub_num = _owner_sub_number(db, user_id, sub_id)
+        sub_num = _owner_sub_number(db, user_id, int(sub_id))
         await query.edit_message_text(
             _edit_menu_text(
                 lang,
@@ -3672,16 +3729,37 @@ async def receive_edit_category_filter_callback(
         context.user_data.pop("catfilt_candidates", None)
         context.user_data.pop("catfilt_companies", None)
         context.user_data.pop("catfilt_search_page", None)
+        if editing_defaults:
+            from stream_alert_defaults import update_defaults_draft
+            from handlers.stream_defaults import reshow_defaults_after_edit
+
+            update_defaults_draft(context.user_data, category_filter="")
+            await query.edit_message_text(t("edit_category_filter_cleared", lang))
+            return await reshow_defaults_after_edit(update, context, lang)
         if sub_id:
-            db.update_subscription(sub_id, user_id, category_filter="")
+            db.update_subscription(int(sub_id), user_id, category_filter="")
         await query.edit_message_text(t("edit_category_filter_cleared", lang))
         context.user_data.clear()
         return ConversationHandler.END
     if data == "catfilt:done":
         cats = list(context.user_data.get("category_filter_list") or [])
         raw = dump_category_filter(cats)
+        if editing_defaults:
+            from stream_alert_defaults import update_defaults_draft
+            from handlers.stream_defaults import reshow_defaults_after_edit
+
+            update_defaults_draft(context.user_data, category_filter=raw)
+            try:
+                await query.edit_message_text(
+                    t("edit_category_filter_cleared", lang)
+                    if not cats
+                    else t("edit_category_filter_saved", lang)
+                )
+            except BadRequest:
+                pass
+            return await reshow_defaults_after_edit(update, context, lang)
         if sub_id:
-            db.update_subscription(sub_id, user_id, category_filter=raw)
+            db.update_subscription(int(sub_id), user_id, category_filter=raw)
         try:
             await query.edit_message_text(
                 t("edit_category_filter_cleared", lang)
@@ -3749,28 +3827,36 @@ async def start_edit_custom_buttons(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
-    if not await maybe_entitled_custom_buttons(
-        context.bot, db, query.from_user.id, channel=sub.twitch_username
-    ):
-        import beta as beta_features
-        from premium_handlers import send_premium_screen
+    from stream_alert_defaults import resolve_defaults_edit_target
 
-        if not beta_features.is_enabled(
-            db, query.from_user.id, cbtn.BETA_FEATURE_ID
-        ):
-            await query.edit_message_text(t("custom_buttons_beta_required", lang))
+    defaults_target = resolve_defaults_edit_target(
+        context.user_data, db, query.from_user.id, query_data=query.data
+    )
+    if defaults_target is not None:
+        sub, sub_id = defaults_target
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
             return ConversationHandler.END
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(
-            context.bot, query.from_user.id, lang, db, update=update
-        )
-        return ConversationHandler.END
+        if not await maybe_entitled_custom_buttons(
+            context.bot, db, query.from_user.id, channel=sub.twitch_username
+        ):
+            import beta as beta_features
+            from premium_handlers import send_premium_screen
+
+            if not beta_features.is_enabled(
+                db, query.from_user.id, cbtn.BETA_FEATURE_ID
+            ):
+                await query.edit_message_text(t("custom_buttons_beta_required", lang))
+                return ConversationHandler.END
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot, query.from_user.id, lang, db, update=update
+            )
+            return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data.pop("cbtn_awaiting", None)
     context.user_data.pop("cbtn_edit_index", None)
@@ -3802,10 +3888,27 @@ async def receive_edit_custom_buttons_callback(
     db: Database = context.application.bot_data["db"]
     sub_id = int(context.user_data.get("edit_sub_id") or 0)
     owner_id = query.from_user.id
+    editing_defaults = bool(context.user_data.get("editing_defaults"))
 
     def _persist(_ctx: ContextTypes.DEFAULT_TYPE) -> None:
         dump = cbtn.dump_custom_buttons(_ud_buttons(_ctx))
         kwargs: dict = {"custom_buttons": dump}
+        if editing_defaults:
+            from stream_alert_defaults import (
+                ensure_defaults_draft,
+                update_defaults_draft,
+            )
+
+            draft = ensure_defaults_draft(_ctx.user_data, db, owner_id)
+            if (
+                dump == "[]"
+                and not draft.get("attach_chat_button")
+                and not draft.get("attach_live_remind_button")
+            ):
+                kwargs["button_style"] = ""
+            update_defaults_draft(_ctx.user_data, **kwargs)
+            _set_ud_buttons(_ctx, cbtn.parse_custom_buttons(dump))
+            return
         sub_now = db.get_subscription(sub_id, owner_id)
         if (
             dump == "[]"
@@ -3819,6 +3922,14 @@ async def receive_edit_custom_buttons_callback(
 
     async def _done(upd, ctx, lang_done):
         _persist(ctx)
+        if editing_defaults:
+            from handlers.stream_defaults import reshow_defaults_after_edit
+
+            await context.bot.send_message(
+                reply_chat_id(upd),
+                t("custom_buttons_saved", lang_done),
+            )
+            return await reshow_defaults_after_edit(upd, ctx, lang_done)
         sub = db.get_subscription(sub_id, owner_id)
         if not sub:
             await context.bot.send_message(
@@ -3870,10 +3981,27 @@ async def receive_edit_custom_buttons_text(
     db: Database = context.application.bot_data["db"]
     sub_id = int(context.user_data.get("edit_sub_id") or 0)
     owner_id = update.effective_user.id
+    editing_defaults = bool(context.user_data.get("editing_defaults"))
 
     def _persist(_ctx: ContextTypes.DEFAULT_TYPE) -> None:
         dump = cbtn.dump_custom_buttons(_ud_buttons(_ctx))
         kwargs: dict = {"custom_buttons": dump}
+        if editing_defaults:
+            from stream_alert_defaults import (
+                ensure_defaults_draft,
+                update_defaults_draft,
+            )
+
+            draft = ensure_defaults_draft(_ctx.user_data, db, owner_id)
+            if (
+                dump == "[]"
+                and not draft.get("attach_chat_button")
+                and not draft.get("attach_live_remind_button")
+            ):
+                kwargs["button_style"] = ""
+            update_defaults_draft(_ctx.user_data, **kwargs)
+            _set_ud_buttons(_ctx, cbtn.parse_custom_buttons(dump))
+            return
         sub_now = db.get_subscription(sub_id, owner_id)
         if (
             dump == "[]"
@@ -3906,36 +4034,44 @@ async def start_edit_multistream(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
-    if not sub.notify_on_live or sub.notify_on_end or sub.notify_on_category_change:
-        await query.answer()
-        return ConversationHandler.END
-    if not await prem.has_feature(
-        context.bot,
-        db,
-        query.from_user.id,
-        ms.FEATURE_ID,
-        channel=sub.twitch_username,
-    ):
-        from premium_handlers import send_premium_screen
+    from stream_alert_defaults import resolve_defaults_edit_target
 
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(
+    defaults_target = resolve_defaults_edit_target(
+        context.user_data, db, query.from_user.id, query_data=query.data
+    )
+    if defaults_target is not None:
+        sub, sub_id = defaults_target
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
+        if not sub.notify_on_live or sub.notify_on_end or sub.notify_on_category_change:
+            await query.answer()
+            return ConversationHandler.END
+        if not await prem.has_feature(
             context.bot,
-            query.from_user.id,
-            lang,
             db,
-            update=update,
-            context=context,
-            source="edit_multistream",
-            feature=ms.FEATURE_ID,
-        )
-        return ConversationHandler.END
+            query.from_user.id,
+            ms.FEATURE_ID,
+            channel=sub.twitch_username,
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_multistream",
+                feature=ms.FEATURE_ID,
+            )
+            return ConversationHandler.END
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
     channels = ms.parse_multistream_channels(getattr(sub, "multistream_channels", None))
@@ -3966,9 +4102,14 @@ async def receive_edit_multistream_callback(
     db: Database = context.application.bot_data["db"]
     sub_id = int(context.user_data.get("edit_sub_id") or 0)
     owner_id = query.from_user.id
+    editing_defaults = bool(context.user_data.get("editing_defaults"))
     action = (query.data or "").split(":")[-1]
 
     async def _reshow_edit() -> int:
+        if editing_defaults:
+            from handlers.stream_defaults import reshow_defaults_after_edit
+
+            return await reshow_defaults_after_edit(update, context, lang)
         sub = db.get_subscription(sub_id, owner_id)
         if not sub:
             await context.bot.send_message(
@@ -3996,7 +4137,12 @@ async def receive_edit_multistream_callback(
     if action == "clear":
         context.user_data["multistream_list"] = []
         context.user_data["multistream_channels"] = "[]"
-        db.update_subscription(sub_id, owner_id, multistream_channels="[]")
+        if editing_defaults:
+            from stream_alert_defaults import update_defaults_draft
+
+            update_defaults_draft(context.user_data, multistream_channels="[]")
+        else:
+            db.update_subscription(sub_id, owner_id, multistream_channels="[]")
         await query.edit_message_text(t("multistream_cleared", lang))
         await context.bot.send_message(
             reply_chat_id(update),
@@ -4010,7 +4156,12 @@ async def receive_edit_multistream_callback(
     if action in ("done", "skip"):
         channels = context.user_data.get("multistream_list") or []
         dump = ms.dump_multistream_channels(channels)
-        db.update_subscription(sub_id, owner_id, multistream_channels=dump)
+        if editing_defaults:
+            from stream_alert_defaults import update_defaults_draft
+
+            update_defaults_draft(context.user_data, multistream_channels=dump)
+        else:
+            db.update_subscription(sub_id, owner_id, multistream_channels=dump)
         await query.edit_message_text(
             t("multistream_saved", lang, count=len(channels))
             if channels
@@ -4151,11 +4302,24 @@ async def receive_edit_ignore_keywords_skip(
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
 
     db: Database = context.application.bot_data["db"]
     owner_id = query.from_user.id
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import update_defaults_draft
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        update_defaults_draft(
+            context.user_data,
+            ignore_keywords="",
+            use_global_ignore=bool(context.user_data.get("use_global_ignore")),
+        )
+        await query.edit_message_text("✓")
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(
         sub_id,
@@ -4181,30 +4345,38 @@ async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_T
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
-    sub = db.get_subscription(sub_id, query.from_user.id)
-    if not sub:
-        await query.edit_message_text(t("sub_not_found", lang))
-        return ConversationHandler.END
+    from stream_alert_defaults import resolve_defaults_edit_target
 
-    if not await prem.has_feature(
-        context.bot, db, query.from_user.id, "repeat", channel=sub.twitch_username
-    ):
-        from premium_handlers import send_premium_screen
+    defaults_target = resolve_defaults_edit_target(
+        context.user_data, db, query.from_user.id, query_data=query.data
+    )
+    if defaults_target is not None:
+        sub, sub_id = defaults_target
+    else:
+        sub = db.get_subscription(sub_id, query.from_user.id)
+        if not sub:
+            await query.edit_message_text(t("sub_not_found", lang))
+            return ConversationHandler.END
 
-        await query.edit_message_text(
-            t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
-        )
-        await send_premium_screen(
-            context.bot,
-            query.from_user.id,
-            lang,
-            db,
-            update=update,
-            context=context,
-            source="edit_field",
-            feature="repeat",
-        )
-        return ConversationHandler.END
+        if not await prem.has_feature(
+            context.bot, db, query.from_user.id, "repeat", channel=sub.twitch_username
+        ):
+            from premium_handlers import send_premium_screen
+
+            await query.edit_message_text(
+                t("premium_gate", lang, action=t("premium_gate_action_cancel", lang))
+            )
+            await send_premium_screen(
+                context.bot,
+                query.from_user.id,
+                lang,
+                db,
+                update=update,
+                context=context,
+                source="edit_field",
+                feature="repeat",
+            )
+            return ConversationHandler.END
 
     context.user_data["edit_sub_id"] = sub_id
     context.user_data["wizard_edit"] = True
@@ -4212,7 +4384,11 @@ async def start_edit_repeat_mute(update: Update, context: ContextTypes.DEFAULT_T
     current = _repeat_current_label(
         prem.effective_suppress_repeat_minutes(sub), lang
     )
-    sub_num = _owner_sub_number(db, query.from_user.id, sub_id)
+    sub_num = (
+        0
+        if context.user_data.get("editing_defaults")
+        else _owner_sub_number(db, query.from_user.id, sub_id)
+    )
     await query.edit_message_text("✓")
     await context.bot.send_message(
         reply_chat_id(update),

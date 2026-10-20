@@ -1689,6 +1689,42 @@ async def _smoke_defedit_handoff_frozen_callback(db) -> None:
     starter.assert_awaited_once_with(update, ctx)
 
 
+async def _smoke_defedit_receive_template(db) -> None:
+    """Defaults editor: sending a template with edit_sub_id=0 must save draft + notify."""
+    from bot import receive_edit_template
+    from stream_alert_defaults import ensure_defaults_draft
+
+    application, bot = _app(db)
+    db.upsert_user(_FREE_UID)
+    ctx = _ctx(
+        application,
+        user_data={
+            "editing_defaults": True,
+            "edit_sub_id": 0,
+            "wizard_edit": True,
+        },
+    )
+    ensure_defaults_draft(ctx.user_data, db, _FREE_UID)
+    update = _msg_update(_FREE_UID, text="Live: {username} — {game}")
+    update.effective_message.link_preview_options = None
+
+    with patch(
+        "bot._offer_template_typo_fix", new=AsyncMock(return_value=False)
+    ), patch(
+        "handlers.stream_defaults.show_defaults_editor",
+        new=AsyncMock(),
+    ):
+        state = await receive_edit_template(update, ctx)
+
+    assert state == ConversationHandler.END
+    draft = ctx.user_data.get("stream_defaults_draft") or {}
+    assert draft.get("message_template") == "Live: {username} — {game}"
+    # Must notify (not silent END on edit_sub_id=0).
+    assert bot.send_message.await_count >= 1
+    sent = " ".join(str(c.args[1]) for c in bot.send_message.await_args_list if c.args)
+    assert "черновик" in sent.lower() or "draft" in sent.lower()
+
+
 async def _run_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "smoke.db")
@@ -1708,6 +1744,7 @@ async def _run_smoke() -> None:
         await _smoke_pause_sub_start(db)
         await _smoke_welcome_demo_locale(db)
         await _smoke_defedit_handoff_frozen_callback(db)
+        await _smoke_defedit_receive_template(db)
 
 
 def check_handler_smoke() -> None:

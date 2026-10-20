@@ -2355,7 +2355,13 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return await _go_image_ask_prompt(update, context, lang)
         return await _go_advanced_options_prompt(update, context, lang)
     if state == _wz()["IMAGE_ASK"]:
-        if context.user_data.get("edit_sub_id"):
+        from stream_alert_defaults import is_edit_flow
+
+        if is_edit_flow(context.user_data):
+            if context.user_data.get("editing_defaults"):
+                from handlers.stream_defaults import reshow_defaults_after_edit
+
+                return await reshow_defaults_after_edit(update, context, lang)
             owner_id = update.effective_user.id
             context.user_data.clear()
             await update.effective_message.reply_text(
@@ -2369,9 +2375,13 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if state == _wz()["IMAGE_UPLOAD"]:
         return await _go_image_ask_prompt(update, context, lang)
     if state == _wz()["IMAGE_POSITION"]:
+        from stream_alert_defaults import is_edit_flow
+
         await update.effective_message.reply_text(
             t("image_send_prompt", lang),
-            reply_markup=_wizard(lang, back=not bool(context.user_data.get("edit_sub_id"))),
+            reply_markup=_wizard(
+                lang, back=not is_edit_flow(context.user_data)
+            ),
         )
         _set_wizard_back(context, _wz()["IMAGE_UPLOAD"])
         return _wz()["IMAGE_UPLOAD"]
@@ -3129,7 +3139,9 @@ async def receive_template_typo_confirm(
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     fix = query.data.endswith(":1")
-    is_edit = bool(context.user_data.get("edit_sub_id"))
+    from stream_alert_defaults import is_edit_flow
+
+    is_edit = is_edit_flow(context.user_data)
     # A repeated tap on this keyboard already consumed pending_template; saving the
     # leftover "" wipes the template and the create aborts later at the save step.
     template = context.user_data.pop(
@@ -3192,7 +3204,9 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     action = query.data.split(":", 1)[1]
-    is_edit = bool(context.user_data.get("edit_sub_id"))
+    from stream_alert_defaults import is_edit_flow
+
+    is_edit = is_edit_flow(context.user_data)
 
     if action == "keep":
         await query.edit_message_text("✓")
@@ -3343,7 +3357,9 @@ async def receive_image_position(update: Update, context: ContextTypes.DEFAULT_T
         return _wz()["IMAGE_POSITION"]
     context.user_data["image_position"] = position
     await query.edit_message_text("✓")
-    if context.user_data.get("edit_sub_id"):
+    from stream_alert_defaults import is_edit_flow
+
+    if is_edit_flow(context.user_data):
         return await _save_edit_image(update, context, lang)
     return await _go_after_image_step(update, context, lang)
 
@@ -3359,8 +3375,12 @@ async def receive_strip_name_toggle(
     lang = _user_lang(context, query.from_user.id)
     enabled = not bool(context.user_data.get("strip_name_mentions"))
     context.user_data["strip_name_mentions"] = enabled
-    editing = bool(context.user_data.get("edit_sub_id"))
-    if editing:
+    from stream_alert_defaults import is_edit_flow, update_defaults_draft
+
+    editing = is_edit_flow(context.user_data)
+    if editing and context.user_data.get("editing_defaults"):
+        update_defaults_draft(context.user_data, strip_name_mentions=enabled)
+    elif editing:
         db: Database = context.application.bot_data["db"]
         owner_id = query.from_user.id
         sub_id = int(context.user_data["edit_sub_id"])

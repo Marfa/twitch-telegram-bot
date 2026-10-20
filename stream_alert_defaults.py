@@ -381,3 +381,23 @@ def keep_defaults_editor_state(user_data: dict[str, Any]) -> dict[str, Any]:
         for k in ("editing_defaults", "stream_defaults_draft")
         if k in user_data
     }
+
+
+def is_edit_flow(user_data: dict[str, Any]) -> bool:
+    """True for subscription or defaults edit (``edit_sub_id`` may be 0)."""
+    return user_data.get("edit_sub_id") is not None
+
+
+def resolve_defaults_edit_target(
+    user_data: dict[str, Any],
+    db: Any,
+    user_id: int,
+    *,
+    query_data: str | None = None,
+) -> tuple[Any, int] | None:
+    """If editing stream defaults, return ``(draft_as_subscription, 0)``. Else None."""
+    if user_data.get("editing_defaults") or str(query_data or "").startswith("defedit:"):
+        user_data["editing_defaults"] = True
+        draft = ensure_defaults_draft(user_data, db, user_id)
+        return draft_as_subscription(draft, owner_id=user_id), 0
+    return None

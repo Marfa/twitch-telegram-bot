@@ -1566,6 +1566,42 @@ async def start_edit_schedule_reminder(
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
+    from stream_alert_defaults import resolve_defaults_edit_target
+
+    defaults_target = resolve_defaults_edit_target(
+        context.user_data, db, query.from_user.id, query_data=query.data
+    )
+    if defaults_target is not None:
+        sub, sub_id = defaults_target
+        if int(sub.schedule_reminder_minutes or 0) > 0:
+            from stream_alert_defaults import update_defaults_draft
+            from handlers.stream_defaults import show_defaults_editor
+
+            update_defaults_draft(
+                context.user_data,
+                schedule_reminder_minutes=0,
+                schedule_reminder_configured=True,
+            )
+            await show_defaults_editor(update, context, edit_message=True)
+            return ConversationHandler.END
+        context.user_data["edit_sub_id"] = 0
+        context.user_data["wizard_edit"] = True
+        current_label = _schedule_reminder_current_label(
+            sub.schedule_reminder_minutes, lang
+        )
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t(
+                "edit_schedule_reminder_prompt",
+                lang,
+                sub_id=0,
+                current=current_label,
+            ),
+            reply_markup=_wizard(lang, back=False),
+        )
+        return EDIT_SCHEDULE_REMINDER
+
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub or not sub.schedule_reminder_configured:
         await query.edit_message_text(t("sub_not_found", lang))
@@ -1647,7 +1683,7 @@ async def receive_edit_schedule_reminder(
 ) -> int:
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
 
     raw = (update.effective_message.text or "").strip()
@@ -1663,6 +1699,18 @@ async def receive_edit_schedule_reminder(
     minutes = int(raw)
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import update_defaults_draft
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        update_defaults_draft(
+            context.user_data,
+            schedule_reminder_minutes=minutes,
+            schedule_reminder_configured=True,
+        )
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not db.update_subscription(
         sub_id, owner_id, schedule_reminder_minutes=minutes
@@ -1689,6 +1737,36 @@ async def start_edit_schedule_cancel(
     lang = _user_lang(context, query.from_user.id)
     sub_id = int(query.data.split(":")[1])
     db: Database = context.application.bot_data["db"]
+    from stream_alert_defaults import resolve_defaults_edit_target
+
+    defaults_target = resolve_defaults_edit_target(
+        context.user_data, db, query.from_user.id, query_data=query.data
+    )
+    if defaults_target is not None:
+        sub, sub_id = defaults_target
+        context.user_data["edit_sub_id"] = 0
+        context.user_data["wizard_edit"] = True
+        current_label = (
+            t("edit_schedule_cancel_current_on", lang)
+            if getattr(sub, "notify_on_schedule_cancel", False)
+            and (getattr(sub, "schedule_cancel_template", "") or "").strip()
+            else t("edit_schedule_cancel_current_off", lang)
+        )
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t(
+                "edit_schedule_cancel_prompt",
+                lang,
+                sub_id=0,
+                current=current_label,
+                placeholders_link=placeholders_link_html(lang),
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_wizard(lang, back=False),
+        )
+        return EDIT_SCHEDULE_CANCEL
+
     sub = db.get_subscription(sub_id, query.from_user.id)
     if not sub or _alert_type_from_sub(sub) != "upcoming":
         await query.edit_message_text(t("sub_not_found", lang))
@@ -1779,7 +1857,7 @@ async def receive_edit_schedule_cancel(
 ) -> int:
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
 
     plain = (update.effective_message.text or "").strip()
@@ -1789,6 +1867,27 @@ async def receive_edit_schedule_cancel(
 
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import update_defaults_draft
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        if not plain or plain == "0":
+            update_defaults_draft(
+                context.user_data,
+                notify_on_schedule_cancel=False,
+                schedule_cancel_template="",
+            )
+        else:
+            update_defaults_draft(
+                context.user_data,
+                notify_on_schedule_cancel=True,
+                schedule_cancel_template=message_text_for_template(
+                    update.effective_message
+                ),
+            )
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
     sub_num = _owner_sub_number(db, owner_id, sub_id)
     if not plain or plain == "0":
         ok = db.update_subscription(
@@ -1820,7 +1919,8 @@ async def receive_edit_schedule_cancel(
 async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    # Defaults editor uses edit_sub_id=0 — must not treat as missing.
+    if sub_id is None:
         return ConversationHandler.END
 
     plain = (update.effective_message.text or "").strip()
@@ -1835,6 +1935,16 @@ async def receive_edit_template(update: Update, context: ContextTypes.DEFAULT_TY
     if context.user_data.get("editing_top_donations_template"):
         db: Database = context.application.bot_data["db"]
         owner_id = update.effective_user.id
+        if context.user_data.get("editing_defaults"):
+            from stream_alert_defaults import update_defaults_draft
+            from handlers.stream_defaults import reshow_defaults_after_edit
+
+            update_defaults_draft(
+                context.user_data,
+                top_donations=True,
+                top_donations_template=template,
+            )
+            return await reshow_defaults_after_edit(update, context, lang)
         sub_num = _owner_sub_number(db, owner_id, sub_id)
         if not db.update_subscription(
             sub_id,
@@ -1875,7 +1985,7 @@ async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     lang = _user_lang(context, update.effective_user.id)
     sub_id = context.user_data.get("edit_sub_id")
-    if not sub_id:
+    if sub_id is None:
         return ConversationHandler.END
 
     raw = (update.effective_message.text or "").strip()
@@ -1891,6 +2001,14 @@ async def receive_edit_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE
     minutes = int(raw)
     db: Database = context.application.bot_data["db"]
     owner_id = update.effective_user.id
+    if context.user_data.get("editing_defaults"):
+        from stream_alert_defaults import update_defaults_draft
+        from handlers.stream_defaults import reshow_defaults_after_edit
+
+        update_defaults_draft(context.user_data, suppress_repeat_minutes=minutes)
+        return await reshow_defaults_after_edit(update, context, lang)
+    if not sub_id:
+        return ConversationHandler.END
     sub = db.get_subscription(sub_id, owner_id)
     if sub is not None:
         minutes = prem.suppress_repeat_minutes_for_create(
@@ -3112,7 +3230,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_defedit_callback),
-                pattern=r"^defedit:0:(save|cancel|template|image|image_del|strip|ignore_keywords|category_filter|delay|repeat|delete_old|pin_message|custom_buttons|chat_button|live_remind|top_donations|preview|button_style|sched_remind|schedule_cancel|multistream)$",
+                pattern=r"^defedit:0:(save|cancel|template|image|image_del|strip|ignore_keywords|category_filter|delay|repeat|delete_old|pin_message|custom_buttons|chat_button|live_remind|top_donations|preview|button_style|button_style_back|sched_remind|schedule_cancel|multistream|bs:(?:default|primary|success|danger))$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_edit_template), pattern=r"^edit_f:\d+:template$"

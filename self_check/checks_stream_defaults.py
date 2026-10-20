@@ -10,7 +10,9 @@ from i18n import btn, edit_options_keyboard, settings_menu, t
 from stream_alert_defaults import (
     apply_defaults_to_user_data,
     dump_stream_alert_defaults,
+    is_edit_flow,
     parse_stream_alert_defaults,
+    resolve_defaults_edit_target,
     subscription_update_from_defaults,
 )
 
@@ -134,3 +136,18 @@ def run() -> None:
         sub2 = db.get_subscription(sid, 42)
         assert sub2 is not None
         assert sub2.message_template == "Bound {username}"
+
+    # edit_sub_id=0 must still count as an edit flow (defaults editor).
+    assert is_edit_flow({"edit_sub_id": 0}) is True
+    assert is_edit_flow({}) is False
+    assert is_edit_flow({"edit_sub_id": 7}) is True
+
+    ud: dict = {"editing_defaults": True, "stream_defaults_draft": payload}
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "defaults_resolve.db")
+        db.upsert_user(7)
+        target = resolve_defaults_edit_target(ud, db, 7, query_data="defedit:0:template")
+        assert target is not None
+        sub, sid = target
+        assert sid == 0
+        assert sub.message_template == "Hello {username}"

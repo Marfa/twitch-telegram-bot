@@ -247,6 +247,35 @@ async def on_defedit_callback(
         await show_defaults_editor(update, context, edit_message=True)
         return ConversationHandler.END
 
+    if field == "button_style":
+        from i18n import edit_button_style_keyboard
+
+        await query.answer()
+        await query.edit_message_text(
+            t("edit_button_style_prompt", lang),
+            reply_markup=edit_button_style_keyboard(
+                0,
+                lang,
+                current=str(draft.get("button_style") or ""),
+                callback_prefix="defedit",
+            ),
+        )
+        return ConversationHandler.END
+
+    if field == "button_style_back":
+        await query.answer()
+        await show_defaults_editor(update, context, edit_message=True)
+        return ConversationHandler.END
+
+    if field == "bs" and len(parts) >= 4:
+        from custom_buttons import button_style_from_choice
+
+        style = button_style_from_choice(parts[3])
+        update_defaults_draft(context.user_data, button_style=style)
+        await query.answer()
+        await show_defaults_editor(update, context, edit_message=True)
+        return ConversationHandler.END
+
     # Complex fields → reuse existing edit ConversationHandler entry points
     await query.answer()
     return await _handoff_edit_field(update, context, field)

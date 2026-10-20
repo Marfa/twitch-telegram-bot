@@ -3376,6 +3376,61 @@ async def _scenario_settings_stream_defaults(db) -> None:
     assert "editing_defaults" not in ctx.user_data
 
 
+async def _scenario_settings_stream_defaults_template(db) -> None:
+    """§8 — Defaults editor: template prompt + text save notifies and returns."""
+    from telegram.ext import ConversationHandler
+
+    from bot import receive_edit_template
+    from handlers.stream_defaults import on_defedit_callback, open_stream_defaults_editor
+    from i18n import t
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    db.upsert_user(_FREE_UID)
+
+    update = _msg_update(_FREE_UID, btn("default_alert_settings", "ru"), cap)
+    await open_stream_defaults_editor(update, ctx)
+    cap.assert_turn("settings_stream_defaults_template_open")
+    assert ctx.user_data.get("editing_defaults") is True
+
+    update, query = _cb_update(_FREE_UID, "defedit:0:template", cap)
+    query.answer = AsyncMock()
+    state = await on_defedit_callback(update, ctx)
+    assert ctx.user_data.get("edit_sub_id") == 0
+    assert ctx.user_data.get("editing_defaults") is True
+    # EDIT_TEMPLATE constant from bot; numeric state still leaves cancel on strip_name.
+    assert state != ConversationHandler.END
+    cap.assert_turn("settings_stream_defaults_template_prompt")
+
+    tmpl = "Defaults live {username} — {game}"
+    update = _msg_update(_FREE_UID, tmpl, cap)
+    update.effective_message.link_preview_options = None
+    with patch("bot._offer_template_typo_fix", new=AsyncMock(return_value=False)):
+        state = await receive_edit_template(update, ctx)
+    assert state == ConversationHandler.END
+    draft = ctx.user_data.get("stream_defaults_draft") or {}
+    assert draft.get("message_template") == tmpl
+    assert ctx.user_data.get("editing_defaults") is True
+    saved_note = t("stream_defaults_field_saved", "ru")
+    assert any(
+        c.args and len(c.args) > 1 and saved_note in str(c.args[1])
+        for c in bot.send_message.await_args_list
+    ), "expected stream_defaults_field_saved after template text"
+    # Editor re-shown with Save / Cancel.
+    editor_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "defedit:0:save" in editor_cbs
+    assert "defedit:0:cancel" in editor_cbs
+    cap.assert_turn("settings_stream_defaults_template_saved")
+
+
 async def _scenario_follow_monitor(db) -> None:
     """§1.4 Follow/Unfollow screen: enable + lists + search (escape hatch via menu)."""
     from handlers.follow_monitor import (
@@ -4051,6 +4106,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_publish_chain(db)
         await _scenario_settings_extended(db)
         await _scenario_settings_stream_defaults(db)
+        await _scenario_settings_stream_defaults_template(db)
         await _scenario_follow_monitor(db)
         await _scenario_ai_clips(db)
 

@@ -3343,7 +3343,11 @@ def edit_options_keyboard(
 
 
 def edit_button_style_keyboard(
-    sub_id: int, lang: str, *, current: str = ""
+    sub_id: int,
+    lang: str,
+    *,
+    current: str = "",
+    callback_prefix: str = "edit",
 ) -> InlineKeyboardMarkup:
     from custom_buttons import (
         BUTTON_STYLE_CHOICES,
@@ -3356,10 +3360,16 @@ def edit_button_style_keyboard(
     style_row: list[InlineKeyboardButton] = []
     for choice in BUTTON_STYLE_CHOICES:
         mark = "✅ " if choice == selected else "⬜️ "
+        if callback_prefix == "defedit":
+            style_cb = f"defedit:{sub_id}:bs:{choice}"
+            back_cb = f"defedit:{sub_id}:button_style_back"
+        else:
+            style_cb = f"edit_set:{sub_id}:button_style:{choice}"
+            back_cb = f"edit_f:{sub_id}:button_style_back"
         style_row.append(
             InlineKeyboardButton(
                 mark + t(BUTTON_STYLE_LABEL_KEYS[choice], lang),
-                callback_data=f"edit_set:{sub_id}:button_style:{choice}",
+                callback_data=style_cb,
             )
         )
         if len(style_row) == 2:
@@ -3371,7 +3381,7 @@ def edit_button_style_keyboard(
         [
             InlineKeyboardButton(
                 btn("wizard_back", lang),
-                callback_data=f"edit_f:{sub_id}:button_style_back",
+                callback_data=back_cb,
             )
         ]
     )
