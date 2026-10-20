@@ -30,7 +30,7 @@
 | Cover | Optional alert cover — stream preview (frame, 30‑min refresh), stream GIF preview ⭐ (~30s autoplay MP4, 30‑min refresh), stream video preview ⭐ (~30s muted MP4, 30‑min refresh), game cover, **AI image** ⭐ (generated from the game description when the alert is sent; Advanced options), or your own photo; caption above or below; link preview then off |
 | Delayed send | N minutes after go-live, category change, or going offline (Helix re-check); ⭐ on Extras |
 | Restart mute | For stream start: don’t alert again for X minutes if the stream restarts quickly; ⭐ on Extras |
-| Repeats | For stream start: re-send the same alert at CSV minute offsets (e.g. `5,15,30`) while still live; `0` = off; ⭐<!--beta:alert-repeats-overlap--> / beta “Repeats and overlap guard”<!--/beta:alert-repeats-overlap--> |
+| Repeats | For stream start: re-send the same alert every N minutes from CSV (e.g. `15` or `10,30` — independent intervals) while still live; `0` = off; ⭐<!--beta:alert-repeats-overlap--> / beta “Repeats and overlap guard”<!--/beta:alert-repeats-overlap--> |
 | Overlap guard | Channel/group: don’t send a new alert while the previous one for that streamer is still in chat; optionally skip repeats while your message is still the latest; ⭐<!--beta:alert-repeats-overlap--> / same beta<!--/beta:alert-repeats-overlap--> |
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks, “viewed all below”, **To unwatched** pagination jump |
@@ -127,7 +127,7 @@ Then the wizard (for stream start / category change / stream end):
 5. Link preview (skipped when an image is set)
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
 7. Restart mute (minutes) — if checked; **stream start** only
-8. Repeats (comma-separated minutes, e.g. `5,15,30`) — if checked; **stream start** only; `0` = off
+8. Repeats (interval minutes, e.g. `15` or `10,30`) — if checked; **stream start** only; `0` = off
 9. Destination: DM or channel/group (one button)
 10. For channel or group — add the bot and confirm the chat
 11. Delete previous bot message? — if checked, before a new alert the bot deletes prior ones for the same streamer in that chat (type and template do not matter; other streamers are left alone)

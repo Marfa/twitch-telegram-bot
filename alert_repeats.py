@@ -1,4 +1,9 @@
-"""Scheduled live-alert repeats + overlap-guard helpers."""
+"""Scheduled live-alert repeats (interval ticks) + overlap-guard helpers.
+
+``repeat_notify_minutes`` is a CSV of independent intervals in minutes. After the
+first live send, each value arms a tick; every tick that still sees the stream
+online re-arms the same interval until offline (or the sub is disabled).
+"""
 
 from __future__ import annotations
 

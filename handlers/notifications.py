@@ -294,6 +294,37 @@ def schedule_delayed_live_notification(
     return True
 
 
+def schedule_repeat_interval_job(
+    job_queue,
+    *,
+    db: Database,
+    sub_id: int,
+    stream_id: str,
+    minutes: int,
+) -> None:
+    """Arm one interval tick ``minutes`` from now (survives restart via pending jobs)."""
+    from alert_repeats import repeat_notify_job_name
+
+    mins = int(minutes or 0)
+    if job_queue is None or mins <= 0:
+        return
+    name = repeat_notify_job_name(int(sub_id), mins)
+    schedule_alert_run_once(
+        job_queue,
+        _send_repeat_notification,
+        when=mins * 60,
+        data={
+            "sub_id": int(sub_id),
+            "stream_id": str(stream_id or "").strip(),
+            "minutes": mins,
+        },
+        name=name,
+        replace_existing=True,
+        db=db,
+        kind=ALERT_JOB_REPEAT,
+    )
+
+
 def schedule_repeat_notify_jobs(
     job_queue,
     *,
@@ -301,11 +332,10 @@ def schedule_repeat_notify_jobs(
     sub: Subscription,
     stream_id: str,
 ) -> None:
-    """Arm CSV-minute repeat sends after a successful live alert."""
+    """Arm CSV-minute interval ticks after a successful live alert (then re-arm each tick)."""
     from alert_repeats import (
         format_repeat_notify_minutes,
         parse_repeat_notify_minutes,
-        repeat_notify_job_name,
     )
 
     if job_queue is None:
@@ -319,16 +349,12 @@ def schedule_repeat_notify_jobs(
     _ = format_repeat_notify_minutes(minutes_list)
     sid = str(stream_id or "").strip()
     for minutes in minutes_list:
-        name = repeat_notify_job_name(sub.id, minutes)
-        schedule_alert_run_once(
+        schedule_repeat_interval_job(
             job_queue,
-            _send_repeat_notification,
-            when=int(minutes) * 60,
-            data={"sub_id": sub.id, "stream_id": sid, "minutes": minutes},
-            name=name,
-            replace_existing=True,
             db=db,
-            kind=ALERT_JOB_REPEAT,
+            sub_id=sub.id,
+            stream_id=sid,
+            minutes=minutes,
         )
 
 
@@ -484,15 +510,32 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def _send_repeat_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Re-send the same live alert at a configured offset; skip if offline / when-last."""
+    """Re-send the same live alert on each interval tick; skip if offline / when-last.
+
+    Each configured minute value is an independent interval: after a tick (send or
+    skip-while-still-live) the same interval is re-armed until the stream goes offline.
+    """
     from alert_repeats import is_last_alert_in_chat
     from bot import _render_sub_template
 
     _consume_pending_alert_job(context)
     job_data = context.job.data or {}
     sub_id = int(job_data.get("sub_id") or 0)
+    minutes = int(job_data.get("minutes") or 0)
+    stream_id = str(job_data.get("stream_id") or "")
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
+    jq = context.application.job_queue
+
+    def _rearm(*, sid: str | None = None) -> None:
+        schedule_repeat_interval_job(
+            jq,
+            db=db,
+            sub_id=sub_id,
+            stream_id=sid if sid is not None else stream_id,
+            minutes=minutes,
+        )
+
     sub = db.get_subscription_by_id(sub_id)
     if not sub or not sub.enabled or not sub.notify_on_live:
         return
@@ -502,43 +545,51 @@ async def _send_repeat_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except Exception:
         logger.exception("Twitch poll failed for repeat notification sub %s", sub_id)
+        # Keep the interval cadence across a transient Helix blip.
+        _rearm()
         return
     if sub.twitch_user_id not in live_streams:
         return
-    if bool(getattr(sub, "block_repeat_when_last", False)) and is_last_alert_in_chat(
-        db, sub
-    ):
-        logger.info(
-            "Skip repeat sub=%s: block_repeat_when_last and alert is still last",
-            sub.id,
+    try:
+        if bool(getattr(sub, "block_repeat_when_last", False)) and is_last_alert_in_chat(
+            db, sub
+        ):
+            logger.info(
+                "Skip repeat sub=%s: block_repeat_when_last and alert is still last",
+                sub.id,
+            )
+            return
+        stream = live_streams[sub.twitch_user_id]
+        username = stream.get("user_login", stream.get("user_name", ""))
+        game = stream.get("game_name", "")
+        title = stream.get("title", "")
+        if await _should_skip_ignored_alert(
+            sub, db, twitch, game, title, stream.get("game_id")
+        ):
+            return
+        if _should_skip_category_filter(sub, stream.get("game_id")):
+            return
+        sid = stream_id or str(stream.get("id") or "")
+        text = _render_sub_template(
+            sub, username, game, title, twitch=twitch, stream=stream
         )
-        return
-    stream = live_streams[sub.twitch_user_id]
-    username = stream.get("user_login", stream.get("user_name", ""))
-    game = stream.get("game_name", "")
-    title = stream.get("title", "")
-    if await _should_skip_ignored_alert(
-        sub, db, twitch, game, title, stream.get("game_id")
-    ):
-        return
-    if _should_skip_category_filter(sub, stream.get("game_id")):
-        return
-    text = _render_sub_template(
-        sub, username, game, title, twitch=twitch, stream=stream
-    )
-    await _send_notification(
-        context.bot,
-        db,
-        sub,
-        text,
-        alert_type="live",
-        stream=stream,
-        stream_id=str(job_data.get("stream_id") or stream.get("id") or ""),
-        twitch=twitch,
-        bot_data=context.application.bot_data,
-        job_queue=context.application.job_queue,
-        is_scheduled_repeat=True,
-    )
+        await _send_notification(
+            context.bot,
+            db,
+            sub,
+            text,
+            alert_type="live",
+            stream=stream,
+            stream_id=sid,
+            twitch=twitch,
+            bot_data=context.application.bot_data,
+            job_queue=jq,
+            is_scheduled_repeat=True,
+        )
+        stream_id = sid
+    finally:
+        # Still live: re-arm this interval (send, when-last skip, or filter skip).
+        _rearm(sid=stream_id)
 
 
 async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> None:

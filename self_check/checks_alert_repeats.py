@@ -23,6 +23,15 @@ def check_alert_repeats() -> None:
     assert format_repeat_notify_minutes([30, 5]) == "5,30"
     assert repeat_notify_job_name(9, 15) == "repeat_9_15"
 
+    # Interval semantics: each tick re-arms the same minute value while live.
+    from pathlib import Path
+
+    notif_src = Path("handlers/notifications.py").read_text(encoding="utf-8")
+    assert "def schedule_repeat_interval_job" in notif_src
+    assert "schedule_repeat_interval_job" in notif_src.split(
+        "async def _send_repeat_notification"
+    )[1].split("async def _send_delayed_end_notification")[0]
+
     sub = SimpleNamespace(
         dest_type="channel",
         delete_previous=False,
