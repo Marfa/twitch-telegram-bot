@@ -5,7 +5,7 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from telegram import ReplyKeyboardMarkup
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
 from telegram.ext import ContextTypes, ConversationHandler, filters
@@ -62,16 +62,60 @@ def chat_context_properties(update) -> dict[str, int | str]:
     return props
 
 
-async def reply_setup_private_only(update, lang: str) -> None:
+# Sticky main-menu keyboards must not linger in groups (Android caches them).
+_GROUP_KEYBOARD_REMOVE = ReplyKeyboardRemove()
+
+
+async def reply_setup_private_only(update, lang: str, *, bot=None) -> None:
     text = t("setup_private_only", lang)
     if update.callback_query:
         try:
             await update.callback_query.answer(text, show_alert=True)
         except BadRequest:
             pass
+        # Alert cannot carry ReplyKeyboardRemove — clear via a pulse.
+        if bot is not None:
+            await clear_group_reply_keyboard(bot, reply_chat_id(update))
         return
     if update.effective_message:
-        await update.effective_message.reply_text(text)
+        await update.effective_message.reply_text(
+            text, reply_markup=_GROUP_KEYBOARD_REMOVE
+        )
+
+
+async def clear_group_reply_keyboard(bot, chat_id: int) -> None:
+    """Drop a sticky reply keyboard in a group/channel without leaving a visible msg."""
+    from message_fx import message_fx_disabled
+
+    with message_fx_disabled():
+        for attempt in range(3):
+            try:
+                msg = await bot.send_message(
+                    chat_id, "·", reply_markup=_GROUP_KEYBOARD_REMOVE
+                )
+                await asyncio.sleep(0.35)
+                try:
+                    await bot.delete_message(chat_id, msg.message_id)
+                except (BadRequest, Forbidden):
+                    pass
+                return
+            except RetryAfter as exc:
+                await asyncio.sleep(float(exc.retry_after) + 0.5)
+            except NetworkError:
+                if attempt + 1 >= 3:
+                    logger.warning(
+                        "Clear group reply keyboard failed for %s after retries",
+                        chat_id,
+                    )
+                    return
+                await asyncio.sleep(0.5 * (attempt + 1))
+            except (BadRequest, Forbidden):
+                return
+            except Exception:
+                logger.exception(
+                    "Clear group reply keyboard failed for %s", chat_id
+                )
+                return
 
 
 # ponytail: in-memory; one hint per (chat, chat-admin user) until restart
@@ -148,9 +192,12 @@ async def handle_group_setup_rejection(
     )
     if not is_chat_admin:
         await _ack_callback_quietly(update)
+        # Clear sticky menu left by an older /help (or similar) in this chat.
+        await clear_group_reply_keyboard(context.bot, chat_id)
         return True
     if not should_send_group_setup_hint(chat_id, user_id):
         await _ack_callback_quietly(update)
+        await clear_group_reply_keyboard(context.bot, chat_id)
         return True
     db: Database = context.application.bot_data["db"]
     db.upsert_user(user_id)
@@ -167,7 +214,7 @@ async def handle_group_setup_rejection(
             "is_bot_admin": _is_admin(user_id),
         },
     )
-    await reply_setup_private_only(update, lang)
+    await reply_setup_private_only(update, lang, bot=context.bot)
     return True
 
 

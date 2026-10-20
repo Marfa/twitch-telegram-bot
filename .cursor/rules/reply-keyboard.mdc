@@ -19,5 +19,6 @@ To refresh the menu without a visible message, use `_pulse_reply_keyboard` in `b
 
 - Build reply keyboards only via `_reply_keyboard` in `i18n.py` (`resize_keyboard=True`, `is_persistent=True`). Do not construct a non-persistent `ReplyKeyboardMarkup`.
 - Do not send `ReplyKeyboardRemove` in private chats.
+- **Groups/channels:** never attach the main reply menu. Clear sticky keyboards with `ReplyKeyboardRemove` on group replies (`reply_setup_private_only`, schedule `/when`/`day`/`week`) or `clear_group_reply_keyboard` when silent. Android clients keep a persistent keyboard until remove is applied; macOS may already have dropped it.
 - Do not run `sendMessageDraft` / typing FX on a message that carries a `ReplyKeyboardMarkup` (`message_fx.py` already skips those).
 - `bot_update` broadcasts keep the post-send `_pulse_reply_keyboard` call. A new private DM that ends on inline buttons needs the same pulse (or a lasting message that includes the reply keyboard).

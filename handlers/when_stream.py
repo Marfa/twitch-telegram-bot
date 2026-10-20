@@ -8,12 +8,12 @@ import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.constants import ParseMode
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from bot_helpers import _user_lang
+from bot_helpers import _user_lang, clear_group_reply_keyboard
 from db import Database
 from handlers.notifications import _parse_segment_start
 from i18n import SCHEDULE_TZ, format_stream_schedule_date, t
@@ -358,8 +358,15 @@ async def _reply_schedule_message(
     as_html: bool = False,
 ) -> None:
     send_kw: dict = {}
+    chat = getattr(message, "chat", None)
+    in_group = chat is not None and getattr(chat, "type", None) != ChatType.PRIVATE
     if reply_markup is not None:
         send_kw["reply_markup"] = reply_markup
+        # Inline and ReplyKeyboardRemove cannot share one message — pulse-clear first.
+        if in_group:
+            await clear_group_reply_keyboard(context.bot, chat_id)
+    elif in_group:
+        send_kw["reply_markup"] = ReplyKeyboardRemove()
     if as_html:
         send_kw["parse_mode"] = ParseMode.HTML
         send_kw["disable_web_page_preview"] = True

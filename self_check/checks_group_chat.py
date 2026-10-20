@@ -260,10 +260,13 @@ async def _check_when_stream_no_schedule() -> None:
     ctx = MagicMock()
     ctx.bot = AsyncMock()
     ctx.application.bot_data = {"db": db, "twitch": twitch}
+    update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
     await when_stream_command(update, ctx)
-    update.effective_message.reply_text.assert_awaited_once_with(
-        t("when_stream_no_schedule", "ru")
+    update.effective_message.reply_text.assert_awaited_once()
+    assert update.effective_message.reply_text.await_args.args[0] == t(
+        "when_stream_no_schedule", "ru"
     )
+    assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
     # Cooldown: second call is silent.
     update.effective_message.reply_text.reset_mock()
     await when_stream_command(update, ctx)
@@ -274,11 +277,15 @@ async def _check_when_stream_no_schedule() -> None:
     update.effective_message.reply_text = AsyncMock(
         side_effect=BadRequest("Message to be replied not found")
     )
+    update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
     ctx.bot.send_message = AsyncMock()
     await when_stream_command(update, ctx)
-    ctx.bot.send_message.assert_awaited_once_with(
-        -1002, t("when_stream_no_schedule", "ru")
+    ctx.bot.send_message.assert_awaited_once()
+    assert ctx.bot.send_message.await_args.args[:2] == (
+        -1002,
+        t("when_stream_no_schedule", "ru"),
     )
+    assert "reply_markup" in ctx.bot.send_message.await_args.kwargs
     reset_when_stream_cooldown()
 
 async def _check_group_setup_gate() -> None:
@@ -310,9 +317,13 @@ async def _check_group_setup_gate() -> None:
     )
     ctx = MagicMock()
     ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=1)
+    )
+    ctx.bot.delete_message = AsyncMock()
     ctx.application.bot_data = {"db": MagicMock(get_user_locale=MagicMock(return_value="ru"))}
 
-    # Chat admin → DM-only hint once.
+    # Chat admin → DM-only hint once (and ReplyKeyboardRemove).
     with patch(
         "bot_helpers.user_is_telegram_chat_admin",
         new=AsyncMock(return_value=True),
@@ -321,9 +332,12 @@ async def _check_group_setup_gate() -> None:
         state = await wrapped(update, ctx)
         assert state == ConversationHandler.END
         update.effective_message.reply_text.assert_awaited()
+        _rm_kw = update.effective_message.reply_text.await_args.kwargs
+        assert "reply_markup" in _rm_kw
 
-    # Non-admin member → silent (no help / no hint).
+    # Non-admin member → silent text, but clear sticky reply keyboard.
     update.effective_message.reply_text.reset_mock()
+    ctx.bot.send_message.reset_mock()
     with patch(
         "bot_helpers.user_is_telegram_chat_admin",
         new=AsyncMock(return_value=False),
@@ -332,6 +346,7 @@ async def _check_group_setup_gate() -> None:
         state = await wrapped(update, ctx)
         assert state == ConversationHandler.END
         update.effective_message.reply_text.assert_not_awaited()
+        ctx.bot.send_message.assert_awaited()
 
     update.effective_message.reply_text.reset_mock()
     update.effective_chat = SimpleNamespace(id=900001, type=ChatType.PRIVATE)
@@ -350,11 +365,24 @@ async def _check_group_setup_gate() -> None:
             ),
         ),
     )
-    await reply_setup_private_only(cb_update, "ru")
+    clear_bot = MagicMock()
+    clear_bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=9))
+    clear_bot.delete_message = AsyncMock()
+    await reply_setup_private_only(cb_update, "ru", bot=clear_bot)
     cb_update.callback_query.answer.assert_awaited()
+    clear_bot.send_message.assert_awaited()
+
+    helpers_remove = (_ROOT / "bot_helpers.py").read_text(encoding="utf-8")
+    assert "ReplyKeyboardRemove" in helpers_remove
+    assert "clear_group_reply_keyboard" in helpers_remove
+    when_src = (_ROOT / "handlers/when_stream.py").read_text(encoding="utf-8")
+    assert "ReplyKeyboardRemove" in when_src
+    assert "clear_group_reply_keyboard" in when_src
 
     ctx = MagicMock()
     ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=2))
+    ctx.bot.delete_message = AsyncMock()
     ctx.application.bot_data = {"db": MagicMock(get_user_locale=MagicMock(return_value="ru"))}
     group_update = SimpleNamespace(
         effective_user=SimpleNamespace(id=900002),
@@ -371,6 +399,8 @@ async def _check_group_setup_gate() -> None:
         group_update.effective_message.reply_text.assert_awaited_once()
         assert await handle_group_setup_rejection(group_update, ctx) is True
         group_update.effective_message.reply_text.assert_awaited_once()
+        # Second attempt is silent but still clears sticky keyboard.
+        ctx.bot.send_message.assert_awaited()
     reset_group_setup_notified()
 
     bot_src = (_ROOT / "bot.py").read_text(encoding="utf-8")
@@ -458,6 +488,12 @@ async def _check_day_week_schedule() -> None:
         mock_dt.now = MagicMock(return_value=now)
         mock_dt.combine = datetime.combine
 
+    from telegram import InlineKeyboardMarkup, ReplyKeyboardRemove
+
+    update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
+    ctx.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=3))
+    ctx.bot.delete_message = AsyncMock()
+
     # Day: only alpha has a slot today → single streamer text, no picker.
     with patch("handlers.when_stream.datetime") as mock_dt:
         _freeze_now(mock_dt)
@@ -466,7 +502,8 @@ async def _check_day_week_schedule() -> None:
     assert "Fallout" in text
     assert "Elden Ring" not in text
     assert "alpha" not in text
-    assert update.effective_message.reply_text.await_args.kwargs.get("reply_markup") is None
+    day_markup = update.effective_message.reply_text.await_args.kwargs.get("reply_markup")
+    assert isinstance(day_markup, ReplyKeyboardRemove)
 
     # Week: both have slots → picker with streamer buttons.
     reset_when_stream_cooldown()
@@ -477,9 +514,11 @@ async def _check_day_week_schedule() -> None:
     week_call = update.effective_message.reply_text.await_args
     assert week_call.args[0] == t("schedule_found_streamers", "ru")
     markup = week_call.kwargs.get("reply_markup")
-    assert markup is not None
+    assert isinstance(markup, InlineKeyboardMarkup)
     labels = [btn.text for row in markup.inline_keyboard for btn in row]
     assert labels == ["alpha", "beta"]
+    # Sticky reply keyboard cleared before inline picker.
+    ctx.bot.send_message.assert_awaited()
 
     # Pick alpha → schedule detail + back.
     query = SimpleNamespace(
@@ -510,10 +549,13 @@ async def _check_day_week_schedule() -> None:
         return_value={"segments": [], "vacation": None}
     )
     db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub_a])
+    update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
     await day_schedule_command(update, ctx)
-    update.effective_message.reply_text.assert_awaited_once_with(
-        t("schedule_range_empty_day", "ru")
+    update.effective_message.reply_text.assert_awaited_once()
+    assert update.effective_message.reply_text.await_args.args[0] == t(
+        "schedule_range_empty_day", "ru"
     )
+    assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
     reset_when_stream_cooldown()
 
 
