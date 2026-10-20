@@ -3029,6 +3029,8 @@ def check_core() -> None:
             category="Just Chatting",
         )
         assert tr("when_stream_no_schedule", loc)
+        assert tr("schedule_range_empty_day", loc)
+        assert tr("schedule_range_empty_week", loc)
         assert tr("schedule_live_add_prompt", loc)
         assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
         assert tr("alert_type_prompt", loc)

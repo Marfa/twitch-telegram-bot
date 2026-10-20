@@ -55,7 +55,11 @@ def _check_premium_and_helpers() -> None:
     error_src = (_ROOT / "bot.py").read_text(encoding="utf-8")
     assert "chat_context_properties(update)" in error_src
     assert "when_stream_command" in error_src
+    assert "day_schedule_command" in error_src
+    assert "week_schedule_command" in error_src
     assert 'CommandHandler("when"' in error_src
+    assert 'CommandHandler("day"' in error_src
+    assert 'CommandHandler("week"' in error_src
     assert "GROUP_DM_ONLY_COMMANDS" in error_src
     assert "raise ApplicationHandlerStop" in error_src
     from i18n import t as _t
@@ -66,10 +70,16 @@ def _check_premium_and_helpers() -> None:
 
 def _check_when_stream_helpers() -> None:
     from handlers.when_stream import (
+        DAY_SCHEDULE_TEXT_RE,
+        WEEK_SCHEDULE_TEXT_RE,
         WHEN_STREAM_TEXT_RE,
+        format_range_schedule_line,
+        format_range_streamer_block,
         format_when_stream_line,
         next_upcoming_segment,
         reset_when_stream_cooldown,
+        schedule_window_end,
+        segments_in_window,
         unique_streamers_for_chat,
         _cooldown_allows,
         _mark_cooldown,
@@ -85,6 +95,15 @@ def _check_when_stream_helpers() -> None:
     assert WHEN_STREAM_TEXT_RE.match("@bot When is the stream?")
     assert not WHEN_STREAM_TEXT_RE.match("когда стрим завтра")
     assert not WHEN_STREAM_TEXT_RE.match("@bot когда стрим завтра")
+    assert DAY_SCHEDULE_TEXT_RE.match("расписание на день")
+    assert DAY_SCHEDULE_TEXT_RE.match("@bot расписание на день")
+    assert DAY_SCHEDULE_TEXT_RE.match("schedule for the day")
+    assert DAY_SCHEDULE_TEXT_RE.match("розклад на день")
+    assert WEEK_SCHEDULE_TEXT_RE.match("расписание на неделю")
+    assert WEEK_SCHEDULE_TEXT_RE.match("schedule for the week")
+    assert WEEK_SCHEDULE_TEXT_RE.match("розклад на тиждень")
+    assert not DAY_SCHEDULE_TEXT_RE.match("расписание на неделю")
+    assert not WEEK_SCHEDULE_TEXT_RE.match("расписание на день")
 
     subs = [
         SimpleNamespace(twitch_user_id="1", twitch_username="alpha"),
@@ -129,6 +148,41 @@ def _check_when_stream_helpers() -> None:
     )
     assert seg is not None and seg["id"] == "future"
 
+    window_end = schedule_window_end("week", now=now)
+    assert window_end > now
+    week_slots = segments_in_window(
+        {"segments": [past, canceled, future], "vacation": None},
+        window_start=now,
+        window_end=window_end,
+    )
+    assert len(week_slots) == 1 and week_slots[0][1] == "Elden Ring"
+    day_end = schedule_window_end("day", now=now)
+    assert (
+        segments_in_window(
+            {"segments": [future], "vacation": None},
+            window_start=now,
+            window_end=day_end,
+        )
+        == []
+    )
+    range_line = format_range_schedule_line(
+        lang="ru",
+        start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
+        category="Fallout: A Post Nuclear Role Playing Game",
+    )
+    assert range_line.startswith("- 2 января 18:00 ")
+    assert "Fallout: A Post Nuclear Role Playing Game" in range_line
+    multi_block = format_range_streamer_block(
+        lang="ru",
+        username="alpha",
+        slots=[
+            (datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc), "Elden Ring"),
+        ],
+        show_username=True,
+    )
+    assert multi_block.startswith('<a href="https://www.twitch.tv/alpha">alpha</a>:')
+    assert "- 2 января 18:00 Elden Ring" in multi_block
+
     line = format_when_stream_line(
         lang="ru",
         username="alpha",
@@ -146,7 +200,17 @@ def _check_when_stream_helpers() -> None:
         category="Elden Ring",
         show_username=True,
     )
-    assert "alpha" in named and "Category Elden Ring" in named
+    assert 'href="https://www.twitch.tv/alpha"' in named
+    assert ">alpha</a>:" in named
+    assert "Category Elden Ring" in named
+    named_esc = format_when_stream_line(
+        lang="en",
+        username="alpha",
+        start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
+        category="A < B",
+        show_username=True,
+    )
+    assert "A &lt; B" in named_esc
     assert t("when_stream_no_schedule", "ru").startswith("Откуда мне-то знать?")
 
     reset_when_stream_cooldown()
@@ -179,6 +243,7 @@ async def _check_when_stream_silent() -> None:
 async def _check_when_stream_no_schedule() -> None:
     from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
     from i18n import t
+    from telegram.error import BadRequest
 
     reset_when_stream_cooldown()
     update = SimpleNamespace(
@@ -196,6 +261,7 @@ async def _check_when_stream_no_schedule() -> None:
         return_value={"segments": [], "vacation": None}
     )
     ctx = MagicMock()
+    ctx.bot = AsyncMock()
     ctx.application.bot_data = {"db": db, "twitch": twitch}
     await when_stream_command(update, ctx)
     update.effective_message.reply_text.assert_awaited_once_with(
@@ -205,6 +271,17 @@ async def _check_when_stream_no_schedule() -> None:
     update.effective_message.reply_text.reset_mock()
     await when_stream_command(update, ctx)
     update.effective_message.reply_text.assert_not_awaited()
+    reset_when_stream_cooldown()
+
+    # Trigger message deleted while schedule was fetching → plain send, no raise.
+    update.effective_message.reply_text = AsyncMock(
+        side_effect=BadRequest("Message to be replied not found")
+    )
+    ctx.bot.send_message = AsyncMock()
+    await when_stream_command(update, ctx)
+    ctx.bot.send_message.assert_awaited_once_with(
+        -1002, t("when_stream_no_schedule", "ru")
+    )
     reset_when_stream_cooldown()
 
 async def _check_group_setup_gate() -> None:
@@ -335,6 +412,85 @@ def _check_wizard_schedule_reply_targets() -> None:
     assert not badrequest_dm.search(sched_handlers)
 
 
+async def _check_day_week_schedule() -> None:
+    from handlers.when_stream import (
+        day_schedule_command,
+        reset_when_stream_cooldown,
+        week_schedule_command,
+    )
+    from i18n import t
+    from unittest.mock import patch
+
+    reset_when_stream_cooldown()
+    now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    today_slot = {
+        "id": "today",
+        "start_time": "2030-01-01T15:00:00Z",
+        "category": {"name": "Fallout"},
+    }
+    later_slot = {
+        "id": "later",
+        "start_time": "2030-01-03T15:00:00Z",
+        "category": {"name": "Elden Ring"},
+    }
+    sub_a = SimpleNamespace(twitch_user_id="1", twitch_username="alpha")
+    sub_b = SimpleNamespace(twitch_user_id="2", twitch_username="beta")
+    db = MagicMock()
+    db.get_user_locale = MagicMock(return_value="ru")
+    db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub_a, sub_b])
+
+    def _sched(uid, **_kwargs):
+        if str(uid) == "1":
+            return {"segments": [today_slot, later_slot], "vacation": None}
+        return {"segments": [later_slot], "vacation": None}
+
+    twitch = MagicMock()
+    twitch.get_channel_schedule = MagicMock(side_effect=_sched)
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=900001),
+        effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
+        effective_message=AsyncMock(),
+        callback_query=None,
+    )
+    ctx = MagicMock()
+    ctx.bot = AsyncMock()
+    ctx.application.bot_data = {"db": db, "twitch": twitch}
+
+    def _freeze_now(mock_dt):
+        mock_dt.now = MagicMock(return_value=now)
+        mock_dt.combine = datetime.combine
+
+    with patch("handlers.when_stream.datetime") as mock_dt:
+        _freeze_now(mock_dt)
+        await day_schedule_command(update, ctx)
+    text = update.effective_message.reply_text.await_args.args[0]
+    assert "alpha" in text and "beta" not in text
+    assert "Fallout" in text
+    assert "Elden Ring" not in text
+    assert update.effective_message.reply_text.await_args.kwargs.get("parse_mode")
+
+    reset_when_stream_cooldown()
+    update.effective_message.reply_text.reset_mock()
+    with patch("handlers.when_stream.datetime") as mock_dt:
+        _freeze_now(mock_dt)
+        await week_schedule_command(update, ctx)
+    week_text = update.effective_message.reply_text.await_args.args[0]
+    assert "alpha" in week_text and "beta" in week_text
+    assert "Fallout" in week_text and "Elden Ring" in week_text
+
+    reset_when_stream_cooldown()
+    update.effective_message.reply_text.reset_mock()
+    twitch.get_channel_schedule = MagicMock(
+        return_value={"segments": [], "vacation": None}
+    )
+    db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub_a])
+    await day_schedule_command(update, ctx)
+    update.effective_message.reply_text.assert_awaited_once_with(
+        t("schedule_range_empty_day", "ru")
+    )
+    reset_when_stream_cooldown()
+
+
 def check_group_chat() -> None:
     _check_premium_and_helpers()
     _check_wizard_schedule_reply_targets()
@@ -344,3 +500,4 @@ def check_group_chat() -> None:
     asyncio.run(_check_group_setup_gate())
     asyncio.run(_check_when_stream_silent())
     asyncio.run(_check_when_stream_no_schedule())
+    asyncio.run(_check_day_week_schedule())

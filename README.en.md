@@ -44,7 +44,7 @@
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR) |
-| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/feedback`, `/settings` |
+| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/day`, `/week`, `/feedback`, `/settings` |
 | Deploy | VPS (Docker) |
 
 ## Premium
@@ -242,7 +242,9 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
-| `/when` | When is the stream? **Only** command that runs in a group/channel (with an alert to that chat — next Twitch schedule slot; witty reply if none; 1 min cooldown). Also “When stream?” / «Когда стрим?». All other bot management is DM-only |
+| `/when` | When is the stream? In a group/channel (with an alert to that chat — next Twitch schedule slot; witty reply if none). Also “When stream?” / «Когда стрим?» |
+| `/day` | Today’s schedule (MSK): `- date time game` lines. Also “schedule for the day” / «расписание на день». Multiple streamers — linked channel headers |
+| `/week` | Next 7 days (MSK). Also “schedule for the week” / «расписание на неделю». Same rules as `/day`. Shared 1 min cooldown with `/when`/`/day`. All other bot management is DM-only |
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |

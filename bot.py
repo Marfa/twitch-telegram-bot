@@ -292,7 +292,14 @@ from handlers.notifications import (
     live_transitions,
     needs_live_game_recheck,
 )
-from handlers.when_stream import WHEN_STREAM_TEXT_RE, when_stream_command
+from handlers.when_stream import (
+    DAY_SCHEDULE_TEXT_RE,
+    WEEK_SCHEDULE_TEXT_RE,
+    WHEN_STREAM_TEXT_RE,
+    day_schedule_command,
+    week_schedule_command,
+    when_stream_command,
+)
 from handlers.stream_schedule import (
     _SCHEDULE_DEFAULT_DURATION_MIN,
     _SCHEDULE_FIX_DAY_BETA_ID,
@@ -2645,10 +2652,26 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CommandHandler("feedback", report_problem), group=0)
     app.add_handler(CommandHandler("when", when_stream_command), group=0)
+    app.add_handler(CommandHandler("day", day_schedule_command), group=0)
+    app.add_handler(CommandHandler("week", week_schedule_command), group=0)
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.Regex(WHEN_STREAM_TEXT_RE),
             when_stream_command,
+        ),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.Regex(DAY_SCHEDULE_TEXT_RE),
+            day_schedule_command,
+        ),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.Regex(WEEK_SCHEDULE_TEXT_RE),
+            week_schedule_command,
         ),
         group=0,
     )

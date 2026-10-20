@@ -19,10 +19,10 @@ All bot management (commands, reply-menu, setup callbacks, bot-admin tools) runs
 - **Telegram chat admins:** one-time `setup_private_only` («управление только в ЛС»); further attempts silent
 - Never execute the underlying command in a group/channel (even for bot `ADMIN_USER_IDS`)
 - Analytics: `group_setup_private_hint` (`chat_id`, `chat_type`, `is_chat_admin`, `is_bot_admin`)
-- **Allowed in groups/channels:** only `/when` and free-text «Когда стрим?» / «When stream?»
+- **Allowed in groups/channels:** `/when`, `/day`, `/week` and free-text «Когда стрим?» / «расписание на день|неделю» (EN/UK variants)
 - DM-only slash commands: `GROUP_DM_ONLY_COMMANDS` in `bot_helpers.py`
 
-When adding a new menu button, slash command (except `/when`), or setup inline callback, register it in `group_setup_menu_filter()` / `GROUP_DM_ONLY_COMMANDS` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.
+When adding a new menu button, slash command (except `/when` `/day` `/week`), or setup inline callback, register it in `group_setup_menu_filter()` / `GROUP_DM_ONLY_COMMANDS` / `GROUP_SETUP_CALLBACK_PATTERN` in `bot_helpers.py`.
 
 ## Replies — current chat, not user DM
 
