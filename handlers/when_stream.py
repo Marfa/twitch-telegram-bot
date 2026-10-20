@@ -8,7 +8,7 @@ import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
@@ -47,7 +47,6 @@ WEEK_SCHEDULE_TEXT_RE = re.compile(
     r"|week(?:ly)?\s+schedule"
     r")\s*\??\s*$"
 )
-
 
 def unique_streamers_for_chat(
     subs: list,
@@ -148,23 +147,13 @@ def segments_in_window(
 def format_when_stream_line(
     *,
     lang: str,
-    username: str,
     start: datetime,
     category: str,
-    show_username: bool,
 ) -> str:
     local = start.astimezone(SCHEDULE_TZ)
     when = local.strftime("%d.%m.%Y %H:%M MSK")
     category_label = (category or "").strip() or "—"
-    if not show_username:
-        return t("when_stream", lang, when=when, category=category_label)
-    return t(
-        "when_stream_named",
-        lang,
-        username=twitch_login_link_html(username),
-        when=when,
-        category=html.escape(category_label),
-    )
+    return t("when_stream", lang, when=when, category=category_label)
 
 
 def format_range_schedule_line(
@@ -190,23 +179,58 @@ def format_range_schedule_line(
 def format_range_streamer_block(
     *,
     lang: str,
-    username: str,
     slots: list[tuple[datetime, str]],
-    show_username: bool,
+    escape_game: bool = False,
 ) -> str:
-    lines = [
+    return "\n".join(
         format_range_schedule_line(
             lang=lang,
             start=start,
             category=category,
-            escape_game=show_username,
+            escape_game=escape_game,
         )
         for start, category in slots
-    ]
-    body = "\n".join(lines)
-    if not show_username:
-        return body
+    )
+
+
+def format_schedule_with_streamer_link(
+    *,
+    username: str,
+    body: str,
+) -> str:
     return f"{twitch_login_link_html(username)}:\n{body}"
+
+
+def schedule_streamer_keyboard(
+    mode: ScheduleMode,
+    streamers: list[tuple[str, str]],
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for uid, username in streamers:
+        label = (username or uid)[:64]
+        row.append(
+            InlineKeyboardButton(label, callback_data=f"schq:{mode}:{uid}")
+        )
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
+def schedule_detail_keyboard(mode: ScheduleMode, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("btn_wizard_back", lang),
+                    callback_data=f"schq:list:{mode}",
+                )
+            ]
+        ]
+    )
 
 
 def _cooldown_allows(chat_id: int, *, now: datetime | None = None) -> bool:
@@ -227,15 +251,115 @@ def reset_when_stream_cooldown() -> None:
     _when_stream_last.clear()
 
 
-async def _reply_schedule_text(
+def _empty_text(mode: ScheduleMode, lang: str) -> str:
+    if mode == "day":
+        return t("schedule_range_empty_day", lang)
+    if mode == "week":
+        return t("schedule_range_empty_week", lang)
+    return t("when_stream_no_schedule", lang)
+
+
+def _segment_category(segment: dict) -> str:
+    cat = segment.get("category") or {}
+    return str(cat.get("name") or "") if isinstance(cat, dict) else ""
+
+
+async def _fetch_schedule(
+    twitch: TwitchClient,
+    uid: str,
+    *,
+    mode: ScheduleMode,
+    now: datetime,
+) -> dict:
+    window_end = (
+        schedule_window_end(mode, now=now) if mode in ("day", "week") else None
+    )
+    stop_before = (
+        window_end.strftime("%Y-%m-%dT%H:%M:%SZ") if window_end is not None else None
+    )
+    return await asyncio.to_thread(
+        twitch.get_channel_schedule,
+        uid,
+        stop_before=stop_before,
+    )
+
+
+def _format_streamer_schedule(
+    *,
+    mode: ScheduleMode,
+    lang: str,
+    schedule: dict,
+    now: datetime,
+    username: str | None = None,
+) -> str | None:
+    linked = bool((username or "").strip())
+    if mode == "when":
+        segment = next_upcoming_segment(schedule, now=now)
+        if segment is None:
+            return None
+        start = _parse_segment_start(segment)
+        if start is None:
+            return None
+        raw_cat = (_segment_category(segment) or "").strip() or "—"
+        body = format_when_stream_line(
+            lang=lang,
+            start=start,
+            category=html.escape(raw_cat) if linked else raw_cat,
+        )
+    else:
+        window_end = schedule_window_end(mode, now=now)
+        slots = segments_in_window(schedule, window_start=now, window_end=window_end)
+        if not slots:
+            return None
+        body = format_range_streamer_block(
+            lang=lang, slots=slots, escape_game=linked
+        )
+    if linked:
+        return format_schedule_with_streamer_link(
+            username=username or "", body=body
+        )
+    return body
+
+
+async def _discover_hits(
+    *,
+    twitch: TwitchClient,
+    streamers: list[tuple[str, str]],
+    mode: ScheduleMode,
+    lang: str,
+    now: datetime,
+) -> tuple[list[tuple[str, str, str]], bool]:
+    """Return ([(uid, username, text), …], any successful fetch)."""
+    hits: list[tuple[str, str, str]] = []
+    fetched_ok = False
+    for uid, username in streamers:
+        try:
+            schedule = await _fetch_schedule(twitch, uid, mode=mode, now=now)
+        except Exception:
+            logger.exception("%s: schedule fetch failed for %s", mode, uid)
+            continue
+        fetched_ok = True
+        text = _format_streamer_schedule(
+            mode=mode, lang=lang, schedule=schedule, now=now
+        )
+        if text is None:
+            continue
+        hits.append((uid, username, text))
+    return hits, fetched_ok
+
+
+async def _reply_schedule_message(
     message,
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     text: str,
     *,
-    as_html: bool,
+    reply_markup=None,
+    as_html: bool = False,
 ) -> None:
     send_kw: dict = {}
+    if reply_markup is not None:
+        send_kw["reply_markup"] = reply_markup
     if as_html:
         send_kw["parse_mode"] = ParseMode.HTML
         send_kw["disable_web_page_preview"] = True
@@ -246,6 +370,25 @@ async def _reply_schedule_text(
         if "message to be replied not found" not in str(exc).lower():
             raise
         await context.bot.send_message(chat_id, text, **send_kw)
+
+
+async def _edit_schedule_message(
+    query,
+    text: str,
+    *,
+    reply_markup=None,
+    as_html: bool = False,
+) -> None:
+    edit_kw: dict = {}
+    if reply_markup is not None:
+        edit_kw["reply_markup"] = reply_markup
+    if as_html:
+        edit_kw["parse_mode"] = ParseMode.HTML
+        edit_kw["disable_web_page_preview"] = True
+    try:
+        await query.edit_message_text(text, **edit_kw)
+    except BadRequest:
+        pass
 
 
 async def _schedule_query_command(
@@ -268,87 +411,38 @@ async def _schedule_query_command(
     twitch: TwitchClient = context.application.bot_data["twitch"]
     lang = _user_lang(context, user.id)
 
-    subs = db.get_enabled_subscriptions_by_chat_id(chat_id)
-    streamers = unique_streamers_for_chat(subs)
+    streamers = unique_streamers_for_chat(
+        db.get_enabled_subscriptions_by_chat_id(chat_id)
+    )
     if not streamers:
         return
 
-    show_name = len(streamers) > 1
     now = datetime.now(timezone.utc)
-    window_end = (
-        schedule_window_end(mode, now=now) if mode in ("day", "week") else None
+    hits, fetched_ok = await _discover_hits(
+        twitch=twitch, streamers=streamers, mode=mode, lang=lang, now=now
     )
-    stop_before = (
-        window_end.strftime("%Y-%m-%dT%H:%M:%SZ") if window_end is not None else None
-    )
-
-    blocks: list[str] = []
-    fetched_ok = False
-    for uid, username in streamers:
-        try:
-            schedule = await asyncio.to_thread(
-                twitch.get_channel_schedule,
-                uid,
-                stop_before=stop_before,
-            )
-        except Exception:
-            logger.exception("%s: schedule fetch failed for %s", mode, uid)
-            continue
-        fetched_ok = True
-        if mode == "when":
-            segment = next_upcoming_segment(schedule, now=now)
-            if segment is None:
-                continue
-            start = _parse_segment_start(segment)
-            if start is None:
-                continue
-            cat = segment.get("category") or {}
-            category = (
-                str(cat.get("name") or "")
-                if isinstance(cat, dict)
-                else ""
-            )
-            blocks.append(
-                format_when_stream_line(
-                    lang=lang,
-                    username=username,
-                    start=start,
-                    category=category,
-                    show_username=show_name,
-                )
-            )
-            continue
-
-        assert window_end is not None
-        slots = segments_in_window(
-            schedule, window_start=now, window_end=window_end
+    if not hits:
+        if not fetched_ok:
+            return
+        _mark_cooldown(chat_id)
+        await _reply_schedule_message(
+            message, context, chat_id, _empty_text(mode, lang)
         )
-        if not slots:
-            continue
-        blocks.append(
-            format_range_streamer_block(
-                lang=lang,
-                username=username,
-                slots=slots,
-                show_username=show_name,
-            )
-        )
-
-    if blocks:
-        text = "\n\n".join(blocks) if mode != "when" else "\n".join(blocks)
-    elif fetched_ok:
-        if mode == "day":
-            text = t("schedule_range_empty_day", lang)
-        elif mode == "week":
-            text = t("schedule_range_empty_week", lang)
-        else:
-            text = t("when_stream_no_schedule", lang)
-    else:
         return
 
     _mark_cooldown(chat_id)
-    await _reply_schedule_text(
-        message, context, chat_id, text, as_html=show_name
+    if len(hits) == 1:
+        await _reply_schedule_message(message, context, chat_id, hits[0][2])
+        return
+
+    await _reply_schedule_message(
+        message,
+        context,
+        chat_id,
+        t("schedule_found_streamers", lang),
+        reply_markup=schedule_streamer_keyboard(
+            mode, [(uid, name) for uid, name, _text in hits]
+        ),
     )
 
 
@@ -368,3 +462,127 @@ async def week_schedule_command(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     await _schedule_query_command(update, context, mode="week")
+
+
+async def on_schedule_query_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    raw = query.data
+    user = update.effective_user
+    if user is None:
+        await query.answer()
+        return
+
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    lang = _user_lang(context, user.id)
+    now = datetime.now(timezone.utc)
+
+    list_m = re.fullmatch(r"schq:list:(when|day|week)", raw)
+    pick_m = re.fullmatch(r"schq:(when|day|week):(\d+)", raw)
+    if list_m:
+        mode: ScheduleMode = list_m.group(1)  # type: ignore[assignment]
+        chat = update.effective_chat
+        if chat is not None:
+            chat_id = int(chat.id)
+        elif query.message is not None:
+            chat_id = int(query.message.chat_id)
+        else:
+            await query.answer()
+            return
+        streamers = unique_streamers_for_chat(
+            db.get_enabled_subscriptions_by_chat_id(chat_id)
+        )
+        hits, fetched_ok = await _discover_hits(
+            twitch=twitch,
+            streamers=streamers,
+            mode=mode,
+            lang=lang,
+            now=now,
+        )
+        await query.answer()
+        if not hits:
+            text = (
+                _empty_text(mode, lang)
+                if fetched_ok
+                else t("schedule_found_streamers", lang)
+            )
+            await _edit_schedule_message(query, text)
+            return
+        if len(hits) == 1:
+            uid, username, _plain = hits[0]
+            try:
+                schedule = await _fetch_schedule(twitch, uid, mode=mode, now=now)
+                text = (
+                    _format_streamer_schedule(
+                        mode=mode,
+                        lang=lang,
+                        schedule=schedule,
+                        now=now,
+                        username=username,
+                    )
+                    or _empty_text(mode, lang)
+                )
+            except Exception:
+                logger.exception("%s: schedule re-fetch failed for %s", mode, uid)
+                return
+            await _edit_schedule_message(query, text, as_html=True)
+            return
+        await _edit_schedule_message(
+            query,
+            t("schedule_found_streamers", lang),
+            reply_markup=schedule_streamer_keyboard(
+                mode, [(uid, name) for uid, name, _text in hits]
+            ),
+        )
+        return
+
+    if not pick_m:
+        await query.answer()
+        return
+
+    mode = pick_m.group(1)  # type: ignore[assignment]
+    uid = pick_m.group(2)
+    chat = update.effective_chat
+    if chat is not None:
+        chat_id = int(chat.id)
+    elif query.message is not None:
+        chat_id = int(query.message.chat_id)
+    else:
+        await query.answer()
+        return
+    name_by_id = dict(
+        unique_streamers_for_chat(db.get_enabled_subscriptions_by_chat_id(chat_id))
+    )
+    username = name_by_id.get(uid, uid)
+    try:
+        schedule = await _fetch_schedule(twitch, uid, mode=mode, now=now)
+        text = _format_streamer_schedule(
+            mode=mode,
+            lang=lang,
+            schedule=schedule,
+            now=now,
+            username=username,
+        )
+    except Exception:
+        logger.exception("%s: schedule pick failed for %s", mode, uid)
+        await query.answer()
+        return
+    await query.answer()
+    if not text:
+        text = _empty_text(mode, lang)
+        await _edit_schedule_message(
+            query,
+            text,
+            reply_markup=schedule_detail_keyboard(mode, lang),
+        )
+        return
+    await _edit_schedule_message(
+        query,
+        text,
+        reply_markup=schedule_detail_keyboard(mode, lang),
+        as_html=True,
+    )

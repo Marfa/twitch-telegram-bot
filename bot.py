@@ -297,6 +297,7 @@ from handlers.when_stream import (
     WEEK_SCHEDULE_TEXT_RE,
     WHEN_STREAM_TEXT_RE,
     day_schedule_command,
+    on_schedule_query_callback,
     week_schedule_command,
     when_stream_command,
 )
@@ -2672,6 +2673,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.Regex(WEEK_SCHEDULE_TEXT_RE),
             week_schedule_command,
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_schedule_query_callback,
+            pattern=r"^schq:(?:list:(when|day|week)|(when|day|week):(\d+))$",
         ),
         group=0,
     )

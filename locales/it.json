@@ -418,6 +418,7 @@
   "when_stream_no_schedule": "Come farei a saperlo? Lo streamer non ha un Schedule su Twitch.",
   "schedule_range_empty_day": "Niente in programma per oggi.",
   "schedule_range_empty_week": "Niente in programma per la prossima settimana.",
+  "schedule_found_streamers": "Trovati programmi per gli streamer",
   "stream_schedule_publish_prompt": "Pubblicare il programma su Twitch?",
   "stream_schedule_publish_yes": "✅ Sì",
   "stream_schedule_publish_no": "❌ No",

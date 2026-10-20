@@ -419,6 +419,7 @@
   "when_stream_no_schedule": "Откуда мне-то знать? У стримера нет Расписания на Twitch.",
   "schedule_range_empty_day": "На сегодня в расписании ничего нет.",
   "schedule_range_empty_week": "На ближайшую неделю в расписании ничего нет.",
+  "schedule_found_streamers": "Найдено расписание для стримеров",
   "stream_schedule_publish_prompt": "Опубликовать расписание на Twitch?",
   "stream_schedule_publish_yes": "✅ Да",
   "stream_schedule_publish_no": "❌ Нет",

@@ -204,11 +204,13 @@ def _check_submenu_reply_keyboards() -> None:
 
 def _check_inline_wizard_keyboards() -> None:
     from handlers.giveaways import giveaways_hub_keyboard
+    from handlers.when_stream import schedule_detail_keyboard
     from handlers.wizard import _twitch_link_offer_keyboard
     from i18n import drops_catalog_keyboard
 
     for loc in SUPPORTED_LOCALES:
         cases = [
+            ("schedule_query_detail", schedule_detail_keyboard("week", loc)),
             ("alert_type_keyboard", alert_type_keyboard(loc, show_drops=True)),
             (
                 "alert_type_keyboard_giveaways",
@@ -824,6 +826,98 @@ async def _scenario_alert_history(db) -> None:
         cap.wrap(bot)
         await on_alert_history_page(update, ctx)
         cap.assert_turn("alert_history_page1")
+
+
+async def _scenario_group_schedule_picker(db) -> None:
+    """§1 group /week|/day|/when: multi-streamer picker → detail with Back."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from handlers.when_stream import (
+        on_schedule_query_callback,
+        reset_when_stream_cooldown,
+        week_schedule_command,
+    )
+    from telegram.constants import ChatType
+
+    reset_when_stream_cooldown()
+    now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    slot = {
+        "id": "s1",
+        "start_time": "2030-01-02T15:00:00Z",
+        "category": {"name": "Fallout"},
+    }
+    db_mock = MagicMock()
+    db_mock.get_user_locale = MagicMock(return_value="ru")
+    db_mock.get_enabled_subscriptions_by_chat_id = MagicMock(
+        return_value=[
+            SimpleNamespace(twitch_user_id="1", twitch_username="alpha"),
+            SimpleNamespace(twitch_user_id="2", twitch_username="beta"),
+        ]
+    )
+    twitch = MagicMock()
+    twitch.get_channel_schedule = MagicMock(
+        return_value={"segments": [slot], "vacation": None}
+    )
+
+    cap = _BotCapture()
+    msg = MagicMock()
+    cap.wrap_message(msg)
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=_FREE_UID),
+        effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
+        effective_message=msg,
+        callback_query=None,
+    )
+    ctx = MagicMock()
+    ctx.bot = AsyncMock()
+    ctx.application.bot_data = {"db": db_mock, "twitch": twitch}
+
+    with patch("handlers.when_stream.datetime") as mock_dt:
+        mock_dt.now = MagicMock(return_value=now)
+        mock_dt.combine = datetime.combine
+        await week_schedule_command(update, ctx)
+    assert msg.reply_text.await_args.args[0] == t("schedule_found_streamers", "ru")
+    picker = msg.reply_text.await_args.kwargs.get("reply_markup")
+    assert picker is not None
+    assert any(
+        (btn.callback_data or "").startswith("schq:week:")
+        for row in picker.inline_keyboard
+        for btn in row
+    )
+
+    query = AsyncMock()
+    query.data = "schq:week:1"
+    query.message = SimpleNamespace(chat_id=-1003)
+    query.answer = AsyncMock()
+    cap.wrap_query(query)
+    cb_update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=_FREE_UID),
+        effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
+        effective_message=None,
+        callback_query=query,
+    )
+    with patch("handlers.when_stream.datetime") as mock_dt:
+        mock_dt.now = MagicMock(return_value=now)
+        mock_dt.combine = datetime.combine
+        await on_schedule_query_callback(cb_update, ctx)
+    detail_text = query.edit_message_text.await_args.args[0]
+    assert 'href="https://www.twitch.tv/alpha"' in detail_text
+    assert "Fallout" in detail_text
+    detail_kb = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup_has_escape_hatch(detail_kb), "schedule detail missing « Назад"
+    assert query.edit_message_text.await_args.kwargs.get("parse_mode")
+
+    query.edit_message_text.reset_mock()
+    query.data = "schq:list:week"
+    with patch("handlers.when_stream.datetime") as mock_dt:
+        mock_dt.now = MagicMock(return_value=now)
+        mock_dt.combine = datetime.combine
+        await on_schedule_query_callback(cb_update, ctx)
+    assert query.edit_message_text.await_args.args[0] == t(
+        "schedule_found_streamers", "ru"
+    )
+    reset_when_stream_cooldown()
 
 
 async def _scenario_schedule_publish_chain(db) -> None:
@@ -4090,6 +4184,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_image_ask(db)
         await _scenario_import(db)
         await _scenario_alert_history(db)
+        await _scenario_group_schedule_picker(db)
         await _scenario_subscriptions_edit_pick(db)
         await _scenario_subscriptions_edit_ignore_keywords(db)
         await _scenario_subscriptions_edit_game_alert(db)

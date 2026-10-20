@@ -242,8 +242,8 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
-| `/when` | When is the stream? In a group/channel (with an alert to that chat — next Twitch schedule slot; witty reply if none). Also “When stream?” / «Когда стрим?» |
-| `/day` | Today’s schedule (MSK): `- date time game` lines. Also “schedule for the day” / «расписание на день». Multiple streamers — linked channel headers |
+| `/when` | When is the stream? In a group/channel (next Twitch schedule slot; witty reply if none). Multiple streamers — pick buttons. Also “When stream?” / «Когда стрим?» |
+| `/day` | Today’s schedule (MSK): `- date time game` lines. Also “schedule for the day” / «расписание на день». Multiple streamers — “Found schedules…” + channel buttons |
 | `/week` | Next 7 days (MSK). Also “schedule for the week” / «расписание на неделю». Same rules as `/day`. Shared 1 min cooldown with `/when`/`/day`. All other bot management is DM-only |
 | `/feedback` | Feedback |
 | `/settings` | Settings |

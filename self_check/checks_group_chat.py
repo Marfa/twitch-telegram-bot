@@ -57,6 +57,8 @@ def _check_premium_and_helpers() -> None:
     assert "when_stream_command" in error_src
     assert "day_schedule_command" in error_src
     assert "week_schedule_command" in error_src
+    assert "on_schedule_query_callback" in error_src
+    assert "schq:" in error_src
     assert 'CommandHandler("when"' in error_src
     assert 'CommandHandler("day"' in error_src
     assert 'CommandHandler("week"' in error_src
@@ -78,6 +80,8 @@ def _check_when_stream_helpers() -> None:
         format_when_stream_line,
         next_upcoming_segment,
         reset_when_stream_cooldown,
+        schedule_detail_keyboard,
+        schedule_streamer_keyboard,
         schedule_window_end,
         segments_in_window,
         unique_streamers_for_chat,
@@ -174,44 +178,37 @@ def _check_when_stream_helpers() -> None:
     assert "Fallout: A Post Nuclear Role Playing Game" in range_line
     multi_block = format_range_streamer_block(
         lang="ru",
-        username="alpha",
         slots=[
             (datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc), "Elden Ring"),
         ],
-        show_username=True,
     )
-    assert multi_block.startswith('<a href="https://www.twitch.tv/alpha">alpha</a>:')
-    assert "- 2 января 18:00 Elden Ring" in multi_block
+    assert multi_block == "- 2 января 18:00 Elden Ring"
+    from handlers.when_stream import format_schedule_with_streamer_link
+
+    linked = format_schedule_with_streamer_link(
+        username="alpha", body=multi_block
+    )
+    assert linked.startswith('<a href="https://www.twitch.tv/alpha">alpha</a>:')
+    assert "- 2 января 18:00 Elden Ring" in linked
+    kb = schedule_streamer_keyboard(
+        "week", [("1", "alpha"), ("2", "beta")]
+    )
+    assert kb.inline_keyboard[0][0].callback_data == "schq:week:1"
+    assert kb.inline_keyboard[0][1].callback_data == "schq:week:2"
+    assert schedule_detail_keyboard("day", "ru").inline_keyboard[0][0].callback_data == (
+        "schq:list:day"
+    )
 
     line = format_when_stream_line(
         lang="ru",
-        username="alpha",
         start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
         category="Elden Ring",
-        show_username=False,
     )
     assert line.startswith("Следующий эфир будет ")
     assert "Категория Elden Ring" in line
     assert "MSK" in line
-    named = format_when_stream_line(
-        lang="en",
-        username="alpha",
-        start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
-        category="Elden Ring",
-        show_username=True,
-    )
-    assert 'href="https://www.twitch.tv/alpha"' in named
-    assert ">alpha</a>:" in named
-    assert "Category Elden Ring" in named
-    named_esc = format_when_stream_line(
-        lang="en",
-        username="alpha",
-        start=datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc),
-        category="A < B",
-        show_username=True,
-    )
-    assert "A &lt; B" in named_esc
     assert t("when_stream_no_schedule", "ru").startswith("Откуда мне-то знать?")
+    assert t("schedule_found_streamers", "ru") == "Найдено расписание для стримеров"
 
     reset_when_stream_cooldown()
     assert _cooldown_allows(-1001, now=now)
@@ -415,6 +412,7 @@ def _check_wizard_schedule_reply_targets() -> None:
 async def _check_day_week_schedule() -> None:
     from handlers.when_stream import (
         day_schedule_command,
+        on_schedule_query_callback,
         reset_when_stream_cooldown,
         week_schedule_command,
     )
@@ -460,23 +458,51 @@ async def _check_day_week_schedule() -> None:
         mock_dt.now = MagicMock(return_value=now)
         mock_dt.combine = datetime.combine
 
+    # Day: only alpha has a slot today → single streamer text, no picker.
     with patch("handlers.when_stream.datetime") as mock_dt:
         _freeze_now(mock_dt)
         await day_schedule_command(update, ctx)
     text = update.effective_message.reply_text.await_args.args[0]
-    assert "alpha" in text and "beta" not in text
     assert "Fallout" in text
     assert "Elden Ring" not in text
-    assert update.effective_message.reply_text.await_args.kwargs.get("parse_mode")
+    assert "alpha" not in text
+    assert update.effective_message.reply_text.await_args.kwargs.get("reply_markup") is None
 
+    # Week: both have slots → picker with streamer buttons.
     reset_when_stream_cooldown()
     update.effective_message.reply_text.reset_mock()
     with patch("handlers.when_stream.datetime") as mock_dt:
         _freeze_now(mock_dt)
         await week_schedule_command(update, ctx)
-    week_text = update.effective_message.reply_text.await_args.args[0]
-    assert "alpha" in week_text and "beta" in week_text
-    assert "Fallout" in week_text and "Elden Ring" in week_text
+    week_call = update.effective_message.reply_text.await_args
+    assert week_call.args[0] == t("schedule_found_streamers", "ru")
+    markup = week_call.kwargs.get("reply_markup")
+    assert markup is not None
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert labels == ["alpha", "beta"]
+
+    # Pick alpha → schedule detail + back.
+    query = SimpleNamespace(
+        data="schq:week:1",
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+        message=SimpleNamespace(chat_id=-1003),
+    )
+    cb_update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=900001),
+        effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
+        effective_message=None,
+        callback_query=query,
+    )
+    with patch("handlers.when_stream.datetime") as mock_dt:
+        _freeze_now(mock_dt)
+        await on_schedule_query_callback(cb_update, ctx)
+    detail = query.edit_message_text.await_args.args[0]
+    assert 'href="https://www.twitch.tv/alpha"' in detail
+    assert "Fallout" in detail and "Elden Ring" in detail
+    assert query.edit_message_text.await_args.kwargs.get("parse_mode")
+    back_kb = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert back_kb.inline_keyboard[0][0].callback_data == "schq:list:week"
 
     reset_when_stream_cooldown()
     update.effective_message.reply_text.reset_mock()

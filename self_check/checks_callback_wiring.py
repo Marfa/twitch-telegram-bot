@@ -170,6 +170,8 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("sched_apply", "sched:date:0"),
     ("sched_calendar", "sched:calendar"),
     ("sched_month", "sched:month:2026-09"),
+    ("schq_pick", "schq:week:123456"),
+    ("schq_list", "schq:list:day"),
     ("sb_sched_calendar", "sb_sched:calendar"),
     ("sb_edit", f"sb_edit:{_SAMPLE_SUB}"),
     ("bcf_up", f"bcf:up:{_SAMPLE_SUB}"),
