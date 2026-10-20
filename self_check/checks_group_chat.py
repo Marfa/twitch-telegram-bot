@@ -267,6 +267,7 @@ async def _check_when_stream_no_schedule() -> None:
     from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
     from i18n import t
     from telegram.error import BadRequest
+    from unittest.mock import patch
 
     reset_when_stream_cooldown()
     update = SimpleNamespace(
@@ -287,32 +288,33 @@ async def _check_when_stream_no_schedule() -> None:
     ctx.bot = AsyncMock()
     ctx.application.bot_data = {"db": db, "twitch": twitch}
     update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
-    await when_stream_command(update, ctx)
-    update.effective_message.reply_text.assert_awaited_once()
-    assert update.effective_message.reply_text.await_args.args[0] == t(
-        "when_stream_no_schedule", "ru"
-    )
-    assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
-    # Cooldown: second call is silent.
-    update.effective_message.reply_text.reset_mock()
-    await when_stream_command(update, ctx)
-    update.effective_message.reply_text.assert_not_awaited()
-    reset_when_stream_cooldown()
+    with patch("handlers.when_stream.reply_lang", return_value="ru"):
+        await when_stream_command(update, ctx)
+        update.effective_message.reply_text.assert_awaited_once()
+        assert update.effective_message.reply_text.await_args.args[0] == t(
+            "when_stream_no_schedule", "ru"
+        )
+        assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
+        # Cooldown: second call is silent.
+        update.effective_message.reply_text.reset_mock()
+        await when_stream_command(update, ctx)
+        update.effective_message.reply_text.assert_not_awaited()
+        reset_when_stream_cooldown()
 
-    # Trigger message deleted while schedule was fetching → plain send, no raise.
-    update.effective_message.reply_text = AsyncMock(
-        side_effect=BadRequest("Message to be replied not found")
-    )
-    update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
-    ctx.bot.send_message = AsyncMock()
-    await when_stream_command(update, ctx)
-    ctx.bot.send_message.assert_awaited_once()
-    assert ctx.bot.send_message.await_args.args[:2] == (
-        -1002,
-        t("when_stream_no_schedule", "ru"),
-    )
-    assert "reply_markup" in ctx.bot.send_message.await_args.kwargs
-    reset_when_stream_cooldown()
+        # Trigger message deleted while schedule was fetching → plain send, no raise.
+        update.effective_message.reply_text = AsyncMock(
+            side_effect=BadRequest("Message to be replied not found")
+        )
+        update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
+        ctx.bot.send_message = AsyncMock()
+        await when_stream_command(update, ctx)
+        ctx.bot.send_message.assert_awaited_once()
+        assert ctx.bot.send_message.await_args.args[:2] == (
+            -1002,
+            t("when_stream_no_schedule", "ru"),
+        )
+        assert "reply_markup" in ctx.bot.send_message.await_args.kwargs
+        reset_when_stream_cooldown()
 
 async def _check_group_setup_gate() -> None:
     from bot_helpers import (
@@ -520,69 +522,72 @@ async def _check_day_week_schedule() -> None:
     ctx.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=3))
     ctx.bot.delete_message = AsyncMock()
 
-    # Day: only alpha has a slot today → single streamer text, no picker.
-    with patch("handlers.when_stream.datetime") as mock_dt:
-        _freeze_now(mock_dt)
+    with patch("handlers.when_stream.reply_lang", return_value="ru"):
+        # Day: only alpha has a slot today → single streamer text, no picker.
+        with patch("handlers.when_stream.datetime") as mock_dt:
+            _freeze_now(mock_dt)
+            await day_schedule_command(update, ctx)
+        text = update.effective_message.reply_text.await_args.args[0]
+        assert "Fallout" in text
+        assert "Elden Ring" not in text
+        assert "alpha" not in text
+        day_markup = update.effective_message.reply_text.await_args.kwargs.get(
+            "reply_markup"
+        )
+        assert isinstance(day_markup, ReplyKeyboardRemove)
+
+        # Week: both have slots → picker with streamer buttons.
+        reset_when_stream_cooldown()
+        update.effective_message.reply_text.reset_mock()
+        with patch("handlers.when_stream.datetime") as mock_dt:
+            _freeze_now(mock_dt)
+            await week_schedule_command(update, ctx)
+        week_call = update.effective_message.reply_text.await_args
+        assert week_call.args[0] == t("schedule_found_streamers", "ru")
+        markup = week_call.kwargs.get("reply_markup")
+        assert isinstance(markup, InlineKeyboardMarkup)
+        labels = [btn.text for row in markup.inline_keyboard for btn in row]
+        assert labels == ["alpha", "beta"]
+        # Sticky reply keyboard cleared before inline picker.
+        ctx.bot.send_message.assert_awaited()
+
+        # Pick alpha → schedule detail + back.
+        query = SimpleNamespace(
+            data="schq:week:1",
+            answer=AsyncMock(),
+            edit_message_text=AsyncMock(),
+            message=SimpleNamespace(chat_id=-1003),
+        )
+        cb_update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=900001),
+            effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
+            effective_message=None,
+            callback_query=query,
+        )
+        with patch("handlers.when_stream.datetime") as mock_dt:
+            _freeze_now(mock_dt)
+            await on_schedule_query_callback(cb_update, ctx)
+        detail = query.edit_message_text.await_args.args[0]
+        assert 'href="https://www.twitch.tv/alpha"' in detail
+        assert "Fallout" in detail and "Elden Ring" in detail
+        assert query.edit_message_text.await_args.kwargs.get("parse_mode")
+        back_kb = query.edit_message_text.await_args.kwargs.get("reply_markup")
+        assert back_kb.inline_keyboard[0][0].callback_data == "schq:list:week"
+
+        reset_when_stream_cooldown()
+        update.effective_message.reply_text.reset_mock()
+        twitch.get_channel_schedule = MagicMock(
+            return_value={"segments": [], "vacation": None}
+        )
+        db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub_a])
+        update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
         await day_schedule_command(update, ctx)
-    text = update.effective_message.reply_text.await_args.args[0]
-    assert "Fallout" in text
-    assert "Elden Ring" not in text
-    assert "alpha" not in text
-    day_markup = update.effective_message.reply_text.await_args.kwargs.get("reply_markup")
-    assert isinstance(day_markup, ReplyKeyboardRemove)
-
-    # Week: both have slots → picker with streamer buttons.
-    reset_when_stream_cooldown()
-    update.effective_message.reply_text.reset_mock()
-    with patch("handlers.when_stream.datetime") as mock_dt:
-        _freeze_now(mock_dt)
-        await week_schedule_command(update, ctx)
-    week_call = update.effective_message.reply_text.await_args
-    assert week_call.args[0] == t("schedule_found_streamers", "ru")
-    markup = week_call.kwargs.get("reply_markup")
-    assert isinstance(markup, InlineKeyboardMarkup)
-    labels = [btn.text for row in markup.inline_keyboard for btn in row]
-    assert labels == ["alpha", "beta"]
-    # Sticky reply keyboard cleared before inline picker.
-    ctx.bot.send_message.assert_awaited()
-
-    # Pick alpha → schedule detail + back.
-    query = SimpleNamespace(
-        data="schq:week:1",
-        answer=AsyncMock(),
-        edit_message_text=AsyncMock(),
-        message=SimpleNamespace(chat_id=-1003),
-    )
-    cb_update = SimpleNamespace(
-        effective_user=SimpleNamespace(id=900001),
-        effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
-        effective_message=None,
-        callback_query=query,
-    )
-    with patch("handlers.when_stream.datetime") as mock_dt:
-        _freeze_now(mock_dt)
-        await on_schedule_query_callback(cb_update, ctx)
-    detail = query.edit_message_text.await_args.args[0]
-    assert 'href="https://www.twitch.tv/alpha"' in detail
-    assert "Fallout" in detail and "Elden Ring" in detail
-    assert query.edit_message_text.await_args.kwargs.get("parse_mode")
-    back_kb = query.edit_message_text.await_args.kwargs.get("reply_markup")
-    assert back_kb.inline_keyboard[0][0].callback_data == "schq:list:week"
-
-    reset_when_stream_cooldown()
-    update.effective_message.reply_text.reset_mock()
-    twitch.get_channel_schedule = MagicMock(
-        return_value={"segments": [], "vacation": None}
-    )
-    db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub_a])
-    update.effective_message.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
-    await day_schedule_command(update, ctx)
-    update.effective_message.reply_text.assert_awaited_once()
-    assert update.effective_message.reply_text.await_args.args[0] == t(
-        "schedule_range_empty_day", "ru"
-    )
-    assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
-    reset_when_stream_cooldown()
+        update.effective_message.reply_text.assert_awaited_once()
+        assert update.effective_message.reply_text.await_args.args[0] == t(
+            "schedule_range_empty_day", "ru"
+        )
+        assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
+        reset_when_stream_cooldown()
 
 
 def check_group_chat() -> None:
