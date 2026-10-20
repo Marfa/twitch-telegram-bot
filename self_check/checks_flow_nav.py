@@ -871,52 +871,56 @@ async def _scenario_group_schedule_picker(db) -> None:
     )
     ctx = MagicMock()
     ctx.bot = AsyncMock()
+    ctx.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
+    ctx.bot.delete_message = AsyncMock()
     ctx.application.bot_data = {"db": db_mock, "twitch": twitch}
+    msg.chat = SimpleNamespace(type=ChatType.SUPERGROUP, id=-1003)
 
-    with patch("handlers.when_stream.datetime") as mock_dt:
-        mock_dt.now = MagicMock(return_value=now)
-        mock_dt.combine = datetime.combine
-        await week_schedule_command(update, ctx)
-    assert msg.reply_text.await_args.args[0] == t("schedule_found_streamers", "ru")
-    picker = msg.reply_text.await_args.kwargs.get("reply_markup")
-    assert picker is not None
-    assert any(
-        (btn.callback_data or "").startswith("schq:week:")
-        for row in picker.inline_keyboard
-        for btn in row
-    )
+    with patch("handlers.when_stream.reply_lang", return_value="ru"):
+        with patch("handlers.when_stream.datetime") as mock_dt:
+            mock_dt.now = MagicMock(return_value=now)
+            mock_dt.combine = datetime.combine
+            await week_schedule_command(update, ctx)
+        assert msg.reply_text.await_args.args[0] == t("schedule_found_streamers", "ru")
+        picker = msg.reply_text.await_args.kwargs.get("reply_markup")
+        assert picker is not None
+        assert any(
+            (btn.callback_data or "").startswith("schq:week:")
+            for row in picker.inline_keyboard
+            for btn in row
+        )
 
-    query = AsyncMock()
-    query.data = "schq:week:1"
-    query.message = SimpleNamespace(chat_id=-1003)
-    query.answer = AsyncMock()
-    cap.wrap_query(query)
-    cb_update = SimpleNamespace(
-        effective_user=SimpleNamespace(id=_FREE_UID),
-        effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
-        effective_message=None,
-        callback_query=query,
-    )
-    with patch("handlers.when_stream.datetime") as mock_dt:
-        mock_dt.now = MagicMock(return_value=now)
-        mock_dt.combine = datetime.combine
-        await on_schedule_query_callback(cb_update, ctx)
-    detail_text = query.edit_message_text.await_args.args[0]
-    assert 'href="https://www.twitch.tv/alpha"' in detail_text
-    assert "Fallout" in detail_text
-    detail_kb = query.edit_message_text.await_args.kwargs.get("reply_markup")
-    assert markup_has_escape_hatch(detail_kb), "schedule detail missing « Назад"
-    assert query.edit_message_text.await_args.kwargs.get("parse_mode")
+        query = AsyncMock()
+        query.data = "schq:week:1"
+        query.message = SimpleNamespace(chat_id=-1003)
+        query.answer = AsyncMock()
+        cap.wrap_query(query)
+        cb_update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=_FREE_UID),
+            effective_chat=SimpleNamespace(id=-1003, type=ChatType.SUPERGROUP),
+            effective_message=None,
+            callback_query=query,
+        )
+        with patch("handlers.when_stream.datetime") as mock_dt:
+            mock_dt.now = MagicMock(return_value=now)
+            mock_dt.combine = datetime.combine
+            await on_schedule_query_callback(cb_update, ctx)
+        detail_text = query.edit_message_text.await_args.args[0]
+        assert 'href="https://www.twitch.tv/alpha"' in detail_text
+        assert "Fallout" in detail_text
+        detail_kb = query.edit_message_text.await_args.kwargs.get("reply_markup")
+        assert markup_has_escape_hatch(detail_kb), "schedule detail missing « Назад"
+        assert query.edit_message_text.await_args.kwargs.get("parse_mode")
 
-    query.edit_message_text.reset_mock()
-    query.data = "schq:list:week"
-    with patch("handlers.when_stream.datetime") as mock_dt:
-        mock_dt.now = MagicMock(return_value=now)
-        mock_dt.combine = datetime.combine
-        await on_schedule_query_callback(cb_update, ctx)
-    assert query.edit_message_text.await_args.args[0] == t(
-        "schedule_found_streamers", "ru"
-    )
+        query.edit_message_text.reset_mock()
+        query.data = "schq:list:week"
+        with patch("handlers.when_stream.datetime") as mock_dt:
+            mock_dt.now = MagicMock(return_value=now)
+            mock_dt.combine = datetime.combine
+            await on_schedule_query_callback(cb_update, ctx)
+        assert query.edit_message_text.await_args.args[0] == t(
+            "schedule_found_streamers", "ru"
+        )
     reset_when_stream_cooldown()
 
 
