@@ -2,6 +2,13 @@
   "mcpServers": {
     "posthog": {
       "url": "https://mcp.posthog.com/mcp"
+    },
+    "submitmap": {
+      "type": "http",
+      "url": "https://submitmap.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:SUBMITMAP_MCP_TOKEN}"
+      }
     }
   }
 }
