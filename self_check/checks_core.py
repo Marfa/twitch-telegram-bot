@@ -44,6 +44,7 @@ from bot import (
     _help_text,
     _is_link_preview_disabled,
     _is_http_timeout,
+    _is_transient_network_error,
     _is_stale_callback_query,
     _is_unchanged_message_edit,
     _load_posthog_seen_report_ids,
@@ -1448,6 +1449,25 @@ def check_core() -> None:
     assert _is_http_timeout(urllib.error.URLError(TimeoutError("timed out")))
     assert not _is_http_timeout(urllib.error.URLError("connection refused"))
     assert not _is_http_timeout(RuntimeError("boom"))
+    import socket
+    import ssl
+
+    assert _is_transient_network_error(
+        urllib.error.URLError(socket.gaierror(-3, "Temporary failure in name resolution"))
+    )
+    assert _is_transient_network_error(
+        urllib.error.URLError(OSError(101, "Network is unreachable"))
+    )
+    assert _is_transient_network_error(ConnectionResetError("reset"))
+    assert _is_transient_network_error(urllib.error.URLError(TimeoutError("timed out")))
+    assert not _is_transient_network_error(
+        urllib.error.HTTPError("https://x", 401, "Unauthorized", None, None)
+    )
+    assert not _is_transient_network_error(
+        urllib.error.URLError(ssl.SSLCertVerificationError("bad cert"))
+    )
+    assert not _is_transient_network_error(urllib.error.URLError("connection refused"))
+    assert not _is_transient_network_error(ValueError("bad json"))
     assert parse_posthog_issue_payload({"event": {"event": "$pageview"}}) is None
     assert TwitchClient.is_one_off_schedule_forbidden(
         Exception("403 Client Error: single segment creation not authorized for url: x")

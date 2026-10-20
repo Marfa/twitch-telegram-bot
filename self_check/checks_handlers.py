@@ -2465,6 +2465,50 @@ def check_handlers() -> None:
 
         _check_category_watch_digest_and_legacy()
     _check_broadcast_feedback_refresh()
+    _check_posthog_inbox_poll_network_blip()
+
+
+def _check_posthog_inbox_poll_network_blip() -> None:
+    """Inbox poll: a DNS blip logs a warning, and the next poll still notifies."""
+    import asyncio
+    import socket
+    import urllib.error
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from handlers.monitoring import poll_posthog_inbox_reports
+
+    with tempfile.TemporaryDirectory() as tmp:
+        seen_path = Path(tmp) / "posthog_seen_reports.json"
+        seen_path.write_text(json.dumps(["old"]), encoding="utf-8")
+        ctx = SimpleNamespace(application=SimpleNamespace(bot_data={}))
+        ok_resp = MagicMock()
+        ok_resp.read.return_value = json.dumps(
+            {"results": [{"id": "new", "title": "New report"}]}
+        ).encode()
+        dns_error = urllib.error.URLError(
+            socket.gaierror(-3, "Temporary failure in name resolution")
+        )
+        with (
+            patch("config.POSTHOG_PERSONAL_API_KEY", "phx_test"),
+            patch(
+                "handlers.monitoring._posthog_seen_reports_path",
+                return_value=seen_path,
+            ),
+            patch("urllib.request.urlopen", side_effect=[dns_error, ok_resp]),
+            patch(
+                "handlers.monitoring.notify_admins_posthog_issue", new=AsyncMock()
+            ) as notify,
+            patch("handlers.monitoring.logger") as log,
+        ):
+            asyncio.run(poll_posthog_inbox_reports(ctx))
+            log.exception.assert_not_called()
+            log.warning.assert_called_once()
+            notify.assert_not_awaited()
+            asyncio.run(poll_posthog_inbox_reports(ctx))
+        notify.assert_awaited_once()
+        assert notify.await_args.args[1]["fingerprint"] == "new"
+        log.exception.assert_not_called()
 
 
 def _check_broadcast_feedback_refresh() -> None:
