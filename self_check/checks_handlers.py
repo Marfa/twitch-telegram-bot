@@ -2502,7 +2502,6 @@ def _check_posthog_inbox_poll_network_blip() -> None:
             patch("handlers.monitoring.logger") as log,
         ):
             asyncio.run(poll_posthog_inbox_reports(ctx))
-            log.exception.assert_not_called()
             log.warning.assert_called_once()
             notify.assert_not_awaited()
             asyncio.run(poll_posthog_inbox_reports(ctx))

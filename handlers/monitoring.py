@@ -983,14 +983,10 @@ def _is_transient_network_error(exc: BaseException) -> bool:
     import ssl
     import urllib.error
 
-    if _is_http_timeout(exc):
-        return True
-    if isinstance(exc, urllib.error.HTTPError):
-        return False
     if isinstance(exc, urllib.error.URLError):
         reason = exc.reason
         return isinstance(reason, OSError) and not isinstance(reason, ssl.SSLError)
-    return isinstance(exc, ConnectionError)
+    return isinstance(exc, (TimeoutError, ConnectionError))
 
 
 async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None:

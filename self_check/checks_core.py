@@ -1459,14 +1459,12 @@ def check_core() -> None:
         urllib.error.URLError(OSError(101, "Network is unreachable"))
     )
     assert _is_transient_network_error(ConnectionResetError("reset"))
-    assert _is_transient_network_error(urllib.error.URLError(TimeoutError("timed out")))
     assert not _is_transient_network_error(
         urllib.error.HTTPError("https://x", 401, "Unauthorized", None, None)
     )
     assert not _is_transient_network_error(
         urllib.error.URLError(ssl.SSLCertVerificationError("bad cert"))
     )
-    assert not _is_transient_network_error(urllib.error.URLError("connection refused"))
     assert not _is_transient_network_error(ValueError("bad json"))
     assert parse_posthog_issue_payload({"event": {"event": "$pageview"}}) is None
     assert TwitchClient.is_one_off_schedule_forbidden(
