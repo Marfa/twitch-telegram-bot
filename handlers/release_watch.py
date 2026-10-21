@@ -1018,17 +1018,21 @@ def _refresh_platforms_from_db(
     out = []
     for pref in prefs.platforms:
         candidates = by_platform.get(pref.platform_id) or []
-        if not candidates:
+        exact = next(
+            (c for c in candidates if int(c["date"]) == pref.date),
+            None,
+        )
+        # Keep the user's chosen unix date when the dump no longer has an exact
+        # match — never snap to min(candidates) (that shifted fire_at / keys).
+        if not exact:
             out.append(pref)
             continue
-        exact = next((c for c in candidates if int(c["date"]) == pref.date), None)
-        chosen = exact or min(candidates, key=lambda c: int(c["date"]))
         out.append(
             ReleasePlatformPref(
                 platform_id=pref.platform_id,
-                platform_name=str(chosen.get("platform_name") or pref.platform_name),
-                date=int(chosen["date"]),
-                human=str(chosen.get("human") or pref.human),
+                platform_name=str(exact.get("platform_name") or pref.platform_name),
+                date=int(exact["date"]),
+                human=str(exact.get("human") or pref.human),
             )
         )
     return out
@@ -1044,9 +1048,37 @@ def _release_all_platforms_notified(prefs: ReleaseWatchPrefs) -> bool:
     )
 
 
+def _release_platforms_due(
+    prefs: ReleaseWatchPrefs, *, now: int
+) -> list[ReleasePlatformPref]:
+    due: list[ReleasePlatformPref] = []
+    for p in prefs.platforms:
+        key = release_platform_key(p.platform_id, p.date)
+        fire_at = int(p.date) - max(0, int(prefs.days_before)) * 86400
+        if now >= fire_at and key not in prefs.notified_keys:
+            due.append(p)
+    return due
+
+
+async def _live_fill_release_dates(
+    db: Database, twitch: TwitchClient | None, game_id: int
+) -> list[dict[str, Any]]:
+    """When the dump has no dates yet, try live IGDB (same as the create wizard)."""
+    if twitch is None:
+        return []
+    try:
+        return await asyncio.to_thread(twitch.igdb_ensure_release_dates, game_id) or []
+    except Exception:
+        logger.exception(
+            "IGDB live release_dates backfill failed game_id=%s", game_id
+        )
+        return []
+
+
 async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     bot = context.bot
+    twitch: TwitchClient | None = context.application.bot_data.get("twitch")
     now = int(time.time())
     subs = db.get_release_watch_subscriptions()
     for sub in subs:
@@ -1056,6 +1088,11 @@ async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None
         beta_ok = release_feature_available(db, sub.owner_id)
         waiting = prefs.date_unknown or not prefs.platforms
         refreshed = _refresh_platforms_from_db(db, prefs)
+        if waiting and not refreshed:
+            # Dump lags partner CSV; wizard already uses live API — job must too,
+            # or TBA alerts only fire after the next dump (days/weeks late).
+            await _live_fill_release_dates(db, twitch, prefs.igdb_game_id)
+            refreshed = _refresh_platforms_from_db(db, prefs)
         if waiting:
             if not refreshed:
                 continue
@@ -1076,11 +1113,7 @@ async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None
         due: list[ReleasePlatformPref] = []
         # Fire only while beta is on; still pause spent alerts if beta was turned off.
         if sub.enabled and beta_ok:
-            for p in prefs.platforms:
-                key = release_platform_key(p.platform_id, p.date)
-                fire_at = int(p.date) - max(0, int(prefs.days_before)) * 86400
-                if now >= fire_at and key not in prefs.notified_keys:
-                    due.append(p)
+            due = _release_platforms_due(prefs, now=now)
             if due:
                 pending = set(prefs.notified_keys)
                 for p in due:

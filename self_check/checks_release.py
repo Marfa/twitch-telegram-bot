@@ -437,6 +437,133 @@ def _check_release_date_backfill() -> None:
         assert filled[0].platform_name == "PC"
 
 
+def _check_release_refresh_keeps_selected_date() -> None:
+    """Dump date drift must not snap the user's chosen platform date to min()."""
+    from handlers.release_watch import _refresh_platforms_from_db
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        chosen = 1_800_000_000
+        other = 1_700_000_000
+        prefs = ReleaseWatchPrefs(
+            igdb_game_id=77,
+            game_name="Drift",
+            days_before=7,
+            platforms=[
+                ReleasePlatformPref(6, "PC", chosen, "chosen"),
+            ],
+            date_unknown=False,
+        )
+        with db._conn() as conn:
+            conn.execute(
+                "INSERT INTO igdb_platforms (id, name) VALUES (?, ?)",
+                (6, "PC"),
+            )
+            conn.execute(
+                """
+                INSERT INTO igdb_release_dates (id, game_id, platform_id, date, human)
+                VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)
+                """,
+                (1, 77, 6, other, "earlier", 2, 77, 6, chosen + 86400, "later"),
+            )
+            conn.commit()
+        refreshed = _refresh_platforms_from_db(db, prefs)
+        assert len(refreshed) == 1
+        assert refreshed[0].date == chosen
+
+
+def _check_release_due_window() -> None:
+    """days_before=7 → fire at date−7d; overdue after release still due once."""
+    from handlers.release_watch import _release_platforms_due
+
+    release = 1_791_849_600  # 2026-10-13 UTC
+    prefs = ReleaseWatchPrefs(
+        igdb_game_id=421960,
+        game_name="The Conjuring: Unspoken",
+        days_before=7,
+        platforms=[ReleasePlatformPref(82, "Web browser", release, "Oct 13, 2026")],
+    )
+    assert _release_platforms_due(prefs, now=release - 7 * 86400 - 1) == []
+    assert len(_release_platforms_due(prefs, now=release - 7 * 86400)) == 1
+    assert len(_release_platforms_due(prefs, now=release + 7 * 86400)) == 1
+    prefs.notified_keys = [release_platform_key(82, release)]
+    assert _release_platforms_due(prefs, now=release + 7 * 86400) == []
+
+
+def _check_release_job_live_backfill_when_dump_empty() -> None:
+    """TBA alert: empty dump must call live ensure, then notify if already due."""
+    from handlers.release_watch import check_release_watch_alerts
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        uid = 900_049
+        db.upsert_user(uid)
+        import beta as beta_features
+        from handlers.release_watch import RELEASE_BETA_ID
+
+        db.set_beta_enrollment(uid, RELEASE_BETA_ID, True)
+        assert beta_features.is_enabled(db, uid, RELEASE_BETA_ID)
+        release = int(time.time()) - 7 * 86400
+        prefs = ReleaseWatchPrefs(
+            igdb_game_id=421960,
+            game_name="The Conjuring: Unspoken",
+            days_before=7,
+            platforms=[],
+            date_unknown=True,
+        )
+        sub_id = db.add_subscription(
+            owner_id=uid,
+            twitch_username="conjuring",
+            twitch_user_id=f"rel:{uid}:test",
+            message_template="t",
+            dest_type="dm",
+            chat_id=uid,
+            thread_id=None,
+            enabled=True,
+            notify_on_live=False,
+            release_watch_prefs=dump_release_watch_prefs(prefs),
+        )
+
+        def _ensure(gid: int):
+            assert gid == 421960
+            with db._conn() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO igdb_platforms (id, name) VALUES (?, ?)",
+                    (82, "Web browser"),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO igdb_release_dates
+                        (id, game_id, platform_id, date, human)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (977935, 421960, 82, release, "past"),
+                )
+                conn.commit()
+            return db.igdb_release_dates_for_game(gid)
+
+        twitch = MagicMock()
+        twitch.igdb_ensure_release_dates = MagicMock(side_effect=_ensure)
+        bot = AsyncMock()
+        app = MagicMock()
+        app.bot_data = {"db": db, "twitch": twitch}
+        ctx = SimpleNamespace(application=app, bot=bot)
+
+        async def _run() -> None:
+            await check_release_watch_alerts(ctx)
+
+        asyncio.run(_run())
+        twitch.igdb_ensure_release_dates.assert_called_once_with(421960)
+        bot.send_message.assert_awaited()
+        sub = db.get_subscription(sub_id, uid)
+        assert sub is not None
+        assert sub.enabled is False
+        back = parse_release_watch_prefs(sub.release_watch_prefs)
+        assert back is not None
+        assert back.date_unknown is False
+        assert release_platform_key(82, release) in back.notified_keys
+
+
 def _check_release_active_cap() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         db = open_database(Path(tmp) / "bot.db")
@@ -881,6 +1008,9 @@ def run() -> None:
     _check_release_keyboard()
     _check_release_pause_when_all_notified()
     _check_release_date_backfill()
+    _check_release_refresh_keeps_selected_date()
+    _check_release_due_window()
+    _check_release_job_live_backfill_when_dump_empty()
     _check_release_active_cap()
     _check_release_early_dup_stops_wizard()
     _check_game_alert_dedup_by_category()
