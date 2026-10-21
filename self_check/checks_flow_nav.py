@@ -835,12 +835,10 @@ async def _scenario_group_schedule_picker(db) -> None:
 
     from handlers.when_stream import (
         on_schedule_query_callback,
-        reset_when_stream_cooldown,
         week_schedule_command,
     )
     from telegram.constants import ChatType
 
-    reset_when_stream_cooldown()
     now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
     slot = {
         "id": "s1",
@@ -921,7 +919,6 @@ async def _scenario_group_schedule_picker(db) -> None:
         assert query.edit_message_text.await_args.args[0] == t(
             "schedule_found_streamers", "ru"
         )
-    reset_when_stream_cooldown()
 
 
 async def _scenario_schedule_publish_chain(db) -> None:

@@ -242,9 +242,9 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
-| `/when` | When is the stream? In a group (next Twitch schedule slot; witty reply if none). Slash reply is ephemeral (only the caller; status → result). Multiple streamers — pick buttons. Free-text “When stream?” stays a public reply |
+| `/when` | When is the stream? In a group (next Twitch schedule slot; witty reply if none). Slash reply is ephemeral (only the caller; status → result); command and reply are deleted after 5 min. Multiple streamers — pick buttons. Free-text “When stream?” stays a public reply (also deleted after 5 min) |
 | `/day` | Today’s schedule (MSK): `- date time game` lines. Also “schedule for the day”. In a group, slash is ephemeral like `/when` |
-| `/week` | Next 7 days (MSK). Also “schedule for the week”. Shared 1 min cooldown with `/when`/`/day`. All other bot management is DM-only |
+| `/week` | Next 7 days (MSK). Also “schedule for the week”. All other bot management is DM-only |
 | `/feedback` | Feedback |
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |

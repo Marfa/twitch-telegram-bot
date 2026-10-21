@@ -108,22 +108,22 @@ def _check_premium_and_helpers() -> None:
 def _check_when_stream_helpers() -> None:
     from handlers.when_stream import (
         DAY_SCHEDULE_TEXT_RE,
+        SCHEDULE_REPLY_DELETE_AFTER,
         WEEK_SCHEDULE_TEXT_RE,
         WHEN_STREAM_TEXT_RE,
         format_range_schedule_line,
         format_range_streamer_block,
         format_when_stream_line,
         next_upcoming_segment,
-        reset_when_stream_cooldown,
         schedule_detail_keyboard,
         schedule_streamer_keyboard,
         schedule_window_end,
         segments_in_window,
         unique_streamers_for_chat,
-        _cooldown_allows,
-        _mark_cooldown,
     )
     from i18n import t
+
+    assert SCHEDULE_REPLY_DELETE_AFTER.total_seconds() == 300
 
     assert WHEN_STREAM_TEXT_RE.match("Когда стрим?")
     assert WHEN_STREAM_TEXT_RE.match("когда стрим")
@@ -245,13 +245,6 @@ def _check_when_stream_helpers() -> None:
     assert t("when_stream_no_schedule", "ru").startswith("Откуда мне-то знать?")
     assert t("schedule_found_streamers", "ru") == "Найдено расписание для стримеров"
 
-    reset_when_stream_cooldown()
-    assert _cooldown_allows(-1001, now=now)
-    _mark_cooldown(-1001, now=now)
-    assert not _cooldown_allows(-1001, now=now)
-    assert _cooldown_allows(-1001, now=datetime(2030, 1, 1, 12, 1, tzinfo=timezone.utc))
-    reset_when_stream_cooldown()
-
 
 async def _check_ephemeral_helpers() -> None:
     from ephemeral import (
@@ -312,12 +305,11 @@ async def _check_ephemeral_helpers() -> None:
 
 
 async def _check_when_stream_ephemeral_path() -> None:
-    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
+    from handlers.when_stream import when_stream_command
     from i18n import t
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    reset_when_stream_cooldown()
     msg = AsyncMock()
     msg.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
     msg.api_kwargs = {"ephemeral_message_id": 11}
@@ -342,6 +334,7 @@ async def _check_when_stream_ephemeral_path() -> None:
         return_value=SimpleNamespace(api_kwargs={"ephemeral_message_id": 99})
     )
     ctx.bot.do_api_request = AsyncMock(return_value=True)
+    ctx.job_queue = MagicMock()
     ctx.application.bot_data = {"db": db, "twitch": twitch}
 
     with patch("handlers.when_stream.reply_lang", return_value="ru"):
@@ -355,18 +348,21 @@ async def _check_when_stream_ephemeral_path() -> None:
     result_text = ctx.bot.do_api_request.await_args.kwargs["api_kwargs"]["text"]
     assert result_text == t("when_stream_no_schedule", "ru")
     msg.reply_text.assert_not_awaited()
-    reset_when_stream_cooldown()
+    ctx.job_queue.run_once.assert_called_once()
+    assert ctx.job_queue.run_once.call_args.kwargs["when"] == 300
+    job_data = ctx.job_queue.run_once.call_args.kwargs["data"]
+    eph_ids = {item["ephemeral_message_id"] for item in job_data["ephemerals"]}
+    assert eph_ids == {11, 99}
 
 
 async def _check_when_stream_ephemeral_admin_public_slash() -> None:
     """Public /week in a group where the bot is admin → ephemeral + delete trigger."""
-    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
+    from handlers.when_stream import when_stream_command
     from i18n import t
     from telegram.constants import ChatMemberStatus
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    reset_when_stream_cooldown()
     msg = AsyncMock()
     msg.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
     msg.message_id = 77
@@ -396,6 +392,7 @@ async def _check_when_stream_ephemeral_admin_public_slash() -> None:
     )
     ctx.bot.delete_message = AsyncMock()
     ctx.bot.do_api_request = AsyncMock(return_value=True)
+    ctx.job_queue = MagicMock()
     ctx.application.bot_data = {"db": db, "twitch": twitch}
 
     with patch("handlers.when_stream.reply_lang", return_value="ru"):
@@ -411,13 +408,15 @@ async def _check_when_stream_ephemeral_admin_public_slash() -> None:
         "when_stream_no_schedule", "ru"
     )
     msg.reply_text.assert_not_awaited()
-    reset_when_stream_cooldown()
+    ctx.job_queue.run_once.assert_called_once()
+    job_data = ctx.job_queue.run_once.call_args.kwargs["data"]
+    assert [item["ephemeral_message_id"] for item in job_data["ephemerals"]] == [88]
+    assert job_data["message_ids"] == []
 
 
 async def _check_when_stream_silent() -> None:
-    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
+    from handlers.when_stream import when_stream_command
 
-    reset_when_stream_cooldown()
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=900001),
         effective_chat=SimpleNamespace(id=-1001, type=ChatType.SUPERGROUP),
@@ -434,12 +433,11 @@ async def _check_when_stream_silent() -> None:
 
 
 async def _check_when_stream_no_schedule() -> None:
-    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
+    from handlers.when_stream import when_stream_command
     from i18n import t
     from telegram.error import BadRequest
     from unittest.mock import patch
 
-    reset_when_stream_cooldown()
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=900001),
         effective_chat=SimpleNamespace(id=-1002, type=ChatType.SUPERGROUP),
@@ -465,11 +463,6 @@ async def _check_when_stream_no_schedule() -> None:
             "when_stream_no_schedule", "ru"
         )
         assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
-        # Cooldown: second call is silent.
-        update.effective_message.reply_text.reset_mock()
-        await when_stream_command(update, ctx)
-        update.effective_message.reply_text.assert_not_awaited()
-        reset_when_stream_cooldown()
 
         # Trigger message deleted while schedule was fetching → plain send, no raise.
         update.effective_message.reply_text = AsyncMock(
@@ -484,7 +477,6 @@ async def _check_when_stream_no_schedule() -> None:
             t("when_stream_no_schedule", "ru"),
         )
         assert "reply_markup" in ctx.bot.send_message.await_args.kwargs
-        reset_when_stream_cooldown()
 
 async def _check_group_setup_gate() -> None:
     from bot_helpers import (
@@ -641,13 +633,11 @@ async def _check_day_week_schedule() -> None:
     from handlers.when_stream import (
         day_schedule_command,
         on_schedule_query_callback,
-        reset_when_stream_cooldown,
         week_schedule_command,
     )
     from i18n import t
     from unittest.mock import patch
 
-    reset_when_stream_cooldown()
     now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
     today_slot = {
         "id": "today",
@@ -707,7 +697,6 @@ async def _check_day_week_schedule() -> None:
         assert isinstance(day_markup, ReplyKeyboardRemove)
 
         # Week: both have slots → picker with streamer buttons.
-        reset_when_stream_cooldown()
         update.effective_message.reply_text.reset_mock()
         with patch("handlers.when_stream.datetime") as mock_dt:
             _freeze_now(mock_dt)
@@ -744,7 +733,6 @@ async def _check_day_week_schedule() -> None:
         back_kb = query.edit_message_text.await_args.kwargs.get("reply_markup")
         assert back_kb.inline_keyboard[0][0].callback_data == "schq:list:week"
 
-        reset_when_stream_cooldown()
         update.effective_message.reply_text.reset_mock()
         twitch.get_channel_schedule = MagicMock(
             return_value={"segments": [], "vacation": None}
@@ -757,7 +745,6 @@ async def _check_day_week_schedule() -> None:
             "schedule_range_empty_day", "ru"
         )
         assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
-        reset_when_stream_cooldown()
 
 
 def check_group_chat() -> None:
