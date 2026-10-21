@@ -1123,7 +1123,6 @@ async def _smoke_delivery_and_helpers(db) -> None:
         from_user=SimpleNamespace(id=bot_id),
         chat_id=-1001,
         message_id=101,
-        delete=AsyncMock(),
     )
     assert _is_bot_pin_service_message(svc_from_bot, bot_id, db) is True
     foreign = SimpleNamespace(
@@ -1137,15 +1136,18 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert _is_bot_pin_service_message(foreign, bot_id, db) is False
     app, bot = _app(db)
     bot.id = bot_id
+    bot.delete_message = AsyncMock()
     ctx = _ctx(app)
     update = MagicMock()
     update.effective_message = svc_from_bot
     await delete_bot_pin_service_message(update, ctx)
-    svc_from_bot.delete.assert_awaited_once()
+    bot.delete_message.assert_awaited_once_with(
+        chat_id=-1001, message_id=101
+    )
+    bot.delete_message.reset_mock()
     update.effective_message = foreign
-    foreign.delete = AsyncMock()
     await delete_bot_pin_service_message(update, ctx)
-    foreign.delete.assert_not_awaited()
+    bot.delete_message.assert_not_awaited()
     # Channel: no from_user on service post — match stored pinned_message_id.
     pin_chat_id = -1001936914999
     pin_sub_id = db.add_subscription(
@@ -1164,12 +1166,13 @@ async def _smoke_delivery_and_helpers(db) -> None:
         from_user=None,
         chat_id=pin_chat_id,
         message_id=301,
-        delete=AsyncMock(),
     )
     assert _is_bot_pin_service_message(channel_svc, bot_id, db) is True
     update.effective_message = channel_svc
     await delete_bot_pin_service_message(update, ctx)
-    channel_svc.delete.assert_awaited_once()
+    bot.delete_message.assert_awaited_once_with(
+        chat_id=pin_chat_id, message_id=301
+    )
 
     bot = AsyncMock()
     bot.send_message = AsyncMock(side_effect=Forbidden("blocked"))

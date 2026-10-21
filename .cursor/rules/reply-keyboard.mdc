@@ -13,7 +13,7 @@ In a private chat, do not leave an inline-only message as the last bot message w
 
 One message accepts either an inline keyboard or a reply keyboard, not both. Feedback buttons (👍/👎) and the main menu are two sends.
 
-To refresh the menu without a visible message, use `_pulse_reply_keyboard` in `bot_helpers.py`. Do not `send_message` plus an immediate `delete_message`: the client drops the keyboard if the carrier disappears before it is applied. The helper disables draft FX and waits before delete.
+To refresh the menu without a visible message, use `_pulse_reply_keyboard` in `bot_helpers.py`. Do not `send_message` plus an immediate delete: the client drops the keyboard if the carrier disappears before it is applied. The helper disables draft FX and waits before `delete_chat_message(..., kind="bot_own")`.
 
 ## Also
 

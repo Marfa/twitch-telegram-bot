@@ -1,0 +1,39 @@
+---
+description: Bot may delete only its own messages and user commands
+globs:
+  - bot_helpers.py
+  - request_progress.py
+  - handlers/**/*.py
+  - bot.py
+alwaysApply: false
+---
+
+# Message delete policy
+
+The bot must **never** delete arbitrary chat messages (moderation, cleaning history, other users’ posts).
+
+## Allowed
+
+| Kind | Meaning | Examples |
+|---|---|---|
+| `bot_own` | Messages the bot sent (or Telegram service lines for *our* pin) | Alerts (`delete_other_alerts`), keyboard pulse, progress fallback, schedule reply, pin «bot pinned a …» |
+| `user_command` | Slash / free-text that invokes the bot | `/when` `/day` `/week`, «Когда стрим?», `/start ah_*` |
+
+## How
+
+- Every Telegram delete goes through `delete_chat_message(bot, chat_id, message_id, kind=…)` in `bot_helpers.py`.
+- Pass an explicit `kind="bot_own"` or `kind="user_command"`. Unknown kinds raise.
+- Do **not** call `bot.delete_message` / `Message.delete()` directly from handlers.
+- Ephemeral cleanup uses `delete_ephemeral` (separate Bot API) — still only our ephemeral threads / trigger commands.
+
+## Forbidden
+
+- Deleting random user messages in a group/channel
+- “Clean chat” / moderation helpers
+- Deleting replies that are not bot-owned and not the triggering command
+
+## Checklist
+
+1. New delete? → `delete_chat_message(..., kind=…)`.
+2. New user-trigger cleanup? → `kind="user_command"` only for that command message.
+3. `python -m self_check` (`_check_message_delete_policy` in `checks_group_chat.py`).

@@ -184,8 +184,10 @@ async def request_progress(
             pass
         if fallback_msg is not None:
             try:
-                await bot.delete_message(
-                    chat_id=chat_id, message_id=fallback_msg.message_id
+                from bot_helpers import delete_chat_message
+
+                await delete_chat_message(
+                    bot, chat_id, fallback_msg.message_id, kind="bot_own"
                 )
             except Exception:
                 logger.debug("progress fallback delete failed", exc_info=True)

@@ -402,7 +402,9 @@ async def _check_when_stream_ephemeral_admin_public_slash() -> None:
     assert "reply_parameters" not in (
         ctx.bot.send_message.await_args.kwargs.get("api_kwargs") or {}
     )
-    ctx.bot.delete_message.assert_awaited_once_with(-1010, 77)
+    ctx.bot.delete_message.assert_awaited_once_with(
+        chat_id=-1010, message_id=77
+    )
     assert ctx.bot.do_api_request.await_args.args[0] == "editEphemeralMessageText"
     assert ctx.bot.do_api_request.await_args.kwargs["api_kwargs"]["text"] == t(
         "when_stream_no_schedule", "ru"
@@ -411,7 +413,7 @@ async def _check_when_stream_ephemeral_admin_public_slash() -> None:
     ctx.job_queue.run_once.assert_called_once()
     job_data = ctx.job_queue.run_once.call_args.kwargs["data"]
     assert [item["ephemeral_message_id"] for item in job_data["ephemerals"]] == [88]
-    assert job_data["message_ids"] == []
+    assert job_data["deletes"] == []
 
 
 async def _check_when_stream_silent() -> None:
@@ -747,10 +749,49 @@ async def _check_day_week_schedule() -> None:
         assert "reply_markup" in update.effective_message.reply_text.await_args.kwargs
 
 
+def _check_message_delete_policy() -> None:
+    """Bot may delete only its own messages and user commands — via delete_chat_message."""
+    import re
+
+    from bot_helpers import delete_chat_message
+
+    assert callable(delete_chat_message)
+    helpers = (_ROOT / "bot_helpers.py").read_text(encoding="utf-8")
+    assert 'kind: DeleteKind' in helpers or 'kind: Literal["bot_own"' in helpers
+    assert "bot_own" in helpers and "user_command" in helpers
+    # Single raw Telegram delete call site — inside delete_chat_message.
+    raw_calls = [
+        m.start()
+        for m in re.finditer(r"await bot\.delete_message\s*\(", helpers)
+    ]
+    assert len(raw_calls) == 1, (
+        "bot_helpers.py: only delete_chat_message may call bot.delete_message"
+    )
+
+    forbidden = re.compile(
+        r"(?:bot\.delete_message\s*\(|effective_message\.delete\s*\(|\bmsg\.delete\s*\()"
+    )
+    scan_paths = [
+        _ROOT / "request_progress.py",
+        *(_ROOT / "handlers").glob("*.py"),
+    ]
+    for path in scan_paths:
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            if forbidden.search(line):
+                raise AssertionError(
+                    f"{path.relative_to(_ROOT)}:{i}: use delete_chat_message"
+                    f"(..., kind='bot_own'|'user_command'), not raw delete"
+                )
+
+
 def check_group_chat() -> None:
     _check_premium_and_helpers()
     _check_wizard_schedule_reply_targets()
     _check_when_stream_helpers()
+    _check_message_delete_policy()
     import asyncio
 
     asyncio.run(_check_group_setup_gate())

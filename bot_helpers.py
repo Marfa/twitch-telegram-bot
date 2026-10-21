@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Literal
 
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
@@ -28,6 +29,29 @@ logger = logging.getLogger(__name__)
 # Soft pacing for mass DM sends — keeps under Telegram flood limits.
 _BROADCAST_SEND_PAUSE = 0.05
 _PAUSE_NOTIFICATIONS_BETA_ID = "pause-notifications"
+
+# Only these may be deleted — never arbitrary user chat history.
+DeleteKind = Literal["bot_own", "user_command"]
+_ALLOWED_DELETE_KINDS = frozenset({"bot_own", "user_command"})
+
+
+async def delete_chat_message(
+    bot,
+    chat_id: int,
+    message_id: int,
+    *,
+    kind: DeleteKind,
+) -> None:
+    """Delete a message — bot-owned content or a user command only.
+
+    Never call Telegram delete for arbitrary user messages (moderation,
+    chat cleanup, etc.). Every call site must pass an explicit kind.
+    """
+    if kind not in _ALLOWED_DELETE_KINDS:
+        raise ValueError(
+            f"refusing delete: kind must be bot_own or user_command, got {kind!r}"
+        )
+    await bot.delete_message(chat_id=int(chat_id), message_id=int(message_id))
 
 
 def reply_chat_id(update) -> int:
@@ -95,7 +119,9 @@ async def clear_group_reply_keyboard(bot, chat_id: int) -> None:
                 )
                 await asyncio.sleep(0.35)
                 try:
-                    await bot.delete_message(chat_id, msg.message_id)
+                    await delete_chat_message(
+                        bot, chat_id, msg.message_id, kind="bot_own"
+                    )
                 except (BadRequest, Forbidden):
                     pass
                 return
@@ -267,7 +293,9 @@ async def _pulse_reply_keyboard(bot, chat_id: int, reply_markup: ReplyKeyboardMa
                 # Brief pause so the client applies ReplyKeyboard before delete.
                 await asyncio.sleep(0.35)
                 try:
-                    await bot.delete_message(chat_id, msg.message_id)
+                    await delete_chat_message(
+                        bot, chat_id, msg.message_id, kind="bot_own"
+                    )
                 except (BadRequest, Forbidden):
                     pass
                 return

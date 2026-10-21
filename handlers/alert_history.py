@@ -11,7 +11,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 import premium as prem
-from bot_helpers import _menu, _user_lang, reply_chat_id
+from bot_helpers import _menu, _user_lang, delete_chat_message, reply_chat_id
 from db import AlertHistoryEntry, Database
 from i18n import SCHEDULE_TZ, btn, format_stream_schedule_prompt_date, t
 from twitch import TwitchClient
@@ -710,10 +710,16 @@ async def handle_alert_history_start_arg(
             preferred_page = int(ui.get("page") or 0)
         except (TypeError, ValueError):
             preferred_page = 0
-    # Drop the visible /start ah_* message when possible.
-    if update.effective_message is not None:
+    # Drop the visible /start ah_* command when possible.
+    msg = update.effective_message
+    if msg is not None:
         try:
-            await update.effective_message.delete()
+            await delete_chat_message(
+                context.bot,
+                msg.chat_id,
+                msg.message_id,
+                kind="user_command",
+            )
         except BadRequest:
             pass
     await _refresh_alert_history_message(

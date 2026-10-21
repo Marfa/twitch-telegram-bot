@@ -14,7 +14,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
 import analytics
-from bot_helpers import _user_notifications_paused
+from bot_helpers import _user_notifications_paused, delete_chat_message
 from db import Database, Subscription
 from handlers.alert_history import _vod_offset_seconds
 from i18n import DEFAULT_LOCALE, delivery_fail_notice_keyboard, stored_typo_fix_keyboard, t
@@ -1013,7 +1013,9 @@ async def _delete_one_previous_message(
     owner_id: int,
 ) -> bool:
     try:
-        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        await delete_chat_message(
+            bot, chat_id, message_id, kind="bot_own"
+        )
         return True
     except (BadRequest, Forbidden) as exc:
         # Already gone (manual delete, race, purge) — treat as cleaned up, do not notify.
@@ -1146,7 +1148,9 @@ async def delete_bot_pin_service_message(update, context) -> None:
     if not _is_bot_pin_service_message(msg, context.bot.id, db):
         return
     try:
-        await msg.delete()
+        await delete_chat_message(
+            context.bot, msg.chat_id, msg.message_id, kind="bot_own"
+        )
     except (BadRequest, Forbidden) as exc:
         logger.info(
             "Cannot delete pin service message %s in %s: %s",

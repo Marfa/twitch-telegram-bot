@@ -20,7 +20,12 @@ from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
-from bot_helpers import clear_group_reply_keyboard, reply_lang
+from bot_helpers import (
+    DeleteKind,
+    clear_group_reply_keyboard,
+    delete_chat_message,
+    reply_lang,
+)
 from db import Database
 from ephemeral import (
     EphemeralHandle,
@@ -365,11 +370,14 @@ async def _bot_is_chat_admin(bot, chat_id: int) -> bool:
 
 
 async def _delete_trigger_message(bot, chat_id: int, message) -> None:
+    """Delete the user command that triggered a schedule query (slash / free-text)."""
     mid = getattr(message, "message_id", None)
     if mid is None:
         return
     try:
-        await bot.delete_message(chat_id, int(mid))
+        await delete_chat_message(
+            bot, chat_id, int(mid), kind="user_command"
+        )
     except (BadRequest, Forbidden):
         pass
     except Exception:
@@ -393,11 +401,17 @@ async def _delete_schedule_messages_job(context: ContextTypes.DEFAULT_TYPE) -> N
         except Exception:
             logger.exception("schedule ephemeral auto-delete failed %s", item)
     chat_id = data.get("chat_id")
-    for mid in data.get("message_ids") or []:
-        if chat_id is None or mid is None:
+    for item in data.get("deletes") or []:
+        if chat_id is None:
+            continue
+        mid = item.get("message_id")
+        kind: DeleteKind | None = item.get("kind")
+        if mid is None or kind not in ("bot_own", "user_command"):
             continue
         try:
-            await bot.delete_message(int(chat_id), int(mid))
+            await delete_chat_message(
+                bot, int(chat_id), int(mid), kind=kind
+            )
         except (BadRequest, Forbidden):
             pass
         except Exception:
@@ -411,7 +425,7 @@ def _schedule_cleanup(
     *,
     chat_id: int,
     ephemerals: list[EphemeralHandle] | None = None,
-    message_ids: list[int | None] | None = None,
+    deletes: list[tuple[int, DeleteKind]] | None = None,
 ) -> None:
     eph_payload = [
         {
@@ -421,14 +435,19 @@ def _schedule_cleanup(
         }
         for h in (ephemerals or [])
     ]
-    mids = [int(mid) for mid in (message_ids or []) if mid is not None]
-    if not eph_payload and not mids:
+    delete_payload = [
+        {"message_id": int(mid), "kind": kind}
+        for mid, kind in (deletes or [])
+    ]
+    if not eph_payload and not delete_payload:
         return
     jq = context.job_queue
     if jq is None:
         return
     anchor = (
-        eph_payload[0]["ephemeral_message_id"] if eph_payload else mids[0]
+        eph_payload[0]["ephemeral_message_id"]
+        if eph_payload
+        else delete_payload[0]["message_id"]
     )
     jq.run_once(
         _delete_schedule_messages_job,
@@ -436,7 +455,7 @@ def _schedule_cleanup(
         data={
             "chat_id": int(chat_id),
             "ephemerals": eph_payload,
-            "message_ids": mids,
+            "deletes": delete_payload,
         },
         name=f"sched_msg_del_{chat_id}_{anchor}",
     )
@@ -638,7 +657,7 @@ def _schedule_result_cleanup(
 ) -> None:
     """Delete ephemeral command + bot reply (or public pair) after TTL."""
     ephemerals: list[EphemeralHandle] = []
-    message_ids: list[int | None] = []
+    deletes: list[tuple[int, DeleteKind]] = []
     if isinstance(result, EphemeralHandle):
         ephemerals.append(result)
         trigger_eph = _trigger_ephemeral_handle(
@@ -649,16 +668,18 @@ def _schedule_result_cleanup(
             if trigger_eph.ephemeral_message_id != result.ephemeral_message_id:
                 ephemerals.append(trigger_eph)
     elif isinstance(result, int):
-        message_ids.append(result)
+        deletes.append((result, "bot_own"))
         if not trigger_deleted:
-            message_ids.append(getattr(message, "message_id", None))
+            mid = getattr(message, "message_id", None)
+            if mid is not None:
+                deletes.append((int(mid), "user_command"))
     else:
         return
     _schedule_cleanup(
         context,
         chat_id=chat_id,
         ephemerals=ephemerals,
-        message_ids=message_ids,
+        deletes=deletes,
     )
 
 
