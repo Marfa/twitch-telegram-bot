@@ -260,7 +260,7 @@ async def _check_ephemeral_helpers() -> None:
         message_ephemeral_id,
         send_ephemeral_text,
     )
-    from types import SimpleNamespace
+    from types import MappingProxyType, SimpleNamespace
     from unittest.mock import AsyncMock
 
     assert message_ephemeral_id(None) is None
@@ -274,6 +274,15 @@ async def _check_ephemeral_helpers() -> None:
     assert (
         message_ephemeral_id(SimpleNamespace(ephemeral_message_id=9, api_kwargs={}))
         == 9
+    )
+    # PTB Message.api_kwargs is a mappingproxy, not a plain dict.
+    assert (
+        message_ephemeral_id(
+            SimpleNamespace(
+                api_kwargs=MappingProxyType({"ephemeral_message_id": 42})
+            )
+        )
+        == 42
     )
 
     bot = AsyncMock()

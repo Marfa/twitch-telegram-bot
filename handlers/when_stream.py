@@ -473,20 +473,44 @@ async def _deliver_schedule_result(
     reply_markup=None,
     as_html: bool = False,
 ) -> None:
-    """Edit ephemeral status → result, or public reply fallback."""
+    """Edit ephemeral status → result, or public reply fallback.
+
+    If an ephemeral status was already shown, never fall back to a public
+    reply (that duplicates the answer for everyone else).
+    """
     if eph is not None:
         if reply_markup is not None and _group_chat_type(getattr(message, "chat", None)):
             await clear_group_reply_keyboard(context.bot, chat_id)
+        parse_mode = ParseMode.HTML if as_html else None
         ok = await edit_ephemeral_text(
             context.bot,
             eph,
             text,
             reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML if as_html else None,
+            parse_mode=parse_mode,
             disable_web_page_preview=as_html,
         )
         if ok:
             return
+        # Edit failed — send a fresh ephemeral result; drop the stuck status.
+        await delete_ephemeral(context.bot, eph)
+        replacement = await send_ephemeral_text(
+            context.bot,
+            chat_id,
+            text,
+            eph.receiver_user_id,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            disable_web_page_preview=as_html,
+        )
+        if replacement is not None:
+            return
+        logger.warning(
+            "ephemeral schedule result failed chat=%s user=%s; skipping public fallback",
+            chat_id,
+            eph.receiver_user_id,
+        )
+        return
     await _reply_schedule_message(
         message,
         context,

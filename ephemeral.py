@@ -5,6 +5,7 @@ PTB 22.x targets Bot API 10.0 — native types land later; until then use forwar
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,8 +39,9 @@ def message_ephemeral_id(message: Any) -> int | None:
     raw = _coerce_ephemeral_id(getattr(message, "ephemeral_message_id", None))
     if raw is not None:
         return raw
+    # PTB stores unknown fields in api_kwargs as mappingproxy — not a plain dict.
     api_kwargs = getattr(message, "api_kwargs", None)
-    if isinstance(api_kwargs, dict):
+    if isinstance(api_kwargs, Mapping):
         return _coerce_ephemeral_id(api_kwargs.get("ephemeral_message_id"))
     return None
 
