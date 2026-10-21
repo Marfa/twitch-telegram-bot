@@ -5,6 +5,7 @@ import asyncio
 import html
 import logging
 import re
+import uuid
 from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 
@@ -44,6 +45,9 @@ ScheduleMode = Literal["when", "day", "week"]
 
 # Ephemeral command + bot reply stay until we delete them (no short bot-side TTL).
 SCHEDULE_REPLY_DELETE_AFTER = timedelta(minutes=5)
+# Default APScheduler grace is 1s — a slow interval job (e.g. schedule_reminders)
+# can delay the executor past that and drop the cleanup entirely.
+SCHEDULE_REPLY_DELETE_MISFIRE_GRACE = int(SCHEDULE_REPLY_DELETE_AFTER.total_seconds())
 
 # Free-text triggers. Leading @bot is common under Telegram privacy mode.
 WHEN_STREAM_TEXT_RE = re.compile(
@@ -449,6 +453,7 @@ def _schedule_cleanup(
         if eph_payload
         else delete_payload[0]["message_id"]
     )
+    job_name = f"sched_msg_del_{chat_id}_{anchor}_{uuid.uuid4().hex[:8]}"
     jq.run_once(
         _delete_schedule_messages_job,
         when=SCHEDULE_REPLY_DELETE_AFTER.total_seconds(),
@@ -457,7 +462,13 @@ def _schedule_cleanup(
             "ephemerals": eph_payload,
             "deletes": delete_payload,
         },
-        name=f"sched_msg_del_{chat_id}_{anchor}",
+        name=job_name,
+        job_kwargs={
+            "id": job_name,
+            "replace_existing": False,
+            "misfire_grace_time": SCHEDULE_REPLY_DELETE_MISFIRE_GRACE,
+            "coalesce": True,
+        },
     )
 
 

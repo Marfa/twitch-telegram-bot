@@ -109,6 +109,7 @@ def _check_when_stream_helpers() -> None:
     from handlers.when_stream import (
         DAY_SCHEDULE_TEXT_RE,
         SCHEDULE_REPLY_DELETE_AFTER,
+        SCHEDULE_REPLY_DELETE_MISFIRE_GRACE,
         WEEK_SCHEDULE_TEXT_RE,
         WHEN_STREAM_TEXT_RE,
         format_range_schedule_line,
@@ -124,6 +125,7 @@ def _check_when_stream_helpers() -> None:
     from i18n import t
 
     assert SCHEDULE_REPLY_DELETE_AFTER.total_seconds() == 300
+    assert SCHEDULE_REPLY_DELETE_MISFIRE_GRACE == 300
 
     assert WHEN_STREAM_TEXT_RE.match("Когда стрим?")
     assert WHEN_STREAM_TEXT_RE.match("когда стрим")
@@ -349,8 +351,10 @@ async def _check_when_stream_ephemeral_path() -> None:
     assert result_text == t("when_stream_no_schedule", "ru")
     msg.reply_text.assert_not_awaited()
     ctx.job_queue.run_once.assert_called_once()
-    assert ctx.job_queue.run_once.call_args.kwargs["when"] == 300
-    job_data = ctx.job_queue.run_once.call_args.kwargs["data"]
+    run_kw = ctx.job_queue.run_once.call_args.kwargs
+    assert run_kw["when"] == 300
+    assert run_kw["job_kwargs"]["misfire_grace_time"] == 300
+    job_data = run_kw["data"]
     eph_ids = {item["ephemeral_message_id"] for item in job_data["ephemerals"]}
     assert eph_ids == {11, 99}
 
@@ -411,7 +415,9 @@ async def _check_when_stream_ephemeral_admin_public_slash() -> None:
     )
     msg.reply_text.assert_not_awaited()
     ctx.job_queue.run_once.assert_called_once()
-    job_data = ctx.job_queue.run_once.call_args.kwargs["data"]
+    run_kw = ctx.job_queue.run_once.call_args.kwargs
+    assert run_kw["job_kwargs"]["misfire_grace_time"] == 300
+    job_data = run_kw["data"]
     assert [item["ephemeral_message_id"] for item in job_data["ephemerals"]] == [88]
     assert job_data["deletes"] == []
 
