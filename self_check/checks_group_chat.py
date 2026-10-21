@@ -349,6 +349,62 @@ async def _check_when_stream_ephemeral_path() -> None:
     reset_when_stream_cooldown()
 
 
+async def _check_when_stream_ephemeral_admin_public_slash() -> None:
+    """Public /week in a group where the bot is admin → ephemeral + delete trigger."""
+    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
+    from i18n import t
+    from telegram.constants import ChatMemberStatus
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    reset_when_stream_cooldown()
+    msg = AsyncMock()
+    msg.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
+    msg.message_id = 77
+    msg.api_kwargs = {}
+    # No real ephemeral id on the public slash.
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=900001),
+        effective_chat=SimpleNamespace(id=-1010, type=ChatType.SUPERGROUP),
+        effective_message=msg,
+        callback_query=None,
+    )
+    sub = SimpleNamespace(twitch_user_id="42", twitch_username="marfapr")
+    db = MagicMock()
+    db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub])
+    twitch = MagicMock()
+    twitch.get_channel_schedule = MagicMock(
+        return_value={"segments": [], "vacation": None}
+    )
+    ctx = MagicMock()
+    ctx.bot = AsyncMock()
+    ctx.bot.get_me = AsyncMock(return_value=SimpleNamespace(id=1))
+    ctx.bot.get_chat_member = AsyncMock(
+        return_value=SimpleNamespace(status=ChatMemberStatus.ADMINISTRATOR)
+    )
+    ctx.bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(api_kwargs={"ephemeral_message_id": 88})
+    )
+    ctx.bot.delete_message = AsyncMock()
+    ctx.bot.do_api_request = AsyncMock(return_value=True)
+    ctx.application.bot_data = {"db": db, "twitch": twitch}
+
+    with patch("handlers.when_stream.reply_lang", return_value="ru"):
+        await when_stream_command(update, ctx)
+
+    ctx.bot.send_message.assert_awaited()
+    assert "reply_parameters" not in (
+        ctx.bot.send_message.await_args.kwargs.get("api_kwargs") or {}
+    )
+    ctx.bot.delete_message.assert_awaited_once_with(-1010, 77)
+    assert ctx.bot.do_api_request.await_args.args[0] == "editEphemeralMessageText"
+    assert ctx.bot.do_api_request.await_args.kwargs["api_kwargs"]["text"] == t(
+        "when_stream_no_schedule", "ru"
+    )
+    msg.reply_text.assert_not_awaited()
+    reset_when_stream_cooldown()
+
+
 async def _check_when_stream_silent() -> None:
     from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
 
@@ -704,6 +760,7 @@ def check_group_chat() -> None:
     asyncio.run(_check_group_setup_gate())
     asyncio.run(_check_ephemeral_helpers())
     asyncio.run(_check_when_stream_ephemeral_path())
+    asyncio.run(_check_when_stream_ephemeral_admin_public_slash())
     asyncio.run(_check_when_stream_silent())
     asyncio.run(_check_when_stream_no_schedule())
     asyncio.run(_check_day_week_schedule())

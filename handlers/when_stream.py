@@ -16,8 +16,8 @@ from telegram import (
     ReplyKeyboardRemove,
     Update,
 )
-from telegram.constants import ChatType, ParseMode
-from telegram.error import BadRequest
+from telegram.constants import ChatMemberStatus, ChatType, ParseMode
+from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
 from bot_helpers import clear_group_reply_keyboard, reply_lang
@@ -366,6 +366,72 @@ def _group_chat_type(chat) -> bool:
     return getattr(chat, "type", None) in (ChatType.GROUP, ChatType.SUPERGROUP)
 
 
+async def _bot_is_chat_admin(bot, chat_id: int) -> bool:
+    """True if the bot can start ephemeral replies without an ephemeral trigger."""
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id, me.id)
+    except (BadRequest, Forbidden):
+        return False
+    except Exception:
+        logger.exception("getChatMember(bot) failed in chat %s", chat_id)
+        return False
+    return member.status in (
+        ChatMemberStatus.ADMINISTRATOR,
+        ChatMemberStatus.OWNER,
+    )
+
+
+async def _delete_trigger_message(bot, chat_id: int, message) -> None:
+    mid = getattr(message, "message_id", None)
+    if mid is None:
+        return
+    try:
+        await bot.delete_message(chat_id, int(mid))
+    except (BadRequest, Forbidden):
+        pass
+    except Exception:
+        logger.exception("delete trigger message failed chat=%s mid=%s", chat_id, mid)
+
+
+async def _begin_schedule_ephemeral(
+    bot,
+    *,
+    chat,
+    chat_id: int,
+    user_id: int,
+    message,
+    lang: str,
+) -> EphemeralHandle | None:
+    """Status ephemeral for the requester; admin path when the slash was public."""
+    if not _group_chat_type(chat):
+        return None
+    reply_eph_id = message_ephemeral_id(message)
+    if reply_eph_id is not None:
+        return await send_ephemeral_text(
+            bot,
+            chat_id,
+            t("schedule_query_working", lang),
+            user_id,
+            reply_to_ephemeral_id=reply_eph_id,
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    # Clients may still send a public /week even when is_ephemeral is set.
+    # Chat-admin bots may start an ephemeral thread without an ephemeral trigger.
+    if not await _bot_is_chat_admin(bot, chat_id):
+        return None
+    eph = await send_ephemeral_text(
+        bot,
+        chat_id,
+        t("schedule_query_working", lang),
+        user_id,
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    if eph is not None:
+        await _delete_trigger_message(bot, chat_id, message)
+    return eph
+
+
 async def _reply_schedule_message(
     message,
     context: ContextTypes.DEFAULT_TYPE,
@@ -500,18 +566,15 @@ async def _schedule_query_command(
     if not streamers:
         return
 
-    # Ephemeral path: status for this user → edit to result (slash is_ephemeral).
-    eph: EphemeralHandle | None = None
-    reply_eph_id = message_ephemeral_id(message)
-    if _group_chat_type(chat) and reply_eph_id is not None:
-        eph = await send_ephemeral_text(
-            context.bot,
-            chat_id,
-            t("schedule_query_working", lang),
-            int(user.id),
-            reply_to_ephemeral_id=reply_eph_id,
-            reply_markup=ReplyKeyboardRemove(),
-        )
+    # Ephemeral: reply to ephemeral slash, or admin-start when the slash was public.
+    eph = await _begin_schedule_ephemeral(
+        context.bot,
+        chat=chat,
+        chat_id=chat_id,
+        user_id=int(user.id),
+        message=message,
+        lang=lang,
+    )
 
     now = datetime.now(timezone.utc)
     hits, fetched_ok = await _discover_hits(
