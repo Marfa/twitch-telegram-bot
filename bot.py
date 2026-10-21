@@ -297,6 +297,7 @@ from handlers.when_stream import (
     WEEK_SCHEDULE_TEXT_RE,
     WHEN_STREAM_TEXT_RE,
     day_schedule_command,
+    ensure_group_schedule_ephemeral_commands,
     on_schedule_query_callback,
     week_schedule_command,
     when_stream_command,
@@ -2596,6 +2597,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         asyncio.create_task(
             ensure_stream_chat_menu_buttons_for_all(application.bot, db),
             name="stream-chat-menu-buttons",
+        )
+        asyncio.create_task(
+            ensure_group_schedule_ephemeral_commands(application.bot),
+            name="group-schedule-ephemeral-commands",
         )
 
     app = (

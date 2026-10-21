@@ -8,15 +8,29 @@ import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+)
 from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from bot_helpers import clear_group_reply_keyboard, reply_lang
 from db import Database
+from ephemeral import (
+    EphemeralHandle,
+    delete_ephemeral,
+    edit_ephemeral_text,
+    message_ephemeral_id,
+    send_ephemeral_text,
+)
 from handlers.notifications import _parse_segment_start
-from i18n import SCHEDULE_TZ, format_stream_schedule_date, t
+from i18n import SCHEDULE_TZ, SUPPORTED_LOCALES, format_stream_schedule_date, t
 from twitch import TwitchClient, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
@@ -348,6 +362,10 @@ async def _discover_hits(
     return hits, fetched_ok
 
 
+def _group_chat_type(chat) -> bool:
+    return getattr(chat, "type", None) in (ChatType.GROUP, ChatType.SUPERGROUP)
+
+
 async def _reply_schedule_message(
     message,
     context: ContextTypes.DEFAULT_TYPE,
@@ -379,13 +397,71 @@ async def _reply_schedule_message(
         await context.bot.send_message(chat_id, text, **send_kw)
 
 
+async def _deliver_schedule_result(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    *,
+    eph: EphemeralHandle | None,
+    reply_markup=None,
+    as_html: bool = False,
+) -> None:
+    """Edit ephemeral status → result, or public reply fallback."""
+    if eph is not None:
+        if reply_markup is not None and _group_chat_type(getattr(message, "chat", None)):
+            await clear_group_reply_keyboard(context.bot, chat_id)
+        ok = await edit_ephemeral_text(
+            context.bot,
+            eph,
+            text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML if as_html else None,
+            disable_web_page_preview=as_html,
+        )
+        if ok:
+            return
+    await _reply_schedule_message(
+        message,
+        context,
+        chat_id,
+        text,
+        reply_markup=reply_markup,
+        as_html=as_html,
+    )
+
+
 async def _edit_schedule_message(
     query,
     text: str,
     *,
+    bot=None,
+    chat_id: int | None = None,
+    receiver_user_id: int | None = None,
     reply_markup=None,
     as_html: bool = False,
 ) -> None:
+    eph_id = message_ephemeral_id(getattr(query, "message", None))
+    if (
+        eph_id is not None
+        and bot is not None
+        and chat_id is not None
+        and receiver_user_id is not None
+    ):
+        ok = await edit_ephemeral_text(
+            bot,
+            EphemeralHandle(
+                chat_id=int(chat_id),
+                receiver_user_id=int(receiver_user_id),
+                ephemeral_message_id=eph_id,
+            ),
+            text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML if as_html else None,
+            disable_web_page_preview=as_html,
+        )
+        if ok:
+            return
     edit_kw: dict = {}
     if reply_markup is not None:
         edit_kw["reply_markup"] = reply_markup
@@ -424,29 +500,47 @@ async def _schedule_query_command(
     if not streamers:
         return
 
+    # Ephemeral path: status for this user → edit to result (slash is_ephemeral).
+    eph: EphemeralHandle | None = None
+    reply_eph_id = message_ephemeral_id(message)
+    if _group_chat_type(chat) and reply_eph_id is not None:
+        eph = await send_ephemeral_text(
+            context.bot,
+            chat_id,
+            t("schedule_query_working", lang),
+            int(user.id),
+            reply_to_ephemeral_id=reply_eph_id,
+            reply_markup=ReplyKeyboardRemove(),
+        )
+
     now = datetime.now(timezone.utc)
     hits, fetched_ok = await _discover_hits(
         twitch=twitch, streamers=streamers, mode=mode, lang=lang, now=now
     )
     if not hits:
         if not fetched_ok:
+            if eph is not None:
+                await delete_ephemeral(context.bot, eph)
             return
         _mark_cooldown(chat_id)
-        await _reply_schedule_message(
-            message, context, chat_id, _empty_text(mode, lang)
+        await _deliver_schedule_result(
+            message, context, chat_id, _empty_text(mode, lang), eph=eph
         )
         return
 
     _mark_cooldown(chat_id)
     if len(hits) == 1:
-        await _reply_schedule_message(message, context, chat_id, hits[0][2])
+        await _deliver_schedule_result(
+            message, context, chat_id, hits[0][2], eph=eph
+        )
         return
 
-    await _reply_schedule_message(
+    await _deliver_schedule_result(
         message,
         context,
         chat_id,
         t("schedule_found_streamers", lang),
+        eph=eph,
         reply_markup=schedule_streamer_keyboard(
             mode, [(uid, name) for uid, name, _text in hits]
         ),
@@ -487,6 +581,7 @@ async def on_schedule_query_callback(
     twitch: TwitchClient = context.application.bot_data["twitch"]
     lang = reply_lang(context, update, user.id)
     now = datetime.now(timezone.utc)
+    receiver_user_id = int(user.id)
 
     list_m = re.fullmatch(r"schq:list:(when|day|week)", raw)
     pick_m = re.fullmatch(r"schq:(when|day|week):(\d+)", raw)
@@ -511,13 +606,18 @@ async def on_schedule_query_callback(
             now=now,
         )
         await query.answer()
+        edit_kw = {
+            "bot": context.bot,
+            "chat_id": chat_id,
+            "receiver_user_id": receiver_user_id,
+        }
         if not hits:
             text = (
                 _empty_text(mode, lang)
                 if fetched_ok
                 else t("schedule_found_streamers", lang)
             )
-            await _edit_schedule_message(query, text)
+            await _edit_schedule_message(query, text, **edit_kw)
             return
         if len(hits) == 1:
             uid, username, _plain = hits[0]
@@ -536,7 +636,7 @@ async def on_schedule_query_callback(
             except Exception:
                 logger.exception("%s: schedule re-fetch failed for %s", mode, uid)
                 return
-            await _edit_schedule_message(query, text, as_html=True)
+            await _edit_schedule_message(query, text, as_html=True, **edit_kw)
             return
         await _edit_schedule_message(
             query,
@@ -544,6 +644,7 @@ async def on_schedule_query_callback(
             reply_markup=schedule_streamer_keyboard(
                 mode, [(uid, name) for uid, name, _text in hits]
             ),
+            **edit_kw,
         )
         return
 
@@ -579,12 +680,18 @@ async def on_schedule_query_callback(
         await query.answer()
         return
     await query.answer()
+    edit_kw = {
+        "bot": context.bot,
+        "chat_id": chat_id,
+        "receiver_user_id": receiver_user_id,
+    }
     if not text:
         text = _empty_text(mode, lang)
         await _edit_schedule_message(
             query,
             text,
             reply_markup=schedule_detail_keyboard(mode, lang),
+            **edit_kw,
         )
         return
     await _edit_schedule_message(
@@ -592,4 +699,37 @@ async def on_schedule_query_callback(
         text,
         reply_markup=schedule_detail_keyboard(mode, lang),
         as_html=True,
+        **edit_kw,
     )
+
+
+async def ensure_group_schedule_ephemeral_commands(bot) -> None:
+    """Register /when /day /week as ephemeral for all group chats."""
+    scope = BotCommandScopeAllGroupChats()
+    for lang in SUPPORTED_LOCALES:
+        commands = [
+            BotCommand(
+                "when",
+                t("cmd_when_desc", lang)[:256],
+                api_kwargs={"is_ephemeral": True},
+            ),
+            BotCommand(
+                "day",
+                t("cmd_day_desc", lang)[:256],
+                api_kwargs={"is_ephemeral": True},
+            ),
+            BotCommand(
+                "week",
+                t("cmd_week_desc", lang)[:256],
+                api_kwargs={"is_ephemeral": True},
+            ),
+        ]
+        language_code = None if lang == "en" else lang
+        try:
+            await bot.set_my_commands(
+                commands, scope=scope, language_code=language_code
+            )
+        except Exception:
+            logger.exception(
+                "setMyCommands ephemeral schedule failed lang=%s", lang
+            )

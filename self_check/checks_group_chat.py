@@ -94,6 +94,15 @@ def _check_premium_and_helpers() -> None:
     when_src = (_ROOT / "handlers/when_stream.py").read_text(encoding="utf-8")
     assert "reply_lang(" in when_src
     assert "_user_lang(" not in when_src
+    assert "send_ephemeral_text" in when_src
+    assert "edit_ephemeral_text" in when_src
+    assert "ensure_group_schedule_ephemeral_commands" in when_src
+    assert "is_ephemeral" in when_src
+    bot_src_eph = (_ROOT / "bot.py").read_text(encoding="utf-8")
+    assert "ensure_group_schedule_ephemeral_commands" in bot_src_eph
+    eph_src = (_ROOT / "ephemeral.py").read_text(encoding="utf-8")
+    assert "editEphemeralMessageText" in eph_src
+    assert "ephemeral_message_parameters" in eph_src
 
 
 def _check_when_stream_helpers() -> None:
@@ -241,6 +250,102 @@ def _check_when_stream_helpers() -> None:
     _mark_cooldown(-1001, now=now)
     assert not _cooldown_allows(-1001, now=now)
     assert _cooldown_allows(-1001, now=datetime(2030, 1, 1, 12, 1, tzinfo=timezone.utc))
+    reset_when_stream_cooldown()
+
+
+async def _check_ephemeral_helpers() -> None:
+    from ephemeral import (
+        EphemeralHandle,
+        edit_ephemeral_text,
+        message_ephemeral_id,
+        send_ephemeral_text,
+    )
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    assert message_ephemeral_id(None) is None
+    assert message_ephemeral_id(SimpleNamespace(api_kwargs={})) is None
+    assert (
+        message_ephemeral_id(
+            SimpleNamespace(api_kwargs={"ephemeral_message_id": "7"})
+        )
+        == 7
+    )
+    assert (
+        message_ephemeral_id(SimpleNamespace(ephemeral_message_id=9, api_kwargs={}))
+        == 9
+    )
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(
+            api_kwargs={"ephemeral_message_id": 55},
+            message_id=1,
+        )
+    )
+    handle = await send_ephemeral_text(
+        bot, -1001, "status", 42, reply_to_ephemeral_id=3
+    )
+    assert handle == EphemeralHandle(
+        chat_id=-1001, receiver_user_id=42, ephemeral_message_id=55
+    )
+    kw = bot.send_message.await_args.kwargs
+    assert kw["api_kwargs"]["ephemeral_message_parameters"]["receiver_user_id"] == 42
+    assert kw["api_kwargs"]["reply_parameters"]["ephemeral_message_id"] == 3
+
+    bot.do_api_request = AsyncMock(return_value=True)
+    assert await edit_ephemeral_text(bot, handle, "done")
+    endpoint = bot.do_api_request.await_args.args[0]
+    assert endpoint == "editEphemeralMessageText"
+    edit_kw = bot.do_api_request.await_args.kwargs["api_kwargs"]
+    assert edit_kw["ephemeral_message_id"] == 55
+    assert edit_kw["text"] == "done"
+
+
+async def _check_when_stream_ephemeral_path() -> None:
+    from handlers.when_stream import reset_when_stream_cooldown, when_stream_command
+    from i18n import t
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    reset_when_stream_cooldown()
+    msg = AsyncMock()
+    msg.chat = SimpleNamespace(type=ChatType.SUPERGROUP)
+    msg.api_kwargs = {"ephemeral_message_id": 11}
+    msg.ephemeral_message_id = 11
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=900001),
+        effective_chat=SimpleNamespace(id=-1009, type=ChatType.SUPERGROUP),
+        effective_message=msg,
+        callback_query=None,
+    )
+    sub = SimpleNamespace(twitch_user_id="42", twitch_username="marfapr")
+    db = MagicMock()
+    db.get_user_locale = MagicMock(return_value="ru")
+    db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[sub])
+    twitch = MagicMock()
+    twitch.get_channel_schedule = MagicMock(
+        return_value={"segments": [], "vacation": None}
+    )
+    ctx = MagicMock()
+    ctx.bot = AsyncMock()
+    ctx.bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(api_kwargs={"ephemeral_message_id": 99})
+    )
+    ctx.bot.do_api_request = AsyncMock(return_value=True)
+    ctx.application.bot_data = {"db": db, "twitch": twitch}
+
+    with patch("handlers.when_stream.reply_lang", return_value="ru"):
+        await when_stream_command(update, ctx)
+
+    ctx.bot.send_message.assert_awaited()
+    status_text = ctx.bot.send_message.await_args.args[1]
+    assert status_text == t("schedule_query_working", "ru")
+    ctx.bot.do_api_request.assert_awaited()
+    assert ctx.bot.do_api_request.await_args.args[0] == "editEphemeralMessageText"
+    result_text = ctx.bot.do_api_request.await_args.kwargs["api_kwargs"]["text"]
+    assert result_text == t("when_stream_no_schedule", "ru")
+    msg.reply_text.assert_not_awaited()
     reset_when_stream_cooldown()
 
 
@@ -597,6 +702,8 @@ def check_group_chat() -> None:
     import asyncio
 
     asyncio.run(_check_group_setup_gate())
+    asyncio.run(_check_ephemeral_helpers())
+    asyncio.run(_check_when_stream_ephemeral_path())
     asyncio.run(_check_when_stream_silent())
     asyncio.run(_check_when_stream_no_schedule())
     asyncio.run(_check_day_week_schedule())

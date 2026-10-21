@@ -19,7 +19,7 @@ All bot management (commands, reply-menu, setup callbacks, bot-admin tools) runs
 - **Telegram chat admins:** one-time `setup_private_only` («управление только в ЛС»); further attempts silent
 - Never execute the underlying command in a group/channel (even for bot `ADMIN_USER_IDS`)
 - Analytics: `group_setup_private_hint` (`chat_id`, `chat_type`, `is_chat_admin`, `is_bot_admin`)
-- **Allowed in groups/channels:** `/when`, `/day`, `/week` and free-text «Когда стрим?» / «расписание на день|неделю» (EN/UK variants)
+- **Allowed in groups/channels:** `/when`, `/day`, `/week` and free-text «Когда стрим?» / «расписание на день|неделю» (EN/UK variants). Slash commands in groups are registered with `is_ephemeral` — status + result via ephemeral messages (only the caller). Free-text stays a normal public reply.
 - **Reply language in groups/channels:** `reply_lang` / `bot_admin_lang` — locale of the first `ADMIN_USER_IDS` user with a saved language (else `DEFAULT_LOCALE`), not the command author
 - DM-only slash commands: `GROUP_DM_ONLY_COMMANDS` in `bot_helpers.py`
 
