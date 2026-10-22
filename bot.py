@@ -1086,7 +1086,8 @@ async def _maybe_offer_pending_share(
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
-    if user is None or user.is_bot:
+    # `is True`: MagicMock.is_bot must not look like a bot in self_check.
+    if user is None or getattr(user, "is_bot", False) is True:
         return ConversationHandler.END
     if await handle_alert_history_start_arg(update, context):
         return ConversationHandler.END
@@ -2637,7 +2638,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     ) -> None:
         """Record inbound private interaction for yearly inactive-user purge."""
         user = update.effective_user
-        if user is None or user.is_bot:
+        if user is None or getattr(user, "is_bot", False) is True:
             return
         chat = update.effective_chat
         if chat is None or chat.type != ChatType.PRIVATE:

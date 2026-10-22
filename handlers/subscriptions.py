@@ -900,7 +900,7 @@ async def handle_pause_sub_start_arg(
     if sub_id is None:
         return False
     user = update.effective_user
-    if user is None or user.is_bot:
+    if user is None or getattr(user, "is_bot", False) is True:
         return True
     user_id = user.id
     db: Database = context.application.bot_data["db"]

@@ -141,7 +141,7 @@ def _ctx(application, user_data=None):
 def _msg_update(user_id: int, text: str = "hi", capture: _BotCapture | None = None):
     update = MagicMock()
     update.callback_query = None
-    update.effective_user = SimpleNamespace(id=user_id)
+    update.effective_user = SimpleNamespace(id=user_id, is_bot=False)
     update.effective_chat = SimpleNamespace(id=user_id)
     msg = MagicMock()
     msg.text = text
@@ -172,7 +172,7 @@ def _cb_update(user_id: int, data: str, capture: _BotCapture | None = None):
     query.message = msg
     update = MagicMock()
     update.callback_query = query
-    update.effective_user = SimpleNamespace(id=user_id)
+    update.effective_user = SimpleNamespace(id=user_id, is_bot=False)
     update.effective_message = MagicMock()
     update.effective_message.reply_text = AsyncMock()
     update.effective_message.text = ""

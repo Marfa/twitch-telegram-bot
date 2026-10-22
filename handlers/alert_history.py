@@ -689,7 +689,7 @@ async def handle_alert_history_start_arg(
         return False
     action, history_id = parsed
     user = update.effective_user
-    if user is None or user.is_bot:
+    if user is None or getattr(user, "is_bot", False) is True:
         return True
     user_id = user.id
     db: Database = context.application.bot_data["db"]
