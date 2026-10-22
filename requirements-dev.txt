@@ -1,2 +1,2 @@
 # Dev / CI only — not installed on VPS deploy.
-ruff==0.17.0
+ruff==0.17.1
