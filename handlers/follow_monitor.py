@@ -199,7 +199,6 @@ async def open_follow_monitor_menu(
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
     if not beta_ok:
         await update.effective_message.reply_text(
@@ -267,7 +266,6 @@ async def on_follow_monitor_toggle(
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    db.upsert_user(user_id)
     beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
     if not beta_ok or not premium_ok:
         await query.answer()

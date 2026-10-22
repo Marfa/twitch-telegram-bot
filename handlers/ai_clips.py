@@ -519,7 +519,6 @@ async def start_ai_clips(
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    db.upsert_user(user_id)
     chat = reply_chat_id(update)
     beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
     if not beta_ok:

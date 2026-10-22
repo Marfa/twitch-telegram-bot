@@ -1061,7 +1061,6 @@ async def start_what_to_watch(
 ) -> int:
     user_id = update.effective_user.id
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
     context.user_data.clear()
     _set_watch_lucky_mode(context, user_id, enabled=False)
@@ -1080,7 +1079,6 @@ async def start_watch_lucky(
     """📦 Other → What to watch?: I'm-feeling-lucky only (no filter wizard)."""
     user_id = update.effective_user.id
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     lang = _user_lang(context, user_id)
     context.user_data.clear()
     _set_watch_recommended_mode(context, user_id, enabled=False)
@@ -1317,7 +1315,6 @@ async def create_category_watch_subscription(
         category_watch_prefs=prefs_json,
         is_demo=demo_mode.is_active(user_id),
     )
-    db.upsert_user(user_id)
     paused_note = ""
     if not enabled:
         paused_note = "\n\n" + t(

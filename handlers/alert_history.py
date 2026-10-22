@@ -433,7 +433,6 @@ async def show_alert_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     pages, deep = await _load_alert_history_pages(context, user_id, lang)
 
     if not pages:
@@ -690,7 +689,7 @@ async def handle_alert_history_start_arg(
         return False
     action, history_id = parsed
     user = update.effective_user
-    if user is None:
+    if user is None or user.is_bot:
         return True
     user_id = user.id
     db: Database = context.application.bot_data["db"]

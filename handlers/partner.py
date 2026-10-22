@@ -28,7 +28,6 @@ async def open_partner_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     await update.effective_message.reply_text(
         t(
             "partner_intro",

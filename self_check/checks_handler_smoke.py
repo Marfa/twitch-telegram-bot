@@ -60,7 +60,7 @@ def _cb_update(user_id: int, data: str):
     query.message = SimpleNamespace(chat_id=user_id, message_id=1)
     update = MagicMock()
     update.callback_query = query
-    update.effective_user = SimpleNamespace(id=user_id)
+    update.effective_user = SimpleNamespace(id=user_id, is_bot=False)
     update.effective_message = MagicMock()
     update.effective_message.reply_text = AsyncMock()
     update.effective_message.text = ""
@@ -73,7 +73,7 @@ def _msg_update(user_id: int, text: str = "hi"):
 
     update = MagicMock(spec=Update)
     update.callback_query = None
-    update.effective_user = SimpleNamespace(id=user_id)
+    update.effective_user = SimpleNamespace(id=user_id, is_bot=False)
     update.effective_chat = SimpleNamespace(id=user_id, type=ChatType.PRIVATE)
     msg = MagicMock()
     msg.reply_text = AsyncMock()
@@ -1005,7 +1005,7 @@ async def _smoke_premium_and_menus(db) -> None:
     pq.answer = AsyncMock()
     update = MagicMock()
     update.pre_checkout_query = pq
-    update.effective_user = SimpleNamespace(id=_FREE_UID)
+    update.effective_user = SimpleNamespace(id=_FREE_UID, is_bot=False)
     ctx = _ctx(application)
     await precheckout_premium(update, ctx)
     pq.answer.assert_awaited()
@@ -1027,7 +1027,7 @@ async def _smoke_premium_and_menus(db) -> None:
         msg.reply_text = AsyncMock()
         update = MagicMock()
         update.message = msg
-        update.effective_user = SimpleNamespace(id=uid)
+        update.effective_user = SimpleNamespace(id=uid, is_bot=False)
         ctx = _ctx(application)
         await successful_premium_payment(update, ctx)
 

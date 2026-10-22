@@ -900,7 +900,7 @@ async def handle_pause_sub_start_arg(
     if sub_id is None:
         return False
     user = update.effective_user
-    if user is None:
+    if user is None or user.is_bot:
         return True
     user_id = user.id
     db: Database = context.application.bot_data["db"]
@@ -953,7 +953,6 @@ async def on_alert_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     user_id = query.from_user.id
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
     status, channel, sub = _pause_subscription_from_alert(db, user_id, sub_id)
     if status == "not_found":
@@ -1041,7 +1040,6 @@ async def start_twitch_import(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     redirect_uri = twitch_oauth_redirect_uri()
     if not redirect_uri:
         await update.effective_message.reply_text(
@@ -2081,7 +2079,6 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     if not await prem.has_feature(context.bot, db, user_id, "twitch_sync"):
         from premium_handlers import send_premium_screen
 

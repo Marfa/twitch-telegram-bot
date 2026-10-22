@@ -1096,6 +1096,7 @@ def check_handlers() -> None:
         import time as _time
 
         until = int(_time.time()) + 3600
+        db.upsert_user(88)
         db.extend_premium_features(88, ["delay"], until_unix=until, charge_id="c1")
         assert prem.has_feature_sync(db, 88, "advanced_mode")
         assert prem.has_feature_sync(db, 88, "ignore_keywords")

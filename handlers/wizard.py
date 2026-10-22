@@ -4367,8 +4367,6 @@ async def _finish_subscription(
         context.user_data.clear()
         return ConversationHandler.END
 
-    db.upsert_user(owner_id)
-
     if (
         int(data.get("schedule_reminder_minutes", 0)) > 0
         or notify_on_drops

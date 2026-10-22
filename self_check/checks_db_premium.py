@@ -499,6 +499,7 @@ def check_db_premium() -> None:
         assert bad is not None and bad.needs_reauth is True and bad.refresh_token == ""
         assert db.delete_twitch_sync(99) is True
         # Unified OAuth fan-out + reauth pause/restore.
+        db.upsert_user(77)
         db.fan_out_twitch_oauth_token(
             77,
             twitch_user_id="tw77",
@@ -1830,6 +1831,7 @@ def check_db_premium() -> None:
 
         rdb = SqliteDatabase(Path(refund_tmp) / "refund.db")
         uid = 424242
+        rdb.upsert_user(uid)
         feat_charge = "stx" + ("A" * 40)
         until = int(datetime.now(timezone.utc).timestamp()) + 86400 * 30
         apply_features_payment(
@@ -1956,6 +1958,48 @@ def check_db_premium() -> None:
         assert pdb.is_bot_blocked(stay) is True
         assert pdb.user_exists(fresh) is True
 
+    with tempfile.TemporaryDirectory() as inactive_tmp:
+        idb = SqliteDatabase(Path(inactive_tmp) / "purge_inactive.db")
+        ghost = 88001
+        active = 88002
+        paid = 88003
+        # Setters / block must not create users without /start (upsert_user).
+        idb.set_bot_blocked(ghost, True)
+        idb.set_user_locale(ghost, "ru")
+        assert idb.user_exists(ghost) is False
+        idb.upsert_user(ghost)
+        idb.upsert_user(active)
+        idb.upsert_user(paid)
+        idb.set_premium_permanent(paid, True)
+        now = int(datetime.now(timezone.utc).timestamp())
+        with idb._conn() as conn:
+            conn.execute(
+                "UPDATE users SET last_interaction_at = ? WHERE user_id = ?",
+                (now - 400 * 86400, ghost),
+            )
+            conn.execute(
+                "UPDATE users SET last_interaction_at = ? WHERE user_id = ?",
+                (now - 10 * 86400, active),
+            )
+            conn.execute(
+                "UPDATE users SET last_interaction_at = ? WHERE user_id = ?",
+                (now - 400 * 86400, paid),
+            )
+        idb.touch_user_interaction(active, at_unix=now)
+        with idb._conn() as conn:
+            row = conn.execute(
+                "SELECT last_interaction_at FROM users WHERE user_id = ?",
+                (active,),
+            ).fetchone()
+        assert int(row["last_interaction_at"]) >= now - 5
+        removed = idb.purge_inactive_users(
+            now_unix=now, retention_days=365, keep_user_ids=frozenset()
+        )
+        assert removed == 1
+        assert idb.user_exists(ghost) is False
+        assert idb.user_exists(active) is True
+        assert idb.user_exists(paid) is True
+
     with tempfile.TemporaryDirectory() as log_tmp:
         ldb = SqliteDatabase(Path(log_tmp) / "purge_logs.db")
         ldb.upsert_user(99001)
@@ -2079,6 +2123,7 @@ def check_db_premium() -> None:
 
     with tempfile.TemporaryDirectory() as attr_tmp:
         attr_db = SqliteDatabase(Path(attr_tmp) / "attr.db")
+        attr_db.upsert_user(77)
         attr_app = SimpleNamespace(bot_data={"db": attr_db})
         attr_ctx = SimpleNamespace(application=attr_app)
         remember_premium_attribution(

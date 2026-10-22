@@ -887,6 +887,7 @@ def apply_stars_payment(
     stars_paid: int | None = None,
     credit_referral: bool = True,
 ) -> None:
+    db.upsert_user(user_id)
     db.set_premium_stars(
         user_id,
         charge_id=charge_id,
@@ -910,6 +911,7 @@ def apply_lifetime_payment(
     stars_paid: int | None = None,
     credit_referral: bool = True,
 ) -> None:
+    db.upsert_user(user_id)
     db.set_premium_permanent(user_id, True)
     if credit_referral:
         credit_referral_commission(
@@ -937,6 +939,7 @@ def apply_features_payment(
     ids = [fid for fid in feature_ids if fid in allowed]
     if not ids:
         return
+    db.upsert_user(user_id)
     db.extend_premium_features(
         user_id,
         ids,

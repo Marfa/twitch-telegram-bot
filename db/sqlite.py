@@ -431,6 +431,23 @@ class SqliteDatabase:
             ON users(bot_blocked_at)
             """
         )
+        user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "last_interaction_at" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN last_interaction_at INTEGER")
+            conn.execute(
+                """
+                UPDATE users
+                SET last_interaction_at = CAST(strftime('%s', first_seen) AS INTEGER)
+                WHERE last_interaction_at IS NULL
+                  AND first_seen IS NOT NULL
+                """
+            )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_users_last_interaction_at
+            ON users(last_interaction_at)
+            """
+        )
         if "saved_schedule_hour" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN saved_schedule_hour INTEGER")
         if "saved_schedule_minute" not in user_cols:
@@ -2142,9 +2159,8 @@ owner_id, twitch_username, twitch_user_id,
     def set_user_locale(self, user_id: int, locale: str) -> None:
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, locale) VALUES (?, ?) "
-                "ON CONFLICT(user_id) DO UPDATE SET locale = excluded.locale",
-                (user_id, locale),
+                "UPDATE users SET locale = ? WHERE user_id = ?",
+                (locale, user_id),
             )
 
     def get_user_start_arg(self, user_id: int) -> str:
@@ -2159,9 +2175,8 @@ owner_id, twitch_username, twitch_user_id,
     def set_user_start_arg(self, user_id: int, start_arg: str) -> None:
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO users (user_id, start_arg) VALUES (?, ?) "
-                "ON CONFLICT(user_id) DO UPDATE SET start_arg = excluded.start_arg",
-                (user_id, start_arg),
+                "UPDATE users SET start_arg = ? WHERE user_id = ?",
+                (start_arg, user_id),
             )
 
     def get_unique_twitch_user_ids(self) -> list[str]:
@@ -2311,16 +2326,48 @@ owner_id, twitch_username, twitch_user_id,
         return [int(r["owner_id"]) for r in rows]
 
     def upsert_user(self, user_id: int) -> None:
+        """Create or refresh a users row.
+
+        Intended callers: /start (and its deep links), successful Stars/OAuth
+        apply paths, and tests/scripts. Pref setters must not insert.
+        """
+        now = int(datetime.now(timezone.utc).timestamp())
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
-                VALUES (?, 0, NULL)
+                INSERT INTO users (
+                    user_id, bot_blocked, bot_blocked_at, last_interaction_at
+                )
+                VALUES (?, 0, NULL, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     bot_blocked = 0,
-                    bot_blocked_at = NULL
+                    bot_blocked_at = NULL,
+                    last_interaction_at = excluded.last_interaction_at
                 """,
-                (user_id,),
+                (user_id, now),
+            )
+
+    def touch_user_interaction(
+        self, user_id: int, *, at_unix: int | None = None
+    ) -> None:
+        """Bump last_interaction_at for an existing user (no insert). Throttled to 1/day."""
+        now = int(
+            at_unix
+            if at_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET last_interaction_at = ?
+                WHERE user_id = ?
+                  AND (
+                    last_interaction_at IS NULL
+                    OR last_interaction_at < ?
+                  )
+                """,
+                (now, user_id, now - 86400),
             )
 
     def get_user_first_seen(self, user_id: int) -> datetime | None:
@@ -2543,12 +2590,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_refund_surcharge)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_refund_surcharge = excluded.premium_refund_surcharge
+                UPDATE users SET
+                    premium_refund_surcharge = ?
+                WHERE user_id = ?
                 """,
-                (int(user_id), blob),
+                (blob, int(user_id)),
             )
 
     _PREMIUM_PAY_ATTR_TTL_SEC = 24 * 3600
@@ -2564,21 +2610,13 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (
-                    user_id, premium_attr_source, premium_attr_feature, premium_attr_at
-                )
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_attr_source = excluded.premium_attr_source,
-                    premium_attr_feature = excluded.premium_attr_feature,
-                    premium_attr_at = excluded.premium_attr_at
+                UPDATE users SET
+                    premium_attr_source = ?,
+                    premium_attr_feature = ?,
+                    premium_attr_at = ?
+                WHERE user_id = ?
                 """,
-                (
-                    int(user_id),
-                    src,
-                    str(feature or "").strip(),
-                    int(time.time()),
-                ),
+                (src, str(feature or "").strip(), int(time.time()), int(user_id)),
             )
 
     def get_premium_pay_attribution(self, user_id: int) -> dict[str, str] | None:
@@ -2699,10 +2737,6 @@ owner_id, twitch_username, twitch_user_id,
         if user_id == referrer_id or referrer_id <= 0:
             return False
         with self._conn() as conn:
-            conn.execute(
-                "INSERT INTO users (user_id) VALUES (?) ON CONFLICT(user_id) DO NOTHING",
-                (user_id,),
-            )
             cur = conn.execute(
                 """
                 UPDATE users
@@ -3093,27 +3127,25 @@ owner_id, twitch_username, twitch_user_id,
             if blocked:
                 conn.execute(
                     """
-                    INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
-                    VALUES (?, 1, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET
+                    UPDATE users SET
                         bot_blocked = 1,
                         bot_blocked_at = CASE
-                            WHEN COALESCE(users.bot_blocked, 0) = 1
-                             AND users.bot_blocked_at IS NOT NULL
-                            THEN users.bot_blocked_at
-                            ELSE excluded.bot_blocked_at
+                            WHEN COALESCE(bot_blocked, 0) = 1
+                             AND bot_blocked_at IS NOT NULL
+                            THEN bot_blocked_at
+                            ELSE ?
                         END
+                    WHERE user_id = ?
                     """,
-                    (user_id, now),
+                    (now, user_id),
                 )
             else:
                 conn.execute(
                     """
-                    INSERT INTO users (user_id, bot_blocked, bot_blocked_at)
-                    VALUES (?, 0, NULL)
-                    ON CONFLICT(user_id) DO UPDATE SET
+                    UPDATE users SET
                         bot_blocked = 0,
                         bot_blocked_at = NULL
+                    WHERE user_id = ?
                     """,
                     (user_id,),
                 )
@@ -3260,6 +3292,58 @@ owner_id, twitch_username, twitch_user_id,
                 removed += 1
         return removed
 
+    def purge_inactive_users(
+        self,
+        *,
+        now_unix: int | None = None,
+        retention_days: int | None = None,
+        keep_user_ids: frozenset[int] | set[int] | None = None,
+    ) -> int:
+        """Delete users with no inbound interaction for retention_days (blocked or not).
+
+        Keeps bot admins and users with active paid Premium (permanent / Stars / trial).
+        """
+        from config import ADMIN_USER_IDS, INACTIVE_USER_RETENTION_DAYS
+
+        now = int(
+            now_unix
+            if now_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        days = int(
+            INACTIVE_USER_RETENTION_DAYS
+            if retention_days is None
+            else retention_days
+        )
+        cutoff = now - max(0, days) * 86400
+        keep = set(ADMIN_USER_IDS)
+        if keep_user_ids:
+            keep.update(int(x) for x in keep_user_ids)
+        with self._conn() as conn:
+            ids = [
+                int(r["user_id"])
+                for r in conn.execute(
+                    """
+                    SELECT user_id FROM users
+                    WHERE COALESCE(
+                            last_interaction_at,
+                            CAST(strftime('%s', first_seen) AS INTEGER),
+                            0
+                          ) <= ?
+                      AND COALESCE(premium_permanent, 0) = 0
+                      AND COALESCE(premium_stars_until, 0) <= ?
+                      AND COALESCE(premium_trial_until, 0) <= ?
+                    """,
+                    (cutoff, now, now),
+                ).fetchall()
+                if int(r["user_id"]) not in keep
+            ]
+        removed = 0
+        for uid in ids:
+            if self.delete_user_data(uid):
+                removed += 1
+        return removed
+
     def set_chat_unreachable(self, chat_id: int, unreachable: bool) -> None:
         with self._conn() as conn:
             if unreachable:
@@ -3391,10 +3475,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, receive_bot_updates) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET receive_bot_updates = excluded.receive_bot_updates
+                UPDATE users SET
+                    receive_bot_updates = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(enabled)),
+                (int(enabled), user_id),
             )
 
     def get_receive_availability_updates(self, user_id: int) -> bool:
@@ -3411,11 +3496,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, receive_availability_updates) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    receive_availability_updates = excluded.receive_availability_updates
+                UPDATE users SET
+                    receive_availability_updates = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(enabled)),
+                (int(enabled), user_id),
             )
 
     def get_receive_other_updates(self, user_id: int) -> bool:
@@ -3432,11 +3517,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, receive_other_updates) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    receive_other_updates = excluded.receive_other_updates
+                UPDATE users SET
+                    receive_other_updates = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(enabled)),
+                (int(enabled), user_id),
             )
 
     def get_receive_sync_updates(self, user_id: int) -> bool:
@@ -3453,11 +3538,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, receive_sync_updates) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    receive_sync_updates = excluded.receive_sync_updates
+                UPDATE users SET
+                    receive_sync_updates = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(enabled)),
+                (int(enabled), user_id),
             )
 
     def get_receive_beta_updates(self, user_id: int) -> bool:
@@ -3474,11 +3559,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, receive_beta_updates) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    receive_beta_updates = excluded.receive_beta_updates
+                UPDATE users SET
+                    receive_beta_updates = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(enabled)),
+                (int(enabled), user_id),
             )
 
     def get_beta_update_recipients(self) -> list[int]:
@@ -3512,20 +3597,16 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, notifications_paused_until) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    notifications_paused_until = excluded.notifications_paused_until
+                UPDATE users SET
+                    notifications_paused_until = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(until_ts)),
+                (int(until_ts), user_id),
             )
 
     def mark_template_typo_notice_sent(self, user_id: int) -> bool:
         """Return True when this call newly marks the owner (first notice)."""
         with self._conn() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
-                (user_id,),
-            )
             cur = conn.execute(
                 """
                 UPDATE users
@@ -3551,11 +3632,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, global_ignore_keywords) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    global_ignore_keywords = excluded.global_ignore_keywords
+                UPDATE users SET
+                    global_ignore_keywords = ?
+                WHERE user_id = ?
                 """,
-                (user_id, str(keywords or "")),
+                (str(keywords or ""), user_id),
             )
 
     def get_stream_alert_defaults(self, user_id: int) -> dict:
@@ -3577,11 +3658,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, stream_alert_defaults) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    stream_alert_defaults = excluded.stream_alert_defaults
+                UPDATE users SET
+                    stream_alert_defaults = ?
+                WHERE user_id = ?
                 """,
-                (user_id, raw),
+                (raw, user_id),
             )
 
     def resync_bound_stream_alert_defaults(self, user_id: int) -> int:
@@ -3637,11 +3718,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, global_ignore_igdb) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    global_ignore_igdb = excluded.global_ignore_igdb
+                UPDATE users SET
+                    global_ignore_igdb = ?
+                WHERE user_id = ?
                 """,
-                (user_id, payload),
+                (payload, user_id),
             )
 
     def get_advanced_mode_setting(self, user_id: int) -> bool | None:
@@ -3658,11 +3739,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, advanced_mode) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    advanced_mode = excluded.advanced_mode
+                UPDATE users SET
+                    advanced_mode = ?
+                WHERE user_id = ?
                 """,
-                (user_id, 1 if enabled else 0),
+                (1 if enabled else 0, user_id),
             )
 
     def is_message_draft_enabled(self, user_id: int) -> bool:
@@ -3680,11 +3761,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, message_draft) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    message_draft = excluded.message_draft
+                UPDATE users SET
+                    message_draft = ?
+                WHERE user_id = ?
                 """,
-                (user_id, 1 if enabled else 0),
+                (1 if enabled else 0, user_id),
             )
 
     def owner_has_advanced_subscription_options(self, owner_id: int) -> bool:
@@ -3721,13 +3802,12 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, saved_schedule_hour, saved_schedule_minute)
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    saved_schedule_hour = excluded.saved_schedule_hour,
-                    saved_schedule_minute = excluded.saved_schedule_minute
+                UPDATE users SET
+                    saved_schedule_hour = ?,
+                    saved_schedule_minute = ?
+                WHERE user_id = ?
                 """,
-                (user_id, hour, minute),
+                (hour, minute, user_id),
             )
 
     def get_schedule_utc_offset_minutes(self, user_id: int) -> int | None:
@@ -3744,24 +3824,22 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, schedule_utc_offset_minutes)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    schedule_utc_offset_minutes = excluded.schedule_utc_offset_minutes
+                UPDATE users SET
+                    schedule_utc_offset_minutes = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(offset_minutes)),
+                (int(offset_minutes), user_id),
             )
 
     def set_vacation_auto_exit_at(self, user_id: int, exit_at: str | None) -> None:
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, vacation_auto_exit_at)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    vacation_auto_exit_at = excluded.vacation_auto_exit_at
+                UPDATE users SET
+                    vacation_auto_exit_at = ?
+                WHERE user_id = ?
                 """,
-                (user_id, exit_at),
+                (exit_at, user_id),
             )
 
     def get_vacation_auto_exit_at(self, user_id: int) -> str | None:
@@ -3779,12 +3857,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, vacation_ends_at)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    vacation_ends_at = excluded.vacation_ends_at
+                UPDATE users SET
+                    vacation_ends_at = ?
+                WHERE user_id = ?
                 """,
-                (user_id, ends_at),
+                (ends_at, user_id),
             )
 
     def get_vacation_ends_at(self, user_id: int) -> str | None:
@@ -3802,12 +3879,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, schedule_twitch_user_id)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    schedule_twitch_user_id = excluded.schedule_twitch_user_id
+                UPDATE users SET
+                    schedule_twitch_user_id = ?
+                WHERE user_id = ?
                 """,
-                (user_id, (twitch_user_id or "").strip()),
+                ((twitch_user_id or "").strip(), user_id),
             )
 
     def get_schedule_twitch_user_id(self, user_id: int) -> str:
@@ -3959,11 +4035,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, watch_prefs)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET watch_prefs = excluded.watch_prefs
+                UPDATE users SET
+                    watch_prefs = ?
+                WHERE user_id = ?
                 """,
-                (user_id, dump_watch_filters(filters)),
+                (dump_watch_filters(filters), user_id),
             )
 
     def add_watch_filter(
@@ -4078,57 +4154,47 @@ owner_id, twitch_username, twitch_user_id,
             if touch_paid_at:
                 conn.execute(
                     """
-                    INSERT INTO users (
-                        user_id, premium_stars_charge_id, premium_stars_until,
-                        premium_stars_canceled, premium_stars_paid_at
-                    )
-                    VALUES (?, ?, ?, ?, datetime('now'))
-                    ON CONFLICT(user_id) DO UPDATE SET
-                        premium_stars_charge_id = excluded.premium_stars_charge_id,
-                        premium_stars_until = excluded.premium_stars_until,
-                        premium_stars_canceled = excluded.premium_stars_canceled,
+                    UPDATE users SET
+                        premium_stars_charge_id = ?,
+                        premium_stars_until = ?,
+                        premium_stars_canceled = ?,
                         premium_stars_paid_at = datetime('now')
+                    WHERE user_id = ?
                     """,
-                    (user_id, charge_id, int(until_unix), int(bool(canceled))),
+                    (charge_id, int(until_unix), int(bool(canceled)), user_id),
                 )
             else:
                 conn.execute(
                     """
-                    INSERT INTO users (
-                        user_id, premium_stars_charge_id, premium_stars_until,
-                        premium_stars_canceled
-                    )
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET
-                        premium_stars_charge_id = excluded.premium_stars_charge_id,
-                        premium_stars_until = excluded.premium_stars_until,
-                        premium_stars_canceled = excluded.premium_stars_canceled
+                    UPDATE users SET
+                        premium_stars_charge_id = ?,
+                        premium_stars_until = ?,
+                        premium_stars_canceled = ?
+                    WHERE user_id = ?
                     """,
-                    (user_id, charge_id, int(until_unix), int(bool(canceled))),
+                    (charge_id, int(until_unix), int(bool(canceled)), user_id),
                 )
 
     def set_premium_stars_canceled(self, user_id: int, canceled: bool) -> None:
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_stars_canceled)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_stars_canceled = excluded.premium_stars_canceled
+                UPDATE users SET
+                    premium_stars_canceled = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(bool(canceled))),
+                (int(bool(canceled)), user_id),
             )
 
     def set_premium_permanent(self, user_id: int, permanent: bool) -> None:
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_permanent)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_permanent = excluded.premium_permanent
+                UPDATE users SET
+                    premium_permanent = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(bool(permanent))),
+                (int(bool(permanent)), user_id),
             )
 
     def clear_premium(self, user_id: int) -> None:
@@ -4157,13 +4223,12 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_trial_until, premium_trial_used)
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_trial_until = excluded.premium_trial_until,
-                    premium_trial_used = excluded.premium_trial_used
+                UPDATE users SET
+                    premium_trial_until = ?,
+                    premium_trial_used = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(until_unix), int(bool(used))),
+                (int(until_unix), int(bool(used)), user_id),
             )
 
     def expire_premium_trial(self, user_id: int) -> int:
@@ -4209,13 +4274,12 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_features, premium_stars_paid_at)
-                VALUES (?, ?, datetime('now'))
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_features = excluded.premium_features,
+                UPDATE users SET
+                    premium_features = ?,
                     premium_stars_paid_at = datetime('now')
+                WHERE user_id = ?
                 """,
-                (user_id, raw),
+                (raw, user_id),
             )
 
     def clear_premium_feature(self, user_id: int, feature_id: str) -> None:
@@ -4232,12 +4296,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_features)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_features = excluded.premium_features
+                UPDATE users SET
+                    premium_features = ?
+                WHERE user_id = ?
                 """,
-                (user_id, raw),
+                (raw, user_id),
             )
 
     def set_premium_feature_canceled(self, user_id: int, feature_id: str) -> None:
@@ -4254,12 +4317,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_features)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_features = excluded.premium_features
+                UPDATE users SET
+                    premium_features = ?
+                WHERE user_id = ?
                 """,
-                (user_id, raw),
+                (raw, user_id),
             )
 
     def set_premium_twitch(
@@ -4287,18 +4349,14 @@ owner_id, twitch_username, twitch_user_id,
             ref = enc if enc is not None else ((row["premium_twitch_refresh"] if row else "") or "")
             conn.execute(
                 """
-                INSERT INTO users (
-                    user_id, premium_twitch_active, premium_twitch_user_id,
-                    premium_twitch_refresh, premium_twitch_checked_at
-                )
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_twitch_active = excluded.premium_twitch_active,
-                    premium_twitch_user_id = excluded.premium_twitch_user_id,
-                    premium_twitch_refresh = excluded.premium_twitch_refresh,
-                    premium_twitch_checked_at = excluded.premium_twitch_checked_at
+                UPDATE users SET
+                    premium_twitch_active = ?,
+                    premium_twitch_user_id = ?,
+                    premium_twitch_refresh = ?,
+                    premium_twitch_checked_at = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(bool(active)), uid, ref, checked),
+                (int(bool(active)), uid, ref, checked, user_id),
             )
 
     def set_premium_twitch_refresh(self, user_id: int, refresh_token: str) -> None:
@@ -4308,12 +4366,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_twitch_refresh)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_twitch_refresh = excluded.premium_twitch_refresh
+                UPDATE users SET
+                    premium_twitch_refresh = ?
+                WHERE user_id = ?
                 """,
-                (user_id, enc),
+                (enc, user_id),
             )
 
     def get_premium_twitch_refresh(self, user_id: int) -> str | None:
@@ -4337,12 +4394,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_twitch_needs_reauth)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_twitch_needs_reauth = excluded.premium_twitch_needs_reauth
+                UPDATE users SET
+                    premium_twitch_needs_reauth = ?
+                WHERE user_id = ?
                 """,
-                (user_id, int(bool(needs))),
+                (int(bool(needs)), user_id),
             )
 
     def get_premium_twitch_needs_reauth(self, user_id: int) -> bool:
@@ -5302,6 +5358,7 @@ owner_id, twitch_username, twitch_user_id,
     ) -> None:
         from token_crypto import encrypt_secret
 
+        self.upsert_user(owner_id)
         enc = encrypt_secret(refresh_token) if refresh_token else ""
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as conn:
@@ -5359,13 +5416,12 @@ owner_id, twitch_username, twitch_user_id,
             )
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_twitch_refresh, premium_twitch_needs_reauth)
-                VALUES (?, ?, 0)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    premium_twitch_refresh = excluded.premium_twitch_refresh,
+                UPDATE users SET
+                    premium_twitch_refresh = ?,
                     premium_twitch_needs_reauth = 0
+                WHERE user_id = ?
                 """,
-                (owner_id, enc),
+                (enc, owner_id),
             )
             # Keep twitch_user_id on premium row if empty.
             conn.execute(
@@ -5453,9 +5509,8 @@ owner_id, twitch_username, twitch_user_id,
             )
             conn.execute(
                 """
-                INSERT INTO users (user_id, premium_twitch_needs_reauth)
-                VALUES (?, 1)
-                ON CONFLICT(user_id) DO UPDATE SET premium_twitch_needs_reauth = 1
+                UPDATE users SET premium_twitch_needs_reauth = 1
+                WHERE user_id = ?
                 """,
                 (owner_id,),
             )
@@ -5566,12 +5621,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, twitch_reauth_notified_at)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    twitch_reauth_notified_at = excluded.twitch_reauth_notified_at
+                UPDATE users SET
+                    twitch_reauth_notified_at = ?
+                WHERE user_id = ?
                 """,
-                (owner_id, notified_at),
+                (notified_at, owner_id),
             )
 
     def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]:
@@ -7101,11 +7155,11 @@ owner_id, twitch_username, twitch_user_id,
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, hide_streamer_telegram_all) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    hide_streamer_telegram_all = excluded.hide_streamer_telegram_all
+                UPDATE users SET
+                    hide_streamer_telegram_all = ?
+                WHERE user_id = ?
                 """,
-                (int(user_id), 1 if hidden else 0),
+                (1 if hidden else 0, int(user_id)),
             )
 
     def is_streamer_telegram_hidden_for(

@@ -35,6 +35,7 @@ from telegram.ext import (
     ConversationHandler,
     MessageHandler,
     PreCheckoutQueryHandler,
+    TypeHandler,
     filters,
 )
 
@@ -609,6 +610,7 @@ from handlers.delivery import (
     delete_bot_pin_service_message,
     on_stored_template_typo_fix,
     purge_expired_blocked_users,
+    purge_inactive_users,
     purge_stale_log_tables,
     purge_stale_previous_messages,
 )
@@ -1083,13 +1085,16 @@ async def _maybe_offer_pending_share(
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    if user is None or user.is_bot:
+        return ConversationHandler.END
     if await handle_alert_history_start_arg(update, context):
         return ConversationHandler.END
     if await handle_pause_sub_start_arg(update, context):
         return ConversationHandler.END
     context.user_data.clear()
     db: Database = context.application.bot_data["db"]
-    user_id = update.effective_user.id
+    user_id = user.id
     is_first_start = not db.user_exists(user_id)
     db.upsert_user(user_id)
     lucky_nth: int | None = None
@@ -2186,7 +2191,9 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    db.upsert_user(user_id)
+    if not db.user_exists(user_id):
+        await update.effective_message.reply_text(t("please_start", DEFAULT_LOCALE))
+        return
     lang = _user_lang(context, user_id)
     analytics.capture(user_id, "feedback_opened")
     # Reply menu is the escape hatch; guide is a separate inline URL row.
@@ -2207,7 +2214,9 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
-    db.upsert_user(user_id)
+    if not db.user_exists(user_id):
+        await update.effective_message.reply_text(t("please_start", DEFAULT_LOCALE))
+        return ConversationHandler.END
     lang = db.get_user_locale(user_id)
     if not lang:
         context.user_data["after_lang"] = "help"
@@ -2622,6 +2631,23 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["twitch_status_fingerprint"] = None
     app.bot_data["sending_broadcasts"] = set()
     app.add_error_handler(error_handler)
+
+    async def track_private_user_interaction(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Record inbound private interaction for yearly inactive-user purge."""
+        user = update.effective_user
+        if user is None or user.is_bot:
+            return
+        chat = update.effective_chat
+        if chat is None or chat.type != ChatType.PRIVATE:
+            return
+        db_local: Database = context.application.bot_data["db"]
+        if not db_local.user_exists(user.id):
+            return
+        db_local.touch_user_interaction(user.id)
+
+    app.add_handler(TypeHandler(Update, track_private_user_interaction), group=-3)
 
     async def reject_group_bot_setup(
         update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -4345,6 +4371,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         name="purge_expired_blocked_users",
         job_kwargs=_stream_job_kwargs(
             "purge_expired_blocked_users", misfire_grace=24 * 3600
+        ),
+    )
+    app.job_queue.run_repeating(
+        purge_inactive_users,
+        interval=24 * 3600,
+        first=420,
+        name="purge_inactive_users",
+        job_kwargs=_stream_job_kwargs(
+            "purge_inactive_users", misfire_grace=24 * 3600
         ),
     )
     app.job_queue.run_repeating(

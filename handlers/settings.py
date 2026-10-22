@@ -275,7 +275,6 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     await update.effective_message.reply_text(
         t("menu_settings", lang),
         reply_markup=_settings_kb(lang, db, user_id),
@@ -290,7 +289,6 @@ async def open_auth_tokens_menu(
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     await update.effective_message.reply_text(
         t("auth_tokens_menu", lang),
         reply_markup=auth_tokens_menu(lang),
@@ -307,7 +305,6 @@ async def on_auth_tokens_revoke_twitch(
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     revoke_twitch_oauth_tokens(db, user_id)
     sync_optional_jobs(context.application.job_queue, db)
     await update.effective_message.reply_text(
@@ -325,7 +322,6 @@ async def on_auth_tokens_revoke_donationalerts(
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     revoke_donationalerts_oauth_tokens(db, user_id)
     await update.effective_message.reply_text(
         t("auth_tokens_revoked_donationalerts", lang),
@@ -345,7 +341,6 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     from chat_webapp import BETA_FEATURE_ID, chat_webapp_url, stream_chat_open_markup
 
     if not beta_features.is_enabled(db, user_id, BETA_FEATURE_ID):
@@ -390,7 +385,6 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     await update.effective_message.reply_text(
         t("sys_notifications_menu", lang),
         reply_markup=sys_notifications_keyboard(
@@ -433,7 +427,6 @@ async def open_beta_mode_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     analytics.capture(user_id, "beta_menu_opened")
     features_block, kb_rows = _beta_mode_features_block(db, user_id, lang)
     text = t("beta_mode_menu", lang, features_block=features_block)
@@ -450,7 +443,6 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     data = query.data or ""
     prefix = "beta:toggle:"
     if not data.startswith(prefix):
@@ -539,7 +531,6 @@ async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     if not await prem.has_feature(context.bot, db, user_id, "ignore_keywords"):
         from premium_handlers import send_premium_screen
 
@@ -930,7 +921,6 @@ async def open_whisper_alerts_menu(
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     row = db.get_whisper_alert(user_id)
     enabled = bool(row and row.enabled)
     await update.effective_message.reply_text(
@@ -949,7 +939,6 @@ async def on_whisper_alerts_toggle(
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    db.upsert_user(user_id)
     row = db.get_whisper_alert(user_id)
     currently_on = bool(row and row.enabled)
     if currently_on:
@@ -1337,7 +1326,6 @@ async def on_sys_updates_toggle(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     db.set_receive_bot_updates(user_id, not db.get_receive_bot_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
@@ -1347,7 +1335,6 @@ async def on_sys_availability_toggle(update: Update, context: ContextTypes.DEFAU
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     db.set_receive_availability_updates(
         user_id, not db.get_receive_availability_updates(user_id)
     )
@@ -1359,7 +1346,6 @@ async def on_sys_other_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     db.set_receive_other_updates(user_id, not db.get_receive_other_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
@@ -1369,7 +1355,6 @@ async def on_sys_sync_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     db.set_receive_sync_updates(user_id, not db.get_receive_sync_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
@@ -1380,7 +1365,6 @@ async def on_sys_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     db.set_receive_beta_updates(user_id, not db.get_receive_beta_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 

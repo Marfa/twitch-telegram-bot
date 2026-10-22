@@ -185,6 +185,10 @@ class Database(Protocol):
 
     def upsert_user(self, user_id: int) -> None: ...
 
+    def touch_user_interaction(
+        self, user_id: int, *, at_unix: int | None = None
+    ) -> None: ...
+
     def get_user_first_seen(self, user_id: int) -> datetime | None: ...
 
     def user_exists(self, user_id: int) -> bool: ...
@@ -338,6 +342,14 @@ class Database(Protocol):
 
     def purge_expired_blocked_users(
         self, *, now_unix: int | None = None, retention_days: int | None = None
+    ) -> int: ...
+
+    def purge_inactive_users(
+        self,
+        *,
+        now_unix: int | None = None,
+        retention_days: int | None = None,
+        keep_user_ids: frozenset[int] | set[int] | None = None,
     ) -> int: ...
 
     def set_chat_unreachable(self, chat_id: int, unreachable: bool) -> None: ...

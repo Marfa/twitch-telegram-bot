@@ -1687,6 +1687,13 @@ async def purge_expired_blocked_users(context) -> None:
         logger.info("Purged %s user(s) blocked for 365+ days", removed)
 
 
+async def purge_inactive_users(context) -> None:
+    db: Database = context.application.bot_data["db"]
+    removed = db.purge_inactive_users()
+    if removed:
+        logger.info("Purged %s inactive user(s) (no interaction for 365+ days)", removed)
+
+
 async def purge_stale_log_tables(context) -> None:
     db: Database = context.application.bot_data["db"]
     removed = db.purge_stale_log_tables()

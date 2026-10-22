@@ -114,6 +114,8 @@ def parse_admin_user_ids(raw: str | None = None) -> frozenset[int]:
 ADMIN_USER_IDS = parse_admin_user_ids()
 # Delete all rows for a user this many days after they block the bot (clock resets on re-block).
 BLOCKED_USER_RETENTION_DAYS = int(os.getenv("BLOCKED_USER_RETENTION_DAYS", "365"))
+# Delete users with no inbound interaction for this many days (blocked or not).
+INACTIVE_USER_RETENTION_DAYS = int(os.getenv("INACTIVE_USER_RETENTION_DAYS", "365"))
 # Periodic purge for append-only / log-like tables (see Database.purge_stale_log_tables).
 FOLLOW_MONITOR_EVENTS_RETENTION_DAYS = int(
     os.getenv("FOLLOW_MONITOR_EVENTS_RETENTION_DAYS", "90")

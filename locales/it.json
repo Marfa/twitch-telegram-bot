@@ -1347,5 +1347,6 @@
   "advanced_options_hint_overlap": "• Blocco sovrapposizione — in canali/gruppi: non inviare un nuovo avviso finché il precedente per questo streamer non è eliminato; opzionalmente salta le ripetizioni se il tuo messaggio è ancora l’ultimo",
   "edit_overlap": "🚫 Blocco sovrapposizione",
   "sub_list_overlap_block": "• Blocco sovrapposizione: sì",
-  "sub_list_overlap_block_repeats": "• Blocca ripetizioni se ultimo: sì"
+  "sub_list_overlap_block_repeats": "• Blocca ripetizioni se ultimo: sì",
+  "please_start": "Premi prima /start per iniziare a usare il bot."
 }

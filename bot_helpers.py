@@ -226,7 +226,6 @@ async def handle_group_setup_rejection(
         await clear_group_reply_keyboard(context.bot, chat_id)
         return True
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     lang = bot_admin_lang(db)
     import analytics
 

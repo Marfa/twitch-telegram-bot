@@ -107,7 +107,6 @@ async def open_stream_defaults_editor(
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    db.upsert_user(user_id)
     context.user_data.clear()
     context.user_data["editing_defaults"] = True
     ensure_defaults_draft(context.user_data, db, user_id)
