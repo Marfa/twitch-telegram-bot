@@ -452,6 +452,36 @@ async def _smoke_schedule(db) -> None:
     db.set_vacation_auto_exit_at(_FREE_UID, None)
     assert db.has_any_vacation_auto_exit() is False
 
+    # After bot restart: conversation gone, slots/vacation inline still on screen.
+    from bot import orphan_stream_schedule_callback
+
+    application, bot = _app(db)
+    application.bot_data["main_conv"] = None
+    update, query = _cb_update(_FREE_UID, "stream_sched:cancel")
+    ctx = _ctx(application, {"stream_schedule_dates": [date.today()]})
+    await orphan_stream_schedule_callback(update, ctx)
+    query.answer.assert_awaited()
+    bot.send_message.assert_awaited()
+    assert ctx.user_data == {}
+
+    application, bot = _app(db)
+    key = (_FREE_UID, _FREE_UID)
+    conv = MagicMock()
+    conv._get_key = MagicMock(return_value=key)
+    conv._conversations = {key: st["STREAM_SCHEDULE_GAME"]}
+    application.bot_data["main_conv"] = conv
+    update, query = _cb_update(_FREE_UID, "stream_sched:skip")
+    ctx = _ctx(application, {"stream_schedule_index": 0})
+    await orphan_stream_schedule_callback(update, ctx)
+    query.answer.assert_not_awaited()
+    assert ctx.user_data.get("stream_schedule_index") == 0
+
+    import bot as _bot_mod
+
+    _build_src = inspect.getsource(_bot_mod.build_application)
+    assert "orphan_stream_schedule_callback" in _build_src
+    assert r"^(stream_sched:|vac:)" in _build_src
+
 
 async def _smoke_settings_oauth(db) -> None:
     from handlers.settings import (

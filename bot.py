@@ -2184,6 +2184,21 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+async def orphan_stream_schedule_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """After restart, schedule wizard inline buttons remain while conversation is gone."""
+    conv = context.application.bot_data.get("main_conv")
+    if conv is not None:
+        try:
+            key = conv._get_key(update)
+        except Exception:
+            key = None
+        if key is not None and key in conv._conversations:
+            return
+    await cancel(update, context)
+
+
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import show_help_button
     from i18n import btn, guide_keyboard
@@ -4221,6 +4236,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(MessageHandler(_btn_filter("wizard_cancel"), orphan_wizard_nav), group=0)
     app.add_handler(MessageHandler(_btn_filter("wizard_back"), orphan_wizard_nav), group=0)
+    # After deploy/restart: schedule wizard inline (slots / vacation) with no conversation.
+    app.add_handler(
+        CallbackQueryHandler(
+            orphan_stream_schedule_callback,
+            pattern=r"^(stream_sched:|vac:)",
+        ),
+        group=0,
+    )
     # Gift customize wizard (outside ConversationHandler).
     app.add_handler(
         MessageHandler(
