@@ -1103,6 +1103,7 @@ async def _smoke_delivery_and_helpers(db) -> None:
     from telegram.error import BadRequest, Forbidden
 
     assert _is_user_blocked_error(Forbidden("Forbidden: bot was blocked by the user"))
+    assert _is_user_blocked_error(BadRequest("User not found"))
     assert _is_chat_unreachable_error(BadRequest("Chat not found"))
     assert _is_chat_unreachable_error(
         Forbidden("Forbidden: bot is not a member of the channel chat")

@@ -496,6 +496,8 @@ _USER_BLOCKED_NEEDLES = (
     "blocked by the user",
     "user is deactivated",
     "user is deleted",
+    # setChatMenuButton / some private chats — account gone, same as deactivated.
+    "user not found",
 )
 _CHAT_UNREACHABLE_NEEDLES = (
     "chat not found",
