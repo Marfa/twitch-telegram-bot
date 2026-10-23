@@ -1549,6 +1549,21 @@ def check_handlers() -> None:
     assert fp_ok != fp_bad
     assert fp_bad[0] == "major"
     assert ("abc", "investigating") in fp_bad[2]
+    from handlers.monitoring import (
+        _cursor_fingerprint_unhealthy,
+        _should_notify_status_change,
+        _statuspage_fingerprint_unhealthy,
+    )
+
+    assert not _statuspage_fingerprint_unhealthy(fp_ok, ok_indicator="none")
+    assert _statuspage_fingerprint_unhealthy(fp_bad, ok_indicator="none")
+    # Outage always notifies; recovery only after an outage DM.
+    assert _should_notify_status_change(unhealthy=True, alerted_down=False)
+    assert _should_notify_status_change(unhealthy=True, alerted_down=True)
+    assert _should_notify_status_change(unhealthy=False, alerted_down=True)
+    assert not _should_notify_status_change(unhealthy=False, alerted_down=False)
+    assert not _cursor_fingerprint_unhealthy(("none", "All Systems Operational"))
+    assert _cursor_fingerprint_unhealthy(("major", "Partial Outage"))
     msg_ru = _format_twitch_status_message("ru", status_bad)
     assert "Twitch Status" in msg_ru
     assert "Chat" in msg_ru

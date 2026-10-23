@@ -101,6 +101,32 @@ def _format_twitch_status_message(lang: str, summary: dict) -> str:
     return "\n".join(lines)
 
 
+def _statuspage_fingerprint_unhealthy(
+    fingerprint: tuple[str, tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]],
+    *,
+    ok_indicator: str,
+) -> bool:
+    """True when Statuspage-style fingerprint is not fully healthy."""
+    indicator, components, incidents = fingerprint
+    if indicator != ok_indicator:
+        return True
+    if any(status != "operational" for _, status in components):
+        return True
+    return bool(incidents)
+
+
+def _cursor_fingerprint_unhealthy(fingerprint: tuple[str, str]) -> bool:
+    indicator, _description = fingerprint
+    return indicator != "none"
+
+
+def _should_notify_status_change(*, unhealthy: bool, alerted_down: bool) -> bool:
+    """Send outages always; send recovery only after we already DM'd an outage."""
+    if unhealthy:
+        return True
+    return alerted_down
+
+
 async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Poll status.twitch.com; notify availability opt-in users on changes."""
     try:
@@ -119,6 +145,13 @@ async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
     if fingerprint == previous:
         return
 
+    unhealthy = _statuspage_fingerprint_unhealthy(fingerprint, ok_indicator="none")
+    alerted_down = bool(bot_data.get("twitch_status_alerted_down"))
+    if not _should_notify_status_change(
+        unhealthy=unhealthy, alerted_down=alerted_down
+    ):
+        return
+
     db: Database = bot_data["db"]
     user_ids = db.get_availability_recipients()
     if not user_ids:
@@ -134,6 +167,7 @@ async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         message = messages.get(locale) or messages[DEFAULT_LOCALE]
         await _send_dm_html(context.bot, db, uid, message)
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
+    bot_data["twitch_status_alerted_down"] = unhealthy
 
 
 def _format_posthog_status_message(lang: str, snapshot: dict) -> str:
@@ -196,6 +230,15 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
     if fingerprint == previous:
         return
 
+    unhealthy = _statuspage_fingerprint_unhealthy(
+        fingerprint, ok_indicator="operational"
+    )
+    alerted_down = bool(bot_data.get("posthog_us_status_alerted_down"))
+    if not _should_notify_status_change(
+        unhealthy=unhealthy, alerted_down=alerted_down
+    ):
+        return
+
     db: Database = bot_data["db"]
     user_ids = set(ADMIN_USER_IDS)
     user_ids.update(beta_features.user_ids_with_active_enrollment(db))
@@ -215,6 +258,7 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
             context.bot, db, uid, message, disable_web_page_preview=True
         )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
+    bot_data["posthog_us_status_alerted_down"] = unhealthy
 
 
 def _cursor_status_fingerprint(snapshot: dict) -> tuple[str, str]:
@@ -290,6 +334,13 @@ async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         # First poll after start — baseline only, no spam.
         return
 
+    unhealthy = _cursor_fingerprint_unhealthy(fingerprint)
+    alerted_down = bool(bot_data.get("cursor_status_alerted_down"))
+    if not _should_notify_status_change(
+        unhealthy=unhealthy, alerted_down=alerted_down
+    ):
+        return
+
     db: Database = bot_data["db"]
     user_ids = set(ADMIN_USER_IDS)
     if not user_ids:
@@ -307,6 +358,7 @@ async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
             context.bot, db, uid, message, disable_web_page_preview=True
         )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
+    bot_data["cursor_status_alerted_down"] = unhealthy
 
 
 def _seconds_until_next_weekly_report() -> float:

@@ -2645,6 +2645,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     twitch.bind_igdb_db(db)
     apply_stream_poll_snapshot(app.bot_data, db.get_stream_poll_snapshot())
     app.bot_data["twitch_status_fingerprint"] = None
+    app.bot_data["twitch_status_alerted_down"] = False
+    app.bot_data["posthog_us_status_fingerprint"] = None
+    app.bot_data["posthog_us_status_alerted_down"] = False
+    app.bot_data["cursor_status_fingerprint"] = None
+    app.bot_data["cursor_status_alerted_down"] = False
     app.bot_data["sending_broadcasts"] = set()
     app.add_error_handler(error_handler)
 
