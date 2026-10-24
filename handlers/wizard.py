@@ -1681,9 +1681,17 @@ async def receive_advanced_options_toggle(
         db: Database = context.application.bot_data["db"]
         turning_on = not bool(context.user_data.get("use_stream_defaults"))
         if turning_on:
-            from stream_alert_defaults import apply_defaults_to_user_data
+            from stream_alert_defaults import (
+                apply_defaults_to_user_data,
+                defaults_ready_to_apply,
+            )
 
             defaults = db.get_stream_alert_defaults(query.from_user.id)
+            if not defaults_ready_to_apply(defaults):
+                await query.answer(
+                    t("stream_defaults_need_template", lang), show_alert=True
+                )
+                return _wz()["ADVANCED_OPTIONS"]
             apply_defaults_to_user_data(
                 context.user_data,
                 defaults,
@@ -4086,9 +4094,17 @@ async def _finish_subscription(
         and data.get("twitch_user_id")
         and data.get("message_template")
     ):
+        missing = [
+            key
+            for key in ("twitch_username", "twitch_user_id", "message_template")
+            if not data.get(key)
+        ]
         logger.warning(
-            "finish_subscription incomplete create for %s keys=%s",
+            "finish_subscription incomplete create for %s missing=%s "
+            "use_stream_defaults=%s keys=%s",
             owner_id,
+            missing,
+            bool(data.get("use_stream_defaults")),
             sorted(data.keys()),
         )
         await context.bot.send_message(

@@ -232,6 +232,13 @@ def filter_defaults_for_alert_type(
     return out
 
 
+def defaults_ready_to_apply(defaults: dict[str, Any] | None) -> bool:
+    """True when saved defaults include a non-empty message template."""
+    if not isinstance(defaults, dict):
+        return False
+    return bool(str(defaults.get("message_template") or "").strip())
+
+
 def apply_defaults_to_user_data(
     user_data: dict[str, Any], defaults: dict[str, Any], *, alert_type: str
 ) -> None:

@@ -1358,6 +1358,7 @@
   "stream_defaults_synced": "Updated bound alerts: {count}.",
   "stream_defaults_field_saved": "Change saved to the draft. Tap Save to apply.",
   "stream_defaults_locked": "Settings are locked — turn off «Default settings» to edit them.",
+  "stream_defaults_need_template": "Set a default message template in Settings → Default settings first.",
   "edit_apply_defaults": "Default settings",
   "please_start": "Please press /start first to begin using the bot."
 }

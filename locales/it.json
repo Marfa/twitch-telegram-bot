@@ -1328,6 +1328,7 @@
   "stream_defaults_synced": "Avvisi collegati aggiornati: {count}.",
   "stream_defaults_field_saved": "Modifica salvata bozza. Tocca Salva per applicare.",
   "stream_defaults_locked": "Impostazioni bloccate — disattiva «Impostazioni predefinite» per modificarle.",
+  "stream_defaults_need_template": "Imposta prima un modello in Impostazioni → Impostazioni predefinite.",
   "edit_apply_defaults": "Impostazioni predefinite",
   "repeats_minutes_prompt": "🔁 Ripetizioni avviso\n\nMentre lo stream è online, il bot reinvià lo stesso avviso (stesso testo, copertina e pulsanti) ogni N minuti indicati.\n\n• Un numero — un intervallo, es. 15 (ogni 15 minuti)\n• Più valori separati da virgola — intervalli indipendenti, es. 10,30\n• Una ripetizione parte solo se lo streamer è ancora in diretta; offline annulla le ripetizioni in coda\n• Il silenzio al riavvio non blocca queste ripetizioni\n• 0 — disattiva\n\nInserisci i minuti:",
   "repeats_invalid": "Inserisci minuti separati da virgola (1–1440) oppure 0 per disattivare.",

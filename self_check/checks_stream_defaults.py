@@ -9,7 +9,9 @@ from db import open_database
 from i18n import btn, edit_options_keyboard, settings_menu, t
 from stream_alert_defaults import (
     apply_defaults_to_user_data,
+    defaults_ready_to_apply,
     dump_stream_alert_defaults,
+    empty_stream_alert_defaults,
     is_edit_flow,
     parse_stream_alert_defaults,
     resolve_defaults_edit_target,
@@ -22,6 +24,7 @@ def run() -> None:
         assert btn("default_alert_settings", loc)
         assert t("edit_apply_defaults", loc)
         assert t("stream_defaults_locked", loc)
+        assert t("stream_defaults_need_template", loc)
         assert t("stream_defaults_save", loc)
         kb = settings_menu(loc).keyboard
         texts = [b.text for row in kb for b in row]
@@ -91,11 +94,24 @@ def run() -> None:
     assert again["message_template"] == "Hello {username}"
     assert again["strip_name_mentions"] is True
 
+    assert defaults_ready_to_apply(again) is True
+    assert defaults_ready_to_apply(empty_stream_alert_defaults()) is False
+    assert defaults_ready_to_apply({"message_template": "   "}) is False
+    assert defaults_ready_to_apply(None) is False
+
     ud: dict = {}
     apply_defaults_to_user_data(ud, again, alert_type="live")
     assert ud["use_stream_defaults"] is True
     assert ud["message_template"] == "Hello {username}"
     assert ud["adv_want_strip"] is True
+
+    # Empty defaults must not be treated as ready (wizard would wipe template).
+    wiped: dict = {"message_template": "Keep me", "twitch_username": "x"}
+    empty = empty_stream_alert_defaults()
+    assert not defaults_ready_to_apply(empty)
+    # Callers must refuse before apply; apply itself still writes fields if invoked.
+    apply_defaults_to_user_data(wiped, empty, alert_type="live")
+    assert wiped["message_template"] == ""
 
     fields = subscription_update_from_defaults(again, alert_type="upcoming")
     assert fields["use_stream_defaults"] is True

@@ -14,6 +14,7 @@ from bot_helpers import _settings_kb, _user_lang, reply_chat_id
 from db import Database
 from i18n import edit_options_keyboard, t
 from stream_alert_defaults import (
+    defaults_ready_to_apply,
     draft_as_subscription,
     ensure_defaults_draft,
     keep_defaults_editor_state,
@@ -357,6 +358,11 @@ async def on_edit_apply_defaults(
     turning_on = not bool(getattr(sub, "use_stream_defaults", False))
     if turning_on:
         defaults = db.get_stream_alert_defaults(query.from_user.id)
+        if not defaults_ready_to_apply(defaults):
+            await query.answer(
+                t("stream_defaults_need_template", lang), show_alert=True
+            )
+            return
         kind = _alert_type_from_sub(sub)
         fields = subscription_update_from_defaults(defaults, alert_type=kind)
         db.update_subscription(sub_id, query.from_user.id, **fields)
