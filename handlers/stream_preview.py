@@ -118,7 +118,10 @@ async def upgrade_placeholder_preview(
     """Capture live MP4 and editMessageMedia in-place (Animation↔Animation / Video↔Video)."""
     if not video_preview_ready():
         return False
+    import premium as prem
+
     fresh = db.get_subscription(int(sub.id), int(sub.owner_id)) or sub
+    fresh = prem.subscription_for_delivery(db, fresh)
     if not fresh.last_message_id:
         return False
     if not is_stream_capture_preview_image(fresh.image_file_id):
@@ -260,9 +263,12 @@ def preview_active_twitch_user_ids(db: Database) -> list[str]:
         uid_s = str(uid or "").strip()
         if not uid_s:
             continue
+        import premium as prem
+
         for sub in db.get_enabled_by_twitch_user_id(uid_s):
             if not sub.last_message_id:
                 continue
+            sub = prem.subscription_for_delivery(db, sub)
             if is_stream_preview_image(sub.image_file_id) or is_stream_capture_preview_image(
                 sub.image_file_id
             ):

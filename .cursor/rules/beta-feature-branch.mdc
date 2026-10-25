@@ -71,7 +71,7 @@ After promotion:
 - Feature disappears from Settings → 🧪 Beta mode (`stage` not visible)
 - `beta_features.is_enabled()` returns `True` for everyone (feature is GA)
 - Premium bypass ends (`grants_premium_feature` only for alpha/beta) — decision A
-- **Configured Premium settings keep working** (delivery does not strip stored config); **edit/create** without Premium is blocked
+- **Configured Premium settings are preserved** but not editable; **delivery strips** unentitled advanced options (see [`premium-beta-pause.mdc`](premium-beta-pause.mdc))
 - Beta-only wording is gone from docs (no leftover «бета» / «beta» marks for that feature)
 - New betas are announced via Settings → System alerts → «Notify about new betas» (default off; auto-on on first beta opt-in)
 

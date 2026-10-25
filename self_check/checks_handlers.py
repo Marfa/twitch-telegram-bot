@@ -1092,6 +1092,55 @@ def check_handlers() -> None:
         db.set_advanced_mode_setting(77, False)
         assert prem.is_advanced_mode_enabled(db, 77) is True
         assert prem.is_advanced_mode_enabled(db, 77, entitled=False) is True
+        # Delivery strips advanced options when unentitled; DB row unchanged.
+        from twitch import STREAM_VIDEO_PREVIEW_IMAGE_ID
+
+        sid77 = db.add_subscription(
+            owner_id=77,
+            twitch_username="freeadv",
+            twitch_user_id="77",
+            message_template="hi",
+            dest_type="channel",
+            chat_id=-10077,
+            thread_id=None,
+            delay_minutes=5,
+            ignore_keywords="spoiler",
+            category_filter='[{"id":"1","name":"X"}]',
+            delete_previous=True,
+            pin_message=True,
+            custom_buttons='[{"text":"t","url":"https://example.com"}]',
+            multistream_channels='[{"platform":"youtube","id":"x"}]',
+            repeat_notify_minutes="10",
+            block_overlap=True,
+            notify_on_schedule_cancel=True,
+            schedule_cancel_template="canceled",
+            image_file_id=STREAM_VIDEO_PREVIEW_IMAGE_ID,
+        )
+        assert sid77
+        raw77 = db.get_subscription(sid77, 77)
+        assert raw77 and raw77.delay_minutes == 5
+        deliv77 = prem.subscription_for_delivery(db, raw77)
+        assert deliv77.delay_minutes == 0
+        assert deliv77.ignore_keywords == ""
+        assert deliv77.category_filter == ""
+        assert deliv77.delete_previous is False
+        assert deliv77.pin_message is False
+        assert deliv77.custom_buttons == "[]"
+        assert deliv77.multistream_channels in ("", "[]")
+        assert deliv77.repeat_notify_minutes == ""
+        assert deliv77.block_overlap is False
+        assert deliv77.notify_on_schedule_cancel is False
+        assert deliv77.image_file_id is None
+        still77 = db.get_subscription(sid77, 77)
+        assert still77 and still77.delay_minutes == 5
+        assert still77.image_file_id == STREAM_VIDEO_PREVIEW_IMAGE_ID
+        # Entitled: delivery keeps stored advanced options.
+        db.set_premium_permanent(77, True)
+        keep77 = prem.subscription_for_delivery(db, still77)
+        assert keep77.delay_minutes == 5
+        assert keep77.pin_message is True
+        assert keep77.image_file_id == STREAM_VIDEO_PREVIEW_IMAGE_ID
+        db.set_premium_permanent(77, False)
         # Legacy à la carte unlocks still count as advanced_mode entitlement.
         import time as _time
 

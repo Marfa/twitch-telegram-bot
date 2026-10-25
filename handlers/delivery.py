@@ -1316,6 +1316,10 @@ async def _send_notification(
     job_queue=None,
     is_scheduled_repeat: bool = False,
 ) -> bool:
+    import premium as prem
+
+    # Strip unentitled advanced_mode options for this send (settings stay in DB).
+    sub = prem.subscription_for_delivery(db, sub)
     if _user_notifications_paused(db, sub.owner_id):
         return True
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):

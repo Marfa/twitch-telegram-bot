@@ -1,0 +1,44 @@
+---
+description: Preserve settings and pause Premium/beta features when entitlement ends
+alwaysApply: true
+---
+
+# Premium / beta feature pause
+
+When trial, Premium (full plan or à la carte), or beta entitlement ends: **keep stored settings**, **block edit/create** of paid-only options, and **pause runtime** so the feature stops working until re-entitled. Do **not** delete user config. On re-payment / re-enroll, restore behavior from the same stored settings.
+
+Gates: `has_feature` / `has_feature_sync`, `beta_features.is_enabled` / `grants_premium_feature`. Expiry pause for alerts: `pause_unentitled_subscriptions` / `expire_unentitled_alerts` (see [`active-subscription-gate.mdc`](active-subscription-gate.mdc)). Copy: [`premium-feature-copy.mdc`](premium-feature-copy.mdc). Beta lifecycle: [`beta-feature-branch.mdc`](beta-feature-branch.mdc).
+
+## Invariants (every Premium / beta feature)
+
+1. **Preserve** — DB settings, subscription options, and history stay; no wipe on expiry.
+2. **Read-only / no edit** — UI and handlers must not change paid-only config while unentitled (show locked / upgrade, not silent mutate).
+3. **Pause runtime** — background jobs, delivery, sync, and user-visible effects stop or fall back to free defaults (see table).
+4. **Restore** — re-entitlement reapplies stored config as it was; no re-wizard required.
+5. **Unknown pause logic** — if you cannot map a new feature to a clear pause/fallback, **stop and ask** before shipping.
+
+## Pause map (`FEATURE_IDS`)
+
+| Feature id | When unentitled |
+|---|---|
+| `extra_alerts` | Keep only `PREMIUM_FREE_ACTIVE_LIMIT` (5) enabled; excess subscriptions **paused** (settings kept). |
+| `alert_types` | Non-live types: **not editable**; existing rows **kept and paused** (live-only still works per free rules). |
+| `twitch_sync` | Follow auto-sync **paused** (config kept; no sync runs). |
+| `advanced_mode` | Options **not editable** and **not applied in the alert**. Runtime: `premium.subscription_for_delivery` clears unentitled fields at schedule/send (DB unchanged). On pay — same options work again as stored. |
+| `schedule_publish` | Schedule publish / Twitch schedule work **unavailable** (config kept). |
+| `alert_history` | UI shows **free window only** (`ALERT_HISTORY_FREE_DAYS`); older rows stay in storage but are **hidden** until paid (`ALERT_HISTORY_PREMIUM_DAYS`). |
+| `deleted_subscriptions_cart` | Cart UI uses **free days** (`DELETED_SUBSCRIPTIONS_CART_FREE_DAYS`); older cart entries **hidden** until paid (premium days). |
+| `stream_chat` | Mini App chat send falls back to **daily free limit** (`CHAT_FREE_DAILY_SEND_LIMIT`); not wiped. |
+| `follow_monitor` | Follow/unfollow monitor **paused**. |
+| `ai_clips` | AI clips **unavailable**; auto-create clips **paused**. |
+
+Beta-only surfaces without a Premium id still follow the same preserve / no-edit / pause pattern; gate with `beta_features.is_enabled`.
+
+## Checklist — new or changed Premium / beta feature
+
+1. Entitlement checked on **edit**, **create**, and **runtime** (job / delivery / API), not only in the menu.
+2. Expiry path: settings retained; pause or free fallback implemented per table (or user-approved new row).
+3. Re-entitle path: stored settings take effect again without data loss.
+4. User-facing: locked state or free-window UI — not a dead button with no explanation.
+5. `self_check` covers unentitled pause/fallback for non-trivial logic.
+6. If pause behavior is ambiguous — **ask** before merge.

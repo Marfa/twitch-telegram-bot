@@ -57,6 +57,13 @@ ALERT_JOB_LIVE_GAME = "live_game"
 ALERT_JOB_REPEAT = "repeat"
 
 
+def _sub_for_delivery(db: Database, sub: Subscription) -> Subscription:
+    """Advanced options cleared when unentitled (schedule + send paths)."""
+    import premium as prem
+
+    return prem.subscription_for_delivery(db, sub)
+
+
 async def _should_skip_ignored_alert(
     sub: Subscription,
     db: Database,
@@ -444,6 +451,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     sub = db.get_subscription_by_id(sub_id)
     if not sub or not sub.enabled or not sub.notify_on_live:
         return
+    sub = _sub_for_delivery(db, sub)
 
     try:
         live_streams = await asyncio.to_thread(
@@ -539,6 +547,14 @@ async def _send_repeat_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
     sub = db.get_subscription_by_id(sub_id)
     if not sub or not sub.enabled or not sub.notify_on_live:
         return
+    sub = _sub_for_delivery(db, sub)
+    from alert_repeats import parse_repeat_notify_minutes
+
+    # Entitlement lost: drop this interval (do not re-arm).
+    if minutes not in parse_repeat_notify_minutes(
+        getattr(sub, "repeat_notify_minutes", "")
+    ):
+        return
     try:
         live_streams = await asyncio.to_thread(
             twitch.get_live_streams, [sub.twitch_user_id]
@@ -603,6 +619,7 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
     sub = db.get_subscription_by_id(sub_id)
     if not sub or not sub.enabled or not sub.notify_on_end:
         return
+    sub = _sub_for_delivery(db, sub)
 
     try:
         live_streams = await asyncio.to_thread(
@@ -652,7 +669,10 @@ async def _send_delayed_category_notification(
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     sub = db.get_subscription_by_id(sub_id)
-    if not sub or not sub.enabled or not _wants_category_change_alert(sub):
+    if not sub or not sub.enabled:
+        return
+    sub = _sub_for_delivery(db, sub)
+    if not _wants_category_change_alert(sub):
         return
 
     try:
@@ -888,6 +908,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 end_stream = restart_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):
                     cancel_repeat_notify_jobs(context.job_queue, db, sub.id)
+                    sub = _sub_for_delivery(db, sub)
                     if is_category_watch_sub(sub):
                         continue
                     if not sub.notify_on_end:
@@ -945,6 +966,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 title = stream.get("title", "")
                 stream_id = str(stream.get("id") or "")
                 for sub in db.get_enabled_by_twitch_user_id(uid):
+                    sub = _sub_for_delivery(db, sub)
                     if is_category_watch_sub(sub):
                         continue
                     if not sub.notify_on_live:
@@ -1020,6 +1042,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 end_stream = offline_end_streams.get(uid)
                 for sub in db.get_enabled_by_twitch_user_id(uid):
                     cancel_repeat_notify_jobs(context.job_queue, db, sub.id)
+                    sub = _sub_for_delivery(db, sub)
                     if is_category_watch_sub(sub):
                         continue
                     if not sub.notify_on_end:
@@ -1079,6 +1102,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 title = stream.get("title", "")
                 stream_id = str(stream.get("id") or "")
                 for sub in db.get_enabled_by_twitch_user_id(uid):
+                    sub = _sub_for_delivery(db, sub)
                     if is_category_watch_sub(sub):
                         continue
                     if not _wants_category_change_alert(sub):
@@ -1539,6 +1563,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
         db.set_schedule_day_snapshot(uid, current_days)
 
         for sub in db.get_enabled_by_twitch_user_id(uid):
+            sub = _sub_for_delivery(db, sub)
             if (
                 emptied
                 and getattr(sub, "notify_on_schedule_cancel", False)

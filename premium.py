@@ -541,6 +541,60 @@ def has_feature_sync(
     return beta_features.grants_premium_feature(db, user_id, feature_id)
 
 
+def subscription_for_delivery(db: "Database", sub: Any) -> Any:
+    """Return sub with advanced options cleared when unentitled (DB row unchanged).
+
+    Used at alert schedule/send time so unpaid advanced_mode settings stay stored
+    but do not affect delivery. Promo channel / full plan / paid_features_free
+    keep options via has_feature_sync.
+    """
+    from dataclasses import replace
+
+    from alert_repeats import beta_or_advanced_mode
+    from twitch import is_ai_game_cover_image, is_stream_capture_preview_image
+
+    ensure_trial_expired(db, int(sub.owner_id))
+    owner_id = int(sub.owner_id)
+    channel = getattr(sub, "twitch_username", None)
+
+    def _ok(feature_id: str) -> bool:
+        return has_feature_sync(db, owner_id, feature_id, channel=channel)
+
+    kw: dict[str, Any] = {}
+    if not _ok("ignore_keywords"):
+        kw["ignore_keywords"] = ""
+        kw["use_global_ignore"] = False
+    if not _ok("category_filter"):
+        kw["category_filter"] = ""
+    if not _ok("delay"):
+        kw["delay_minutes"] = 0
+    if not _ok("delete_prev"):
+        kw["delete_previous"] = False
+        kw["delete_other_alerts"] = False
+    if not _ok("pin_message"):
+        kw["pin_message"] = False
+    if not _ok("custom_buttons"):
+        kw["custom_buttons"] = "[]"
+        kw["button_style"] = ""
+    if not _ok("multistream"):
+        kw["multistream_channels"] = ""
+    if not _ok("schedule_cancel"):
+        kw["notify_on_schedule_cancel"] = False
+        kw["schedule_cancel_template"] = ""
+    if not beta_or_advanced_mode(db, owner_id, has_advanced_mode=_ok("advanced_mode")):
+        kw["repeat_notify_minutes"] = ""
+        kw["block_overlap"] = False
+        kw["block_repeat_when_last"] = False
+    image_id = getattr(sub, "image_file_id", None)
+    if is_ai_game_cover_image(image_id) and not _ok("ai_image"):
+        kw["image_file_id"] = None
+    elif is_stream_capture_preview_image(image_id) and not _ok("stream_video_preview"):
+        kw["image_file_id"] = None
+    if not kw:
+        return sub
+    return replace(sub, **kw)
+
+
 def is_advanced_mode_enabled(
     db: Database, user_id: int, *, entitled: bool | None = None
 ) -> bool:
