@@ -877,9 +877,17 @@ async def can_enable_more_async(
 def ensure_trial_expired(db: Database, user_id: int) -> bool:
     """If trial ended, pause subs and clear trial_until. Returns True if just expired."""
     st = get_status(db, user_id)
-    if st.trial_until <= 0:
+    raw = getattr(st, "trial_until", 0)
+    # Reject mocks / odd types (int(MagicMock()) is 1 and would false-expire).
+    if type(raw) not in (int, float, str, type(None)):
         return False
-    if st.trial_until > int(time.time()):
+    try:
+        until = int(raw or 0)
+    except (TypeError, ValueError):
+        return False
+    if until <= 0:
+        return False
+    if until > int(time.time()):
         return False
     # Expired: pause and clear until (keep trial_used).
     db.expire_premium_trial(user_id)

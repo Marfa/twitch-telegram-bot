@@ -961,8 +961,18 @@ def check_core() -> None:
             twitch_user_id="9",
             chat_id=-100,
         )
+        from premium import PremiumStatus
+
         db = MagicMock()
         db.get_subscription.return_value = sub
+        db.get_premium_status.return_value = PremiumStatus(
+            permanent=True,
+            stars_until=0,
+            stars_charge_id="",
+            stars_canceled=False,
+            twitch_active=False,
+            twitch_user_id="",
+        )
         bot_data: dict = {}
         with (
             patch(
