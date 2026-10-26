@@ -101,16 +101,19 @@ def check_core() -> None:
     analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
 
     from ai_clips import (
+        CHAT_LAG_SEC,
         CLIP_PHRASE_RE,
         ChatMessage,
         ClipCandidate,
         LoudPeak,
+        classify_chat_reaction,
         find_loud_peaks,
         find_message_spikes,
         find_phrase_peaks,
         format_clip_timecode,
         merge_clip_candidates,
         parse_helix_duration,
+        parse_rerank_order,
     )
 
     assert parse_helix_duration("1h2m3s") == 3723
@@ -121,6 +124,18 @@ def check_core() -> None:
     rms = [1.0] * 40 + [100.0] * 30 + [1.0] * 40 + [80.0] * 30 + [1.0] * 50
     peaks = find_loud_peaks(rms, n=5, duration=30, min_gap=60)
     assert len(peaks) >= 2
+    # Silence→explosion scores higher than flat mid-loud of same length.
+    quiet_then_loud = [1.0] * 20 + [120.0] * 10
+    flat_mid = [40.0] * 30
+    shaped = find_loud_peaks(
+        quiet_then_loud + [1.0] * 40 + flat_mid + [1.0] * 40,
+        n=2,
+        duration=30,
+        min_gap=60,
+    )
+    by_end = {p.vod_offset: p.score for p in shaped}
+    assert 30 in by_end and 100 in by_end
+    assert by_end[30] > by_end[100]
     assert "ai_clips" in FEATURE_IDS
     assert "ai_clips" in purchasable_feature_ids()
 
@@ -129,6 +144,13 @@ def check_core() -> None:
     assert CLIP_PHRASE_RE.search("СУПЕРКлип!!!")
     assert CLIP_PHRASE_RE.search("CLIP")
     assert not CLIP_PHRASE_RE.search("hello world")
+    assert classify_chat_reaction("POGGERS") == "hype"
+    assert classify_chat_reaction("KEKW lmao") == "funny"
+    assert classify_chat_reaction("clip that please") == "clip_ask"
+    assert classify_chat_reaction("hello chat") is None
+    assert parse_rerank_order("3,1,2", 3) == [3, 1, 2]
+    assert parse_rerank_order("1,2", 3) is None
+    assert parse_rerank_order("best is 2 then 1 then 3", 3) == [2, 1, 3]
 
     msgs = [
         ChatMessage(40, "please clip this"),
@@ -139,12 +161,33 @@ def check_core() -> None:
     assert [p.vod_offset for p in phrases] == [40, 400]
     assert all(p.source == "phrase" for p in phrases)
 
-    # Message spikes: quiet baseline then a burst bucket.
+    # Message spikes: unique chatters + relative baseline + chat lag.
     spike_msgs = [ChatMessage(float(t), "x") for t in range(0, 600, 30)]
     spike_msgs += [ChatMessage(300.0 + i * 0.2, "spam") for i in range(20)]
     spikes = find_message_spikes(spike_msgs, n=5, duration=30, min_gap=60)
     assert spikes and spikes[0].source == "spike"
-    assert spikes[0].vod_offset >= 30
+    assert spikes[0].vod_offset == 330 - CHAT_LAG_SEC
+    # Same chatter spam is not a unique-chatter spike.
+    same_user = [ChatMessage(float(t), "x", chatter_id="u1") for t in range(0, 600, 30)]
+    same_user += [
+        ChatMessage(300.0 + i * 0.2, "spam", chatter_id="u1") for i in range(20)
+    ]
+    assert find_message_spikes(same_user, n=5, duration=30, min_gap=60) == []
+    # Reaction burst beats a plain burst of equal unique size (score).
+    plain_burst = [
+        ChatMessage(float(t), "hi", chatter_id=f"p{t}") for t in range(0, 300, 30)
+    ] + [
+        ChatMessage(300.0 + i * 0.1, "ok", chatter_id=f"a{i}") for i in range(8)
+    ]
+    hype_burst = [
+        ChatMessage(float(t), "hi", chatter_id=f"p{t}") for t in range(0, 300, 30)
+    ] + [
+        ChatMessage(300.0 + i * 0.1, "POGGERS", chatter_id=f"b{i}") for i in range(8)
+    ]
+    plain_spikes = find_message_spikes(plain_burst, n=1, duration=30, min_gap=60)
+    hype_spikes = find_message_spikes(hype_burst, n=1, duration=30, min_gap=60)
+    assert plain_spikes and hype_spikes
+    assert hype_spikes[0].score > plain_spikes[0].score
 
     # Merge priority: phrase → emotion → game → audio → spike.
     from ai_clips import (

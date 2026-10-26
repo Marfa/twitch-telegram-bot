@@ -2,7 +2,10 @@
 
 Sources (priority): chat phrase clip/клип → Groq emotion (ASR+score>3) →
 Groq gaming chat context → remaining audio RMS → remaining chat spikes.
+Chat spikes: unique chatters vs rolling baseline, chat-lag shift, reaction
+boost (hype/funny/…). Audio: RMS + silence→explosion + burst density.
 Top-10 audio peaks get Whisper + emotion LLM; chat spikes get context LLM.
+Merged finalists get one Groq head-to-head rerank when available.
 If Groq is down/rate-limited, those tiers are skipped; HTTP 429 sets a sticky
 24h cooldown before the next Groq attempt.
 Downloads no durable media: streamlink audio_only is piped through ffmpeg to
@@ -41,6 +44,14 @@ CLIP_DURATION_SEC = 30
 MIN_GAP_SEC = 60
 CHAT_PHRASE_DEDUP_SEC = 300
 MSG_SPIKE_BUCKET_SEC = 30
+# Chat reacts after the beat (stream delay + typing).
+CHAT_LAG_SEC = 6
+MSG_SPIKE_BASELINE_SEC = 45
+MSG_SPIKE_RATIO = 3.0
+MSG_SPIKE_MIN_UNIQUE = 4
+MSG_SPIKE_PLAIN_RATIO = 4.0
+MSG_SPIKE_PLAIN_MIN_UNIQUE = 6
+MSG_SPIKE_REACTION_WEIGHT = 0.5
 MAX_VOD_ANALYZE_SEC = 4 * 3600  # hard cap for VPS RAM/time
 # Groq free tier: top audio/spike seeds only (not full VOD).
 AUDIO_SEED_N = 10
@@ -60,6 +71,105 @@ _DURATION_RE = re.compile(
 )
 CLIP_PHRASE_RE = re.compile(r"(?i)clip|клип")
 _EMOTION_SCORE_RE = re.compile(r"[1-5]")
+_RERANK_ORDER_RE = re.compile(r"\d+")
+# Compact EN/RU reaction tokens (own list — not a copy of third-party configs).
+_REACTION_WORD_CLASSES: dict[str, frozenset[str]] = {
+    "hype": frozenset(
+        {
+            "pog",
+            "poggers",
+            "pogchamp",
+            "pogu",
+            "letsgo",
+            "letsgooo",
+            "insane",
+            "clutch",
+            "holy",
+            "omg",
+            "wow",
+            "ez",
+            "gg",
+            "gigachad",
+            "fire",
+            "goat",
+            "nice",
+            "sheesh",
+            "вау",
+            "ого",
+            "жестко",
+            "имба",
+            "красава",
+            "топ",
+        }
+    ),
+    "funny": frozenset(
+        {
+            "lul",
+            "lulw",
+            "kekw",
+            "omegalul",
+            "lol",
+            "lmao",
+            "xd",
+            "icant",
+            "hahaha",
+            "ахах",
+            "ахаха",
+            "лол",
+            "кек",
+        }
+    ),
+    "surprise": frozenset(
+        {
+            "huh",
+            "what",
+            "wtf",
+            "wait",
+            "wat",
+            "чего",
+            "whaat",
+        }
+    ),
+    "scare": frozenset(
+        {
+            "monkas",
+            "monkaw",
+            "wutface",
+            "jumpscare",
+            "aaaa",
+            "scary",
+        }
+    ),
+    "fail": frozenset(
+        {
+            "sadge",
+            "rip",
+            "nooo",
+            "threw",
+            "copium",
+            "feelsbadman",
+            "notlikethis",
+        }
+    ),
+    "clip_ask": frozenset(
+        {
+            "clipit",
+            "clipped",
+            "clipping",
+            "клипни",
+            "клипайте",
+            "запишите",
+        }
+    ),
+}
+_REACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("funny", re.compile(r"(?i)^[wｗ]{2,}$|хаха|ахах|^лол+$")),
+    ("hype", re.compile(r"(?i)^6{3,}$|пог+|имба")),
+    ("surprise", re.compile(r"^[?？!]{2,}$")),
+    ("fail", re.compile(r"(?i)^no{3,}$|^ф+$")),
+    ("clip_ask", re.compile(r"(?i)clip\s*(it|that|this)|клип\s*(это|пожалуйста)?")),
+)
+_REACTION_TOKEN_RE = re.compile(r"[\w'+]+", re.UNICODE)
 
 # Twitch web Client-ID required for persisted VideoComments query (partner Helix
 # Client-ID does not serve this GQL). Read-only; not used for Helix auth.
@@ -99,6 +209,16 @@ Stream title: {title}
 
 Chat:
 {text}"""
+
+# Relative order of finalists — small models rank peers better than absolute scores.
+GROQ_RERANK_PROMPT = """Rank these Twitch VOD clip candidates best-first for a highlight reel.
+Reply with ONLY a comma-separated list of their numbers (each once), e.g. 3,1,2,4.
+
+Category: {category}
+Stream title: {title}
+
+Candidates:
+{candidates}"""
 
 ClipSource = Literal["phrase", "emotion", "game", "audio", "spike"]
 
@@ -171,6 +291,7 @@ class ChatMessage:
     offset_sec: float
     text: str
     comment_id: str = ""
+    chatter_id: str = ""
 
 
 def parse_helix_duration(raw: str | None) -> int:
@@ -187,6 +308,29 @@ def parse_helix_duration(raw: str | None) -> int:
     return h * 3600 + mins * 60 + secs
 
 
+def _rms_percentile(rms_per_sec: list[float], pct: float) -> float:
+    if not rms_per_sec:
+        return 0.0
+    ordered = sorted(rms_per_sec)
+    idx = int(max(0, min(len(ordered) - 1, round((len(ordered) - 1) * pct))))
+    return float(ordered[idx])
+
+
+def _window_audio_score(
+    window: list[float], *, p75: float, duration: int
+) -> float:
+    """RMS mean/peak + silence→explosion payoff + high-energy burst density."""
+    mean = sum(window) / duration
+    peak = max(window)
+    third = max(1, duration // 3)
+    first_m = sum(window[:third]) / third
+    last_m = sum(window[-third:]) / third
+    payoff = max(0.0, last_m - first_m)
+    thresh = p75 if p75 > 0 else mean
+    burst = sum(1 for x in window if x >= thresh) / duration
+    return mean + 0.5 * peak + 0.35 * payoff + 0.25 * burst * max(peak, 1.0)
+
+
 def find_loud_peaks(
     rms_per_sec: list[float],
     *,
@@ -197,12 +341,11 @@ def find_loud_peaks(
     """Pick up to ``n`` non-overlapping loud windows; return end offsets."""
     if n <= 0 or duration <= 0 or len(rms_per_sec) < duration:
         return []
+    p75 = _rms_percentile(rms_per_sec, 0.75)
     scored: list[tuple[float, int]] = []
     for end in range(duration, len(rms_per_sec) + 1):
         window = rms_per_sec[end - duration : end]
-        mean = sum(window) / duration
-        peak = max(window)
-        scored.append((mean + 0.5 * peak, end))
+        scored.append((_window_audio_score(window, p75=p75, duration=duration), end))
     scored.sort(key=lambda x: x[0], reverse=True)
     picked: list[LoudPeak] = []
     for score, end in scored:
@@ -213,6 +356,40 @@ def find_loud_peaks(
         if len(picked) >= n:
             break
     return sorted(picked, key=lambda p: p.vod_offset)
+
+
+def classify_chat_reaction(text: str) -> str | None:
+    """Reaction class for one chat line, or None if plain."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    low = raw.lower()
+    tokens = set(_REACTION_TOKEN_RE.findall(low))
+    for key, words in _REACTION_WORD_CLASSES.items():
+        if tokens & words or low in words:
+            return key
+    for key, pattern in _REACTION_PATTERNS:
+        if pattern.search(raw):
+            return key
+    if CLIP_PHRASE_RE.search(raw):
+        return "clip_ask"
+    return None
+
+
+def chat_reaction_hits(texts: list[str]) -> tuple[int, float]:
+    """(hit_count, hit_fraction) for reaction-class messages in a burst."""
+    if not texts:
+        return 0, 0.0
+    hits = sum(1 for t in texts if classify_chat_reaction(t))
+    return hits, hits / len(texts)
+
+
+def _chatter_key(msg: ChatMessage) -> str:
+    cid = (msg.chatter_id or "").strip()
+    if cid:
+        return cid
+    # No author (tests / partial GQL) — fall back so unique≈message count.
+    return f"m:{msg.comment_id or f'{msg.offset_sec}:{msg.text}'}"
 
 
 def find_phrase_peaks(
@@ -248,28 +425,51 @@ def find_message_spikes(
     duration: int = CLIP_DURATION_SEC,
     min_gap: int = MIN_GAP_SEC,
     bucket_sec: int = MSG_SPIKE_BUCKET_SEC,
+    lag_sec: int = CHAT_LAG_SEC,
 ) -> list[ClipCandidate]:
-    """Multiplicative chat-volume spikes; clip ends at bucket end."""
+    """Unique-chatter spikes vs rolling baseline; lag-shifted; reaction boost."""
     if n <= 0 or duration <= 0 or bucket_sec <= 0 or not messages:
         return []
-    counts: dict[int, int] = {}
+    buckets: dict[int, tuple[set[str], list[str]]] = {}
     for msg in messages:
         b = int(msg.offset_sec) // bucket_sec
-        counts[b] = counts.get(b, 0) + 1
-    nonzero = [c for c in counts.values() if c > 0]
-    if not nonzero:
+        entry = buckets.get(b)
+        if entry is None:
+            entry = (set(), [])
+            buckets[b] = entry
+        ids, texts = entry
+        ids.add(_chatter_key(msg))
+        texts.append(msg.text or "")
+    unique_counts = [len(ids) for ids, _ in buckets.values() if ids]
+    if not unique_counts:
         return []
-    sorted_nz = sorted(nonzero)
-    median = sorted_nz[len(sorted_nz) // 2]
-    threshold = max(4, int(2 * median))
+    sorted_u = sorted(unique_counts)
+    median_u = float(sorted_u[len(sorted_u) // 2])
+    lookback = max(1, MSG_SPIKE_BASELINE_SEC // bucket_sec)
     scored: list[tuple[float, int]] = []
-    for bucket, count in counts.items():
-        if count < threshold:
+    for bucket, (ids, texts) in buckets.items():
+        unique = len(ids)
+        prev = [
+            len(buckets[b][0])
+            for b in range(bucket - lookback, bucket)
+            if b in buckets
+        ]
+        baseline = (sum(prev) / len(prev)) if prev else max(median_u, 1.0)
+        hits, frac = chat_reaction_hits(texts)
+        plain = hits == 0
+        ratio = MSG_SPIKE_PLAIN_RATIO if plain else MSG_SPIKE_RATIO
+        min_u = MSG_SPIKE_PLAIN_MIN_UNIQUE if plain else MSG_SPIKE_MIN_UNIQUE
+        if unique < min_u:
             continue
-        end = (bucket + 1) * bucket_sec
+        if unique < ratio * max(baseline, 0.5):
+            continue
+        end = (bucket + 1) * bucket_sec - max(0, int(lag_sec))
         if end < duration:
             continue
-        scored.append((float(count), end))
+        score = float(unique) * (1.0 + MSG_SPIKE_REACTION_WEIGHT * frac) + float(
+            hits
+        )
+        scored.append((score, end))
     scored.sort(key=lambda x: (-x[0], x[1]))
     picked: list[ClipCandidate] = []
     for score, end in scored:
@@ -415,6 +615,25 @@ def parse_context_label(raw: str) -> Literal["game", "chat"] | None:
     return None
 
 
+def parse_rerank_order(raw: str, n: int) -> list[int] | None:
+    """Parse 1-based candidate order; None if incomplete/invalid."""
+    if n <= 0:
+        return None
+    seen: set[int] = set()
+    order: list[int] = []
+    for m in _RERANK_ORDER_RE.finditer(raw or ""):
+        idx = int(m.group(0))
+        if idx < 1 or idx > n or idx in seen:
+            continue
+        seen.add(idx)
+        order.append(idx)
+        if len(order) >= n:
+            break
+    if len(order) != n:
+        return None
+    return order
+
+
 def normalize_clip_source(raw: str | None) -> ClipSource:
     """Map stored/legacy source labels onto ClipSource."""
     src = str(raw or "audio").strip().lower()
@@ -513,7 +732,20 @@ def _fetch_comment_page(vod_id: str, offset: float, headers: dict[str, str]) -> 
         if not text:
             continue
         cid = str(node.get("id") or "").strip()
-        out.append(ChatMessage(offset_sec=sec, text=text, comment_id=cid))
+        commenter = node.get("commenter")
+        chatter = ""
+        if isinstance(commenter, dict):
+            chatter = str(
+                commenter.get("id") or commenter.get("login") or ""
+            ).strip()
+        out.append(
+            ChatMessage(
+                offset_sec=sec,
+                text=text,
+                comment_id=cid,
+                chatter_id=chatter,
+            )
+        )
     time.sleep(_GQL_REQUEST_DELAY)
     return out
 
@@ -740,6 +972,53 @@ def classify_spikes_with_groq(
         len(remaining),
     )
     return game, remaining
+
+
+def rerank_clip_candidates(
+    candidates: list[ClipCandidate],
+    messages: list[ChatMessage] | None = None,
+    *,
+    category: str = "",
+    title: str = "",
+) -> list[ClipCandidate]:
+    """Reorder finalists via one Groq head-to-head call; unchanged on failure."""
+    if len(candidates) <= 1 or not groq_api_ready():
+        return list(candidates)
+    lines: list[str] = []
+    for i, cand in enumerate(candidates, start=1):
+        chat_bit = ""
+        if messages:
+            chat_bit = _chat_text_near(
+                messages, cand.vod_offset, window_sec=20, max_lines=8, max_chars=400
+            ).replace("\n", " / ")
+        lines.append(
+            f"{i}. source={cand.source} score={cand.score:.2f} "
+            f"end={cand.vod_offset}s chat={chat_bit or '-'}"
+        )
+    prompt = GROQ_RERANK_PROMPT.format(
+        category=(category or "").strip()[:200] or "unknown",
+        title=(title or "").strip()[:300] or "unknown",
+        candidates="\n".join(lines),
+    )
+    try:
+        raw = _groq_chat(prompt, max_tokens=64)
+        order = parse_rerank_order(raw, len(candidates))
+        if not order:
+            logger.info("ai_clips groq rerank parse miss; keep merge order")
+            return list(candidates)
+        reordered = [candidates[i - 1] for i in order]
+        logger.info(
+            "ai_clips groq rerank n=%s order=%s",
+            len(candidates),
+            ",".join(str(i) for i in order),
+        )
+        return reordered
+    except GroqUnavailable:
+        logger.warning("ai_clips groq unavailable during rerank; keep merge order")
+        return list(candidates)
+    except Exception:
+        logger.warning("ai_clips groq rerank failed", exc_info=True)
+        return list(candidates)
 
 
 def _chat_text_near(
