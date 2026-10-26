@@ -15,7 +15,6 @@ from telegram.error import BadRequest, Forbidden
 from telegram.ext import Application, ContextTypes
 
 import analytics
-import beta as beta_features
 from bot_helpers import _BROADCAST_SEND_PAUSE, _send_dm_html
 from db import Database
 from i18n import DEFAULT_LOCALE, SCHEDULE_TZ, SUPPORTED_LOCALES, t
@@ -64,6 +63,14 @@ def _twitch_indicator_label(lang: str, indicator: str) -> str:
     return indicator
 
 
+def _availability_status_footer(lang: str) -> str:
+    return t(
+        "broadcast_footer",
+        lang,
+        type=t("broadcast_type_availability", lang),
+    )
+
+
 def _format_twitch_status_message(lang: str, summary: dict) -> str:
     status = summary.get("status") or {}
     indicator = str(status.get("indicator") or "none")
@@ -98,6 +105,8 @@ def _format_twitch_status_message(lang: str, summary: dict) -> str:
             lines.append(f"• {name}")
     lines.append("")
     lines.append(f'<a href="{TWITCH_STATUS_PAGE_URL}">{TWITCH_STATUS_PAGE_URL}</a>')
+    lines.append("")
+    lines.append(_availability_status_footer(lang))
     return "\n".join(lines)
 
 
@@ -210,6 +219,8 @@ def _format_posthog_status_message(lang: str, snapshot: dict) -> str:
         f'<a href="{analytics.POSTHOG_US_STATUS_PAGE_URL}">'
         f"{analytics.POSTHOG_US_STATUS_PAGE_URL}</a>"
     )
+    lines.append("")
+    lines.append(_availability_status_footer(lang))
     return "\n".join(lines)
 
 
@@ -242,8 +253,8 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     db: Database = bot_data["db"]
-    user_ids = set(ADMIN_USER_IDS)
-    user_ids.update(beta_features.user_ids_with_active_enrollment(db))
+    avail = set(db.get_availability_recipients())
+    user_ids = {uid for uid in ADMIN_USER_IDS if uid in avail}
     if not user_ids:
         return
 
@@ -299,11 +310,13 @@ def _format_cursor_status_message(lang: str, snapshot: dict) -> str:
     lines.append(
         f'<a href="{CURSOR_STATUS_PAGE_URL}">{CURSOR_STATUS_PAGE_URL}</a>'
     )
+    lines.append("")
+    lines.append(_availability_status_footer(lang))
     return "\n".join(lines)
 
 
 async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Poll status.cursor.com; notify admins on rollup changes."""
+    """Poll status.cursor.com; notify admins with availability alerts enabled."""
     from config import ADMIN_USER_IDS
 
     if not ADMIN_USER_IDS:
@@ -349,7 +362,8 @@ async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     db: Database = bot_data["db"]
-    user_ids = set(ADMIN_USER_IDS)
+    avail = set(db.get_availability_recipients())
+    user_ids = {uid for uid in ADMIN_USER_IDS if uid in avail}
     if not user_ids:
         return
 

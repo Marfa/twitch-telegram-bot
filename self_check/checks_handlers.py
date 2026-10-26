@@ -1616,6 +1616,7 @@ def check_handlers() -> None:
     msg_ru = _format_twitch_status_message("ru", status_bad)
     assert "Twitch Status" in msg_ru
     assert "Chat" in msg_ru
+    assert "настройках" in msg_ru
     status_host = urlparse(TWITCH_STATUS_PAGE_URL).hostname
     assert status_host is not None
     assert any(
@@ -1624,8 +1625,11 @@ def check_handlers() -> None:
     )
     msg_ok = _format_twitch_status_message("en", status_ok)
     assert "All Systems Operational" in msg_ok
+    assert "Settings" in msg_ok
     assert tr("broadcast_started", "ru")
     assert f"({TWITCH_STATUS_HOST})" in tr("sys_notifications_menu", "ru")
+    assert "status.cursor.com" in tr("sys_notifications_menu", "ru")
+    assert "Cursor" in tr("sys_availability_label", "ru")
     assert tr("sys_beta_label", "ru")
     assert tr("beta_announce_header", "ru")
     assert tr("drops_configure_locked", "ru")
@@ -1644,9 +1648,22 @@ def check_handlers() -> None:
     assert "PostHog Status" in ph_msg_ru
     assert "App" in ph_msg_ru
     assert "posthogstatus.com/us" in ph_msg_ru
+    assert "настройках" in ph_msg_ru
     ph_msg_ok = _format_posthog_status_message("en", ph_ok)
     assert "All Systems Operational" in ph_msg_ok
     assert "EU Cloud" not in ph_msg_ok
+    from handlers.monitoring import _format_cursor_status_message
+
+    cursor_msg = _format_cursor_status_message(
+        "en",
+        {"status": {"indicator": "major", "description": "Partial Outage"}},
+    )
+    assert "Cursor Status" in cursor_msg
+    assert "Settings" in cursor_msg
+    mon_src = Path("handlers/monitoring.py").read_text(encoding="utf-8")
+    # Cursor / PostHog: admins ∩ availability recipients (no beta audience).
+    assert mon_src.count("if uid in avail") >= 2
+    assert "user_ids_with_active_enrollment" not in mon_src
 
     def _fake_sub(**kwargs):
         base = dict(

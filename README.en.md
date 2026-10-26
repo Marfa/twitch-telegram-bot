@@ -39,7 +39,7 @@
 | Streamer Telegram | After manually creating a stream alert, TG channels are appended to the “Setup complete” message after the alert note (Helix/seeds = curated, no disclaimer; otherwise crowd with disclaimer) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
-| System alerts | Toggle admin broadcasts (updates / availability / other / sync / **new betas**, default off, auto-on on first beta opt-in); Twitch outages from status.twitch.com; Cursor incidents (status.cursor.com) — admins only |
+| System alerts | Toggle admin broadcasts (updates / availability / other / sync / **new betas**, default off, auto-on on first beta opt-in); Twitch outages (status.twitch.com) when availability is on; Cursor (status.cursor.com) — admins with the same toggle; status DMs include a “turn off in Settings” footer |
 | Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
