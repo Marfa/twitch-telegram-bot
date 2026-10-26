@@ -3415,6 +3415,26 @@ def check_core() -> None:
         tracked = last_outbound(tracked_uid)
         assert tracked is not None and tracked[0] == "reply"
 
+        # _send_dm_html records outbound_kind for bot_blocked last_bot_message_kind
+        from bot_helpers import _send_dm_html
+        from unittest.mock import AsyncMock, MagicMock
+
+        kind_uid = 987654322
+        dm_bot = MagicMock()
+        dm_bot.send_message = AsyncMock(return_value=MagicMock(message_id=99))
+        dm_db = MagicMock()
+        dm_db.get_notifications_paused_until = MagicMock(return_value=0)
+        status = await _send_dm_html(
+            dm_bot,
+            dm_db,
+            kind_uid,
+            "<b>hi</b>",
+            outbound_kind="twitch_status",
+        )
+        assert status == "sent"
+        kind_tracked = last_outbound(kind_uid)
+        assert kind_tracked is not None and kind_tracked[0] == "twitch_status"
+
     asyncio.run(_fx_roundtrip())
 
     # request_progress: rich thinking draft with timer; classic fallback

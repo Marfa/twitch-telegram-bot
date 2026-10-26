@@ -523,8 +523,14 @@ async def _send_dm_html(
     reply_markup=None,
     disable_web_page_preview: bool = False,
     return_message_id: bool = False,
+    outbound_kind: str = "system_dm",
 ) -> str | tuple[str, int | None]:
-    """Send one DM. Returns 'sent', 'blocked', or 'failed' (optionally with message_id)."""
+    """Send one DM. Returns 'sent', 'blocked', or 'failed' (optionally with message_id).
+
+    ``outbound_kind`` is stored for ``bot_blocked`` context (e.g. ``twitch_status``,
+    ``broadcast:16``) — surfaces as ``last_bot_message_kind`` / Forbidden ``source``.
+    """
+    kind = (outbound_kind or "system_dm").strip() or "system_dm"
     if _user_notifications_paused(db, uid):
         return ("sent", None) if return_message_id else "sent"
     kwargs: dict = {}
@@ -549,7 +555,7 @@ async def _send_dm_html(
         if status == "sent":
             from outbound_messages import note_outbound
 
-            note_outbound(uid, "system_dm")
+            note_outbound(uid, kind)
         if return_message_id:
             mid = getattr(msg, "message_id", None)
             return status, int(mid) if mid is not None else None
@@ -567,7 +573,7 @@ async def _send_dm_html(
             if "blocked" in str(retry_exc).lower():
                 from handlers.delivery import apply_user_blocked
 
-                apply_user_blocked(db, uid, source="system_dm")
+                apply_user_blocked(db, uid, source=kind)
                 return _result("blocked")
             logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
             return _result("failed")
@@ -578,7 +584,7 @@ async def _send_dm_html(
         if "blocked" in str(exc).lower():
             from handlers.delivery import apply_user_blocked
 
-            apply_user_blocked(db, uid, source="system_dm")
+            apply_user_blocked(db, uid, source=kind)
             return _result("blocked")
         logger.warning("Broadcast to %s failed: %s", uid, exc)
         return _result("failed")

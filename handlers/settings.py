@@ -1405,6 +1405,7 @@ async def announce_new_beta_features(context: ContextTypes.DEFAULT_TYPE) -> None
                 uid,
                 f"{body}\n\n{footer}",
                 disable_web_page_preview=True,
+                outbound_kind=f"beta_announce:{feat.id}",
             )
             await asyncio.sleep(_BROADCAST_SEND_PAUSE)
         db.mark_beta_feature_announced(feat.id)

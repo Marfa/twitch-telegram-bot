@@ -165,7 +165,9 @@ async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
     for uid in user_ids:
         locale = locale_rows.get(uid) or DEFAULT_LOCALE
         message = messages.get(locale) or messages[DEFAULT_LOCALE]
-        await _send_dm_html(context.bot, db, uid, message)
+        await _send_dm_html(
+            context.bot, db, uid, message, outbound_kind="twitch_status"
+        )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
     bot_data["twitch_status_alerted_down"] = unhealthy
 
@@ -255,7 +257,12 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         locale = locale_rows.get(uid) or DEFAULT_LOCALE
         message = messages.get(locale) or messages[DEFAULT_LOCALE]
         await _send_dm_html(
-            context.bot, db, uid, message, disable_web_page_preview=True
+            context.bot,
+            db,
+            uid,
+            message,
+            disable_web_page_preview=True,
+            outbound_kind="posthog_status",
         )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
     bot_data["posthog_us_status_alerted_down"] = unhealthy
@@ -355,7 +362,12 @@ async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         locale = locale_rows.get(uid) or DEFAULT_LOCALE
         message = messages.get(locale) or messages[DEFAULT_LOCALE]
         await _send_dm_html(
-            context.bot, db, uid, message, disable_web_page_preview=True
+            context.bot,
+            db,
+            uid,
+            message,
+            disable_web_page_preview=True,
+            outbound_kind="cursor_status",
         )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
     bot_data["cursor_status_alerted_down"] = unhealthy

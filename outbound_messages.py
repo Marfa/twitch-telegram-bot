@@ -2,6 +2,12 @@
 
 In-memory; resets on restart. Blocks usually follow the last DM within
 minutes, so a restart loses only a small diagnostic tail.
+
+Kinds from ``_send_dm_html(outbound_kind=…)``: ``twitch_status``,
+``posthog_status``, ``cursor_status``, ``broadcast:{id}``,
+``beta_announce:{id}`` (fallback ``system_dm``). Other paths use
+``reply``, ``welcome``, ``alert_*``, etc. Surfaced on ``bot_blocked`` as
+``last_bot_message_kind`` (and Forbidden send ``source``).
 """
 from __future__ import annotations
 

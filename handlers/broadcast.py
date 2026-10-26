@@ -664,6 +664,7 @@ async def _send_admin_broadcast(
             message,
             reply_markup=feedback_kb,
             return_message_id=True,
+            outbound_kind=f"broadcast:{broadcast_id}",
         )
         status, message_id = result if isinstance(result, tuple) else (result, None)
         if status == "sent":
