@@ -2215,6 +2215,21 @@ def check_core() -> None:
         def get_unique_twitch_user_ids(self):
             return ["9", "8"]
 
+        def get_premium_status(self, user_id: int):
+            from premium import PremiumStatus
+
+            return PremiumStatus(
+                permanent=True,
+                stars_until=0,
+                stars_charge_id="",
+                stars_canceled=False,
+                twitch_active=False,
+                twitch_user_id="",
+            )
+
+        def is_premium_channel_login(self, login: str) -> bool:
+            return False
+
         def get_enabled_by_twitch_user_id(self, uid: str):
             from types import SimpleNamespace
             from twitch import STREAM_PREVIEW_IMAGE_ID
@@ -2223,8 +2238,10 @@ def check_core() -> None:
                 return []
             return [
                 SimpleNamespace(
+                    owner_id=1,
                     last_message_id=55,
                     image_file_id=STREAM_PREVIEW_IMAGE_ID,
+                    twitch_username="stilllive",
                 )
             ]
 
@@ -3470,7 +3487,6 @@ def check_core() -> None:
 
         # _send_dm_html records outbound_kind for bot_blocked last_bot_message_kind
         from bot_helpers import _send_dm_html
-        from unittest.mock import AsyncMock, MagicMock
 
         kind_uid = 987654322
         dm_bot = MagicMock()

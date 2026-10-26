@@ -553,8 +553,11 @@ def subscription_for_delivery(db: "Database", sub: Any) -> Any:
     from alert_repeats import beta_or_advanced_mode
     from twitch import is_ai_game_cover_image, is_stream_capture_preview_image
 
-    ensure_trial_expired(db, int(sub.owner_id))
-    owner_id = int(sub.owner_id)
+    try:
+        owner_id = int(getattr(sub, "owner_id"))
+    except (TypeError, ValueError, AttributeError):
+        return sub
+    ensure_trial_expired(db, owner_id)
     channel = getattr(sub, "twitch_username", None)
 
     def _ok(feature_id: str) -> bool:
@@ -592,7 +595,13 @@ def subscription_for_delivery(db: "Database", sub: Any) -> Any:
         kw["image_file_id"] = None
     if not kw:
         return sub
-    return replace(sub, **kw)
+    try:
+        return replace(sub, **kw)
+    except TypeError:
+        # Non-dataclass stubs in self_check / duck-typed rows.
+        for key, val in kw.items():
+            setattr(sub, key, val)
+        return sub
 
 
 def is_advanced_mode_enabled(
