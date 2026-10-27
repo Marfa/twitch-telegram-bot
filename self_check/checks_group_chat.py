@@ -345,18 +345,30 @@ async def _check_when_stream_ephemeral_path() -> None:
     ctx.bot.send_message.assert_awaited()
     status_text = ctx.bot.send_message.await_args.args[1]
     assert status_text == t("schedule_query_working", "ru")
-    ctx.bot.do_api_request.assert_awaited()
-    assert ctx.bot.do_api_request.await_args.args[0] == "editEphemeralMessageText"
-    result_text = ctx.bot.do_api_request.await_args.kwargs["api_kwargs"]["text"]
-    assert result_text == t("when_stream_no_schedule", "ru")
+    # edit result + immediate delete of ephemeral slash (not deferred 5 min).
+    endpoints = [c.args[0] for c in ctx.bot.do_api_request.await_args_list if c.args]
+    assert "editEphemeralMessageText" in endpoints
+    assert "deleteEphemeralMessage" in endpoints
+    edit_call = next(
+        c
+        for c in ctx.bot.do_api_request.await_args_list
+        if c.args and c.args[0] == "editEphemeralMessageText"
+    )
+    assert edit_call.kwargs["api_kwargs"]["text"] == t("when_stream_no_schedule", "ru")
+    deleted = {
+        c.kwargs["api_kwargs"]["ephemeral_message_id"]
+        for c in ctx.bot.do_api_request.await_args_list
+        if c.args and c.args[0] == "deleteEphemeralMessage"
+    }
+    assert 11 in deleted
     msg.reply_text.assert_not_awaited()
     ctx.job_queue.run_once.assert_called_once()
     run_kw = ctx.job_queue.run_once.call_args.kwargs
     assert run_kw["when"] == 300
     assert run_kw["job_kwargs"]["misfire_grace_time"] == 300
     job_data = run_kw["data"]
-    eph_ids = {item["ephemeral_message_id"] for item in job_data["ephemerals"]}
-    assert eph_ids == {11, 99}
+    # Only the bot reply waits for TTL — slash already deleted.
+    assert [item["ephemeral_message_id"] for item in job_data["ephemerals"]] == [99]
 
 
 async def _check_when_stream_ephemeral_admin_public_slash() -> None:
@@ -425,19 +437,28 @@ async def _check_when_stream_ephemeral_admin_public_slash() -> None:
 async def _check_when_stream_silent() -> None:
     from handlers.when_stream import when_stream_command
 
+    msg = AsyncMock()
+    msg.message_id = 55
+    msg.api_kwargs = {}
+    msg.ephemeral_message_id = None
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=900001),
         effective_chat=SimpleNamespace(id=-1001, type=ChatType.SUPERGROUP),
-        effective_message=AsyncMock(),
+        effective_message=msg,
         callback_query=None,
     )
     db = MagicMock()
     db.get_user_locale = MagicMock(return_value="ru")
     db.get_enabled_subscriptions_by_chat_id = MagicMock(return_value=[])
     ctx = MagicMock()
+    ctx.bot = AsyncMock()
+    ctx.bot.delete_message = AsyncMock()
+    ctx.job_queue = MagicMock()
     ctx.application.bot_data = {"db": db, "twitch": MagicMock()}
     await when_stream_command(update, ctx)
-    update.effective_message.reply_text.assert_not_awaited()
+    msg.reply_text.assert_not_awaited()
+    # No streamers + public slash → still delete the user command.
+    ctx.bot.delete_message.assert_awaited_once_with(chat_id=-1001, message_id=55)
 
 
 async def _check_when_stream_silent_purges_ephemeral_slash() -> None:
