@@ -1633,7 +1633,9 @@ def check_handlers() -> None:
     # Parse parenthetical hosts — not a URL substring sanitization check (CodeQL).
     menu_hosts = set(re.findall(r"\(([a-z0-9.-]+)(?:;|\))", menu_ru))
     assert CURSOR_STATUS_HOST in menu_hosts
-    assert "Cursor" in tr("sys_availability_label", "ru")
+    assert "Twitch" in tr("sys_availability_label", "ru")
+    assert "Cursor" not in tr("sys_availability_label", "ru")
+    assert "Cursor" not in tr("broadcast_type_availability", "ru")
     assert tr("sys_beta_label", "ru")
     assert tr("beta_announce_header", "ru")
     assert tr("drops_configure_locked", "ru")
