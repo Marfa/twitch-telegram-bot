@@ -485,6 +485,31 @@ def _trigger_ephemeral_handle(
     )
 
 
+async def _purge_orphan_ephemerals(
+    bot,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    chat_id: int,
+    user_id: int,
+    message,
+    status_eph: EphemeralHandle | None = None,
+) -> None:
+    """Drop status + ephemeral slash when we abort without a schedule result.
+
+    Immediate delete; if API fails, fall back to the usual 5‑min cleanup job.
+    """
+    leftovers: list[EphemeralHandle] = []
+    for handle in (status_eph, _trigger_ephemeral_handle(
+        message, chat_id=chat_id, user_id=user_id
+    )):
+        if handle is None:
+            continue
+        if not await delete_ephemeral(bot, handle):
+            leftovers.append(handle)
+    if leftovers:
+        _schedule_cleanup(context, chat_id=chat_id, ephemerals=leftovers)
+
+
 async def _begin_schedule_ephemeral(
     bot,
     *,
@@ -669,11 +694,11 @@ def _schedule_result_cleanup(
     """Delete ephemeral command + bot reply (or public pair) after TTL."""
     ephemerals: list[EphemeralHandle] = []
     deletes: list[tuple[int, DeleteKind]] = []
+    trigger_eph = _trigger_ephemeral_handle(
+        message, chat_id=chat_id, user_id=user_id
+    )
     if isinstance(result, EphemeralHandle):
         ephemerals.append(result)
-        trigger_eph = _trigger_ephemeral_handle(
-            message, chat_id=chat_id, user_id=user_id
-        )
         # Admin path already deleted a public slash; ephemeral slash stays until TTL.
         if trigger_eph is not None and not trigger_deleted:
             if trigger_eph.ephemeral_message_id != result.ephemeral_message_id:
@@ -685,7 +710,15 @@ def _schedule_result_cleanup(
             if mid is not None:
                 deletes.append((int(mid), "user_command"))
     else:
-        return
+        # Deliver failed after we may still have an ephemeral slash — purge it.
+        if trigger_eph is not None and not trigger_deleted:
+            ephemerals.append(trigger_eph)
+        elif not trigger_deleted:
+            mid = getattr(message, "message_id", None)
+            if mid is not None:
+                deletes.append((int(mid), "user_command"))
+        if not ephemerals and not deletes:
+            return
     _schedule_cleanup(
         context,
         chat_id=chat_id,
@@ -717,6 +750,14 @@ async def _schedule_query_command(
         db.get_enabled_subscriptions_by_chat_id(chat_id)
     )
     if not streamers:
+        # Ephemeral /when|/day|/week otherwise sticks forever for the caller.
+        await _purge_orphan_ephemerals(
+            context.bot,
+            context,
+            chat_id=chat_id,
+            user_id=user_id,
+            message=message,
+        )
         return
 
     trigger_eph_before = message_ephemeral_id(message)
@@ -742,8 +783,14 @@ async def _schedule_query_command(
     )
     if not hits:
         if not fetched_ok:
-            if eph is not None:
-                await delete_ephemeral(context.bot, eph)
+            await _purge_orphan_ephemerals(
+                context.bot,
+                context,
+                chat_id=chat_id,
+                user_id=user_id,
+                message=message,
+                status_eph=eph,
+            )
             return
         result = await _deliver_schedule_result(
             message, context, chat_id, _empty_text(mode, lang), eph=eph
