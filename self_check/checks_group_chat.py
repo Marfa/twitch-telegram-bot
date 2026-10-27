@@ -97,7 +97,9 @@ def _check_premium_and_helpers() -> None:
     assert "send_ephemeral_text" in when_src
     assert "edit_ephemeral_text" in when_src
     assert "ensure_group_schedule_ephemeral_commands" in when_src
-    assert "is_ephemeral" in when_src
+    # Public slash on purpose — is_ephemeral stickies aren't reliably deletable.
+    assert 'is_ephemeral": True' not in when_src
+    assert "deleteEphemeralMessage reaches the client" in when_src
     bot_src_eph = (_ROOT / "bot.py").read_text(encoding="utf-8")
     assert "ensure_group_schedule_ephemeral_commands" in bot_src_eph
     eph_src = (_ROOT / "ephemeral.py").read_text(encoding="utf-8")

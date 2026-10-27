@@ -19,7 +19,7 @@ All bot management (commands, reply-menu, setup callbacks, bot-admin tools) runs
 - **Telegram chat admins:** one-time `setup_private_only` («управление только в ЛС»); further attempts silent
 - Never execute the underlying command in a group/channel (even for bot `ADMIN_USER_IDS`)
 - Analytics: `group_setup_private_hint` (`chat_id`, `chat_type`, `is_chat_admin`, `is_bot_admin`)
-- **Allowed in groups/channels:** `/when`, `/day`, `/week` and free-text «Когда стрим?» / «расписание на день|неделю» (EN/UK variants). Slash commands in groups are registered with `is_ephemeral` — status + result via ephemeral messages (only the caller); the user trigger is deleted ASAP after the answer, the bot reply after 5 minutes. Free-text: public reply; trigger deleted ASAP, reply after 5 minutes.
+- **Allowed in groups/channels:** `/when`, `/day`, `/week` and free-text «Когда стрим?» / «расписание на день|неделю» (EN/UK variants). Group `/when` `/day` `/week` are **public** slash (not `is_ephemeral` — Telegram may not deliver `deleteEphemeralMessage` to the client). Chat-admin bot: delete the trigger via `deleteMessage`, answer via ephemeral (caller only); reply TTL 5 minutes. Free-text: public reply; trigger deleted ASAP when allowed, reply after 5 minutes.
 - **Deletes:** only bot-owned messages and those user commands — via `delete_chat_message(..., kind=)`. Never arbitrary chat history. See [`message-delete.mdc`](message-delete.mdc).
 - **Reply language in groups/channels:** `reply_lang` / `bot_admin_lang` — locale of the first `ADMIN_USER_IDS` user with a saved language (else `DEFAULT_LOCALE`), not the command author
 - DM-only slash commands: `GROUP_DM_ONLY_COMMANDS` in `bot_helpers.py`
