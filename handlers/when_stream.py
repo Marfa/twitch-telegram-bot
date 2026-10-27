@@ -1024,19 +1024,25 @@ async def on_schedule_query_callback(
 
 
 async def ensure_group_schedule_ephemeral_commands(bot) -> None:
-    """Register /when /day /week for all group chats (public slash, private reply).
-
-    Do **not** set BotCommand.is_ephemeral. Telegram does not guarantee that
-    deleteEphemeralMessage reaches the client, so ephemeral slash commands
-    stick as «Видит только @bot». With a public slash + chat-admin bot we
-    deleteMessage the trigger reliably and still answer via ephemeral.
-    """
+    """Register /when /day /week as ephemeral for all group chats."""
     scope = BotCommandScopeAllGroupChats()
     for lang in SUPPORTED_LOCALES:
         commands = [
-            BotCommand("when", t("cmd_when_desc", lang)[:256]),
-            BotCommand("day", t("cmd_day_desc", lang)[:256]),
-            BotCommand("week", t("cmd_week_desc", lang)[:256]),
+            BotCommand(
+                "when",
+                t("cmd_when_desc", lang)[:256],
+                api_kwargs={"is_ephemeral": True},
+            ),
+            BotCommand(
+                "day",
+                t("cmd_day_desc", lang)[:256],
+                api_kwargs={"is_ephemeral": True},
+            ),
+            BotCommand(
+                "week",
+                t("cmd_week_desc", lang)[:256],
+                api_kwargs={"is_ephemeral": True},
+            ),
         ]
         language_code = None if lang == "en" else lang
         try:
@@ -1045,5 +1051,5 @@ async def ensure_group_schedule_ephemeral_commands(bot) -> None:
             )
         except Exception:
             logger.exception(
-                "setMyCommands group schedule failed lang=%s", lang
+                "setMyCommands ephemeral schedule failed lang=%s", lang
             )
