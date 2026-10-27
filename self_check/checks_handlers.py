@@ -1599,6 +1599,7 @@ def check_handlers() -> None:
     assert fp_bad[0] == "major"
     assert ("abc", "investigating") in fp_bad[2]
     from handlers.monitoring import (
+        CURSOR_STATUS_HOST,
         _cursor_fingerprint_unhealthy,
         _should_notify_status_change,
         _statuspage_fingerprint_unhealthy,
@@ -1627,8 +1628,11 @@ def check_handlers() -> None:
     assert "All Systems Operational" in msg_ok
     assert "Settings" in msg_ok
     assert tr("broadcast_started", "ru")
-    assert f"({TWITCH_STATUS_HOST})" in tr("sys_notifications_menu", "ru")
-    assert "status.cursor.com" in tr("sys_notifications_menu", "ru")
+    menu_ru = tr("sys_notifications_menu", "ru")
+    assert f"({TWITCH_STATUS_HOST})" in menu_ru
+    # Parse parenthetical hosts — not a URL substring sanitization check (CodeQL).
+    menu_hosts = set(re.findall(r"\(([a-z0-9.-]+)(?:;|\))", menu_ru))
+    assert CURSOR_STATUS_HOST in menu_hosts
     assert "Cursor" in tr("sys_availability_label", "ru")
     assert tr("sys_beta_label", "ru")
     assert tr("beta_announce_header", "ru")

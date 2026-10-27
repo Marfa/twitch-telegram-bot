@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 TWITCH_STATUS_HOST = "status.twitch.com"
 TWITCH_STATUS_PAGE_URL = f"https://{TWITCH_STATUS_HOST}/"
-CURSOR_STATUS_API_URL = "https://status.cursor.com/api/v2/status.json"
-CURSOR_STATUS_PAGE_URL = "https://status.cursor.com/"
+CURSOR_STATUS_HOST = "status.cursor.com"
+CURSOR_STATUS_API_URL = f"https://{CURSOR_STATUS_HOST}/api/v2/status.json"
+CURSOR_STATUS_PAGE_URL = f"https://{CURSOR_STATUS_HOST}/"
 
 _TWITCH_INDICATOR_KEYS = {
     "none": "twitch_indicator_none",
