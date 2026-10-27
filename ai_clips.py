@@ -1,17 +1,19 @@
 """Post-VOD peaks → Helix Create Clip From VOD.
 
 Sources (priority): chat phrase clip/клип → Groq emotion (ASR+score>3) →
-Groq gaming chat context → remaining audio RMS → remaining chat spikes.
+game (lexicon/audio heuristics, then Groq chat context) → remaining audio RMS →
+remaining chat spikes.
 Chat spikes: unique chatters vs rolling baseline, chat-lag shift, reaction
 boost (hype/funny/…). Audio: RMS + silence→explosion + burst density.
-Top-10 audio peaks get Whisper + emotion LLM; chat spikes get context LLM.
+Top-10 audio peaks get Whisper + emotion LLM; chat spikes get lexicon boost
+and/or context LLM. Nearby game events collapse into one clip window.
 Merged finalists get one Groq head-to-head rerank when available.
-If Groq is down/rate-limited, those tiers are skipped; HTTP 429 sets a sticky
-24h cooldown before the next Groq attempt.
+If Groq is down/rate-limited, lexicon heuristics still promote game spikes;
+HTTP 429 sets a sticky 24h cooldown before the next Groq attempt.
 Downloads no durable media: streamlink audio_only is piped through ffmpeg to
 PCM, RMS is scored in memory, then temp dirs (if any) are removed in finally.
-ponytail: streamlink/Twitch HLS is the same unofficial path as stream_capture;
-upgrade = official media API if Twitch ever ships one.
+ponytail: no OCR/HUD — chat keywords + loudness only; upgrade = per-game
+vision if we ever need kill-feed precision.
 
 Gray area: VOD chat uses unofficial gql.twitch.tv VideoCommentsByOffsetOrCursor
 (time-offset scan only; no cursor). Scoped exception in api-license-compliance.
@@ -59,6 +61,10 @@ SPIKE_SEED_N = 10
 ASR_WINDOW_SEC = 20
 EMOTION_MIN_SCORE = 3  # candidate when score > this (4–5)
 CHAT_CONTEXT_WINDOW_SEC = 45
+# Nearby game beats → one Helix window (end after last event).
+SERIES_GAP_SEC = 20
+SERIES_POST_SEC = 4
+AUDIO_NEAR_SEC = 45  # chat spike ↔ loud peak alignment
 _GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 _GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 _GROQ_WHISPER_MODEL = "whisper-large-v3-turbo"
@@ -170,6 +176,41 @@ _REACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("clip_ask", re.compile(r"(?i)clip\s*(it|that|this)|клип\s*(это|пожалуйста)?")),
 )
 _REACTION_TOKEN_RE = re.compile(r"[\w'+]+", re.UNICODE)
+# Chat lexicon for gameplay beats (EN/RU); not emote-only spam.
+GAME_KEYWORD_RE = re.compile(
+    r"(?i)(?<!\w)(?:"
+    r"kill(?:ed|s|ing)?|clutch(?:ed|es|ing)?|ace|headshot|hs|"
+    r"knock(?:ed|s)?|nuke|1v[1-5]|booyah|winner\s*winner|"
+    r"килл(?:ы|ов|а)?|убил(?:а|и)?|хедшот|клатч|эйс|"
+    r"нок(?:аут)?|сбил(?:а|и)?|нокаут"
+    r")(?!\w)"
+)
+# Substrings of Helix game_name / category (lowercase).
+_ACTION_CATEGORY_SUBSTR = (
+    "pubg",
+    "battlegrounds",
+    "counter-strike",
+    "cs2",
+    "cs:go",
+    "valorant",
+    "apex legends",
+    "call of duty",
+    "warzone",
+    "fortnite",
+    "escape from tarkov",
+    "tarkov",
+    "dota 2",
+    "league of legends",
+    "overwatch",
+    "rainbow six",
+    "r6",
+    "teamfight tactics",
+    "dead by daylight",
+    "rust",
+    "dayz",
+    "hunt: showdown",
+    "marvel rivals",
+)
 
 # Twitch web Client-ID required for persisted VideoComments query (partner Helix
 # Client-ID does not serve this GQL). Read-only; not used for Helix auth.
@@ -201,8 +242,11 @@ Text:
 # Category/title help disambiguate (Helix VOD has no game_id — caller passes
 # channel last/current category + VOD title).
 GROQ_CONTEXT_PROMPT = """Classify a Twitch chat burst. Reply with ONLY one word:
-game — reactions to gameplay (fight, clutch, boss, win/lose, skill play, in-game event)
+game — reactions to gameplay (fight, clutch, kill, knock, ace, boss, win/lose, skill play, in-game event)
 chat — social talk, greetings, memes, emotes-only, off-topic, no clear game beat
+
+Prefer game when chat mentions kills/clutches/knocks/aces or clear play-by-play.
+Prefer chat when messages are greetings, donation thanks, or emotes with no play context.
 
 Category: {category}
 Stream title: {title}
@@ -480,6 +524,64 @@ def find_message_spikes(
         if len(picked) >= n:
             break
     return sorted(picked, key=lambda p: p.vod_offset)
+
+
+def chat_game_keyword_hits(text: str) -> int:
+    """Count gameplay lexicon hits in chat/ASR text."""
+    if not text:
+        return 0
+    return len(GAME_KEYWORD_RE.findall(text))
+
+
+def category_is_action_game(category: str) -> bool:
+    """True when Helix category looks like an action/competitive title."""
+    name = (category or "").strip().lower()
+    if not name:
+        return False
+    return any(s in name for s in _ACTION_CATEGORY_SUBSTR)
+
+
+def collapse_candidate_series(
+    cands: list[ClipCandidate],
+    *,
+    gap_sec: int = SERIES_GAP_SEC,
+    post_sec: int = SERIES_POST_SEC,
+) -> list[ClipCandidate]:
+    """Merge candidates within ``gap_sec`` into one clip ending after the last.
+
+    Score = best in the series + (n-1); source keeps the earliest priority label
+    among phrase → emotion → game → audio → spike present in the group.
+    """
+    if not cands:
+        return []
+    gap = max(0, int(gap_sec))
+    post = max(0, int(post_sec))
+    ordered = sorted(cands, key=lambda c: c.vod_offset)
+    groups: list[list[ClipCandidate]] = [[ordered[0]]]
+    for c in ordered[1:]:
+        if int(c.vod_offset) - int(groups[-1][-1].vod_offset) <= gap:
+            groups[-1].append(c)
+        else:
+            groups.append([c])
+    priority = ("phrase", "emotion", "game", "audio", "spike")
+    out: list[ClipCandidate] = []
+    for group in groups:
+        best = max(group, key=lambda c: c.score)
+        source: ClipSource = best.source
+        for pref in priority:
+            if any(c.source == pref for c in group):
+                source = pref  # type: ignore[assignment]
+                break
+        # Extra post-roll only when several beats share a window.
+        end = int(group[-1].vod_offset) + (post if len(group) > 1 else 0)
+        out.append(
+            ClipCandidate(
+                vod_offset=end,
+                score=float(best.score) + float(len(group) - 1),
+                source=source,
+            )
+        )
+    return out
 
 
 def clip_start_offset(
@@ -1041,6 +1143,87 @@ def _chat_text_near(
         if len(lines) >= max_lines:
             break
     return "\n".join(lines)[:max_chars]
+
+
+def _audio_near_peak(
+    offset: int,
+    audio_peaks: list[LoudPeak],
+    *,
+    within_sec: int = AUDIO_NEAR_SEC,
+) -> LoudPeak | None:
+    """Closest loud peak within ``within_sec`` of clip end offset, else None."""
+    if not audio_peaks or within_sec <= 0:
+        return None
+    best: LoudPeak | None = None
+    best_dist = within_sec + 1
+    for peak in audio_peaks:
+        dist = abs(int(peak.vod_offset) - int(offset))
+        if dist <= within_sec and dist < best_dist:
+            best = peak
+            best_dist = dist
+    return best
+
+
+def promote_spikes_to_game(
+    messages: list[ChatMessage],
+    spikes: list[ClipCandidate],
+    audio_peaks: list[LoudPeak] | None = None,
+    *,
+    category: str = "",
+    window_sec: int = CHAT_CONTEXT_WINDOW_SEC,
+) -> tuple[list[ClipCandidate], list[ClipCandidate]]:
+    """Promote chat spikes to game via lexicon + nearby loudness (no OCR/LLM).
+
+    Rules (any): ≥2 keyword hits; ≥1 hit + loud peak nearby; action category +
+    ≥1 hit; action category + loud nearby + strong spike (score ≥ 8).
+    Remaining spikes keep a small score bump when signals are weak but present.
+    """
+    if not spikes:
+        return [], []
+    action = category_is_action_game(category)
+    audio = list(audio_peaks or ())
+    game: list[ClipCandidate] = []
+    remain: list[ClipCandidate] = []
+    for spike in spikes:
+        chat_text = _chat_text_near(
+            messages, spike.vod_offset, window_sec=window_sec
+        )
+        hits = chat_game_keyword_hits(chat_text)
+        near = _audio_near_peak(spike.vod_offset, audio)
+        loud_near = near is not None
+        promote = (
+            hits >= 2
+            or (hits >= 1 and loud_near)
+            or (action and hits >= 1)
+            or (action and loud_near and float(spike.score) >= 8.0)
+        )
+        if promote:
+            boost = float(spike.score) + 2.0 * hits + (1.5 if loud_near else 0.0)
+            game.append(
+                ClipCandidate(
+                    vod_offset=spike.vod_offset, score=boost, source="game"
+                )
+            )
+        elif hits or loud_near:
+            remain.append(
+                ClipCandidate(
+                    vod_offset=spike.vod_offset,
+                    score=float(spike.score)
+                    + float(hits)
+                    + (0.5 if loud_near else 0.0),
+                    source="spike",
+                )
+            )
+        else:
+            remain.append(spike)
+    logger.info(
+        "ai_clips heuristic game spikes=%s game=%s remain=%s action=%s",
+        len(spikes),
+        len(game),
+        len(remain),
+        action,
+    )
+    return game, remain
 
 
 def _transcribe_vod_window(vod_id: str, start_sec: int, window_sec: int) -> str:

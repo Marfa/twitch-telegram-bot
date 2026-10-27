@@ -31,6 +31,7 @@ from ai_clips import (
     classify_spikes_with_groq,
     clip_start_offset,
     clip_watch_url,
+    collapse_candidate_series,
     fetch_vod_chat_messages,
     filter_unoccupied,
     find_loud_peaks,
@@ -43,6 +44,7 @@ from ai_clips import (
     merge_clip_candidates,
     normalize_clip_source,
     parse_helix_duration,
+    promote_spikes_to_game,
     rerank_clip_candidates,
     score_audio_peaks_with_groq,
     start_is_occupied,
@@ -1250,26 +1252,34 @@ async def _run_job(
             game_peaks: list[ClipCandidate] = []
             remain_audio: list[LoudPeak] = list(audio_peaks)
             remain_spikes: list[ClipCandidate] = list(spikes)
-            # Helix VOD has no game_id; channel last/current category for Groq.
+            # Helix VOD has no game_id; channel last/current category for heuristics + Groq.
             stream_category = ""
+            try:
+                channel = await asyncio.to_thread(
+                    twitch.get_channel, token["twitch_user_id"]
+                )
+                if channel:
+                    stream_category = str(
+                        channel.get("game_name") or ""
+                    ).strip()
+            except Exception:
+                logger.warning(
+                    "ai_clips category lookup failed vod=%s",
+                    job.vod_id,
+                    exc_info=True,
+                )
+            if remain_spikes:
+                heur_game, remain_spikes = promote_spikes_to_game(
+                    chat_msgs,
+                    remain_spikes,
+                    remain_audio,
+                    category=stream_category,
+                )
+                game_peaks.extend(heur_game)
             if groq_api_ready():
                 db.update_ai_clips_job(
                     job_id, status="analyzing", progress_pct=88
                 )
-                try:
-                    channel = await asyncio.to_thread(
-                        twitch.get_channel, token["twitch_user_id"]
-                    )
-                    if channel:
-                        stream_category = str(
-                            channel.get("game_name") or ""
-                        ).strip()
-                except Exception:
-                    logger.warning(
-                        "ai_clips category lookup failed vod=%s",
-                        job.vod_id,
-                        exc_info=True,
-                    )
                 if remain_audio and groq_asr_ready():
                     try:
                         emotion_peaks, remain_audio = await asyncio.to_thread(
@@ -1286,13 +1296,14 @@ async def _run_job(
                         )
                 if remain_spikes:
                     try:
-                        game_peaks, remain_spikes = await asyncio.to_thread(
+                        groq_game, remain_spikes = await asyncio.to_thread(
                             classify_spikes_with_groq,
                             chat_msgs,
                             remain_spikes,
                             category=stream_category,
                             title=job.vod_title or "",
                         )
+                        game_peaks.extend(groq_game)
                     except Exception:
                         logger.warning(
                             "ai_clips groq context failed owner=%s vod=%s",
@@ -1300,6 +1311,9 @@ async def _run_job(
                             job.vod_id,
                             exc_info=True,
                         )
+            emotion_peaks = collapse_candidate_series(emotion_peaks)
+            game_peaks = collapse_candidate_series(game_peaks)
+            remain_spikes = collapse_candidate_series(remain_spikes)
             # Spare slots so create can skip late-appearing Helix clips.
             peaks = merge_clip_candidates(
                 phrases,

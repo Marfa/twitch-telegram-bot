@@ -191,9 +191,13 @@ def check_core() -> None:
 
     # Merge priority: phrase → emotion → game → audio → spike.
     from ai_clips import (
+        category_is_action_game,
+        chat_game_keyword_hits,
+        collapse_candidate_series,
         normalize_clip_source,
         parse_context_label,
         parse_emotion_score,
+        promote_spikes_to_game,
     )
 
     assert parse_emotion_score("4") == 4
@@ -203,6 +207,43 @@ def check_core() -> None:
     assert parse_context_label("CHAT please") == "chat"
     assert parse_context_label("maybe") is None
     assert normalize_clip_source("asr") == "emotion"
+    assert chat_game_keyword_hits("nice clutch and килл") >= 2
+    assert chat_game_keyword_hits("hello hi") == 0
+    assert category_is_action_game("PUBG: BATTLEGROUNDS")
+    assert category_is_action_game("Just Chatting") is False
+    # Lexicon + loudness promote spike → game without Groq.
+    heur_msgs = [
+        ChatMessage(290.0, "CLUTCH???"),
+        ChatMessage(295.0, "килл"),
+        ChatMessage(298.0, "ACE"),
+    ]
+    heur_spikes = [ClipCandidate(300, 12.0, "spike")]
+    heur_audio = [LoudPeak(vod_offset=305, score=50.0)]
+    heur_game, heur_remain = promote_spikes_to_game(
+        heur_msgs, heur_spikes, heur_audio, category="Valorant"
+    )
+    assert len(heur_game) == 1 and heur_game[0].source == "game"
+    assert heur_remain == []
+    # Social spike stays spike.
+    social_game, social_remain = promote_spikes_to_game(
+        [ChatMessage(100.0, "hi"), ChatMessage(101.0, "LUL")],
+        [ClipCandidate(120, 20.0, "spike")],
+        [],
+        category="Just Chatting",
+    )
+    assert social_game == [] and len(social_remain) == 1
+    # Series collapse: nearby game beats → one window after last + post.
+    collapsed = collapse_candidate_series(
+        [
+            ClipCandidate(100, 3.0, "game"),
+            ClipCandidate(112, 5.0, "game"),
+            ClipCandidate(200, 2.0, "game"),
+        ],
+        gap_sec=20,
+        post_sec=4,
+    )
+    assert [c.vod_offset for c in collapsed] == [116, 200]
+    assert collapsed[0].score == 6.0  # best 5 + (2-1)
     from ai_clips import GROQ_CONTEXT_PROMPT
 
     ctx_prompt = GROQ_CONTEXT_PROMPT.format(
@@ -213,6 +254,7 @@ def check_core() -> None:
     assert "Escape from Tarkov" in ctx_prompt
     assert "Стрим 14 !glist" in ctx_prompt
     assert "POGGERS" in ctx_prompt
+    assert "kills/clutches" in ctx_prompt
 
     merged = merge_clip_candidates(
         [ClipCandidate(90, 1.0, "phrase")],
