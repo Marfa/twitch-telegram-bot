@@ -23,6 +23,19 @@ def check_alert_repeats() -> None:
     assert format_repeat_notify_minutes([30, 5]) == "5,30"
     assert repeat_notify_job_name(9, 15) == "repeat_9_15"
 
+    # GA: is_enabled is True for all, but Premium gate must still apply.
+    from alert_repeats import beta_or_advanced_mode
+    from unittest.mock import MagicMock, patch
+
+    db = MagicMock()
+    with patch("beta.get_feature") as gf:
+        gf.return_value = SimpleNamespace(stage="ga", id=BETA_FEATURE_ID)
+        assert beta_or_advanced_mode(db, 1, has_advanced_mode=False) is False
+        assert beta_or_advanced_mode(db, 1, has_advanced_mode=True) is True
+    with patch("beta.get_feature") as gf, patch("beta.is_enabled", return_value=True):
+        gf.return_value = SimpleNamespace(stage="beta", id=BETA_FEATURE_ID)
+        assert beta_or_advanced_mode(db, 1, has_advanced_mode=False) is True
+
     # Interval semantics: each tick re-arms the same minute value while live.
     from pathlib import Path
 

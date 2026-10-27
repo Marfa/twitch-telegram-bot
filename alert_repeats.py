@@ -77,11 +77,18 @@ def sub_tracks_last_message_for_overlap(sub: Any) -> bool:
 def beta_or_advanced_mode(
     db: Any, user_id: int, *, has_advanced_mode: bool
 ) -> bool:
-    """Edit/create gate: Premium advanced_mode, or beta enrollment while stage is beta."""
+    """Edit/create/delivery gate: Premium advanced_mode, or enrolled while alpha/beta.
+
+    After GA, ``is_enabled`` is True for everyone — Premium still required
+    (``has_advanced_mode``); do not treat GA as a Premium bypass.
+    """
     if has_advanced_mode:
         return True
     import beta as beta_features
 
+    feat = beta_features.get_feature(BETA_FEATURE_ID)
+    if feat is None or feat.stage not in ("alpha", "beta"):
+        return False
     return beta_features.is_enabled(db, user_id, BETA_FEATURE_ID)
 
 
