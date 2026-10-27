@@ -5,7 +5,6 @@ import asyncio
 import html
 import logging
 import re
-import uuid
 from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 
@@ -21,16 +20,10 @@ from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
-from bot_helpers import (
-    DeleteKind,
-    clear_group_reply_keyboard,
-    delete_chat_message,
-    reply_lang,
-)
+from bot_helpers import clear_group_reply_keyboard, reply_lang
 from db import Database
 from ephemeral import (
     EphemeralHandle,
-    delete_ephemeral,
     edit_ephemeral_text,
     message_ephemeral_id,
     send_ephemeral_text,
@@ -42,12 +35,6 @@ from twitch import TwitchClient, twitch_login_link_html
 logger = logging.getLogger(__name__)
 
 ScheduleMode = Literal["when", "day", "week"]
-
-# Ephemeral command + bot reply stay until we delete them (no short bot-side TTL).
-SCHEDULE_REPLY_DELETE_AFTER = timedelta(minutes=5)
-# Default APScheduler grace is 1s — a slow interval job (e.g. schedule_reminders)
-# can delay the executor past that and drop the cleanup entirely.
-SCHEDULE_REPLY_DELETE_MISFIRE_GRACE = int(SCHEDULE_REPLY_DELETE_AFTER.total_seconds())
 
 # Free-text triggers. Leading @bot is common under Telegram privacy mode.
 WHEN_STREAM_TEXT_RE = re.compile(
@@ -373,157 +360,6 @@ async def _bot_is_chat_admin(bot, chat_id: int) -> bool:
     )
 
 
-async def _delete_trigger_message(bot, chat_id: int, message) -> bool:
-    """Delete the user command that triggered a schedule query (slash / free-text)."""
-    mid = getattr(message, "message_id", None)
-    if mid is None:
-        return False
-    try:
-        await delete_chat_message(
-            bot, chat_id, int(mid), kind="user_command"
-        )
-        return True
-    except (BadRequest, Forbidden):
-        return False
-    except Exception:
-        logger.exception("delete trigger message failed chat=%s mid=%s", chat_id, mid)
-        return False
-
-
-async def _delete_schedule_messages_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    job = context.job
-    if job is None:
-        return
-    data = job.data or {}
-    bot = context.bot
-    for item in data.get("ephemerals") or []:
-        try:
-            handle = EphemeralHandle(
-                chat_id=int(item["chat_id"]),
-                receiver_user_id=int(item["receiver_user_id"]),
-                ephemeral_message_id=int(item["ephemeral_message_id"]),
-            )
-            await delete_ephemeral(bot, handle)
-        except Exception:
-            logger.exception("schedule ephemeral auto-delete failed %s", item)
-    chat_id = data.get("chat_id")
-    for item in data.get("deletes") or []:
-        if chat_id is None:
-            continue
-        mid = item.get("message_id")
-        kind: DeleteKind | None = item.get("kind")
-        if mid is None or kind not in ("bot_own", "user_command"):
-            continue
-        try:
-            await delete_chat_message(
-                bot, int(chat_id), int(mid), kind=kind
-            )
-        except (BadRequest, Forbidden):
-            pass
-        except Exception:
-            logger.exception(
-                "schedule message auto-delete failed chat=%s mid=%s", chat_id, mid
-            )
-
-
-def _schedule_cleanup(
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    chat_id: int,
-    ephemerals: list[EphemeralHandle] | None = None,
-    deletes: list[tuple[int, DeleteKind]] | None = None,
-) -> None:
-    eph_payload = [
-        {
-            "chat_id": h.chat_id,
-            "receiver_user_id": h.receiver_user_id,
-            "ephemeral_message_id": h.ephemeral_message_id,
-        }
-        for h in (ephemerals or [])
-    ]
-    delete_payload = [
-        {"message_id": int(mid), "kind": kind}
-        for mid, kind in (deletes or [])
-    ]
-    if not eph_payload and not delete_payload:
-        return
-    jq = context.job_queue
-    if jq is None:
-        return
-    anchor = (
-        eph_payload[0]["ephemeral_message_id"]
-        if eph_payload
-        else delete_payload[0]["message_id"]
-    )
-    job_name = f"sched_msg_del_{chat_id}_{anchor}_{uuid.uuid4().hex[:8]}"
-    jq.run_once(
-        _delete_schedule_messages_job,
-        when=SCHEDULE_REPLY_DELETE_AFTER.total_seconds(),
-        data={
-            "chat_id": int(chat_id),
-            "ephemerals": eph_payload,
-            "deletes": delete_payload,
-        },
-        name=job_name,
-        job_kwargs={
-            "id": job_name,
-            "replace_existing": False,
-            "misfire_grace_time": SCHEDULE_REPLY_DELETE_MISFIRE_GRACE,
-            "coalesce": True,
-        },
-    )
-
-
-def _trigger_ephemeral_handle(
-    message, *, chat_id: int, user_id: int
-) -> EphemeralHandle | None:
-    eph_id = message_ephemeral_id(message)
-    if eph_id is None:
-        return None
-    return EphemeralHandle(
-        chat_id=int(chat_id),
-        receiver_user_id=int(user_id),
-        ephemeral_message_id=eph_id,
-    )
-
-
-async def _purge_orphan_ephemerals(
-    bot,
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    chat_id: int,
-    user_id: int,
-    message,
-    status_eph: EphemeralHandle | None = None,
-) -> None:
-    """Drop status + user trigger when we abort without a schedule result.
-
-    Immediate delete; if API fails, fall back to the usual 5‑min cleanup job.
-    Public / unparsed slash also goes through deleteMessage (bot needs delete rights).
-    """
-    leftovers: list[EphemeralHandle] = []
-    trigger = _trigger_ephemeral_handle(
-        message, chat_id=chat_id, user_id=user_id
-    )
-    for handle in (status_eph, trigger):
-        if handle is None:
-            continue
-        if not await delete_ephemeral(bot, handle):
-            leftovers.append(handle)
-    if leftovers:
-        _schedule_cleanup(context, chat_id=chat_id, ephemerals=leftovers)
-    if trigger is None:
-        # No ephemeral id (public slash / free-text, or PTB dropped the field).
-        if not await _delete_trigger_message(bot, chat_id, message):
-            mid = getattr(message, "message_id", None)
-            if mid is not None:
-                _schedule_cleanup(
-                    context,
-                    chat_id=chat_id,
-                    deletes=[(int(mid), "user_command")],
-                )
-
-
 async def _begin_schedule_ephemeral(
     bot,
     *,
@@ -532,16 +368,17 @@ async def _begin_schedule_ephemeral(
     user_id: int,
     message,
     lang: str,
-) -> tuple[EphemeralHandle | None, bool]:
+) -> EphemeralHandle | None:
     """Status ephemeral for the requester; admin path when the slash was public.
 
-    Returns (status_handle, trigger_deleted).
+    No trigger/reply auto-delete — ephemeral UI is left to Telegram (deletion
+    via Bot API is unreliable on clients).
     """
     if not _group_chat_type(chat):
-        return None, False
+        return None
     reply_eph_id = message_ephemeral_id(message)
     if reply_eph_id is not None:
-        handle = await send_ephemeral_text(
+        return await send_ephemeral_text(
             bot,
             chat_id,
             t("schedule_query_working", lang),
@@ -549,22 +386,17 @@ async def _begin_schedule_ephemeral(
             reply_to_ephemeral_id=reply_eph_id,
             reply_markup=ReplyKeyboardRemove(),
         )
-        return handle, False
     # Clients may still send a public /week even when is_ephemeral is set.
     # Chat-admin bots may start an ephemeral thread without an ephemeral trigger.
     if not await _bot_is_chat_admin(bot, chat_id):
-        return None, False
-    eph = await send_ephemeral_text(
+        return None
+    return await send_ephemeral_text(
         bot,
         chat_id,
         t("schedule_query_working", lang),
         user_id,
         reply_markup=ReplyKeyboardRemove(),
     )
-    if eph is None:
-        return None, False
-    deleted = await _delete_trigger_message(bot, chat_id, message)
-    return eph, deleted
 
 
 async def _reply_schedule_message(
@@ -592,7 +424,6 @@ async def _reply_schedule_message(
     try:
         sent = await message.reply_text(text, **send_kw)
     except BadRequest as exc:
-        # Trigger deleted while we fetched schedule — still answer in the chat.
         if "message to be replied not found" not in str(exc).lower():
             raise
         sent = await context.bot.send_message(chat_id, text, **send_kw)
@@ -629,8 +460,7 @@ async def _deliver_schedule_result(
         )
         if ok:
             return eph
-        # Edit failed — send a fresh ephemeral result; drop the stuck status.
-        await delete_ephemeral(context.bot, eph)
+        # Edit failed — send a fresh ephemeral result (leave stuck status; no deletes).
         replacement = await send_ephemeral_text(
             context.bot,
             chat_id,
@@ -701,67 +531,6 @@ async def _edit_schedule_message(
         pass
 
 
-async def _finalize_schedule_result(
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    chat_id: int,
-    user_id: int,
-    message,
-    result: EphemeralHandle | int | None,
-    trigger_deleted: bool,
-) -> None:
-    """Drop the user trigger ASAP; keep the bot reply until the 5‑min TTL.
-
-    Ephemeral slash labels («Видит только @bot») otherwise linger for the full
-    TTL even though the answer is already on screen.
-    """
-    trigger_eph = _trigger_ephemeral_handle(
-        message, chat_id=chat_id, user_id=user_id
-    )
-    if isinstance(result, EphemeralHandle):
-        if (
-            trigger_eph is not None
-            and not trigger_deleted
-            and trigger_eph.ephemeral_message_id != result.ephemeral_message_id
-        ):
-            if not await delete_ephemeral(context.bot, trigger_eph):
-                _schedule_cleanup(
-                    context,
-                    chat_id=chat_id,
-                    ephemerals=[result, trigger_eph],
-                )
-                return
-        _schedule_cleanup(context, chat_id=chat_id, ephemerals=[result])
-        return
-    if isinstance(result, int):
-        deletes: list[tuple[int, DeleteKind]] = [(result, "bot_own")]
-        if not trigger_deleted:
-            if trigger_eph is not None:
-                if not await delete_ephemeral(context.bot, trigger_eph):
-                    _schedule_cleanup(
-                        context,
-                        chat_id=chat_id,
-                        ephemerals=[trigger_eph],
-                        deletes=deletes,
-                    )
-                    return
-            else:
-                if not await _delete_trigger_message(context.bot, chat_id, message):
-                    mid = getattr(message, "message_id", None)
-                    if mid is not None:
-                        deletes.append((int(mid), "user_command"))
-        _schedule_cleanup(context, chat_id=chat_id, deletes=deletes)
-        return
-    # Deliver failed — purge leftover trigger/status.
-    await _purge_orphan_ephemerals(
-        context.bot,
-        context,
-        chat_id=chat_id,
-        user_id=user_id,
-        message=message,
-    )
-
-
 async def _schedule_query_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -785,18 +554,10 @@ async def _schedule_query_command(
         db.get_enabled_subscriptions_by_chat_id(chat_id)
     )
     if not streamers:
-        # Ephemeral /when|/day|/week otherwise sticks forever for the caller.
-        await _purge_orphan_ephemerals(
-            context.bot,
-            context,
-            chat_id=chat_id,
-            user_id=user_id,
-            message=message,
-        )
         return
 
     # Ephemeral: reply to ephemeral slash, or admin-start when the slash was public.
-    eph, trigger_deleted = await _begin_schedule_ephemeral(
+    eph = await _begin_schedule_ephemeral(
         context.bot,
         chat=chat,
         chat_id=chat_id,
@@ -811,43 +572,19 @@ async def _schedule_query_command(
     )
     if not hits:
         if not fetched_ok:
-            await _purge_orphan_ephemerals(
-                context.bot,
-                context,
-                chat_id=chat_id,
-                user_id=user_id,
-                message=message,
-                status_eph=eph,
-            )
             return
-        result = await _deliver_schedule_result(
+        await _deliver_schedule_result(
             message, context, chat_id, _empty_text(mode, lang), eph=eph
-        )
-        await _finalize_schedule_result(
-            context,
-            chat_id=chat_id,
-            user_id=user_id,
-            message=message,
-            result=result,
-            trigger_deleted=trigger_deleted,
         )
         return
 
     if len(hits) == 1:
-        result = await _deliver_schedule_result(
+        await _deliver_schedule_result(
             message, context, chat_id, hits[0][2], eph=eph
-        )
-        await _finalize_schedule_result(
-            context,
-            chat_id=chat_id,
-            user_id=user_id,
-            message=message,
-            result=result,
-            trigger_deleted=trigger_deleted,
         )
         return
 
-    result = await _deliver_schedule_result(
+    await _deliver_schedule_result(
         message,
         context,
         chat_id,
@@ -856,14 +593,6 @@ async def _schedule_query_command(
         reply_markup=schedule_streamer_keyboard(
             mode, [(uid, name) for uid, name, _text in hits]
         ),
-    )
-    await _finalize_schedule_result(
-        context,
-        chat_id=chat_id,
-        user_id=user_id,
-        message=message,
-        result=result,
-        trigger_deleted=trigger_deleted,
     )
 
 
