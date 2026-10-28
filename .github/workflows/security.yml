@@ -30,3 +30,18 @@ jobs:
       - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Value-based: fails if a tracked .env* slipped in (CI has no secrets .env).
+  # Local pre-commit uses real .env values via scripts/pre-commit-gitleaks.sh.
+  omerta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10
+      - name: omerta check (tracked files)
+        run: uvx omerta@0.1.2 check --all
+      - name: omerta history
+        run: uvx omerta@0.1.2 history

@@ -8,7 +8,7 @@ Adapted for this Telegram bot (handlers + small HTTP surface), not a full web AS
 
 **How:** for each item mark `PASS` / `FAIL` / `RISK` / `N/A`, note evidence (`file:line` or command), and log the run below.
 
-**Out of scope here:** SPA XSS/CSRF, cookie session fixation, classic form CSRF. Prefer manual/code review + existing CI (`pip-audit`, `gitleaks`, `self_check`).
+**Out of scope here:** SPA XSS/CSRF, cookie session fixation, classic form CSRF. Prefer manual/code review + existing CI (`pip-audit`, `gitleaks`, `omerta`, `self_check`).
 
 ---
 
@@ -42,7 +42,7 @@ Adapted for this Telegram bot (handlers + small HTTP surface), not a full web AS
 
 | # | Check | Expected |
 |---|--------|----------|
-| C1 | No secrets in git | `.env` gitignored; `gitleaks` CI green |
+| C1 | No secrets in git | `.env` gitignored; `gitleaks` + `omerta` CI green; local hook `scripts/pre-commit-gitleaks.sh` |
 | C2 | Twitch refresh tokens encrypted at rest | `token_crypto` / `enc:v1:`; prefer dedicated `TOKEN_ENCRYPTION_KEY` in prod |
 | C3 | Logs do not print access/refresh tokens or API keys | OAuth paths avoid `logger.exception` with tokens in locals; PostHog scrubbers |
 | C4 | OAuth `state` unpredictable + short TTL + one-time | uuid4 / equivalent; pop-on-use; TTL ≤ 10–15 min |
@@ -141,6 +141,8 @@ Adapted for this Telegram bot (handlers + small HTTP surface), not a full web AS
 pip-audit -r requirements.txt
 # gitleaks via Actions; locally if installed:
 # gitleaks detect --source . --no-git
+# omerta (your .env values; needs local .env + uv/omerta):
+# uvx omerta@0.1.2 check --all
 
 # Mutating callbacks registration
 rg -n "CallbackQueryHandler|pattern=" bot.py | head -80
@@ -179,7 +181,7 @@ rg -n "edit_set:|has_feature.*delete_prev|delete_previous" handlers/subscription
 | E2–E3 | PASS | Spot-checked; follow active-subscription-gate on future changes |
 | F1 | PASS | Health returns short status strings |
 | F2 | **RISK** | `0.0.0.0` + host `"8080:8080"` — harden if public without nginx |
-| F3–F4 | PASS | `security.yml` pip-audit + gitleaks |
+| F3–F4 | PASS | `security.yml` pip-audit + gitleaks + omerta |
 | G1–G2 | N/A this run | Re-check alerts before next push per pre-push rule |
 | H1 | PASS | EventSub HMAC + `compare_digest` |
 | H2 | **RISK** | `timestamp_fresh` returns `True` if RFC3339 parse fails (`eventsub.py` ~111–115) |

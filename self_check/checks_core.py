@@ -586,7 +586,7 @@ def check_core() -> None:
     assert not t.is_standalone_twitch_url("{username} https://twitch.tv/marfapr")
     assert not t.is_standalone_twitch_url("marfapr")
     # Synthetic category-watch / drops ids must not hit Helix /videos (400).
-    assert t.get_videos_by_user("cw:150697169:1e3af59a") == []
+    assert t.get_videos_by_user("cw:999001002:1e3af59a") == []
     assert t.get_videos_by_user("drops:1:abcd") == []
     assert t.get_videos_by_user("") == []
 
