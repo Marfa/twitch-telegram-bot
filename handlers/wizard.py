@@ -329,8 +329,8 @@ def _render_sub_template(
                 locale = DEFAULT_LOCALE
     template = sub.message_template or ""
     merged = dict(extra or {})
-    if any(f"{{{key}}}" in template for key in ms.STATUS_PLACEHOLDERS):
-        for key, val in ms.status_placeholders(
+    if any(f"{{{key}}}" in template for key in ms.MULTISTREAM_PLACEHOLDERS):
+        for key, val in ms.multistream_placeholders(
             getattr(sub, "multistream_channels", None), template
         ).items():
             merged.setdefault(key, val)

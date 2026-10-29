@@ -2751,6 +2751,11 @@ def _template_values(
         "goodgame_status": "—",
         "vkplay_status": "—",
         "youtube_status": "—",
+        "tiktok_status": "—",
+        "goodgame_url": "—",
+        "vkplay_url": "—",
+        "youtube_url": "—",
+        "tiktok_url": "—",
     }
     if stream:
         started = stream.get("started_at")
@@ -2815,6 +2820,11 @@ _TEMPLATE_PLACEHOLDERS = (
     "goodgame_status",
     "vkplay_status",
     "youtube_status",
+    "tiktok_status",
+    "goodgame_url",
+    "vkplay_url",
+    "youtube_url",
+    "tiktok_url",
 )
 _STREAM_SNAPSHOT_KEYS = (
     "user_id",
@@ -2889,6 +2899,16 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "gg_status": "goodgame_status",
     "vk_status": "vkplay_status",
     "yt_status": "youtube_status",
+    "tt_status": "tiktok_status",
+    "tiktok_live_status": "tiktok_status",
+    "gg_url": "goodgame_url",
+    "vk_url": "vkplay_url",
+    "yt_url": "youtube_url",
+    "tt_url": "tiktok_url",
+    "goodgame_stream": "goodgame_url",
+    "vkplay_stream": "vkplay_url",
+    "youtube_stream": "youtube_url",
+    "tiktok_stream": "tiktok_url",
 }
 # Telegram may linkify these even without a scheme; used to decide link-preview UI.
 _TEMPLATE_LINK_RE = re.compile(
@@ -2896,10 +2916,20 @@ _TEMPLATE_LINK_RE = re.compile(
 )
 
 
+_MULTISTREAM_URL_TOKENS = (
+    "{goodgame_url}",
+    "{vkplay_url}",
+    "{youtube_url}",
+    "{tiktok_url}",
+)
+
+
 def template_has_link(template: str) -> bool:
     """True if the template text is likely to produce a Telegram link preview."""
     text = template or ""
     if "{url}" in text:
+        return True
+    if any(tok in text for tok in _MULTISTREAM_URL_TOKENS):
         return True
     return bool(_TEMPLATE_LINK_RE.search(text))
 

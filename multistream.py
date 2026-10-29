@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 FEATURE_ID = "multistream"
 MULTISTREAM_MAX = 5
-PLATFORMS = ("goodgame", "vkplay", "youtube")
+PLATFORMS = ("goodgame", "vkplay", "youtube", "tiktok")
 
 # Telegram equivalent of Chat Mini App status dots (live #eb0400 / offline #adadb8).
 STATUS_ONLINE = "🔴"
@@ -25,11 +25,26 @@ STATUS_PLACEHOLDERS = (
     "goodgame_status",
     "vkplay_status",
     "youtube_status",
+    "tiktok_status",
 )
+URL_PLACEHOLDERS = (
+    "goodgame_url",
+    "vkplay_url",
+    "youtube_url",
+    "tiktok_url",
+)
+MULTISTREAM_PLACEHOLDERS = STATUS_PLACEHOLDERS + URL_PLACEHOLDERS
 _PLATFORM_STATUS_KEY = {
     "goodgame": "goodgame_status",
     "vkplay": "vkplay_status",
     "youtube": "youtube_status",
+    "tiktok": "tiktok_status",
+}
+_PLATFORM_URL_KEY = {
+    "goodgame": "goodgame_url",
+    "vkplay": "vkplay_url",
+    "youtube": "youtube_url",
+    "tiktok": "tiktok_url",
 }
 
 _GG_HOSTS = frozenset({"goodgame.ru", "www.goodgame.ru", "goodgame.com", "www.goodgame.com"})
@@ -52,6 +67,15 @@ _YT_HOSTS = frozenset(
         "www.youtu.be",
     }
 )
+_TT_HOSTS = frozenset(
+    {
+        "tiktok.com",
+        "www.tiktok.com",
+        "m.tiktok.com",
+    }
+)
+# TikTok api-live status: 4 = offline (same convention as Streamlink / TikTok web).
+_TT_STATUS_OFFLINE = 4
 
 
 def error_line_looks_like_youtube(line: str) -> bool:
@@ -166,6 +190,8 @@ def parse_multistream_url(text: str) -> MultistreamChannel | None:
         return _parse_vkplay(parsed, raw)
     if host in _YT_HOSTS:
         return _parse_youtube(parsed, raw)
+    if host in _TT_HOSTS:
+        return _parse_tiktok(parsed, raw)
     return None
 
 
@@ -212,47 +238,94 @@ def status_placeholders(
     raw: str | None,
     template: str | None = None,
 ) -> dict[str, str]:
-    """Map {goodgame,vkplay,youtube}_status → 🔴 / ⚪ / — for the alert template.
+    """Alias for multistream_placeholders (status + stream URL tokens)."""
+    return multistream_placeholders(raw, template)
+
+
+def multistream_placeholders(
+    raw: str | None,
+    template: str | None = None,
+) -> dict[str, str]:
+    """Map status (🔴/⚪/—) and current-stream URL placeholders for the alert template.
 
     Unconfigured platforms stay «—». Only platforms mentioned in the template
-    (or all three if template is omitted) are live-checked.
+    (or all if template is omitted) are resolved / live-checked.
     """
     text = template or ""
-    needed = [
+    needed_status = [
         key
         for key in STATUS_PLACEHOLDERS
         if not text or f"{{{key}}}" in text
     ]
-    out = {key: "—" for key in STATUS_PLACEHOLDERS}
-    if not needed:
+    needed_url = [
+        key for key in URL_PLACEHOLDERS if not text or f"{{{key}}}" in text
+    ]
+    out = {key: "—" for key in MULTISTREAM_PLACEHOLDERS}
+    if not needed_status and not needed_url:
         return out
     by_platform = {c.platform: c for c in parse_multistream_channels(raw)}
-    for platform, key in _PLATFORM_STATUS_KEY.items():
-        if key not in needed:
+    for platform in PLATFORMS:
+        status_key = _PLATFORM_STATUS_KEY[platform]
+        url_key = _PLATFORM_URL_KEY[platform]
+        want_status = status_key in needed_status
+        want_url = url_key in needed_url
+        if not want_status and not want_url:
             continue
         ch = by_platform.get(platform)
         if ch is None:
             continue
+        # URL-only for GG/VK/TikTok: channel live page is the stream link — no probe.
+        if want_url and not want_status and platform != "youtube":
+            out[url_key] = _canonical_stream_url(ch)
+            continue
         try:
-            out[key] = STATUS_ONLINE if _is_online(ch) else STATUS_OFFLINE
+            online, stream_url = _live_state(ch)
         except Exception:
             logger.exception(
-                "Multistream status placeholder failed platform=%s id=%s",
+                "Multistream placeholder failed platform=%s id=%s",
                 ch.platform,
                 ch.channel_id,
             )
-            out[key] = STATUS_OFFLINE
+            online, stream_url = False, _canonical_stream_url(ch)
+        if want_status:
+            out[status_key] = STATUS_ONLINE if online else STATUS_OFFLINE
+        if want_url:
+            out[url_key] = stream_url or _canonical_stream_url(ch)
     return out
 
 
-def _is_online(ch: MultistreamChannel) -> bool:
-    if ch.platform == "goodgame":
-        return _goodgame_online(ch.channel_id)
-    if ch.platform == "vkplay":
-        return _vkplay_online(ch.channel_id)
+def _canonical_stream_url(ch: MultistreamChannel) -> str:
+    if ch.platform == "tiktok":
+        return f"https://www.tiktok.com/@{ch.channel_id}/live"
     if ch.platform == "youtube":
-        return _youtube_online(ch.channel_id)
-    return False
+        return f"https://www.youtube.com/channel/{ch.channel_id}/live"
+    return (ch.url or "").strip()
+
+
+def _live_state(ch: MultistreamChannel) -> tuple[bool, str]:
+    """Return (online, current_stream_url). URL falls back to canonical live page."""
+    canon = _canonical_stream_url(ch)
+    if ch.platform == "goodgame":
+        return _goodgame_online(ch.channel_id), canon
+    if ch.platform == "vkplay":
+        return _vkplay_online(ch.channel_id), canon
+    if ch.platform == "youtube":
+        video_id = _youtube_live_video_id(ch.channel_id)
+        if video_id:
+            return True, f"https://www.youtube.com/watch?v={video_id}"
+        return False, canon
+    if ch.platform == "tiktok":
+        online = _tiktok_online(ch.channel_id)
+        return online, canon
+    return False, canon
+
+
+def _is_online(ch: MultistreamChannel) -> bool:
+    try:
+        online, _ = _live_state(ch)
+        return online
+    except Exception:
+        return False
 
 
 def _parse_goodgame(parsed, raw: str) -> MultistreamChannel | None:
@@ -287,6 +360,28 @@ def _parse_vkplay(parsed, raw: str) -> MultistreamChannel | None:
     canon = f"https://{host}/{slug}"
     return MultistreamChannel(
         platform="vkplay", url=canon, channel_id=slug, label=slug
+    )
+
+
+def _parse_tiktok(parsed, raw: str) -> MultistreamChannel | None:
+    parts = [unquote(p) for p in (parsed.path or "").split("/") if p]
+    if not parts:
+        return None
+    handle = parts[0]
+    if not handle.startswith("@") or len(handle) < 2:
+        return None
+    unique = handle.lstrip("@").strip()
+    if not re.fullmatch(r"[\w.\-]{2,64}", unique, re.UNICODE):
+        return None
+    # Skip reserved path segments mistaken for handles.
+    if unique.lower() in ("live", "video", "music", "tag", "explore", "foryou"):
+        return None
+    canon = f"https://www.tiktok.com/@{unique}/live"
+    return MultistreamChannel(
+        platform="tiktok",
+        url=canon,
+        channel_id=unique,
+        label=f"@{unique}",
     )
 
 
@@ -492,7 +587,7 @@ def _vkplay_online(slug: str) -> bool:
         return False
 
 
-def _youtube_online(channel_id: str) -> bool:
+def _youtube_live_video_id(channel_id: str) -> str | None:
     data = _youtube_api_get(
         "search",
         {
@@ -504,6 +599,56 @@ def _youtube_online(channel_id: str) -> bool:
         },
     )
     if data is None:
-        return False
+        return None
     items = data.get("items") or []
-    return bool(items)
+    if not items or not isinstance(items[0], dict):
+        return None
+    vid = str((items[0].get("id") or {}).get("videoId") or "").strip()
+    return vid or None
+
+
+def _youtube_online(channel_id: str) -> bool:
+    return bool(_youtube_live_video_id(channel_id))
+
+
+def _tiktok_online(unique_id: str) -> bool:
+    """True if the TikTok account is currently live.
+
+    Gray area: TikTok has no public Live Status API. We call the same
+    ``/api-live/user/room/`` JSON endpoint the TikTok web live page (and
+    Streamlink) uses. Upgrade path: official TikTok Live API if shipped.
+    """
+    uid = (unique_id or "").strip().lstrip("@")
+    if not uid:
+        return False
+    try:
+        resp = _SESSION.get(
+            "https://www.tiktok.com/api-live/user/room/",
+            params={"aid": "1988", "sourceType": "54", "uniqueId": uid},
+            headers={"Referer": f"https://www.tiktok.com/@{uid}/live"},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            logger.warning("TikTok status HTTP %s for %s", resp.status_code, uid)
+            return False
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            return False
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return False
+        live_room = data.get("liveRoom")
+        status = None
+        if isinstance(live_room, dict) and "status" in live_room:
+            status = live_room.get("status")
+        elif "status" in (data.get("user") or {}):
+            status = (data.get("user") or {}).get("status")
+        if status is None:
+            return False
+        try:
+            return int(status) != _TT_STATUS_OFFLINE
+        except (TypeError, ValueError):
+            return False
+    except Exception:
+        logger.exception("TikTok status failed for %s", uid)
+        return False
