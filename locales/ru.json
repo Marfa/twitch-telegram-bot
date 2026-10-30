@@ -436,6 +436,7 @@
   "stream_schedule_publish_auth_unavailable": "Публикация расписания не настроена (нужен PUBLIC_BASE_URL).",
   "stream_schedule_publish_ok": "✅ Расписание опубликовано на Twitch!",
   "stream_schedule_publish_ok_recurring": "✅ Расписание опубликовано на Twitch как еженедельные слоты (разовые сегменты доступны только Partner/Affiliate).",
+  "stream_schedule_publish_deferred": "Расписание будет опубликовано в понедельник на Twitch как еженедельные слоты (разовые сегменты доступны только Partner/Affiliate).",
   "stream_schedule_publish_fail": "❌ Не удалось опубликовать расписание: {error}",
   "stream_schedule_publish_partial": "⚠️ Сохранено {ok} из {total}.\n{errors}",
   "stream_schedule_err_recurring_time": "{date}: Twitch не даёт менять время у еженедельного слота таким способом.",

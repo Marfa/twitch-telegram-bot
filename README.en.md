@@ -216,6 +216,7 @@ Optionally **publish to Twitch** (**Premium**):
 4. OAuth / saved token with `channel:manage:schedule`
 5. Existing segments are cleared before creating new ones (full clear for weekly mode; selected day only for "Fix slots for a day")
 6. Segments are one-off (Partner/Affiliate) or weekly recurring (fallback); Helix gets the chosen UTC offset
+7. Non–Partner/Affiliate + week: Helix publish is deferred until Monday so the current week’s slots are not wiped
 
 ### Deleted subscriptions cart
 

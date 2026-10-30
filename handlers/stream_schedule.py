@@ -8,12 +8,21 @@ from html import escape as html_escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import beta as beta_features
 import premium as prem
-from bot_helpers import _menu, _pulse_wizard_keyboard, _user_lang, _wizard, reply_chat_id, with_oauth_legal
+from bot_helpers import (
+    _menu,
+    _pulse_reply_keyboard,
+    _pulse_wizard_keyboard,
+    _user_lang,
+    _wizard,
+    delete_chat_message,
+    reply_chat_id,
+    with_oauth_legal,
+)
 from db import Database
 from i18n import (
     DEFAULT_LOCALE,
@@ -43,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 VACATION_AUTO_JOB_NAME = "vacation_auto_exits"
 _VACATION_AUTO_INTERVAL_SEC = 300
+_DEFERRED_SCHEDULE_JOB_PREFIX = "deferred_schedule_"
 
 
 def sync_vacation_auto_job(job_queue, db: Database) -> None:
@@ -50,6 +60,76 @@ def sync_vacation_auto_job(job_queue, db: Database) -> None:
     from handlers.background_jobs import sync_optional_jobs
 
     sync_optional_jobs(job_queue, db)
+
+
+def deferred_schedule_job_name(user_id: int) -> str:
+    return f"{_DEFERRED_SCHEDULE_JOB_PREFIX}{int(user_id)}"
+
+
+def unschedule_deferred_schedule_job(job_queue, user_id: int) -> None:
+    if job_queue is None:
+        return
+    for job in job_queue.get_jobs_by_name(deferred_schedule_job_name(user_id)):
+        job.schedule_removal()
+
+
+def schedule_deferred_schedule_job(job_queue, user_id: int, at_iso: str) -> None:
+    """One-shot Helix publish at Monday 00:00 (user TZ) — not a repeating poller."""
+    if job_queue is None:
+        return
+    name = deferred_schedule_job_name(user_id)
+    unschedule_deferred_schedule_job(job_queue, user_id)
+    raw = str(at_iso or "").strip()
+    try:
+        due = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        due = datetime.now(timezone.utc)
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=timezone.utc)
+    delay = max(0.0, (due - datetime.now(timezone.utc)).total_seconds())
+    # Large grace: if the bot was down past Monday, still fire once on restart.
+    grace = max(24 * 3600, int(delay) + 3600)
+    job_queue.run_once(
+        process_deferred_schedule_publish,
+        when=delay,
+        data={"owner_id": int(user_id)},
+        name=name,
+        job_kwargs={
+            "id": name,
+            "replace_existing": True,
+            "misfire_grace_time": grace,
+            "coalesce": True,
+        },
+    )
+
+
+def restore_deferred_schedule_jobs(job_queue, db: Database) -> None:
+    """Re-arm one-shot Monday publishes after process restart."""
+    if job_queue is None:
+        return
+    for user_id, at_iso in db.list_deferred_schedule_publishes():
+        schedule_deferred_schedule_job(job_queue, user_id, at_iso)
+
+
+async def _dismiss_schedule_callback(bot, query) -> None:
+    """Remove the callback carrier without leaving a «✓» stub.
+
+    Reply keyboard must stay on a lasting message or be pulsed afterward —
+    never rely on the deleted carrier for the menu.
+    """
+    if not query or not query.message:
+        return
+    try:
+        await delete_chat_message(
+            bot,
+            query.message.chat_id,
+            query.message.message_id,
+            kind="bot_own",
+        )
+    except (BadRequest, Forbidden):
+        pass
+    except Exception:
+        logger.exception("Failed to dismiss schedule callback message")
 
 
 def _set_vacation_auto_exit_at(
@@ -645,18 +725,14 @@ async def _prompt_stream_schedule_game(
     keyboard = stream_schedule_day_keyboard(
         lang, show_finish=_stream_schedule_show_finish(context)
     )
+    chat_id = reply_chat_id(update)
     if update.callback_query:
-        await update.callback_query.edit_message_text("✓")
-        await context.bot.send_message(
-            reply_chat_id(update),
-            message,
-            reply_markup=keyboard,
-        )
+        await _dismiss_schedule_callback(context.bot, update.callback_query)
+        await context.bot.send_message(chat_id, message, reply_markup=keyboard)
     else:
         await update.effective_message.reply_text(message, reply_markup=keyboard)
-    await _pulse_wizard_keyboard(
-        context.bot, reply_chat_id(update), lang, back=False
-    )
+    # Inline day keyboard alone does not carry reply Cancel — pulse wizard menu.
+    await _pulse_wizard_keyboard(context.bot, chat_id, lang, back=False)
     return STREAM_SCHEDULE_GAME
 
 
@@ -665,11 +741,15 @@ async def _prompt_publish_on_twitch(
 ) -> int:
     _st = _sched_states()
     STREAM_SCHEDULE_PUBLISH = _st["STREAM_SCHEDULE_PUBLISH"]
+    chat_id = reply_chat_id(update)
+    user_id = update.effective_user.id
     await context.bot.send_message(
-        reply_chat_id(update),
+        chat_id,
         t("stream_schedule_publish_prompt", lang),
         reply_markup=stream_schedule_publish_keyboard(lang),
     )
+    # Inline Yes/No only — keep reply menu visible in private chat.
+    await _pulse_reply_keyboard(context.bot, chat_id, _menu(lang, user_id))
     return STREAM_SCHEDULE_PUBLISH
 
 
@@ -720,6 +800,44 @@ def _schedule_iso_date(value: date | str) -> str:
     return str(value)
 
 
+def _is_twitch_partner_or_affiliate(user: dict | None) -> bool:
+    kind = str((user or {}).get("broadcaster_type") or "").strip().lower()
+    return kind in ("affiliate", "partner")
+
+
+def deferred_schedule_at_iso(
+    entries: list[dict], offset_minutes: int
+) -> str | None:
+    """UTC ISO of Monday 00:00 (user TZ) for the earliest entry date."""
+    days: list[date] = []
+    for item in entries:
+        raw = str(item.get("date") or "")[:10]
+        try:
+            days.append(date.fromisoformat(raw))
+        except ValueError:
+            continue
+    if not days:
+        return None
+    monday = min(days)
+    local_tz = offset_minutes_to_tzinfo(int(offset_minutes))
+    local_dt = datetime(monday.year, monday.month, monday.day, 0, 0, tzinfo=local_tz)
+    return local_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _should_defer_week_schedule(
+    *,
+    clear_mode: str,
+    entries: list,
+    is_partner: bool,
+) -> bool:
+    """Non-P/A week clear-all: wait for Monday so recurring clear won't wipe this week."""
+    return (
+        not is_partner
+        and clear_mode == "all"
+        and bool(entries)
+    )
+
+
 async def _queue_schedule_publish_and_auth(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -737,7 +855,7 @@ async def _queue_schedule_publish_and_auth(
         text = t("stream_schedule_publish_fail", lang, error="no data")
         query = update.callback_query
         if query:
-            await query.edit_message_text("✓")
+            await _dismiss_schedule_callback(context.bot, query)
         await context.bot.send_message(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
@@ -813,7 +931,7 @@ async def _finish_stream_schedule(
     text = _format_schedule_finish_text(context, lang)
     chat_id = reply_chat_id(update)
     if update.callback_query:
-        await update.callback_query.edit_message_text("✓")
+        await _dismiss_schedule_callback(context.bot, update.callback_query)
     if not _has_pending_schedule_changes(context):
         context.user_data.clear()
         await context.bot.send_message(
@@ -1091,13 +1209,12 @@ async def _prompt_stream_schedule_fix_game(
         date=format_stream_schedule_prompt_date(day_date, lang),
     )
     query = update.callback_query
+    chat_id = reply_chat_id(update)
     if query:
-        try:
-            await query.edit_message_text("✓")
-        except BadRequest:
-            pass
+        await _dismiss_schedule_callback(context.bot, query)
+    # Reply keyboard on lasting prompt (not a deleted ✓ carrier).
     await context.bot.send_message(
-        reply_chat_id(update),
+        chat_id,
         text,
         reply_markup=_wizard(lang, back=False),
     )
@@ -1243,7 +1360,7 @@ async def stream_schedule_confirm_callback(
     confirmed = query.data.split(":")[-1] == "1"
     if not confirmed:
         context.user_data.clear()
-        await query.edit_message_text("✓")
+        await _dismiss_schedule_callback(context.bot, query)
         await context.bot.send_message(
             reply_chat_id(update),
             t("cancelled", lang),
@@ -1469,6 +1586,7 @@ async def _begin_week_schedule(
     user_id = update.effective_user.id
     db: Database = context.application.bot_data["db"]
     _init_stream_schedule(context, local_tz=_user_schedule_tz(db, user_id))
+    context.user_data["stream_schedule_clear_mode"] = "all"
     query = update.callback_query
     if query:
         try:
@@ -1591,7 +1709,7 @@ async def stream_schedule_vacation_auto_callback(
     end_day: date | None = context.user_data.get("vac_end_date")
     if not isinstance(start_day, date) or not isinstance(end_day, date):
         context.user_data.clear()
-        await query.edit_message_text("✓")
+        await _dismiss_schedule_callback(context.bot, query)
         await context.bot.send_message(
             reply_chat_id(update),
             t("stream_schedule_vacation_fail", lang, error="no dates"),
@@ -1652,7 +1770,7 @@ async def stream_schedule_publish_callback(
     deletes = context.user_data.get("stream_schedule_deletes", [])
     if not publish or (not entries and not updates and not deletes):
         context.user_data.clear()
-        await query.edit_message_text("✓")
+        await _dismiss_schedule_callback(context.bot, query)
         await context.bot.send_message(
             reply_chat_id(update),
             t("cancelled", lang) if not publish else "—",
@@ -1739,14 +1857,14 @@ async def _start_schedule_publish_auth(
                         next_sync_at=sync.next_sync_at,
                     )
                 if query:
-                    await query.edit_message_text("✓")
+                    await _dismiss_schedule_callback(context.bot, query)
                 await _complete_schedule_publish(
                     context.application,
                     user_id,
                     None,
                     {
                         "access_token": access,
-                        "refresh_token": "",
+                        "refresh_token": refresh or sync.refresh_token or "",
                         "twitch_user_id": sync.twitch_user_id,
                     },
                 )
@@ -1761,7 +1879,7 @@ async def _start_schedule_publish_auth(
     if not redirect_uri:
         text = t("stream_schedule_publish_auth_unavailable", lang)
         if query:
-            await query.edit_message_text("✓")
+            await _dismiss_schedule_callback(context.bot, query)
         await context.bot.send_message(
             chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
         )
@@ -1808,6 +1926,8 @@ async def _complete_schedule_publish(
         return
 
     pending = _pending_schedule_publishes(application).pop(owner_id, None)
+    prefer_recurring_sticky = False
+    force_publish = False
     if isinstance(pending, list):
         # Legacy in-memory shape from older deploys
         entries, duration_min = pending, _SCHEDULE_DEFAULT_DURATION_MIN
@@ -1822,6 +1942,8 @@ async def _complete_schedule_publish(
         duration_min = int(pending.get("duration") or _SCHEDULE_DEFAULT_DURATION_MIN)
         clear_mode = pending.get("clear_mode") or "all"
         offset_minutes = pending.get("utc_offset_minutes")
+        prefer_recurring_sticky = bool(pending.get("prefer_recurring"))
+        force_publish = bool(pending.get("force_publish"))
     else:
         entries, duration_min = [], _SCHEDULE_DEFAULT_DURATION_MIN
         clear_mode = "all"
@@ -1853,6 +1975,60 @@ async def _complete_schedule_publish(
         application, owner_id, sync_follow_monitor=False
     )
     _remember_schedule_broadcaster(db, owner_id, twitch_user_id, refresh)
+
+    helix_user = None
+    try:
+        helix_user = await asyncio.to_thread(twitch.get_token_user, access)
+    except Exception:
+        logger.exception(
+            "Failed to load Twitch user for schedule partner check user=%s",
+            owner_id,
+        )
+    is_partner = _is_twitch_partner_or_affiliate(helix_user)
+    if not force_publish and _should_defer_week_schedule(
+        clear_mode=str(clear_mode),
+        entries=list(entries),
+        is_partner=is_partner,
+    ):
+        at_iso = deferred_schedule_at_iso(list(entries), int(offset_minutes))
+        sync = db.get_twitch_sync(owner_id)
+        stored_refresh = refresh or (
+            (sync.refresh_token if sync else "") or ""
+        )
+        if not at_iso or not stored_refresh:
+            await application.bot.send_message(
+                owner_id,
+                t(
+                    "stream_schedule_publish_fail",
+                    lang,
+                    error="no token" if not stored_refresh else "no date",
+                ),
+                reply_markup=_menu(lang, owner_id),
+            )
+            return
+        if stored_refresh and not refresh:
+            _remember_schedule_broadcaster(
+                db, owner_id, twitch_user_id, stored_refresh
+            )
+        payload = {
+            "entries": entries,
+            "updates": updates,
+            "deletes": deletes,
+            "duration": duration_min,
+            "clear_mode": clear_mode,
+            "utc_offset_minutes": int(offset_minutes),
+            "prefer_recurring": True,
+            "force_publish": True,
+        }
+        db.upsert_user(owner_id)
+        db.set_deferred_schedule_publish(owner_id, payload, at_iso)
+        schedule_deferred_schedule_job(application.job_queue, owner_id, at_iso)
+        await application.bot.send_message(
+            owner_id,
+            t("stream_schedule_publish_deferred", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
+        return
 
     # clear/create briefly empties Helix days — do not treat that as user cancels.
     from schedule_cancel import refresh_schedule_day_snapshot, suppress_schedule_cancel
@@ -1916,8 +2092,8 @@ async def _complete_schedule_publish(
 
         ok = 0
         errs: list[str] = []
-        prefer_recurring = False
-        used_recurring = False
+        prefer_recurring = prefer_recurring_sticky or (not is_partner)
+        used_recurring = prefer_recurring_sticky
         # Clamp shared duration so same-day siblings do not overlap. Include Helix
         # neighbors in overlap mode so a new earlier slot is shortened to the next
         # existing start (otherwise Twitch overlap replace would erase it).
@@ -2215,6 +2391,119 @@ async def _complete_schedule_vacation(
         }
     markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
     await application.bot.send_message(owner_id, text, reply_markup=markup)
+
+
+async def process_deferred_schedule_publish(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """One-shot: publish a week schedule deferred until Monday (non-P/A)."""
+    from twitch import SCHEDULE_SCOPE
+
+    job = context.job
+    owner_id = int((getattr(job, "data", None) or {}).get("owner_id") or 0)
+    if not owner_id:
+        return
+
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    stored = db.get_deferred_schedule_publish(owner_id)
+    db.clear_deferred_schedule_publish(owner_id)
+    unschedule_deferred_schedule_job(context.application.job_queue, owner_id)
+    if not stored:
+        return
+    payload, _at = stored
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+
+    if not prem.has_feature_sync(db, owner_id, "schedule_publish"):
+        try:
+            await context.bot.send_message(
+                owner_id,
+                t(
+                    "stream_schedule_publish_fail",
+                    lang,
+                    error=t("premium_gate_action_cancel", lang),
+                ),
+                reply_markup=_menu(lang, owner_id),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify user=%s deferred schedule premium gate",
+                owner_id,
+            )
+        return
+
+    sync = db.get_twitch_sync(owner_id)
+    if not sync or not sync.refresh_token:
+        try:
+            await context.bot.send_message(
+                owner_id,
+                t(
+                    "stream_schedule_publish_fail",
+                    lang,
+                    error=t("stream_schedule_vacation_auto_exit_no_token", lang),
+                ),
+                reply_markup=_menu(lang, owner_id),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify user=%s deferred schedule missing token",
+                owner_id,
+            )
+        return
+
+    try:
+        token_data = await asyncio.to_thread(
+            twitch.refresh_user_token, sync.refresh_token
+        )
+        access = token_data.get("access_token") or ""
+        refresh = token_data.get("refresh_token") or sync.refresh_token
+        if not access or not await asyncio.to_thread(
+            twitch.token_has_scope, access, SCHEDULE_SCOPE
+        ):
+            await context.bot.send_message(
+                owner_id,
+                t(
+                    "stream_schedule_publish_fail",
+                    lang,
+                    error=t("stream_schedule_vacation_auto_exit_no_scope", lang),
+                ),
+                reply_markup=_menu(lang, owner_id),
+            )
+            return
+        if refresh != sync.refresh_token:
+            db.update_twitch_sync_tokens(
+                owner_id,
+                refresh,
+                last_sync_at=sync.last_sync_at
+                or datetime.now(timezone.utc).isoformat(),
+                next_sync_at=sync.next_sync_at,
+            )
+        queued = dict(payload) if isinstance(payload, dict) else {}
+        queued["prefer_recurring"] = True
+        queued["force_publish"] = True
+        _pending_schedule_publishes(context.application)[owner_id] = queued
+        await _complete_schedule_publish(
+            context.application,
+            owner_id,
+            None,
+            {
+                "access_token": access,
+                "refresh_token": refresh,
+                "twitch_user_id": sync.twitch_user_id,
+            },
+        )
+    except Exception:
+        logger.exception("Deferred schedule publish failed for user=%s", owner_id)
+        try:
+            await context.bot.send_message(
+                owner_id,
+                t("stream_schedule_publish_fail", lang, error="token/helix"),
+                reply_markup=_menu(lang, owner_id),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify user=%s deferred schedule error", owner_id
+            )
 
 
 async def process_vacation_auto_exits(context: ContextTypes.DEFAULT_TYPE) -> None:

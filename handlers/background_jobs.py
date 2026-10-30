@@ -95,6 +95,7 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
         VACATION_AUTO_JOB_NAME,
         _VACATION_AUTO_INTERVAL_SEC,
         process_vacation_auto_exits,
+        restore_deferred_schedule_jobs,
     )
     from handlers.subscriptions import sync_twitch_follows
     from igdb_dumps import ensure_igdb_dump_job
@@ -167,3 +168,5 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
         first=10,
         enabled=db.has_any_vacation_auto_exit(),
     )
+    # Deferred week publishes are one-shot run_once jobs (Monday), not a poller.
+    restore_deferred_schedule_jobs(job_queue, db)

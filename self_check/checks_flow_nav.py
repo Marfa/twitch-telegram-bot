@@ -983,6 +983,104 @@ async def _scenario_schedule_publish_chain(db) -> None:
     cap.assert_turn("stream_schedule_publish_auth_unavailable")
 
 
+async def _scenario_schedule_deferred_week(db) -> None:
+    """§5 Week publish for non-Partner/Affiliate — deferred notice keeps menu."""
+    from datetime import date
+
+    from handlers.stream_schedule import (
+        _complete_schedule_publish,
+        _finish_stream_schedule,
+        _pending_schedule_publishes,
+        stream_schedule_publish_callback,
+    )
+    from telegram.ext import ConversationHandler
+
+    async def _pulse(bot, chat_id, lang, *, back=True):
+        cap.note_pulse()
+
+    async def _pulse_reply(bot, chat_id, reply_markup):
+        cap.note_pulse()
+
+    # Publish prompt: inline No is escape; also pulse main menu after dismiss path.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(
+        application,
+        {
+            "stream_schedule_entries": [
+                {"date": date(2099, 1, 5), "time": "18:00", "game": "Just Chatting"}
+            ],
+            "stream_schedule_clear_mode": "all",
+        },
+    )
+    update = _msg_update(_FREE_UID, "x", cap)
+    with patch("handlers.stream_schedule._pulse_wizard_keyboard", new=_pulse), patch(
+        "handlers.stream_schedule._pulse_reply_keyboard", new=_pulse_reply
+    ):
+        await _finish_stream_schedule(update, ctx, "ru")
+    cap.assert_turn("stream_schedule_publish")
+
+    # Decline publish → lasting cancelled + main menu (no ✓ stub).
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(
+        application,
+        {
+            "stream_schedule_entries": [
+                {"date": date(2099, 1, 5), "time": "18:00", "game": "Just Chatting"}
+            ],
+        },
+    )
+    update, query = _cb_update(_FREE_UID, "stream_sched:publish:0", cap)
+    cap.wrap(bot)
+    state = await stream_schedule_publish_callback(update, ctx)
+    assert state == ConversationHandler.END
+    query.edit_message_text.assert_not_awaited()
+    bot.delete_message.assert_awaited()
+    cap.assert_turn("stream_schedule_publish_cancel")
+
+    # Deferred Helix publish message carries main menu.
+    application, bot = _app(db)
+    application.job_queue = None
+    cap = _BotCapture()
+    cap.wrap(bot)
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
+    twitch = application.bot_data["twitch"]
+    twitch.get_token_user = MagicMock(return_value={"broadcaster_type": ""})
+    _pending_schedule_publishes(application)[_FREE_UID] = {
+        "entries": [{"date": "2099-01-05", "time": "19:00", "game": "Game"}],
+        "updates": [],
+        "deletes": [],
+        "duration": 120,
+        "clear_mode": "all",
+        "utc_offset_minutes": 180,
+    }
+    with patch("oauth_tokens.apply_oauth_success_tokens", return_value=True), patch(
+        "oauth_tokens.restore_after_twitch_oauth", new_callable=AsyncMock
+    ):
+        await _complete_schedule_publish(
+            application,
+            _FREE_UID,
+            None,
+            {
+                "access_token": "access",
+                "refresh_token": "refresh-token",
+                "twitch_user_id": "tw123",
+            },
+        )
+    assert db.has_any_deferred_schedule_publish()
+    texts = [
+        c.args[1] if len(c.args) > 1 else c.kwargs.get("text")
+        for c in bot.send_message.await_args_list
+    ]
+    assert any("понедельник" in str(t) for t in texts)
+    cap.assert_turn("stream_schedule_publish_deferred")
+    db.clear_deferred_schedule_publish(_FREE_UID)
+
+
 async def _wizard_to_template_step(cap: _BotCapture, application, ctx):
     from handlers.wizard import receive_alert_type, receive_channel
 
@@ -4200,6 +4298,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_deep(db)
         await _scenario_schedule_vacation(db)
         await _scenario_schedule_publish_chain(db)
+        await _scenario_schedule_deferred_week(db)
         await _scenario_settings_extended(db)
         await _scenario_settings_stream_defaults(db)
         await _scenario_settings_stream_defaults_template(db)

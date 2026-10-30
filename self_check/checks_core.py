@@ -1784,6 +1784,29 @@ def check_core() -> None:
 
     assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "en")
     assert "Partner/Affiliate" in tr("stream_schedule_publish_ok_recurring", "ru")
+    assert "понедельник" in tr("stream_schedule_publish_deferred", "ru")
+    assert "Monday" in tr("stream_schedule_publish_deferred", "en")
+    assert "Partner/Affiliate" in tr("stream_schedule_publish_deferred", "ru")
+    from handlers.stream_schedule import (
+        _is_twitch_partner_or_affiliate,
+        _should_defer_week_schedule,
+        deferred_schedule_at_iso,
+    )
+
+    assert _is_twitch_partner_or_affiliate({"broadcaster_type": "partner"})
+    assert _is_twitch_partner_or_affiliate({"broadcaster_type": "affiliate"})
+    assert not _is_twitch_partner_or_affiliate({"broadcaster_type": ""})
+    assert _should_defer_week_schedule(
+        clear_mode="all", entries=[{"date": "2099-01-05"}], is_partner=False
+    )
+    assert not _should_defer_week_schedule(
+        clear_mode="all", entries=[{"date": "2099-01-05"}], is_partner=True
+    )
+    assert not _should_defer_week_schedule(
+        clear_mode="overlap", entries=[{"date": "2099-01-05"}], is_partner=False
+    )
+    at = deferred_schedule_at_iso([{"date": "2099-01-05", "time": "15:00"}], 180)
+    assert at and at.startswith("2099-01-04T")  # UTC+3 → Monday 00:00 = Sun 21:00 UTC
     assert "UTC+3" in tr("stream_schedule_tz_prompt", "ru")
     assert "UTC-5" in tr("stream_schedule_tz_prompt", "en")
     assert "New York" in tr("stream_schedule_tz_prompt", "en")

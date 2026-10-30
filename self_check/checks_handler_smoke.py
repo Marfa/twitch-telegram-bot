@@ -416,6 +416,48 @@ async def _smoke_schedule(db) -> None:
     await _complete_schedule_publish(application, _FREE_UID, "oauth_error", None)
     await _complete_schedule_publish(application, _FREE_UID, None, None)
 
+    # Non-Partner week publish → deferred until Monday (no Helix clear/create).
+    from handlers.stream_schedule import _pending_schedule_publishes
+
+    twitch_defer = MagicMock()
+    twitch_defer.get_token_user = MagicMock(return_value={"broadcaster_type": ""})
+    twitch_defer.clear_channel_schedule = MagicMock()
+    application, bot = _app(db, twitch=twitch_defer)
+    application.job_queue = None
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
+    _pending_schedule_publishes(application)[_FREE_UID] = {
+        "entries": [{"date": "2099-01-05", "time": "19:00", "game": "Game"}],
+        "updates": [],
+        "deletes": [],
+        "duration": 120,
+        "clear_mode": "all",
+        "utc_offset_minutes": 180,
+    }
+    with patch("oauth_tokens.apply_oauth_success_tokens", return_value=True), patch(
+        "oauth_tokens.restore_after_twitch_oauth", new_callable=AsyncMock
+    ):
+        await _complete_schedule_publish(
+            application,
+            _FREE_UID,
+            None,
+            {
+                "access_token": "access",
+                "refresh_token": "refresh-token-value",
+                "twitch_user_id": "tw123",
+            },
+        )
+    assert db.has_any_deferred_schedule_publish()
+    due = db.get_due_deferred_schedule_publishes("2099-01-06T00:00:00Z")
+    assert len(due) == 1 and due[0][0] == _FREE_UID
+    defer_msgs = [
+        c.args[1] if len(c.args) > 1 else c.kwargs.get("text")
+        for c in bot.send_message.await_args_list
+    ]
+    assert any("понедельник" in str(t) for t in defer_msgs)
+    twitch_defer.clear_channel_schedule.assert_not_called()
+    db.clear_deferred_schedule_publish(_FREE_UID)
+
     from handlers.stream_schedule import process_vacation_auto_exits
 
     application, bot = _app(db)

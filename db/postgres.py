@@ -683,6 +683,19 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS deferred_schedule_publish_json
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS deferred_schedule_at TEXT
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS watch_prefs TEXT NOT NULL DEFAULT ''
                 """
             )
@@ -4345,6 +4358,119 @@ owner_id, twitch_username, twitch_user_id,
                 SELECT 1 FROM users
                 WHERE vacation_auto_exit_at IS NOT NULL
                   AND vacation_auto_exit_at != ''
+                LIMIT 1
+                """
+            )
+            return cur.fetchone() is not None
+
+    def set_deferred_schedule_publish(
+        self, user_id: int, payload: dict, at_iso: str
+    ) -> None:
+        blob = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users SET
+                    deferred_schedule_publish_json = %s,
+                    deferred_schedule_at = %s
+                WHERE user_id = %s
+                """,
+                (blob, str(at_iso or ""), user_id),
+            )
+
+    def clear_deferred_schedule_publish(self, user_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users SET
+                    deferred_schedule_publish_json = '',
+                    deferred_schedule_at = NULL
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+
+    def get_deferred_schedule_publish(
+        self, user_id: int
+    ) -> tuple[dict, str] | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT deferred_schedule_publish_json, deferred_schedule_at
+                FROM users WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        at = str(row["deferred_schedule_at"] or "").strip()
+        blob = row["deferred_schedule_publish_json"] or ""
+        if not at or not blob:
+            return None
+        try:
+            payload = json.loads(blob)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload, at
+
+    def list_deferred_schedule_publishes(self) -> list[tuple[int, str]]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id, deferred_schedule_at FROM users
+                WHERE deferred_schedule_at IS NOT NULL
+                  AND deferred_schedule_at != ''
+                  AND deferred_schedule_publish_json IS NOT NULL
+                  AND deferred_schedule_publish_json != ''
+                """
+            )
+            rows = cur.fetchall()
+        return [(int(r["user_id"]), str(r["deferred_schedule_at"])) for r in rows]
+
+    def get_due_deferred_schedule_publishes(
+        self, now_iso: str
+    ) -> list[tuple[int, dict]]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id, deferred_schedule_publish_json FROM users
+                WHERE deferred_schedule_at IS NOT NULL
+                  AND deferred_schedule_at != ''
+                  AND deferred_schedule_at <= %s
+                  AND deferred_schedule_publish_json IS NOT NULL
+                  AND deferred_schedule_publish_json != ''
+                """,
+                (now_iso,),
+            )
+            rows = cur.fetchall()
+        out: list[tuple[int, dict]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["deferred_schedule_publish_json"] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if isinstance(payload, dict):
+                out.append((int(row["user_id"]), payload))
+        return out
+
+    def has_any_deferred_schedule_publish(self) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM users
+                WHERE deferred_schedule_at IS NOT NULL
+                  AND deferred_schedule_at != ''
+                  AND deferred_schedule_publish_json IS NOT NULL
+                  AND deferred_schedule_publish_json != ''
                 LIMIT 1
                 """
             )
