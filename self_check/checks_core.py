@@ -2018,17 +2018,47 @@ def check_core() -> None:
     from health import (
         _HealthHandler,
         _http_rate_limit_allow,
+        evaluate_component_health,
         evaluate_health,
         mark_ready,
         note_check_streams_ok,
+        register_health_probes,
         reset_http_rate_limits_for_tests,
     )
+    from health_probes import clear_probe_cache_for_tests
 
     reset_http_rate_limits_for_tests()
     assert _http_rate_limit_allow("t:ip", limit=2, window_sec=60.0)
     assert _http_rate_limit_allow("t:ip", limit=2, window_sec=60.0)
     assert not _http_rate_limit_allow("t:ip", limit=2, window_sec=60.0)
     reset_http_rate_limits_for_tests()
+
+    clear_probe_cache_for_tests()
+    assert evaluate_component_health("nope") == (404, b"unknown")
+    register_health_probes(db_ping=lambda: True, db=None)
+    mark_ready()
+    note_check_streams_ok()
+    clear_probe_cache_for_tests()
+    assert evaluate_component_health("db") == (200, b"ok")
+    assert evaluate_health() == (200, b"ok")
+    register_health_probes(db_ping=lambda: False, db=None)
+    clear_probe_cache_for_tests()
+    assert evaluate_component_health("db") == (503, b"db")
+    register_health_probes(db_ping=lambda: True, db=None)
+    clear_probe_cache_for_tests()
+    assert evaluate_health() == (200, b"ok")
+    import health_probes as probes_mod
+    from unittest.mock import patch
+
+    # Optional component fail must not change aggregate /health.
+    clear_probe_cache_for_tests()
+    with patch.object(probes_mod, "_probe_groq", return_value=(503, b"auth")):
+        assert evaluate_component_health("groq") == (503, b"auth")
+        assert evaluate_health() == (200, b"ok")
+    clear_probe_cache_for_tests()
+    with patch.dict("os.environ", {"TWITCH_CLIPS_REFRESH_TOKEN": ""}, clear=False):
+        st, body = probes_mod.evaluate_component("clips_oauth")
+        assert st == 200 and body == b"n/a"
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
     httpd.daemon_threads = True
@@ -2043,6 +2073,19 @@ def check_core() -> None:
         ).read() == b"ok"
         status, body = evaluate_health()
         assert status == 200 and body == b"ok"
+        clear_probe_cache_for_tests()
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health/c/db", timeout=2
+        ) as resp:
+            assert resp.status == 200
+            assert resp.read() == b"ok"
+        try:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/health/c/nope", timeout=2
+            )
+            raise AssertionError("expected 404 for unknown component")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
         # OAuth path rate limit: health stays unlimited; oauth trips 429.
         import health as health_mod
 

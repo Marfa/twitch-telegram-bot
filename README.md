@@ -408,7 +408,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
 | `translate.py` | DeepL для админ-рассылок; при квоте 456 — Azure Translator |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/health` (DB ping + freshness `check_streams`), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, azure_translator, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue+Report webhook.
 

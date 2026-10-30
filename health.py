@@ -220,11 +220,30 @@ def is_ready() -> bool:
         return _ready
 
 
-def register_health_probes(*, db_ping: Callable[[], bool]) -> None:
-    """Wire deep /health checks (DB ping). Call once from bot post_init."""
+def register_health_probes(
+    *, db_ping: Callable[[], bool], db: Any | None = None
+) -> None:
+    """Wire deep /health checks (DB ping) and component probes. Call once from bot post_init."""
     global _db_ping
     with _HEALTH_PROBES_LOCK:
         _db_ping = db_ping
+    from health_probes import register_component_probes
+
+    def _read_streams_ok_at() -> float:
+        with _ready_lock:
+            return float(_streams_ok_at)
+
+    def _read_ready_at() -> float:
+        with _ready_lock:
+            return float(_ready_at)
+
+    register_component_probes(
+        db_ping=db_ping,
+        db=db,
+        streams_ok_at=_read_streams_ok_at,
+        ready_at=_read_ready_at,
+        is_ready=is_ready,
+    )
 
 
 def note_check_streams_ok() -> None:
@@ -266,6 +285,13 @@ def evaluate_health() -> tuple[int, bytes]:
     if (now - last_ok) > stale:
         return 503, b"streams_stale"
     return 200, b"ok"
+
+
+def evaluate_component_health(name: str) -> tuple[int, bytes]:
+    """Component probe for ``/health/c/<name>`` (optional deps; not used by deploy)."""
+    from health_probes import evaluate_component
+
+    return evaluate_component(name)
 
 
 def create_pending_login_state(
@@ -1081,6 +1107,19 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "public, max-age=300")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path.startswith("/health/c/"):
+            name = path[len("/health/c/") :]
+            if not name or "/" in name:
+                self.send_response(404)
+                self.end_headers()
+                return
+            status, body = evaluate_component_health(name)
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

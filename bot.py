@@ -2566,7 +2566,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         resume_ai_clips_jobs(application)
         loop = asyncio.get_running_loop()
         register_chat_webapp(db=db, twitch=twitch)
-        register_health_probes(db_ping=db.ping)
+        register_health_probes(db_ping=db.ping, db=db)
         redirect_uri = twitch_oauth_redirect_uri()
         if redirect_uri:
 

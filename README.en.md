@@ -408,7 +408,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts; Azure Translator on DeepL quota 456 |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health` (DB ping + `check_streams` freshness), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, azure_translator, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 
