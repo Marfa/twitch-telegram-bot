@@ -31,6 +31,24 @@ def segment_day_key(start: datetime, tz: ZoneInfo) -> str:
     return start.astimezone(tz).date().isoformat()
 
 
+def segment_game_or_title(segment: dict[str, Any]) -> str:
+    """Helix category name, or segment title when the category is unset.
+
+    Schedule publish stores the user-facing label in ``title``; Twitch category
+    is optional (search may miss custom names like «Вахта Хоррор»).
+    """
+    category = segment.get("category") or {}
+    if isinstance(category, dict):
+        game = str(category.get("name") or "").strip()
+        if game:
+            return game
+    # Snapshots store flat "game" / "title" (no nested category).
+    stored = str(segment.get("game") or "").strip()
+    if stored:
+        return stored
+    return str(segment.get("title") or "").strip()
+
+
 def build_schedule_day_map(
     segments: list[dict[str, Any]],
     *,
@@ -57,19 +75,14 @@ def build_schedule_day_map(
         seg_id = str(segment.get("id") or "").strip()
         if not seg_id:
             continue
-        category = segment.get("category") or {}
-        game = (
-            str(category.get("name") or "")
-            if isinstance(category, dict)
-            else ""
-        )
+        title = str(segment.get("title") or "").strip()
         day = segment_day_key(start, tz)
         out.setdefault(day, []).append(
             {
                 "id": seg_id,
                 "start": start.isoformat(),
-                "title": str(segment.get("title") or ""),
-                "game": game,
+                "title": title,
+                "game": segment_game_or_title(segment),
             }
         )
     for day in out:

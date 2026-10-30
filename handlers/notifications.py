@@ -1513,6 +1513,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
         build_schedule_day_map,
         find_emptied_schedule_days,
         schedule_cancel_suppressed,
+        segment_game_or_title,
     )
 
     db: Database = context.application.bot_data["db"]
@@ -1589,8 +1590,8 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
 
                     cancel_sub = SimpleNamespace(**{**sub.__dict__})
                     cancel_sub.message_template = template
-                    game = str(first.get("game") or "")
-                    title = str(first.get("title") or "—")
+                    title = str(first.get("title") or "").strip() or "—"
+                    game = segment_game_or_title(first)
                     cover_stream = {
                         "game_id": "",
                         "game_name": game,
@@ -1635,13 +1636,10 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 if minutes_left > remind_before:
                     continue
                 username = sub.twitch_username
-                title = str(segment.get("title") or "—")
+                title = str(segment.get("title") or "").strip() or "—"
                 category = segment.get("category") or {}
-                game = (
-                    str(category.get("name") or "")
-                    if isinstance(category, dict)
-                    else ""
-                )
+                # No Twitch category → publish segment title as {game} (as on schedule).
+                game = segment_game_or_title(segment)
                 template = (sub.message_template or "").strip()
                 if not template:
                     continue

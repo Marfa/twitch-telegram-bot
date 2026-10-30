@@ -1529,6 +1529,58 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert "Post-apocalyptic RPG" in sent
     assert "—" not in sent
 
+    # No Helix category → {game} uses segment title as on the Twitch schedule.
+    title_only_uid = _FREE_UID + 41
+    db.upsert_user(title_only_uid)
+    db.set_user_locale(title_only_uid, "ru")
+    title_sub_id = db.add_subscription(
+        title_only_uid,
+        "marfapr",
+        "tw_sched_title",
+        "Через {minutes} минут\n\nСтрим по {game}\n\nhttps://twitch.tv/marfapr",
+        "dm",
+        title_only_uid,
+        None,
+    )
+    assert db.update_subscription(
+        title_sub_id,
+        title_only_uid,
+        notify_on_live=False,
+        schedule_reminder_minutes=30,
+        schedule_reminder_configured=True,
+    )
+    title_start = (
+        datetime.now(timezone.utc) + timedelta(minutes=28)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    twitch_title = MagicMock()
+    twitch_title.get_channel_schedule = MagicMock(
+        return_value={
+            "vacation": None,
+            "segments": [
+                {
+                    "id": "seg-vakhta",
+                    "title": "Вахта Хоррор",
+                    "start_time": title_start,
+                    "canceled_until": None,
+                    "category": None,
+                }
+            ],
+        }
+    )
+    twitch_title.vacation_active = MagicMock(return_value=False)
+    twitch_title.resolve_game_description = MagicMock(return_value="")
+    application.bot_data["twitch"] = twitch_title
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=43))
+    bot.send_photo = AsyncMock()
+    ctx = _ctx(application)
+    ctx.job = None
+    await check_schedule_reminders(ctx)
+    title_texts = [
+        str(c.kwargs.get("text") or "") for c in bot.send_message.await_args_list
+    ]
+    assert any("Стрим по Вахта Хоррор" in t for t in title_texts)
+    assert not any("Стрим по —" in t for t in title_texts)
+
     # error_handler: blocked-user Forbidden is expected noise (not PostHog).
     from bot import error_handler
 

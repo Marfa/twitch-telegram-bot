@@ -3689,7 +3689,24 @@ def check_core() -> None:
         build_schedule_day_map,
         find_emptied_schedule_days,
         schedule_cancel_suppressed,
+        segment_game_or_title,
         suppress_schedule_cancel,
+    )
+
+    assert (
+        segment_game_or_title(
+            {"title": "Вахта Хоррор", "category": None}
+        )
+        == "Вахта Хоррор"
+    )
+    assert (
+        segment_game_or_title(
+            {"title": "Custom", "category": {"name": "Just Chatting"}}
+        )
+        == "Just Chatting"
+    )
+    assert (
+        segment_game_or_title({"title": "Snap", "game": ""}) == "Snap"
     )
 
     now_sc = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
