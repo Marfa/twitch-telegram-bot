@@ -1,0 +1,28 @@
+---
+description: PingZen Maintenance Windows — plan downtime and only work inside the window
+alwaysApply: true
+---
+
+# PingZen Maintenance Windows
+
+Status page: https://pingzen.dev/status/bot-themarfa  
+MCP: `user-pingzen` (`create_maintenance` / `list_maintenance` / …).
+
+## Rule
+
+If maintenance is **planned** (deploy with expected downtime, VPS reboot, DB migration, forced recreate that may flap `/health`, certificate swap, etc.):
+
+1. **Schedule it first** in PingZen **Maintenance Windows** (MCP `create_maintenance` or dashboard), covering the affected monitors (`Bot /health` and relevant `/health/c/*`).
+2. **Run the work only inside that window** — do not start disruptive ops before the window opens or after it ends.
+3. Prefer a window with a little buffer before/after the real change.
+4. After the window: confirm monitors are UP; cancel/extend via MCP only if the plan changes.
+
+## Why
+
+Without a window, PingZen will alert on expected DOWN during the work. The window suppresses those alerts and keeps the status page honest.
+
+## Do not
+
+- Take the bot down “for a minute” without a scheduled window when PingZen is watching.
+- Leave a window open indefinitely after work is done — close/cancel or let it end on schedule.
+- Treat vendor Statuspage maintenance as a substitute for our PingZen window.
