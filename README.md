@@ -3,7 +3,7 @@
 **Старт, смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
 
 > [!IMPORTANT]
-> **Готовый бот:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню
+> **Готовый бот:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню · [статус](https://pingzen.dev/status/bot-themarfa)
 
 English: [README.en.md](README.en.md)
 
@@ -17,7 +17,7 @@ English: [README.en.md](README.en.md)
 
 | Возможность | Как работает |
 |---|---|
-| Готовый бот | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню |
+| Готовый бот | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню; [статус](https://pingzen.dev/status/bot-themarfa) |
 | Языки | Русский, English, Українська, Italiano — выбор при первом `/start`, смена в **⚙️ Настройки** |
 | Типы оповещений | Начало стрима · смена категории · предстоящий (Twitch schedule) · окончание стрима · Drops · оповещение по игре · выход релизов (IGDB) · раздачи игр (GamerPower + ITAD) |
 | Куда слать | Личка или канал/группа/сообщество (с темами) |
@@ -268,7 +268,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | ↳ 💸 Выводы | Заявки партнёров: ✅ выплачено / ❌ отклонить (баланс возвращается) |
 | ↳ 📊 Статистика | Пользователи, подписки, языки, платный Premium; тот же снимок раз в сутки уходит в PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Демо режим | Вкл. из админки: меню как у free без Premium, демо-подписки; **Админка скрыта**, кнопка «Демо режим» остаётся в главном меню — повторное нажатие выходит и сбрасывает всё демо |
-| ❓ Помощь | @immarfa или [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
+| ❓ Помощь | @immarfa или [Issues](https://github.com/Marfa/twitch-telegram-bot/issues); [статус бота](https://pingzen.dev/status/bot-themarfa) |
 
 ### Партнёрская программа
 

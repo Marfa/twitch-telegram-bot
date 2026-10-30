@@ -2,6 +2,12 @@
   "mcpServers": {
     "posthog": {
       "url": "https://mcp.posthog.com/mcp"
+    },
+    "viaduct": {
+      "url": "https://mcp.quietgridlabs.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:VIADUCT_MCP_TOKEN}"
+      }
     }
   }
 }

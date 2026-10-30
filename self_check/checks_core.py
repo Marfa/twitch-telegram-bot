@@ -3341,6 +3341,7 @@ def check_core() -> None:
         assert "42" in feedback
         assert "<code>42</code>" in feedback
         assert "@immarfa" in feedback
+        assert "pingzen.dev/status/bot-themarfa" in feedback
         assert "igdb.com" in feedback.lower()
         from i18n import igdb_attribution
 

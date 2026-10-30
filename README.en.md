@@ -3,7 +3,7 @@
 **Go-live, category change, upcoming or stream end, a new Drop, game giveaways, or a Twitch whisper — the bot notifies wherever you choose.** AI clips from VOD. Manage Twitch schedule from Telegram.
 
 > [!IMPORTANT]
-> **Live bot:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu
+> **Live bot:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu · [status](https://pingzen.dev/status/bot-themarfa)
 
 Русский: [README.md](README.md)
 
@@ -17,7 +17,7 @@
 
 | Feature | How it works |
 |---|---|
-| Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu |
+| Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu; [status](https://pingzen.dev/status/bot-themarfa) |
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (GamerPower + ITAD) |
 | Destinations | DM or channel/group/community (with topics) |
@@ -268,7 +268,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
 | ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium; same snapshot sent daily to PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Demo mode | Start from Admin: free-user menu without Premium, demo subscriptions; **Admin is hidden**, «Demo mode» stays on the main menu — press again to exit and wipe all demo data |
-| ❓ Help | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues) |
+| ❓ Help | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues); [bot status](https://pingzen.dev/status/bot-themarfa) |
 
 ### Partner program
 
