@@ -2616,7 +2616,8 @@ async def schedule_save_token_callback(
         t("stream_schedule_token_saved", lang),
         reply_markup=_menu(lang, user_id),
     )
+    # Keep the publish/vacation result text; only drop the save-token button.
     try:
-        await query.edit_message_text((query.message.text or "") + "\n\n✓")
+        await query.edit_message_reply_markup(None)
     except BadRequest:
         pass
