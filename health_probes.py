@@ -33,7 +33,7 @@ COMPONENT_NAMES = frozenset(
         "groq",
         "bothub",
         "deepl",
-        "azure_translator",
+        "rapidapi_translate",
         "youtube",
         "itad",
         "gamerpower",
@@ -142,8 +142,8 @@ def _run_probe(name: str) -> tuple[int, bytes]:
         return _probe_bothub()
     if name == "deepl":
         return _probe_deepl()
-    if name == "azure_translator":
-        return _probe_azure_translator()
+    if name == "rapidapi_translate":
+        return _probe_rapidapi_translate()
     if name == "youtube":
         return _probe_youtube()
     if name == "itad":
@@ -364,33 +364,28 @@ def _probe_deepl() -> tuple[int, bytes]:
     return _fail(b"auth" if r.status_code in (401, 403) else b"http")
 
 
-def _probe_azure_translator() -> tuple[int, bytes]:
-    from config import (
-        AZURE_TRANSLATOR_ENDPOINT,
-        AZURE_TRANSLATOR_KEY,
-        AZURE_TRANSLATOR_REGION,
-    )
+def _probe_rapidapi_translate() -> tuple[int, bytes]:
+    """Tiny EN→RU call — validates key + Deep Translate subscription (not a public stub)."""
+    from config import RAPIDAPI_KEY
 
-    key = (AZURE_TRANSLATOR_KEY or "").strip()
-    region = (AZURE_TRANSLATOR_REGION or "").strip()
-    if not key or not region:
+    key = (RAPIDAPI_KEY or "").strip()
+    if not key:
         return _na()
-    endpoint = (AZURE_TRANSLATOR_ENDPOINT or "").rstrip("/")
-    url = f"{endpoint}/languages"
+    host = "deep-translate1.p.rapidapi.com"
     try:
-        r = _SESSION.get(
-            url,
-            params={"api-version": "3.0"},
+        r = _SESSION.post(
+            f"https://{host}/language/translate/v2",
+            json={"q": "ok", "source": "en", "target": "ru", "format": "text"},
             headers={
-                "Ocp-Apim-Subscription-Key": key,
-                "Ocp-Apim-Subscription-Region": region,
+                "X-RapidAPI-Key": key,
+                "X-RapidAPI-Host": host,
+                "Content-Type": "application/json",
             },
             timeout=_HTTP_TIMEOUT,
         )
     except Exception:
-        logger.exception("health probe azure translator failed")
+        logger.exception("health probe rapidapi translate failed")
         return _fail(b"net")
-    # languages is often public; key+region still validated by 200 from our endpoint call
     if r.status_code == 200:
         return _ok()
     return _fail(b"auth" if r.status_code in (401, 403) else b"http")

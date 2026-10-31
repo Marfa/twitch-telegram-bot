@@ -344,9 +344,7 @@ Menu Button **Чат** слева у поля ввода (ставится вс�
 | `TOKEN_ENCRYPTION_KEY` | Опционально: Fernet-ключ для refresh token (иначе из `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Порт health/OAuth (по умолчанию 8080) |
 | `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя (основной) |
-| `AZURE_TRANSLATOR_KEY` | Fallback при исчерпании квоты DeepL (HTTP 456) |
-| `AZURE_TRANSLATOR_REGION` | Регион ресурса Azure Translator (`northeurope`, `eastus`, …) |
-| `AZURE_TRANSLATOR_ENDPOINT` | Опционально; по умолчанию global Translator API |
+| `RAPIDAPI_KEY` | Fallback при исчерпании квоты DeepL (HTTP 456) — RapidAPI Deep Translate |
 | `GROQ_API_KEY` | (опц.) Groq Whisper + LLM — emotion-скоринг топ-10 audio и game/chat-контекст всплесков чата в AI-клипах |
 | `BOTHUB_API_KEY` | (опц.) BotHub — ИИ-обложки алертов; без ключа фича недоступна |
 | `BOTHUB_IMAGE_MODEL` | Модель обложки (по умолчанию `gemini-3.1-flash-lite-image`) |
@@ -407,9 +405,9 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `beta.py` | Бета-каталог (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Флаг админского демо-режима (free UX + сброс демо-подписок) |
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
-| `translate.py` | DeepL для админ-рассылок; при квоте 456 — Azure Translator |
+| `translate.py` | DeepL для админ-рассылок; при квоте 456 — RapidAPI Deep Translate |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, azure_translator, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, rapidapi_translate, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS только для OAuth / health / PostHog Issue+Report webhook.
 

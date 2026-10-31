@@ -1277,10 +1277,8 @@ def check_db_premium() -> None:
     from unittest.mock import MagicMock, patch
 
     with patch("config.DEEPL_API_KEY", "test-key"), patch(
-        "config.AZURE_TRANSLATOR_KEY", ""
-    ), patch("config.AZURE_TRANSLATOR_REGION", ""), patch(
-        "translate.requests.post"
-    ) as post:
+        "config.RAPIDAPI_KEY", ""
+    ), patch("translate.requests.post") as post:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.ok = True
@@ -1302,35 +1300,33 @@ def check_db_premium() -> None:
         sent_html = post.call_args.kwargs["data"]
         assert sent_html.get("tag_handling") == "html"
 
-    # DeepL 456 → sticky fallback to Azure Translator (clears after 24h).
+    # DeepL 456 → sticky fallback to RapidAPI Deep Translate (clears after 24h).
     translate_mod._deepl_quota_exhausted_at = None
     with patch("config.DEEPL_API_KEY", "test-key"), patch(
-        "config.AZURE_TRANSLATOR_KEY", "azure-key"
-    ), patch("config.AZURE_TRANSLATOR_REGION", "northeurope"), patch(
-        "translate.requests.post"
-    ) as post:
+        "config.RAPIDAPI_KEY", "rapid-key"
+    ), patch("translate.requests.post") as post:
         deepl_resp = MagicMock()
         deepl_resp.status_code = 456
         deepl_resp.text = "Quota exceeded"
-        azure_resp = MagicMock()
-        azure_resp.status_code = 200
-        azure_resp.ok = True
-        azure_resp.raise_for_status = MagicMock()
-        azure_resp.json.return_value = [
-            {"translations": [{"text": "привет azure", "to": "ru"}]}
-        ]
-        post.side_effect = [deepl_resp, azure_resp]
+        rapid_resp = MagicMock()
+        rapid_resp.status_code = 200
+        rapid_resp.ok = True
+        rapid_resp.raise_for_status = MagicMock()
+        rapid_resp.json.return_value = {
+            "data": {"translations": {"translatedText": ["привет rapid"]}}
+        }
+        post.side_effect = [deepl_resp, rapid_resp]
         assert (
             translate_text("hello", target_lang="ru", source_lang="en")
-            == "привет azure"
+            == "привет rapid"
         )
         assert translate_mod._deepl_quota_exhausted_at is not None
         assert post.call_count == 2
-        # Second call skips DeepL (sticky) and goes straight to Azure.
-        post.side_effect = [azure_resp]
+        # Second call skips DeepL (sticky) and goes straight to RapidAPI.
+        post.side_effect = [rapid_resp]
         assert (
             translate_text("hello", target_lang="ru", source_lang="en")
-            == "привет azure"
+            == "привет rapid"
         )
         assert post.call_count == 3
         # After sticky TTL, DeepL is tried again.
@@ -1350,6 +1346,29 @@ def check_db_premium() -> None:
         assert translate_mod._deepl_quota_exhausted_at is None
         assert post.call_count == 4
     translate_mod._deepl_quota_exhausted_at = None
+
+    # RapidAPI HTTP errors are logged like Azure (PostHog ERROR) then raised.
+    with patch("config.DEEPL_API_KEY", ""), patch(
+        "config.RAPIDAPI_KEY", "rapid-key"
+    ), patch("translate.requests.post") as post, patch(
+        "translate.logger"
+    ) as tr_log:
+        bad = MagicMock()
+        bad.status_code = 401
+        bad.ok = False
+        bad.text = '{"message":"Invalid API key"}'
+        bad.raise_for_status.side_effect = Exception("401")
+        post.return_value = bad
+        try:
+            translate_text("hello", target_lang="ru", source_lang="en")
+            raise AssertionError("expected raise")
+        except Exception:
+            pass
+        tr_log.error.assert_called()
+        args = tr_log.error.call_args.args
+        assert args[0] == "rapidapi deep translate → %s %s"
+        assert args[1] == 401
+        assert "Invalid API key" in args[2]
     from twitch import localize_igdb_summary, _IGDB_SUMMARY_TR_CACHE
 
     with patch("config.DEEPL_API_KEY", "x"), patch(

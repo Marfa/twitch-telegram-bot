@@ -344,9 +344,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language (primary) |
-| `AZURE_TRANSLATOR_KEY` | Fallback when DeepL quota is exhausted (HTTP 456) |
-| `AZURE_TRANSLATOR_REGION` | Azure Translator resource region (`northeurope`, `eastus`, …) |
-| `AZURE_TRANSLATOR_ENDPOINT` | Optional; default is the global Translator API |
+| `RAPIDAPI_KEY` | Fallback when DeepL quota is exhausted (HTTP 456) — RapidAPI Deep Translate |
 | `GROQ_API_KEY` | (opt.) Groq Whisper + LLM — emotion score on top-10 audio and game/chat context on chat spikes for AI clips |
 | `BOTHUB_API_KEY` | (opt.) BotHub — AI alert covers; feature skipped if unset |
 | `BOTHUB_IMAGE_MODEL` | Cover model (default `gemini-3.1-flash-lite-image`) |
@@ -407,9 +405,9 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `beta.py` | Beta catalog (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
-| `translate.py` | DeepL for admin broadcasts; Azure Translator on DeepL quota 456 |
+| `translate.py` | DeepL for admin broadcasts; RapidAPI Deep Translate on DeepL quota 456 |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, azure_translator, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, rapidapi_translate, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS for OAuth / health / PostHog Issue+Report webhook.
 

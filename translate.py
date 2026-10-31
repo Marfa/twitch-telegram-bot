@@ -15,12 +15,13 @@ _DEEPL_SOURCE = {"en": "EN", "ru": "RU", "uk": "UK", "it": "IT"}
 _DEEPL_TARGET = {"en": "EN-US", "ru": "RU", "uk": "UK", "it": "IT"}
 _DEEPL_TIMEOUT = 30
 
-_AZURE_LANG = {"en": "en", "ru": "ru", "uk": "uk", "it": "it"}
-_AZURE_TIMEOUT = 30
-# Azure Text API ~50k chars — keep under with margin (bot texts are usually short).
-_AZURE_MAX_CHARS = 45_000
+# RapidAPI Deep Translate (Google Translate v2-shaped). Fallback after DeepL 456.
+_RAPID_LANG = {"en": "en", "ru": "ru", "uk": "uk", "it": "it"}
+_RAPID_TIMEOUT = 30
+_RAPID_HOST = "deep-translate1.p.rapidapi.com"
+_RAPID_URL = f"https://{_RAPID_HOST}/language/translate/v2"
 
-# After DeepL 456, skip DeepL for a day (Azure fallback), then probe again.
+# After DeepL 456, skip DeepL for a day (RapidAPI fallback), then probe again.
 _DEEPL_QUOTA_STICKY_SEC = 24 * 3600
 _deepl_quota_exhausted_at: float | None = None
 
@@ -30,7 +31,7 @@ class DeeplQuotaExceeded(RuntimeError):
 
 
 def _deepl_quota_blocked() -> bool:
-    """True while sticky Azure-only window after DeepL 456 is still active."""
+    """True while sticky RapidAPI-only window after DeepL 456 is still active."""
     global _deepl_quota_exhausted_at
     if _deepl_quota_exhausted_at is None:
         return False
@@ -91,17 +92,17 @@ def _normalize_locale(locale: str | None) -> str:
     return DEFAULT_LOCALE
 
 
-def _azure_configured() -> bool:
+def _rapidapi_configured() -> bool:
     import config as cfg
 
-    return bool(cfg.AZURE_TRANSLATOR_KEY and cfg.AZURE_TRANSLATOR_REGION)
+    return bool(cfg.RAPIDAPI_KEY)
 
 
 def translation_configured() -> bool:
-    """True when DeepL and/or Azure Translator can translate."""
+    """True when DeepL and/or RapidAPI Deep Translate can translate."""
     import config as cfg
 
-    return bool(cfg.DEEPL_API_KEY) or _azure_configured()
+    return bool(cfg.DEEPL_API_KEY) or _rapidapi_configured()
 
 
 def _tr_deepl(
@@ -138,7 +139,25 @@ def _tr_deepl(
     return str(translations[0].get("text") or text)
 
 
-def _tr_azure_once(
+def _parse_rapid_translation(data: object, fallback: str) -> str:
+    """Accept Deep Translate dict shape and Google-native list shape."""
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Unexpected RapidAPI Deep Translate response: {data!r}")
+    translations = (data.get("data") or {}).get("translations")
+    if isinstance(translations, dict):
+        texts = translations.get("translatedText")
+        if isinstance(texts, list) and texts:
+            return str(texts[0] or fallback)
+        if isinstance(texts, str) and texts.strip():
+            return texts
+    if isinstance(translations, list) and translations:
+        first = translations[0] or {}
+        if isinstance(first, dict):
+            return str(first.get("translatedText") or fallback)
+    raise RuntimeError(f"Unexpected RapidAPI Deep Translate response: {data!r}")
+
+
+def _tr_rapidapi(
     text: str,
     *,
     target: str,
@@ -147,70 +166,41 @@ def _tr_azure_once(
 ) -> str:
     import config as cfg
 
-    params: dict[str, str] = {
-        "api-version": "3.0",
-        "to": _AZURE_LANG[target],
+    payload: dict[str, object] = {
+        "q": text,
+        "target": _RAPID_LANG[target],
+        "format": "html" if use_html else "text",
     }
     if source:
-        params["from"] = _AZURE_LANG[source]
-    if use_html:
-        params["textType"] = "html"
+        payload["source"] = _RAPID_LANG[source]
     headers = {
-        "Ocp-Apim-Subscription-Key": cfg.AZURE_TRANSLATOR_KEY,
-        "Ocp-Apim-Subscription-Region": cfg.AZURE_TRANSLATOR_REGION,
-        "Content-Type": "application/json; charset=UTF-8",
+        "X-RapidAPI-Key": cfg.RAPIDAPI_KEY,
+        "X-RapidAPI-Host": _RAPID_HOST,
+        "Content-Type": "application/json",
     }
-    response = requests.post(
-        f"{cfg.AZURE_TRANSLATOR_ENDPOINT}/translate",
-        params=params,
-        headers=headers,
-        json=[{"Text": text}],
-        timeout=_AZURE_TIMEOUT,
-    )
-    # requests.Response has .ok, not httpx-style .is_error
+    try:
+        response = requests.post(
+            _RAPID_URL,
+            json=payload,
+            headers=headers,
+            timeout=_RAPID_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        # Same visibility as HTTP errors → PostHog via ERROR logs.
+        logger.error(
+            "rapidapi deep translate → %s %s",
+            type(exc).__name__,
+            str(exc)[:500],
+        )
+        raise
     if not response.ok:
         logger.error(
-            "azure translate → %s %s",
+            "rapidapi deep translate → %s %s",
             response.status_code,
             response.text[:500],
         )
     response.raise_for_status()
-    data = response.json()
-    try:
-        return data[0]["translations"][0]["text"]
-    except (IndexError, KeyError, TypeError) as exc:
-        raise RuntimeError(f"Unexpected Azure Translator response: {data!r}") from exc
-
-
-def _tr_azure(
-    text: str,
-    *,
-    target: str,
-    source: str | None,
-    use_html: bool,
-) -> str:
-    if len(text) <= _AZURE_MAX_CHARS:
-        return _tr_azure_once(
-            text, target=target, source=source, use_html=use_html
-        )
-    if use_html:
-        # Bot payloads are Telegram-sized; avoid mid-tag splits.
-        return _tr_azure_once(
-            text, target=target, source=source, use_html=True
-        )
-    parts: list[str] = []
-    start = 0
-    while start < len(text):
-        parts.append(
-            _tr_azure_once(
-                text[start : start + _AZURE_MAX_CHARS],
-                target=target,
-                source=source,
-                use_html=False,
-            )
-        )
-        start += _AZURE_MAX_CHARS
-    return "".join(parts)
+    return _parse_rapid_translation(response.json(), text)
 
 
 def translate_text(
@@ -244,15 +234,17 @@ def translate_text(
             return _tr_deepl(text, target=target, source=source, use_html=use_html)
         except DeeplQuotaExceeded:
             _mark_deepl_quota_exhausted()
-            logger.warning("DeepL quota exceeded; falling back to Azure Translator")
+            logger.warning(
+                "DeepL quota exceeded; falling back to RapidAPI Deep Translate"
+            )
 
-    if _azure_configured():
-        return _tr_azure(text, target=target, source=source, use_html=use_html)
+    if _rapidapi_configured():
+        return _tr_rapidapi(text, target=target, source=source, use_html=use_html)
 
     if _deepl_quota_blocked():
         raise RuntimeError(
-            "DeepL quota exceeded and Azure Translator is not configured "
-            "(AZURE_TRANSLATOR_KEY + AZURE_TRANSLATOR_REGION)"
+            "DeepL quota exceeded and RapidAPI Deep Translate is not configured "
+            "(RAPIDAPI_KEY)"
         )
     return text
 

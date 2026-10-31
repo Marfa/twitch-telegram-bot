@@ -8,21 +8,43 @@ alwaysApply: true
 Status page: https://pingzen.dev/status/bot-themarfa  
 MCP: `user-pingzen` (`create_maintenance` / `list_maintenance` / …).
 
-## Rule
+Admin broadcast type for downtime notice: **`availability`**
+(«Оповещения о доступности (бот / Twitch)» — recipients via `get_availability_recipients` / Settings toggle).
 
-If maintenance is **planned** (deploy with expected downtime, VPS reboot, DB migration, forced recreate that may flap `/health`, certificate swap, etc.):
+## When this applies
 
-1. **Schedule it first** in PingZen **Maintenance Windows** (MCP `create_maintenance` or dashboard), covering the affected monitors (`Bot /health` and relevant `/health/c/*`).
-2. **Run the work only inside that window** — do not start disruptive ops before the window opens or after it ends.
-3. Prefer a window with a little buffer before/after the real change.
-4. After the window: confirm monitors are UP; cancel/extend via MCP only if the plan changes.
+If maintenance is **planned** (deploy with expected downtime, VPS reboot, DB migration, forced recreate that may flap `/health`, certificate swap, push→Deploy VPS that recreates the bot, etc.).
+
+## Rule — order of operations
+
+1. **Ask the user first** (before creating any PingZen window and before disruptive work):
+
+   > Нужна ли рассылка пользователям об этой недоступности / работах?
+
+2. **If yes:**
+   1. Draft the notice text and **agree the final copy with the user** (do not send unapproved wording).
+   2. Send the broadcast with type **`availability`** (admin «Доступность бота» / `msg_type=availability`) to users who opted into availability alerts.
+   3. Only after the broadcast is sent (or scheduled and confirmed), create the PingZen **Maintenance Window** and start the work.
+
+3. **If no:**
+   - Skip the user broadcast.
+   - Create the PingZen window and start the work.
+
+4. **Schedule the window** (MCP `create_maintenance` or dashboard) covering the affected monitors (`Bot /health` and relevant `/health/c/*`). Prefer a little buffer before/after the real change.
+
+5. **Run the work only inside that window** — do not start disruptive ops before the window opens or after it ends.
+
+6. After the window: confirm monitors are UP; cancel/extend via MCP only if the plan changes.
 
 ## Why
 
-Without a window, PingZen will alert on expected DOWN during the work. The window suppresses those alerts and keeps the status page honest.
+Without a window, PingZen will alert on expected DOWN during the work. The window suppresses those alerts and keeps the status page honest. The optional `availability` broadcast warns opted-in users before the bot goes away.
 
 ## Do not
 
+- Create a Maintenance Window or start disruptive work **before** asking about the user broadcast (when this rule applies).
+- Send an `availability` broadcast without the user approving the text.
 - Take the bot down “for a minute” without a scheduled window when PingZen is watching.
 - Leave a window open indefinitely after work is done — close/cancel or let it end on schedule.
 - Treat vendor Statuspage maintenance as a substitute for our PingZen window.
+- Use `bot_update` / `other` for planned downtime notices — use **`availability`**.
