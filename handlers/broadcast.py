@@ -641,6 +641,11 @@ async def _send_admin_broadcast(
     db: Database = context.application.bot_data["db"]
     user_ids = _broadcast_recipient_ids(db, msg_type, recipient_ids)
     user_ids = [uid for uid in user_ids if not db.is_bot_blocked(uid)]
+    # send-now (full blast) and timezone waves can overlap; deliveries PK only
+    # updates message_id — without this filter Telegram gets a second DM.
+    already = {uid for uid, _ in db.get_broadcast_deliveries(broadcast_id)}
+    if already:
+        user_ids = [uid for uid in user_ids if uid not in already]
     if utc_offset_filter is not None:
         default_off = _default_broadcast_utc_offset()
         offsets = db.get_schedule_utc_offsets_for_users(user_ids)
@@ -1469,7 +1474,12 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
     db: Database = context.application.bot_data["db"]
     bot_data = context.application.bot_data
     now = datetime.now(timezone.utc)
+    sending_full = bot_data.get("sending_broadcasts") or set()
     for item in db.get_unsent_scheduled_broadcasts():
+        # sched:now holds sending_broadcasts until mark_sent; wave claim is a
+        # separate set — without this skip, due TZ waves double-DM the audience.
+        if item.id in sending_full:
+            continue
         sent_offsets = db.get_broadcast_sent_offsets(item.id)
         for offset, due_utc in _broadcast_waves(db, item):
             if offset in sent_offsets or due_utc > now:

@@ -609,6 +609,16 @@ def check_db_premium() -> None:
         assert "def _broadcast_run_once" in bc
         assert bc.count("job_queue.run_once(") == 1  # only inside _broadcast_run_once
         assert "misfire_grace_time" in bc
+        # send-now vs TZ-wave race: poll skips full blast; send skips prior deliveries
+        _poll = bc.split("async def process_scheduled_broadcasts", 1)[1].split(
+            "async def ", 1
+        )[0]
+        assert "sending_broadcasts" in _poll or "sending_full" in _poll
+        _send = bc.split("async def _send_admin_broadcast", 1)[1].split(
+            "async def ", 1
+        )[0]
+        assert "get_broadcast_deliveries" in _send
+        assert "already" in _send
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")
