@@ -1363,7 +1363,7 @@
   "stream_defaults_need_template": "Set a default message template in Settings → Default settings first.",
   "edit_apply_defaults": "Default settings",
   "please_start": "Please press /start first to begin using the bot.",
-  "broadcast_type_promo": "🎃 Promotions",
+  "broadcast_type_promo": "🏷 Promotions",
   "sys_promo_label": "Promotions",
   "btn_premium_promo_enter": "Enter promo code",
   "btn_premium_promo_skip": "Continue without code",

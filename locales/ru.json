@@ -1364,7 +1364,7 @@
   "stream_defaults_need_template": "Сначала задайте шаблон в Настройки → Настройки по умолчанию.",
   "edit_apply_defaults": "Настройки по умолчанию",
   "please_start": "Сначала нажмите /start, чтобы начать пользоваться ботом.",
-  "broadcast_type_promo": "🎃 Промоакции",
+  "broadcast_type_promo": "🏷 Промоакции",
   "sys_promo_label": "Промоакции",
   "btn_premium_promo_enter": "Ввести промокод",
   "btn_premium_promo_skip": "Без промокода",
