@@ -951,7 +951,7 @@
   "twitch_status_affected": "Affected components:",
   "twitch_status_incidents": "Incidents:",
   "cursor_status_title": "📡 Cursor Status",
-  "bot_stats": "📊 Bot statistics\n\nUsers: {users}\nCreated alerts: {unique_owners}\nRecipients: {notify_users}\nSubscriptions: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nTwitch channels tracked: {unique_twitch_channels}\nPaid Premium users: {premium_paid}\nActive trials: {trials}{trial_list}\n\nSystem notifications:\n• Bot updates: {sys_updates}\n• Bot availability: {sys_availability}\n• Other: {sys_other}\n• Blocked the bot: {blocked_users}\n\nLanguages:\n• English: {locale_en}\n• Russian: {locale_ru}\n• Ukrainian: {locale_uk}\n• Italian: {locale_it}\n• Not set: {locale_unset}",
+  "bot_stats": "📊 Bot statistics\n\nUsers: {users}\nCreated alerts: {unique_owners}\nRecipients: {notify_users}\nSubscriptions: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nTwitch channels tracked: {unique_twitch_channels}\nPaid Premium users: {premium_paid}\nActive trials: {trials}{trial_list}\n\nSystem notifications:\n• Bot updates: {sys_updates}\n• Bot availability: {sys_availability}\n• Other: {sys_other}\n• Promotions: {sys_promo}\n• Blocked the bot: {blocked_users}\n\nLanguages:\n• English: {locale_en}\n• Russian: {locale_ru}\n• Ukrainian: {locale_uk}\n• Italian: {locale_it}\n• Not set: {locale_unset}",
   "sub_list_edit": "✏️",
   "sub_list_delete": "🗑",
   "sub_list_share_short": "📤",
@@ -1362,5 +1362,16 @@
   "stream_defaults_locked": "Settings are locked — turn off «Default settings» to edit them.",
   "stream_defaults_need_template": "Set a default message template in Settings → Default settings first.",
   "edit_apply_defaults": "Default settings",
-  "please_start": "Please press /start first to begin using the bot."
+  "please_start": "Please press /start first to begin using the bot.",
+  "broadcast_type_promo": "🎃 Promotions",
+  "sys_promo_label": "Promotions",
+  "btn_premium_promo_enter": "Enter promo code",
+  "btn_premium_promo_skip": "Continue without code",
+  "premium_promo_prompt": "Have a promo code? Enter it now or continue without a discount.",
+  "premium_promo_ask": "Send the promo code in one message.\n/cancel — cancel.",
+  "premium_promo_applied": "Promo applied: −{percent}%.\nAmount due: {stars} ⭐\nDiscount applies to the first payment only; renewals are full price.",
+  "premium_promo_invalid": "Promo code is invalid or expired.",
+  "premium_promo_used": "You already used this promo code.",
+  "premium_promo_expired": "This promo code has expired.",
+  "premium_promo_kind_blocked": "This promo code does not apply to the selected plan."
 }

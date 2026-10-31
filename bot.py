@@ -362,6 +362,7 @@ from handlers.settings import (
     on_sys_availability_toggle,
     on_sys_beta_toggle,
     on_sys_other_toggle,
+    on_sys_promo_toggle,
     on_sys_sync_toggle,
     on_sys_updates_toggle,
     on_whisper_alerts_toggle,
@@ -2482,7 +2483,10 @@ async def _gift_wiz_text_router(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     from handlers.premium_gift import gift_wiz_text
+    from premium_handlers import promo_wiz_text
 
+    if await promo_wiz_text(update, context):
+        return
     await gift_wiz_text(update, context)
 
 
@@ -3018,6 +3022,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_sys_promo_toggle, pattern=r"^sys_promo:toggle$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_sys_sync_toggle, pattern=r"^sys_sync:toggle$"),
         group=0,
     )
@@ -3033,7 +3041,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_premium_callback_router,
-            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|cancel_channel:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+|gift|gift_month|gift_year|gift_life)$",
+            pattern=r"^premium:(pay|month|year|life|cancel|cancel_feat:.+|cancel_channel:.+|owned|marfapr|channel|channel_confirm|channel_pay|trial|trial_confirm|features|feat_back|feat_pay|feat_toggle:.+|gift|gift_month|gift_year|gift_life|promo_skip|promo_enter|promo_cancel)$",
         ),
         group=0,
     )
@@ -4184,7 +4192,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
                 r"list_type:|list_del:\d+$|list_del_ok:\d+$|list_del_no:\d+$|"
                 r"sb_edit:\d+$|sb_edit_f:|sb_delete:|"
-                r"sys_updates:|sys_availability:|sys_other:|sys_sync:|sys_beta:|"
+                r"sys_updates:|sys_availability:|sys_other:|sys_promo:|sys_sync:|sys_beta:|"
                 r"whisper_alerts:|"
                 r"follow_monitor:|"
                 r"import_mode:|sync:|premium:|premium_early:|ref_wd:|watch:|alert_history:)"

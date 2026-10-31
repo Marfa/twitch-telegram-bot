@@ -29,6 +29,7 @@ from i18n import (
     premium_early_keyboard,
     premium_gate_keyboard,
     premium_gift_keyboard,
+    premium_promo_keyboard,
     settings_menu,
     auth_tokens_menu,
     language_keyboard,
@@ -228,6 +229,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("premium_gate_first", premium_gate_keyboard(loc, first_step=True)),
             ("premium_gate_later", premium_gate_keyboard(loc, first_step=False)),
             ("premium_early_soft", premium_early_keyboard(loc)),
+            ("premium_promo", premium_promo_keyboard(loc)),
             ("stream_schedule_confirm", stream_schedule_confirm_keyboard(loc)),
             ("stream_schedule_mode", stream_schedule_mode_keyboard(loc)),
             ("stream_schedule_vacation_auto", stream_schedule_vacation_auto_keyboard(loc)),
@@ -4197,6 +4199,74 @@ async def _scenario_premium_channel_ad(db) -> None:
     query.edit_message_text.assert_awaited()
 
 
+async def _scenario_premium_promo_step(db) -> None:
+    """§8 Premium — promo prompt has Skip/Back; skipped when no applicable codes."""
+    from premium_handlers import on_premium_callback
+    from i18n import premium_promo_keyboard as promo_kb
+
+    uid = _FREE_UID + 31
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(uid, "premium:month", cap)
+    query.get_bot = MagicMock(return_value=bot)
+    ctx = _ctx(application)
+    # Keep pending pay so promo_cancel has something to clear.
+    with patch("config.show_premium_ui", return_value=True), patch(
+        "premium.has_applicable_promo_for_user", return_value=True
+    ):
+        await on_premium_callback(update, ctx)
+    query.edit_message_text.assert_awaited()
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    assert markup_has_escape_hatch(markup), "premium promo step missing Skip/Back"
+    cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium:promo_skip" in cbs
+    assert "premium:promo_cancel" in cbs
+    assert "premium:promo_enter" in cbs
+    assert markup_has_escape_hatch(promo_kb("ru"))
+    assert ctx.user_data.get("premium_pending_pay")
+    cap.assert_turn("premium_promo_prompt")
+
+    update, query = _cb_update(uid, "premium:promo_cancel", cap)
+    query.get_bot = MagicMock(return_value=bot)
+    with patch("config.show_premium_ui", return_value=True), patch(
+        "premium_handlers.send_premium_screen", new=AsyncMock()
+    ) as send_prem:
+        await on_premium_callback(update, ctx)
+    send_prem.assert_awaited()
+    assert "premium_pending_pay" not in ctx.user_data
+
+    # Lifetime: Halloween excludes life → invoice without promo prompt.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    bot.create_invoice_link = AsyncMock(return_value="https://t.me/$life")
+    update, query = _cb_update(uid, "premium:life", cap)
+    query.get_bot = MagicMock(return_value=bot)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True):
+        await on_premium_callback(update, ctx)
+    bot.create_invoice_link.assert_awaited()
+    last_markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    last_cbs = {
+        cell.callback_data
+        for row in (getattr(last_markup, "inline_keyboard", None) or [])
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium:promo_enter" not in last_cbs
+    assert not ctx.user_data.get("premium_pending_pay")
+
+
 async def _scenario_premium_early_soft(db) -> None:
     """§8 Premium — soft intro before paywall for first-day users without alerts."""
     from premium_handlers import on_premium_early, open_premium_menu
@@ -4254,6 +4324,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_menus_and_wizards(db)
         await _scenario_welcome_demo(db)
         await _scenario_premium_early_soft(db)
+        await _scenario_premium_promo_step(db)
         await _scenario_premium_channel_ad(db)
         await _scenario_wizard_channel_step(db)
         await _scenario_subscriptions(db)

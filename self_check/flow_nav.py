@@ -36,6 +36,8 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^welcome_del:\d+$|"
     r"^premium:gift_skip_(?:msg|img)$|"
     r"^premium:feat_back$|"
+    r"^premium:promo_cancel$|"
+    r"^premium:promo_skip$|"
     r"^twitch_link:decline$|"
     r"^delete_all:no$|"
     r"^list_del_no:\d+$|"

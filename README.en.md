@@ -39,7 +39,7 @@
 | Streamer Telegram | After manually creating a stream alert, TG channels are appended to the “Setup complete” message after the alert note (Helix/seeds = curated, no disclaimer; otherwise crowd with disclaimer) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
-| System alerts | Toggle admin broadcasts (updates / availability / other / sync / **new betas**, default off, auto-on on first beta opt-in); Twitch outages (status.twitch.com) when availability is on; Cursor (status.cursor.com) — admins with the same toggle; status DMs include a “turn off in Settings” footer |
+| System alerts | Toggle admin broadcasts (updates / availability / other / **promotions** for non-Premium users / sync / **new betas**, default off, auto-on on first beta opt-in); Twitch outages (status.twitch.com) when availability is on; Cursor (status.cursor.com) — admins with the same toggle; status DMs include a “turn off in Settings” footer |
 | Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
@@ -61,7 +61,7 @@ Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the
 | Single feature | 20 | 30 days each |
 | Channel advertising (streamers) | 300 | Stars subscription / month |
 
-Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars. With Russian locale — **Buy Stars with RF card** button (external link).
+Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars. With Russian locale — **Buy Stars with RF card** button (external link). At checkout you can enter a promo code (discount on the first payment only; auto-renew / repurchase is full price).
 
 | Feature | What it unlocks |
 |---|---|
@@ -262,10 +262,10 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
 | ↳ 🔑 Auth tokens | Separate buttons to revoke Twitch or DonationAlerts |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
-| ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), sync, and new-beta alerts |
+| ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), other, promotions, sync, and new-beta alerts |
 | ↳ 🌐 Language | Russian / English / Ukrainian / Italian |
 | ⚙️ Admin | Broadcast, stats, withdrawals, demo mode (`ADMIN_USER_IDS` only) |
-| ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, or “Other”; scheduled send (MSK default, per-user UTC offset when set); final stats after all UTC waves; footer with type and how to disable in Settings |
+| ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, “Other”, or “Promotions” (non-Premium only); scheduled send (MSK default, per-user UTC offset when set); final stats after all UTC waves; footer with type and how to disable in Settings |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
 | ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium; same snapshot sent daily to PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Demo mode | Start from Admin: free-user menu without Premium, demo subscriptions; **Admin is hidden**, «Demo mode» stays on the main menu — press again to exit and wipe all demo data |

@@ -932,7 +932,7 @@
   "twitch_status_affected": "Уражені компоненти:",
   "twitch_status_incidents": "Інциденти:",
   "cursor_status_title": "📡 Cursor Status",
-  "bot_stats": "📊 Статистика бота\n\nКористувачів: {users}\nСтворили сповіщення: {unique_owners}\nОдержувачів: {notify_users}\nПідписок: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nКаналів Twitch: {unique_twitch_channels}\nПлатний преміум: {premium_paid}\nАктивних тріалів: {trials}{trial_list}\n\nСистемні сповіщення:\n• Оновлення бота: {sys_updates}\n• Доступність бота: {sys_availability}\n• Інші: {sys_other}\n• Заблокували бота: {blocked_users}\n\nМови:\n• English: {locale_en}\n• Русский: {locale_ru}\n• Українська: {locale_uk}\n• Italiano: {locale_it}\n• Не обрано: {locale_unset}",
+  "bot_stats": "📊 Статистика бота\n\nКористувачів: {users}\nСтворили сповіщення: {unique_owners}\nОдержувачів: {notify_users}\nПідписок: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nКаналів Twitch: {unique_twitch_channels}\nПлатний преміум: {premium_paid}\nАктивних тріалів: {trials}{trial_list}\n\nСистемні сповіщення:\n• Оновлення бота: {sys_updates}\n• Доступність бота: {sys_availability}\n• Інші: {sys_other}\n• Промоакції: {sys_promo}\n• Заблокували бота: {blocked_users}\n\nМови:\n• English: {locale_en}\n• Русский: {locale_ru}\n• Українська: {locale_uk}\n• Italiano: {locale_it}\n• Не обрано: {locale_unset}",
   "sub_list_edit": "✏️",
   "sub_list_delete": "🗑",
   "sub_list_share_short": "📤",
@@ -1362,5 +1362,16 @@
   "edit_overlap": "🚫 Заборона перекриття",
   "sub_list_overlap_block": "• Заборона перекриття: так",
   "sub_list_overlap_block_repeats": "• Заборона повторів (якщо останнє): так",
-  "please_start": "Спочатку натисніть /start, щоб почати користуватися ботом."
+  "please_start": "Спочатку натисніть /start, щоб почати користуватися ботом.",
+  "broadcast_type_promo": "🎃 Промоакції",
+  "sys_promo_label": "Промоакції",
+  "btn_premium_promo_enter": "Ввести промокод",
+  "btn_premium_promo_skip": "Без промокоду",
+  "premium_promo_prompt": "Є промокод? Можете ввести його зараз або продовжити без знижки.",
+  "premium_promo_ask": "Надішліть промокод одним повідомленням.\n/cancel — скасувати.",
+  "premium_promo_applied": "Промокод застосовано: −{percent}%.\nДо сплати: {stars} ⭐\nЗнижка лише на першу оплату; продовження — за повною ціною.",
+  "premium_promo_invalid": "Промокод недійсний або прострочений.",
+  "premium_promo_used": "Ви вже використали цей промокод.",
+  "premium_promo_expired": "Термін дії промокоду минув.",
+  "premium_promo_kind_blocked": "Цей промокод не діє на обраний тариф."
 }

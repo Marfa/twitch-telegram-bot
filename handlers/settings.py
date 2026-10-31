@@ -392,6 +392,7 @@ async def open_sys_notifications_menu(update: Update, context: ContextTypes.DEFA
             updates_enabled=db.get_receive_bot_updates(user_id),
             availability_enabled=db.get_receive_availability_updates(user_id),
             other_enabled=db.get_receive_other_updates(user_id),
+            promo_enabled=db.get_receive_promo_updates(user_id),
             sync_enabled=db.get_receive_sync_updates(user_id),
             beta_enabled=db.get_receive_beta_updates(user_id),
         ),
@@ -1315,6 +1316,7 @@ async def _refresh_sys_notifications_menu(
             updates_enabled=db.get_receive_bot_updates(user_id),
             availability_enabled=db.get_receive_availability_updates(user_id),
             other_enabled=db.get_receive_other_updates(user_id),
+            promo_enabled=db.get_receive_promo_updates(user_id),
             sync_enabled=db.get_receive_sync_updates(user_id),
             beta_enabled=db.get_receive_beta_updates(user_id),
         ),
@@ -1347,6 +1349,15 @@ async def on_sys_other_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     db.set_receive_other_updates(user_id, not db.get_receive_other_updates(user_id))
+    await _refresh_sys_notifications_menu(query, context, lang, user_id)
+
+async def on_sys_promo_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.set_receive_promo_updates(user_id, not db.get_receive_promo_updates(user_id))
     await _refresh_sys_notifications_menu(query, context, lang, user_id)
 
 async def on_sys_sync_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

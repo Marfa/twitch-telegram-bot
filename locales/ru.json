@@ -952,7 +952,7 @@
   "twitch_status_affected": "Затронутые компоненты:",
   "twitch_status_incidents": "Инциденты:",
   "cursor_status_title": "📡 Cursor Status",
-  "bot_stats": "📊 Статистика бота\n\nПользователей: {users}\nСоздали оповещение: {unique_owners}\nПолучателей: {notify_users}\nПодписок: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nКаналов Twitch: {unique_twitch_channels}\nПлатный премиум: {premium_paid}\nАктивных триалов: {trials}{trial_list}\n\nСистемные оповещения:\n• Обновление бота: {sys_updates}\n• Доступность бота: {sys_availability}\n• Прочие: {sys_other}\n• Заблокировали бота: {blocked_users}\n\nЯзыки:\n• English: {locale_en}\n• Русский: {locale_ru}\n• Українська: {locale_uk}\n• Italiano: {locale_it}\n• Не выбран: {locale_unset}",
+  "bot_stats": "📊 Статистика бота\n\nПользователей: {users}\nСоздали оповещение: {unique_owners}\nПолучателей: {notify_users}\nПодписок: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nКаналов Twitch: {unique_twitch_channels}\nПлатный премиум: {premium_paid}\nАктивных триалов: {trials}{trial_list}\n\nСистемные оповещения:\n• Обновление бота: {sys_updates}\n• Доступность бота: {sys_availability}\n• Прочие: {sys_other}\n• Промоакции: {sys_promo}\n• Заблокировали бота: {blocked_users}\n\nЯзыки:\n• English: {locale_en}\n• Русский: {locale_ru}\n• Українська: {locale_uk}\n• Italiano: {locale_it}\n• Не выбран: {locale_unset}",
   "sub_list_edit": "✏️",
   "sub_list_delete": "🗑",
   "sub_list_share_short": "📤",
@@ -1363,5 +1363,16 @@
   "stream_defaults_locked": "Настройки заблокированы — снимите «Настройки по умолчанию», чтобы менять их.",
   "stream_defaults_need_template": "Сначала задайте шаблон в Настройки → Настройки по умолчанию.",
   "edit_apply_defaults": "Настройки по умолчанию",
-  "please_start": "Сначала нажмите /start, чтобы начать пользоваться ботом."
+  "please_start": "Сначала нажмите /start, чтобы начать пользоваться ботом.",
+  "broadcast_type_promo": "🎃 Промоакции",
+  "sys_promo_label": "Промоакции",
+  "btn_premium_promo_enter": "Ввести промокод",
+  "btn_premium_promo_skip": "Без промокода",
+  "premium_promo_prompt": "Есть промокод? Можете ввести его сейчас или продолжить без скидки.",
+  "premium_promo_ask": "Отправьте промокод одним сообщением.\n/cancel — отмена.",
+  "premium_promo_applied": "Промокод применён: −{percent}%.\nК оплате: {stars} ⭐\nСкидка только на первую оплату; продление — по полной цене.",
+  "premium_promo_invalid": "Промокод недействителен или истёк.",
+  "premium_promo_used": "Вы уже использовали этот промокод.",
+  "premium_promo_expired": "Срок действия промокода истёк.",
+  "premium_promo_kind_blocked": "Этот промокод не действует на выбранный тариф."
 }

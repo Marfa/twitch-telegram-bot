@@ -353,6 +353,79 @@ def attach_invoice_attribution(
     return out
 
 
+def attach_invoice_promo(payload: str, code: str) -> str:
+    """Append promo code token (|p:CODE). Safe if attribution already present."""
+    token = _invoice_attr_token(code)
+    if not token or "|p:" in payload:
+        return payload
+    out = f"{payload}|p:{token}"
+    if len(out.encode("utf-8")) > _INVOICE_ATTR_MAX_BYTES:
+        return payload
+    return out
+
+
+def apply_stars_discount(stars: int, percent: int) -> int:
+    """Integer percent off; always at least 1 Star."""
+    p = max(0, min(100, int(percent or 0)))
+    return max(1, int(stars) * (100 - p) // 100)
+
+
+def promo_excluded_kinds(promo: Any) -> set[str]:
+    raw = str(getattr(promo, "excluded_kinds", "") or "")
+    return {k.strip().lower() for k in raw.split(",") if k.strip()}
+
+
+def promo_applies_to_kind(promo: Any, kind: str) -> bool:
+    k = str(kind or "").strip().lower()
+    if not k:
+        return True
+    return k not in promo_excluded_kinds(promo)
+
+
+def has_applicable_promo_for_user(
+    db: Database,
+    user_id: int,
+    kind: str,
+    *,
+    now: int | None = None,
+) -> bool:
+    """True when at least one active, unused code applies to this invoice kind."""
+    for promo in db.list_active_premium_promo_codes(now=now):
+        if not promo_applies_to_kind(promo, kind):
+            continue
+        if db.has_premium_promo_redemption(promo.code, user_id):
+            continue
+        return True
+    return False
+
+
+def validate_promo_for_user(
+    db: Database,
+    user_id: int,
+    code: str,
+    *,
+    kind: str = "",
+    now: int | None = None,
+) -> tuple[Any | None, str]:
+    """Return (promo_row, reason).
+
+    reason: ok | not_found | expired | used | not_yet | kind_blocked
+    """
+    promo = db.get_premium_promo_code(code)
+    if promo is None:
+        return None, "not_found"
+    ts = int(now if now is not None else time.time())
+    if ts < int(promo.valid_from):
+        return None, "not_yet"
+    if ts > int(promo.valid_until):
+        return None, "expired"
+    if kind and not promo_applies_to_kind(promo, kind):
+        return None, "kind_blocked"
+    if db.has_premium_promo_redemption(promo.code, user_id):
+        return None, "used"
+    return promo, "ok"
+
+
 @dataclass(frozen=True)
 class ParsedInvoice:
     user_id: int
@@ -362,6 +435,27 @@ class ParsedInvoice:
     twitch_login: str = ""
     source: str = ""
     source_feature: str = ""
+    promo_code: str = ""
+
+
+def _parse_invoice_suffix(rest: str) -> tuple[str, str, str]:
+    """Parse |src|feat|p:code tokens after the invoice body."""
+    attr_source = ""
+    attr_feature = ""
+    promo_code = ""
+    attr_parts: list[str] = []
+    for bit in (rest or "").split("|"):
+        if not bit:
+            continue
+        if bit.startswith("p:"):
+            promo_code = _invoice_attr_token(bit[2:])
+        else:
+            attr_parts.append(bit)
+    if attr_parts:
+        attr_source = _invoice_attr_token(attr_parts[0])
+        if len(attr_parts) > 1:
+            attr_feature = _invoice_attr_token(attr_parts[1])
+    return attr_source, attr_feature, promo_code
 
 
 def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
@@ -370,18 +464,17 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
     raw = payload[len(PREMIUM_INVOICE_PREFIX) :]
     attr_source = ""
     attr_feature = ""
+    promo_code = ""
     if "|" in raw:
         raw, _, rest = raw.partition("|")
-        bits = rest.split("|", 1)
-        attr_source = _invoice_attr_token(bits[0])
-        if len(bits) > 1:
-            attr_feature = _invoice_attr_token(bits[1])
+        attr_source, attr_feature, promo_code = _parse_invoice_suffix(rest)
     if raw.isdigit():
         return ParsedInvoice(
             user_id=int(raw),
             kind="legacy",
             source=attr_source,
             source_feature=attr_feature,
+            promo_code=promo_code,
         )
     parts = raw.split(":", 3)
     if len(parts) < 2:
@@ -396,6 +489,7 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
             kind=kind,
             source=attr_source,
             source_feature=attr_feature,
+            promo_code=promo_code,
         )
     if kind == "feat":
         feat_raw = parts[2] if len(parts) > 2 else ""
@@ -408,6 +502,7 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
             features=feats,
             source=attr_source,
             source_feature=attr_feature,
+            promo_code=promo_code,
         )
     if kind == "channel":
         if len(parts) < 4:
@@ -423,6 +518,7 @@ def parse_invoice_payload(payload: str) -> ParsedInvoice | None:
             twitch_login=login,
             source=attr_source,
             source_feature=attr_feature,
+            promo_code=promo_code,
         )
     return None
 

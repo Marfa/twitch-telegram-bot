@@ -27,6 +27,7 @@ from .models import (
     GiveawayCatalogEntry,
     PremiumChannel,
     PremiumGift,
+    PremiumPromoCode,
     PremiumPurchase,
     ReferralCreditRef,
     ReferralStats,
@@ -405,6 +406,10 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN receive_other_updates INTEGER NOT NULL DEFAULT 1"
             )
+        if "receive_promo_updates" not in user_cols:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN receive_promo_updates INTEGER NOT NULL DEFAULT 1"
+            )
         if "receive_sync_updates" not in user_cols:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN receive_sync_updates INTEGER NOT NULL DEFAULT 1"
@@ -603,6 +608,52 @@ class SqliteDatabase:
                 sent_at TEXT,
                 created_by INTEGER NOT NULL
             )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS premium_promo_codes (
+                code TEXT PRIMARY KEY,
+                discount_percent INTEGER NOT NULL,
+                valid_from INTEGER NOT NULL,
+                valid_until INTEGER NOT NULL,
+                excluded_kinds TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        promo_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(premium_promo_codes)")
+        }
+        if "excluded_kinds" not in promo_cols:
+            conn.execute(
+                "ALTER TABLE premium_promo_codes "
+                "ADD COLUMN excluded_kinds TEXT NOT NULL DEFAULT ''"
+            )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS premium_promo_redemptions (
+                code TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                redeemed_at INTEGER NOT NULL,
+                charge_id TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (code, user_id)
+            )
+            """
+        )
+        # Halloween: 31% off, 24h from 2026-10-31 16:42 UTC; not for lifetime.
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO premium_promo_codes
+                (code, discount_percent, valid_from, valid_until, excluded_kinds)
+            VALUES ('halloween', 31, 1793464923, 1793551323, 'life,gift_life')
+            """
+        )
+        conn.execute(
+            """
+            UPDATE premium_promo_codes
+            SET excluded_kinds = 'life,gift_life'
+            WHERE code = 'halloween'
+              AND COALESCE(excluded_kinds, '') = ''
             """
         )
         sb_cols = {
@@ -3441,6 +3492,7 @@ owner_id, twitch_username, twitch_user_id,
             "receive_bot_updates",
             "receive_availability_updates",
             "receive_other_updates",
+            "receive_promo_updates",
         ):
             raise ValueError(f"invalid recipient pref: {pref_column}")
         with self._conn() as conn:
@@ -3467,6 +3519,9 @@ owner_id, twitch_username, twitch_user_id,
 
     def get_other_recipients(self) -> list[int]:
         return self._update_recipients("receive_other_updates")
+
+    def get_promo_recipients(self) -> list[int]:
+        return self._update_recipients("receive_promo_updates")
 
     def get_receive_bot_updates(self, user_id: int) -> bool:
         with self._conn() as conn:
@@ -3526,6 +3581,27 @@ owner_id, twitch_username, twitch_user_id,
                 """
                 UPDATE users SET
                     receive_other_updates = ?
+                WHERE user_id = ?
+                """,
+                (int(enabled), user_id),
+            )
+
+    def get_receive_promo_updates(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT receive_promo_updates FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return True
+        return bool(row["receive_promo_updates"])
+
+    def set_receive_promo_updates(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET
+                    receive_promo_updates = ?
                 WHERE user_id = ?
                 """,
                 (int(enabled), user_id),
@@ -4916,6 +4992,18 @@ owner_id, twitch_username, twitch_user_id,
                   AND COALESCE(u.bot_blocked, 0) = 0
                 """
             ).fetchone()["c"]
+            sys_promo = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM (
+                    SELECT user_id AS id FROM users
+                    UNION
+                    SELECT DISTINCT owner_id AS id FROM subscriptions
+                ) AS n
+                LEFT JOIN users u ON u.user_id = n.id
+                WHERE COALESCE(u.receive_promo_updates, 1) = 1
+                  AND COALESCE(u.bot_blocked, 0) = 0
+                """
+            ).fetchone()["c"]
             blocked_users = conn.execute(
                 "SELECT COUNT(*) AS c FROM users WHERE bot_blocked = 1"
             ).fetchone()["c"]
@@ -4976,6 +5064,7 @@ owner_id, twitch_username, twitch_user_id,
             sys_updates=int(sys_updates),
             sys_availability=int(sys_availability),
             sys_other=int(sys_other),
+            sys_promo=int(sys_promo),
             blocked_users=int(blocked_users),
             locale_en=int(locale_en),
             locale_ru=int(locale_ru),
@@ -7578,6 +7667,84 @@ owner_id, twitch_username, twitch_user_id,
                 (cid,),
             ).fetchone()
         return self._row_to_premium_gift(row) if row else None
+
+    @staticmethod
+    def _normalize_promo_code(code: str) -> str:
+        return str(code or "").strip().lower()
+
+    @staticmethod
+    def _row_to_premium_promo(row) -> PremiumPromoCode:
+        return PremiumPromoCode(
+            code=str(row["code"] or ""),
+            discount_percent=int(row["discount_percent"] or 0),
+            valid_from=int(row["valid_from"] or 0),
+            valid_until=int(row["valid_until"] or 0),
+            excluded_kinds=str(row["excluded_kinds"] or ""),
+        )
+
+    def get_premium_promo_code(self, code: str) -> PremiumPromoCode | None:
+        key = self._normalize_promo_code(code)
+        if not key:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT code, discount_percent, valid_from, valid_until, excluded_kinds
+                FROM premium_promo_codes WHERE code = ?
+                """,
+                (key,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._row_to_premium_promo(row)
+
+    def list_active_premium_promo_codes(
+        self, *, now: int | None = None
+    ) -> list[PremiumPromoCode]:
+        ts = int(now if now is not None else time.time())
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT code, discount_percent, valid_from, valid_until, excluded_kinds
+                FROM premium_promo_codes
+                WHERE valid_from <= ? AND valid_until >= ?
+                ORDER BY code
+                """,
+                (ts, ts),
+            ).fetchall()
+        return [self._row_to_premium_promo(r) for r in rows]
+
+    def has_premium_promo_redemption(self, code: str, user_id: int) -> bool:
+        key = self._normalize_promo_code(code)
+        if not key:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM premium_promo_redemptions
+                WHERE code = ? AND user_id = ?
+                """,
+                (key, user_id),
+            ).fetchone()
+        return row is not None
+
+    def redeem_premium_promo(
+        self, code: str, user_id: int, *, charge_id: str = ""
+    ) -> bool:
+        key = self._normalize_promo_code(code)
+        if not key:
+            return False
+        now = int(time.time())
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO premium_promo_redemptions
+                    (code, user_id, redeemed_at, charge_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (key, user_id, now, str(charge_id or "")),
+            )
+            return cur.rowcount > 0
 
     def get_referral_credit_by_charge(
         self, charge_id: str

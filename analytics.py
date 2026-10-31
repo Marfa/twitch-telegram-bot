@@ -264,6 +264,7 @@ def capture_bot_stats(stats: Any, *, timestamp: Any | None = None) -> None:
             "sys_updates": int(stats.sys_updates),
             "sys_availability": int(stats.sys_availability),
             "sys_other": int(stats.sys_other),
+            "sys_promo": int(getattr(stats, "sys_promo", 0) or 0),
             "locale_en": int(stats.locale_en),
             "locale_ru": int(stats.locale_ru),
             "locale_uk": int(stats.locale_uk),
@@ -466,6 +467,7 @@ def _self_check() -> None:
         sys_updates = 1
         sys_availability = 1
         sys_other = 1
+        sys_promo = 1
         locale_en = 0
         locale_ru = 1
         locale_uk = 0

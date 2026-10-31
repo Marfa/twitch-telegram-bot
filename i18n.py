@@ -2092,6 +2092,12 @@ def admin_type_keyboard(lang: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    t("broadcast_type_promo", lang),
+                    callback_data="admin_type:promo",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     btn("wizard_cancel", lang), callback_data="admin_type:cancel"
                 )
             ],
@@ -2129,12 +2135,14 @@ def sys_notifications_keyboard(
     updates_enabled: bool,
     availability_enabled: bool,
     other_enabled: bool,
+    promo_enabled: bool = True,
     sync_enabled: bool,
     beta_enabled: bool = False,
 ) -> InlineKeyboardMarkup:
     updates_mark = "✅ " if updates_enabled else "❌ "
     availability_mark = "✅ " if availability_enabled else "❌ "
     other_mark = "✅ " if other_enabled else "❌ "
+    promo_mark = "✅ " if promo_enabled else "❌ "
     sync_mark = "✅ " if sync_enabled else "❌ "
     beta_mark = "✅ " if beta_enabled else "❌ "
     return InlineKeyboardMarkup(
@@ -2159,6 +2167,12 @@ def sys_notifications_keyboard(
             ],
             [
                 InlineKeyboardButton(
+                    promo_mark + t("sys_promo_label", lang),
+                    callback_data="sys_promo:toggle",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     sync_mark + t("sys_sync_label", lang),
                     callback_data="sys_sync:toggle",
                 )
@@ -2167,6 +2181,31 @@ def sys_notifications_keyboard(
                 InlineKeyboardButton(
                     beta_mark + t("sys_beta_label", lang),
                     callback_data="sys_beta:toggle",
+                )
+            ],
+        ]
+    )
+
+
+def premium_promo_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    btn("premium_promo_enter", lang),
+                    callback_data="premium:promo_enter",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("premium_promo_skip", lang),
+                    callback_data="premium:promo_skip",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("premium_feat_back", lang),
+                    callback_data="premium:promo_cancel",
                 )
             ],
         ]

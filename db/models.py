@@ -19,6 +19,7 @@ class BotStats:
     sys_updates: int
     sys_availability: int
     sys_other: int
+    sys_promo: int
     blocked_users: int
     locale_en: int
     locale_ru: int
@@ -651,6 +652,15 @@ class PremiumGift:
     until_unix: int = 0
     created_at: str = ""
     redeemed_at: str = ""
+
+
+@dataclass(frozen=True)
+class PremiumPromoCode:
+    code: str
+    discount_percent: int
+    valid_from: int
+    valid_until: int
+    excluded_kinds: str = ""  # comma-separated invoice kinds, e.g. life,gift_life
 
 
 def alert_type_from_payload(payload: dict[str, Any]) -> str:

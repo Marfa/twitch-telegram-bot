@@ -77,6 +77,8 @@ def _broadcast_type_label(msg_type: str, lang: str) -> str:
         return t("broadcast_type_availability", lang)
     if msg_type == "other":
         return t("broadcast_type_other", lang)
+    if msg_type == "promo":
+        return t("broadcast_type_promo", lang)
     return msg_type
 
 
@@ -426,6 +428,15 @@ def _utc_due_for_offset(
     return local_dt.astimezone(timezone.utc)
 
 
+def _user_has_any_premium(db: Database, user_id: int) -> bool:
+    """Full plan, à la carte, or active channel advertising."""
+    import premium as prem
+
+    if prem.get_status(db, user_id).is_premium:
+        return True
+    return bool(db.list_premium_channels_for_owner(user_id))
+
+
 def _broadcast_recipient_ids(
     db: Database,
     msg_type: str,
@@ -439,6 +450,12 @@ def _broadcast_recipient_ids(
         return db.get_availability_recipients()
     if msg_type == "other":
         return db.get_other_recipients()
+    if msg_type == "promo":
+        return [
+            uid
+            for uid in db.get_promo_recipients()
+            if not _user_has_any_premium(db, uid)
+        ]
     return db.get_notify_user_ids()
 
 

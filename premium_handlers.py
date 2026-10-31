@@ -20,13 +20,16 @@ from db import Database
 from health import create_pending_login_state
 from i18n import (
     DEFAULT_LOCALE,
+    all_wizard_nav_buttons,
     btn,
+    is_menu_button,
     main_menu,
     premium_actions_keyboard,
     premium_early_keyboard,
     premium_features_keyboard,
     premium_gift_keyboard,
     premium_owned_keyboard,
+    premium_promo_keyboard,
     t,
 )
 
@@ -598,6 +601,10 @@ def _attribution_for_payment(
     return {}
 
 
+_PENDING_PAY = "premium_pending_pay"
+_AWAITING_PROMO = "premium_awaiting_promo"
+
+
 async def _send_invoice_link(
     query,
     *,
@@ -611,6 +618,8 @@ async def _send_invoice_link(
     user_id: int | None = None,
     kind: str = "",
     surcharge_stars: int = 0,
+    promo_code: str = "",
+    promo_percent: int = 0,
 ) -> None:
     attr: dict[str, str] = {}
     if context is not None and user_id is not None:
@@ -618,11 +627,21 @@ async def _send_invoice_link(
         payload = prem.attach_invoice_attribution(
             payload, attr.get("source", ""), attr.get("feature", "")
         )
+    if promo_code:
+        payload = prem.attach_invoice_promo(payload, promo_code)
+    base = max(1, int(stars))
+    if promo_percent > 0:
+        base = prem.apply_stars_discount(base, promo_percent)
     extra = max(0, int(surcharge_stars or 0))
-    total = max(1, int(stars) + extra)
+    total = max(1, base + extra)
     desc = description
+    if promo_percent > 0:
+        desc = (
+            f"{description}\n"
+            f"{t('premium_promo_applied', lang, percent=promo_percent, stars=base)}"
+        )
     if extra > 0:
-        desc = f"{description}\n{t('premium_pay_surcharge_note', lang, stars=extra)}"
+        desc = f"{desc}\n{t('premium_pay_surcharge_note', lang, stars=extra)}"
     prices = [LabeledPrice(title, total)]
     kwargs: dict = {
         "title": title,
@@ -632,8 +651,11 @@ async def _send_invoice_link(
         "currency": "XTR",
         "prices": prices,
     }
-    if subscription_period is not None:
-        kwargs["subscription_period"] = subscription_period
+    # Promo = one-shot invoice only. Telegram renews Stars subs at the invoice
+    # price, so a discounted subscription_period would lock in the discount.
+    period = None if promo_percent > 0 else subscription_period
+    if period is not None:
+        kwargs["subscription_period"] = period
     try:
         link = await query.get_bot().create_invoice_link(**kwargs)
     except Exception:
@@ -645,6 +667,8 @@ async def _send_invoice_link(
             "kind": kind or "unknown",
             "stars": total,
             "surcharge_stars": extra,
+            "promo_code": promo_code or "",
+            "promo_percent": int(promo_percent or 0),
         }
         props.update(attr)
         analytics.capture(user_id, "premium_pay_started", props)
@@ -653,6 +677,82 @@ async def _send_invoice_link(
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton(btn("premium_pay", lang), url=link)]]
         ),
+    )
+
+
+async def _begin_pay_with_promo(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int,
+    lang: str,
+    title: str,
+    description_key: str,
+    description_kwargs: dict | None = None,
+    payload: str,
+    stars: int,
+    kind: str,
+    surcharge_stars: int = 0,
+    subscription_period: int | None = None,
+) -> None:
+    """Show promo-code step when applicable; otherwise create the Stars invoice."""
+    context.user_data[_PENDING_PAY] = {
+        "title": title,
+        "description_key": description_key,
+        "description_kwargs": dict(description_kwargs or {}),
+        "payload": payload,
+        "stars": int(stars),
+        "kind": kind,
+        "surcharge_stars": int(surcharge_stars or 0),
+        "subscription_period": subscription_period,
+    }
+    context.user_data.pop(_AWAITING_PROMO, None)
+    db: Database = context.application.bot_data["db"]
+    if not prem.has_applicable_promo_for_user(db, user_id, kind):
+        await _finish_pending_pay(query, context, user_id=user_id, lang=lang)
+        return
+    await query.edit_message_text(
+        t("premium_promo_prompt", lang),
+        reply_markup=premium_promo_keyboard(lang),
+    )
+
+
+async def _finish_pending_pay(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int,
+    lang: str,
+    promo_code: str = "",
+    promo_percent: int = 0,
+) -> None:
+    pending = context.user_data.pop(_PENDING_PAY, None)
+    context.user_data.pop(_AWAITING_PROMO, None)
+    if not isinstance(pending, dict):
+        await query.edit_message_text(t("premium_pay_failed", lang))
+        return
+    stars = int(pending.get("stars") or 0)
+    billed = (
+        prem.apply_stars_discount(stars, promo_percent) if promo_percent > 0 else stars
+    )
+    desc_key = str(pending.get("description_key") or "")
+    desc_kwargs = dict(pending.get("description_kwargs") or {})
+    desc_kwargs["stars"] = billed
+    description = t(desc_key, lang, **desc_kwargs) if desc_key else ""
+    await _send_invoice_link(
+        query,
+        title=str(pending.get("title") or ""),
+        description=description,
+        payload=str(pending.get("payload") or ""),
+        stars=stars,
+        lang=lang,
+        subscription_period=pending.get("subscription_period"),
+        context=context,
+        user_id=user_id,
+        kind=str(pending.get("kind") or ""),
+        surcharge_stars=int(pending.get("surcharge_stars") or 0),
+        promo_code=promo_code,
+        promo_percent=promo_percent,
     )
 
 
@@ -748,28 +848,28 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if plan == "year":
             stars = prem.stars_year_price(user_id)
             title = t("premium_gift_pay_year_title", lang)
-            desc = t("premium_gift_pay_year_description", lang, stars=stars)
+            desc_key = "premium_gift_pay_year_description"
         elif plan == "life":
             stars = prem.stars_lifetime_price(user_id)
             title = t("premium_gift_pay_life_title", lang)
-            desc = t("premium_gift_pay_life_description", lang, stars=stars)
+            desc_key = "premium_gift_pay_life_description"
         else:
             stars = prem.stars_price(user_id)
             title = t("premium_gift_pay_month_title", lang)
-            desc = t("premium_gift_pay_month_description", lang, stars=stars)
+            desc_key = "premium_gift_pay_month_description"
         surcharge = prem.refund_surcharge_for_plan(db, user_id)
-        await _send_invoice_link(
+        await _begin_pay_with_promo(
             query,
+            context,
+            user_id=user_id,
+            lang=lang,
             title=title,
-            description=desc,
+            description_key=desc_key,
             payload=prem.invoice_payload(user_id, gift_kind),
             stars=stars,
-            lang=lang,
-            subscription_period=None,
-            context=context,
-            user_id=user_id,
             kind=gift_kind,
             surcharge_stars=surcharge,
+            subscription_period=None,
         )
         return
 
@@ -867,18 +967,18 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer()
         total = prem.stars_feature_price(user_id) * len(selected)
         surcharge = prem.refund_surcharge_for_features(db, user_id, selected)
-        await _send_invoice_link(
+        await _begin_pay_with_promo(
             query,
+            context,
+            user_id=user_id,
+            lang=lang,
             title=t("premium_pay_feat_title", lang),
-            description=t("premium_pay_feat_description", lang, stars=total),
+            description_key="premium_pay_feat_description",
             payload=prem.invoice_payload(user_id, "feat", selected),
             stars=total,
-            lang=lang,
-            subscription_period=prem.stars_period(),
-            context=context,
-            user_id=user_id,
             kind="feat",
             surcharge_stars=surcharge,
+            subscription_period=prem.stars_period(),
         )
         return
 
@@ -955,62 +1055,80 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if action in ("pay", "month"):
         month_stars = prem.stars_price(user_id)
         surcharge = prem.refund_surcharge_for_plan(db, user_id)
-        await _send_invoice_link(
+        await _begin_pay_with_promo(
             query,
+            context,
+            user_id=user_id,
+            lang=lang,
             title=t("premium_pay_title", lang),
-            description=t(
-                "premium_pay_description", lang, stars=month_stars
-            ),
+            description_key="premium_pay_description",
             payload=prem.invoice_payload(user_id, "month"),
             stars=month_stars,
-            lang=lang,
-            subscription_period=prem.stars_period(),
-            context=context,
-            user_id=user_id,
             kind="month",
             surcharge_stars=surcharge,
+            subscription_period=prem.stars_period(),
         )
         return
 
     if action == "year":
         year_stars = prem.stars_year_price(user_id)
         surcharge = prem.refund_surcharge_for_plan(db, user_id)
-        await _send_invoice_link(
+        await _begin_pay_with_promo(
             query,
+            context,
+            user_id=user_id,
+            lang=lang,
             title=t("premium_pay_year_title", lang),
-            description=t(
-                "premium_pay_year_description", lang, stars=year_stars
-            ),
+            description_key="premium_pay_year_description",
             payload=prem.invoice_payload(user_id, "year"),
             stars=year_stars,
-            lang=lang,
-            subscription_period=None,
-            context=context,
-            user_id=user_id,
             kind="year",
             surcharge_stars=surcharge,
+            subscription_period=None,
         )
         return
 
     if action == "life":
         life_stars = prem.stars_lifetime_price(user_id)
         surcharge = prem.refund_surcharge_for_plan(db, user_id)
-        await _send_invoice_link(
+        await _begin_pay_with_promo(
             query,
+            context,
+            user_id=user_id,
+            lang=lang,
             title=t("premium_pay_life_title", lang),
-            description=t(
-                "premium_pay_life_description",
-                lang,
-                stars=life_stars,
-            ),
+            description_key="premium_pay_life_description",
             payload=prem.invoice_payload(user_id, "life"),
             stars=life_stars,
-            lang=lang,
-            subscription_period=None,
-            context=context,
-            user_id=user_id,
             kind="life",
             surcharge_stars=surcharge,
+            subscription_period=None,
+        )
+        return
+
+    if action == "promo_skip":
+        if not context.user_data.get(_PENDING_PAY):
+            await query.answer(t("premium_pay_failed", lang), show_alert=True)
+            return
+        await query.answer()
+        await _finish_pending_pay(query, context, user_id=user_id, lang=lang)
+        return
+
+    if action == "promo_enter":
+        if not context.user_data.get(_PENDING_PAY):
+            await query.answer(t("premium_pay_failed", lang), show_alert=True)
+            return
+        await query.answer()
+        context.user_data[_AWAITING_PROMO] = True
+        await query.edit_message_text(t("premium_promo_ask", lang))
+        return
+
+    if action == "promo_cancel":
+        await query.answer()
+        context.user_data.pop(_PENDING_PAY, None)
+        context.user_data.pop(_AWAITING_PROMO, None)
+        await send_premium_screen(
+            context.bot, user_id, lang, db, edit_message=query.message
         )
         return
 
@@ -1116,15 +1234,14 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         stars = prem.stars_channel_price(user_id)
         surcharge = prem.refund_surcharge_for_channel(db, user_id)
-        await _send_invoice_link(
+        await _begin_pay_with_promo(
             query,
+            context,
+            user_id=user_id,
+            lang=lang,
             title=t("premium_channel_pay_title", lang),
-            description=t(
-                "premium_channel_pay_description",
-                lang,
-                channel=login,
-                stars=stars,
-            ),
+            description_key="premium_channel_pay_description",
+            description_kwargs={"channel": login},
             payload=prem.invoice_payload(
                 user_id,
                 "channel",
@@ -1132,12 +1249,9 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 twitch_login=login,
             ),
             stars=stars,
-            lang=lang,
-            subscription_period=prem.stars_period(),
-            context=context,
-            user_id=user_id,
             kind="channel",
             surcharge_stars=surcharge,
+            subscription_period=prem.stars_period(),
         )
         return
 
@@ -1388,11 +1502,20 @@ async def successful_premium_payment(
             source_feature=attr.get("feature", ""),
             is_renewal=is_renewal,
         )
+        if parsed.promo_code:
+            db.redeem_premium_promo(
+                parsed.promo_code, parsed.user_id, charge_id=charge_id
+            )
         prem.clear_all_refund_surcharge(db, parsed.user_id)
         analytics.capture(
             parsed.user_id,
             "premium_gift_purchased",
-            {"kind": plan, "stars": stars_eff, **attr},
+            {
+                "kind": plan,
+                "stars": stars_eff,
+                "promo_code": parsed.promo_code or "",
+                **attr,
+            },
         )
         await msg.reply_text(
             t("premium_gift_pay_done", lang, user_id=parsed.user_id),
@@ -1413,6 +1536,9 @@ async def successful_premium_payment(
             until_unix=until_unix,
             stars_paid=stars_eff,
         )
+        # Promo month is one-shot (no subscription_period) — same as year.
+        if parsed.promo_code:
+            db.set_premium_stars_canceled(parsed.user_id, True)
         prem.clear_all_refund_surcharge(db, parsed.user_id)
     elif parsed.kind == "year":
         until_unix = now + prem.year_seconds()
@@ -1451,6 +1577,9 @@ async def successful_premium_payment(
             until_unix=until_unix,
             stars_paid=stars_eff,
         )
+        if parsed.promo_code:
+            for fid in parsed.features:
+                db.set_premium_feature_canceled(parsed.user_id, fid)
         prem.clear_refund_surcharge_keys(db, parsed.user_id, list(parsed.features))
     elif parsed.kind == "channel":
         pending = context.application.bot_data.get("pending_premium_channel") or {}
@@ -1474,6 +1603,8 @@ async def successful_premium_payment(
             until_unix=until_unix,
             stars_paid=stars_eff,
         )
+        if parsed.promo_code:
+            db.set_premium_channel_canceled(parsed.twitch_user_id, True)
         db.record_premium_purchase(
             user_id=parsed.user_id,
             charge_id=charge_id,
@@ -1488,6 +1619,10 @@ async def successful_premium_payment(
         prem.clear_refund_surcharge_keys(
             db, parsed.user_id, [prem.SURCHARGE_CHANNEL_KEY]
         )
+        if parsed.promo_code:
+            db.redeem_premium_promo(
+                parsed.promo_code, parsed.user_id, charge_id=charge_id
+            )
         analytics.capture(
             parsed.user_id,
             "premium_channel_purchased",
@@ -1496,6 +1631,7 @@ async def successful_premium_payment(
                 "twitch_login": parsed.twitch_login,
                 "twitch_user_id": parsed.twitch_user_id,
                 "is_renewal": is_renewal,
+                "promo_code": parsed.promo_code or "",
                 **attr,
             },
         )
@@ -1511,6 +1647,11 @@ async def successful_premium_payment(
                 parse_mode=ParseMode.HTML,
             )
         return
+
+    if parsed.promo_code:
+        db.redeem_premium_promo(
+            parsed.promo_code, parsed.user_id, charge_id=charge_id
+        )
 
     kind = parsed.kind if parsed.kind != "legacy" else "month"
     db.record_premium_purchase(
@@ -1531,6 +1672,7 @@ async def successful_premium_payment(
             "kind": parsed.kind,
             "stars": stars_eff,
             "features": list(parsed.features) if parsed.kind == "feat" else [],
+            "promo_code": parsed.promo_code or "",
             **attr,
         },
     )
@@ -1605,6 +1747,70 @@ async def refunded_premium_payment(
             "from_user": int(from_user or 0),
         },
     )
+
+
+async def promo_wiz_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Handle promo code text while awaiting input. Returns True if consumed."""
+    if not context.user_data.get(_AWAITING_PROMO):
+        return False
+    if not isinstance(context.user_data.get(_PENDING_PAY), dict):
+        context.user_data.pop(_AWAITING_PROMO, None)
+        return False
+    user_id = update.effective_user.id
+    from bot import _user_lang
+
+    lang = _user_lang(context, user_id)
+    raw = (update.effective_message.text or "").strip()
+    if is_menu_button(raw) or raw in all_wizard_nav_buttons():
+        if raw == btn("wizard_cancel", lang) or raw in {
+            btn("wizard_cancel", loc) for loc in ("ru", "en")
+        }:
+            context.user_data.pop(_PENDING_PAY, None)
+            context.user_data.pop(_AWAITING_PROMO, None)
+            db: Database = context.application.bot_data["db"]
+            await send_premium_screen(context.bot, user_id, lang, db)
+            return True
+        return False
+    db = context.application.bot_data["db"]
+    pending = context.user_data.get(_PENDING_PAY) or {}
+    kind = str(pending.get("kind") or "")
+    promo, reason = prem.validate_promo_for_user(db, user_id, raw, kind=kind)
+    if reason == "used":
+        await update.effective_message.reply_text(t("premium_promo_used", lang))
+        return True
+    if reason == "expired":
+        await update.effective_message.reply_text(t("premium_promo_expired", lang))
+        return True
+    if reason == "kind_blocked":
+        await update.effective_message.reply_text(t("premium_promo_kind_blocked", lang))
+        return True
+    if promo is None or reason != "ok":
+        await update.effective_message.reply_text(t("premium_promo_invalid", lang))
+        return True
+    # Fake query-like object for edit_message_text on a new reply path.
+    class _PayMsg:
+        def __init__(self, bot, chat_id: int):
+            self._bot = bot
+            self._chat_id = chat_id
+
+        def get_bot(self):
+            return self._bot
+
+        async def edit_message_text(self, text, reply_markup=None, **_kwargs):
+            await self._bot.send_message(
+                self._chat_id, text, reply_markup=reply_markup
+            )
+
+    query = _PayMsg(context.bot, update.effective_chat.id)
+    await _finish_pending_pay(
+        query,
+        context,
+        user_id=user_id,
+        lang=lang,
+        promo_code=promo.code,
+        promo_percent=int(promo.discount_percent),
+    )
+    return True
 
 
 async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None:

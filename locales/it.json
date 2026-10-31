@@ -932,7 +932,7 @@
   "twitch_status_affected": "Componenti interessati:",
   "twitch_status_incidents": "Incidenti:",
   "cursor_status_title": "📡 Stato Cursor",
-  "bot_stats": "📊 Statistiche bot\n\nUtenti: {users}\nAvvisi creati: {unique_owners}\nDestinatari: {notify_users}\nIscrizioni: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nCanali Twitch tracciati: {unique_twitch_channels}\nUtenti Premium a pagamento: {premium_paid}\nProve attive: {trials}{trial_list}\n\nNotifiche di sistema:\n• Aggiornamenti bot: {sys_updates}\n• Disponibilità bot: {sys_availability}\n• Altro: {sys_other}\n• Hanno bloccato il bot: {blocked_users}\n\nLingue:\n• Inglese: {locale_en}\n• Russo: {locale_ru}\n• Ucraino: {locale_uk}\n• Italiano: {locale_it}\n• Non impostata: {locale_unset}",
+  "bot_stats": "📊 Statistiche bot\n\nUtenti: {users}\nAvvisi creati: {unique_owners}\nDestinatari: {notify_users}\nIscrizioni: {subscriptions_total} (✅ {subscriptions_enabled} / ⏸ {subscriptions_disabled})\nCanali Twitch tracciati: {unique_twitch_channels}\nUtenti Premium a pagamento: {premium_paid}\nProve attive: {trials}{trial_list}\n\nNotifiche di sistema:\n• Aggiornamenti bot: {sys_updates}\n• Disponibilità bot: {sys_availability}\n• Altro: {sys_other}\n• Promozioni: {sys_promo}\n• Hanno bloccato il bot: {blocked_users}\n\nLingue:\n• Inglese: {locale_en}\n• Russo: {locale_ru}\n• Ucraino: {locale_uk}\n• Italiano: {locale_it}\n• Non impostata: {locale_unset}",
   "sub_list_edit": "✏️",
   "sub_list_delete": "🗑",
   "sub_list_share_short": "📤",
@@ -1351,5 +1351,16 @@
   "edit_overlap": "🚫 Blocco sovrapposizione",
   "sub_list_overlap_block": "• Blocco sovrapposizione: sì",
   "sub_list_overlap_block_repeats": "• Blocca ripetizioni se ultimo: sì",
-  "please_start": "Premi prima /start per iniziare a usare il bot."
+  "please_start": "Premi prima /start per iniziare a usare il bot.",
+  "broadcast_type_promo": "🎃 Promozioni",
+  "sys_promo_label": "Promozioni",
+  "btn_premium_promo_enter": "Inserisci codice promo",
+  "btn_premium_promo_skip": "Continua senza codice",
+  "premium_promo_prompt": "Hai un codice promo? Inseriscilo ora o continua senza sconto.",
+  "premium_promo_ask": "Invia il codice promo in un messaggio.\n/cancel — annulla.",
+  "premium_promo_applied": "Codice applicato: −{percent}%.\nDa pagare: {stars} ⭐\nLo sconto vale solo per il primo pagamento; i rinnovi sono a prezzo pieno.",
+  "premium_promo_invalid": "Codice promo non valido o scaduto.",
+  "premium_promo_used": "Hai già usato questo codice promo.",
+  "premium_promo_expired": "Questo codice promo è scaduto.",
+  "premium_promo_kind_blocked": "Questo codice promo non vale per il piano selezionato."
 }

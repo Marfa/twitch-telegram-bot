@@ -407,6 +407,7 @@ def check_core() -> None:
         sys_updates = 1
         sys_availability = 1
         sys_other = 1
+        sys_promo = 1
         locale_en = 0
         locale_ru = 1
         locale_uk = 0

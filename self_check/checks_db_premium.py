@@ -135,6 +135,7 @@ def check_db_premium() -> None:
         assert stats.premium_paid == 0
         assert stats.sys_updates == 1
         assert stats.sys_other == 1
+        assert stats.sys_promo == 1
         db.set_premium_stars(1, charge_id="c", until_unix=10**12, canceled=False)
         assert db.get_bot_stats().premium_paid == 1
         import premium as prem
@@ -961,6 +962,10 @@ def check_db_premium() -> None:
         db.set_receive_other_updates(1, False)
         assert db.get_receive_other_updates(1) is False
         assert 1 not in db.get_other_recipients()
+        assert db.get_receive_promo_updates(1) is True
+        db.set_receive_promo_updates(1, False)
+        assert db.get_receive_promo_updates(1) is False
+        assert 1 not in db.get_promo_recipients()
         assert db.get_receive_sync_updates(1) is True
         db.set_receive_sync_updates(1, False)
         assert db.get_receive_sync_updates(1) is False
@@ -974,6 +979,31 @@ def check_db_premium() -> None:
         db.set_receive_bot_updates(1, True)
         db.set_receive_availability_updates(1, True)
         db.set_receive_other_updates(1, True)
+        db.set_receive_promo_updates(1, True)
+        halloween = db.get_premium_promo_code("Halloween")
+        assert halloween is not None
+        assert halloween.discount_percent == 31
+        assert "life" in halloween.excluded_kinds
+        assert "gift_life" in halloween.excluded_kinds
+        assert not prem.promo_applies_to_kind(halloween, "life")
+        assert prem.promo_applies_to_kind(halloween, "month")
+        blocked, blocked_reason = prem.validate_promo_for_user(
+            db, 2, "Halloween", kind="life"
+        )
+        assert blocked is None and blocked_reason == "kind_blocked"
+        assert not db.has_premium_promo_redemption("halloween", 1)
+        assert db.redeem_premium_promo("Halloween", 1, charge_id="c1")
+        assert db.has_premium_promo_redemption("halloween", 1)
+        assert not db.redeem_premium_promo("Halloween", 1, charge_id="c2")
+        ok_promo, reason = prem.validate_promo_for_user(db, 1, "Halloween")
+        assert ok_promo is None and reason == "used"
+        now_promo = int(datetime.now(timezone.utc).timestamp())
+        ok2, reason2 = prem.validate_promo_for_user(db, 2, "Halloween")
+        if halloween.valid_from <= now_promo <= halloween.valid_until:
+            assert ok2 is not None and reason2 == "ok"
+        else:
+            assert reason2 in ("expired", "not_yet")
+        assert prem.apply_stars_discount(100, 31) == 69
         assert db.get_notifications_paused_until(1) == 0
         pause_until = int(
             (datetime.now(timezone.utc) + timedelta(days=3)).timestamp()
@@ -991,6 +1021,7 @@ def check_db_premium() -> None:
         assert 1 not in db.get_bot_update_recipients()
         assert 1 not in db.get_availability_recipients()
         assert 1 not in db.get_other_recipients()
+        assert 1 not in db.get_promo_recipients()
         blocked_stats = db.get_bot_stats()
         assert blocked_stats.blocked_users == 1
         assert blocked_stats.users == 0
@@ -1002,6 +1033,7 @@ def check_db_premium() -> None:
         assert blocked_stats.sys_updates == 0
         assert blocked_stats.sys_availability == 0
         assert blocked_stats.sys_other == 0
+        assert blocked_stats.sys_promo == 0
         assert db.is_chat_unreachable(-1001980871389) is False
         db.set_chat_unreachable(-1001980871389, True)
         assert db.is_chat_unreachable(-1001980871389) is True

@@ -40,6 +40,7 @@ def _format_stats(stats: BotStats, lang: str, *, trials: list[tuple[int, int]] |
         sys_updates=stats.sys_updates,
         sys_availability=stats.sys_availability,
         sys_other=stats.sys_other,
+        sys_promo=stats.sys_promo,
         blocked_users=stats.blocked_users,
         locale_en=stats.locale_en,
         locale_ru=stats.locale_ru,
