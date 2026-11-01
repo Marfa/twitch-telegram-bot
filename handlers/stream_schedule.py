@@ -2249,18 +2249,11 @@ async def _complete_schedule_publish(
     else:
         text = t("stream_schedule_publish_fail", lang, error="\n".join(errors))
 
-    buttons = []
-    if refresh:
-        buttons.append([InlineKeyboardButton(
-            t("stream_schedule_save_token", lang),
-            callback_data=f"sched_save_token:{owner_id}",
-        )])
-        application.bot_data.setdefault("pending_schedule_tokens", {})[owner_id] = {
-            "refresh_token": refresh,
-            "twitch_user_id": twitch_user_id,
-        }
-    markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
-    await application.bot.send_message(owner_id, text, reply_markup=markup)
+    # apply_oauth_success_tokens / _remember_schedule_broadcaster already persist
+    # the refresh — do not re-offer «Save authorization».
+    await application.bot.send_message(
+        owner_id, text, reply_markup=_menu(lang, owner_id)
+    )
 
 
 async def _complete_schedule_vacation(
@@ -2330,23 +2323,12 @@ async def _complete_schedule_vacation(
     if disable:
         _set_vacation_auto_exit_at(None, db, owner_id, None, application=application)
         db.set_vacation_ends_at(owner_id, None)
-        text = t("stream_schedule_vacation_manual_exit_ok", lang)
-        buttons = []
-        if refresh:
-            buttons.append(
-                [
-                    InlineKeyboardButton(
-                        t("stream_schedule_save_token", lang),
-                        callback_data=f"sched_save_token:{owner_id}",
-                    )
-                ]
-            )
-            application.bot_data.setdefault("pending_schedule_tokens", {})[owner_id] = {
-                "refresh_token": refresh,
-                "twitch_user_id": twitch_user_id,
-            }
-        markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
-        await application.bot.send_message(owner_id, text, reply_markup=markup)
+        # Token already persisted via apply_oauth_success_tokens above.
+        await application.bot.send_message(
+            owner_id,
+            t("stream_schedule_vacation_manual_exit_ok", lang),
+            reply_markup=_menu(lang, owner_id),
+        )
         return
 
     auto_exit = bool(vacation.get("auto_exit"))
@@ -2360,10 +2342,6 @@ async def _complete_schedule_vacation(
     else:
         _set_vacation_auto_exit_at(None, db, owner_id, None, application=application)
 
-    # Refresh already stored above when present; don't re-offer save if kept.
-    if refresh:
-        refresh = ""
-
     if auto_exit:
         end_day_raw = str(vacation.get("end_date") or "")
         try:
@@ -2375,22 +2353,10 @@ async def _complete_schedule_vacation(
     else:
         text = t("stream_schedule_vacation_ok", lang)
 
-    buttons = []
-    if refresh:
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    t("stream_schedule_save_token", lang),
-                    callback_data=f"sched_save_token:{owner_id}",
-                )
-            ]
-        )
-        application.bot_data.setdefault("pending_schedule_tokens", {})[owner_id] = {
-            "refresh_token": refresh,
-            "twitch_user_id": twitch_user_id,
-        }
-    markup = InlineKeyboardMarkup(buttons) if buttons else _menu(lang, owner_id)
-    await application.bot.send_message(owner_id, text, reply_markup=markup)
+    # Token already persisted — do not re-offer «Save authorization».
+    await application.bot.send_message(
+        owner_id, text, reply_markup=_menu(lang, owner_id)
+    )
 
 
 async def process_deferred_schedule_publish(

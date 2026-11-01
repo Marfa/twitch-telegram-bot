@@ -458,6 +458,57 @@ async def _smoke_schedule(db) -> None:
     twitch_defer.clear_channel_schedule.assert_not_called()
     db.clear_deferred_schedule_publish(_FREE_UID)
 
+    # Success path: token already fan-out-saved — no «Save authorization» button.
+    twitch_ok = MagicMock()
+    twitch_ok.get_token_user = MagicMock(
+        return_value={"broadcaster_type": "affiliate"}
+    )
+    twitch_ok.clear_channel_schedule = MagicMock(return_value=0)
+    twitch_ok.create_schedule_segment_with_fallback = MagicMock(
+        return_value=(None, False)
+    )
+    twitch_ok.search_categories = MagicMock(return_value=[])
+    application, bot = _app(db, twitch=twitch_ok)
+    _pending_schedule_publishes(application)[_FREE_UID] = {
+        "entries": [{"date": "2099-01-05", "time": "19:00", "game": "Game"}],
+        "updates": [],
+        "deletes": [],
+        "duration": 120,
+        "clear_mode": "all",
+        "utc_offset_minutes": 180,
+        "force_publish": True,
+    }
+    with patch("oauth_tokens.apply_oauth_success_tokens", return_value=True), patch(
+        "oauth_tokens.restore_after_twitch_oauth", new_callable=AsyncMock
+    ), patch(
+        "schedule_cancel.refresh_schedule_day_snapshot", return_value=None
+    ), patch(
+        "schedule_cancel.suppress_schedule_cancel", return_value=None
+    ), patch(
+        "request_progress.request_progress"
+    ) as rp:
+        rp.return_value.__aenter__ = AsyncMock(return_value=None)
+        rp.return_value.__aexit__ = AsyncMock(return_value=False)
+        await _complete_schedule_publish(
+            application,
+            _FREE_UID,
+            None,
+            {
+                "access_token": "access",
+                "refresh_token": "refresh-already-saved",
+                "twitch_user_id": "tw123",
+            },
+        )
+    assert not application.bot_data.get("pending_schedule_tokens")
+    for call in bot.send_message.await_args_list:
+        markup = call.kwargs.get("reply_markup")
+        if markup is None and len(call.args) > 2:
+            markup = call.args[2]
+        data = ""
+        if markup is not None:
+            data = str(getattr(markup, "inline_keyboard", markup))
+        assert "sched_save_token" not in data
+
     from handlers.stream_schedule import process_vacation_auto_exits
 
     application, bot = _app(db)
