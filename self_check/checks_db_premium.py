@@ -1001,22 +1001,25 @@ def check_db_premium() -> None:
         assert "gift_life" in halloween.excluded_kinds
         assert not prem.promo_applies_to_kind(halloween, "life")
         assert prem.promo_applies_to_kind(halloween, "month")
+        # Pin now inside the promo window so wall-clock expiry does not mask
+        # kind_blocked / used / ok reasons.
+        promo_now = int(halloween.valid_from) + 1
         blocked, blocked_reason = prem.validate_promo_for_user(
-            db, 2, "Halloween", kind="life"
+            db, 2, "Halloween", kind="life", now=promo_now
         )
         assert blocked is None and blocked_reason == "kind_blocked"
         assert not db.has_premium_promo_redemption("halloween", 1)
         assert db.redeem_premium_promo("Halloween", 1, charge_id="c1")
         assert db.has_premium_promo_redemption("halloween", 1)
         assert not db.redeem_premium_promo("Halloween", 1, charge_id="c2")
-        ok_promo, reason = prem.validate_promo_for_user(db, 1, "Halloween")
+        ok_promo, reason = prem.validate_promo_for_user(
+            db, 1, "Halloween", now=promo_now
+        )
         assert ok_promo is None and reason == "used"
-        now_promo = int(datetime.now(timezone.utc).timestamp())
-        ok2, reason2 = prem.validate_promo_for_user(db, 2, "Halloween")
-        if halloween.valid_from <= now_promo <= halloween.valid_until:
-            assert ok2 is not None and reason2 == "ok"
-        else:
-            assert reason2 in ("expired", "not_yet")
+        ok2, reason2 = prem.validate_promo_for_user(
+            db, 2, "Halloween", now=promo_now
+        )
+        assert ok2 is not None and reason2 == "ok"
         assert prem.apply_stars_discount(100, 31) == 69
         assert db.get_notifications_paused_until(1) == 0
         pause_until = int(
