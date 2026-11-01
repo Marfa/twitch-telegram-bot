@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import logging
 import re
-import time
+from collections.abc import Callable
 
 import requests
 
@@ -21,30 +21,44 @@ _RAPID_TIMEOUT = 30
 _RAPID_HOST = "deep-translate1.p.rapidapi.com"
 _RAPID_URL = f"https://{_RAPID_HOST}/language/translate/v2"
 
-# After DeepL 456, skip DeepL for a day (RapidAPI fallback), then probe again.
-_DEEPL_QUOTA_STICKY_SEC = 24 * 3600
-_deepl_quota_exhausted_at: float | None = None
+# After DeepL 456, stay on RapidAPI for process lifetime (Developer credit does not reset).
+_deepl_quota_exhausted: bool = False
+_deepl_quota_notifier: Callable[[], None] | None = None
 
 
 class DeeplQuotaExceeded(RuntimeError):
     """DeepL returned HTTP 456 (quota exhausted)."""
 
 
+def set_deepl_quota_exhausted_notifier(fn: Callable[[], None] | None) -> None:
+    """Register sync hook (schedules admin DM) fired once on first DeepL 456."""
+    global _deepl_quota_notifier
+    _deepl_quota_notifier = fn
+
+
+def clear_deepl_quota_exhausted() -> None:
+    """Reset sticky fallback (tests / after deploying a new DeepL key)."""
+    global _deepl_quota_exhausted
+    _deepl_quota_exhausted = False
+
+
 def _deepl_quota_blocked() -> bool:
-    """True while sticky RapidAPI-only window after DeepL 456 is still active."""
-    global _deepl_quota_exhausted_at
-    if _deepl_quota_exhausted_at is None:
-        return False
-    if time.monotonic() - _deepl_quota_exhausted_at >= _DEEPL_QUOTA_STICKY_SEC:
-        _deepl_quota_exhausted_at = None
-        logger.info("DeepL quota sticky expired; retrying DeepL")
-        return False
-    return True
+    """True after DeepL 456 — permanent RapidAPI-only until process restart / clear."""
+    return _deepl_quota_exhausted
 
 
 def _mark_deepl_quota_exhausted() -> None:
-    global _deepl_quota_exhausted_at
-    _deepl_quota_exhausted_at = time.monotonic()
+    global _deepl_quota_exhausted
+    first = not _deepl_quota_exhausted
+    _deepl_quota_exhausted = True
+    if not first:
+        return
+    if _deepl_quota_notifier is None:
+        return
+    try:
+        _deepl_quota_notifier()
+    except Exception:
+        logger.exception("DeepL quota admin notify hook failed")
 
 
 def markdown_to_telegram_html(text: str) -> str:

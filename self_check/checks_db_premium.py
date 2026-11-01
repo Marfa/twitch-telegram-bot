@@ -1329,7 +1329,7 @@ def check_db_premium() -> None:
         post.return_value = mock_resp
         import translate as translate_mod
 
-        translate_mod._deepl_quota_exhausted_at = None
+        translate_mod.clear_deepl_quota_exhausted()
         assert translate_text("hello", target_lang="ru", source_lang="en") == "привет"
         sent = post.call_args.kwargs["data"]
         assert "tag_handling" not in sent
@@ -1342,8 +1342,10 @@ def check_db_premium() -> None:
         sent_html = post.call_args.kwargs["data"]
         assert sent_html.get("tag_handling") == "html"
 
-    # DeepL 456 → sticky fallback to RapidAPI Deep Translate (clears after 24h).
-    translate_mod._deepl_quota_exhausted_at = None
+    # DeepL 456 → permanent RapidAPI sticky + one-shot admin notify hook.
+    translate_mod.clear_deepl_quota_exhausted()
+    notify_calls: list[int] = []
+    translate_mod.set_deepl_quota_exhausted_notifier(lambda: notify_calls.append(1))
     with patch("config.DEEPL_API_KEY", "test-key"), patch(
         "config.RAPIDAPI_KEY", "rapid-key"
     ), patch("translate.requests.post") as post:
@@ -1362,19 +1364,27 @@ def check_db_premium() -> None:
             translate_text("hello", target_lang="ru", source_lang="en")
             == "привет rapid"
         )
-        assert translate_mod._deepl_quota_exhausted_at is not None
+        assert translate_mod._deepl_quota_exhausted is True
+        assert notify_calls == [1]
         assert post.call_count == 2
-        # Second call skips DeepL (sticky) and goes straight to RapidAPI.
+        # Second call skips DeepL (permanent sticky) and goes straight to RapidAPI.
         post.side_effect = [rapid_resp]
         assert (
             translate_text("hello", target_lang="ru", source_lang="en")
             == "привет rapid"
         )
         assert post.call_count == 3
-        # After sticky TTL, DeepL is tried again.
-        translate_mod._deepl_quota_exhausted_at = (
-            time.monotonic() - translate_mod._DEEPL_QUOTA_STICKY_SEC - 1
+        assert notify_calls == [1]
+        # Sticky does not expire — still RapidAPI, DeepL not probed.
+        post.side_effect = [rapid_resp]
+        assert (
+            translate_text("hello", target_lang="ru", source_lang="en")
+            == "привет rapid"
         )
+        assert post.call_count == 4
+        assert translate_mod._deepl_quota_exhausted is True
+        # After clear (new key deploy), DeepL is tried again.
+        translate_mod.clear_deepl_quota_exhausted()
         deepl_ok = MagicMock()
         deepl_ok.status_code = 200
         deepl_ok.ok = True
@@ -1385,9 +1395,10 @@ def check_db_premium() -> None:
             translate_text("hello", target_lang="ru", source_lang="en")
             == "привет deepl"
         )
-        assert translate_mod._deepl_quota_exhausted_at is None
-        assert post.call_count == 4
-    translate_mod._deepl_quota_exhausted_at = None
+        assert translate_mod._deepl_quota_exhausted is False
+        assert post.call_count == 5
+    translate_mod.set_deepl_quota_exhausted_notifier(None)
+    translate_mod.clear_deepl_quota_exhausted()
 
     # RapidAPI HTTP errors are logged like Azure (PostHog ERROR) then raised.
     with patch("config.DEEPL_API_KEY", ""), patch(

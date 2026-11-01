@@ -739,6 +739,26 @@ async def monthly_new_users_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def notify_admins_deepl_quota(application: Application) -> None:
+    """DM ADMIN_USER_IDS once DeepL returns HTTP 456 (sticky RapidAPI fallback)."""
+    from config import ADMIN_USER_IDS
+
+    if not ADMIN_USER_IDS:
+        return
+    db: Database = application.bot_data["db"]
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        try:
+            await application.bot.send_message(
+                admin_id,
+                t("deepl_quota_admin", lang),
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning(
+                "Cannot send DeepL quota notice to admin %s: %s", admin_id, exc
+            )
+
+
 async def notify_admins_lucky_premium(
     bot,
     db: Database,

@@ -1373,5 +1373,6 @@
   "premium_promo_invalid": "Промокод недійсний або прострочений.",
   "premium_promo_used": "Ви вже використали цей промокод.",
   "premium_promo_expired": "Термін дії промокоду минув.",
-  "premium_promo_kind_blocked": "Цей промокод не діє на обраний тариф."
+  "premium_promo_kind_blocked": "Цей промокод не діє на обраний тариф.",
+  "deepl_quota_admin": "Квоту DeepL API вичерпано (HTTP 456). Переклади йдуть через RapidAPI Deep Translate, доки не буде новий ключ або план DeepL."
 }

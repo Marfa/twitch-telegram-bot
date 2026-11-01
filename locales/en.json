@@ -1373,5 +1373,6 @@
   "premium_promo_invalid": "Promo code is invalid or expired.",
   "premium_promo_used": "You already used this promo code.",
   "premium_promo_expired": "This promo code has expired.",
-  "premium_promo_kind_blocked": "This promo code does not apply to the selected plan."
+  "premium_promo_kind_blocked": "This promo code does not apply to the selected plan.",
+  "deepl_quota_admin": "DeepL API quota exhausted (HTTP 456). Translations fall back to RapidAPI Deep Translate until a new DeepL key or plan is available."
 }
