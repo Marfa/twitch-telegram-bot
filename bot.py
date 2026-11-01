@@ -263,6 +263,7 @@ from handlers.broadcast import (
     admin_sent_list,
     admin_select_type,
     on_broadcast_feedback,
+    on_dm_main_menu,
     on_sb_delete,
     on_sb_edit_pick,
     on_sb_edit_text_click,
@@ -2814,6 +2815,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_broadcast_feedback, pattern=r"^bcf:(up|down):\d+$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_dm_main_menu, pattern=r"^dm_menu$"),
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_sb_edit_pick, pattern=r"^sb_edit:\d+$"), group=0)

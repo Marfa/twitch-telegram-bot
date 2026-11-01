@@ -207,11 +207,17 @@ def _check_inline_wizard_keyboards() -> None:
     from handlers.giveaways import giveaways_hub_keyboard
     from handlers.when_stream import schedule_detail_keyboard
     from handlers.wizard import _twitch_link_offer_keyboard
-    from i18n import drops_catalog_keyboard
+    from i18n import (
+        broadcast_feedback_keyboard,
+        dm_main_menu_keyboard,
+        drops_catalog_keyboard,
+    )
 
     for loc in SUPPORTED_LOCALES:
         cases = [
             ("schedule_query_detail", schedule_detail_keyboard("week", loc)),
+            ("broadcast_feedback", broadcast_feedback_keyboard(1, 0, 0, loc)),
+            ("dm_main_menu", dm_main_menu_keyboard(loc)),
             ("alert_type_keyboard", alert_type_keyboard(loc, show_drops=True)),
             (
                 "alert_type_keyboard_giveaways",
@@ -656,6 +662,19 @@ async def _scenario_admin_broadcast(db) -> None:
     with patch("handlers.broadcast._is_admin", return_value=True):
         await admin_select_type(update, ctx)
     cap.assert_turn("admin_broadcast_audience")
+
+
+async def _scenario_dm_main_menu(db) -> None:
+    """§12 admin/status DM: «Вернуться в главное меню» restores Reply menu."""
+    from handlers.broadcast import on_dm_main_menu
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, _query = _cb_update(_FREE_UID, "dm_menu", cap)
+    ctx = _ctx(application)
+    await on_dm_main_menu(update, ctx)
+    cap.assert_turn("system_dm_main_menu")
 
 
 async def _scenario_feedback(db) -> None:
@@ -4331,6 +4350,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_settings_and_partner(db)
         await _scenario_ignore_igdb(db)
         await _scenario_admin_broadcast(db)
+        await _scenario_dm_main_menu(db)
         await _scenario_feedback(db)
         await _scenario_wizard_deep(db)
         await _scenario_wizard_template_typo(db)

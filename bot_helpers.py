@@ -522,6 +522,7 @@ async def _send_dm_html(
     *,
     reply_markup=None,
     disable_web_page_preview: bool = False,
+    disable_notification: bool = False,
     return_message_id: bool = False,
     outbound_kind: str = "system_dm",
 ) -> str | tuple[str, int | None]:
@@ -538,6 +539,8 @@ async def _send_dm_html(
         kwargs["reply_markup"] = reply_markup
     if disable_web_page_preview:
         kwargs["disable_web_page_preview"] = True
+    if disable_notification:
+        kwargs["disable_notification"] = True
 
     async def _deliver() -> object | None:
         from message_fx import message_fx_disabled

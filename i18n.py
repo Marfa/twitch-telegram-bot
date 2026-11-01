@@ -754,8 +754,20 @@ def broadcast_menu(lang: str) -> ReplyKeyboardMarkup:
     return _reply_keyboard(_pair_reply_rows(buttons))
 
 
+def dm_main_menu_button(lang: str) -> InlineKeyboardButton:
+    """Restore sticky reply menu after an inline-only system DM."""
+    return InlineKeyboardButton(
+        btn("broadcast_main_menu", lang),
+        callback_data="dm_menu",
+    )
+
+
+def dm_main_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[dm_main_menu_button(lang)]])
+
+
 def broadcast_feedback_keyboard(
-    broadcast_id: int, up_count: int, down_count: int
+    broadcast_id: int, up_count: int, down_count: int, lang: str
 ) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -769,6 +781,7 @@ def broadcast_feedback_keyboard(
                     callback_data=f"bcf:down:{broadcast_id}",
                 ),
             ],
+            [dm_main_menu_button(lang)],
         ]
     )
 

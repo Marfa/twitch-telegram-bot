@@ -17,7 +17,13 @@ from telegram.ext import Application, ContextTypes
 import analytics
 from bot_helpers import _BROADCAST_SEND_PAUSE, _send_dm_html
 from db import Database
-from i18n import DEFAULT_LOCALE, SCHEDULE_TZ, SUPPORTED_LOCALES, t
+from i18n import (
+    DEFAULT_LOCALE,
+    SCHEDULE_TZ,
+    SUPPORTED_LOCALES,
+    dm_main_menu_keyboard,
+    t,
+)
 from twitch import fetch_twitch_status_summary, twitch_status_fingerprint
 
 logger = logging.getLogger(__name__)
@@ -176,7 +182,12 @@ async def check_twitch_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         locale = locale_rows.get(uid) or DEFAULT_LOCALE
         message = messages.get(locale) or messages[DEFAULT_LOCALE]
         await _send_dm_html(
-            context.bot, db, uid, message, outbound_kind="twitch_status"
+            context.bot,
+            db,
+            uid,
+            message,
+            reply_markup=dm_main_menu_keyboard(locale),
+            outbound_kind="twitch_status",
         )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
     bot_data["twitch_status_alerted_down"] = unhealthy
@@ -273,6 +284,7 @@ async def check_posthog_status(context: ContextTypes.DEFAULT_TYPE) -> None:
             db,
             uid,
             message,
+            reply_markup=dm_main_menu_keyboard(locale),
             disable_web_page_preview=True,
             outbound_kind="posthog_status",
         )
@@ -381,6 +393,7 @@ async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
             db,
             uid,
             message,
+            reply_markup=dm_main_menu_keyboard(locale),
             disable_web_page_preview=True,
             outbound_kind="cursor_status",
         )

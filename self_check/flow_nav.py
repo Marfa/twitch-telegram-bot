@@ -51,7 +51,8 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^template_typo:0$|"
     r"^stored_typo_fix:0$|"
     r"^gv:(?:close|hub)$|"
-    r"^schq:list:(?:when|day|week)$"
+    r"^schq:list:(?:when|day|week)$|"
+    r"^dm_menu$"
     r")"
 )
 

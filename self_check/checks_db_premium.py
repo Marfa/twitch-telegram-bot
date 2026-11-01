@@ -619,6 +619,10 @@ def check_db_premium() -> None:
         )[0]
         assert "get_broadcast_deliveries" in _send
         assert "already" in _send
+        # Inline «main menu» restores reply keyboard; pulse+delete loses it on Android.
+        assert "_pulse_reply_keyboard" not in _send
+        assert "broadcast_footer" not in _send
+        assert 'callback_data="dm_menu"' in Path("i18n.py").read_text(encoding="utf-8")
         assert stats.sys_availability == 1
         assert stats.blocked_users == 0
         assert db.update_subscription(sub_id, 1, message_template="bye")

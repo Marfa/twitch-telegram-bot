@@ -37,6 +37,7 @@ from i18n import (
     SUPPORTED_LOCALES,
     all_wizard_nav_buttons,
     beta_mode_keyboard,
+    dm_main_menu_keyboard,
     ignore_igdb_delete_keyboard,
     ignore_igdb_pick_keyboard,
     ignore_keywords_keyboard,
@@ -1415,6 +1416,7 @@ async def announce_new_beta_features(context: ContextTypes.DEFAULT_TYPE) -> None
                 db,
                 uid,
                 f"{body}\n\n{footer}",
+                reply_markup=dm_main_menu_keyboard(lang),
                 disable_web_page_preview=True,
                 outbound_kind=f"beta_announce:{feat.id}",
             )

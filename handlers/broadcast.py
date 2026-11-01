@@ -16,9 +16,9 @@ from bot_helpers import (
     _can_use_admin_tools,
     _is_admin,
     _menu,
-    _pulse_reply_keyboard,
     _send_dm_html,
     _user_lang,
+    reply_chat_id,
 )
 from db import Database
 from db.models import BROADCAST_RETENTION_DAYS, ScheduledBroadcast
@@ -122,10 +122,9 @@ def _admin_sent_broadcast_message(
     when = _format_sent_at_label(item.sent_at or item.scheduled_at)
     type_label = _broadcast_type_label(item.msg_type, lang)
     header = t("sent_line", lang, id=item.id, when=when, type=type_label)
-    footer = t("broadcast_footer", lang, type=type_label)
-    message = f"{header}\n\n{item.text}\n\n{footer}"
+    message = f"{header}\n\n{item.text}"
     up_count, down_count = db.get_broadcast_feedback_counts(item.id)
-    markup = broadcast_feedback_keyboard(item.id, up_count, down_count)
+    markup = broadcast_feedback_keyboard(item.id, up_count, down_count, lang)
     return message, markup
 
 
@@ -666,24 +665,21 @@ async def _send_admin_broadcast(
         source,
         set(user_locales.values()),
     )
-    attach_menu = msg_type == "bot_update"
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
-    feedback_kb = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
     sent = failed = 0
     for uid in user_ids:
         locale = user_locales[uid]
         body = translations.get(locale, text)
-        footer = t(
-            "broadcast_footer",
-            locale,
-            type=_broadcast_type_label(msg_type, locale),
+        feedback_kb = broadcast_feedback_keyboard(
+            broadcast_id, up_count, down_count, locale
         )
-        message = f"{body}\n\n{footer}"
+        # Inline feedback + «main menu» button; reply keyboard is restored when
+        # the user taps the button (pulse+delete loses the menu on Android).
         result = await _send_dm_html(
             context.bot,
             db,
             uid,
-            message,
+            body,
             reply_markup=feedback_kb,
             return_message_id=True,
             outbound_kind=f"broadcast:{broadcast_id}",
@@ -693,16 +689,6 @@ async def _send_admin_broadcast(
             sent += 1
             if message_id is not None:
                 db.add_broadcast_delivery(broadcast_id, uid, message_id)
-            if attach_menu:
-                try:
-                    await _pulse_reply_keyboard(
-                        context.bot, uid, _menu(locale, uid)
-                    )
-                except Exception:
-                    # Never abort the rest of the wave if one keyboard refresh fails.
-                    logger.exception(
-                        "bot_update menu pulse failed for %s", uid
-                    )
         else:
             failed += 1
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
@@ -715,11 +701,16 @@ async def _refresh_broadcast_feedback_keyboards(
 ) -> None:
     db: Database = context.application.bot_data["db"]
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
-    markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
-    for uid, message_id in db.get_broadcast_deliveries(broadcast_id):
+    deliveries = db.get_broadcast_deliveries(broadcast_id)
+    locales = db.get_user_locales([uid for uid, _ in deliveries])
+    for uid, message_id in deliveries:
         # Application.stop() waits for this task; end it quickly.
         if not context.application.running:
             return
+        lang = locales.get(uid) or DEFAULT_LOCALE
+        markup = broadcast_feedback_keyboard(
+            broadcast_id, up_count, down_count, lang
+        )
         try:
             await context.bot.edit_message_reply_markup(
                 chat_id=uid,
@@ -788,13 +779,14 @@ async def on_broadcast_feedback(
     broadcast_id = int(raw_id)
     user_id = query.from_user.id
     db: Database = context.application.bot_data["db"]
+    lang = _user_lang(context, user_id)
     current = db.get_broadcast_feedback_vote(broadcast_id, user_id)
     if current == vote:
         db.clear_broadcast_feedback(broadcast_id, user_id)
     else:
         db.set_broadcast_feedback(broadcast_id, user_id, vote)
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
-    markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count)
+    markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count, lang)
     if query.message:
         try:
             await query.edit_message_reply_markup(reply_markup=markup)
@@ -811,6 +803,26 @@ async def on_broadcast_feedback(
         _run_broadcast_feedback_refresh(context, broadcast_id),
         update=update,
         name=f"broadcast_feedback_refresh_{broadcast_id}",
+    )
+
+
+async def on_dm_main_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Restore the sticky reply keyboard after an inline-only system DM."""
+    query = update.callback_query
+    if not query:
+        return
+    try:
+        await query.answer()
+    except BadRequest:
+        pass
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    await context.bot.send_message(
+        reply_chat_id(update),
+        t("menu_main", lang),
+        reply_markup=_menu(lang, user_id),
     )
 
 

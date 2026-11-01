@@ -1550,6 +1550,12 @@ def check_handlers() -> None:
         ) >= 0
         assert "настройках" in tr("broadcast_footer", "ru", type="x")
         assert "Settings" in tr("broadcast_footer", "en", type="x")
+        mon = Path("handlers/monitoring.py").read_text(encoding="utf-8")
+        assert mon.count("dm_main_menu_keyboard(") >= 3
+        sett = Path("handlers/settings.py").read_text(encoding="utf-8")
+        assert "dm_main_menu_keyboard(" in sett.split(
+            "async def announce_new_beta_features", 1
+        )[1].split("async def ", 1)[0]
         assert tr("broadcast_type_other", "ru") == "📢 Прочие"
         assert tr("broadcast_type_other", "en") == "📢 Other"
         assert tr("schedule_pick_month", "ru")
@@ -2614,6 +2620,9 @@ def _check_broadcast_feedback_refresh() -> None:
 
         def get_broadcast_deliveries(self, broadcast_id):
             return [(1, 10), (2, 20), (3, 30)]
+
+        def get_user_locales(self, user_ids):
+            return {uid: "ru" for uid in user_ids}
 
     def _ctx(bot, running=True):
         app = SimpleNamespace(bot_data={"db": _Db()}, running=running)
