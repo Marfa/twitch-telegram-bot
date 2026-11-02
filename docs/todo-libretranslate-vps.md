@@ -114,3 +114,11 @@ bot ──────────────────► db
 | Рекомендация | **Не мигрировать на текущем VPS.** Сначала апгрейд/замер; иначе оставить DeepL |
 
 До go/no-go после prefight реализацию **не планируем**.
+
+---
+
+## Backlog (DeepL / RapidAPI, без LT)
+
+Актуально при текущей схеме DeepL primary → RapidAPI sticky fallback:
+
+- [ ] **Отключить ЛС админам об истечении лимита DeepL** — сейчас `notify_admins_deepl_quota` / ключ `deepl_quota_admin` (один DM на первый HTTP 456 за жизнь процесса). Убрать hook в `bot.py` + `set_deepl_quota_exhausted_notifier`, функцию и i18n; sticky RapidAPI оставить.
