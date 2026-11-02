@@ -3035,19 +3035,17 @@ async def _scenario_share_alert_offer(db) -> None:
     assert db.get_subscriptions_by_owner(newbie) == []
 
     update, _query = _cb_update(newbie, "lang:ru", cap)
-    with patch(
-        "bot._ensure_welcome_premium_channel_subscription",
-        new=AsyncMock(
-            side_effect=AssertionError("demo seed must not run on share first start")
-        ),
-    ), patch("bot.sync_stream_chat_menu_button", new=AsyncMock()), patch(
+    with patch("bot.sync_stream_chat_menu_button", new=AsyncMock()), patch(
         "bot.offer_shared_alert", new=AsyncMock()
     ) as offer_mock:
         await receive_language(update, ctx)
     offer_mock.assert_awaited_once()
     assert offer_mock.await_args.args[-1] == token
     assert db.get_subscriptions_by_owner(newbie) == []
+    assert db.get_welcome_demo_due_at(newbie) is None
     assert "pending_share_token" not in ctx.user_data
+    # Language pick removed; single welcome+menu send (share offer mocked).
+    assert bot.send_message.await_count >= 1
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -4072,7 +4070,7 @@ async def _scenario_ai_clips(db) -> None:
 
 
 async def _scenario_welcome_demo(db) -> None:
-    """§1 welcome demo — paused seed keyboard has Enable + Delete escape."""
+    """§1.2 welcome demo after opt-in — Enable/Delete escape on seeded alert."""
     from bot import _ensure_welcome_premium_channel_subscription
     from handlers.subscriptions import on_welcome_demo_delete, on_welcome_demo_enable
     from i18n import welcome_demo_keyboard
@@ -4089,7 +4087,7 @@ async def _scenario_welcome_demo(db) -> None:
     twitch.get_live_streams = MagicMock(return_value={})
 
     seeded = await _ensure_welcome_premium_channel_subscription(
-        application, bot, uid, "ru"
+        application, bot, uid, "ru", enabled=False
     )
     assert seeded is not None
     sub_id, _channel, enabled = seeded
@@ -4100,14 +4098,6 @@ async def _scenario_welcome_demo(db) -> None:
     assert len(markup.inline_keyboard[0]) == 2
     assert markup.inline_keyboard[0][0].callback_data == f"welcome_en:{sub_id}"
     assert markup.inline_keyboard[0][1].callback_data == f"welcome_del:{sub_id}"
-    cbs = {
-        cell.callback_data
-        for row in markup.inline_keyboard
-        for cell in row
-        if cell.callback_data
-    }
-    assert f"welcome_en:{sub_id}" in cbs
-    assert f"welcome_del:{sub_id}" in cbs
 
     cap = _BotCapture()
     cap.wrap(bot)
@@ -4137,6 +4127,83 @@ async def _scenario_welcome_demo(db) -> None:
     query.edit_message_text.assert_awaited()
     assert db.get_subscription(sub_id, uid) is None
     cap.assert_turn("welcome_demo_deleted")
+
+
+async def _scenario_welcome_demo_offer(db) -> None:
+    """§1.2 deferred demo offer — soft-exit «Не нужно»; accept creates enabled demo."""
+    from bot import _send_welcome_bundle
+    from handlers.subscriptions import (
+        offer_due_welcome_demos,
+        on_welcome_demo_offer_no,
+        on_welcome_demo_offer_yes,
+    )
+    from i18n import welcome_demo_offer_keyboard
+    import premium as prem
+
+    offer_kb = welcome_demo_offer_keyboard("ru")
+    assert markup_has_escape_hatch(offer_kb)
+    cbs = {
+        b.callback_data
+        for row in offer_kb.inline_keyboard
+        for b in row
+        if b.callback_data
+    }
+    assert cbs == {"welcome_offer:yes", "welcome_offer:new", "welcome_offer:no"}
+
+    uid = _FREE_UID + 22
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+    application, bot = _app(db)
+    twitch = application.bot_data["twitch"]
+    twitch.get_user = MagicMock(
+        return_value={"id": "4242", "login": prem.twitch_channel_login() or "marfapr"}
+    )
+    twitch.get_live_streams = MagicMock(return_value={})
+
+    cap = _BotCapture()
+    cap.wrap(bot)
+    with patch("bot.sync_stream_chat_menu_button", new=AsyncMock()):
+        await _send_welcome_bundle(
+            application, bot, uid, uid, "ru", first_start=True
+        )
+    assert db.get_subscriptions_by_owner(uid) == []
+    assert db.get_welcome_demo_due_at(uid) is not None
+    # One bubble: welcome text + reply menu.
+    assert bot.send_message.await_count == 1
+    welcome_kwargs = bot.send_message.await_args.kwargs
+    assert welcome_kwargs.get("reply_markup") is not None
+    assert markup_has_escape_hatch(welcome_kwargs["reply_markup"])
+
+    db.set_welcome_demo_due_at(uid, 1)
+    bot.send_message.reset_mock()
+    cap.markups.clear()
+    ctx = _ctx(application)
+    ctx.bot = bot
+    await offer_due_welcome_demos(ctx)
+    assert db.get_welcome_demo_due_at(uid) is None
+    assert bot.send_message.await_count == 1
+    assert markup_has_escape_hatch(
+        bot.send_message.await_args.kwargs.get("reply_markup")
+    )
+
+    update, query = _cb_update(uid, "welcome_offer:no", cap)
+    db.set_welcome_demo_due_at(uid, 1)
+    await on_welcome_demo_offer_no(update, ctx)
+    query.edit_message_text.assert_awaited()
+    assert db.get_welcome_demo_due_at(uid) is None
+    assert db.get_subscriptions_by_owner(uid) == []
+
+    uid_yes = uid + 1
+    db.upsert_user(uid_yes)
+    db.set_user_locale(uid_yes, "ru")
+    update, query = _cb_update(uid_yes, "welcome_offer:yes", cap)
+    await on_welcome_demo_offer_yes(update, ctx)
+    rows = db.get_subscriptions_by_owner(uid_yes)
+    assert len(rows) == 1 and rows[0].enabled is True
+    query.edit_message_text.assert_awaited()
+    enabled_markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert enabled_markup is not None
+    assert markup_has_escape_hatch(enabled_markup)
 
 
 async def _scenario_premium_channel_ad(db) -> None:
@@ -4342,6 +4409,7 @@ async def _run_flow_nav_checks() -> None:
         db.set_user_locale(_FREE_UID, "ru")
         await _scenario_menus_and_wizards(db)
         await _scenario_welcome_demo(db)
+        await _scenario_welcome_demo_offer(db)
         await _scenario_premium_early_soft(db)
         await _scenario_premium_promo_step(db)
         await _scenario_premium_channel_ad(db)

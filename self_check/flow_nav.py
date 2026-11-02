@@ -34,6 +34,7 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^share_decline$|"
     r"^gift_decline$|"
     r"^welcome_del:\d+$|"
+    r"^welcome_offer:no$|"
     r"^premium:gift_skip_(?:msg|img)$|"
     r"^premium:feat_back$|"
     r"^premium:promo_cancel$|"
@@ -67,6 +68,7 @@ def _decline_labels() -> set[str]:
         labels.add(t("premium_gift_decline", loc))
         labels.add(t("twitch_link_decline", loc))
         labels.add(btn("premium_feat_back", loc))
+        labels.add(btn("welcome_demo_offer_no", loc))
     return labels
 
 

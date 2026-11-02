@@ -87,6 +87,7 @@ from i18n import (
     watch_tags_keyboard,
     watch_viewers_keyboard,
     welcome_demo_keyboard,
+    welcome_demo_offer_keyboard,
 )
 from request_progress import request_progress
 from twitch import (
@@ -5541,6 +5542,113 @@ async def on_welcome_demo_delete(update: Update, context: ContextTypes.DEFAULT_T
         return
     analytics.capture(user_id, "welcome_demo_subscription_deleted", {"sub_id": sub_id})
     await query.edit_message_text(t("welcome_demo_deleted", lang))
+
+
+async def offer_due_welcome_demos(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send deferred opt-in demo offer to users with zero subscriptions after 24h."""
+    from bot import _pick_welcome_demo_channel
+    from outbound_messages import note_outbound
+    from telegram.error import BadRequest, Forbidden
+
+    db: Database = context.application.bot_data["db"]
+    bot = context.bot
+    due_ids = db.list_due_welcome_demo_offers()
+    for user_id in due_ids:
+        # Clear first so a crash mid-loop does not re-spam forever.
+        db.clear_welcome_demo_due_at(user_id)
+        if db.get_subscriptions_by_owner(user_id):
+            continue
+        if db.is_bot_blocked(user_id):
+            continue
+        lang = db.get_user_locale(user_id) or "ru"
+        channel = await _pick_welcome_demo_channel(context.application, user_id, lang)
+        if not channel:
+            analytics.capture(user_id, "welcome_demo_offer_skipped", {"reason": "no_channel"})
+            continue
+        try:
+            await bot.send_message(
+                user_id,
+                t("start_welcome_demo_offer", lang, channel=channel),
+                reply_markup=welcome_demo_offer_keyboard(lang),
+            )
+        except (BadRequest, Forbidden) as exc:
+            from handlers.delivery import _is_user_blocked_error, apply_user_blocked
+
+            if _is_user_blocked_error(exc):
+                apply_user_blocked(db, user_id, source="welcome_demo_offer")
+            logger.warning("welcome demo offer failed user=%s: %s", user_id, exc)
+            continue
+        note_outbound(user_id, "welcome_demo_offer")
+        analytics.capture(
+            user_id, "welcome_demo_offer_sent", {"channel": channel}
+        )
+
+
+async def on_welcome_demo_offer_yes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    try:
+        await query.answer()
+    except BadRequest:
+        return
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.clear_welcome_demo_due_at(user_id)
+    from bot import _ensure_welcome_premium_channel_subscription
+
+    seeded = await _ensure_welcome_premium_channel_subscription(
+        context.application, context.bot, user_id, lang, enabled=True
+    )
+    if not seeded:
+        await query.edit_message_text(t("welcome_demo_offer_unavailable", lang))
+        analytics.capture(user_id, "welcome_demo_offer_accepted", {"ok": False})
+        return
+    sub_id, channel, _enabled = seeded
+    analytics.capture(
+        user_id,
+        "welcome_demo_offer_accepted",
+        {"ok": True, "sub_id": sub_id, "channel": channel},
+    )
+    analytics.capture(
+        user_id,
+        "welcome_demo_subscription_enabled",
+        {"sub_id": sub_id, "channel": channel, "source": "offer"},
+    )
+    await query.edit_message_text(
+        t("welcome_demo_enabled", lang, channel=channel),
+        reply_markup=welcome_demo_keyboard(lang, sub_id, enabled=True),
+    )
+
+
+async def on_welcome_demo_offer_no(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    db.clear_welcome_demo_due_at(user_id)
+    analytics.capture(user_id, "welcome_demo_offer_declined")
+    await query.edit_message_text(t("welcome_demo_offer_declined", lang))
+
+
+async def on_welcome_demo_offer_new(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Start «Новая подписка» from the deferred demo offer."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    db: Database = context.application.bot_data["db"]
+    db.clear_welcome_demo_due_at(user_id)
+    analytics.capture(user_id, "welcome_demo_offer_new_sub")
+    await query.edit_message_text("✓")
+    from handlers.wizard import start_new_subscription
+
+    return await start_new_subscription(update, context)
 
 
 async def on_delivery_fail_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

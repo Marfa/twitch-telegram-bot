@@ -841,6 +841,29 @@ def welcome_demo_keyboard(
     return InlineKeyboardMarkup([[first, delete]])
 
 
+def welcome_demo_offer_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    btn("welcome_demo_offer_yes", lang),
+                    callback_data="welcome_offer:yes",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("welcome_demo_offer_new", lang),
+                    callback_data="welcome_offer:new",
+                ),
+                InlineKeyboardButton(
+                    btn("welcome_demo_offer_no", lang),
+                    callback_data="welcome_offer:no",
+                ),
+            ],
+        ]
+    )
+
+
 def premium_early_keyboard(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

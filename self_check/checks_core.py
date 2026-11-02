@@ -3088,9 +3088,15 @@ def check_core() -> None:
         assert btn("language", loc)
         assert tr("start_welcome", loc)
         assert tr("start_welcome_demo", loc, channel="marfapr")
+        assert tr("start_welcome_demo_offer", loc, channel="marfapr")
+        assert tr("welcome_demo_offer_declined", loc)
+        assert tr("welcome_demo_offer_unavailable", loc)
         assert btn("welcome_demo_enable", loc)
         assert btn("welcome_demo_edit", loc)
         assert btn("welcome_demo_delete", loc)
+        assert btn("welcome_demo_offer_yes", loc)
+        assert btn("welcome_demo_offer_no", loc)
+        assert btn("welcome_demo_offer_new", loc)
         active_note = tr("import_active_limit_note", loc, limit=5, slots=5)
         assert "5" in active_note
         assert active_note in tr(
@@ -3407,7 +3413,11 @@ def check_core() -> None:
         assert b"twitch2telegram_bot" in guide_html
     assert _guide_page("xx") is not None  # falls back to default locale
 
-    from i18n import premium_early_keyboard, welcome_demo_keyboard
+    from i18n import (
+        premium_early_keyboard,
+        welcome_demo_keyboard,
+        welcome_demo_offer_keyboard,
+    )
     from handlers.subscriptions import _import_result_keyboard
     from premium_handlers import user_needs_early_premium_soft
 
@@ -3417,6 +3427,12 @@ def check_core() -> None:
     kb_on = welcome_demo_keyboard("ru", 42, enabled=True)
     assert kb_on.inline_keyboard[0][0].callback_data == "edit:42"
     assert kb_on.inline_keyboard[0][1].callback_data == "welcome_del:42"
+    offer_kb = welcome_demo_offer_keyboard("ru")
+    assert offer_kb.inline_keyboard[0][0].callback_data == "welcome_offer:yes"
+    assert {b.callback_data for b in offer_kb.inline_keyboard[1]} == {
+        "welcome_offer:new",
+        "welcome_offer:no",
+    }
 
     pek = premium_early_keyboard("ru")
     assert pek.inline_keyboard[0][0].callback_data == "premium_early:continue"

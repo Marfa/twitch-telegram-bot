@@ -437,6 +437,15 @@ class SqliteDatabase:
             """
         )
         user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "welcome_demo_due_at" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN welcome_demo_due_at INTEGER")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_users_welcome_demo_due_at
+            ON users(welcome_demo_due_at)
+            """
+        )
+        user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "last_interaction_at" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN last_interaction_at INTEGER")
             conn.execute(
@@ -1654,7 +1663,9 @@ owner_id, twitch_username, twitch_user_id,
                     int(bool(use_stream_defaults)),
                 ),
             )
-            return int(cur.lastrowid)
+            sub_id = int(cur.lastrowid)
+        self.clear_welcome_demo_due_at(owner_id)
+        return sub_id
 
     def get_subscription_by_id(self, sub_id: int) -> Subscription | None:
         with self._conn() as conn:
@@ -3237,6 +3248,53 @@ owner_id, twitch_username, twitch_user_id,
                 """,
                 (int(blocked_at_unix), user_id),
             )
+
+    def set_welcome_demo_due_at(self, user_id: int, due_at_unix: int | None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE users SET welcome_demo_due_at = ? WHERE user_id = ?",
+                (None if due_at_unix is None else int(due_at_unix), user_id),
+            )
+
+    def get_welcome_demo_due_at(self, user_id: int) -> int | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT welcome_demo_due_at FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row or row["welcome_demo_due_at"] is None:
+            return None
+        return int(row["welcome_demo_due_at"])
+
+    def clear_welcome_demo_due_at(self, user_id: int) -> None:
+        self.set_welcome_demo_due_at(user_id, None)
+
+    def list_due_welcome_demo_offers(
+        self, *, now_unix: int | None = None, limit: int = 100
+    ) -> list[int]:
+        now = int(
+            now_unix
+            if now_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        lim = max(1, min(int(limit), 500))
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT u.user_id
+                FROM users u
+                WHERE u.welcome_demo_due_at IS NOT NULL
+                  AND u.welcome_demo_due_at <= ?
+                  AND COALESCE(u.bot_blocked, 0) = 0
+                  AND NOT EXISTS (
+                      SELECT 1 FROM subscriptions s WHERE s.owner_id = u.user_id
+                  )
+                ORDER BY u.welcome_demo_due_at ASC
+                LIMIT ?
+                """,
+                (now, lim),
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]
 
     def list_blocked_user_ids(self) -> list[int]:
         with self._conn() as conn:

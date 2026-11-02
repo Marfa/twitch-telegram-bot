@@ -105,7 +105,7 @@ Live checks use **Client Credentials**. Follow import uses user OAuth (`user:rea
 
 ## Usage
 
-On first `/start` the bot asks for a language (Russian / English / Ukrainian / Italian), then shows the welcome text and **main menu**. On first start (non-share), **ru** (and **uk**) also get a **paused** welcome alert on a random **offline** Premium channel (Enable / Delete; **10 min** post-live delay); for **en**/**it**, `PREMIUM_TWITCH_LOGIN` (`marfapr`) is excluded from that demo seed.
+On first `/start` the bot asks for a language (Russian / English / Ukrainian / Italian), then shows the welcome text and **main menu**, pointing users to New subscription first. The Premium-channel demo is **not** created immediately: if after **~24 h** the user still has zero subscriptions, the bot sends an opt-in offer (enable demo / add own streamer / decline). For **en**/**it**, `PREMIUM_TWITCH_LOGIN` (`marfapr`) is excluded from the demo candidate pool.
 
 ### New subscription
 

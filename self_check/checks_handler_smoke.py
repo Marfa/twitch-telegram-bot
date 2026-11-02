@@ -1756,6 +1756,70 @@ async def _smoke_welcome_demo_locale(db) -> None:
     assert seeded_uk[1] == (prem.twitch_channel_login() or "marfapr")
     assert seeded_uk[2] is False
 
+
+async def _smoke_welcome_demo_deferred_offer(db) -> None:
+    from bot import WELCOME_DEMO_OFFER_AFTER_SEC, _send_welcome_bundle
+    from handlers.subscriptions import (
+        offer_due_welcome_demos,
+        on_welcome_demo_offer_no,
+        on_welcome_demo_offer_yes,
+    )
+    import premium as prem
+
+    uid = _FREE_UID + 77
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+    application, bot = _app(db)
+    twitch = application.bot_data["twitch"]
+    twitch.get_user = MagicMock(
+        return_value={"id": "999", "login": prem.twitch_channel_login() or "marfapr"}
+    )
+    twitch.get_live_streams = MagicMock(return_value={})
+
+    with patch("bot.sync_stream_chat_menu_button", new=AsyncMock()):
+        await _send_welcome_bundle(
+            application, bot, uid, uid, "ru", first_start=True
+        )
+    assert db.get_subscriptions_by_owner(uid) == []
+    due = db.get_welcome_demo_due_at(uid)
+    assert due is not None
+    assert due > int(__import__("time").time()) + WELCOME_DEMO_OFFER_AFTER_SEC - 60
+
+    # Not due yet → job no-ops.
+    ctx = _ctx(application)
+    ctx.bot = bot
+    await offer_due_welcome_demos(ctx)
+    assert bot.send_message.await_count == 1  # welcome only
+    assert db.get_welcome_demo_due_at(uid) == due
+
+    db.set_welcome_demo_due_at(uid, 1)
+    bot.send_message.reset_mock()
+    await offer_due_welcome_demos(ctx)
+    assert db.get_welcome_demo_due_at(uid) is None
+    assert bot.send_message.await_count == 1
+    assert bot.send_message.await_args.kwargs.get("reply_markup") is not None
+
+    # Decline path.
+    uid2 = uid + 1
+    db.upsert_user(uid2)
+    db.set_user_locale(uid2, "ru")
+    db.set_welcome_demo_due_at(uid2, 1)
+    update, _q = _cb_update(uid2, "welcome_offer:no")
+    await on_welcome_demo_offer_no(update, _ctx(application))
+    assert db.get_welcome_demo_due_at(uid2) is None
+    assert db.get_subscriptions_by_owner(uid2) == []
+
+    # Accept → enabled demo.
+    uid3 = uid + 2
+    db.upsert_user(uid3)
+    db.set_user_locale(uid3, "ru")
+    update, _q = _cb_update(uid3, "welcome_offer:yes")
+    await on_welcome_demo_offer_yes(update, _ctx(application))
+    rows = db.get_subscriptions_by_owner(uid3)
+    assert len(rows) == 1 and rows[0].enabled is True
+    assert rows[0].delay_minutes == 10
+
+
 async def _smoke_pause_sub_start(db) -> None:
     from handlers.subscriptions import handle_pause_sub_start_arg, on_alert_pause
     from i18n import t
@@ -1922,6 +1986,7 @@ async def _run_smoke() -> None:
         await _smoke_delivery_and_helpers(db)
         await _smoke_pause_sub_start(db)
         await _smoke_welcome_demo_locale(db)
+        await _smoke_welcome_demo_deferred_offer(db)
         await _smoke_defedit_handoff_frozen_callback(db)
         await _smoke_defedit_receive_template(db)
 

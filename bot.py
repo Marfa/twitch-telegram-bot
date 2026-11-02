@@ -126,7 +126,6 @@ from i18n import (
     watch_suggest_keyboard,
     watch_tags_keyboard,
     watch_viewers_keyboard,
-    welcome_demo_keyboard,
     wizard_menu,
 )
 from links import TelegramTopicLink, chat_ref_to_id, parse_telegram_topic_link
@@ -730,6 +729,10 @@ from handlers.subscriptions import (
     on_alert_pause,
     on_welcome_demo_delete,
     on_welcome_demo_enable,
+    on_welcome_demo_offer_new,
+    on_welcome_demo_offer_no,
+    on_welcome_demo_offer_yes,
+    offer_due_welcome_demos,
     open_cart_menu,
     open_subscriptions_menu,
     open_sync_settings,
@@ -927,41 +930,54 @@ async def _prompt_language(update: Update) -> int:
     return LANG_SELECT
 
 
-async def _ensure_welcome_premium_channel_subscription(
-    application: Application,
-    bot,
-    user_id: int,
-    lang: str,
-) -> tuple[int, str, bool] | None:
-    """First-start demo: random offline Premium channel (config + paid).
+# Deferred opt-in demo: offer only if the user still has zero subscriptions.
+WELCOME_DEMO_OFFER_AFTER_SEC = 24 * 3600
+WELCOME_DEMO_DELAY_MINUTES = 10
 
-    Seeds paused (enabled=False) with a short post-live delay; user opts in
-    via welcome keyboard. English/Italian locales skip the config promo
-    channel (default marfapr); other paid premium_channels are still eligible.
-    Live channels are skipped.
-    """
-    # Softens first live DM after the user enables the demo.
-    welcome_delay_minutes = 10
-    db: Database = application.bot_data["db"]
-    twitch: TwitchClient = application.bot_data["twitch"]
-    candidates = prem.list_promo_channel_logins(db)
+
+def _welcome_demo_candidates(db: Database, lang: str) -> list[str]:
+    candidates = list(prem.list_promo_channel_logins(db) or [])
     if not candidates:
         candidates = [prem.twitch_channel_login() or "marfapr"]
     promo = (prem.twitch_channel_login() or "marfapr").lower()
     if (lang or "").lower() in ("en", "it"):
         candidates = [c for c in candidates if str(c).lower() != promo]
-        if not candidates:
-            return None
+    return candidates
+
+
+async def _ensure_welcome_premium_channel_subscription(
+    application: Application,
+    bot,
+    user_id: int,
+    lang: str,
+    *,
+    enabled: bool = False,
+) -> tuple[int, str, bool] | None:
+    """Opt-in demo: random offline Premium channel (config + paid).
+
+    Creates (or reuses) a live-start DM alert with a short post-live delay.
+    English/Italian locales skip the config promo channel (default marfapr);
+    other paid premium_channels are still eligible. Live channels are skipped.
+    """
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    candidates = _welcome_demo_candidates(db, lang)
+    if not candidates:
+        return None
     random.shuffle(candidates)
     for login in candidates:
+        login_l = str(login).lower()
         for sub in _subs_for_owner(db, user_id):
             if (
-                sub.twitch_username == login
+                sub.twitch_username == login_l
                 and sub.notify_on_live
                 and not sub.notify_on_category_change
                 and not sub.notify_on_end
             ):
-                return sub.id, login, bool(sub.enabled)
+                if enabled and not sub.enabled:
+                    db.toggle_subscription(sub.id, user_id)
+                    return sub.id, login_l, True
+                return sub.id, login_l, bool(sub.enabled)
         user = await asyncio.to_thread(twitch.get_user, login)
         if not user:
             logger.warning("Welcome premium seed: Twitch user %s not found", login)
@@ -971,7 +987,6 @@ async def _ensure_welcome_premium_channel_subscription(
         live = await asyncio.to_thread(twitch.get_live_streams, [uid])
         if uid in live:
             continue
-        # Paused until the user taps Enable — avoid surprise first live DM.
         sub_id = db.add_subscription(
             owner_id=user_id,
             twitch_username=uname,
@@ -981,8 +996,8 @@ async def _ensure_welcome_premium_channel_subscription(
             chat_id=user_id,
             thread_id=None,
             disable_link_preview=True,
-            enabled=False,
-            delay_minutes=welcome_delay_minutes,
+            enabled=bool(enabled),
+            delay_minutes=WELCOME_DEMO_DELAY_MINUTES,
             # Welcome seed is not is_demo, but still a first-run demo alert.
             suppress_repeat_minutes=prem.DEMO_SUPPRESS_REPEAT_MINUTES,
             notify_on_live=True,
@@ -995,12 +1010,35 @@ async def _ensure_welcome_premium_channel_subscription(
             "welcome_demo_subscription_created",
             {
                 "sub_id": sub_id,
-                "enabled": False,
+                "enabled": bool(enabled),
                 "channel": uname,
-                "delay_minutes": welcome_delay_minutes,
+                "delay_minutes": WELCOME_DEMO_DELAY_MINUTES,
             },
         )
-        return sub_id, uname, False
+        return sub_id, uname, bool(enabled)
+    return None
+
+
+async def _pick_welcome_demo_channel(
+    application: Application, user_id: int, lang: str
+) -> str | None:
+    """Offline promo login for the deferred offer text (no DB write)."""
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    candidates = _welcome_demo_candidates(db, lang)
+    if not candidates:
+        return None
+    random.shuffle(candidates)
+    for login in candidates:
+        user = await asyncio.to_thread(twitch.get_user, login)
+        if not user:
+            continue
+        uid = str(user["id"])
+        uname = str(user.get("login") or login).lower()
+        live = await asyncio.to_thread(twitch.get_live_streams, [uid])
+        if uid in live:
+            continue
+        return uname
     return None
 
 
@@ -1033,18 +1071,14 @@ async def _send_welcome_bundle(
         )
     if not first_start:
         return
-    seeded = await _ensure_welcome_premium_channel_subscription(
-        application, bot, user_id, lang
+    # Own streamer first: schedule opt-in demo only if still zero subs after 24h.
+    due = int(datetime.now(timezone.utc).timestamp()) + WELCOME_DEMO_OFFER_AFTER_SEC
+    db.set_welcome_demo_due_at(user_id, due)
+    analytics.capture(
+        user_id,
+        "welcome_demo_offer_scheduled",
+        {"due_at": due, "after_sec": WELCOME_DEMO_OFFER_AFTER_SEC},
     )
-    if not seeded:
-        return
-    sub_id, channel, enabled = seeded
-    await bot.send_message(
-        chat_id,
-        t("start_welcome_demo", lang, channel=channel),
-        reply_markup=welcome_demo_keyboard(lang, sub_id, enabled=enabled),
-    )
-    note_outbound(user_id, "welcome_demo")
 
 
 async def _send_welcome(
@@ -1203,12 +1237,21 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "locale_set",
         {"locale": lang, "$set": {"locale": lang}},
     )
-    await query.edit_message_text(t("lang_set", lang))
     after = context.user_data.pop("after_lang", "welcome")
     first_start = context.user_data.pop("first_welcome", False)
     lucky_nth = context.user_data.pop("lucky_nth", None)
     await sync_stream_chat_menu_button(context.bot, db, query.from_user.id)
     chat_id = reply_chat_id(update)
+    # Drop the language-pick bubble so the next send is the only screen
+    # (welcome/help/settings + reply keyboard). editMessageText cannot attach
+    # a ReplyKeyboardMarkup.
+    try:
+        await query.delete_message()
+    except BadRequest:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
     if after == "help":
         await context.bot.send_message(
             chat_id,
@@ -3257,6 +3300,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_welcome_demo_offer_yes, pattern=r"^welcome_offer:yes$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_welcome_demo_offer_no, pattern=r"^welcome_offer:no$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_welcome_demo_delete, pattern=r"^welcome_del:\d+$"),
         group=0,
     )
@@ -3307,6 +3358,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CallbackQueryHandler(
                 dm_only_conv_entry(on_twitch_link_start),
                 pattern=r"^twitch_link:start:[a-zA-Z0-9_]{4,25}$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(on_welcome_demo_offer_new),
+                pattern=r"^welcome_offer:new$",
             ),
             MessageHandler(
                 _btn_filter("watch"), dm_only_conv_entry(start_watch_lucky)
@@ -4203,7 +4258,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             wake_stuck_on_menu_callback,
             pattern=(
                 r"^(edit:\d+$|edit_f:|edit_set:|edit_type_pick:|edit_type_pick_cancel:|toggle:|alert_pause:\d+$|imp_en:|enable_all$|delete:\d+$|"
-                r"welcome_en:\d+$|welcome_del:\d+$|"
+                r"welcome_en:\d+$|welcome_del:\d+$|welcome_offer:(yes|no|new)$|"
                 r"delivery_fail_del:|"
                 r"delete_sel:|delete_go$|delete_all$|delete_all:(yes|no)$|delete_clear$|delete_type:|"
                 r"delete_cart_open$|delete_cart_type:|delete_cart_sel:|delete_cart_restore_go$|delete_cart_clear$|"
@@ -4417,6 +4472,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         job_kwargs=_stream_job_kwargs(
             "purge_stale_previous_messages", misfire_grace=3600
         ),
+    )
+    app.job_queue.run_repeating(
+        offer_due_welcome_demos,
+        interval=900,
+        first=120,
+        name="offer_due_welcome_demos",
+        job_kwargs=_stream_job_kwargs("offer_due_welcome_demos", misfire_grace=900),
     )
     app.job_queue.run_repeating(
         purge_expired_blocked_users,
