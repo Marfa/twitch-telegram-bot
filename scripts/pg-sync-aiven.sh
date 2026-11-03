@@ -71,12 +71,20 @@ EXCLUDE_ARGS=(
   --exclude-table='_igdb_*'
 )
 
-# --network host: bridge DNS on some VPSes cannot resolve Aiven hostnames
-docker compose -f "$COMPOSE_FILE" exec -T db \
-  pg_dump -U bot -d bot --clean --if-exists --no-owner --no-acl \
-  "${EXCLUDE_ARGS[@]}" \
-  | docker run --rm -i --network host "$PG_IMAGE" \
-    psql "$AIVEN_DATABASE_URL" -v ON_ERROR_STOP=1 >/dev/null
+# --network host: bridge DNS on some VPSes cannot resolve Aiven hostnames.
+# Prefix SET keeps restore peaks down on small Aiven plans (~1GB) that OOM on
+# default maintenance_work_mem during CREATE INDEX / ANALYZE.
+{
+  printf '%s\n' \
+    "SET maintenance_work_mem TO '32MB';" \
+    "SET work_mem TO '1MB';" \
+    "SET max_parallel_maintenance_workers TO 0;" \
+    "SET max_parallel_workers_per_gather TO 0;"
+  docker compose -f "$COMPOSE_FILE" exec -T db \
+    pg_dump -U bot -d bot --clean --if-exists --no-owner --no-acl \
+    "${EXCLUDE_ARGS[@]}"
+} | docker run --rm -i --network host "$PG_IMAGE" \
+  psql "$AIVEN_DATABASE_URL" -v ON_ERROR_STOP=1 >/dev/null
 
 docker run --rm -i --network host "$PG_IMAGE" \
   psql "$AIVEN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \

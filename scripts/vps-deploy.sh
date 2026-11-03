@@ -87,6 +87,21 @@ fi
 docker compose -f "$COMPOSE_FILE" build bot
 docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate --remove-orphans bot
 
+# Host uses /etc/cron.d for nightly dump + Aiven DR. Ubuntu images may ship
+# without the cron package — without the daemon those files never run and
+# PostHog never sees ops_job_* (silence ≠ healthy).
+if ! command -v cron >/dev/null 2>&1 || ! systemctl is-active --quiet cron 2>/dev/null; then
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq cron
+  fi
+  systemctl enable --now cron 2>/dev/null || service cron start 2>/dev/null || true
+fi
+if ! systemctl is-active --quiet cron 2>/dev/null; then
+  echo "warning: cron is not active; nightly pg-backup / pg-sync-aiven will not run" >&2
+fi
+
 # Nightly Postgres dump (7 newest files under /var/backups/twitch-telegram-bot)
 if [[ -f scripts/pg-backup.sh ]]; then
   install -m 755 scripts/pg-backup.sh /usr/local/sbin/twitch-telegram-bot-pg-backup
