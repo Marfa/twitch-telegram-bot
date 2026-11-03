@@ -231,6 +231,8 @@ def all_menu_buttons() -> set[str]:
         "whisper_alerts",
         "follow_monitor",
         "ai_clips",
+        "channel_stats",
+        "game_info",
         "beta_mode",
         "sync_subs",
         "default_alert_settings",
@@ -327,6 +329,7 @@ def other_menu(lang: str) -> ReplyKeyboardMarkup:
         "watch",
         "chat",
         "game_info",
+        "channel_stats",
         "back",
     ]
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
@@ -2063,6 +2066,7 @@ def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
         "watch",
         "chat",
         "game_info",
+        "channel_stats",
     ]
     buttons = [
         InlineKeyboardButton(btn(k, lang), callback_data=f"new_sub_other:{k}")

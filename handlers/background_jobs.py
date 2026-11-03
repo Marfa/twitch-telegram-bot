@@ -16,6 +16,7 @@ JOB_GIVEAWAYS = "giveaways_digest"
 JOB_CATEGORY_WATCH_DIGEST = "category_watch_digest"
 JOB_SCHEDULE_REMINDERS = "schedule_reminders"
 JOB_FOLLOW_MONITOR = "follow_monitor_sync"
+JOB_CHANNEL_STATS = "channel_stats_poll"
 JOB_CHECK_STREAMS = "check_streams"
 JOB_STREAM_PREVIEWS = "check_stream_previews"
 
@@ -88,6 +89,7 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
     """Enable per-user jobs only while someone needs them."""
     from config import CHECK_INTERVAL, SCHEDULE_CHECK_INTERVAL
     from handlers.drops import check_drops
+    from handlers.channel_stats import SAMPLE_INTERVAL_SEC, poll_channel_stats
     from handlers.follow_monitor import sync_follow_monitors
     from handlers.giveaways import check_giveaways_digest
     from handlers.notifications import check_schedule_reminders
@@ -117,6 +119,14 @@ def sync_optional_jobs(job_queue: JobQueue | None, db: Database) -> None:
         interval=3600,
         first=150,
         enabled=db.has_any_enabled_follow_monitor(),
+    )
+    ensure_repeating_job(
+        job_queue,
+        name=JOB_CHANNEL_STATS,
+        callback=poll_channel_stats,
+        interval=SAMPLE_INTERVAL_SEC,
+        first=180,
+        enabled=db.has_any_enabled_channel_stats(),
     )
     ensure_repeating_job(
         job_queue,

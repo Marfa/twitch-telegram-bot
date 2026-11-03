@@ -46,6 +46,7 @@ FEATURE_IDS: tuple[str, ...] = (
     "stream_chat",
     "follow_monitor",
     "ai_clips",
+    "channel_stats",
 )
 
 # Wizard steps bundled into advanced_mode (legacy à la carte ids still honored).
@@ -103,6 +104,7 @@ _FEATURE_LABEL_KEYS = {
     "stream_chat": "premium_feat_stream_chat",
     "follow_monitor": "premium_feat_follow_monitor",
     "ai_clips": "premium_feat_ai_clips",
+    "channel_stats": "premium_feat_channel_stats",
 }
 
 # Free Mini App chat: read unlimited; send capped unless stream_chat / full plan.

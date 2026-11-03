@@ -1027,6 +1027,28 @@ class FollowMonitor:
 
 
 @dataclass
+class ChannelStatsTrack:
+    owner_id: int
+    enabled: bool
+    twitch_user_id: str
+    twitch_login: str
+    display_name: str
+    linked_at: str | None
+    last_sample_at: str | None
+
+
+@dataclass
+class ChannelStatsSample:
+    id: int
+    owner_id: int
+    sampled_at: str
+    viewer_count: int
+    game_id: str
+    game_name: str
+    stream_id: str
+
+
+@dataclass
 class FollowMonitorFollower:
     owner_id: int
     twitch_user_id: str
@@ -1144,6 +1166,39 @@ def _row_to_follow_monitor(row: Any) -> FollowMonitor:
         notify_unfollow=(
             bool(row["notify_unfollow"]) if "notify_unfollow" in row.keys() else False
         ),
+    )
+
+
+def _row_to_channel_stats_track(row: Any) -> ChannelStatsTrack:
+    linked = row["linked_at"] if "linked_at" in row.keys() else None
+    last = row["last_sample_at"] if "last_sample_at" in row.keys() else None
+    if linked is not None and not isinstance(linked, str):
+        linked = linked.isoformat()
+    if last is not None and not isinstance(last, str):
+        last = last.isoformat()
+    return ChannelStatsTrack(
+        owner_id=int(row["owner_id"]),
+        enabled=bool(row["enabled"]),
+        twitch_user_id=str(row["twitch_user_id"] or ""),
+        twitch_login=str(row["twitch_login"] or ""),
+        display_name=str(row["display_name"] or ""),
+        linked_at=str(linked) if linked else None,
+        last_sample_at=str(last) if last else None,
+    )
+
+
+def _row_to_channel_stats_sample(row: Any) -> ChannelStatsSample:
+    sampled = row["sampled_at"]
+    if sampled is not None and not isinstance(sampled, str):
+        sampled = sampled.isoformat()
+    return ChannelStatsSample(
+        id=int(row["id"]),
+        owner_id=int(row["owner_id"]),
+        sampled_at=str(sampled or ""),
+        viewer_count=int(row["viewer_count"] or 0),
+        game_id=str(row["game_id"] or ""),
+        game_name=str(row["game_name"] or ""),
+        stream_id=str(row["stream_id"] or ""),
     )
 
 

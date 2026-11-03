@@ -1848,6 +1848,7 @@ async def _scenario_wizard_alert_type_other(db) -> None:
     assert btn("whisper_alerts", "ru") in labels
     assert btn("chat", "ru") in labels
     assert btn("game_info", "ru") in labels
+    assert btn("channel_stats", "ru") in labels
     assert btn("wizard_back", "ru") in labels
     assert btn("wizard_cancel", "ru") not in labels
     cap.assert_turn("wizard_alert_type_other")
@@ -1907,6 +1908,90 @@ async def _scenario_other_game_info(db) -> None:
     state = await cancel_game_info_callback(update, ctx)
     assert state == ConversationHandler.END
     cap.assert_turn("other_game_info_cancel")
+
+
+async def _scenario_other_channel_stats(db) -> None:
+    """§1.4 Other → Channel stats: button order; upsell without Premium; OAuth when entitled."""
+    from handlers.channel_stats import start_channel_stats
+
+    other_labels = [b.text for row in other_menu("ru").keyboard for b in row]
+    assert btn("channel_stats", "ru") in other_labels
+    assert other_labels.index(btn("game_info", "ru")) < other_labels.index(
+        btn("channel_stats", "ru")
+    )
+    assert markup_has_escape_hatch(other_menu("ru"))
+    assert markup_has_escape_hatch(new_sub_other_keyboard("ru"))
+    assert any(
+        (b.callback_data or "") == "new_sub_other:channel_stats"
+        for row in new_sub_other_keyboard("ru").inline_keyboard
+        for b in row
+    )
+
+    db.upsert_user(_FREE_UID)
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("channel_stats", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.channel_stats.prem.has_feature",
+        new=AsyncMock(return_value=False),
+    ), patch(
+        "premium_handlers.send_premium_screen",
+        new=AsyncMock(),
+    ) as prem_screen:
+        await start_channel_stats(update, ctx)
+        prem_screen.assert_awaited()
+
+    application, bot = _app(db)
+    twitch = application.bot_data["twitch"]
+    twitch.build_authorize_url = MagicMock(
+        return_value="https://id.twitch.tv/oauth2/authorize?x=1"
+    )
+    sent: list[tuple] = []
+
+    async def _capture_send(*args, **kwargs):
+        sent.append((args, kwargs))
+        return SimpleNamespace(message_id=len(sent) + 1, chat_id=0)
+
+    bot.send_message = AsyncMock(side_effect=_capture_send)
+    update = _msg_update(_FREE_UID, btn("channel_stats", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.channel_stats.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ), patch(
+        "handlers.channel_stats._oauth_ready",
+        return_value=True,
+    ), patch(
+        "config.twitch_oauth_redirect_uri",
+        return_value="https://example.test/oauth",
+    ), patch(
+        "health.create_pending_login_state",
+        return_value="cs-state",
+    ):
+        await start_channel_stats(update, ctx)
+    assert sent
+    blobs = []
+    oauth_markups = []
+    for args, kwargs in sent:
+        if len(args) >= 2:
+            blobs.append(str(args[1]))
+        blobs.append(str(kwargs.get("text") or ""))
+        rm = kwargs.get("reply_markup")
+        if rm is not None:
+            oauth_markups.append(rm)
+    blob = " ".join(blobs).lower()
+    assert "twitch" in blob or "подтверд" in blob
+    assert any(
+        getattr(m, "inline_keyboard", None)
+        and any(
+            (b.url or "").startswith("https://id.twitch.tv/")
+            for row in m.inline_keyboard
+            for b in row
+        )
+        for m in oauth_markups
+    )
 
 
 async def _scenario_wizard_extras_checkboxes(db) -> None:
@@ -4435,6 +4520,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_giveaways_discount(db)
         await _scenario_wizard_alert_type_other(db)
         await _scenario_other_game_info(db)
+        await _scenario_other_channel_stats(db)
         await _scenario_wizard_extras_checkboxes(db)
         await _scenario_wizard_repeats_overlap(db)
         await _scenario_wizard_top_donations(db)

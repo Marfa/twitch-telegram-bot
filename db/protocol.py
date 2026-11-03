@@ -13,6 +13,8 @@ from .models import (
     DeletedSubscriptionCartItem,
     DonationAlertsAuth,
     DropsAuth,
+    ChannelStatsSample,
+    ChannelStatsTrack,
     FollowMonitor,
     FollowMonitorEvent,
     FollowMonitorFollower,
@@ -779,6 +781,43 @@ class Database(Protocol):
     def get_due_follow_monitors(self, now_iso: str) -> list[FollowMonitor]: ...
 
     def has_any_enabled_follow_monitor(self) -> bool: ...
+
+    def get_channel_stats_track(self, owner_id: int) -> ChannelStatsTrack | None: ...
+
+    def upsert_channel_stats_track(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        display_name: str = "",
+        linked_at: str | None = None,
+        last_sample_at: str | None = None,
+    ) -> None: ...
+
+    def set_channel_stats_track_enabled(self, owner_id: int, enabled: bool) -> None: ...
+
+    def list_enabled_channel_stats_tracks(self) -> list[ChannelStatsTrack]: ...
+
+    def has_any_enabled_channel_stats(self) -> bool: ...
+
+    def add_channel_stats_sample(
+        self,
+        owner_id: int,
+        *,
+        sampled_at: str,
+        viewer_count: int,
+        game_id: str = "",
+        game_name: str = "",
+        stream_id: str = "",
+    ) -> None: ...
+
+    def list_channel_stats_samples(
+        self, owner_id: int, *, since_iso: str | None = None
+    ) -> list[ChannelStatsSample]: ...
+
+    def prune_channel_stats_samples(self, before_iso: str) -> int: ...
 
     def list_follow_monitor_followers(
         self, owner_id: int, *, limit: int = 5000, offset: int = 0

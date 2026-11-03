@@ -952,6 +952,7 @@ async def receive_new_sub_other(
     """Handle Other submenu from New subscription: Back or open a feature."""
     import beta as beta_features
     from handlers.drops import DROPS_BETA_ID
+    from handlers.channel_stats import start_channel_stats
     from handlers.follow_monitor import open_follow_monitor_menu
     from handlers.ai_clips import start_ai_clips
     from handlers.game_info import start_game_info
@@ -994,6 +995,7 @@ async def receive_new_sub_other(
         "watch",
         "chat",
         "game_info",
+        "channel_stats",
     ):
         markup = new_sub_other_keyboard(lang)
         await query.edit_message_reply_markup(reply_markup=markup)
@@ -1016,6 +1018,9 @@ async def receive_new_sub_other(
         return await start_watch_lucky(update, context)
     if action == "game_info":
         return await start_game_info(update, context)
+    if action == "channel_stats":
+        await start_channel_stats(update, context)
+        return ConversationHandler.END
     return await start_stream_schedule(update, context)
 
 async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:

@@ -394,6 +394,7 @@ from handlers.stream_defaults import (
     on_defedit_callback,
     open_stream_defaults_editor,
 )
+from handlers.channel_stats import start_channel_stats
 from handlers.follow_monitor import (
     FM_SEARCH,
     cancel_follow_monitor_search,
@@ -916,6 +917,7 @@ def _help_text(lang: str) -> str:
         btn_watch=btn("watch", lang),
         btn_chat=btn("chat", lang),
         btn_game_info=btn("game_info", lang),
+        btn_channel_stats=btn("channel_stats", lang),
         btn_settings=btn("settings", lang),
         btn_feedback=btn("feedback", lang),
         alert_type_game=t("alert_type_game", lang),
@@ -3021,6 +3023,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("channel_stats"), start_channel_stats),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_ai_clips_callback,
             pattern=r"^ai_clips:(cancel|status|auto|back|rerun:.+|vod:.+|page:\d+|clips_page:\d+)$",
@@ -3491,7 +3497,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_new_sub_other,
-                    pattern=r"^new_sub_other:(back|follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info)$",
+                    pattern=r"^new_sub_other:(back|follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info|channel_stats)$",
                 ),
                 CallbackQueryHandler(
                     receive_alert_type,
@@ -4300,6 +4306,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("new")
                 | _btn_filter("watch")
                 | _btn_filter("game_info")
+                | _btn_filter("channel_stats")
                 | _btn_filter("chat")
                 | _btn_filter("create_schedule")
                 | _btn_filter("back")

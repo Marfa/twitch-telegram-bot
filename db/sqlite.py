@@ -20,6 +20,8 @@ from .models import (
     DeletedSubscriptionCartItem,
     DonationAlertsAuth,
     DropsAuth,
+    ChannelStatsSample,
+    ChannelStatsTrack,
     FollowMonitor,
     FollowMonitorEvent,
     FollowMonitorFollower,
@@ -42,6 +44,8 @@ from .models import (
     _row_to_alert_delivery_log,
     _row_to_alert_history,
     _row_to_chat_auth,
+    _row_to_channel_stats_sample,
+    _row_to_channel_stats_track,
     _row_to_follow_monitor,
     _row_to_follow_monitor_event,
     _row_to_follow_monitor_follower,
@@ -832,6 +836,38 @@ class SqliteDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_follow_monitor_events_owner
             ON follow_monitor_events(owner_id, event_type, detected_at DESC)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS channel_stats_track (
+                owner_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                twitch_user_id TEXT NOT NULL DEFAULT '',
+                twitch_login TEXT NOT NULL DEFAULT '',
+                display_name TEXT NOT NULL DEFAULT '',
+                linked_at TEXT,
+                last_sample_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS channel_stats_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                sampled_at TEXT NOT NULL,
+                viewer_count INTEGER NOT NULL DEFAULT 0,
+                game_id TEXT NOT NULL DEFAULT '',
+                game_name TEXT NOT NULL DEFAULT '',
+                stream_id TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_channel_stats_samples_owner
+            ON channel_stats_samples(owner_id, sampled_at)
             """
         )
         conn.execute(
@@ -3347,6 +3383,10 @@ owner_id, twitch_username, twitch_user_id,
                 "DELETE FROM follow_monitor_followers WHERE owner_id = ?", (uid,)
             )
             conn.execute("DELETE FROM follow_monitor WHERE owner_id = ?", (uid,))
+            conn.execute(
+                "DELETE FROM channel_stats_samples WHERE owner_id = ?", (uid,)
+            )
+            conn.execute("DELETE FROM channel_stats_track WHERE owner_id = ?", (uid,))
             conn.execute("DELETE FROM chat_auth WHERE owner_id = ?", (uid,))
             conn.execute("DELETE FROM chat_send_daily WHERE owner_id = ?", (uid,))
             conn.execute(
@@ -5929,6 +5969,152 @@ owner_id, twitch_username, twitch_user_id,
                 """
             ).fetchone()
         return row is not None
+
+    def get_channel_stats_track(self, owner_id: int) -> ChannelStatsTrack | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM channel_stats_track WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchone()
+        return _row_to_channel_stats_track(row) if row else None
+
+    def upsert_channel_stats_track(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        display_name: str = "",
+        linked_at: str | None = None,
+        last_sample_at: str | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_stats_track (
+                    owner_id, enabled, twitch_user_id, twitch_login, display_name,
+                    linked_at, last_sample_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    twitch_user_id = excluded.twitch_user_id,
+                    twitch_login = excluded.twitch_login,
+                    display_name = excluded.display_name,
+                    linked_at = COALESCE(excluded.linked_at, channel_stats_track.linked_at),
+                    last_sample_at = COALESCE(
+                        excluded.last_sample_at, channel_stats_track.last_sample_at
+                    )
+                """,
+                (
+                    owner_id,
+                    1 if enabled else 0,
+                    twitch_user_id,
+                    twitch_login,
+                    display_name,
+                    linked_at,
+                    last_sample_at,
+                ),
+            )
+            conn.commit()
+
+    def set_channel_stats_track_enabled(self, owner_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE channel_stats_track SET enabled = ? WHERE owner_id = ?",
+                (1 if enabled else 0, owner_id),
+            )
+            conn.commit()
+
+    def list_enabled_channel_stats_tracks(self) -> list[ChannelStatsTrack]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM channel_stats_track
+                WHERE enabled = 1 AND twitch_user_id != ''
+                """
+            ).fetchall()
+        return [_row_to_channel_stats_track(r) for r in rows]
+
+    def has_any_enabled_channel_stats(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM channel_stats_track
+                WHERE enabled = 1 AND twitch_user_id != ''
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+
+    def add_channel_stats_sample(
+        self,
+        owner_id: int,
+        *,
+        sampled_at: str,
+        viewer_count: int,
+        game_id: str = "",
+        game_name: str = "",
+        stream_id: str = "",
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_stats_samples (
+                    owner_id, sampled_at, viewer_count, game_id, game_name, stream_id
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_id,
+                    sampled_at,
+                    max(0, int(viewer_count)),
+                    game_id or "",
+                    game_name or "",
+                    stream_id or "",
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE channel_stats_track
+                SET last_sample_at = ?
+                WHERE owner_id = ?
+                """,
+                (sampled_at, owner_id),
+            )
+            conn.commit()
+
+    def list_channel_stats_samples(
+        self, owner_id: int, *, since_iso: str | None = None
+    ) -> list[ChannelStatsSample]:
+        with self._conn() as conn:
+            if since_iso:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM channel_stats_samples
+                    WHERE owner_id = ? AND sampled_at >= ?
+                    ORDER BY sampled_at ASC
+                    """,
+                    (owner_id, since_iso),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM channel_stats_samples
+                    WHERE owner_id = ?
+                    ORDER BY sampled_at ASC
+                    """,
+                    (owner_id,),
+                ).fetchall()
+        return [_row_to_channel_stats_sample(r) for r in rows]
+
+    def prune_channel_stats_samples(self, before_iso: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM channel_stats_samples WHERE sampled_at < ?",
+                (before_iso,),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
 
     def list_follow_monitor_followers(
         self, owner_id: int, *, limit: int = 5000, offset: int = 0

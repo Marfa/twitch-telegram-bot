@@ -22,6 +22,8 @@ from .models import (
     DeletedSubscriptionCartItem,
     DonationAlertsAuth,
     DropsAuth,
+    ChannelStatsSample,
+    ChannelStatsTrack,
     FollowMonitor,
     FollowMonitorEvent,
     FollowMonitorFollower,
@@ -44,6 +46,8 @@ from .models import (
     _row_to_alert_delivery_log,
     _row_to_alert_history,
     _row_to_chat_auth,
+    _row_to_channel_stats_sample,
+    _row_to_channel_stats_track,
     _row_to_follow_monitor,
     _row_to_follow_monitor_event,
     _row_to_follow_monitor_follower,
@@ -1073,6 +1077,38 @@ class PostgresDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_follow_monitor_events_owner
                 ON follow_monitor_events(owner_id, event_type, detected_at DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS channel_stats_track (
+                    owner_id BIGINT PRIMARY KEY,
+                    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    twitch_user_id TEXT NOT NULL DEFAULT '',
+                    twitch_login TEXT NOT NULL DEFAULT '',
+                    display_name TEXT NOT NULL DEFAULT '',
+                    linked_at TIMESTAMPTZ,
+                    last_sample_at TIMESTAMPTZ
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS channel_stats_samples (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL,
+                    sampled_at TIMESTAMPTZ NOT NULL,
+                    viewer_count INTEGER NOT NULL DEFAULT 0,
+                    game_id TEXT NOT NULL DEFAULT '',
+                    game_name TEXT NOT NULL DEFAULT '',
+                    stream_id TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_channel_stats_samples_owner
+                ON channel_stats_samples(owner_id, sampled_at)
                 """
             )
             cur.execute(
@@ -3720,6 +3756,10 @@ owner_id, twitch_username, twitch_user_id,
                 "DELETE FROM follow_monitor_followers WHERE owner_id = %s", (uid,)
             )
             cur.execute("DELETE FROM follow_monitor WHERE owner_id = %s", (uid,))
+            cur.execute(
+                "DELETE FROM channel_stats_samples WHERE owner_id = %s", (uid,)
+            )
+            cur.execute("DELETE FROM channel_stats_track WHERE owner_id = %s", (uid,))
             cur.execute("DELETE FROM chat_auth WHERE owner_id = %s", (uid,))
             cur.execute("DELETE FROM chat_send_daily WHERE owner_id = %s", (uid,))
             cur.execute(
@@ -6540,6 +6580,166 @@ owner_id, twitch_username, twitch_user_id,
                 """
             )
             return cur.fetchone() is not None
+
+    def get_channel_stats_track(self, owner_id: int) -> ChannelStatsTrack | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM channel_stats_track WHERE owner_id = %s",
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        return _row_to_channel_stats_track(row) if row else None
+
+    def upsert_channel_stats_track(
+        self,
+        owner_id: int,
+        *,
+        enabled: bool,
+        twitch_user_id: str,
+        twitch_login: str,
+        display_name: str = "",
+        linked_at: str | None = None,
+        last_sample_at: str | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO channel_stats_track (
+                    owner_id, enabled, twitch_user_id, twitch_login, display_name,
+                    linked_at, last_sample_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    enabled = EXCLUDED.enabled,
+                    twitch_user_id = EXCLUDED.twitch_user_id,
+                    twitch_login = EXCLUDED.twitch_login,
+                    display_name = EXCLUDED.display_name,
+                    linked_at = COALESCE(
+                        EXCLUDED.linked_at, channel_stats_track.linked_at
+                    ),
+                    last_sample_at = COALESCE(
+                        EXCLUDED.last_sample_at, channel_stats_track.last_sample_at
+                    )
+                """,
+                (
+                    owner_id,
+                    enabled,
+                    twitch_user_id,
+                    twitch_login,
+                    display_name,
+                    linked_at,
+                    last_sample_at,
+                ),
+            )
+            conn.commit()
+
+    def set_channel_stats_track_enabled(self, owner_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "UPDATE channel_stats_track SET enabled = %s WHERE owner_id = %s",
+                (enabled, owner_id),
+            )
+            conn.commit()
+
+    def list_enabled_channel_stats_tracks(self) -> list[ChannelStatsTrack]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM channel_stats_track
+                WHERE enabled IS TRUE AND twitch_user_id != ''
+                """
+            )
+            rows = cur.fetchall()
+        return [_row_to_channel_stats_track(r) for r in rows]
+
+    def has_any_enabled_channel_stats(self) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT 1 FROM channel_stats_track
+                WHERE enabled IS TRUE AND twitch_user_id != ''
+                LIMIT 1
+                """
+            )
+            return cur.fetchone() is not None
+
+    def add_channel_stats_sample(
+        self,
+        owner_id: int,
+        *,
+        sampled_at: str,
+        viewer_count: int,
+        game_id: str = "",
+        game_name: str = "",
+        stream_id: str = "",
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO channel_stats_samples (
+                    owner_id, sampled_at, viewer_count, game_id, game_name, stream_id
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    owner_id,
+                    sampled_at,
+                    max(0, int(viewer_count)),
+                    game_id or "",
+                    game_name or "",
+                    stream_id or "",
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE channel_stats_track
+                SET last_sample_at = %s
+                WHERE owner_id = %s
+                """,
+                (sampled_at, owner_id),
+            )
+            conn.commit()
+
+    def list_channel_stats_samples(
+        self, owner_id: int, *, since_iso: str | None = None
+    ) -> list[ChannelStatsSample]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if since_iso:
+                cur.execute(
+                    """
+                    SELECT * FROM channel_stats_samples
+                    WHERE owner_id = %s AND sampled_at >= %s
+                    ORDER BY sampled_at ASC
+                    """,
+                    (owner_id, since_iso),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT * FROM channel_stats_samples
+                    WHERE owner_id = %s
+                    ORDER BY sampled_at ASC
+                    """,
+                    (owner_id,),
+                )
+            rows = cur.fetchall()
+        return [_row_to_channel_stats_sample(r) for r in rows]
+
+    def prune_channel_stats_samples(self, before_iso: str) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM channel_stats_samples WHERE sampled_at < %s",
+                (before_iso,),
+            )
+            n = int(cur.rowcount or 0)
+            conn.commit()
+        return n
 
     def list_follow_monitor_followers(
         self, owner_id: int, *, limit: int = 5000, offset: int = 0

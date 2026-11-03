@@ -75,6 +75,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
 | Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
 | AI clips from VOD | **📦 Other → 🎬 AI clips** (Premium / à la carte `ai_clips`): up to 5 clips — chat «clip»/«клип» → Groq emotion (ASR+score>3) → Groq game context on chat spikes → remaining audio → remaining spikes; without Groq falls back to peaks; Helix Create Clip From VOD; auto for new VODs |
+| Channel stats | **📦 Other → 📊 Channel stats** (Premium / à la carte `channel_stats`): OAuth your channel → PNG card (avg/peak/airtime/games); Helix poll ~10 min; TwitchTracker summary enrich; polling pauses when Premium ends |
 | Channel advertising for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend (Stars subscription) |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
@@ -252,7 +253,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below”, **To unwatched** |
-| 📦 Other | Follow/Unfollow (settings Premium), AI clips (Premium / à la carte), whisper alerts, schedule, what to watch (feeling lucky), chat, game info |
+| 📦 Other | Follow/Unfollow (settings Premium), AI clips (Premium / à la carte), whisper alerts, schedule, what to watch (feeling lucky), chat, game info, channel stats (Premium / à la carte) |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
 | ↳ 🎲 What to watch? | Feeling lucky immediately; suggest again |

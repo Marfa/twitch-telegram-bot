@@ -1777,8 +1777,66 @@ def check_handlers() -> None:
     assert "follow_monitor" in prem.purchasable_feature_ids()
     assert "ai_clips" in FEATURE_IDS
     assert "ai_clips" in prem.purchasable_feature_ids()
+    assert "channel_stats" in FEATURE_IDS
+    assert "channel_stats" in prem.purchasable_feature_ids()
     assert not prem.premium_feature_in_unreleased_beta("follow_monitor")
     assert not prem.premium_feature_in_unreleased_beta("ai_clips")
+    assert not prem.premium_feature_in_unreleased_beta("channel_stats")
+    assert tr("premium_feat_channel_stats", "ru")
+    assert tr("premium_feat_channel_stats_desc", "en")
+    assert tr("btn_channel_stats", "ru")
+    from handlers.channel_stats import (
+        FEATURE_ID as _CS_FID,
+        aggregate_samples,
+        build_snapshot,
+        SAMPLE_INTERVAL_SEC,
+    )
+    from db.models import ChannelStatsSample as _CSS
+    from db.models import ChannelStatsTrack as _CST
+
+    assert _CS_FID == "channel_stats"
+    assert SAMPLE_INTERVAL_SEC == 600
+    _cs_base = datetime(2026, 10, 6, 12, tzinfo=timezone.utc)
+    _cs_samples = [
+        _CSS(
+            i + 1,
+            1,
+            (_cs_base + timedelta(hours=i)).isoformat(),
+            3,
+            "g",
+            "Fallout",
+            "s",
+        )
+        for i in range(8)
+    ]
+    _cs_weeks, _cs_games, _cs_peak = aggregate_samples(
+        _cs_samples, now=_cs_base + timedelta(days=1)
+    )
+    assert _cs_peak == 3
+    assert _cs_games.get("Fallout", 0) > 0
+    _cs_snap = build_snapshot(
+        track=_CST(1, True, "1", "u", "U", None, None),
+        samples=_cs_samples,
+        tt={},
+    )
+    assert not _cs_snap.cold_start
+    assert _cs_snap.sample_count == 8
+    with tempfile.TemporaryDirectory() as _csd:
+        _csdb = SqliteDatabase(Path(_csd) / "cs.db")
+        _csdb.upsert_user(41)
+        _csdb.upsert_channel_stats_track(
+            41,
+            enabled=True,
+            twitch_user_id="41",
+            twitch_login="cstat",
+            display_name="C",
+            linked_at=_cs_base.isoformat(),
+        )
+        assert _csdb.has_any_enabled_channel_stats()
+        _csdb.set_channel_stats_track_enabled(41, False)
+        assert not _csdb.has_any_enabled_channel_stats()
+        # Pause keeps row (settings preserved).
+        assert _csdb.get_channel_stats_track(41) is not None
     fm_feat = beta_mod.get_feature("follow-monitor")
     assert fm_feat is not None and fm_feat.premium_feature_id == "follow_monitor"
     assert fm_feat.stage == "ga"
