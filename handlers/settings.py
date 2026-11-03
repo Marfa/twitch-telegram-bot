@@ -1023,6 +1023,7 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
         else MenuButtonCommands()
     )
     # Transient Telegram blips (ReadError etc.); RetryAfter still bubbles for bulk.
+    # BadRequest before NetworkError: in PTB, BadRequest subclasses NetworkError.
     attempts = 3
     for attempt in range(attempts):
         try:
@@ -1030,13 +1031,6 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
             return
         except RetryAfter:
             raise
-        except NetworkError:
-            if attempt + 1 >= attempts:
-                logger.exception(
-                    "Failed to sync stream-chat menu button for %s", user_id
-                )
-                return
-            await asyncio.sleep(0.5 * (attempt + 1))
         except (Forbidden, BadRequest) as exc:
             # Deactivated / blocked / chat gone — mark and stop retrying forever.
             if _is_user_blocked_error(exc) or _is_chat_unreachable_error(exc):
@@ -1064,6 +1058,13 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
                 },
             )
             return
+        except NetworkError:
+            if attempt + 1 >= attempts:
+                logger.exception(
+                    "Failed to sync stream-chat menu button for %s", user_id
+                )
+                return
+            await asyncio.sleep(0.5 * (attempt + 1))
         except Exception as exc:
             logger.exception("Failed to sync stream-chat menu button for %s", user_id)
             analytics.capture_exception(

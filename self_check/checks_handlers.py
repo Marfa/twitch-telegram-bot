@@ -2002,7 +2002,7 @@ def check_handlers() -> None:
         assert "chat_id" not in default_kwargs
         assert default_kwargs["menu_button"].web_app is not None
 
-        from telegram.error import Forbidden
+        from telegram.error import BadRequest, Forbidden
 
         retry_bot = AsyncMock()
         retry_bot.set_chat_menu_button.side_effect = [
@@ -2054,6 +2054,21 @@ def check_handlers() -> None:
         assert capture_block.call_args.args[0] == 7574175793
         assert capture_block.call_args.args[1] == "bot_blocked"
         assert capture_block.call_args.args[2]["source"] == "stream_chat_menu"
+
+        # BadRequest subclasses NetworkError in PTB — must soft-handle, not retry.
+        gone_bot = AsyncMock()
+        gone_bot.set_chat_menu_button.side_effect = BadRequest("User not found")
+        gone_db = _DeadDb()
+        with patch("handlers.settings.asyncio.sleep", new_callable=AsyncMock) as sleep_m, patch(
+            "analytics.capture"
+        ) as capture_block, patch("analytics.capture_exception") as capture_exc:
+            asyncio.run(sync_stream_chat_menu_button(gone_bot, gone_db, 8809384391))
+        assert gone_db.blocked is True
+        assert gone_bot.set_chat_menu_button.await_count == 1
+        assert sleep_m.await_count == 0
+        assert capture_exc.call_count == 0
+        assert capture_block.call_count == 1
+        assert capture_block.call_args.args[1] == "bot_blocked"
 
         # Already blocked: skip Telegram call entirely.
         skip_bot = AsyncMock()
