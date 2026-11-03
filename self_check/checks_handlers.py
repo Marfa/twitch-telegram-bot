@@ -1796,6 +1796,16 @@ def check_handlers() -> None:
 
     assert _CS_FID == "channel_stats"
     assert SAMPLE_INTERVAL_SEC == 600
+    from pathlib import Path as _CsPath
+
+    _cs_src = (_CsPath(__file__).resolve().parents[1] / "handlers" / "channel_stats.py").read_text(
+        encoding="utf-8"
+    )
+    # Identity OAuth must not fan-out empty-scope refresh (would wipe full scopes).
+    assert "apply_oauth_success_tokens" not in _cs_src
+    assert "channel_stats_cold_start" not in _cs_src.split(
+        "def render_channel_stats_card", 1
+    )[1].split("async def _send_oauth_prompt", 1)[0]
     _cs_base = datetime(2026, 10, 6, 12, tzinfo=timezone.utc)
     _cs_samples = [
         _CSS(

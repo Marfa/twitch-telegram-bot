@@ -411,15 +411,7 @@ def render_channel_stats_card(snap: ChannelStatsSnapshot, lang: str) -> bytes:
         draw.text((40, gy), t("channel_stats_no_games", lang), fill=muted, font=body_f)
         gy += 40
 
-    # Footer TT / cold
     footer_y = H - 70
-    if snap.cold_start:
-        draw.text(
-            (40, footer_y - 28),
-            t("channel_stats_cold_start", lang),
-            fill=muted,
-            font=small_f,
-        )
     foot = t("channel_stats_footer", lang)
     if snap.tt:
         foot = t("channel_stats_footer_tt", lang)
@@ -630,10 +622,8 @@ async def complete_channel_stats_oauth(
             feature=FEATURE_ID,
         )
         return
-    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
-
-    apply_oauth_success_tokens(db, owner_id, token_info)
-    await restore_after_twitch_oauth(application, owner_id)
+    # Identity-only OAuth (empty scopes) — do not fan-out refresh tokens or
+    # we overwrite full BOT_TWITCH_OAUTH_SCOPES and trip twitch reauth.
     db.upsert_channel_stats_track(
         owner_id,
         enabled=True,
