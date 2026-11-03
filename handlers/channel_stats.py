@@ -510,7 +510,6 @@ async def _deliver_card(
     caption = t(
         "channel_stats_caption",
         lang,
-        channel=html_escape(snap.display_name or snap.login),
         login=html_escape(snap.login),
     )
     if snap.cold_start:

@@ -1391,7 +1391,7 @@
   "channel_stats_failed": "Не вдалося зібрати статистику каналу. Спробуйте ще раз.",
   "channel_stats_building": "Збираю картку статистики…",
   "channel_stats_linked": "Канал {channel} підтверджено. Будую картку…",
-  "channel_stats_caption": "Статистика <b>{channel}</b> (<code>{login}</code>)",
+  "channel_stats_caption": "Статистика каналу <b>{login}</b>",
   "channel_stats_caption_tt": "Частина цифр: TwitchTracker (30 днів).",
   "channel_stats_cold_start": "Історія ще коротка — збираємо ефіри. Цифри стануть точнішими після кількох стрімів.",
   "channel_stats_kpi_avg": "Середній онлайн",

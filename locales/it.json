@@ -1380,7 +1380,7 @@
   "channel_stats_failed": "Impossibile costruire le statistiche. Riprova.",
   "channel_stats_building": "Sto preparando la scheda…",
   "channel_stats_linked": "Canale {channel} confermato. Preparo la scheda…",
-  "channel_stats_caption": "Statistiche di <b>{channel}</b> (<code>{login}</code>)",
+  "channel_stats_caption": "Statistiche del canale <b>{login}</b>",
   "channel_stats_caption_tt": "Alcune cifre: TwitchTracker (30 giorni).",
   "channel_stats_cold_start": "La storia è ancora corta — stiamo raccogliendo le live. I numeri migliorano dopo alcune trasmissioni.",
   "channel_stats_kpi_avg": "Media spettatori",
