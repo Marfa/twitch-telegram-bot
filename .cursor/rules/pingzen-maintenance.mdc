@@ -15,18 +15,25 @@ Admin broadcast type for downtime notice: **`availability`**
 
 If maintenance is **planned** (deploy with expected downtime, VPS reboot, DB migration, forced recreate that may flap `/health`, certificate swap, push→Deploy VPS that recreates the bot, etc.).
 
+## User broadcast — when to ask
+
+Estimate the **bot user-visible downtime** (stop / recreate → `/health` ok), not the full CI/workflow wall time.
+
+- **≤ 60 seconds** expected (typical `force-recreate` deploy ~5–30 s): **do not** ask about or send an `availability` broadcast. Proceed with PingZen window + work.
+- **> 60 seconds** expected (or unknown / unbounded — long migration, reboot, uncertain health): **ask first**:
+
+  > Нужна ли рассылка пользователям об этой недоступности / работах?
+
 ## Rule — order of operations
 
-1. **Ask the user first** (before creating any PingZen window and before disruptive work):
+1. Estimate downtime. If **> 60 s** (or unclear), ask about the user broadcast before creating any PingZen window and before disruptive work. If **≤ 60 s**, skip the ask and the broadcast.
 
-   > Нужна ли рассылка пользователям об этой недоступности / работах?
-
-2. **If yes:**
+2. **If the user said yes** (only when the ask applied):
    1. Draft the notice text and **agree the final copy with the user** (do not send unapproved wording).
    2. Send the broadcast with type **`availability`** (admin «Доступность бота» / `msg_type=availability`) to users who opted into availability alerts.
    3. Only after the broadcast is sent (or scheduled and confirmed), create the PingZen **Maintenance Window** and start the work.
 
-3. **If no:**
+3. **If the user said no**, or downtime is **≤ 60 s**:
    - Skip the user broadcast.
    - Create the PingZen window and start the work.
 
@@ -38,12 +45,13 @@ If maintenance is **planned** (deploy with expected downtime, VPS reboot, DB mig
 
 ## Why
 
-Without a window, PingZen will alert on expected DOWN during the work. The window suppresses those alerts and keeps the status page honest. The optional `availability` broadcast warns opted-in users before the bot goes away.
+Without a window, PingZen will alert on expected DOWN during the work. The window suppresses those alerts and keeps the status page honest. The optional `availability` broadcast is for longer outages so opted-in users are warned; sub-minute recreates are too short to bother them.
 
 ## Do not
 
-- Create a Maintenance Window or start disruptive work **before** asking about the user broadcast (when this rule applies).
-- Send an `availability` broadcast without the user approving the text.
+- Create a Maintenance Window or start disruptive work **before** asking about the user broadcast when expected downtime is **> 60 s** (or unclear).
+- Ask for / send an `availability` broadcast when expected downtime is **≤ 60 s**.
+- Send an `availability` broadcast without the user approving the text (when a broadcast is in play).
 - Take the bot down “for a minute” without a scheduled window when PingZen is watching.
 - Leave a window open indefinitely after work is done — close/cancel or let it end on schedule.
 - Treat vendor Statuspage maintenance as a substitute for our PingZen window.
