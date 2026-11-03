@@ -1908,12 +1908,14 @@ def check_core() -> None:
             [btn("follow_monitor", loc), btn("ai_clips", loc)],
             [btn("whisper_alerts", loc), btn("create_schedule", loc)],
             [btn("watch", loc), btn("chat", loc)],
-            [btn("game_info", loc), btn("back", loc)],
+            [btn("game_info", loc), btn("channel_stats", loc)],
+            [btn("back", loc)],
         ]
-        for i, row in enumerate(other_kb):
+        for i, row in enumerate(other_kb[:-1]):
             assert len(row) == 2, (
                 f"other_menu row {i} must be paired: {[b.text for b in row]}"
             )
+        assert [b.text for b in other_kb[-1]] == [btn("back", loc)]
         subs_kb = subscriptions_menu(loc).keyboard
         assert [[b.text for b in row] for row in subs_kb] == [
             [btn("back", loc)],
