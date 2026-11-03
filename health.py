@@ -694,6 +694,7 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
             "whispers",
             "chat",
             "follow_monitor",
+            "channel_stats",
             "reauth",
             "ai_clips",
         ):

@@ -1428,6 +1428,7 @@ def check_core() -> None:
     assert "AI-клип" in i18n_t("new_sub_other_prompt", "ru")
     assert "Premium" in i18n_t("new_sub_other_prompt", "ru")
     assert "информация об игре" in i18n_t("new_sub_other_prompt", "ru")
+    assert "статистика канала" in i18n_t("new_sub_other_prompt", "ru")
     fm_ru = i18n_t("follow_monitor_screen", "ru")
     assert "Premium" in fm_ru
     assert "мониторинг" in fm_ru.lower() or "Monitor" in fm_ru
@@ -1435,6 +1436,15 @@ def check_core() -> None:
     assert "Follow/Unfollow" in i18n_t("new_sub_other_prompt", "en")
     assert "AI clip" in i18n_t("new_sub_other_prompt", "en")
     assert "game info" in i18n_t("new_sub_other_prompt", "en").lower()
+    assert "channel stats" in i18n_t("new_sub_other_prompt", "en").lower()
+    # channel_stats OAuth must not call Helix followed-channels (no follows scope).
+    from pathlib import Path as _Path
+
+    _health = (_Path(__file__).resolve().parents[1] / "health.py").read_text(
+        encoding="utf-8"
+    )
+    _oauth_skip = _health.split("if purpose in (", 1)[1].split("):", 1)[0]
+    assert '"channel_stats"' in _oauth_skip
 
     created = parse_posthog_issue_payload(
         {
