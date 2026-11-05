@@ -1738,6 +1738,7 @@ async def stream_schedule_vacation_auto_callback(
         "end_time": end_iso,
         "timezone": tz_name,
         "auto_exit": auto_exit,
+        "start_date": start_day.isoformat(),
         "end_date": end_day.isoformat(),
     }
     context.user_data.clear()
@@ -2342,16 +2343,23 @@ async def _complete_schedule_vacation(
     else:
         _set_vacation_auto_exit_at(None, db, owner_id, None, application=application)
 
-    if auto_exit:
-        end_day_raw = str(vacation.get("end_date") or "")
+    def _vac_date_label(raw: str, fallback: str = "") -> str:
         try:
-            end_day = date.fromisoformat(end_day_raw)
-            date_label = format_stream_schedule_date(end_day, lang)
+            return format_stream_schedule_date(date.fromisoformat(raw), lang)
         except ValueError:
-            date_label = end_day_raw or end_iso
-        text = t("stream_schedule_vacation_ok_auto", lang, date=date_label)
+            return raw or fallback
+
+    start_label = _vac_date_label(str(vacation.get("start_date") or ""))
+    if auto_exit:
+        end_label = _vac_date_label(str(vacation.get("end_date") or ""), end_iso)
+        text = t(
+            "stream_schedule_vacation_ok_auto",
+            lang,
+            start_date=start_label,
+            end_date=end_label,
+        )
     else:
-        text = t("stream_schedule_vacation_ok", lang)
+        text = t("stream_schedule_vacation_ok", lang, start_date=start_label)
 
     # Token already persisted — do not re-offer «Save authorization».
     await application.bot.send_message(
