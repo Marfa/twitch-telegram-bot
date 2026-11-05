@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from db.models import GiveawayCatalogEntry
 from db.sqlite import SqliteDatabase
 from giveaway_sources import (
     GiveawayOffer,
@@ -591,9 +592,7 @@ def _sample_catalog_entry(
     external_id: str,
     title: str,
     name: str | None = None,
-) -> "GiveawayCatalogEntry":
-    from db.models import GiveawayCatalogEntry
-
+) -> GiveawayCatalogEntry:
     return GiveawayCatalogEntry(
         source="gamerpower",
         external_id=external_id,
