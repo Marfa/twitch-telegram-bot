@@ -720,22 +720,15 @@ def sync_settings_keyboard(lang: str) -> InlineKeyboardMarkup:
 def admin_menu(lang: str) -> ReplyKeyboardMarkup:
     from config import show_partner_ui
 
-    rows: list[list[KeyboardButton]] = [
-        [
-            KeyboardButton(btn("broadcast", lang)),
-            KeyboardButton(btn("stats", lang)),
-        ],
-        [KeyboardButton(btn("reload_locales", lang))],
+    buttons = [
+        KeyboardButton(btn("broadcast", lang)),
+        KeyboardButton(btn("stats", lang)),
+        KeyboardButton(btn("reload_locales", lang)),
     ]
     if show_partner_ui():
-        rows.append(
-            [
-                KeyboardButton(btn("admin_withdrawals", lang)),
-                KeyboardButton(btn("demo", lang)),
-            ]
-        )
-    else:
-        rows.append([KeyboardButton(btn("demo", lang))])
+        buttons.append(KeyboardButton(btn("admin_withdrawals", lang)))
+    buttons.append(KeyboardButton(btn("demo", lang)))
+    rows = _pair_reply_rows(buttons)
     rows.append([KeyboardButton(btn("back", lang))])
     return _reply_keyboard(rows)
 

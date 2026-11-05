@@ -2017,8 +2017,8 @@ def check_core() -> None:
         admin_kb = admin_menu(loc).keyboard
         assert [[b.text for b in row] for row in admin_kb] == [
             [btn("broadcast", loc), btn("stats", loc)],
-            [btn("reload_locales", loc)],
-            [btn("admin_withdrawals", loc), btn("demo", loc)],
+            [btn("reload_locales", loc), btn("admin_withdrawals", loc)],
+            [btn("demo", loc)],
             [btn("back", loc)],
         ]
         assert tr("locales_reloaded", loc, summary="en=1")
