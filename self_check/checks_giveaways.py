@@ -586,6 +586,149 @@ def _check_details_shows_loading() -> None:
     query.answer.assert_awaited()
 
 
+def _sample_catalog_entry(
+    *,
+    external_id: str,
+    title: str,
+    name: str | None = None,
+) -> "GiveawayCatalogEntry":
+    from db.models import GiveawayCatalogEntry
+
+    return GiveawayCatalogEntry(
+        source="gamerpower",
+        external_id=external_id,
+        title=title,
+        store_id="steam",
+        platform_ids=("pc",),
+        claim_url=f"https://example.com/{external_id}",
+        start_at="",
+        end_at="",
+        description="",
+        image_url="",
+        dedupe_key=_dedupe_key("steam", title),
+        igdb_id=int(external_id) if external_id.isdigit() else 1,
+        name=name or title,
+        year="2020",
+        publisher="P",
+        developer="D",
+        summary="s",
+        cover_url="",
+        refreshed_at=100,
+    )
+
+
+def _check_last_digest_persist() -> None:
+    """Last digest batch survives process restart (DB, not only bot_data)."""
+    from db.models import giveaway_entries_from_json, giveaway_entries_to_json
+
+    new_only = [
+        _sample_catalog_entry(external_id="1", title="New A"),
+        _sample_catalog_entry(external_id="2", title="New B"),
+    ]
+    blob = giveaway_entries_to_json(new_only)
+    roundtrip = giveaway_entries_from_json(blob)
+    assert len(roundtrip) == 2
+    assert roundtrip[0].external_id == "1"
+    assert roundtrip[1].name == "New B"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = SqliteDatabase(Path(tmp) / "t.db")
+        assert db.get_giveaways_last_digest(7) == []
+        db.set_giveaways_last_digest(7, new_only)
+        loaded = db.get_giveaways_last_digest(7)
+        assert [e.external_id for e in loaded] == ["1", "2"]
+        # upsert prefs must not wipe last digest
+        db.upsert_giveaways_prefs(
+            7, stores=["steam"], platforms=["pc"], digest_enabled=True
+        )
+        loaded2 = db.get_giveaways_last_digest(7)
+        assert [e.external_id for e in loaded2] == ["1", "2"]
+
+
+def _check_details_cold_uses_last_digest_only() -> None:
+    """gv:details without in-memory browse must not expand to full catalog."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from handlers.giveaways import on_giveaways_callback
+
+    new_only = [
+        _sample_catalog_entry(external_id="1", title="Letter Quest"),
+        _sample_catalog_entry(external_id="2", title="Letter Quest Key"),
+    ]
+    # Full catalog would be much larger — Details must ignore it.
+    full_catalog = new_only + [
+        _sample_catalog_entry(external_id=str(i), title=f"Old {i}")
+        for i in range(10, 20)
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = SqliteDatabase(Path(tmp) / "t.db")
+        db.upsert_giveaways_prefs(
+            42, stores=["steam"], platforms=["pc"], digest_enabled=True
+        )
+        db.replace_giveaways_catalog(full_catalog)
+        db.set_giveaways_last_digest(42, new_only)
+
+        app = MagicMock()
+        app.bot_data = {"db": db}  # no giveaways_browse → cold path
+        bot = AsyncMock()
+        context = MagicMock()
+        context.application = app
+        context.bot = bot
+
+        query = AsyncMock()
+        query.data = "gv:details"
+        query.from_user = MagicMock(id=42)
+        query.message = MagicMock(chat_id=42)
+        update = MagicMock()
+        update.callback_query = query
+        update.effective_user = query.from_user
+
+        class _FakeProgress:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *args):
+                return None
+
+        sent: dict[str, list] = {"entries": []}
+
+        async def _fake_send_cards(_bot, _chat, *, entries, **_k):
+            sent["entries"] = list(entries)
+            return len(entries)
+
+        with (
+            patch(
+                "handlers.giveaways.request_progress",
+                return_value=_FakeProgress(),
+            ),
+            patch(
+                "handlers.giveaways._send_cards_batch",
+                side_effect=_fake_send_cards,
+            ),
+            patch(
+                "handlers.giveaways.reply_chat_id",
+                return_value=42,
+            ),
+            patch(
+                "handlers.giveaways._user_lang",
+                return_value="ru",
+            ),
+            patch(
+                "handlers.giveaways.giveaways_feature_available",
+                return_value=True,
+            ),
+        ):
+            asyncio.run(on_giveaways_callback(update, context))
+
+        assert [e.external_id for e in sent["entries"]] == ["1", "2"]
+        # Browse restored for «Показать ещё»
+        browse = app.bot_data.get("giveaways_browse", {}).get(42)
+        assert browse is not None
+        assert [e.external_id for e in browse["entries"]] == ["1", "2"]
+
+
 def _check_beta_manifest() -> None:
     import json
     from pathlib import Path
@@ -694,6 +837,8 @@ def run() -> None:
     _check_deal_merge_and_card_cut()
     _check_card_keyboard()
     _check_details_shows_loading()
+    _check_last_digest_persist()
+    _check_details_cold_uses_last_digest_only()
     _check_card_html_caption_budget()
     _check_unified_card_dates_after_platforms()
     _check_beta_manifest()

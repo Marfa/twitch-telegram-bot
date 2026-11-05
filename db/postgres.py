@@ -29,6 +29,8 @@ from .models import (
     FollowMonitorFollower,
     GiveawaysPrefs,
     GiveawayCatalogEntry,
+    giveaway_entries_from_json,
+    giveaway_entries_to_json,
     PremiumChannel,
     PremiumGift,
     PremiumPromoCode,
@@ -1191,7 +1193,8 @@ class PostgresDatabase:
                     digest_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                     first_digest_sent BOOLEAN NOT NULL DEFAULT FALSE,
                     last_digest_at BIGINT NOT NULL DEFAULT 0,
-                    deal_cut_min INTEGER
+                    deal_cut_min INTEGER,
+                    last_digest_json TEXT NOT NULL DEFAULT '[]'
                 )
                 """
             )
@@ -1199,6 +1202,12 @@ class PostgresDatabase:
                 """
                 ALTER TABLE giveaways_prefs
                 ADD COLUMN IF NOT EXISTS deal_cut_min INTEGER
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE giveaways_prefs
+                ADD COLUMN IF NOT EXISTS last_digest_json TEXT NOT NULL DEFAULT '[]'
                 """
             )
             cur.execute(
@@ -7366,6 +7375,40 @@ owner_id, twitch_username, twitch_user_id,
                 """,
                 (owner_id, source, external_id, int(seen_at)),
             )
+
+    def set_giveaways_last_digest(
+        self, owner_id: int, entries: list[GiveawayCatalogEntry]
+    ) -> None:
+        payload = giveaway_entries_to_json(entries)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO giveaways_prefs (owner_id, last_digest_json)
+                VALUES (%s, %s)
+                ON CONFLICT (owner_id) DO UPDATE SET
+                    last_digest_json = EXCLUDED.last_digest_json
+                """,
+                (owner_id, payload),
+            )
+
+    def get_giveaways_last_digest(
+        self, owner_id: int
+    ) -> list[GiveawayCatalogEntry]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT last_digest_json FROM giveaways_prefs
+                WHERE owner_id = %s
+                """,
+                (owner_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return []
+        raw = row["last_digest_json"] if "last_digest_json" in row else "[]"
+        return giveaway_entries_from_json(str(raw or "[]"))
 
     @staticmethod
     def _row_to_giveaways_catalog(row: Any) -> GiveawayCatalogEntry:

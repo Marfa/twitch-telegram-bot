@@ -1217,32 +1217,21 @@ async def on_giveaways_callback(
         await query.answer()
         loaded = _load_browse(context.application, user_id)
         if not loaded:
-            prefs = _prefs_or_empty(db, user_id)
-            async with request_progress(context.bot, chat_id, lang):
-                catalog = await ensure_giveaways_catalog(db)
-                entries = filter_catalog_entries(
-                    catalog,
-                    stores=set(prefs.stores),
-                    platforms=set(prefs.platforms),
+            # Cold path (restart): only the last digest batch — never the full
+            # filtered catalog («Свежие раздачи» / gv:fresh is for that).
+            entries = db.get_giveaways_last_digest(user_id)
+            if entries:
+                entries = _store_browse(
+                    context.application, user_id, entries, lang
                 )
-                if entries:
-                    entries = _store_browse(
-                        context.application, user_id, entries, lang
-                    )
-                    await _send_cards_batch(
-                        context.bot,
-                        chat_id,
-                        db=db,
-                        entries=entries,
-                        lang=lang,
-                        offset=0,
-                    )
-            if not entries:
+            else:
                 await context.bot.send_message(
                     chat_id, t("giveaways_empty", lang)
                 )
-            return
-        entries, browse_lang = loaded
+                return
+            browse_lang = lang
+        else:
+            entries, browse_lang = loaded
         async with request_progress(context.bot, chat_id, lang):
             await _send_cards_batch(
                 context.bot,
@@ -1392,6 +1381,7 @@ async def check_giveaways_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
             stored = _store_browse(
                 context.application, owner_id, new_entries, lang
             )
+            db.set_giveaways_last_digest(owner_id, stored)
             await bot.send_message(
                 owner_id,
                 _summary_text(lang, stored),

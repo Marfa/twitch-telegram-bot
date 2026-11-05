@@ -27,6 +27,8 @@ from .models import (
     FollowMonitorFollower,
     GiveawaysPrefs,
     GiveawayCatalogEntry,
+    giveaway_entries_from_json,
+    giveaway_entries_to_json,
     PremiumChannel,
     PremiumGift,
     PremiumPromoCode,
@@ -946,7 +948,8 @@ class SqliteDatabase:
                 digest_enabled INTEGER NOT NULL DEFAULT 0,
                 first_digest_sent INTEGER NOT NULL DEFAULT 0,
                 last_digest_at INTEGER NOT NULL DEFAULT 0,
-                deal_cut_min INTEGER
+                deal_cut_min INTEGER,
+                last_digest_json TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
@@ -956,6 +959,11 @@ class SqliteDatabase:
         if gv_prefs_cols and "deal_cut_min" not in gv_prefs_cols:
             conn.execute(
                 "ALTER TABLE giveaways_prefs ADD COLUMN deal_cut_min INTEGER"
+            )
+        if gv_prefs_cols and "last_digest_json" not in gv_prefs_cols:
+            conn.execute(
+                "ALTER TABLE giveaways_prefs "
+                "ADD COLUMN last_digest_json TEXT NOT NULL DEFAULT '[]'"
             )
         conn.execute(
             """
@@ -6713,6 +6721,38 @@ owner_id, twitch_username, twitch_user_id,
                 """,
                 (owner_id, source, external_id, int(seen_at)),
             )
+
+    def set_giveaways_last_digest(
+        self, owner_id: int, entries: list[GiveawayCatalogEntry]
+    ) -> None:
+        payload = giveaway_entries_to_json(entries)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO giveaways_prefs (owner_id, last_digest_json)
+                VALUES (?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    last_digest_json = excluded.last_digest_json
+                """,
+                (owner_id, payload),
+            )
+
+    def get_giveaways_last_digest(
+        self, owner_id: int
+    ) -> list[GiveawayCatalogEntry]:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT last_digest_json FROM giveaways_prefs
+                WHERE owner_id = ?
+                """,
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return []
+        keys = row.keys() if hasattr(row, "keys") else []
+        raw = row["last_digest_json"] if "last_digest_json" in keys else "[]"
+        return giveaway_entries_from_json(str(raw or "[]"))
 
     @staticmethod
     def _row_to_giveaways_catalog(row: Any) -> GiveawayCatalogEntry:

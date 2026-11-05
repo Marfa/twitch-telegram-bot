@@ -1001,6 +1001,102 @@ class GiveawayCatalogEntry:
     cut: int | None = None  # ITAD deal discount %; None for free giveaways
 
 
+def giveaway_entry_to_jsonable(entry: GiveawayCatalogEntry) -> dict[str, Any]:
+    return {
+        "source": entry.source,
+        "external_id": entry.external_id,
+        "title": entry.title,
+        "store_id": entry.store_id,
+        "platform_ids": list(entry.platform_ids),
+        "claim_url": entry.claim_url,
+        "start_at": entry.start_at,
+        "end_at": entry.end_at,
+        "description": entry.description,
+        "image_url": entry.image_url,
+        "dedupe_key": entry.dedupe_key,
+        "igdb_id": entry.igdb_id,
+        "name": entry.name,
+        "year": entry.year,
+        "publisher": entry.publisher,
+        "developer": entry.developer,
+        "summary": entry.summary,
+        "cover_url": entry.cover_url,
+        "refreshed_at": int(entry.refreshed_at or 0),
+        "cut": entry.cut,
+    }
+
+
+def giveaway_entry_from_jsonable(raw: Any) -> GiveawayCatalogEntry | None:
+    if not isinstance(raw, dict):
+        return None
+    source = str(raw.get("source") or "").strip()
+    external_id = str(raw.get("external_id") or "").strip()
+    if not source or not external_id:
+        return None
+    plats_raw = raw.get("platform_ids") or []
+    plats = tuple(
+        str(p) for p in (plats_raw if isinstance(plats_raw, list) else [])
+    )
+    igdb_raw = raw.get("igdb_id")
+    igdb_id = int(igdb_raw) if igdb_raw is not None else None
+    if igdb_id is not None and igdb_id <= 0:
+        igdb_id = None
+    cut_raw = raw.get("cut")
+    cut: int | None
+    try:
+        cut = int(cut_raw) if cut_raw is not None else None
+    except (TypeError, ValueError):
+        cut = None
+    if cut is not None and not (0 <= cut <= 100):
+        cut = None
+    return GiveawayCatalogEntry(
+        source=source,
+        external_id=external_id,
+        title=str(raw.get("title") or ""),
+        store_id=str(raw.get("store_id") or ""),
+        platform_ids=plats,
+        claim_url=str(raw.get("claim_url") or ""),
+        start_at=str(raw.get("start_at") or ""),
+        end_at=str(raw.get("end_at") or ""),
+        description=str(raw.get("description") or ""),
+        image_url=str(raw.get("image_url") or ""),
+        dedupe_key=str(raw.get("dedupe_key") or ""),
+        igdb_id=igdb_id,
+        name=str(raw.get("name") or ""),
+        year=str(raw.get("year") or ""),
+        publisher=str(raw.get("publisher") or ""),
+        developer=str(raw.get("developer") or ""),
+        summary=str(raw.get("summary") or ""),
+        cover_url=str(raw.get("cover_url") or ""),
+        refreshed_at=int(raw.get("refreshed_at") or 0),
+        cut=cut,
+    )
+
+
+def giveaway_entries_to_json(entries: list[GiveawayCatalogEntry]) -> str:
+    return json.dumps(
+        [giveaway_entry_to_jsonable(e) for e in entries],
+        ensure_ascii=False,
+    )
+
+
+def giveaway_entries_from_json(raw: str | None) -> list[GiveawayCatalogEntry]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[GiveawayCatalogEntry] = []
+    for item in data:
+        entry = giveaway_entry_from_jsonable(item)
+        if entry is not None:
+            out.append(entry)
+    return out
+
+
 @dataclass
 class DonationAlertsAuth:
     owner_id: int
