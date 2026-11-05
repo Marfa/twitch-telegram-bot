@@ -1873,6 +1873,116 @@ async def _scenario_wizard_alert_type_other(db) -> None:
     assert markup_has_escape_hatch(alert_type_keyboard("ru", show_drops=True))
 
 
+async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
+    """§1.4 Chat WebApp (Other + New→Other) and private Menu Button commands."""
+    from handlers.settings import (
+        _private_bot_commands,
+        open_other_menu,
+        open_stream_chat,
+    )
+    from handlers.wizard import _wz, alert_type_open_other, start_new_subscription
+
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
+
+    with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"):
+        other = other_menu("ru")
+        assert markup_has_escape_hatch(other)
+        other_chat = next(
+            b
+            for row in other.keyboard
+            for b in row
+            if b.text == btn("chat", "ru")
+        )
+        assert other_chat.web_app is not None
+
+        new_other = new_sub_other_keyboard("ru")
+        assert markup_has_escape_hatch(new_other)
+        new_chat = next(
+            b
+            for row in new_other.inline_keyboard
+            for b in row
+            if b.text == btn("chat", "ru")
+        )
+        assert new_chat.web_app is not None
+        assert new_chat.callback_data is None
+
+        application, bot = _app(db)
+        cap = _BotCapture()
+        cap.wrap(bot)
+        update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
+        ctx = _ctx(application)
+        await open_other_menu(update, ctx)
+        cap.assert_turn("other_menu_chat_webapp")
+
+        application, bot = _app(db)
+        cap = _BotCapture()
+        cap.wrap(bot)
+        update, query = _cb_update(_FREE_UID, "alert_type:other", cap)
+        update.effective_message = query.message
+        ctx = _ctx(application)
+        state = await alert_type_open_other(update, ctx)
+        assert state == _wz()["ALERT_TYPE"]
+        opened = next(
+            b
+            for m in cap.markups
+            if getattr(m, "inline_keyboard", None)
+            for row in m.inline_keyboard
+            for b in row
+            if b.text == btn("chat", "ru")
+        )
+        assert opened.web_app is not None
+        cap.assert_turn("wizard_other_chat_webapp")
+
+        from telegram.constants import ChatType
+
+        application, bot = _app(db)
+        cap = _BotCapture()
+        cap.wrap(bot)
+        update = _msg_update(_FREE_UID, "/chat", cap)
+        update.effective_chat = SimpleNamespace(id=_FREE_UID, type=ChatType.PRIVATE)
+        ctx = _ctx(application)
+        with patch(
+            "handlers.settings.sync_stream_chat_menu_button",
+            new=AsyncMock(),
+        ), patch(
+            "handlers.settings.beta_features.is_enabled",
+            return_value=True,
+        ):
+            await open_stream_chat(update, ctx)
+        assert any(
+            getattr(m, "inline_keyboard", None)
+            and any(
+                getattr(b, "web_app", None) for row in m.inline_keyboard for b in row
+            )
+            for m in cap.markups
+        )
+        # /chat should not also re-push the Other reply keyboard.
+        assert not any(getattr(m, "keyboard", None) for m in cap.markups)
+        cap.assert_turn("cmd_chat_inline_webapp")
+
+        application, bot = _app(db)
+        cap = _BotCapture()
+        cap.wrap(bot)
+        update = _msg_update(_FREE_UID, "/etc", cap)
+        ctx = _ctx(application)
+        await open_other_menu(update, ctx)
+        cap.assert_turn("cmd_etc_other_menu")
+
+        application, bot = _app(db)
+        cap = _BotCapture()
+        cap.wrap(bot)
+        update = _msg_update(_FREE_UID, "/new", cap)
+        ctx = _ctx(application)
+        with patch("handlers.wizard.analytics.capture"):
+            state = await start_new_subscription(update, ctx)
+        assert state == _wz()["ALERT_TYPE"]
+        cap.assert_turn("cmd_new_alert_type")
+
+    cmds = [c.command for c in _private_bot_commands("ru")]
+    assert cmds == ["start", "new", "etc", "chat", "help", "settings"]
+
+
 async def _scenario_other_game_info(db) -> None:
     """§1.4 Other → Game info — search prompt with Cancel; pick Cancel ends."""
     from handlers.game_info import (
@@ -4519,6 +4629,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_giveaways_hub(db)
         await _scenario_wizard_giveaways_discount(db)
         await _scenario_wizard_alert_type_other(db)
+        await _scenario_stream_chat_webapp_and_menu_commands(db)
         await _scenario_other_game_info(db)
         await _scenario_other_channel_stats(db)
         await _scenario_wizard_extras_checkboxes(db)

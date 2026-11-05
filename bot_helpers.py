@@ -150,6 +150,9 @@ _group_setup_notified: set[tuple[int, int]] = set()
 # Slash commands that configure or control the bot — DM only. /when is allowed in groups.
 GROUP_DM_ONLY_COMMANDS = (
     "start",
+    "new",
+    "etc",
+    "chat",
     "help",
     "cancel",
     "schedule",

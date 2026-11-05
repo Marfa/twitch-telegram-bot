@@ -339,6 +339,7 @@ async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/chat and plain-text Chat fallback — one inline WebApp button (no extra menu noise)."""
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -361,10 +362,6 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
     await sync_stream_chat_menu_button(context.bot, db, user_id)
-    await update.effective_message.reply_text(
-        t("menu_other", lang),
-        reply_markup=other_menu(lang),
-    )
     await update.effective_message.reply_text(
         t("chat_open_hint", lang),
         reply_markup=stream_chat_open_markup(
@@ -1076,9 +1073,11 @@ def _private_bot_commands(lang: str) -> list[BotCommand]:
     """Slash commands shown in the private-chat Menu Button."""
     return [
         BotCommand("start", t("cmd_start_desc", lang)[:256]),
+        BotCommand("new", t("cmd_new_desc", lang)[:256]),
+        BotCommand("etc", t("cmd_etc_desc", lang)[:256]),
+        BotCommand("chat", t("cmd_chat_desc", lang)[:256]),
         BotCommand("help", t("cmd_help_desc", lang)[:256]),
         BotCommand("settings", t("cmd_settings_desc", lang)[:256]),
-        BotCommand("feedback", t("cmd_feedback_desc", lang)[:256]),
     ]
 
 

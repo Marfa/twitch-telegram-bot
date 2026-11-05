@@ -2925,10 +2925,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("other"), open_other_menu),
         group=0,
     )
+    app.add_handler(CommandHandler("etc", open_other_menu), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("chat"), open_stream_chat),
         group=0,
     )
+    app.add_handler(CommandHandler("chat", open_stream_chat), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("premium"), open_premium_from_settings),
         group=0,
@@ -3361,6 +3363,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("start", dm_only_conv_entry(start)),
             CommandHandler("help", dm_only_conv_entry(help_command)),
             CommandHandler("schedule", dm_only_conv_entry(start_stream_schedule)),
+            CommandHandler("new", dm_only_conv_entry(start_new_subscription)),
             MessageHandler(_btn_filter("new"), dm_only_conv_entry(start_new_subscription)),
             CallbackQueryHandler(
                 dm_only_conv_entry(start_drops_from_digest),

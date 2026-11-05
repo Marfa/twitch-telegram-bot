@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, WebAppInfo
 
 from config import PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
 from i18n import SUPPORTED_LOCALES
@@ -135,14 +135,39 @@ def alert_chat_button_url(
 
 def stream_chat_open_markup(lang: str, url: str, *, private: bool) -> InlineKeyboardMarkup:
     """Inline open-chat button. web_app only works in private chats with the bot."""
-    from i18n import t
+    from i18n import dm_main_menu_button, t
 
     label = t("menu_btn_chat", lang)
     if private:
-        btn = InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
+        rows = [
+            [InlineKeyboardButton(label, web_app=WebAppInfo(url=url))],
+            [dm_main_menu_button(lang)],
+        ]
     else:
-        btn = InlineKeyboardButton(label, url=url)
-    return InlineKeyboardMarkup([[btn]])
+        rows = [[InlineKeyboardButton(label, url=url)]]
+    return InlineKeyboardMarkup(rows)
+
+
+def stream_chat_reply_button(lang: str) -> KeyboardButton:
+    """Reply-keyboard Chat: WebApp opens Mini App with no bot message; else plain text."""
+    from i18n import btn
+
+    label = btn("chat", lang)
+    url = chat_webapp_url(lang=lang if lang in SUPPORTED_LOCALES else None)
+    if url:
+        return KeyboardButton(label, web_app=WebAppInfo(url=url))
+    return KeyboardButton(label)
+
+
+def stream_chat_menu_inline_button(lang: str) -> InlineKeyboardButton:
+    """Inline Chat for wizards: WebApp when URL known, else callback fallback."""
+    from i18n import btn
+
+    label = btn("chat", lang)
+    url = chat_webapp_url(lang=lang if lang in SUPPORTED_LOCALES else None)
+    if url:
+        return InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
+    return InlineKeyboardButton(label, callback_data="new_sub_other:chat")
 
 
 def embed_parent_host() -> str:

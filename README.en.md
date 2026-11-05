@@ -44,7 +44,7 @@
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR) |
-| Commands | `/start`, `/help`, `/cancel`, `/schedule`, `/when`, `/day`, `/week`, `/feedback`, `/settings` |
+| Commands | Menu: `/start`, `/new`, `/etc`, `/chat`, `/help`, `/settings`; also `/cancel`, `/schedule`, `/when`, `/day`, `/week`, `/feedback` |
 | Deploy | VPS (Docker) |
 
 ## Premium
@@ -230,7 +230,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 
 ### Twitch stream chat
 
-**Chat** menu button next to the message field (set for everyone on deploy) and **📦 Other → 💬 Chat** → Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + send via the field under chat; **Simple** = IRC). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
+**📦 Other → 💬 Chat** and New alert → Other: Mini App opens immediately (WebApp button). Menu Button next to the input lists `/start` `/new` `/etc` `/chat` `/help` `/settings`. Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + send via the field under chat; **Simple** = IRC). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
 
 ### Pause notifications
 
@@ -241,6 +241,9 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | Button / command | Action |
 |---|---|
 | `/start` | Main menu |
+| `/new` | New alert |
+| `/etc` | Other section |
+| `/chat` | Stream chat Mini App (inline button; from Other — WebApp opens immediately) |
 | `/help` | Help |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |

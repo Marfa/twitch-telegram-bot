@@ -47,12 +47,25 @@ def _check_premium_and_helpers() -> None:
     priv_btn = stream_chat_open_markup("ru", "https://example.com/app/chat/", private=True)
     group_btn = stream_chat_open_markup("ru", "https://example.com/app/chat/", private=False)
     assert priv_btn.inline_keyboard[0][0].web_app is not None
+    assert any(
+        (b.callback_data or "") == "dm_menu"
+        for row in priv_btn.inline_keyboard
+        for b in row
+    )
     assert group_btn.inline_keyboard[0][0].url
+    assert all(
+        (b.callback_data or "") != "dm_menu"
+        for row in group_btn.inline_keyboard
+        for b in row
+    )
     assert group_setup_menu_filter() is not None
     assert GROUP_SETUP_CALLBACK_PATTERN.startswith("^")
     assert "when" not in GROUP_DM_ONLY_COMMANDS
     for cmd in (
         "start",
+        "new",
+        "etc",
+        "chat",
         "help",
         "cancel",
         "schedule",

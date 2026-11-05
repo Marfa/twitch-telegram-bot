@@ -330,6 +330,8 @@ def subscriptions_menu(
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
+    from chat_webapp import stream_chat_reply_button
+
     keys = [
         "follow_monitor",
         "ai_clips",
@@ -341,7 +343,10 @@ def other_menu(lang: str) -> ReplyKeyboardMarkup:
         "channel_stats",
         "back",
     ]
-    buttons = [KeyboardButton(btn(k, lang)) for k in keys]
+    buttons = [
+        stream_chat_reply_button(lang) if k == "chat" else KeyboardButton(btn(k, lang))
+        for k in keys
+    ]
     return _reply_keyboard(_pair_reply_rows(buttons))
 
 
@@ -2061,6 +2066,8 @@ def alert_type_keyboard(
 
 def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
     """Other features from New subscription (§2.1); Back returns to alert type."""
+    from chat_webapp import stream_chat_menu_inline_button
+
     keys = [
         "follow_monitor",
         "ai_clips",
@@ -2072,7 +2079,9 @@ def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
         "channel_stats",
     ]
     buttons = [
-        InlineKeyboardButton(btn(k, lang), callback_data=f"new_sub_other:{k}")
+        stream_chat_menu_inline_button(lang)
+        if k == "chat"
+        else InlineKeyboardButton(btn(k, lang), callback_data=f"new_sub_other:{k}")
         for k in keys
     ]
     rows: list[list[InlineKeyboardButton]] = []

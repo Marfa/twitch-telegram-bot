@@ -2080,9 +2080,11 @@ def check_handlers() -> None:
         first_cmds = cmd_bot.set_my_commands.await_args_list[0].args[0]
         assert [c.command for c in first_cmds] == [
             "start",
+            "new",
+            "etc",
+            "chat",
             "help",
             "settings",
-            "feedback",
         ]
         with patch(
             "handlers.settings.ensure_private_bot_commands", new_callable=AsyncMock
@@ -2339,6 +2341,7 @@ def check_handlers() -> None:
 
         print("  chat / live-remind alert buttons OK")
         from chat_webapp import stream_chat_open_markup
+        from i18n import new_sub_other_keyboard, other_menu
 
         priv_chat_kb = stream_chat_open_markup(
             "ru", "https://example.com/app/chat/", private=True
@@ -2349,7 +2352,28 @@ def check_handlers() -> None:
         priv_chat_btn = priv_chat_kb.inline_keyboard[0][0]
         group_chat_btn = group_chat_kb.inline_keyboard[0][0]
         assert priv_chat_btn.web_app is not None and priv_chat_btn.url is None
+        assert any(
+            (b.callback_data or "") == "dm_menu"
+            for row in priv_chat_kb.inline_keyboard
+            for b in row
+        )
         assert group_chat_btn.url and group_chat_btn.web_app is None
+        # Прочее reply «Чат» and New→Other inline open Mini App (no callback message).
+        other_chat = next(
+            b
+            for row in other_menu("ru").keyboard
+            for b in row
+            if b.text == tr("btn_chat", "ru")
+        )
+        assert other_chat.web_app is not None
+        new_other_chat = next(
+            b
+            for row in new_sub_other_keyboard("ru").inline_keyboard
+            for b in row
+            if b.text == tr("btn_chat", "ru")
+        )
+        assert new_other_chat.web_app is not None
+        assert new_other_chat.callback_data is None
     with tempfile.TemporaryDirectory() as chat_tmp:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
         cdb.upsert_user(777)
