@@ -2063,12 +2063,14 @@ def check_handlers() -> None:
             sync_stream_chat_menu_button,
         )
 
+        from telegram import MenuButtonCommands
+
         mock_bot = AsyncMock()
         asyncio.run(set_default_stream_chat_menu_button(mock_bot))
         assert mock_bot.set_chat_menu_button.await_count == 1
         default_kwargs = mock_bot.set_chat_menu_button.await_args.kwargs
         assert "chat_id" not in default_kwargs
-        assert default_kwargs["menu_button"].web_app is not None
+        assert isinstance(default_kwargs["menu_button"], MenuButtonCommands)
 
         from telegram.error import BadRequest, Forbidden
 
@@ -2088,6 +2090,10 @@ def check_handlers() -> None:
         with patch("handlers.settings.asyncio.sleep", new_callable=AsyncMock):
             asyncio.run(sync_stream_chat_menu_button(retry_bot, _RetryDb(), 99))
         assert retry_bot.set_chat_menu_button.await_count == 2
+        assert isinstance(
+            retry_bot.set_chat_menu_button.await_args.kwargs["menu_button"],
+            MenuButtonCommands,
+        )
 
         # Deactivated Telegram account: mark blocked, no ERROR spam / no retry storm.
         dead_bot = AsyncMock()

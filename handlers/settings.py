@@ -10,9 +10,7 @@ from telegram import (
     InlineKeyboardMarkup,
     LinkPreviewOptions,
     MenuButtonCommands,
-    MenuButtonWebApp,
     Update,
-    WebAppInfo,
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
@@ -997,8 +995,7 @@ async def on_whisper_alerts_toggle(
     )
 
 async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> None:
-    """Show or clear the Chat Menu Button for a private chat."""
-    from chat_webapp import BETA_FEATURE_ID, chat_webapp_url
+    """Keep the private-chat Menu Button on Telegram command menu (not WebApp Chat)."""
     from handlers.delivery import (
         _is_chat_unreachable_error,
         _is_user_blocked_error,
@@ -1008,20 +1005,7 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
     if db.is_bot_blocked(user_id):
         return
 
-    lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
-    url = chat_webapp_url(
-        lang=lang if lang in SUPPORTED_LOCALES else None,
-        user_id=user_id,
-    )
-    enabled = bool(url) and beta_features.is_enabled(db, user_id, BETA_FEATURE_ID)
-    menu_button = (
-        MenuButtonWebApp(
-            text=t("menu_btn_chat", lang),
-            web_app=WebAppInfo(url=url),
-        )
-        if enabled
-        else MenuButtonCommands()
-    )
+    menu_button = MenuButtonCommands()
     # Transient Telegram blips (ReadError etc.); RetryAfter still bubbles for bulk.
     # BadRequest before NetworkError: in PTB, BadRequest subclasses NetworkError.
     attempts = 3
@@ -1078,37 +1062,16 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
             return
 
 
-def _stream_chat_is_ga() -> bool:
-    from chat_webapp import BETA_FEATURE_ID
-
-    feat = beta_features.get_feature(BETA_FEATURE_ID)
-    return bool(feat and feat.stage == "ga")
-
-
 async def set_default_stream_chat_menu_button(bot: Any) -> None:
-    """Bot-wide default Menu Button (new private chats inherit it)."""
-    from chat_webapp import chat_webapp_url
-
-    if not _stream_chat_is_ga():
-        return
-    url = chat_webapp_url(lang=DEFAULT_LOCALE)
-    if not url:
-        return
+    """Bot-wide default Menu Button: command list (new private chats inherit it)."""
     try:
-        await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(
-                text=t("menu_btn_chat", DEFAULT_LOCALE),
-                web_app=WebAppInfo(url=url),
-            ),
-        )
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     except Exception:
         logger.exception("Failed to set default stream-chat menu button")
 
 
 async def sync_all_stream_chat_menu_buttons(bot: Any, db: Database) -> None:
-    """Per-chat Menu Button for known users (clears Commands overrides after GA)."""
-    if not _stream_chat_is_ga():
-        return
+    """Per-chat Menu Button for known users (clears leftover WebApp Chat)."""
     user_ids = sorted({int(uid) for uid in db.get_notify_user_ids()})
     ok = 0
     skipped = 0
@@ -1137,7 +1100,7 @@ async def sync_all_stream_chat_menu_buttons(bot: Any, db: Database) -> None:
 
 
 async def ensure_stream_chat_menu_buttons_for_all(bot: Any, db: Database) -> None:
-    """Default Menu Button + one bulk pass over users (GA only)."""
+    """Default Menu Button + one bulk pass over users."""
     await set_default_stream_chat_menu_button(bot)
     await sync_all_stream_chat_menu_buttons(bot, db)
 
