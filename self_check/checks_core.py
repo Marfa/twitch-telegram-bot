@@ -2017,9 +2017,12 @@ def check_core() -> None:
         admin_kb = admin_menu(loc).keyboard
         assert [[b.text for b in row] for row in admin_kb] == [
             [btn("broadcast", loc), btn("stats", loc)],
+            [btn("reload_locales", loc)],
             [btn("admin_withdrawals", loc), btn("demo", loc)],
             [btn("back", loc)],
         ]
+        assert tr("locales_reloaded", loc, summary="en=1")
+        assert tr("locales_reload_failed", loc, error="x")
         from i18n import broadcast_menu
 
         broadcast_kb = broadcast_menu(loc).keyboard
@@ -2035,6 +2038,12 @@ def check_core() -> None:
             for row in dur_kb.inline_keyboard
             for btn in row
         )
+    from i18n import reload_strings
+
+    before_stats = tr("btn_stats", "en")
+    counts = reload_strings()
+    assert counts["en"] > 0 and counts["ru"] > 0
+    assert tr("btn_stats", "en") == before_stats
     html_ru = _html_page(
         tr("oauth_web_done_title", "ru"),
         tr("oauth_web_done_body", "ru"),

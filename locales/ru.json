@@ -20,6 +20,7 @@
   "btn_scheduled_broadcasts": "📅 Запланированные сообщения",
   "btn_sent_broadcasts": "📨 Отправленные сообщения",
   "btn_stats": "📊 Статистика",
+  "btn_reload_locales": "🔄 Тексты",
   "btn_back": "◀️ Главное меню",
   "btn_broadcast_main_menu": "Вернуться в главное меню",
   "btn_wizard_back": "« Назад",
@@ -1408,5 +1409,7 @@
   "channel_stats_games_title": "Во что играет",
   "channel_stats_no_games": "Игры появятся после эфиров",
   "channel_stats_footer": "Данные: Twitch Helix · опрос каждые 10 мин",
-  "channel_stats_footer_tt": "Данные: Twitch Helix + TwitchTracker"
+  "channel_stats_footer_tt": "Данные: Twitch Helix + TwitchTracker",
+  "locales_reloaded": "Локали перезагружены: {summary}",
+  "locales_reload_failed": "Не удалось перезагрузить локали: {error}"
 }

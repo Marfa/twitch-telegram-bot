@@ -24,6 +24,8 @@ services:
       DATABASE_PATH: /data/bot.db
     volumes:
       - bot-data:/data
+      # Hot-reload UI strings via /reload_locales without image rebuild
+      - ./locales:/app/locales:ro
     depends_on:
       db:
         condition: service_healthy

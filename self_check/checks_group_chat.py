@@ -51,10 +51,28 @@ def _check_premium_and_helpers() -> None:
     assert group_setup_menu_filter() is not None
     assert GROUP_SETUP_CALLBACK_PATTERN.startswith("^")
     assert "when" not in GROUP_DM_ONLY_COMMANDS
-    for cmd in ("start", "help", "cancel", "schedule", "feedback", "settings", "stats"):
+    for cmd in (
+        "start",
+        "help",
+        "cancel",
+        "schedule",
+        "feedback",
+        "settings",
+        "stats",
+        "reload_locales",
+    ):
         assert cmd in GROUP_DM_ONLY_COMMANDS
     helpers_src = (_ROOT / "bot_helpers.py").read_text(encoding="utf-8")
-    for btn_key in ("chat", "other", "feedback", "back", "cart", "admin", "stats"):
+    for btn_key in (
+        "chat",
+        "other",
+        "feedback",
+        "back",
+        "cart",
+        "admin",
+        "stats",
+        "reload_locales",
+    ):
         assert f'_btn_filter("{btn_key}")' in helpers_src
     error_src = (_ROOT / "bot.py").read_text(encoding="utf-8")
     assert "chat_context_properties(update)" in error_src

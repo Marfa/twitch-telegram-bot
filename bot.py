@@ -178,7 +178,7 @@ from bot_helpers import (
     reply_chat_id,
     reply_setup_private_only,
 )
-from handlers.admin_stats import admin_show_stats, _format_stats
+from handlers.admin_stats import admin_reload_locales, admin_show_stats, _format_stats
 from handlers.alert_history import (
     _alert_history_item_url,
     _alert_history_nav_keyboard,
@@ -2847,6 +2847,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(CommandHandler("stats", admin_show_stats), group=0)
     app.add_handler(
+        MessageHandler(_btn_filter("reload_locales"), admin_reload_locales),
+        group=0,
+    )
+    app.add_handler(CommandHandler("reload_locales", admin_reload_locales), group=0)
+    app.add_handler(
         MessageHandler(_btn_filter("broadcast"), open_broadcast_menu),
         group=0,
     )
@@ -4321,6 +4326,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("scheduled_broadcasts")
                 | _btn_filter("sent_broadcasts")
                 | _btn_filter("stats")
+                | _btn_filter("reload_locales")
             ),
             wake_stuck_on_menu_message,
         ),

@@ -20,6 +20,7 @@
   "btn_scheduled_broadcasts": "📅 Заплановані повідомлення",
   "btn_sent_broadcasts": "📨 Надіслані повідомлення",
   "btn_stats": "📊 Статистика",
+  "btn_reload_locales": "🔄 Тексти",
   "btn_back": "◀️ Головне меню",
   "btn_broadcast_main_menu": "Повернутися до головного меню",
   "btn_wizard_back": "« Назад",
@@ -1407,5 +1408,7 @@
   "channel_stats_games_title": "У що грає",
   "channel_stats_no_games": "Ігри з’являться після ефірів",
   "channel_stats_footer": "Дані: Twitch Helix · опит кожні 10 хв",
-  "channel_stats_footer_tt": "Дані: Twitch Helix + TwitchTracker"
+  "channel_stats_footer_tt": "Дані: Twitch Helix + TwitchTracker",
+  "locales_reloaded": "Локалі перезавантажено: {summary}",
+  "locales_reload_failed": "Не вдалося перезавантажити локалі: {error}"
 }

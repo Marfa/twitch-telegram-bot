@@ -81,6 +81,7 @@ _MENU_BTN_KEYS = (
     "scheduled_broadcasts",
     "sent_broadcasts",
     "stats",
+    "reload_locales",
     "back",
     "sys_notifications",
     "ignored_words",

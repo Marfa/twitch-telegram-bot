@@ -156,6 +156,7 @@ GROUP_DM_ONLY_COMMANDS = (
     "feedback",
     "settings",
     "stats",
+    "reload_locales",
 )
 
 
@@ -378,6 +379,7 @@ def group_setup_menu_filter():
             | _btn_filter("scheduled_broadcasts")
             | _btn_filter("sent_broadcasts")
             | _btn_filter("stats")
+            | _btn_filter("reload_locales")
             | _btn_filter("demo")
             | _btn_filter("wizard_cancel")
             | _btn_filter("wizard_back")

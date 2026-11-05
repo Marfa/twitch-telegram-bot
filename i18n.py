@@ -53,6 +53,14 @@ def _load_strings() -> dict[str, dict[str, str]]:
 _STRINGS: dict[str, dict[str, str]] = _load_strings()
 
 
+def reload_strings() -> dict[str, int]:
+    """Re-read locales/*.json into memory. Raises on invalid JSON; leaves old strings intact."""
+    loaded = _load_strings()
+    _STRINGS.clear()
+    _STRINGS.update(loaded)
+    return {loc: len(strings) for loc, strings in loaded.items()}
+
+
 def t(key: str, lang: str, **kwargs: object) -> str:
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     text = _STRINGS[locale].get(key) or _STRINGS[DEFAULT_LOCALE][key]
@@ -225,6 +233,7 @@ def all_menu_buttons() -> set[str]:
         "scheduled_broadcasts",
         "sent_broadcasts",
         "stats",
+        "reload_locales",
         "back",
         "sys_notifications",
         "ignored_words",
@@ -716,6 +725,7 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
             KeyboardButton(btn("broadcast", lang)),
             KeyboardButton(btn("stats", lang)),
         ],
+        [KeyboardButton(btn("reload_locales", lang))],
     ]
     if show_partner_ui():
         rows.append(

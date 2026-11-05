@@ -20,6 +20,7 @@
   "btn_scheduled_broadcasts": "📅 Messaggi programmati",
   "btn_sent_broadcasts": "📨 Messaggi inviati",
   "btn_stats": "📊 Statistiche",
+  "btn_reload_locales": "🔄 Testi",
   "btn_back": "◀️ Menu principale",
   "btn_broadcast_main_menu": "Torna al menu principale",
   "btn_wizard_back": "« Indietro",
@@ -1396,5 +1397,7 @@
   "channel_stats_games_title": "Giochi",
   "channel_stats_no_games": "I giochi compariranno dopo le live",
   "channel_stats_footer": "Fonte: Twitch Helix · poll ogni 10 min",
-  "channel_stats_footer_tt": "Fonte: Twitch Helix + TwitchTracker"
+  "channel_stats_footer_tt": "Fonte: Twitch Helix + TwitchTracker",
+  "locales_reloaded": "Localizzazioni ricaricate: {summary}",
+  "locales_reload_failed": "Impossibile ricaricare le localizzazioni: {error}"
 }
