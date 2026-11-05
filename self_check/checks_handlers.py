@@ -2058,6 +2058,8 @@ def check_handlers() -> None:
         from telegram.error import NetworkError
 
         from handlers.settings import (
+            ensure_private_bot_commands,
+            ensure_stream_chat_menu_buttons_for_all,
             set_default_stream_chat_menu_button,
             sync_all_stream_chat_menu_buttons,
             sync_stream_chat_menu_button,
@@ -2071,6 +2073,32 @@ def check_handlers() -> None:
         default_kwargs = mock_bot.set_chat_menu_button.await_args.kwargs
         assert "chat_id" not in default_kwargs
         assert isinstance(default_kwargs["menu_button"], MenuButtonCommands)
+
+        cmd_bot = AsyncMock()
+        asyncio.run(ensure_private_bot_commands(cmd_bot))
+        assert cmd_bot.set_my_commands.await_count >= 1
+        first_cmds = cmd_bot.set_my_commands.await_args_list[0].args[0]
+        assert [c.command for c in first_cmds] == [
+            "start",
+            "help",
+            "settings",
+            "feedback",
+        ]
+        with patch(
+            "handlers.settings.ensure_private_bot_commands", new_callable=AsyncMock
+        ) as ens_cmds, patch(
+            "handlers.settings.set_default_stream_chat_menu_button",
+            new_callable=AsyncMock,
+        ) as ens_def, patch(
+            "handlers.settings.sync_all_stream_chat_menu_buttons",
+            new_callable=AsyncMock,
+        ) as ens_all:
+            asyncio.run(
+                ensure_stream_chat_menu_buttons_for_all(AsyncMock(), AsyncMock())
+            )
+            assert ens_cmds.await_count == 1
+            assert ens_def.await_count == 1
+            assert ens_all.await_count == 1
 
         from telegram.error import BadRequest, Forbidden
 

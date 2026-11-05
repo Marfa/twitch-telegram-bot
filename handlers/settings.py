@@ -6,6 +6,8 @@ import logging
 from typing import Any
 
 from telegram import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     LinkPreviewOptions,
@@ -1070,6 +1072,36 @@ async def set_default_stream_chat_menu_button(bot: Any) -> None:
         logger.exception("Failed to set default stream-chat menu button")
 
 
+def _private_bot_commands(lang: str) -> list[BotCommand]:
+    """Slash commands shown in the private-chat Menu Button."""
+    return [
+        BotCommand("start", t("cmd_start_desc", lang)[:256]),
+        BotCommand("help", t("cmd_help_desc", lang)[:256]),
+        BotCommand("settings", t("cmd_settings_desc", lang)[:256]),
+        BotCommand("feedback", t("cmd_feedback_desc", lang)[:256]),
+    ]
+
+
+async def ensure_private_bot_commands(bot: Any) -> None:
+    """Register private-chat commands so MenuButtonCommands is visible on clients."""
+    scopes = (BotCommandScopeAllPrivateChats(), None)
+    for lang in SUPPORTED_LOCALES:
+        language_code = None if lang == "en" else lang
+        commands = _private_bot_commands(lang)
+        for scope in scopes:
+            try:
+                kwargs: dict[str, Any] = {"language_code": language_code}
+                if scope is not None:
+                    kwargs["scope"] = scope
+                await bot.set_my_commands(commands, **kwargs)
+            except Exception:
+                logger.exception(
+                    "setMyCommands private menu failed lang=%s scope=%s",
+                    lang,
+                    getattr(scope, "type", "default"),
+                )
+
+
 async def sync_all_stream_chat_menu_buttons(bot: Any, db: Database) -> None:
     """Per-chat Menu Button for known users (clears leftover WebApp Chat)."""
     user_ids = sorted({int(uid) for uid in db.get_notify_user_ids()})
@@ -1100,7 +1132,8 @@ async def sync_all_stream_chat_menu_buttons(bot: Any, db: Database) -> None:
 
 
 async def ensure_stream_chat_menu_buttons_for_all(bot: Any, db: Database) -> None:
-    """Default Menu Button + one bulk pass over users."""
+    """Private commands + Menu Button + one bulk pass over users."""
+    await ensure_private_bot_commands(bot)
     await set_default_stream_chat_menu_button(bot)
     await sync_all_stream_chat_menu_buttons(bot, db)
 
