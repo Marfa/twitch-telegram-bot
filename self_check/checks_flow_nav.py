@@ -423,6 +423,84 @@ async def _scenario_wizard_channel_step(db) -> None:
     cap.assert_turn("wizard_channel")
 
 
+async def _scenario_wizard_channel_dup_by_type(db) -> None:
+    """§2 CHANNEL_DUP only when same streamer and same alert type."""
+    from handlers.wizard import _wz, receive_channel
+    from i18n import t as tr
+
+    uid = _FREE_UID + 42
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+    sub_id = db.add_subscription(
+        owner_id=uid,
+        twitch_username="duptype",
+        twitch_user_id="9042",
+        message_template="{username} live",
+        dest_type="dm",
+        chat_id=uid,
+        thread_id=None,
+        notify_on_live=True,
+        notify_on_end=False,
+    )
+
+    twitch = MagicMock()
+    twitch.parse_username.return_value = "duptype"
+    twitch.get_user.return_value = {
+        "id": "9042",
+        "login": "duptype",
+        "display_name": "DupType",
+    }
+    twitch.is_twitch_url.return_value = False
+
+    # Different type → template step, no dup prompt.
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(uid, "duptype", cap)
+    ctx = _ctx(application, {"alert_type": "end"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["TEMPLATE"]
+    dup_prompt = tr("channel_dup_prompt", "ru")
+    assert not any(
+        dup_prompt in str(c.args[0] if c.args else c.kwargs.get("text") or "")
+        for c in update.effective_message.reply_text.await_args_list
+    )
+    cap.assert_turn("wizard_channel_diff_type_no_dup")
+
+    # Same type → CHANNEL_DUP with edit / continue.
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(uid, "duptype", cap)
+    ctx = _ctx(application, {"alert_type": "live"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["CHANNEL_DUP"]
+    reply_calls = update.effective_message.reply_text.await_args_list
+    assert any(
+        dup_prompt in str(c.args[0] if c.args else c.kwargs.get("text") or "")
+        for c in reply_calls
+    )
+    markup = next(
+        (c.kwargs.get("reply_markup") for c in reply_calls if c.kwargs.get("reply_markup")),
+        None,
+    )
+    assert markup is not None
+    cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert f"dup:edit:{sub_id}" in cbs
+    assert "dup:continue" in cbs
+
+
 def _seed_live_sub(db, owner_id: int) -> int:
     return db.add_subscription(
         owner_id=owner_id,
@@ -4609,6 +4687,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_premium_promo_step(db)
         await _scenario_premium_channel_ad(db)
         await _scenario_wizard_channel_step(db)
+        await _scenario_wizard_channel_dup_by_type(db)
         await _scenario_subscriptions(db)
         await _scenario_settings_and_partner(db)
         await _scenario_ignore_igdb(db)

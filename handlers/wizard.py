@@ -3040,13 +3040,10 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return _wz()["CHANNEL"]
 
     owner_id = update.effective_user.id
-    existing = next(
-        (
-            s
-            for s in _subs_for_owner(db, owner_id)
-            if s.twitch_user_id == user["id"]
-        ),
-        None,
+    from handlers.subscriptions import _existing_sub_for_twitch
+
+    existing = _existing_sub_for_twitch(
+        db, owner_id, user["id"], alert_type=alert_kind
     )
     if existing:
         await update.effective_message.reply_text(

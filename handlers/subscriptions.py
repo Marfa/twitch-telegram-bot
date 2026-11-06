@@ -6443,13 +6443,23 @@ def _share_dup_keyboard(lang: str, sub_id: int, token: str) -> InlineKeyboardMar
 
 
 def _existing_sub_for_twitch(
-    db: Database, owner_id: int, twitch_user_id: str
+    db: Database,
+    owner_id: int,
+    twitch_user_id: str,
+    *,
+    alert_type: str | None = None,
 ) -> Subscription | None:
+    """Same streamer + same alert type (username alone is not a duplicate)."""
     uid = (twitch_user_id or "").strip()
     if not uid:
         return None
+    want = (alert_type or "live").strip() or "live"
     return next(
-        (s for s in _subs_for_owner(db, owner_id) if s.twitch_user_id == uid),
+        (
+            s
+            for s in _subs_for_owner(db, owner_id)
+            if s.twitch_user_id == uid and _alert_type_from_sub(s) == want
+        ),
         None,
     )
 
@@ -6509,7 +6519,10 @@ def _existing_share_dup(
                 return s
         return None
     return _existing_sub_for_twitch(
-        db, owner_id, str(snapshot.get("twitch_user_id") or "")
+        db,
+        owner_id,
+        str(snapshot.get("twitch_user_id") or ""),
+        alert_type=kind,
     )
 
 

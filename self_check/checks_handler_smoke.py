@@ -917,6 +917,38 @@ async def _smoke_wizard(db) -> None:
     assert any(_t("menu_subs", "ru") in str(t) for t in edit_texts)
     assert query.edit_message_text.await_args.args[0] == "✓"
 
+    # Same streamer, different alert type → no CHANNEL_DUP warning.
+    uid_diff = _FREE_UID + 22
+    db.upsert_user(uid_diff)
+    db.set_user_locale(uid_diff, "ru")
+    db.add_subscription(
+        owner_id=uid_diff,
+        twitch_username="difftype",
+        twitch_user_id="9022",
+        message_template="{username} live",
+        dest_type="dm",
+        chat_id=uid_diff,
+        thread_id=None,
+        notify_on_live=True,
+        notify_on_end=False,
+    )
+    twitch_diff = MagicMock()
+    twitch_diff.parse_username.return_value = "difftype"
+    twitch_diff.get_user.return_value = {
+        "id": "9022",
+        "login": "difftype",
+        "display_name": "Diff",
+    }
+    twitch_diff.is_twitch_url.return_value = False
+    application, bot = _app(db, twitch=twitch_diff)
+    update = _msg_update(uid_diff, "difftype")
+    ctx = _ctx(application, {"alert_type": "end"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["TEMPLATE"]
+
     # Edit mode: unchecking "use global list" must persist False (not only UI).
     uid = _FREE_UID + 20
     db.upsert_user(uid)
