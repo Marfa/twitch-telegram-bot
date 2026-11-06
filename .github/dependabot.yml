@@ -8,6 +8,10 @@ updates:
     # Dedicated weekly sync → PR: .github/workflows/sync-streamlink.yml
     ignore:
       - dependency-name: streamlink
+    groups:
+      opentelemetry:
+        patterns:
+          - "opentelemetry-*"
 
   - package-ecosystem: github-actions
     directory: /
