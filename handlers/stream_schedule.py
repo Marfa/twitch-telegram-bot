@@ -565,16 +565,12 @@ def _format_week_slots_preview(lang: str, slots: list[dict]) -> str:
         return ""
     lines = [t("stream_schedule_mode_week_slots", lang), ""]
     for slot in slots:
+        # Date stays proportional; only time + game are monospace.
+        time_s = slot.get("time") or ""
+        game_s = html_escape(str(slot.get("game") or ""))
         lines.append(
-            _mono_schedule_slot_line(
-                t(
-                    "stream_schedule_line",
-                    lang,
-                    date=format_stream_schedule_date(slot["date"], lang),
-                    time=slot.get("time") or "",
-                    game=html_escape(str(slot.get("game") or "")),
-                )
-            )
+            f"- {format_stream_schedule_date(slot['date'], lang)} "
+            f"<code>{time_s} {game_s}</code>"
         )
     return "\n".join(lines)
 
