@@ -1756,8 +1756,8 @@ def check_core() -> None:
     ]
     preview = _format_week_slots_preview("ru", preview_slots)
     assert "Актуальные слоты до конца недели" in preview
-    assert "15:30" in preview and "Deponia &lt;v1&gt;" in preview
-    assert "18:00" in preview
+    assert "- <code>7 октября 15:30 Deponia &lt;v1&gt;</code>" in preview
+    assert "- <code>8 октября 18:00 Just Chatting</code>" in preview
     assert _format_week_slots_preview("en", []) == ""
 
     week_client = TwitchClient.__new__(TwitchClient)

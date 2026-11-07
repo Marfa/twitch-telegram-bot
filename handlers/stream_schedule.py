@@ -553,18 +553,27 @@ def _slots_until_week_end(
     )
 
 
+def _mono_schedule_slot_line(line: str) -> str:
+    """Monospace slot body; keep leading '- ' outside <code> (HTML parse mode)."""
+    if line.startswith("- "):
+        return f"- <code>{line[2:]}</code>"
+    return f"<code>{line}</code>"
+
+
 def _format_week_slots_preview(lang: str, slots: list[dict]) -> str:
     if not slots:
         return ""
     lines = [t("stream_schedule_mode_week_slots", lang), ""]
     for slot in slots:
         lines.append(
-            t(
-                "stream_schedule_line",
-                lang,
-                date=format_stream_schedule_date(slot["date"], lang),
-                time=slot.get("time") or "",
-                game=html_escape(str(slot.get("game") or "")),
+            _mono_schedule_slot_line(
+                t(
+                    "stream_schedule_line",
+                    lang,
+                    date=format_stream_schedule_date(slot["date"], lang),
+                    time=slot.get("time") or "",
+                    game=html_escape(str(slot.get("game") or "")),
+                )
             )
         )
     return "\n".join(lines)
@@ -1147,11 +1156,13 @@ async def _occupied_slots_text(lang: str, day_date: date, slots: list[dict]) -> 
     lines = [t("stream_schedule_occupied_header", lang, date=header_date), ""]
     for slot in slots:
         lines.append(
-            t(
-                "stream_schedule_occupied_line",
-                lang,
-                time=slot.get("time") or "",
-                game=slot.get("game") or "",
+            _mono_schedule_slot_line(
+                t(
+                    "stream_schedule_occupied_line",
+                    lang,
+                    time=slot.get("time") or "",
+                    game=html_escape(str(slot.get("game") or "")),
+                )
             )
         )
     return "\n".join(lines)
@@ -1182,11 +1193,17 @@ async def _show_day_slots(
     query = update.callback_query
     if query:
         try:
-            await query.edit_message_text(text, reply_markup=markup)
+            await query.edit_message_text(
+                text, reply_markup=markup, parse_mode=ParseMode.HTML
+            )
         except BadRequest:
-            await context.bot.send_message(chat_id, text, reply_markup=markup)
+            await context.bot.send_message(
+                chat_id, text, reply_markup=markup, parse_mode=ParseMode.HTML
+            )
     else:
-        await context.bot.send_message(chat_id, text, reply_markup=markup)
+        await context.bot.send_message(
+            chat_id, text, reply_markup=markup, parse_mode=ParseMode.HTML
+        )
     return STREAM_SCHEDULE_FIX_SLOTS
 
 
