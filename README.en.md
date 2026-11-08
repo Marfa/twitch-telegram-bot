@@ -72,7 +72,6 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Twitch schedule tools | Publish slots, fix a day, vacation mode on Twitch |
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
-| Unlimited stream chat in the Mini App | Free plan: read + 20 messages/day |
 | Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
 | AI clips from VOD | **📦 Other → 🎬 AI clips** (Premium / à la carte `ai_clips`): up to 5 clips — chat «clip»/«клип» → Groq emotion (ASR+score>3) → Groq game context on chat spikes → remaining audio → remaining spikes; without Groq falls back to peaks; Helix Create Clip From VOD; auto for new VODs |
 | Channel stats | **📦 Other → 📊 Channel stats** (Premium / à la carte `channel_stats`): OAuth your channel → HTMLBubble card (avg/peak/airtime/games; PNG fallback); Helix poll ~10 min; TwitchTracker summary enrich; polling pauses when Premium ends |
@@ -230,7 +229,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 
 ### Twitch stream chat
 
-**📦 Other → 💬 Chat** and New alert → Other: Mini App opens immediately (WebApp button). Menu Button next to the input lists `/start` `/new` `/etc` `/chat` `/help` `/settings`. Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + send via the field under chat; **Simple** = IRC). Free: read + up to 20 messages/day; Premium feature `stream_chat` / full plan — unlimited.
+**📦 Other → 💬 Chat** and New alert → Other: Mini App opens immediately (WebApp button). Menu Button next to the input lists `/start` `/new` `/etc` `/chat` `/help` `/settings`. Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + send via the field under chat; **Simple** = IRC). Read and send are free with no daily cap.
 
 ### Pause notifications
 

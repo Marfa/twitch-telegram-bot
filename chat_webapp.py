@@ -1,4 +1,4 @@
-"""Twitch stream chat Mini App: auth, online list, resolve, send limits."""
+"""Twitch stream chat Mini App: auth, online list, resolve, send."""
 from __future__ import annotations
 
 import hashlib
@@ -15,13 +15,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 
 from config import PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
 from i18n import SUPPORTED_LOCALES
-from premium import (
-    CHAT_FREE_DAILY_SEND_LIMIT,
-    chat_daily_send_limit,
-    chat_send_unlimited,
-    is_promo_channel,
-    list_promo_channel_logins,
-)
+from premium import get_status, list_promo_channel_logins
 
 logger = logging.getLogger(__name__)
 
@@ -287,9 +281,6 @@ def _subscription_uids(subs: list[Any]) -> dict[str, Any]:
     return by_uid
 
 
-def _utc_day() -> str:
-    return time.strftime("%Y-%m-%d", time.gmtime())
-
 
 def _err(code: int, error: str) -> tuple[int, dict[str, Any]]:
     return code, {"ok": False, "error": error}
@@ -338,10 +329,10 @@ _OTHER_PROMO_STREAMS_N = 5
 
 
 def _other_promo_streams(user_id: int, *, sub_logins: set[str]) -> list[dict[str, Any]]:
-    """Up to 5 random live Premium channels not in the user's subscriptions (free users)."""
+    """Up to 5 random live Premium channels not in the user's subscriptions (no full plan)."""
     if _twitch is None or _db is None:
         return []
-    if chat_daily_send_limit(_db, user_id) is None:
+    if get_status(_db, user_id).has_full_plan:
         return []
     candidates = [
         login
@@ -377,21 +368,18 @@ def api_session(*, init_data: str = "", token: str = "") -> tuple[int, dict[str,
     user_id = int(user["id"])
     lang = token_lang or _db.get_user_locale(user_id) or "en"
     auth = _db.get_chat_auth(user_id)
-    limit = chat_daily_send_limit(_db, user_id)
-    sent = _db.get_chat_send_count(user_id, _utc_day())
-    unlimited = limit is None
-    remaining = None if unlimited else max(0, int(limit) - sent)
     return 200, {
         "ok": True,
         "user_id": user_id,
         "lang": lang,
         "twitch_linked": bool(auth and auth.twitch_user_id),
         "twitch_login": (auth.twitch_login if auth else "") or "",
-        "unlimited": unlimited,
-        "daily_limit": limit if limit is not None else CHAT_FREE_DAILY_SEND_LIMIT,
-        "sent_today": sent,
-        "remaining": remaining,
-        "prefer_embed": unlimited,
+        "unlimited": True,
+        "daily_limit": None,
+        "sent_today": 0,
+        "remaining": None,
+        "prefer_embed": True,
+        "show_other_streams": not get_status(_db, user_id).has_full_plan,
         "promo_channels": list_promo_channel_logins(_db),
         "embed_parent": embed_parent_host(),
     }
@@ -524,18 +512,6 @@ def api_send(
     auth = _db.get_chat_auth(user_id)
     if not auth or not auth.refresh_token:
         return _err(401, "twitch_auth_required")
-    unlimited = chat_send_unlimited(_db, user_id, broadcaster_login=login)
-    day = _utc_day()
-    sent = _db.get_chat_send_count(user_id, day)
-    limit = chat_daily_send_limit(_db, user_id)
-    if not unlimited and limit is not None and sent >= limit:
-        return 429, {
-            "ok": False,
-            "error": "daily_limit",
-            "daily_limit": limit,
-            "sent_today": sent,
-            "remaining": 0,
-        }
     broadcaster = _twitch.get_user(login)
     if not broadcaster:
         return _err(404, "not_found")
@@ -561,17 +537,11 @@ def api_send(
     except Exception as exc:
         logger.warning("chat send failed user=%s: %s", user_id, exc)
         return _err(502, "send_failed")
-    # Promo channel sends do not consume the free daily quota.
-    if is_promo_channel(login, _db):
-        new_count = sent
-    else:
-        new_count = _db.increment_chat_send_count(user_id, day)
-    remaining = None if unlimited else max(0, int(limit or 0) - new_count)
     return 200, {
         "ok": True,
-        "sent_today": new_count,
-        "remaining": remaining,
-        "unlimited": unlimited,
+        "sent_today": 0,
+        "remaining": None,
+        "unlimited": True,
     }
 
 

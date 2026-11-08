@@ -505,7 +505,12 @@
     const section = el("other-section");
     const list = el("other-list");
     list.innerHTML = "";
-    if (!session || session.unlimited || !streams || !streams.length) {
+    if (
+      !session ||
+      session.show_other_streams === false ||
+      !streams ||
+      !streams.length
+    ) {
       section.classList.add("hidden");
       return;
     }

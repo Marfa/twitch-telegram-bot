@@ -33,7 +33,6 @@
       "branch": "feat/stream-chat",
       "title_key": "beta_feat_stream_chat",
       "description_key": "beta_feat_stream_chat_desc",
-      "premium_feature_id": "stream_chat",
       "issue_label": "beta/stream-chat",
       "stage": "ga",
       "created_at": "2026-08-21"

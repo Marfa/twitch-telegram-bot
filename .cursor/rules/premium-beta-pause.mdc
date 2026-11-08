@@ -28,7 +28,6 @@ Gates: `has_feature` / `has_feature_sync`, `beta_features.is_enabled` / `grants_
 | `schedule_publish` | Schedule publish / Twitch schedule work **unavailable** (config kept). |
 | `alert_history` | UI shows **free window only** (`ALERT_HISTORY_FREE_DAYS`); older rows stay in storage but are **hidden** until paid (`ALERT_HISTORY_PREMIUM_DAYS`). |
 | `deleted_subscriptions_cart` | Cart UI uses **free days** (`DELETED_SUBSCRIPTIONS_CART_FREE_DAYS`); older cart entries **hidden** until paid (premium days). |
-| `stream_chat` | Mini App chat send falls back to **daily free limit** (`CHAT_FREE_DAILY_SEND_LIMIT`); not wiped. |
 | `follow_monitor` | Follow/unfollow monitor **paused**. |
 | `ai_clips` | AI clips **unavailable**; auto-create clips **paused**. |
 | `channel_stats` | Channel stats Helix poll **paused** (track + samples kept); card UI upsells. |

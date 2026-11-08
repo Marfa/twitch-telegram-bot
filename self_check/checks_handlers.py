@@ -424,7 +424,7 @@ def check_handlers() -> None:
             _demo.deactivate(249097744)
         assert not prem.has_feature_sync(db, 249097744, "delay", channel="other")
         assert prem.chat_send_unlimited(db, 249097744, broadcaster_login="marfapr")
-        assert not prem.chat_send_unlimited(db, 249097744, broadcaster_login="other")
+        assert prem.chat_send_unlimited(db, 249097744, broadcaster_login="other")
         # Promo channel does not consume free active slots.
         db.add_subscription(
             owner_id=249097744,
@@ -464,7 +464,7 @@ def check_handlers() -> None:
             if (b.callback_data or "").startswith("premium:feat_toggle:")
         }
         purchasable = set(prem.purchasable_feature_ids())
-        assert "stream_chat" in purchasable
+        assert "stream_chat" not in purchasable
         assert "deleted_subscriptions_cart" in purchasable
         assert "alert_history" in purchasable
         toggle_ids = {
@@ -475,7 +475,7 @@ def check_handlers() -> None:
             for b in row
             if (b.callback_data or "").startswith("premium:feat_toggle:")
         }
-        assert "stream_chat" in toggle_ids
+        assert "stream_chat" not in toggle_ids
         assert "deleted_subscriptions_cart" in toggle_ids
         db.upsert_user(2)
         from unittest.mock import patch
@@ -518,7 +518,7 @@ def check_handlers() -> None:
         status="s",
     )
     assert "Продвинутые опции оповещений" in _pt
-    assert "мини-приложении" in _pt
+    assert "мини-приложении" not in _pt
     assert "Реклама канала" in _pt
     assert "рекомендация" in _pt
     # Full plan + à la carte share the same feature labels.
@@ -1781,7 +1781,7 @@ def check_handlers() -> None:
     assert is_menu_button(beta_mode_btn("ru", 2, 5))
     assert not is_menu_button("not a menu button")
 
-    assert "stream_chat" in FEATURE_IDS
+    assert "stream_chat" not in FEATURE_IDS
     assert "follow_monitor" in FEATURE_IDS
     assert "follow_monitor" in prem.purchasable_feature_ids()
     assert "ai_clips" in FEATURE_IDS
@@ -2047,12 +2047,11 @@ def check_handlers() -> None:
     assert "stream-chat" not in {f.id for f in beta_mod.list_features()}
     assert "deleted-subscriptions-cart" not in {f.id for f in beta_mod.list_features()}
     sc_feat = beta_mod.get_feature("stream-chat")
-    assert sc_feat is not None and sc_feat.premium_feature_id == "stream_chat"
+    assert sc_feat is not None and not sc_feat.premium_feature_id
     assert sc_feat.stage == "ga"
-    assert "stream_chat" in prem.purchasable_feature_ids()
+    assert "stream_chat" not in prem.purchasable_feature_ids()
     assert "deleted_subscriptions_cart" in prem.purchasable_feature_ids()
     assert tr("menu_btn_chat", "ru") == "Чат"
-    assert tr("premium_feat_stream_chat", "ru")
     assert tr("beta_feat_stream_chat", "en")
     from chat_webapp import (
         WEBAPP_DIR,
@@ -2063,12 +2062,12 @@ def check_handlers() -> None:
         validate_webapp_init_data,
         validate_webapp_token,
     )
-    from premium import CHAT_FREE_DAILY_SEND_LIMIT, chat_daily_send_limit
+    from premium import chat_daily_send_limit
 
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=19' in (WEBAPP_DIR / "index.html").read_text(
+    assert '/app/chat/app.js?v=20' in (WEBAPP_DIR / "index.html").read_text(
         encoding="utf-8"
     )
     html = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
@@ -2424,7 +2423,7 @@ def check_handlers() -> None:
         cdb = SqliteDatabase(Path(chat_tmp) / "chat.db")
         cdb.upsert_user(777)
         ensure_trial_expired(cdb, 777)
-        assert chat_daily_send_limit(cdb, 777) == CHAT_FREE_DAILY_SEND_LIMIT
+        assert chat_daily_send_limit(cdb, 777) is None
         assert cdb.get_chat_send_count(777, "2026-08-21") == 0
         assert cdb.increment_chat_send_count(777, "2026-08-21") == 1
         assert cdb.increment_chat_send_count(777, "2026-08-21") == 2
@@ -2439,23 +2438,13 @@ def check_handlers() -> None:
         assert auth.twitch_login == "viewer"
         assert auth.refresh_token == "refresh-token-value"
         cdb.set_beta_enrollment(777, "stream-chat", True)
-        # GA: beta enrollment no longer grants unlimited chat.
-        assert chat_daily_send_limit(cdb, 777) == CHAT_FREE_DAILY_SEND_LIMIT
-        import time as _t
-
-        cdb.upsert_user(778)
-        ensure_trial_expired(cdb, 778)
-        assert chat_daily_send_limit(cdb, 778) == CHAT_FREE_DAILY_SEND_LIMIT
-        cdb.extend_premium_features(
-            778, ["stream_chat"], until_unix=int(_t.time()) + 3600, charge_id="chat1"
-        )
-        assert chat_daily_send_limit(cdb, 778) is None
+        assert chat_daily_send_limit(cdb, 777) is None
 
         import chat_webapp as cw
 
         cdb.upsert_user(779)
         ensure_trial_expired(cdb, 779)
-        assert chat_daily_send_limit(cdb, 779) == CHAT_FREE_DAILY_SEND_LIMIT
+        assert chat_daily_send_limit(cdb, 779) is None
         cdb.upsert_premium_channel(
             twitch_user_id="200",
             twitch_login="paidstreamer",
@@ -2504,9 +2493,8 @@ def check_handlers() -> None:
             other = cw._other_promo_streams(779, sub_logins={"marfapr"})
         assert len(other) == 1
         assert other[0]["login"] == "paidstreamer"
-        cdb.extend_premium_features(
-            779, ["stream_chat"], until_unix=int(_t.time()) + 3600, charge_id="chat2"
-        )
+        # Full plan hides promo discovery.
+        cdb.set_premium_permanent(779, True)
         with patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", fake):
             assert cw._other_promo_streams(779, sub_logins=set()) == []
 

@@ -43,7 +43,6 @@ FEATURE_IDS: tuple[str, ...] = (
     "schedule_publish",
     "alert_history",
     "deleted_subscriptions_cart",
-    "stream_chat",
     "follow_monitor",
     "ai_clips",
     "channel_stats",
@@ -101,15 +100,10 @@ _FEATURE_LABEL_KEYS = {
     "schedule_publish": "premium_feat_schedule_publish",
     "alert_history": "premium_feat_alert_history",
     "deleted_subscriptions_cart": "premium_feat_deleted_subscriptions_cart",
-    "stream_chat": "premium_feat_stream_chat",
     "follow_monitor": "premium_feat_follow_monitor",
     "ai_clips": "premium_feat_ai_clips",
     "channel_stats": "premium_feat_channel_stats",
 }
-
-# Free Mini App chat: read unlimited; send capped unless stream_chat / full plan.
-CHAT_FREE_DAILY_SEND_LIMIT = 20
-
 
 def deleted_subscriptions_cart_days(db: "Database", user_id: int) -> int:
     """10 days for free, 30 days if feature (or full plan) is active."""
@@ -123,11 +117,8 @@ def deleted_subscriptions_cart_days(db: "Database", user_id: int) -> int:
 
 
 def chat_daily_send_limit(db: "Database", user_id: int) -> int | None:
-    """None = unlimited (Premium stream_chat / full plan); else free daily cap."""
-    ensure_trial_expired(db, user_id)
-    if has_feature_sync(db, user_id, "stream_chat"):
-        return None
-    return CHAT_FREE_DAILY_SEND_LIMIT
+    """None = unlimited (stream chat is free for everyone)."""
+    return None
 
 
 def is_promo_channel(login: str | None, db: "Database | None" = None) -> bool:
@@ -154,10 +145,8 @@ def list_promo_channel_logins(db: "Database") -> list[str]:
 def chat_send_unlimited(
     db: "Database", user_id: int, *, broadcaster_login: str | None = None
 ) -> bool:
-    """True if this send should not consume the free daily chat quota."""
-    if is_promo_channel(broadcaster_login, db):
-        return True
-    return chat_daily_send_limit(db, user_id) is None
+    """True — Mini App chat sends are free / unlimited for everyone."""
+    return True
 
 
 @dataclass(frozen=True)
