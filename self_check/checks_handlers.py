@@ -1847,6 +1847,43 @@ def check_handlers() -> None:
         assert not _csdb.has_any_enabled_channel_stats()
         # Pause keeps row (settings preserved).
         assert _csdb.get_channel_stats_track(41) is not None
+    from handlers.channel_stats import build_channel_stats_chat_data
+    from telegram_widgets import (
+        CHANNEL_STATS_WIDGET_HTML,
+        PREMIUM_DIGEST_WIDGET_HTML,
+        WIDGET_DATA_MAX,
+        WIDGET_ZLIB_MAX,
+        assert_widget_limits,
+        widget_zlib_size,
+    )
+
+    assert widget_zlib_size(CHANNEL_STATS_WIDGET_HTML) <= WIDGET_ZLIB_MAX
+    assert widget_zlib_size(PREMIUM_DIGEST_WIDGET_HTML) <= WIDGET_ZLIB_MAX
+    assert_widget_limits(CHANNEL_STATS_WIDGET_HTML)
+    assert_widget_limits(PREMIUM_DIGEST_WIDGET_HTML)
+    _cs_chat = build_channel_stats_chat_data(_cs_snap, "ru")
+    assert len(_cs_chat.encode("utf-8")) <= WIDGET_DATA_MAX
+    from handlers.monitoring import build_premium_digest_chat_data
+
+    class _DigRow:
+        def __init__(self, uid: int, stars: int, renewal: bool) -> None:
+            self.id = uid
+            self.user_id = uid
+            self.kind = "month"
+            self.stars = stars
+            self.is_renewal = renewal
+            self.features = ""
+            self.until_unix = 0
+            self.source = "test"
+            self.source_feature = ""
+
+    _dig_rows = [_DigRow(1000 + i, 100, i % 2 == 1) for i in range(12)]
+    _dig_chat = build_premium_digest_chat_data(
+        "ru", rows=_dig_rows, new_count=6, renew_count=6
+    )
+    assert len(_dig_chat.encode("utf-8")) <= WIDGET_DATA_MAX
+    assert tr("premium_digest_full_btn", "ru")
+    assert tr("premium_digest_widget_title", "en", date="01.01")
     fm_feat = beta_mod.get_feature("follow-monitor")
     assert fm_feat is not None and fm_feat.premium_feature_id == "follow_monitor"
     assert fm_feat.stage == "ga"

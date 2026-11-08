@@ -431,6 +431,8 @@ flowchart TD
 
 ## 7. 📜 История оповещений
 
+Канон: текстовые страницы HTML + deep links. HTMLBubbles для истории **отложены** — [`todo-htmlbubbles-alert-history.md`](todo-htmlbubbles-alert-history.md).
+
 | | |
 |---|---|
 | Заголовок | История за 7 дн. (free) / 60 дн. (Premium) |

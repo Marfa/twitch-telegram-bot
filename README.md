@@ -75,7 +75,7 @@ English: [README.en.md](README.en.md)
 | Безлимитный чат стримов в Mini App | На бесплатном — чтение + 20 сообщений/день |
 | Follow/Unfollow канала | Мониторинг и оповещения — Premium; списки Follow / новых Follow и Unfollow за 30 дней доступны без Premium |
 | AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (Premium / а-ля карт `ai_clips`): до 5 клипов — «clip»/«клип» в чате → Groq emotion (ASR+балл>3) → Groq game-контекст всплеска → остальные audio → остальные spike; без Groq — как раньше по пикам; Helix Create Clip From VOD; авто для новых VOD |
-| Статистика канала | **📦 Прочее → 📊 Статистика канала** (Premium / а-ля карт `channel_stats`): OAuth своего канала → PNG-карточка (онлайн/пик/часы/игры); Helix-опрос ~10 мин; обогащение TwitchTracker summary; при отмене Premium сбор паузится |
+| Статистика канала | **📦 Прочее → 📊 Статистика канала** (Premium / а-ля карт `channel_stats`): OAuth своего канала → HTMLBubble-карточка (онлайн/пик/часы/игры; фоллбек PNG); Helix-опрос ~10 мин; обогащение TwitchTracker summary; при отмене Premium сбор паузится |
 | Реклама канала для стримеров | Бесплатные взаимодействия с ботом для зрителей, приоритет в «Оповещение по игре», welcome-рекомендация (подписка Stars) |
 
 Цены задаются env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
@@ -333,6 +333,8 @@ python main.py
 | `ENABLE_PREMIUM` | Premium-магазин и гейты (`0` по умолчанию — всё платное бесплатно; на VPS `1`) |
 | `ENABLE_HELP` | Кнопка «Помощь» (`0` по умолчанию — кнопки нет, платное бесплатно; на VPS `1`) |
 | `ENABLE_PARTNER` | Партнёрка (`0` по умолчанию — выкл; на VPS `1`) |
+| `ENABLE_HTML_WIDGETS` | HTMLBubbles (`sendWidget`): channel stats и admin Premium digest (`1` по умолчанию; иначе сразу PNG/текст) |
+| `TELEGRAM_WIDGET_API_ROOT` | Хост Bot API для виджетов (по умолчанию `https://api.telegram.org/beta`, пока метода нет в stable) |
 | `PREMIUM_FREE_ACTIVE_LIMIT` | Сколько активных алертов без Premium (по умолчанию 5) |
 | `PREMIUM_STARS_AMOUNT` | Месячная Stars-подписка (по умолчанию 100) |
 | `PREMIUM_STARS_YEAR` | Год Stars разово (по умолчанию 1000) |
