@@ -7,7 +7,6 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from html import escape as html_escape
 from typing import Any
 from urllib.request import Request, urlopen
 
@@ -20,7 +19,7 @@ import premium as prem
 from bot_helpers import _user_lang, reply_chat_id, with_oauth_legal
 from db import ChannelStatsSample, ChannelStatsTrack, Database
 from i18n import DEFAULT_LOCALE, other_menu, t
-from twitch import TwitchClient
+from twitch import TwitchClient, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
 
@@ -514,7 +513,7 @@ async def _deliver_card(
     caption = t(
         "channel_stats_caption",
         lang,
-        login=html_escape(snap.login),
+        channel_link=twitch_login_link_html(snap.login),
     )
     if snap.cold_start:
         caption += "\n\n" + t("channel_stats_cold_start", lang)

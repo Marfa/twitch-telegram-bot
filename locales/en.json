@@ -1405,7 +1405,7 @@
   "channel_stats_failed": "Could not build channel stats. Please try again.",
   "channel_stats_building": "Building your stats card…",
   "channel_stats_linked": "Channel {channel} confirmed. Building the card…",
-  "channel_stats_caption": "Channel stats for <b>{login}</b>",
+  "channel_stats_caption": "Channel stats for {channel_link}",
   "channel_stats_caption_tt": "Some figures: TwitchTracker (30 days).",
   "channel_stats_cold_start": "History is still short — we’re collecting streams. Numbers improve after a few broadcasts.",
   "channel_stats_kpi_avg": "Avg viewers",

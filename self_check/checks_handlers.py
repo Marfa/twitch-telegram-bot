@@ -1815,6 +1815,10 @@ def check_handlers() -> None:
     assert "channel_stats_cold_start" not in _cs_src.split(
         "def render_channel_stats_card", 1
     )[1].split("async def _send_oauth_prompt", 1)[0]
+    assert "{channel_link}" in tr("channel_stats_caption", "ru")
+    assert "twitch_login_link_html" in _cs_src
+    assert "<b>" not in tr("channel_stats_caption", "ru")
+    assert "<b>" not in tr("channel_stats_caption", "en")
     _cs_base = datetime(2026, 10, 6, 12, tzinfo=timezone.utc)
     _cs_samples = [
         _CSS(
