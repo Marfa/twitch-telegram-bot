@@ -1856,23 +1856,17 @@ def check_handlers() -> None:
         assert not _csdb.has_any_enabled_channel_stats()
         # Pause keeps row (settings preserved).
         assert _csdb.get_channel_stats_track(41) is not None
-    from handlers.channel_stats import build_channel_stats_chat_data
     from telegram_widgets import (
-        CHANNEL_STATS_WIDGET_HTML,
         PREMIUM_DIGEST_WIDGET_HTML,
         WIDGET_DATA_MAX,
         WIDGET_ZLIB_MAX,
         assert_widget_limits,
         widget_zlib_size,
     )
-
-    assert widget_zlib_size(CHANNEL_STATS_WIDGET_HTML) <= WIDGET_ZLIB_MAX
-    assert widget_zlib_size(PREMIUM_DIGEST_WIDGET_HTML) <= WIDGET_ZLIB_MAX
-    assert_widget_limits(CHANNEL_STATS_WIDGET_HTML)
-    assert_widget_limits(PREMIUM_DIGEST_WIDGET_HTML)
-    _cs_chat = build_channel_stats_chat_data(_cs_snap, "ru")
-    assert len(_cs_chat.encode("utf-8")) <= WIDGET_DATA_MAX
     from handlers.monitoring import build_premium_digest_chat_data
+
+    assert widget_zlib_size(PREMIUM_DIGEST_WIDGET_HTML) <= WIDGET_ZLIB_MAX
+    assert_widget_limits(PREMIUM_DIGEST_WIDGET_HTML)
 
     class _DigRow:
         def __init__(self, uid: int, stars: int, renewal: bool) -> None:

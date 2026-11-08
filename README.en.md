@@ -74,7 +74,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
 | AI clips from VOD | **📦 Other → 🎬 AI clips** (Premium / à la carte `ai_clips`): up to 5 clips — chat «clip»/«клип» → Groq emotion (ASR+score>3) → Groq game context on chat spikes → remaining audio → remaining spikes; without Groq falls back to peaks; Helix Create Clip From VOD; auto for new VODs |
-| Channel stats | **📦 Other → 📊 Channel stats** (Premium / à la carte `channel_stats`): OAuth your channel → HTMLBubble card (avg/peak/airtime/games; PNG fallback); Helix poll ~10 min; TwitchTracker summary enrich; polling pauses when Premium ends |
+| Channel stats | **📦 Other → 📊 Channel stats** (Premium / à la carte `channel_stats`): OAuth your channel → PNG card (avg/peak/airtime/games); Helix poll ~10 min; TwitchTracker summary enrich; polling pauses when Premium ends |
 | Channel advertising for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend (Stars subscription) |
 
 Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LIFETIME`, `PREMIUM_STARS_FEATURE`, `PREMIUM_CHANNEL_STARS`, `PREMIUM_TRIAL_DAYS`, `PREMIUM_FREE_ACTIVE_LIMIT`.
@@ -332,7 +332,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `ENABLE_PREMIUM` | Premium shop and gates (`0` default — all paid features free; set `1` on VPS) |
 | `ENABLE_HELP` | Help button (`0` default — hidden, paid features free; set `1` on VPS) |
 | `ENABLE_PARTNER` | Partner program (`0` default — off; set `1` on VPS) |
-| `ENABLE_HTML_WIDGETS` | HTMLBubbles (`sendWidget`): channel stats and admin Premium digest (`1` default; else PNG/text only) |
+| `ENABLE_HTML_WIDGETS` | HTMLBubbles (`sendWidget`) for **admin** Premium digest (`1` default; else plain text) |
 | `TELEGRAM_WIDGET_API_ROOT` | Bot API host for widgets (default `https://api.telegram.org/beta` until stable has the method) |
 | `PREMIUM_FREE_ACTIVE_LIMIT` | Active alerts without Premium (default 5) |
 | `PREMIUM_STARS_AMOUNT` | Monthly Stars subscription (default 100) |

@@ -290,56 +290,7 @@ def render_channel_stats_card(snap: ChannelStatsSnapshot, lang: str) -> bytes:
 
     # KPI row
     kpi_y = 170
-    boxes = [
-        (
-            t("channel_stats_kpi_avg", lang),
-            _fmt_num(snap.avg_4w),
-            t("channel_stats_kpi_avg_sub", lang),
-        ),
-        (
-            t("channel_stats_kpi_peak", lang),
-            _fmt_num(snap.peak_all, digits=0),
-            t("channel_stats_kpi_peak_sub", lang),
-        ),
-        (
-            t("channel_stats_kpi_air", lang),
-            _fmt_hours(snap.hours_per_week),
-            t("channel_stats_kpi_air_sub", lang),
-        ),
-        (
-            t("channel_stats_kpi_growth", lang),
-            (
-                f"{_fmt_num(snap.growth_pct)} %"
-                if snap.growth_pct is not None
-                else "—"
-            ),
-            t("channel_stats_kpi_growth_sub", lang),
-        ),
-    ]
-    # Prefer TT numbers when cold and TT has data
-    if snap.cold_start and snap.tt:
-        if snap.avg_4w is None and "avg_viewers" in snap.tt:
-            boxes[0] = (
-                boxes[0][0],
-                _fmt_num(snap.tt.get("avg_viewers")),
-                "TwitchTracker · 30d",
-            )
-        if snap.peak_all is None and "max_viewers" in snap.tt:
-            boxes[1] = (
-                boxes[1][0],
-                _fmt_num(snap.tt.get("max_viewers"), digits=0),
-                "TwitchTracker · 30d",
-            )
-        mins = snap.tt.get("minutes_streamed")
-        if snap.hours_per_week is None and mins is not None:
-            try:
-                boxes[2] = (
-                    boxes[2][0],
-                    _fmt_hours(float(mins) / 60.0 / 4.0),
-                    "TwitchTracker · 30d",
-                )
-            except (TypeError, ValueError):
-                pass
+    boxes = _kpi_boxes_for_snap(snap, lang)
 
     gap = 16
     box_w = (W - 80 - 3 * gap) // 4
@@ -470,6 +421,59 @@ async def maybe_pause_channel_stats(
     analytics.capture(
         user_id, "channel_stats_paused", {"reason": "unentitled"}
     )
+
+
+def _kpi_boxes_for_snap(snap: ChannelStatsSnapshot, lang: str) -> list[tuple[str, str, str]]:
+    boxes = [
+        (
+            t("channel_stats_kpi_avg", lang),
+            _fmt_num(snap.avg_4w),
+            t("channel_stats_kpi_avg_sub", lang),
+        ),
+        (
+            t("channel_stats_kpi_peak", lang),
+            _fmt_num(snap.peak_all, digits=0),
+            t("channel_stats_kpi_peak_sub", lang),
+        ),
+        (
+            t("channel_stats_kpi_air", lang),
+            _fmt_hours(snap.hours_per_week),
+            t("channel_stats_kpi_air_sub", lang),
+        ),
+        (
+            t("channel_stats_kpi_growth", lang),
+            (
+                f"{_fmt_num(snap.growth_pct)} %"
+                if snap.growth_pct is not None
+                else "—"
+            ),
+            t("channel_stats_kpi_growth_sub", lang),
+        ),
+    ]
+    if snap.cold_start and snap.tt:
+        if snap.avg_4w is None and "avg_viewers" in snap.tt:
+            boxes[0] = (
+                boxes[0][0],
+                _fmt_num(snap.tt.get("avg_viewers")),
+                "TwitchTracker · 30d",
+            )
+        if snap.peak_all is None and "max_viewers" in snap.tt:
+            boxes[1] = (
+                boxes[1][0],
+                _fmt_num(snap.tt.get("max_viewers"), digits=0),
+                "TwitchTracker · 30d",
+            )
+        mins = snap.tt.get("minutes_streamed")
+        if snap.hours_per_week is None and mins is not None:
+            try:
+                boxes[2] = (
+                    boxes[2][0],
+                    _fmt_hours(float(mins) / 60.0 / 4.0),
+                    "TwitchTracker · 30d",
+                )
+            except (TypeError, ValueError):
+                pass
+    return boxes
 
 
 async def _deliver_card(
