@@ -290,7 +290,56 @@ def render_channel_stats_card(snap: ChannelStatsSnapshot, lang: str) -> bytes:
 
     # KPI row
     kpi_y = 170
-    boxes = _kpi_boxes_for_snap(snap, lang)
+    boxes = [
+        (
+            t("channel_stats_kpi_avg", lang),
+            _fmt_num(snap.avg_4w),
+            t("channel_stats_kpi_avg_sub", lang),
+        ),
+        (
+            t("channel_stats_kpi_peak", lang),
+            _fmt_num(snap.peak_all, digits=0),
+            t("channel_stats_kpi_peak_sub", lang),
+        ),
+        (
+            t("channel_stats_kpi_air", lang),
+            _fmt_hours(snap.hours_per_week),
+            t("channel_stats_kpi_air_sub", lang),
+        ),
+        (
+            t("channel_stats_kpi_growth", lang),
+            (
+                f"{_fmt_num(snap.growth_pct)} %"
+                if snap.growth_pct is not None
+                else "—"
+            ),
+            t("channel_stats_kpi_growth_sub", lang),
+        ),
+    ]
+    # Prefer TT numbers when cold and TT has data
+    if snap.cold_start and snap.tt:
+        if snap.avg_4w is None and "avg_viewers" in snap.tt:
+            boxes[0] = (
+                boxes[0][0],
+                _fmt_num(snap.tt.get("avg_viewers")),
+                "TwitchTracker · 30d",
+            )
+        if snap.peak_all is None and "max_viewers" in snap.tt:
+            boxes[1] = (
+                boxes[1][0],
+                _fmt_num(snap.tt.get("max_viewers"), digits=0),
+                "TwitchTracker · 30d",
+            )
+        mins = snap.tt.get("minutes_streamed")
+        if snap.hours_per_week is None and mins is not None:
+            try:
+                boxes[2] = (
+                    boxes[2][0],
+                    _fmt_hours(float(mins) / 60.0 / 4.0),
+                    "TwitchTracker · 30d",
+                )
+            except (TypeError, ValueError):
+                pass
 
     gap = 16
     box_w = (W - 80 - 3 * gap) // 4
@@ -423,118 +472,6 @@ async def maybe_pause_channel_stats(
     )
 
 
-def _kpi_boxes_for_snap(snap: ChannelStatsSnapshot, lang: str) -> list[tuple[str, str, str]]:
-    boxes = [
-        (
-            t("channel_stats_kpi_avg", lang),
-            _fmt_num(snap.avg_4w),
-            t("channel_stats_kpi_avg_sub", lang),
-        ),
-        (
-            t("channel_stats_kpi_peak", lang),
-            _fmt_num(snap.peak_all, digits=0),
-            t("channel_stats_kpi_peak_sub", lang),
-        ),
-        (
-            t("channel_stats_kpi_air", lang),
-            _fmt_hours(snap.hours_per_week),
-            t("channel_stats_kpi_air_sub", lang),
-        ),
-        (
-            t("channel_stats_kpi_growth", lang),
-            (
-                f"{_fmt_num(snap.growth_pct)} %"
-                if snap.growth_pct is not None
-                else "—"
-            ),
-            t("channel_stats_kpi_growth_sub", lang),
-        ),
-    ]
-    if snap.cold_start and snap.tt:
-        if snap.avg_4w is None and "avg_viewers" in snap.tt:
-            boxes[0] = (
-                boxes[0][0],
-                _fmt_num(snap.tt.get("avg_viewers")),
-                "TwitchTracker · 30d",
-            )
-        if snap.peak_all is None and "max_viewers" in snap.tt:
-            boxes[1] = (
-                boxes[1][0],
-                _fmt_num(snap.tt.get("max_viewers"), digits=0),
-                "TwitchTracker · 30d",
-            )
-        mins = snap.tt.get("minutes_streamed")
-        if snap.hours_per_week is None and mins is not None:
-            try:
-                boxes[2] = (
-                    boxes[2][0],
-                    _fmt_hours(float(mins) / 60.0 / 4.0),
-                    "TwitchTracker · 30d",
-                )
-            except (TypeError, ValueError):
-                pass
-    return boxes
-
-
-def build_channel_stats_chat_data(snap: ChannelStatsSnapshot, lang: str) -> str:
-    """Compact JSON for HTMLBubble chat_data (≤1024 UTF-8 bytes)."""
-    import json
-
-    name = snap.display_name or snap.login
-    boxes = _kpi_boxes_for_snap(snap, lang)
-    weeks = snap.weeks[-4:] if snap.weeks else []
-    max_avg = max((w.avg for w in weeks), default=1.0) or 1.0
-    week_rows = [
-        {
-            "h": int(max(3, min(100, round((w.avg / max_avg) * 100)))),
-            "l": w.week_start.strftime("%d.%m"),
-        }
-        for w in weeks
-    ]
-    games = " · ".join(gname[:18] for gname, _hours in (snap.games or [])[:3])
-    if not games:
-        games = t("channel_stats_no_games", lang)
-    foot = t("channel_stats_footer_tt" if snap.tt else "channel_stats_footer", lang)
-    payload: dict[str, Any] = {
-        "t": name[:40],
-        "k": [
-            {"v": value[:16], "l": label[:24], "s": sub[:24]}
-            for label, value, sub in boxes
-        ],
-        "w": week_rows,
-        "m": (t("channel_stats_games_title", lang) + ": " + games)[:120],
-        "f": foot[:80],
-    }
-    if snap.cold_start:
-        payload["c"] = t("channel_stats_cold_start", lang)[:120]
-    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    while len(raw.encode("utf-8")) > 1024 and payload.get("w"):
-        payload["w"] = payload["w"][1:]
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    while len(raw.encode("utf-8")) > 1024 and payload.get("c"):
-        payload.pop("c", None)
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    if len(raw.encode("utf-8")) > 1024:
-        payload.pop("m", None)
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    if len(raw.encode("utf-8")) > 1024:
-        raise ValueError("channel_stats chat_data too large")
-    return raw
-
-
-def _channel_stats_caption(snap: ChannelStatsSnapshot, lang: str) -> str:
-    caption = t(
-        "channel_stats_caption",
-        lang,
-        login=html_escape(snap.login),
-    )
-    if snap.cold_start:
-        caption += "\n\n" + t("channel_stats_cold_start", lang)
-    if snap.tt:
-        caption += "\n" + t("channel_stats_caption_tt", lang)
-    return caption
-
-
 async def _deliver_card(
     bot: Any,
     db: Database,
@@ -569,39 +506,27 @@ async def _deliver_card(
         profile_image_url=profile_url,
         tt=tt,
     )
-    caption = _channel_stats_caption(snap, lang)
-    markup = other_menu(lang)
-    via = "png"
-    try:
-        from telegram_widgets import CHANNEL_STATS_WIDGET_HTML, send_widget
-
-        chat_data = build_channel_stats_chat_data(snap, lang)
-        sent = send_widget(
-            chat_id=user_id,
-            html=CHANNEL_STATS_WIDGET_HTML,
-            chat_data=chat_data,
-            caption=caption,
-            height=420,
-            reply_markup=markup,
-        )
-        if sent.ok:
-            via = "widget"
-        else:
-            raise RuntimeError(sent.error or "sendWidget failed")
-    except Exception as exc:
-        logger.info("channel_stats widget fallback: %s", type(exc).__name__)
-        png = render_channel_stats_card(snap, lang)
-        await bot.send_photo(
-            chat_id=user_id,
-            photo=InputFile(io.BytesIO(png), filename="channel_stats.png"),
-            caption=caption,
-            parse_mode=ParseMode.HTML,
-            reply_markup=markup,
-        )
+    png = render_channel_stats_card(snap, lang)
+    caption = t(
+        "channel_stats_caption",
+        lang,
+        login=html_escape(snap.login),
+    )
+    if snap.cold_start:
+        caption += "\n\n" + t("channel_stats_cold_start", lang)
+    if tt:
+        caption += "\n" + t("channel_stats_caption_tt", lang)
+    await bot.send_photo(
+        chat_id=user_id,
+        photo=InputFile(io.BytesIO(png), filename="channel_stats.png"),
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+        reply_markup=other_menu(lang),
+    )
     analytics.capture(
         user_id,
         "channel_stats_card_sent",
-        {"samples": snap.sample_count, "tt": bool(tt), "via": via},
+        {"samples": snap.sample_count, "tt": bool(tt)},
     )
 
 
