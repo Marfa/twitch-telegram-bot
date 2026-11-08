@@ -1,0 +1,40 @@
+---
+description: Before work — verify project MCPs are available; ask user to connect if not
+alwaysApply: true
+---
+
+# MCP availability gate
+
+Перед началом работы (первый содержательный шаг агента в сессии / перед задачей, где MCP нужен) **проверить доступность MCP проекта**. Не продолжать работу, которая зависит от недоступного MCP, молча.
+
+## Expected MCP
+
+| Config | Namespace (typical) | Role |
+|--------|---------------------|------|
+| Project `.cursor/mcp.json` → `posthog` | `project-*-posthog` / PostHog tools | analytics, errors, insights |
+| Project `.cursor/mcp.json` → `viaduct` | `project-*-viaduct` / `c4_*` | C4 architecture model |
+| Project `.cursor/mcp.json` → `aiven` | `project-*-aiven` / Aiven tools | cold DR Postgres (read-only MCP) |
+| User `~/.cursor/mcp.json` → `pingzen` | `user-pingzen` | monitors, maintenance windows |
+
+Sources of truth for the list: `.cursor/mcp.json` (project) + user MCP config. If the list changes, update this table.
+
+## How to check
+
+1. Inspect available dynamic MCP namespaces / `namespaceStatus` (or a cheap tool call per server).
+2. Treat as **unavailable**: missing namespace, `needsAuth`, `error`, `loading` that does not become ready, auth/connection failures on a cheap probe.
+3. Cheap probes (optional, one each): PostHog `project-get` / `user-get`; Viaduct `c4_whoami`; PingZen `list_monitors` or `ping`.
+
+Do **not** burn a long workflow before the check. One short availability pass is enough per session unless a later call fails with auth/connection.
+
+## If unavailable
+
+1. **Stop** the part of the work that needs that MCP (or stop entirely if the task cannot proceed without it).
+2. **Ask the user** to connect / enable / re-auth the missing MCP(s). Name them explicitly (e.g. «PostHog MCP», «Viaduct», «PingZen»).
+3. Give a short hint: Cursor Settings → MCP; for Viaduct also `VIADUCT_MCP_TOKEN` in `.env`; then reload MCP / retry.
+4. Resume only after the user confirms they are connected, or after a re-check shows the namespace is ready.
+
+## Do not
+
+- Assume MCP tools work without checking when starting work that uses them.
+- Invent fallbacks that bypass PingZen maintenance / PostHog / Viaduct rules just because MCP is down — ask the user instead.
+- Put MCP tokens into Git, rules, or chat.

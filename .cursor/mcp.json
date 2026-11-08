@@ -8,6 +8,10 @@
       "headers": {
         "Authorization": "Bearer ${env:VIADUCT_MCP_TOKEN}"
       }
+    },
+    "aiven": {
+      "type": "http",
+      "url": "https://mcp.aiven.live/mcp?read_only=true"
     }
   }
 }
