@@ -2949,6 +2949,134 @@ async def _scenario_wizard_image_ask(db) -> None:
     assert is_game_cover_image(ctx.user_data.get("image_file_id"))
 
 
+async def _scenario_upcoming_schedule_block_repeats(db) -> None:
+    """§2 / §4 upcoming — «Запретить повторы» in Extras + edit under remind."""
+    from handlers.subscriptions import edit_menu, on_edit_bool_menu, on_edit_pick
+    from handlers.wizard import (
+        _go_advanced_options_prompt,
+        receive_advanced_options_toggle,
+        _wz,
+    )
+
+    # Create Extras: toggle present for upcoming, absent for live.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "soon",
+            "alert_type": "live",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    live_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:toggle:schedule_block_repeats" not in live_cbs
+    cap.assert_turn("wizard_schedule_block_repeats_hidden_on_live")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "soon",
+            "alert_type": "upcoming",
+            "twitch_username": "streamer",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    upcoming_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:toggle:schedule_block_repeats" in upcoming_cbs
+    cap.assert_turn("wizard_schedule_block_repeats_shown_on_upcoming")
+
+    update, _query = _cb_update(
+        _FREE_UID, "advopt:toggle:schedule_block_repeats", cap
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await receive_advanced_options_toggle(update, ctx)
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    assert ctx.user_data.get("adv_want_schedule_block_repeats") is True
+    cap.note_pulse()
+    cap.assert_turn("wizard_schedule_block_repeats_toggled")
+
+    # Edit: checkbox under «За сколько напомнить» when reminder is on.
+    sub_id = db.add_subscription(
+        owner_id=_FREE_UID,
+        twitch_username="upcoming_block",
+        twitch_user_id="200",
+        message_template="soon {minutes}",
+        dest_type="dm",
+        chat_id=_FREE_UID,
+        thread_id=None,
+        notify_on_live=False,
+        schedule_reminder_minutes=60,
+        schedule_reminder_configured=True,
+        schedule_reminder_block_repeats=False,
+    )
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("edit", "ru"), cap)
+    ctx = _ctx(application)
+    await edit_menu(update, ctx)
+    update, _query = _cb_update(_FREE_UID, f"edit:{sub_id}", cap)
+    with patch(
+        "handlers.subscriptions.prem.advanced_mode_on",
+        new=AsyncMock(return_value=True),
+    ), patch("beta.is_enabled", return_value=True):
+        await on_edit_pick(update, ctx)
+    edit_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert f"edit_f:{sub_id}:sched_remind" in edit_cbs
+    assert f"edit_f:{sub_id}:sched_block_reps" in edit_cbs
+
+    update, _query = _cb_update(
+        _FREE_UID, f"edit_f:{sub_id}:sched_block_reps", cap
+    )
+    with patch(
+        "handlers.subscriptions.prem.advanced_mode_on",
+        new=AsyncMock(return_value=True),
+    ), patch("beta.is_enabled", return_value=True):
+        await on_edit_bool_menu(update, ctx)
+    sub = db.get_subscription(sub_id, _FREE_UID)
+    assert sub is not None
+    assert sub.schedule_reminder_block_repeats is True
+    cap.assert_turn("subscriptions_edit_schedule_block_repeats")
+
+
 async def _scenario_subscriptions_edit_checkboxes(db) -> None:
     """§4 edit menu — boolean settings toggle via checkbox (no Yes/No)."""
     from handlers.subscriptions import edit_menu, on_edit_bool_menu, on_edit_pick
@@ -4723,6 +4851,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_subscriptions_edit_ignore_keywords(db)
         await _scenario_subscriptions_edit_game_alert(db)
         await _scenario_subscriptions_edit_type_copy(db)
+        await _scenario_upcoming_schedule_block_repeats(db)
         await _scenario_subscriptions_edit_checkboxes(db)
         await _scenario_subscriptions_edit_button_style(db)
         await _scenario_subscriptions_delete(db)

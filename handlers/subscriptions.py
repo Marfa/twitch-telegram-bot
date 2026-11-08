@@ -628,6 +628,8 @@ def _format_sub_line(
                 minutes=sub.schedule_reminder_minutes,
             )
         )
+        if bool(getattr(sub, "schedule_reminder_block_repeats", False)):
+            settings.append(t("sub_list_schedule_block_repeats_yes", lang))
     settings.append(
         t(
             "sub_list_dest",
@@ -4797,6 +4799,21 @@ async def on_edit_bool_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         sub = db.get_subscription(sub_id, query.from_user.id) or sub
         await _reshow_edit_menu(sub)
         return
+    if field == "sched_block_reps":
+        if (
+            _alert_type_from_sub(sub) != "upcoming"
+            or int(sub.schedule_reminder_minutes or 0) <= 0
+        ):
+            await query.answer()
+            return
+        await query.answer()
+        enabled = not bool(getattr(sub, "schedule_reminder_block_repeats", False))
+        db.update_subscription(
+            sub_id, query.from_user.id, schedule_reminder_block_repeats=enabled
+        )
+        sub = db.get_subscription(sub_id, query.from_user.id) or sub
+        await _reshow_edit_menu(sub)
+        return
     if field == "delete_old":
         if sub.dest_type == "dm":
             await query.answer()
@@ -6041,6 +6058,7 @@ _TYPE_MIGRATION_KEYS = (
     "block_overlap",
     "block_repeat_when_last",
     "schedule_reminder_minutes",
+    "schedule_reminder_block_repeats",
     "schedule_reminder_configured",
     "notify_on_live",
     "notify_on_end",
@@ -6132,6 +6150,9 @@ def _add_subscription_from_snapshot(
         block_repeat_when_last=bool(snapshot.get("block_repeat_when_last")),
         schedule_reminder_minutes=int(snapshot.get("schedule_reminder_minutes") or 0),
         schedule_reminder_configured=bool(snapshot.get("schedule_reminder_configured")),
+        schedule_reminder_block_repeats=bool(
+            snapshot.get("schedule_reminder_block_repeats")
+        ),
         ignore_keywords=str(snapshot.get("ignore_keywords") or ""),
         category_filter=str(snapshot.get("category_filter") or ""),
         use_global_ignore=bool(snapshot.get("use_global_ignore")),

@@ -321,6 +321,15 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN block_repeat_when_last "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "schedule_reminder_block_repeats" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN schedule_reminder_block_repeats "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_schedule_reminder_day" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN last_schedule_reminder_day TEXT"
+            )
         if "pinned_message_id" not in cols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN pinned_message_id INTEGER"
@@ -1602,6 +1611,7 @@ class SqliteDatabase:
         block_repeat_when_last: bool = False,
         schedule_reminder_minutes: int = 0,
         schedule_reminder_configured: bool = False,
+        schedule_reminder_block_repeats: bool = False,
         ignore_keywords: str = "",
         use_global_ignore: bool = False,
         category_filter: str = "",
@@ -1638,7 +1648,8 @@ owner_id, twitch_username, twitch_user_id,
                     custom_buttons, multistream_channels, button_style,
                     delay_minutes, suppress_repeat_minutes, repeat_notify_minutes,
                     block_overlap, block_repeat_when_last, schedule_reminder_minutes,
-                    schedule_reminder_configured, ignore_keywords, use_global_ignore,
+                    schedule_reminder_configured, schedule_reminder_block_repeats,
+                    ignore_keywords, use_global_ignore,
                     category_filter,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs, release_watch_prefs, giveaway_watch_prefs,
@@ -1648,7 +1659,7 @@ owner_id, twitch_username, twitch_user_id,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
                     use_stream_defaults
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1681,6 +1692,7 @@ owner_id, twitch_username, twitch_user_id,
                     int(bool(block_repeat_when_last)),
                     max(0, int(schedule_reminder_minutes)),
                     int(bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0),
+                    int(bool(schedule_reminder_block_repeats)),
                     ignore_keywords,
                     int(bool(use_global_ignore)),
                     str(category_filter or ""),
@@ -1791,12 +1803,25 @@ owner_id, twitch_username, twitch_user_id,
                 (sub_id,),
             )
 
-    def set_last_schedule_reminder_segment(self, sub_id: int, segment_id: str) -> None:
+    def set_last_schedule_reminder_segment(
+        self, sub_id: int, segment_id: str, *, day: str | None = None
+    ) -> None:
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE subscriptions SET last_schedule_reminder_segment_id = ? WHERE id = ?",
-                (segment_id, sub_id),
-            )
+            if day is None:
+                conn.execute(
+                    "UPDATE subscriptions SET last_schedule_reminder_segment_id = ? WHERE id = ?",
+                    (segment_id, sub_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_schedule_reminder_segment_id = ?,
+                        last_schedule_reminder_day = ?
+                    WHERE id = ?
+                    """,
+                    (segment_id, str(day or "").strip() or None, sub_id),
+                )
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]:
         with self._conn() as conn:
@@ -2012,6 +2037,7 @@ owner_id, twitch_username, twitch_user_id,
                         delay_minutes, suppress_repeat_minutes,
                         repeat_notify_minutes, block_overlap, block_repeat_when_last,
                         schedule_reminder_minutes, schedule_reminder_configured,
+                        schedule_reminder_block_repeats,
                         ignore_keywords, use_global_ignore,
                         category_filter,
                         image_file_id, image_position, enabled,
@@ -2023,7 +2049,7 @@ owner_id, twitch_username, twitch_user_id,
                         top_donations, top_donations_template, is_demo,
                         notify_on_schedule_cancel, schedule_cancel_template,
                         use_stream_defaults
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         owner_id,
@@ -2054,6 +2080,7 @@ owner_id, twitch_username, twitch_user_id,
                         int(bool(payload.get("block_repeat_when_last"))),
                         int(payload.get("schedule_reminder_minutes") or 0),
                         int(bool(payload.get("schedule_reminder_configured"))),
+                        int(bool(payload.get("schedule_reminder_block_repeats"))),
                         payload.get("ignore_keywords") or "",
                         int(bool(payload.get("use_global_ignore"))),
                         payload.get("category_filter") or "",
@@ -2137,6 +2164,7 @@ owner_id, twitch_username, twitch_user_id,
             "block_repeat_when_last",
             "schedule_reminder_minutes",
             "schedule_reminder_configured",
+            "schedule_reminder_block_repeats",
             "notify_on_live",
             "notify_on_end",
             "notify_on_category_change",
@@ -2187,6 +2215,7 @@ owner_id, twitch_username, twitch_user_id,
                 "use_stream_defaults",
                 "block_overlap",
                 "block_repeat_when_last",
+                "schedule_reminder_block_repeats",
             ):
                 values.append(int(bool(value)))
             elif key in (
@@ -2211,6 +2240,7 @@ owner_id, twitch_username, twitch_user_id,
                 "schedule_cancel_template",
                 "schedule_cancel_notified_days",
                 "top_donations_template",
+                "last_schedule_reminder_day",
             ):
                 if key == "button_style":
                     from custom_buttons import normalize_button_style

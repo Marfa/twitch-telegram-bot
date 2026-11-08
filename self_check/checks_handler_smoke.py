@@ -1664,6 +1664,84 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert any("Стрим по Вахта Хоррор" in t for t in title_texts)
     assert not any("Стрим по —" in t for t in title_texts)
 
+    # Block repeats: same calendar day + new segment id → no second send.
+    for prior_id in (remind_sub_id, title_sub_id):
+        prior = db.get_subscription_by_id(prior_id)
+        if prior is not None:
+            db.update_subscription(
+                prior_id, prior.owner_id, schedule_reminder_minutes=0
+            )
+    block_uid = _FREE_UID + 43
+    db.upsert_user(block_uid)
+    db.set_user_locale(block_uid, "en")
+    block_sub_id = db.add_subscription(
+        block_uid,
+        "marfapr",
+        "tw_sched_block",
+        "Remind {minutes}",
+        "dm",
+        block_uid,
+        None,
+    )
+    assert db.update_subscription(
+        block_sub_id,
+        block_uid,
+        notify_on_live=False,
+        schedule_reminder_minutes=60,
+        schedule_reminder_configured=True,
+        schedule_reminder_block_repeats=True,
+    )
+    block_start = (
+        datetime.now(timezone.utc) + timedelta(minutes=20)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    twitch_block = MagicMock()
+    twitch_block.get_channel_schedule = MagicMock(
+        return_value={
+            "vacation": None,
+            "broadcaster_timezone": "UTC",
+            "segments": [
+                {
+                    "id": "seg-day-a",
+                    "title": "first",
+                    "start_time": block_start,
+                    "canceled_until": None,
+                    "category": {"id": "1", "name": "Game"},
+                }
+            ],
+        }
+    )
+    twitch_block.vacation_active = MagicMock(return_value=False)
+    twitch_block.resolve_game_description = MagicMock(return_value="")
+    application.bot_data["twitch"] = twitch_block
+    bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=44))
+    bot.send_photo = AsyncMock()
+    ctx = _ctx(application)
+    ctx.job = None
+    await check_schedule_reminders(ctx)
+    assert bot.send_message.await_count == 1
+    block_sub = db.get_subscription(block_sub_id, block_uid)
+    assert block_sub is not None
+    assert block_sub.last_schedule_reminder_segment_id == "seg-day-a"
+    assert block_sub.last_schedule_reminder_day
+    twitch_block.get_channel_schedule = MagicMock(
+        return_value={
+            "vacation": None,
+            "broadcaster_timezone": "UTC",
+            "segments": [
+                {
+                    "id": "seg-day-b",
+                    "title": "reschedule",
+                    "start_time": block_start,
+                    "canceled_until": None,
+                    "category": {"id": "1", "name": "Game"},
+                }
+            ],
+        }
+    )
+    bot.send_message.reset_mock()
+    await check_schedule_reminders(ctx)
+    assert bot.send_message.await_count == 0
+
     # error_handler: blocked-user Forbidden is expected noise (not PostHog).
     from bot import error_handler
 

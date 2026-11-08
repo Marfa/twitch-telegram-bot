@@ -25,6 +25,7 @@ ALERT_SETTING_ORDER: tuple[str, ...] = (
     "top_donations",
     "preview",
     "schedule_remind",
+    "schedule_block_repeats",
     "schedule_cancel",
     "multistream",
 )
@@ -48,6 +49,7 @@ EDIT_FIELD: dict[str, str] = {
     "top_donations": "top_donations",
     "preview": "preview",
     "schedule_remind": "sched_remind",
+    "schedule_block_repeats": "sched_block_reps",
     "schedule_cancel": "schedule_cancel",
     "multistream": "multistream",
 }
@@ -69,6 +71,7 @@ ADVOPT_LABEL_KEY: dict[str, str] = {
     "top_donations": "advanced_options_top_donations",
     "preview": "advanced_options_preview",
     "schedule_remind": "edit_schedule_reminder",
+    "schedule_block_repeats": "advanced_options_schedule_block_repeats",
     "schedule_cancel": "advanced_options_schedule_cancel",
     "multistream": "advanced_options_multistream",
 }

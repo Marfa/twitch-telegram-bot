@@ -1512,7 +1512,10 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     from schedule_cancel import (
         build_schedule_day_map,
         find_emptied_schedule_days,
+        resolve_schedule_tz,
         schedule_cancel_suppressed,
+        schedule_reminder_blocked_for_day,
+        segment_day_key,
         segment_game_or_title,
     )
 
@@ -1623,6 +1626,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             remind_before = int(sub.schedule_reminder_minutes or 0)
             if remind_before <= 0:
                 continue
+            sched_tz = resolve_schedule_tz(tz_name)
             for segment in segments:
                 if segment.get("canceled_until"):
                     continue
@@ -1631,6 +1635,15 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                     continue
                 start = _parse_segment_start(segment)
                 if start is None or start <= now:
+                    continue
+                seg_day = segment_day_key(start, sched_tz)
+                if schedule_reminder_blocked_for_day(
+                    block_repeats=bool(
+                        getattr(sub, "schedule_reminder_block_repeats", False)
+                    ),
+                    last_day=getattr(sub, "last_schedule_reminder_day", None),
+                    segment_day=seg_day,
+                ):
                     continue
                 minutes_left = int((start - now).total_seconds() // 60)
                 if minutes_left > remind_before:
@@ -1675,7 +1688,7 @@ async def check_schedule_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
                 if not ok:
                     continue
-                db.set_last_schedule_reminder_segment(sub.id, seg_id)
+                db.set_last_schedule_reminder_segment(sub.id, seg_id, day=seg_day)
                 break
 
     from handlers.background_jobs import sync_optional_jobs

@@ -3518,10 +3518,12 @@ def check_core() -> None:
     with_remind["attach_live_remind_button"] = True
     with_remind["notify_on_schedule_cancel"] = True
     with_remind["schedule_cancel_template"] = "cancelled {date}"
+    with_remind["schedule_reminder_block_repeats"] = True
     live_clears = migrate_sub_fields_for_alert_type(with_remind, "live")
     assert live_clears["attach_live_remind_button"] is False
     assert live_clears["notify_on_schedule_cancel"] is False
     assert live_clears["schedule_cancel_template"] == ""
+    assert live_clears["schedule_reminder_block_repeats"] is False
 
 
     # message_fx: typing + draft stream with classic fallback
@@ -3735,8 +3737,19 @@ def check_core() -> None:
         build_schedule_day_map,
         find_emptied_schedule_days,
         schedule_cancel_suppressed,
+        schedule_reminder_blocked_for_day,
         segment_game_or_title,
         suppress_schedule_cancel,
+    )
+
+    assert schedule_reminder_blocked_for_day(
+        block_repeats=True, last_day="2026-09-22", segment_day="2026-09-22"
+    )
+    assert not schedule_reminder_blocked_for_day(
+        block_repeats=True, last_day="2026-09-22", segment_day="2026-09-23"
+    )
+    assert not schedule_reminder_blocked_for_day(
+        block_repeats=False, last_day="2026-09-22", segment_day="2026-09-22"
     )
 
     assert (

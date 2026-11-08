@@ -63,6 +63,7 @@ class Database(Protocol):
         block_repeat_when_last: bool = False,
         schedule_reminder_minutes: int = 0,
         schedule_reminder_configured: bool = False,
+        schedule_reminder_block_repeats: bool = False,
         ignore_keywords: str = "",
         use_global_ignore: bool = False,
         category_filter: str = "",
@@ -102,7 +103,7 @@ class Database(Protocol):
     def clear_notify_cooldown(self, sub_id: int) -> None: ...
 
     def set_last_schedule_reminder_segment(
-        self, sub_id: int, segment_id: str
+        self, sub_id: int, segment_id: str, *, day: str | None = None
     ) -> None: ...
 
     def get_subscription_by_id(self, sub_id: int) -> Subscription | None: ...

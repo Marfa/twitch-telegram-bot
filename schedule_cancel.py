@@ -31,6 +31,20 @@ def segment_day_key(start: datetime, tz: ZoneInfo) -> str:
     return start.astimezone(tz).date().isoformat()
 
 
+def schedule_reminder_blocked_for_day(
+    *,
+    block_repeats: bool,
+    last_day: str | None,
+    segment_day: str,
+) -> bool:
+    """True when once-per-day is on and this stream day was already reminded."""
+    if not block_repeats:
+        return False
+    day = (segment_day or "").strip()
+    prev = (last_day or "").strip()
+    return bool(day) and bool(prev) and prev == day
+
+
 def segment_game_or_title(segment: dict[str, Any]) -> str:
     """Helix category name, or segment title when the category is unset.
 

@@ -347,6 +347,8 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
                 "show_repeat": False,
                 "show_live_remind": True,
                 "want_live_remind": True,
+                "show_schedule_block_repeats": True,
+                "want_schedule_block_repeats": True,
                 "show_schedule_cancel": True,
                 "want_schedule_cancel": True,
                 "show_top_donations": False,

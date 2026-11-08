@@ -1346,6 +1346,7 @@ def advanced_options_keyboard(
     want_pin: bool = False,
     want_live_remind: bool = False,
     want_schedule_cancel: bool = False,
+    want_schedule_block_repeats: bool = False,
     want_multistream: bool = False,
     want_top_donations: bool = False,
     want_categories: bool = False,
@@ -1361,6 +1362,7 @@ def advanced_options_keyboard(
     show_buttons: bool = False,
     show_live_remind: bool = False,
     show_schedule_remind: bool = False,
+    show_schedule_block_repeats: bool = False,
     show_schedule_cancel: bool = False,
     show_multistream: bool = False,
     show_top_donations: bool = False,
@@ -1394,6 +1396,7 @@ def advanced_options_keyboard(
         "top_donations": want_top_donations,
         "preview": want_preview,
         "schedule_remind": False,
+        "schedule_block_repeats": want_schedule_block_repeats,
         "schedule_cancel": want_schedule_cancel,
         "multistream": want_multistream,
     }
@@ -1408,6 +1411,7 @@ def advanced_options_keyboard(
         "top_donations": show_top_donations,
         "preview": show_preview,
         "schedule_remind": show_schedule_remind,
+        "schedule_block_repeats": show_schedule_block_repeats,
         "schedule_cancel": show_schedule_cancel,
         "multistream": show_multistream,
     }
@@ -3068,6 +3072,7 @@ def edit_options_keyboard(
     schedule_reminder_minutes: int = 0,
     show_link_preview: bool = True,
     schedule_reminder_configured: bool = False,
+    schedule_reminder_block_repeats: bool = False,
     notify_on_category_change: bool = False,
     notify_on_end: bool = False,
     is_upcoming: bool = False,
@@ -3300,6 +3305,22 @@ def edit_options_keyboard(
                     [
                         InlineKeyboardButton(
                             remind_mark + t(ADVOPT_LABEL_KEY[sid], lang),
+                            callback_data=_cb(field),
+                        )
+                    ]
+                )
+            continue
+        if sid == "schedule_block_repeats":
+            if (
+                is_upcoming
+                and schedule_reminder_minutes > 0
+                and (for_defaults_editor or schedule_reminder_configured)
+            ):
+                block_mark = "✅ " if schedule_reminder_block_repeats else "⬜️ "
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            block_mark + t(ADVOPT_LABEL_KEY[sid], lang),
                             callback_data=_cb(field),
                         )
                     ]

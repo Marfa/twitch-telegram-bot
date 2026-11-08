@@ -1538,6 +1538,9 @@ async def _advanced_options_markup(
         want_chat=bool(context.user_data.get("adv_want_chat")),
         want_live_remind=bool(context.user_data.get("adv_want_live_remind")),
         want_schedule_cancel=bool(context.user_data.get("adv_want_schedule_cancel")),
+        want_schedule_block_repeats=bool(
+            context.user_data.get("adv_want_schedule_block_repeats")
+        ),
         want_multistream=bool(context.user_data.get("adv_want_multistream")),
         want_top_donations=bool(context.user_data.get("adv_want_top_donations")),
         want_preview=bool(context.user_data.get("adv_want_preview")),
@@ -1551,6 +1554,7 @@ async def _advanced_options_markup(
         show_preview=show_preview,
         show_buttons=show_buttons,
         show_live_remind=show_live_remind,
+        show_schedule_block_repeats=alert == "upcoming",
         show_schedule_cancel=show_schedule_cancel,
         show_multistream=show_multistream,
         show_top_donations=show_top_donations,
@@ -1601,6 +1605,7 @@ def _advanced_options_prompt_text(
     ):
         lines.append(t("advanced_options_hint_live_remind", lang))
     if alert == "upcoming":
+        lines.append(t("advanced_options_hint_schedule_block_repeats", lang))
         lines.append(t("advanced_options_hint_schedule_cancel", lang))
     if alert == "live" or not alert:
         lines.append(t("advanced_options_hint_multistream", lang))
@@ -1637,10 +1642,12 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("button_style", "")
     if context.user_data.get("alert_type") == "upcoming":
         context.user_data.setdefault("adv_want_live_remind", False)
+        context.user_data.setdefault("adv_want_schedule_block_repeats", False)
         context.user_data.setdefault("adv_want_schedule_cancel", False)
         context.user_data.pop("adv_want_multistream", None)
     else:
         context.user_data.pop("adv_want_live_remind", None)
+        context.user_data.pop("adv_want_schedule_block_repeats", None)
         context.user_data.pop("adv_want_schedule_cancel", None)
         if context.user_data.get("alert_type") == "live" or not context.user_data.get(
             "alert_type"
@@ -1730,6 +1737,7 @@ async def receive_advanced_options_toggle(
         "live_remind": "adv_want_live_remind",
         "top_donations": "adv_want_top_donations",
         "preview": "adv_want_preview",
+        "schedule_block_repeats": "adv_want_schedule_block_repeats",
         "schedule_cancel": "adv_want_schedule_cancel",
         "multistream": "adv_want_multistream",
     }.get(flag)
@@ -1937,12 +1945,16 @@ async def receive_advanced_options_next(
         context.user_data["attach_live_remind_button"] = bool(
             context.user_data.get("adv_want_live_remind")
         )
+        context.user_data["schedule_reminder_block_repeats"] = bool(
+            context.user_data.get("adv_want_schedule_block_repeats")
+        )
         want_cancel = bool(context.user_data.get("adv_want_schedule_cancel"))
         context.user_data["notify_on_schedule_cancel"] = want_cancel
         if not want_cancel:
             context.user_data["schedule_cancel_template"] = ""
     else:
         context.user_data["attach_live_remind_button"] = False
+        context.user_data["schedule_reminder_block_repeats"] = False
         context.user_data["notify_on_schedule_cancel"] = False
         context.user_data["schedule_cancel_template"] = ""
     if context.user_data.get("alert_type") == "end" and context.user_data.get(
@@ -2318,6 +2330,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             "adv_want_buttons",
             "adv_want_chat",
             "adv_want_live_remind",
+            "adv_want_schedule_block_repeats",
             "adv_want_schedule_cancel",
             "adv_want_multistream",
             "adv_want_top_donations",
@@ -4358,6 +4371,12 @@ async def _finish_subscription(
                     data.get("schedule_reminder_configured")
                 )
                 or int(data.get("schedule_reminder_minutes", 0)) > 0,
+                schedule_reminder_block_repeats=(
+                    bool(data.get("schedule_reminder_block_repeats"))
+                    or bool(data.get("adv_want_schedule_block_repeats"))
+                    if alert_type == "upcoming"
+                    else False
+                ),
                 ignore_keywords=str(data.get("ignore_keywords", "")),
                 use_global_ignore=bool(data.get("use_global_ignore")),
                 category_filter=str(data.get("category_filter") or ""),

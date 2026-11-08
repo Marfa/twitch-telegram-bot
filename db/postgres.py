@@ -547,6 +547,19 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS schedule_reminder_block_repeats
+                BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS last_schedule_reminder_day TEXT
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT
                 """
             )
@@ -1865,6 +1878,7 @@ class PostgresDatabase:
         block_repeat_when_last: bool = False,
         schedule_reminder_minutes: int = 0,
         schedule_reminder_configured: bool = False,
+        schedule_reminder_block_repeats: bool = False,
         ignore_keywords: str = "",
         use_global_ignore: bool = False,
         category_filter: str = "",
@@ -1902,7 +1916,8 @@ owner_id, twitch_username, twitch_user_id,
                     custom_buttons, multistream_channels, button_style,
                     delay_minutes, suppress_repeat_minutes, repeat_notify_minutes,
                     block_overlap, block_repeat_when_last, schedule_reminder_minutes,
-                    schedule_reminder_configured, ignore_keywords, use_global_ignore,
+                    schedule_reminder_configured, schedule_reminder_block_repeats,
+                    ignore_keywords, use_global_ignore,
                     category_filter,
                     image_file_id, image_position, enabled, from_twitch_sync,
                     from_watch_suggest, category_watch_prefs, release_watch_prefs, giveaway_watch_prefs,
@@ -1912,7 +1927,7 @@ owner_id, twitch_username, twitch_user_id,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
                     use_stream_defaults
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1948,6 +1963,7 @@ owner_id, twitch_username, twitch_user_id,
                     bool(block_repeat_when_last),
                     max(0, int(schedule_reminder_minutes)),
                     bool(schedule_reminder_configured) or int(schedule_reminder_minutes) > 0,
+                    bool(schedule_reminder_block_repeats),
                     ignore_keywords,
                     bool(use_global_ignore),
                     str(category_filter or ""),
@@ -2066,13 +2082,26 @@ owner_id, twitch_username, twitch_user_id,
                 (sub_id,),
             )
 
-    def set_last_schedule_reminder_segment(self, sub_id: int, segment_id: str) -> None:
+    def set_last_schedule_reminder_segment(
+        self, sub_id: int, segment_id: str, *, day: str | None = None
+    ) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)
-            cur.execute(
-                "UPDATE subscriptions SET last_schedule_reminder_segment_id = %s WHERE id = %s",
-                (segment_id, sub_id),
-            )
+            if day is None:
+                cur.execute(
+                    "UPDATE subscriptions SET last_schedule_reminder_segment_id = %s WHERE id = %s",
+                    (segment_id, sub_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_schedule_reminder_segment_id = %s,
+                        last_schedule_reminder_day = %s
+                    WHERE id = %s
+                    """,
+                    (segment_id, str(day or "").strip() or None, sub_id),
+                )
 
     def get_subscriptions_by_owner(self, owner_id: int) -> list[Subscription]:
         with self._conn() as conn:
@@ -2317,6 +2346,7 @@ owner_id, twitch_username, twitch_user_id,
                     "block_repeat_when_last",
                     "schedule_reminder_minutes",
                     "schedule_reminder_configured",
+                    "schedule_reminder_block_repeats",
                     "ignore_keywords",
                     "use_global_ignore",
                     "category_filter",
@@ -2410,6 +2440,7 @@ owner_id, twitch_username, twitch_user_id,
             "block_repeat_when_last",
             "schedule_reminder_minutes",
             "schedule_reminder_configured",
+            "schedule_reminder_block_repeats",
             "notify_on_live",
             "notify_on_end",
             "notify_on_category_change",
@@ -2460,6 +2491,7 @@ owner_id, twitch_username, twitch_user_id,
                 "use_stream_defaults",
                 "block_overlap",
                 "block_repeat_when_last",
+                "schedule_reminder_block_repeats",
             ):
                 values.append(bool(value))
             elif key in (

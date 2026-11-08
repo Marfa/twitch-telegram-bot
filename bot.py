@@ -2163,6 +2163,9 @@ def _edit_options_for_sub(
         show_link_preview=not bool(sub.image_file_id)
         and template_has_link(sub.message_template or ""),
         schedule_reminder_configured=sub.schedule_reminder_configured,
+        schedule_reminder_block_repeats=bool(
+            getattr(sub, "schedule_reminder_block_repeats", False)
+        ),
         notify_on_category_change=sub.notify_on_category_change,
         notify_on_end=sub.notify_on_end,
         is_upcoming=alert_type == "upcoming",
@@ -3340,7 +3343,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_edit_bool_menu,
-            pattern=r"^edit_f:\d+:(delete_old|pin_message|preview|chat_button|strip|live_remind|button_style|button_style_back|defaults_locked|apply_defaults)$",
+            pattern=r"^edit_f:\d+:(delete_old|pin_message|preview|chat_button|strip|live_remind|sched_block_reps|button_style|button_style_back|defaults_locked|apply_defaults)$",
         ),
         group=0,
     )
@@ -3575,7 +3578,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|categories|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_cancel|multistream|apply_defaults)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|categories|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_block_repeats|schedule_cancel|multistream|apply_defaults)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_style,

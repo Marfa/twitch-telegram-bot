@@ -560,6 +560,8 @@ class Subscription:
     last_message_id: int | None = None
     pinned_message_id: int | None = None
     last_schedule_reminder_segment_id: str | None = None
+    last_schedule_reminder_day: str | None = None
+    schedule_reminder_block_repeats: bool = False
     from_twitch_sync: bool = False
     paused_for_reauth: bool = False
     from_watch_suggest: bool = False
@@ -760,6 +762,7 @@ def migrate_sub_fields_for_alert_type(
         out["attach_live_remind_button"] = False
         out["notify_on_schedule_cancel"] = False
         out["schedule_cancel_template"] = ""
+        out["schedule_reminder_block_repeats"] = False
     if new_type != "end":
         out["top_donations"] = False
         out["top_donations_template"] = ""
@@ -839,6 +842,9 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         ),
         "schedule_reminder_minutes": int(sub.schedule_reminder_minutes),
         "schedule_reminder_configured": bool(sub.schedule_reminder_configured),
+        "schedule_reminder_block_repeats": bool(
+            getattr(sub, "schedule_reminder_block_repeats", False)
+        ),
         "notify_on_schedule_cancel": bool(
             getattr(sub, "notify_on_schedule_cancel", False)
         ),
@@ -1487,6 +1493,15 @@ def _row_to_sub(row: Any) -> Subscription:
             and row["last_schedule_reminder_segment_id"]
             else None
         ),
+        last_schedule_reminder_day=(
+            str(row["last_schedule_reminder_day"])
+            if "last_schedule_reminder_day" in keys
+            and row["last_schedule_reminder_day"]
+            else None
+        ),
+        schedule_reminder_block_repeats=bool(row["schedule_reminder_block_repeats"])
+        if "schedule_reminder_block_repeats" in keys
+        else False,
         from_twitch_sync=bool(row["from_twitch_sync"])
         if "from_twitch_sync" in keys
         else False,

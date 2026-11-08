@@ -248,6 +248,7 @@ def check_alert_setting_order() -> None:
         "top_donations",
         "preview",
         "schedule_remind",
+        "schedule_block_repeats",
         "schedule_cancel",
         "multistream",
     )
@@ -270,6 +271,7 @@ def check_alert_setting_order() -> None:
         want_live_remind=False,
         want_top_donations=False,
         want_preview=False,
+        want_schedule_block_repeats=False,
         want_schedule_cancel=False,
         want_multistream=False,
         show_categories=True,
@@ -282,6 +284,7 @@ def check_alert_setting_order() -> None:
         show_top_donations=True,
         show_preview=True,
         show_schedule_remind=False,
+        show_schedule_block_repeats=True,
         show_schedule_cancel=True,
         show_multistream=True,
     )
@@ -311,7 +314,14 @@ def check_alert_setting_order() -> None:
     assert _edit_setting_ids(edit) == [
         sid
         for sid in ALERT_SETTING_ORDER
-        if sid not in ("live_remind", "schedule_remind", "schedule_cancel", "top_donations")
+        if sid
+        not in (
+            "live_remind",
+            "schedule_remind",
+            "schedule_block_repeats",
+            "schedule_cancel",
+            "top_donations",
+        )
     ]
     labels = {
         (btn.callback_data or ""): btn.text
@@ -338,6 +348,7 @@ def check_alert_setting_order() -> None:
         notify_on_schedule_cancel=True,
         schedule_reminder_configured=True,
         schedule_reminder_minutes=15,
+        schedule_reminder_block_repeats=True,
     )
     assert _edit_setting_ids(upcoming_edit) == [
         sid
@@ -363,11 +374,13 @@ def check_alert_setting_order() -> None:
     }
     assert upcoming_labels["edit_f:1:live_remind"].startswith("✅ ")
     assert upcoming_labels["edit_f:1:sched_remind"].startswith("✅ ")
+    assert upcoming_labels["edit_f:1:sched_block_reps"].startswith("✅ ")
     assert upcoming_labels["edit_f:1:schedule_cancel"].startswith("✅ ")
-    # Cancel stays last among shared setting rows.
+    # Cancel stays last among shared setting rows; block-repeats under remind.
     setting_ids = _edit_setting_ids(upcoming_edit)
     assert setting_ids[-1] == "schedule_cancel"
-    assert setting_ids[-2] == "schedule_remind"
+    assert setting_ids[-2] == "schedule_block_repeats"
+    assert setting_ids[-3] == "schedule_remind"
     assert "edit_f:1:delay" not in upcoming_labels
     assert "edit_f:1:repeat" not in upcoming_labels
     assert "edit_f:1:top_donations" not in upcoming_labels

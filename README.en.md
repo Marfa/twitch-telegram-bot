@@ -135,7 +135,7 @@ Then the wizard (for stream start / category change / stream end):
 
 Steps 4 / 6 / 7 / 8 / 11 only after checking Extras (and Premium for ⭐). Chat button, “Reminder button”, clean title, and image are free.
 
-For **upcoming stream**, after the channel and schedule check — template and settings (“Reminder button” — a button with a share link for a stream-start alert; optional “Stream cancel” ⭐ — separate template when a day’s schedule slots are removed without replacement), then reminder minutes and destination (no “do you want reminders?” ask).
+For **upcoming stream**, after the channel and schedule check — template and settings (“Reminder button” — a button with a share link for a stream-start alert; optional “Block repeats” — one upcoming alert per day, schedule changes for that day are ignored; “Stream cancel” ⭐ — separate template when a day’s schedule slots are removed without replacement), then reminder minutes and destination (no “do you want reminders?” ask).
 
 Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
 
@@ -289,7 +289,7 @@ Commission applies only to Stars Premium (not Twitch-sub Premium or external don
 
 Weekly admin report (Mon 10:00 MSK): total users (parentheses = change vs the previous mailing), new users and Stars payers for the week, active trials. On the 1st at 10:00 MSK — the same for the previous calendar month.
 
-**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (same streamer in chat) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Stream cancel” ⭐** (upcoming), restart mute, repeats / overlap guard (live), ignore and **categories** / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
+**Edit** — same shared options order as Extras: image, `⬜️/✅` clean title / delete previous (same streamer in chat) / pin message / chat button / remind about stream (upcoming) / top donations (stream end) / link preview / **“How soon to remind”** / **“Block repeats”** (upcoming, when reminder is on) / **“Stream cancel” ⭐** (upcoming), restart mute, repeats / overlap guard (live), ignore and **categories** / delay (minutes step, ⭐ where needed), plus template, destination, change type / copy.
 
 Notification template example:
 

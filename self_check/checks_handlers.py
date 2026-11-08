@@ -1053,10 +1053,17 @@ def check_handlers() -> None:
             show_schedule_cancel=True,
             attach_live_remind_button=True,
             notify_on_schedule_cancel=True,
+            schedule_reminder_configured=True,
+            schedule_reminder_minutes=30,
+            schedule_reminder_block_repeats=True,
         )
         upcoming_labels = [btn.text for row in upcoming_kb.inline_keyboard for btn in row]
         assert any(
             tr("advanced_options_live_remind", "ru") in text for text in upcoming_labels
+        )
+        assert any(
+            tr("advanced_options_schedule_block_repeats", "ru") in text
+            for text in upcoming_labels
         )
         assert any(
             tr("advanced_options_schedule_cancel", "ru") in text
@@ -1068,7 +1075,9 @@ def check_handlers() -> None:
         assert tr("advanced_options_preview", "ru")
         assert tr("advanced_options_hint_preview", "ru")
         assert tr("advanced_options_hint_live_remind", "ru")
+        assert tr("advanced_options_hint_schedule_block_repeats", "ru")
         assert tr("advanced_options_hint_schedule_cancel", "ru")
+        assert tr("sub_list_schedule_block_repeats_yes", "ru")
         assert tr("alert_live_remind_button", "ru")
         assert tr("schedule_cancel_template_prompt", "ru", placeholders_link="x")
         assert tr("edit_schedule_cancel_prompt", "ru", sub_id=1, current="x", placeholders_link="x")
