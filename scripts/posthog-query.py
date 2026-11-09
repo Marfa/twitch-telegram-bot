@@ -35,6 +35,11 @@ def _bot_blocked_week_queries(days: int) -> dict[str, str]:
     start_s = start.strftime("%Y-%m-%d %H:%M:%S")
     end_s = now.strftime("%Y-%m-%d %H:%M:%S")
     prev_start = (start - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    # Legacy bot_blocked + source=stream_chat_menu was menu-sync discovery, not churn.
+    churn_event = (
+        "(event = 'bot_blocked' "
+        "AND coalesce(toString(properties.source), '') != 'stream_chat_menu')"
+    )
     return {
         "_meta": json.dumps(
             {
@@ -44,9 +49,9 @@ def _bot_blocked_week_queries(days: int) -> dict[str, str]:
         ),
         "totals": f"""
 SELECT
-  countIf(event = 'bot_blocked') AS blocks,
+  countIf({churn_event}) AS blocks,
   countIf(event = 'bot_unblocked') AS unblocks,
-  uniqExactIf(distinct_id, event = 'bot_blocked') AS block_users,
+  uniqExactIf(distinct_id, {churn_event}) AS block_users,
   uniqExactIf(distinct_id, event = 'bot_unblocked') AS unblock_users
 FROM events
 WHERE event IN ('bot_blocked', 'bot_unblocked')
@@ -59,7 +64,7 @@ SELECT
   count() AS events,
   count(DISTINCT distinct_id) AS users
 FROM events
-WHERE event = 'bot_blocked'
+WHERE {churn_event}
   AND timestamp >= toDateTime('{start_s}')
   AND timestamp < toDateTime('{end_s}')
 GROUP BY source
@@ -71,7 +76,7 @@ SELECT
   count() AS events,
   count(DISTINCT distinct_id) AS users
 FROM events
-WHERE event = 'bot_blocked'
+WHERE {churn_event}
   AND timestamp >= toDateTime('{start_s}')
   AND timestamp < toDateTime('{end_s}')
 GROUP BY day
@@ -88,7 +93,7 @@ SELECT
   count() AS events,
   count(DISTINCT distinct_id) AS users
 FROM events
-WHERE event = 'bot_blocked'
+WHERE {churn_event}
   AND timestamp >= toDateTime('{start_s}')
   AND timestamp < toDateTime('{end_s}')
 GROUP BY source, alert_type
@@ -108,7 +113,7 @@ SELECT
   count() AS events,
   count(DISTINCT distinct_id) AS users
 FROM events
-WHERE event = 'bot_blocked'
+WHERE {churn_event}
   AND timestamp >= toDateTime('{start_s}')
   AND timestamp < toDateTime('{end_s}')
 GROUP BY source, last_alert_age
@@ -125,7 +130,7 @@ SELECT
   count() AS events,
   count(DISTINCT distinct_id) AS users
 FROM events
-WHERE event = 'bot_blocked'
+WHERE {churn_event}
   AND timestamp >= toDateTime('{start_s}')
   AND timestamp < toDateTime('{end_s}')
 GROUP BY channel
@@ -145,7 +150,7 @@ SELECT
   count() AS events,
   count(DISTINCT distinct_id) AS users
 FROM events
-WHERE event = 'bot_blocked'
+WHERE {churn_event}
   AND timestamp >= toDateTime('{start_s}')
   AND timestamp < toDateTime('{end_s}')
 GROUP BY source, active_subs_bucket
@@ -158,9 +163,24 @@ SELECT
   count() AS events,
   count(DISTINCT distinct_id) AS users
 FROM events
-WHERE event = 'bot_blocked'
+WHERE {churn_event}
   AND timestamp >= toDateTime('{prev_start}')
   AND timestamp < toDateTime('{start_s}')
+GROUP BY source
+ORDER BY events DESC
+""",
+        "unreachable_detected": f"""
+SELECT
+  coalesce(toString(properties.source), '(null)') AS source,
+  count() AS events,
+  count(DISTINCT distinct_id) AS users
+FROM events
+WHERE (
+    event = 'bot_unreachable_detected'
+    OR (event = 'bot_blocked' AND coalesce(toString(properties.source), '') = 'stream_chat_menu')
+  )
+  AND timestamp >= toDateTime('{start_s}')
+  AND timestamp < toDateTime('{end_s}')
 GROUP BY source
 ORDER BY events DESC
 """,

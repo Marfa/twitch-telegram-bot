@@ -391,7 +391,7 @@ Premium (already in PostHog, Trends / Funnels):
 
 Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (break down by `source` / `kind`). Stars volume: Trends → `premium_purchased` → Property value `stars` (sum).
 
-Churn / blocks: `bot_blocked` with `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …), optional `alert_type` / `dest_type`, plus DB context (`active_subs`, `total_subs`, `has_demo_sub`, `last_alert_channel` / `last_alert_age_hours`, …); successful DM delivery → `alert_sent` (same `alert_type`). In Trends: path `alert_sent` → `bot_blocked`, or break down `bot_blocked` by `source`. Pause from an alert: callback `alert_pause:{sub_id}` (older messages — deep link `?start=pause_{sub_id}`) → `subscription_paused_from_alert`.
+Churn / blocks: `bot_blocked` with `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …), optional `alert_type` / `dest_type`, plus DB context (`active_subs`, `total_subs`, `has_demo_sub`, `last_alert_channel` / `last_alert_age_hours`, …); successful DM delivery → `alert_sent` (same `alert_type`). Menu Button sync discovering already-unreachable users → separate `bot_unreachable_detected` (`source=stream_chat_menu`), not churn. In Trends: path `alert_sent` → `bot_blocked`, or break down `bot_blocked` by `source`. Pause from an alert: callback `alert_pause:{sub_id}` (older messages — deep link `?start=pause_{sub_id}`) → `subscription_paused_from_alert`.
 
 One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (on VPS inside the bot container).
 

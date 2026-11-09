@@ -2199,7 +2199,7 @@ def check_handlers() -> None:
         assert capture_exc.call_count == 0
         assert capture_block.call_count == 1
         assert capture_block.call_args.args[0] == 7574175793
-        assert capture_block.call_args.args[1] == "bot_blocked"
+        assert capture_block.call_args.args[1] == "bot_unreachable_detected"
         assert capture_block.call_args.args[2]["source"] == "stream_chat_menu"
 
         # BadRequest subclasses NetworkError in PTB — must soft-handle, not retry.
@@ -2215,7 +2215,7 @@ def check_handlers() -> None:
         assert sleep_m.await_count == 0
         assert capture_exc.call_count == 0
         assert capture_block.call_count == 1
-        assert capture_block.call_args.args[1] == "bot_blocked"
+        assert capture_block.call_args.args[1] == "bot_unreachable_detected"
 
         # Already blocked: skip Telegram call entirely.
         skip_bot = AsyncMock()

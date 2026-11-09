@@ -1022,6 +1022,7 @@ async def sync_stream_chat_menu_button(bot: Any, db: Database, user_id: int) -> 
                     user_id,
                     source="stream_chat_menu",
                     properties={"op": "set_chat_menu_button"},
+                    analytics_event="bot_unreachable_detected",
                 )
                 logger.warning(
                     "Stream-chat menu sync skipped for unreachable user %s: %s",

@@ -391,7 +391,7 @@ Premium (уже в PostHog, Trends / Funnels):
 
 Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (breakdown `source` / `kind`). Сумма Stars: Trends → `premium_purchased` → Property value `stars` (sum).
 
-Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …), опционально `alert_type` / `dest_type`, плюс контекст из БД (`active_subs`, `total_subs`, `has_demo_sub`, `last_alert_channel` / `last_alert_age_hours`, …); успешная DM-доставка — `alert_sent` (тот же `alert_type`). В Trends: path `alert_sent` → `bot_blocked` или breakdown `bot_blocked` by `source`. Пауза из алерта: callback `alert_pause:{sub_id}` (старые сообщения — deep link `?start=pause_{sub_id}`) → событие `subscription_paused_from_alert`.
+Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …), опционально `alert_type` / `dest_type`, плюс контекст из БД (`active_subs`, `total_subs`, `has_demo_sub`, `last_alert_channel` / `last_alert_age_hours`, …); успешная DM-доставка — `alert_sent` (тот же `alert_type`). Обнаружение уже недоступных при sync Menu Button — отдельно `bot_unreachable_detected` (`source=stream_chat_menu`), не смешивать с churn. В Trends: path `alert_sent` → `bot_blocked` или breakdown `bot_blocked` by `source`. Пауза из алерта: callback `alert_pause:{sub_id}` (старые сообщения — deep link `?start=pause_{sub_id}`) → событие `subscription_paused_from_alert`.
 
 Разовый снимок / приближённый backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (на VPS в контейнере bot).
 

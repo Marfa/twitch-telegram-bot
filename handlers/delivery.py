@@ -704,6 +704,7 @@ def apply_user_blocked(
     *,
     source: str = "unknown",
     properties: dict[str, Any] | None = None,
+    analytics_event: str = "bot_blocked",
 ) -> int:
     already = db.is_bot_blocked(user_id)
     db.set_bot_blocked(user_id, True)
@@ -715,7 +716,7 @@ def apply_user_blocked(
             logger.debug("bot_blocked enrichment failed", exc_info=True)
         if properties:
             props.update(properties)
-        analytics.capture(user_id, "bot_blocked", props)
+        analytics.capture(user_id, analytics_event, props)
     return db.pause_delivery_for_chat(user_id)
 
 
