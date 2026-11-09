@@ -4255,7 +4255,7 @@ async def _scenario_ai_clips(db) -> None:
 
     from handlers.ai_clips import poll_ai_clips_auto
 
-    # Poller no-ops when nothing newer than baseline (and while busy would also skip).
+    # Poller no-ops when nothing newer than baseline (and while any job is active).
     poll_ctx = _ctx(application)
     with patch(
         "handlers.ai_clips.prem.has_feature",
@@ -4467,6 +4467,40 @@ async def _scenario_ai_clips(db) -> None:
     assert "botClip" not in edited_gone and "userClip" not in edited_gone
     assert edited_gone.strip() == t("ai_clips_existing_empty", "ru")
     cap.assert_turn("other_ai_clips_existing_deleted")
+
+    # Another owner's active job must not block enqueue — working notice, not busy.
+    other_uid = _FREE_UID + 77
+    db.upsert_user(other_uid)
+    busy_id = db.create_ai_clips_job(other_uid, vod_id="9999", vod_title="Busy")
+    db.update_ai_clips_job(busy_id, status="analyzing", progress_pct=10)
+    before_n = db.count_active_ai_clips_jobs()
+    assert before_n >= 1
+    ctx.user_data["ai_clips_videos"] = [
+        {
+            "id": "3001",
+            "title": "Queued VOD",
+            "duration": "1h0m0s",
+            "stream_id": "sid-3001",
+        }
+    ]
+    update, query = _cb_update(_FREE_UID, "ai_clips:vod:3001", cap)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ), patch(
+        "handlers.ai_clips._run_job",
+        new=AsyncMock(),
+    ):
+        await on_ai_clips_callback(update, ctx)
+    assert db.count_active_ai_clips_jobs() == before_n + 1
+    queued = db.get_active_ai_clips_job(_FREE_UID)
+    assert queued is not None and queued.vod_id == "3001" and queued.status == "queued"
+    working = " ".join(
+        str(c.args[0]) if c.args else str(c.kwargs.get("text") or "")
+        for c in query.edit_message_text.await_args_list
+    )
+    assert "Queued VOD" in working
+    assert "Подождите" not in working
     _ = FEATURE_ID
 
 
