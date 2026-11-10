@@ -1879,13 +1879,11 @@ async def receive_advanced_options_style(
     return _wz()["ADVANCED_OPTIONS"]
 
 
-async def receive_advanced_options_next(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    await query.answer()
-    lang = _user_lang(context, query.from_user.id)
-    locked = await _advopt_locked(context, query.from_user.id)
+async def _commit_advanced_options_from_checkboxes(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> None:
+    """Apply «Дополнительно» toggles into create payload (Next or Save draft)."""
+    locked = await _advopt_locked(context, user_id)
     for toggle, ud_key in (
         ("ignore", "adv_want_ignore"),
         ("categories", "adv_want_categories"),
@@ -1975,7 +1973,6 @@ async def receive_advanced_options_next(
         str(context.user_data.get("message_template") or "")
     )
     want_preview = bool(context.user_data.get("adv_want_preview")) if has_link else False
-    # Image / chat always force preview off (already synced above).
     if context.user_data.get("adv_want_image") or want_chat or not has_link:
         want_preview = False
         context.user_data["adv_want_preview"] = False
@@ -1983,6 +1980,15 @@ async def receive_advanced_options_next(
     context.user_data["strip_name_mentions"] = bool(
         context.user_data.get("adv_want_strip")
     )
+
+
+async def receive_advanced_options_next(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    lang = _user_lang(context, query.from_user.id)
+    await _commit_advanced_options_from_checkboxes(context, query.from_user.id)
     await query.edit_message_text("✓")
     if context.user_data.get("top_donations") and not str(
         context.user_data.get("top_donations_template") or ""
@@ -1996,6 +2002,38 @@ async def receive_advanced_options_next(
     context.user_data.pop("image_file_id", None)
     context.user_data["image_position"] = ""
     return await _go_after_image_step(update, context, lang)
+
+
+async def receive_wizard_save_draft(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Save current wizard settings as a paused subscription (draft)."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    # From «Дополнительно» — commit toggles; from dest picker they are already applied.
+    if not context.user_data.get("advanced_options_done"):
+        await _commit_advanced_options_from_checkboxes(context, user_id)
+        if not context.user_data.get("adv_want_image"):
+            context.user_data.pop("image_file_id", None)
+            context.user_data["image_position"] = ""
+    if not context.user_data.get("dest_type"):
+        context.user_data["dest_type"] = "unset"
+        context.user_data["dest_chat_id"] = 0
+        context.user_data["dest_thread_id"] = None
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    return await _finish_subscription(
+        update,
+        context,
+        user_id,
+        int(context.user_data.get("dest_chat_id") or 0),
+        context.user_data.get("dest_thread_id"),
+        as_draft=True,
+    )
 
 
 async def _maybe_prompt_donationalerts_oauth(
@@ -4264,14 +4302,16 @@ async def _finish_subscription(
     owner_id: int,
     chat_id: int,
     thread_id: int | None,
+    *,
+    as_draft: bool = False,
 ) -> int:
     db: Database = context.application.bot_data["db"]
     lang = _user_lang(context, owner_id)
     data = dict(context.user_data)
     edit_sub_id = data.get("edit_sub_id")
     live_addon = bool(data.get("live_addon_pass"))
-    dest_type = data.get("dest_type")
-    if not dest_type:
+    dest_type = str(data.get("dest_type") or "").strip()
+    if not dest_type and not as_draft:
         logger.warning(
             "finish_subscription missing dest_type for %s keys=%s",
             owner_id,
@@ -4284,6 +4324,8 @@ async def _finish_subscription(
         )
         context.user_data.clear()
         return ConversationHandler.END
+    if as_draft and not dest_type:
+        dest_type = "unset"
     if not edit_sub_id and not (
         data.get("twitch_username")
         and data.get("twitch_user_id")
@@ -4311,13 +4353,13 @@ async def _finish_subscription(
         return ConversationHandler.END
     delete_previous = (
         bool(data.get("delete_previous", False))
-        and dest_type not in ("dm", "webhook")
+        and dest_type not in ("dm", "webhook", "unset")
     )
     notify_delete_fail = delete_previous
     # Discord / outbound webhook cannot pin; keep pin off for DM too.
     pin_message = (
         bool(data.get("pin_message", False) or data.get("adv_want_pin", False))
-        and dest_type not in ("dm", "discord", "webhook")
+        and dest_type not in ("dm", "discord", "webhook", "unset")
     )
     discord_webhook = (
         str(data.get("discord_webhook") or "").strip() if dest_type == "discord" else ""
@@ -4333,7 +4375,7 @@ async def _finish_subscription(
         if dest_type == "webhook"
         else ""
     )
-    if dest_type in ("discord", "webhook"):
+    if dest_type in ("discord", "webhook", "unset"):
         chat_id = 0
         thread_id = None
     from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
@@ -4351,12 +4393,12 @@ async def _finish_subscription(
         repeat_notify_minutes = ""
     block_overlap = (
         bool(data.get("block_overlap"))
-        and dest_type not in ("dm", "discord", "webhook")
+        and dest_type not in ("dm", "discord", "webhook", "unset")
         and alert_type in ("", "live")
     )
     block_repeat_when_last = (
         bool(data.get("block_repeat_when_last"))
-        and dest_type not in ("dm", "discord", "webhook")
+        and dest_type not in ("dm", "discord", "webhook", "unset")
         and alert_type in ("", "live")
     )
     if alert_type and alert_type != "live":
@@ -4485,8 +4527,8 @@ async def _finish_subscription(
                 )
                 context.user_data.clear()
                 return ConversationHandler.END
-            create_enabled = True
-            if not await prem.can_enable_more_async(
+            create_enabled = False if as_draft else True
+            if create_enabled and not await prem.can_enable_more_async(
                 context.bot,
                 db,
                 owner_id,
@@ -4604,7 +4646,7 @@ async def _finish_subscription(
                 webhook_url=outbound_webhook_url,
                 webhook_secret=outbound_webhook_secret,
             )
-            if not create_enabled:
+            if not create_enabled and not as_draft:
                 context.user_data["premium_created_disabled"] = True
     except Exception:
         logger.exception("Failed to save subscription for owner %s", owner_id)
@@ -4616,7 +4658,11 @@ async def _finish_subscription(
         context.user_data.clear()
         return ConversationHandler.END
 
-    if edit_sub_id and (
+    if as_draft and edit_sub_id:
+        saved_edit = db.get_subscription(int(edit_sub_id), owner_id)
+        if saved_edit is not None and saved_edit.enabled:
+            db.toggle_subscription(int(edit_sub_id), owner_id)
+    elif edit_sub_id and (
         (dest_type == "discord" and discord_webhook)
         or (dest_type == "webhook" and outbound_webhook_url)
     ):
@@ -4628,7 +4674,7 @@ async def _finish_subscription(
         )
         db.clear_delivery_paused(int(edit_sub_id), enabled=can)
 
-    if dest_type == "discord" and discord_webhook and sub_id:
+    if not as_draft and dest_type == "discord" and discord_webhook and sub_id:
         saved = db.get_subscription(int(sub_id), owner_id)
         if saved is not None:
             try:
@@ -4647,7 +4693,7 @@ async def _finish_subscription(
                     exc_info=True,
                 )
 
-    if dest_type == "webhook" and outbound_webhook_url and sub_id:
+    if not as_draft and dest_type == "webhook" and outbound_webhook_url and sub_id:
         saved = db.get_subscription(int(sub_id), owner_id)
         if saved is not None:
             try:
@@ -4666,8 +4712,11 @@ async def _finish_subscription(
                 )
 
     if (
-        int(data.get("schedule_reminder_minutes", 0)) > 0
-        or notify_on_drops
+        not as_draft
+        and (
+            int(data.get("schedule_reminder_minutes", 0)) > 0
+            or notify_on_drops
+        )
     ):
         from handlers.background_jobs import sync_optional_jobs
 
@@ -4684,8 +4733,33 @@ async def _finish_subscription(
             "has_schedule_reminder": int(data.get("schedule_reminder_minutes", 0)) > 0,
             "is_demo": demo_mode.is_active(owner_id),
             "live_addon": bool(live_addon),
+            "as_draft": as_draft,
         },
     )
+
+    if as_draft:
+        context.user_data.clear()
+        user_sub_num = _owner_sub_number(db, owner_id, sub_id)
+        text = t(
+            "setup_draft_saved",
+            lang,
+            sub_id=user_sub_num,
+            twitch_username=data["twitch_username"],
+            dest=dest_label(dest_type, lang),
+        )
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text(
+                    t("sub_created_short", lang, sub_id=user_sub_num)
+                )
+            except BadRequest:
+                pass
+        await context.bot.send_message(
+            reply_chat_id(update),
+            text,
+            reply_markup=_menu(lang, owner_id),
+        )
+        return ConversationHandler.END
 
     schedule_only_pending = (
         not edit_sub_id

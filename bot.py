@@ -550,6 +550,7 @@ from handlers.wizard import (
     receive_advanced_options_next,
     receive_advanced_options_style,
     receive_advanced_options_toggle,
+    receive_wizard_save_draft,
     receive_overlap_options,
     receive_top_donations_template,
     complete_donationalerts_oauth,
@@ -3578,7 +3579,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_advanced_options_toggle,
-                    pattern=r"^advopt:toggle:(image|strip|ignore|categories|delay|repeat|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_block_repeats|schedule_cancel|multistream|apply_defaults)$",
+                    pattern=r"^advopt:toggle:(image|strip|ignore|categories|delay|repeat|repeats|overlap|delete|pin|buttons|chat|live_remind|top_donations|preview|schedule_block_repeats|schedule_cancel|multistream|apply_defaults)$",
                 ),
                 CallbackQueryHandler(
                     receive_advanced_options_style,
@@ -3587,6 +3588,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 CallbackQueryHandler(on_advopt_locked, pattern=r"^advopt:locked$"),
                 CallbackQueryHandler(
                     receive_advanced_options_next, pattern=r"^advopt:next$"
+                ),
+                CallbackQueryHandler(
+                    receive_wizard_save_draft, pattern=r"^advopt:draft$"
                 ),
             ],
             TOP_DONATIONS_TEMPLATE: [
@@ -3832,7 +3836,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             DEST_TYPE: [
                 _wiz_cancel,
                 _wiz_back,
-                CallbackQueryHandler(receive_dest_type, pattern=r"^dest:"),
+                CallbackQueryHandler(
+                    receive_wizard_save_draft, pattern=r"^dest:draft$"
+                ),
+                CallbackQueryHandler(
+                    receive_dest_type, pattern=r"^dest:(dm|chat|discord|webhook)$"
+                ),
             ],
             DEST_CHAT: [
                 _wiz_cancel,

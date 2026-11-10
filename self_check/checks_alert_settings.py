@@ -157,6 +157,43 @@ def check_button_style_options() -> None:
         show_buttons=True,
         show_live_remind=True,
     )
+    adv_cbs = [(b.callback_data or "") for row in adv_off.inline_keyboard for b in row]
+    assert "advopt:draft" in adv_cbs
+    from i18n import dest_keyboard
+
+    dest_cbs = [
+        (b.callback_data or "") for row in dest_keyboard("en").inline_keyboard for b in row
+    ]
+    assert "dest:draft" in dest_cbs
+    from db.models import Subscription
+
+    draft = Subscription(
+        id=1,
+        owner_id=1,
+        twitch_username="x",
+        twitch_user_id="1",
+        message_template="hi",
+        dest_type="unset",
+        chat_id=0,
+        thread_id=None,
+        enabled=False,
+        delete_previous=False,
+        notify_delete_fail=False,
+        disable_link_preview=False,
+        strip_name_mentions=False,
+        attach_chat_button=False,
+        attach_live_remind_button=False,
+        custom_buttons="[]",
+        multistream_channels="[]",
+        delay_minutes=0,
+        suppress_repeat_minutes=0,
+        schedule_reminder_minutes=0,
+        schedule_reminder_configured=False,
+        notify_on_live=True,
+        notify_on_end=False,
+        notify_on_category_change=False,
+    )
+    assert not draft.destination_ready()
     style_cbs = [
         (b.callback_data or "")
         for row in adv_off.inline_keyboard

@@ -1947,6 +1947,8 @@ async def _send_notification(
     sub = prem.subscription_for_delivery(db, sub)
     if _user_notifications_paused(db, sub.owner_id):
         return True
+    if not sub.destination_ready():
+        return True
     if sub.dest_type == "discord":
         return await _send_discord_notification(
             bot,

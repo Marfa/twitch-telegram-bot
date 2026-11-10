@@ -1248,6 +1248,11 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
                     t("dest_webhook", lang), callback_data="dest:webhook"
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    t("wizard_save_draft", lang), callback_data="dest:draft"
+                )
+            ],
         ]
     )
 
@@ -1482,6 +1487,14 @@ def advanced_options_keyboard(
             InlineKeyboardButton(
                 t("advanced_options_next", lang),
                 callback_data="advopt:next",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("wizard_save_draft", lang),
+                callback_data="advopt:draft",
             )
         ]
     )
@@ -3542,4 +3555,9 @@ def edit_bool_keyboard(sub_id: int, field: str, lang: str) -> InlineKeyboardMark
 
 
 def dest_label(dest_type: str, lang: str) -> str:
-    return t(f"dest_label_{dest_type}", lang)
+    dest = (dest_type or "").strip() or "unset"
+    key = f"dest_label_{dest}"
+    locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    if _STRINGS[locale].get(key) or _STRINGS[DEFAULT_LOCALE].get(key):
+        return t(key, lang)
+    return t("dest_label_unset", lang)

@@ -2499,6 +2499,8 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     for s in _subs_for_owner(db, owner_id):
         if s.enabled or getattr(s, "trial_paused", False):
             continue
+        if not s.destination_ready():
+            continue
         if not await prem.alert_type_entitled(context.bot, db, owner_id, s):
             continue
         promo = prem.is_promo_channel(s.twitch_username, db)
@@ -2514,7 +2516,9 @@ async def on_enable_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         paused = [
             s
             for s in _subs_for_owner(db, owner_id)
-            if not s.enabled and not getattr(s, "trial_paused", False)
+            if not s.enabled
+            and not getattr(s, "trial_paused", False)
+            and s.destination_ready()
         ]
         entitled_paused = False
         for s in paused:
@@ -6006,6 +6010,9 @@ async def on_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             source="toggle_sub",
             feature="active_limit",
         )
+        return
+    if not sub.enabled and not sub.destination_ready():
+        await query.edit_message_text(t("draft_need_destination", lang))
         return
     was_enabled = bool(sub.enabled)
     new_state = db.toggle_subscription(sub_id, query.from_user.id)

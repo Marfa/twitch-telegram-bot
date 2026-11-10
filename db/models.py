@@ -593,6 +593,19 @@ class Subscription:
     webhook_url: str = ""
     webhook_secret: str = ""
 
+    def destination_ready(self) -> bool:
+        """True when delivery target is complete enough to enable the alert."""
+        dest = (self.dest_type or "").strip().lower()
+        if dest == "dm":
+            return True
+        if dest in ("chat", "channel", "group"):
+            return int(self.chat_id or 0) != 0
+        if dest == "discord":
+            return bool(str(self.discord_webhook or "").strip())
+        if dest == "webhook":
+            return bool(str(self.webhook_url or "").strip())
+        return False
+
 
 @dataclass(frozen=True)
 class DeletedSubscriptionCartItem:

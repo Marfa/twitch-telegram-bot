@@ -2762,6 +2762,142 @@ async def _scenario_wizard_top_donations(db) -> None:
     assert ctx.user_data.get("top_donations") is True
 
 
+async def _scenario_wizard_save_draft(db) -> None:
+    """§2.5 / §2.11 Save draft — paused alert; cannot enable without destination."""
+    from handlers.subscriptions import on_toggle
+    from handlers.wizard import (
+        _go_advanced_options_prompt,
+        _prompt_dest_step,
+        receive_wizard_save_draft,
+        _wz,
+    )
+    from telegram.ext import ConversationHandler
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "Live {username}",
+            "alert_type": "live",
+            "twitch_username": "draftchan",
+            "twitch_user_id": "9001",
+        }
+    )
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch("beta.is_enabled", return_value=True):
+        state = await _go_advanced_options_prompt(update, ctx, "ru")
+    assert state == _wz()["ADVANCED_OPTIONS"]
+    adv_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "advopt:draft" in adv_cbs
+    cap.note_pulse()
+    cap.assert_turn("wizard_extras_save_draft_btn")
+
+    update, _query = _cb_update(_FREE_UID, "advopt:draft", cap)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ), patch(
+        "handlers.wizard.prem.can_enable_more_async",
+        new=AsyncMock(return_value=True),
+    ):
+        state = await receive_wizard_save_draft(update, ctx)
+    assert state == ConversationHandler.END
+    created = [
+        s
+        for s in db.get_subscriptions_by_owner(_FREE_UID)
+        if s.twitch_username == "draftchan"
+    ]
+    assert created and created[-1].enabled is False
+    assert created[-1].dest_type == "unset"
+    assert not created[-1].destination_ready()
+    draft_text = t("setup_draft_saved", "ru", sub_id=1, twitch_username="draftchan", dest="x")
+    sent = [
+        str(c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or "")
+        for c in bot.send_message.await_args_list
+    ]
+    assert any("Черновик" in s or "черновик" in s.lower() for s in sent), sent
+    assert any(draft_text.split("\n")[0] in s for s in sent) or any(
+        "паузе" in s for s in sent
+    ), sent
+    cap.assert_turn("wizard_extras_save_draft_done")
+
+    sub_id = created[-1].id
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(_FREE_UID, f"toggle:{sub_id}", cap)
+    ctx = _ctx(application)
+    await on_toggle(update, ctx)
+    edited = [
+        str(c.kwargs.get("text") or (c.args[0] if c.args else "") or "")
+        for c in query.edit_message_text.await_args_list
+    ]
+    need = t("draft_need_destination", "ru")
+    assert any(need in e for e in edited), edited
+    still = db.get_subscription(sub_id, _FREE_UID)
+    assert still is not None and still.enabled is False
+    cap.note_pulse()
+    cap.assert_turn("wizard_draft_enable_blocked")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    await bot.send_message(_FREE_UID, "·", reply_markup=wizard_menu("ru"))
+    update = _msg_update(_FREE_UID, "x", cap)
+    ctx = _ctx(application)
+    ctx.user_data.update(
+        {
+            "message_template": "Live {username}",
+            "alert_type": "live",
+            "twitch_username": "draftdest",
+            "twitch_user_id": "9002",
+            "advanced_options_done": True,
+            "strip_name_mentions": False,
+            "attach_chat_button": False,
+            "disable_link_preview": True,
+        }
+    )
+    state = await _prompt_dest_step(update, ctx, "ru")
+    assert state == _wz()["DEST_TYPE"]
+    dest_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "dest:draft" in dest_cbs
+    cap.note_pulse()
+    cap.assert_turn("wizard_dest_save_draft_btn")
+
+    update, _query = _cb_update(_FREE_UID, "dest:draft", cap)
+    with patch(
+        "handlers.wizard.prem.can_enable_more_async",
+        new=AsyncMock(return_value=True),
+    ):
+        state = await receive_wizard_save_draft(update, ctx)
+    assert state == ConversationHandler.END
+    dest_drafts = [
+        s
+        for s in db.get_subscriptions_by_owner(_FREE_UID)
+        if s.twitch_username == "draftdest"
+    ]
+    assert dest_drafts and dest_drafts[-1].enabled is False
+    assert dest_drafts[-1].dest_type == "unset"
+    assert not dest_drafts[-1].destination_ready()
+    cap.assert_turn("wizard_dest_save_draft_done")
+
+
 async def _scenario_wizard_button_style(db) -> None:
     """§2 Extras — button color options appear when a button option is on; pick persists."""
     from handlers.wizard import (
@@ -4943,6 +5079,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_other_game_info(db)
         await _scenario_other_channel_stats(db)
         await _scenario_wizard_extras_checkboxes(db)
+        await _scenario_wizard_save_draft(db)
         await _scenario_wizard_repeats_overlap(db)
         await _scenario_wizard_top_donations(db)
         await _scenario_wizard_button_style(db)
