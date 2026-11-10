@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class EphemeralHandle:
     chat_id: int
-    receiver_user_id: int
+    receiver_user_id: int | None
     ephemeral_message_id: int
 
 
@@ -47,12 +47,24 @@ def message_ephemeral_id(message: Any) -> int | None:
 
 
 def _ephemeral_params(
-    receiver_user_id: int,
+    receiver_user_id: int | None = None,
     *,
     callback_query_id: str | None = None,
     replace_callback_query_message: bool = False,
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {"receiver_user_id": int(receiver_user_id)}
+    """Build EphemeralMessageParameters.
+
+    Bot API 10.3+: either receiver_user_id, or callback_query_id alone
+    (ephemeral reply to the button press; chat_id ignored).
+    """
+    if receiver_user_id is None and not callback_query_id:
+        raise ValueError(
+            "ephemeral_message_parameters need receiver_user_id "
+            "or callback_query_id"
+        )
+    params: dict[str, Any] = {}
+    if receiver_user_id is not None:
+        params["receiver_user_id"] = int(receiver_user_id)
     if callback_query_id:
         params["callback_query_id"] = str(callback_query_id)
         if replace_callback_query_message:
@@ -64,7 +76,7 @@ async def send_ephemeral_text(
     bot,
     chat_id: int,
     text: str,
-    receiver_user_id: int,
+    receiver_user_id: int | None = None,
     *,
     reply_to_ephemeral_id: int | None = None,
     callback_query_id: str | None = None,
@@ -73,13 +85,22 @@ async def send_ephemeral_text(
     parse_mode: str | None = None,
     disable_web_page_preview: bool = False,
 ) -> EphemeralHandle | None:
-    """Send a group/supergroup message visible only to receiver_user_id."""
-    api_kwargs: dict[str, Any] = {
-        "ephemeral_message_parameters": _ephemeral_params(
+    """Send a message visible only to one user (or the callback author).
+
+    Pass receiver_user_id, or omit it and pass callback_query_id only
+    (Bot API 10.3 ephemeral reply to a callback — chat_id is ignored).
+    """
+    try:
+        eph_params = _ephemeral_params(
             receiver_user_id,
             callback_query_id=callback_query_id,
             replace_callback_query_message=replace_callback_query_message,
-        ),
+        )
+    except ValueError:
+        logger.warning("ephemeral sendMessage missing receiver/callback id")
+        return None
+    api_kwargs: dict[str, Any] = {
+        "ephemeral_message_parameters": eph_params,
     }
     if reply_to_ephemeral_id is not None:
         api_kwargs["reply_parameters"] = {
@@ -118,7 +139,9 @@ async def send_ephemeral_text(
         return None
     return EphemeralHandle(
         chat_id=int(chat_id),
-        receiver_user_id=int(receiver_user_id),
+        receiver_user_id=(
+            int(receiver_user_id) if receiver_user_id is not None else None
+        ),
         ephemeral_message_id=eph_id,
     )
 
@@ -133,6 +156,13 @@ async def edit_ephemeral_text(
     disable_web_page_preview: bool = False,
 ) -> bool:
     """Replace ephemeral message text. Returns False on API failure."""
+    if handle.receiver_user_id is None:
+        logger.info(
+            "editEphemeralMessageText skipped: no receiver_user_id chat=%s eph=%s",
+            handle.chat_id,
+            handle.ephemeral_message_id,
+        )
+        return False
     api_kwargs: dict[str, Any] = {
         "chat_id": handle.chat_id,
         "receiver_user_id": handle.receiver_user_id,
@@ -166,6 +196,13 @@ async def edit_ephemeral_text(
 
 
 async def delete_ephemeral(bot, handle: EphemeralHandle) -> bool:
+    if handle.receiver_user_id is None:
+        logger.info(
+            "deleteEphemeralMessage skipped: no receiver_user_id chat=%s eph=%s",
+            handle.chat_id,
+            handle.ephemeral_message_id,
+        )
+        return False
     api_kwargs = {
         "chat_id": handle.chat_id,
         "receiver_user_id": handle.receiver_user_id,

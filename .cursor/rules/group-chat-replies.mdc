@@ -16,7 +16,7 @@ All bot management (commands, reply-menu, setup callbacks, bot-admin tools) runs
 
 - Gate: `reject_group_bot_setup` (group `-2`, raises `ApplicationHandlerStop`) + `dm_only_conv_entry()` on ConversationHandler entry/fallbacks (incl. `/help`)
 - **Telegram chat non-admins:** silent (no command, no hint)
-- **Telegram chat admins:** one-time `setup_private_only` («управление только в ЛС»); further attempts silent
+- **Telegram chat admins:** one-time `setup_private_only` («управление только в ЛС») as ephemeral (callback: `callback_query_id` only; slash: `receiver_user_id`); further attempts silent
 - Never execute the underlying command in a group/channel (even for bot `ADMIN_USER_IDS`)
 - Analytics: `group_setup_private_hint` (`chat_id`, `chat_type`, `is_chat_admin`, `is_bot_admin`)
 - **Allowed in groups/channels:** `/when`, `/day`, `/week` and free-text «Когда стрим?» / «расписание на день|неделю» (EN/UK variants). Slash commands in groups are registered with `is_ephemeral` — status + result via ephemeral messages (only the caller). Do **not** auto-delete schedule triggers/replies (Telegram ephemeral delete is unreliable on clients). Free-text stays a normal public reply.

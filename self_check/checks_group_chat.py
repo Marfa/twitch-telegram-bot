@@ -326,6 +326,23 @@ async def _check_ephemeral_helpers() -> None:
     assert kw["api_kwargs"]["ephemeral_message_parameters"]["receiver_user_id"] == 42
     assert kw["api_kwargs"]["reply_parameters"]["ephemeral_message_id"] == 3
 
+    bot.send_message.reset_mock()
+    bot.send_message.return_value = SimpleNamespace(
+        api_kwargs={"ephemeral_message_id": 66},
+        message_id=2,
+    )
+    cb_handle = await send_ephemeral_text(
+        bot, -1001, "hint", callback_query_id="cbq-9"
+    )
+    assert cb_handle == EphemeralHandle(
+        chat_id=-1001, receiver_user_id=None, ephemeral_message_id=66
+    )
+    cb_params = bot.send_message.await_args.kwargs["api_kwargs"][
+        "ephemeral_message_parameters"
+    ]
+    assert cb_params == {"callback_query_id": "cbq-9"}
+    assert "receiver_user_id" not in cb_params
+
     bot.do_api_request = AsyncMock(return_value=True)
     assert await edit_ephemeral_text(bot, handle, "done")
     endpoint = bot.do_api_request.await_args.args[0]
@@ -333,6 +350,7 @@ async def _check_ephemeral_helpers() -> None:
     edit_kw = bot.do_api_request.await_args.kwargs["api_kwargs"]
     assert edit_kw["ephemeral_message_id"] == 55
     assert edit_kw["text"] == "done"
+    assert await edit_ephemeral_text(bot, cb_handle, "nope") is False
 
 
 async def _check_when_stream_ephemeral_path() -> None:
@@ -533,15 +551,19 @@ async def _check_group_setup_gate() -> None:
         effective_message=AsyncMock(),
         callback_query=None,
     )
+    def _eph_msg(eph_id: int = 77):
+        return SimpleNamespace(
+            message_id=1,
+            api_kwargs={"ephemeral_message_id": eph_id},
+        )
+
     ctx = MagicMock()
     ctx.bot = MagicMock()
-    ctx.bot.send_message = AsyncMock(
-        return_value=SimpleNamespace(message_id=1)
-    )
+    ctx.bot.send_message = AsyncMock(side_effect=lambda *a, **k: _eph_msg())
     ctx.bot.delete_message = AsyncMock()
     ctx.application.bot_data = {"db": MagicMock(get_user_locale=MagicMock(return_value="ru"))}
 
-    # Chat admin → DM-only hint once (and ReplyKeyboardRemove).
+    # Chat admin → DM-only hint once via ephemeral (receiver_user_id).
     with patch(
         "bot_helpers.user_is_telegram_chat_admin",
         new=AsyncMock(return_value=True),
@@ -549,13 +571,19 @@ async def _check_group_setup_gate() -> None:
         reset_group_setup_notified()
         state = await wrapped(update, ctx)
         assert state == ConversationHandler.END
-        update.effective_message.reply_text.assert_awaited()
-        _rm_kw = update.effective_message.reply_text.await_args.kwargs
-        assert "reply_markup" in _rm_kw
+        update.effective_message.reply_text.assert_not_awaited()
+        ctx.bot.send_message.assert_awaited()
+        _eph = ctx.bot.send_message.await_args.kwargs["api_kwargs"][
+            "ephemeral_message_parameters"
+        ]
+        assert _eph["receiver_user_id"] == 900001
+        assert "callback_query_id" not in _eph
+        assert "reply_markup" in ctx.bot.send_message.await_args.kwargs
 
     # Non-admin member → silent text, but clear sticky reply keyboard.
     update.effective_message.reply_text.reset_mock()
     ctx.bot.send_message.reset_mock()
+    ctx.bot.send_message.side_effect = lambda *a, **k: SimpleNamespace(message_id=1)
     with patch(
         "bot_helpers.user_is_telegram_chat_admin",
         new=AsyncMock(return_value=False),
@@ -577,6 +605,7 @@ async def _check_group_setup_gate() -> None:
         effective_chat=SimpleNamespace(id=-1001, type=ChatType.SUPERGROUP),
         effective_message=None,
         callback_query=SimpleNamespace(
+            id="cbq-setup-1",
             answer=AsyncMock(),
             message=SimpleNamespace(
                 chat_id=-1001, chat=SimpleNamespace(type=ChatType.SUPERGROUP)
@@ -584,22 +613,34 @@ async def _check_group_setup_gate() -> None:
         ),
     )
     clear_bot = MagicMock()
-    clear_bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=9))
+    clear_bot.send_message = AsyncMock(
+        side_effect=[
+            _eph_msg(9),
+            SimpleNamespace(message_id=10),  # keyboard pulse
+        ]
+    )
     clear_bot.delete_message = AsyncMock()
     await reply_setup_private_only(cb_update, "ru", bot=clear_bot)
     cb_update.callback_query.answer.assert_awaited()
-    clear_bot.send_message.assert_awaited()
+    assert cb_update.callback_query.answer.await_args.kwargs.get("show_alert") is not True
+    eph_call = clear_bot.send_message.await_args_list[0]
+    cb_params = eph_call.kwargs["api_kwargs"]["ephemeral_message_parameters"]
+    assert cb_params == {"callback_query_id": "cbq-setup-1"}
+    assert "receiver_user_id" not in cb_params
+    # Pulse-clear sticky keyboard (second send).
+    assert clear_bot.send_message.await_count >= 2
 
     helpers_remove = (_ROOT / "bot_helpers.py").read_text(encoding="utf-8")
     assert "ReplyKeyboardRemove" in helpers_remove
     assert "clear_group_reply_keyboard" in helpers_remove
+    assert "callback_query_id" in helpers_remove
     when_src = (_ROOT / "handlers/when_stream.py").read_text(encoding="utf-8")
     assert "ReplyKeyboardRemove" in when_src
     assert "clear_group_reply_keyboard" in when_src
 
     ctx = MagicMock()
     ctx.bot = MagicMock()
-    ctx.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=2))
+    ctx.bot.send_message = AsyncMock(side_effect=lambda *a, **k: _eph_msg(2))
     ctx.bot.delete_message = AsyncMock()
     ctx.application.bot_data = {"db": MagicMock(get_user_locale=MagicMock(return_value="ru"))}
     group_update = SimpleNamespace(
@@ -614,11 +655,12 @@ async def _check_group_setup_gate() -> None:
     ):
         reset_group_setup_notified()
         assert await handle_group_setup_rejection(group_update, ctx) is True
-        group_update.effective_message.reply_text.assert_awaited_once()
+        group_update.effective_message.reply_text.assert_not_awaited()
+        assert ctx.bot.send_message.await_count == 1
         assert await handle_group_setup_rejection(group_update, ctx) is True
-        group_update.effective_message.reply_text.assert_awaited_once()
+        group_update.effective_message.reply_text.assert_not_awaited()
         # Second attempt is silent but still clears sticky keyboard.
-        ctx.bot.send_message.assert_awaited()
+        assert ctx.bot.send_message.await_count >= 2
     reset_group_setup_notified()
 
     bot_src = (_ROOT / "bot.py").read_text(encoding="utf-8")

@@ -90,21 +90,52 @@ def chat_context_properties(update) -> dict[str, int | str]:
 _GROUP_KEYBOARD_REMOVE = ReplyKeyboardRemove()
 
 
-async def reply_setup_private_only(update, lang: str, *, bot=None) -> None:
+async def reply_setup_private_only(
+    update, lang: str, *, bot=None, user_id: int | None = None
+) -> None:
+    """Tell a chat admin that setup is DM-only — privately when possible.
+
+    Callback path: ephemeral reply with only callback_query_id (no
+    receiver_user_id; Bot API 10.3+), then answerCallbackQuery.
+    Slash/text path: ephemeral via receiver_user_id; public reply fallback.
+    """
+    from ephemeral import send_ephemeral_text
+
     text = t("setup_private_only", lang)
+    chat_id = reply_chat_id(update)
     if update.callback_query:
+        query = update.callback_query
+        if bot is not None:
+            await send_ephemeral_text(
+                bot,
+                chat_id,
+                text,
+                callback_query_id=str(query.id),
+                reply_markup=_GROUP_KEYBOARD_REMOVE,
+            )
         try:
-            await update.callback_query.answer(text, show_alert=True)
+            await query.answer()
         except BadRequest:
             pass
-        # Alert cannot carry ReplyKeyboardRemove — clear via a pulse.
+        # Sticky ReplyKeyboard may still linger for others — pulse-clear.
         if bot is not None:
-            await clear_group_reply_keyboard(bot, reply_chat_id(update))
+            await clear_group_reply_keyboard(bot, chat_id)
         return
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            text, reply_markup=_GROUP_KEYBOARD_REMOVE
+    if update.effective_message is None:
+        return
+    if bot is not None and user_id is not None:
+        handle = await send_ephemeral_text(
+            bot,
+            chat_id,
+            text,
+            user_id,
+            reply_markup=_GROUP_KEYBOARD_REMOVE,
         )
+        if handle is not None:
+            return
+    await update.effective_message.reply_text(
+        text, reply_markup=_GROUP_KEYBOARD_REMOVE
+    )
 
 
 async def clear_group_reply_keyboard(bot, chat_id: int) -> None:
@@ -244,7 +275,9 @@ async def handle_group_setup_rejection(
             "lang": lang,
         },
     )
-    await reply_setup_private_only(update, lang, bot=context.bot)
+    await reply_setup_private_only(
+        update, lang, bot=context.bot, user_id=user_id
+    )
     return True
 
 
