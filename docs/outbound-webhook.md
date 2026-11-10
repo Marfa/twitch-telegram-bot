@@ -2,6 +2,8 @@
 
 Destination **Webhook** in the Telegram bot: after the alert is rendered, the bot `POST`s JSON to your HTTPS URL with an HMAC signature.
 
+Public HTML copy (same file): [`PUBLIC_BASE_URL/webhook`](https://bot.themarfa.name/webhook) (fallback: this file on GitHub). The wizard setup step links here.
+
 Source of truth for signing/payload shape: [`outbound_webhook.py`](../outbound_webhook.py).  
 Product plan (Max thin bot): [`todo-max-messenger-bot.md`](todo-max-messenger-bot.md).
 

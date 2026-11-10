@@ -72,6 +72,7 @@ from i18n import (
     t,
     template_strip_keyboard,
     template_typo_keyboard,
+    webhook_setup_html,
 )
 from links import (
     TelegramTopicLink,
@@ -2550,8 +2551,10 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return _wz()["DEST_CHAT"]
         if dest_type == "webhook":
             await update.effective_message.reply_text(
-                t("webhook_setup", lang),
+                webhook_setup_html(lang),
                 reply_markup=_wizard(lang),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
             )
             _set_wizard_back(context, _wz()["DEST_CHAT"])
             return _wz()["DEST_CHAT"]
@@ -3916,8 +3919,10 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("✓")
         await context.bot.send_message(
             reply_chat_id(update),
-            t("webhook_setup", lang),
+            webhook_setup_html(lang),
             reply_markup=_wizard(lang),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
         _set_wizard_back(context, _wz()["DEST_CHAT"])
         return _wz()["DEST_CHAT"]

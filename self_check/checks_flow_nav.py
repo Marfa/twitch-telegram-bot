@@ -1334,13 +1334,21 @@ async def _scenario_wizard_dest_webhook(db) -> None:
     assert ctx.user_data.get("pin_message") is False
     assert ctx.user_data.get("delete_previous") is False
     # _FREE_UID locale is ru in flow-nav (same as discord dest scenario).
-    setup = t("webhook_setup", "ru")
+    from i18n import webhook_setup_html
+
+    setup = webhook_setup_html("ru")
     sent = [
         str(c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or "")
         for c in bot.send_message.await_args_list
     ]
     assert any(setup in s for s in sent), sent
     assert any("X-Bot-Signature" in s for s in sent), sent
+    assert any("документация webhook" in s for s in sent), sent
+    assert any(
+        (c.kwargs.get("disable_web_page_preview") is True)
+        for c in bot.send_message.await_args_list
+        if setup in str(c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or "")
+    ), bot.send_message.await_args_list
     cap.assert_turn("wizard_dest_webhook")
 
 

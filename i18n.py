@@ -181,6 +181,31 @@ def guide_url(lang: str) -> str:
     return f"{PUBLIC_BASE_URL}/guide?lang={loc}"
 
 
+_WEBHOOK_DOCS_GITHUB = (
+    "https://github.com/Marfa/twitch-telegram-bot/blob/main/docs/outbound-webhook.md"
+)
+
+
+def webhook_docs_url(lang: str = "") -> str:
+    """Public contract page; falls back to GitHub when PUBLIC_BASE_URL is unset."""
+    from config import PUBLIC_BASE_URL
+
+    _ = lang  # reserved for localized HTML later
+    if PUBLIC_BASE_URL:
+        return f"{PUBLIC_BASE_URL}/webhook"
+    return _WEBHOOK_DOCS_GITHUB
+
+
+def webhook_docs_link_html(lang: str) -> str:
+    url = webhook_docs_url(lang)
+    label = html.escape(t("webhook_docs_link_label", lang))
+    return f'<a href="{html.escape(url)}">{label}</a>'
+
+
+def webhook_setup_html(lang: str) -> str:
+    return t("webhook_setup", lang, docs_link=webhook_docs_link_html(lang))
+
+
 def guide_keyboard(lang: str) -> InlineKeyboardMarkup | None:
     url = guide_url(lang)
     if not url:

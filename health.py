@@ -868,6 +868,27 @@ _GUIDE_FILES = {
     "uk": (_GUIDE_DIR / "uk.html").resolve(),
     "it": (_GUIDE_DIR / "it.html").resolve(),
 }
+_OUTBOUND_WEBHOOK_DOC = (
+    Path(__file__).resolve().parent / "docs" / "outbound-webhook.md"
+).resolve()
+
+
+def _webhook_docs_page() -> bytes | None:
+    """Serve docs/outbound-webhook.md as a simple HTML page for integrators."""
+    try:
+        raw = _OUTBOUND_WEBHOOK_DOC.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    body = html.escape(raw)
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<title>Outbound webhook</title>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "</head><body style='font-family:ui-monospace,Menlo,Consolas,monospace;"
+        "max-width:48rem;margin:2rem auto;padding:0 1rem;line-height:1.45;"
+        "white-space:pre-wrap'>"
+        f"{body}</body></html>"
+    ).encode("utf-8")
 
 
 def _guide_page(lang: str) -> bytes | None:
@@ -1101,6 +1122,19 @@ class _HealthHandler(BaseHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             lang = (query.get("lang") or ["en"])[0]
             body = _guide_page(lang)
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "public, max-age=300")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/webhook":
+            body = _webhook_docs_page()
             if body is None:
                 self.send_response(404)
                 self.end_headers()
