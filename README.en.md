@@ -1,6 +1,6 @@
-# Twitch → Telegram — stream alerts, Drops, whispers, and schedule tools
+# Twitch → Telegram / Discord — stream alerts, Drops, whispers, and schedule tools
 
-**Go-live, category change, upcoming or stream end, a new Drop, game giveaways, or a Twitch whisper — the bot notifies wherever you choose.** AI clips from VOD. Manage Twitch schedule from Telegram.
+**Go-live, category change, upcoming or stream end, a new Drop, game giveaways, or a Twitch whisper — the bot notifies wherever you choose: Telegram or Discord (webhook).** AI clips from VOD. Manage Twitch schedule from Telegram.
 
 > [!IMPORTANT]
 > **Live bot:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) / [@twitchbot_game](https://t.me/twitchbot_game) — `/start` for the menu · [status](https://pingzen.dev/status/bot-themarfa)
@@ -20,7 +20,7 @@
 | Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) / [@twitchbot_game](https://t.me/twitchbot_game) — `/start` for the menu; [status](https://pingzen.dev/status/bot-themarfa) |
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (GamerPower + ITAD) |
-| Destinations | DM or channel/group/community (with topics) |
+| Destinations | DM, channel/group/community (with topics), or Discord (Incoming Webhook) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+) → **realtime or hourly digest**; live → else VOD; own category in **📋 My subscriptions** |
@@ -128,9 +128,9 @@ Then the wizard (for stream start / category change / stream end):
 6. Delay send (minutes) — if checked; after go-live / category change / offline; Helix re-checked before send
 7. Restart mute (minutes) — if checked; **stream start** only
 8. Repeats (interval minutes, e.g. `15` or `10,30`) — if checked; **stream start** only; `0` = off
-9. Destination: DM or channel/group (one button)
-10. For channel or group — add the bot and confirm the chat
-11. Delete previous bot message? — if checked, before a new alert the bot deletes prior ones for the same streamer in that chat (type and template do not matter; other streamers are left alone)
+9. Destination: DM, channel/group, or Discord (webhook)
+10. For channel or group — add the bot and confirm the chat; for Discord — paste an Incoming Webhook URL
+11. Delete previous bot message? — if checked, before a new alert the bot deletes prior ones for the same streamer in that chat / webhook (type and template do not matter; other streamers are left alone). Pin is not available on Discord.
 
 Steps 4 / 6 / 7 / 8 / 11 only after checking Extras (and Premium for ⭐). Chat button, “Reminder button”, clean title, and image are free.
 

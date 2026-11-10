@@ -418,6 +418,13 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS discord_webhook
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS delete_other_alerts
                 BOOLEAN NOT NULL DEFAULT FALSE
                 """
@@ -1903,7 +1910,16 @@ class PostgresDatabase:
         notify_on_schedule_cancel: bool = False,
         schedule_cancel_template: str = "",
         use_stream_defaults: bool = False,
+        discord_webhook: str = "",
     ) -> int:
+        from token_crypto import encrypt_secret
+
+        webhook_store = ""
+        if dest_type == "discord":
+            webhook_store = encrypt_secret(str(discord_webhook or "").strip())
+            chat_id = 0
+            thread_id = None
+            pin_message = False
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -1926,8 +1942,8 @@ owner_id, twitch_username, twitch_user_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
-                    use_stream_defaults
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    use_stream_defaults, discord_webhook
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1988,6 +2004,7 @@ owner_id, twitch_username, twitch_user_id,
                     bool(notify_on_schedule_cancel),
                     str(schedule_cancel_template or ""),
                     bool(use_stream_defaults),
+                    webhook_store,
                 ),
             )
             row = cur.fetchone()
@@ -2050,7 +2067,7 @@ owner_id, twitch_username, twitch_user_id,
                 SELECT * FROM subscriptions
                 WHERE COALESCE(delete_previous, FALSE)
                   AND last_message_id IS NOT NULL
-                  AND dest_type != 'dm'
+                  AND dest_type NOT IN ('dm', 'discord')
                   AND (
                     last_message_at IS NULL
                     OR last_message_at <= %s
@@ -2371,6 +2388,7 @@ owner_id, twitch_username, twitch_user_id,
                     "notify_on_schedule_cancel",
                     "schedule_cancel_template",
                     "use_stream_defaults",
+                    "discord_webhook",
                 )
                 if k in payload
             })
@@ -2464,6 +2482,7 @@ owner_id, twitch_username, twitch_user_id,
             "schedule_cancel_template",
             "schedule_cancel_notified_days",
             "use_stream_defaults",
+            "discord_webhook",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -2500,6 +2519,15 @@ owner_id, twitch_username, twitch_user_id,
                 "schedule_reminder_minutes",
             ):
                 values.append(max(0, int(value)))
+            elif key == "discord_webhook":
+                from token_crypto import encrypt_secret
+
+                raw = str(value or "").strip()
+                values.append(
+                    raw
+                    if not raw or raw.startswith("enc:v1:")
+                    else encrypt_secret(raw)
+                )
             elif key in (
                 "ignore_keywords",
                 "repeat_notify_minutes",
@@ -3957,6 +3985,19 @@ owner_id, twitch_username, twitch_user_id,
                 (chat_id,),
             )
             return int(cur.rowcount)
+
+    def pause_delivery_for_subscription(self, sub_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE subscriptions
+                SET enabled = FALSE, delivery_paused = TRUE
+                WHERE id = %s
+                """,
+                (int(sub_id),),
+            )
+            return int(cur.rowcount or 0) > 0
 
     def get_enabled_subscriptions_by_chat_id(
         self, chat_id: int

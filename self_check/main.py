@@ -122,6 +122,9 @@ def main() -> None:
     from .checks_startup import run as check_startup
 
     check_startup()
+    from .checks_discord import run as check_discord
+
+    check_discord()
     print("ok")
 
 

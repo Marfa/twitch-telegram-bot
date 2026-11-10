@@ -1423,5 +1423,12 @@
   "channel_stats_footer": "Source: Twitch Helix · poll every 10 min",
   "channel_stats_footer_tt": "Source: Twitch Helix + TwitchTracker",
   "locales_reloaded": "Locales reloaded: {summary}",
-  "locales_reload_failed": "Failed to reload locales: {error}"
+  "locales_reload_failed": "Failed to reload locales: {error}",
+  "dest_discord": "🎮 To Discord (webhook)",
+  "dest_label_discord": "Discord",
+  "discord_setup": "Send alerts to a Discord channel via Incoming Webhook.\n\nIn Discord: channel → Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL and paste it here.\n\nOnly this URL is needed — no Discord bot. Pin is not available for webhooks.",
+  "discord_invalid_url": "That does not look like a Discord webhook URL.\nExpected: https://discord.com/api/webhooks/…/…",
+  "discord_test_ok": "✅ Test: the webhook can post to Discord.",
+  "discord_test_failed": "Could not post via this webhook. Check the URL and channel permissions, then try again.",
+  "delivery_fail_notice_discord": "Could not send notification for subscription #{sub_id} ({twitch_username}) to Discord ({webhook}).\n\nReason: {reason}\n\nThis Discord destination is paused. Update the webhook URL in the alert settings to resume."
 }

@@ -2503,6 +2503,13 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         dest_type = context.user_data.get("dest_type")
         if dest_type == "dm":
             return await _go_dest_prompt(update, context, lang)
+        if dest_type == "discord":
+            await update.effective_message.reply_text(
+                t("discord_setup", lang),
+                reply_markup=_wizard(lang),
+            )
+            _set_wizard_back(context, _wz()["DEST_CHAT"])
+            return _wz()["DEST_CHAT"]
         context.user_data["dest_type"] = "chat"
         await update.effective_message.reply_text(
             t("chat_setup", lang),
@@ -3830,6 +3837,7 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data["delete_previous"] = False
         context.user_data["notify_delete_fail"] = False
         context.user_data["pin_message"] = False
+        context.user_data["discord_webhook"] = ""
         return await _finish_subscription(
             update,
             context,
@@ -3838,9 +3846,22 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             None,
         )
 
+    if dest_type == "discord":
+        context.user_data["pin_message"] = False
+        context.user_data["adv_want_pin"] = False
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("discord_setup", lang),
+            reply_markup=_wizard(lang),
+        )
+        _set_wizard_back(context, _wz()["DEST_CHAT"])
+        return _wz()["DEST_CHAT"]
+
     setup_key = "chat_setup" if dest_type == "chat" else (
         "channel_setup" if dest_type == "channel" else "group_setup"
     )
+    context.user_data["discord_webhook"] = ""
     await query.edit_message_text("✓")
     await context.bot.send_message(
         reply_chat_id(update),
@@ -3909,6 +3930,9 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lang = _user_lang(context, update.effective_user.id)
     dest_type = context.user_data.get("dest_type", "")
 
+    if dest_type == "discord":
+        return await _receive_discord_webhook(update, context)
+
     chat_id, thread_id, error = await _parse_dest_input(
         context.bot, message, dest_type, lang
     )
@@ -3975,7 +3999,37 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     context.user_data["pending_chat_id"] = chat_id
     context.user_data["pending_thread_id"] = thread_id
+    context.user_data["discord_webhook"] = ""
     return await _prompt_delete_old(update, context, lang)
+
+
+async def _receive_discord_webhook(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import discord_webhook as dwh
+
+    message = update.effective_message
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (message.text or message.caption or "").strip()
+    url = dwh.normalize_webhook_url(raw)
+    if not url:
+        await message.reply_text(t("discord_invalid_url", lang))
+        return _wz()["DEST_CHAT"]
+
+    err = await asyncio.to_thread(
+        dwh.test_webhook, url, text=t("discord_test_ok", lang)
+    )
+    if err is not None:
+        await message.reply_text(t("discord_test_failed", lang))
+        return _wz()["DEST_CHAT"]
+
+    context.user_data["discord_webhook"] = url
+    context.user_data["pending_chat_id"] = 0
+    context.user_data["pending_thread_id"] = None
+    context.user_data["pin_message"] = False
+    context.user_data["adv_want_pin"] = False
+    return await _prompt_delete_old(update, context, lang)
+
 
 async def _prompt_delete_old(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
@@ -4131,10 +4185,17 @@ async def _finish_subscription(
         return ConversationHandler.END
     delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
     notify_delete_fail = delete_previous
+    # Discord Incoming Webhooks cannot pin; keep pin off for DM + Discord.
     pin_message = (
         bool(data.get("pin_message", False) or data.get("adv_want_pin", False))
-        and dest_type != "dm"
+        and dest_type not in ("dm", "discord")
     )
+    discord_webhook = (
+        str(data.get("discord_webhook") or "").strip() if dest_type == "discord" else ""
+    )
+    if dest_type == "discord":
+        chat_id = 0
+        thread_id = None
     from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
 
     alert_type = str(data.get("alert_type") or "")
@@ -4149,11 +4210,13 @@ async def _finish_subscription(
     if alert_type and alert_type != "live":
         repeat_notify_minutes = ""
     block_overlap = (
-        bool(data.get("block_overlap")) and dest_type != "dm" and alert_type in ("", "live")
+        bool(data.get("block_overlap"))
+        and dest_type not in ("dm", "discord")
+        and alert_type in ("", "live")
     )
     block_repeat_when_last = (
         bool(data.get("block_repeat_when_last"))
-        and dest_type != "dm"
+        and dest_type not in ("dm", "discord")
         and alert_type in ("", "live")
     )
     if alert_type and alert_type != "live":
@@ -4234,6 +4297,7 @@ async def _finish_subscription(
                 image_file_id=data.get("image_file_id") or None,
                 image_position=str(data.get("image_position") or ""),
                 notify_on_live=True,
+                discord_webhook=discord_webhook,
             )
             if not ok:
                 await context.bot.send_message(
@@ -4255,6 +4319,7 @@ async def _finish_subscription(
                 notify_delete_fail=notify_delete_fail,
                 delete_other_alerts=delete_other_alerts,
                 pin_message=pin_message,
+                discord_webhook=discord_webhook,
             )
             if not ok:
                 await context.bot.send_message(
@@ -4391,6 +4456,7 @@ async def _finish_subscription(
                 delete_other_alerts=delete_other_alerts,
                 is_demo=demo_mode.is_active(owner_id),
                 use_stream_defaults=bool(data.get("use_stream_defaults")),
+                discord_webhook=discord_webhook,
             )
             if not create_enabled:
                 context.user_data["premium_created_disabled"] = True
@@ -4403,6 +4469,15 @@ async def _finish_subscription(
         )
         context.user_data.clear()
         return ConversationHandler.END
+
+    if edit_sub_id and dest_type == "discord" and discord_webhook:
+        can = await prem.may_enable_subscription_async(
+            context.bot,
+            db,
+            owner_id,
+            twitch_username=str(data.get("twitch_username") or ""),
+        )
+        db.clear_delivery_paused(int(edit_sub_id), enabled=can)
 
     if (
         int(data.get("schedule_reminder_minutes", 0)) > 0

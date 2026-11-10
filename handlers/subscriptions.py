@@ -1178,7 +1178,20 @@ async def _format_subs_overview_lines(
     for sub in subs:
         sub_num = _owner_sub_number(db, owner_id, sub.id)
         try:
-            chat_display = await _resolve_chat_display_name(bot, sub)
+            if sub.dest_type == "discord":
+                from discord_webhook import mask_webhook_url
+                from token_crypto import try_decrypt_secret
+
+                plain = try_decrypt_secret(
+                    str(getattr(sub, "discord_webhook", "") or "")
+                )
+                chat_display = (
+                    mask_webhook_url(plain or "")
+                    if plain
+                    else dest_label("discord", lang)
+                )
+            else:
+                chat_display = await _resolve_chat_display_name(bot, sub)
             lines.append(
                 _format_sub_line(
                     sub,
@@ -6552,6 +6565,7 @@ def _share_clone_snapshot(snapshot: dict, user_id: int) -> dict:
     out["dest_type"] = "dm"
     out["chat_id"] = user_id
     out["thread_id"] = None
+    out["discord_webhook"] = ""
     out["delete_previous"] = False
     out["notify_delete_fail"] = False
     out["delete_other_alerts"] = False

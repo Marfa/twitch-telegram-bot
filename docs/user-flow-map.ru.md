@@ -254,8 +254,9 @@ IGDB-кнопки — `ignore-igdb-categories` (тот же мастер, что
 |---|---|
 | `📩 В личку` | Финиш (без delete_old) |
 | `📢 В канал или группу` | Инструкция → `@username` / `https://t.me/…` / тема / ID / переслать → тип чата определяется автоматически → delete follow-ups (если отмечено в «Дополнительно») |
+| `🎮 В Discord (webhook)` | Инструкция → вставить Incoming Webhook URL → тестовый POST → delete follow-ups (если отмечено; pin недоступен) · оповещения только в Discord (не в Telegram) |
 
-### 2.12 Удалять старые (adv + Premium; канал/группа)
+### 2.12 Удалять старые (adv + Premium; канал/группа / Discord)
 
 | | |
 |---|---|

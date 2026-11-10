@@ -88,6 +88,7 @@ class Database(Protocol):
         notify_on_schedule_cancel: bool = False,
         schedule_cancel_template: str = "",
         use_stream_defaults: bool = False,
+        discord_webhook: str = "",
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None: ...
@@ -371,6 +372,8 @@ class Database(Protocol):
     def is_chat_unreachable(self, chat_id: int) -> bool: ...
 
     def pause_delivery_for_chat(self, chat_id: int) -> int: ...
+
+    def pause_delivery_for_subscription(self, sub_id: int) -> bool: ...
 
     def get_enabled_subscriptions_by_chat_id(
         self, chat_id: int

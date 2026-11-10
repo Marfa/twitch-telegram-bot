@@ -1423,5 +1423,12 @@
   "channel_stats_footer": "Дані: Twitch Helix · опит кожні 10 хв",
   "channel_stats_footer_tt": "Дані: Twitch Helix + TwitchTracker",
   "locales_reloaded": "Локалі перезавантажено: {summary}",
-  "locales_reload_failed": "Не вдалося перезавантажити локалі: {error}"
+  "locales_reload_failed": "Не вдалося перезавантажити локалі: {error}",
+  "dest_discord": "🎮 У Discord (webhook)",
+  "dest_label_discord": "Discord",
+  "discord_setup": "Сповіщення підуть у канал Discord через Incoming Webhook.\n\nУ Discord: канал → Змінити канал → Інтеграції → Вебхуки → Новий вебхук → скопіюйте URL і надішліть сюди.\n\nПотрібен лише URL — Discord-бот не потрібен. Закріплення для webhook недоступне.",
+  "discord_invalid_url": "Це не схоже на URL Discord webhook.\nПотрібно: https://discord.com/api/webhooks/…/…",
+  "discord_test_ok": "✅ Тест: webhook може писати в Discord.",
+  "discord_test_failed": "Не вдалося надіслати через цей webhook. Перевірте URL і права каналу, потім спробуйте знову.",
+  "delivery_fail_notice_discord": "Не вдалося надіслати сповіщення за підпискою #{sub_id} ({twitch_username}) у Discord ({webhook}).\n\nПричина: {reason}\n\nЦе Discord-призначення на паузі. Оновіть URL webhook у налаштуваннях сповіщення, щоб відновити."
 }

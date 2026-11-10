@@ -1279,6 +1279,37 @@ async def _scenario_wizard_template_typo(db) -> None:
     cap.assert_turn("wizard_template_typo_no_dest")
 
 
+async def _scenario_wizard_dest_discord(db) -> None:
+    """§2.11 Discord webhook destination — Cancel/Back on setup Reply keyboard."""
+    from handlers.wizard import _wz, receive_dest_type
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(
+        application,
+        {
+            "twitch_username": "streamer",
+            "twitch_user_id": "100",
+            "message_template": "Live {username}",
+            "alert_type": "live",
+        },
+    )
+    update, _query = _cb_update(_FREE_UID, "dest:discord", cap)
+    cap.wrap(bot)
+    state = await receive_dest_type(update, ctx)
+    assert state == _wz()["DEST_CHAT"]
+    assert ctx.user_data.get("dest_type") == "discord"
+    assert ctx.user_data.get("pin_message") is False
+    setup = t("discord_setup", "ru")
+    sent = [
+        str(c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or "")
+        for c in bot.send_message.await_args_list
+    ]
+    assert any(setup in s for s in sent), sent
+    cap.assert_turn("wizard_dest_discord")
+
+
 async def _scenario_wizard_finish(db) -> None:
     from handlers.wizard import (
         receive_alert_type,
@@ -4859,6 +4890,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_deep(db)
         await _scenario_wizard_template_typo(db)
         await _scenario_wizard_finish(db)
+        await _scenario_wizard_dest_discord(db)
         await _scenario_wizard_custom_buttons(db)
         await _scenario_wizard_drops_game(db)
         await _scenario_wizard_game_alert(db)

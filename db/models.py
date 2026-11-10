@@ -587,6 +587,8 @@ class Subscription:
     repeat_notify_minutes: str = ""
     block_overlap: bool = False
     block_repeat_when_last: bool = False
+    # Encrypted Incoming Webhook URL when dest_type == "discord" (else "").
+    discord_webhook: str = ""
 
 
 @dataclass(frozen=True)
@@ -748,13 +750,23 @@ def migrate_sub_fields_for_alert_type(
     else:
         return out
 
-    if str(out.get("dest_type") or "dm") == "dm":
+    dest = str(out.get("dest_type") or "dm")
+    if dest == "dm":
         out["delete_previous"] = False
         out["notify_delete_fail"] = False
         out["delete_other_alerts"] = False
         out["pin_message"] = False
         out["block_overlap"] = False
         out["block_repeat_when_last"] = False
+        out["discord_webhook"] = ""
+    elif dest == "discord":
+        out["chat_id"] = 0
+        out["thread_id"] = None
+        out["pin_message"] = False
+        out["block_overlap"] = False
+        out["block_repeat_when_last"] = False
+    else:
+        out["discord_webhook"] = ""
     out["notify_delete_fail"] = bool(out.get("delete_previous"))
     if not out.get("notify_on_category_change") or not out.get("delete_previous"):
         out["delete_other_alerts"] = False
@@ -822,6 +834,7 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "dest_type": sub.dest_type,
         "chat_id": sub.chat_id,
         "thread_id": sub.thread_id,
+        "discord_webhook": str(getattr(sub, "discord_webhook", "") or ""),
         "delete_previous": bool(sub.delete_previous),
         "notify_delete_fail": bool(sub.notify_delete_fail),
         "disable_link_preview": bool(sub.disable_link_preview),
@@ -1424,6 +1437,9 @@ def _row_to_sub(row: Any) -> Subscription:
         delete_previous=bool(row["delete_previous"]),
         notify_delete_fail=bool(row["notify_delete_fail"]),
         disable_link_preview=bool(row["disable_link_preview"]),
+        discord_webhook=str(row["discord_webhook"] or "")
+        if "discord_webhook" in keys
+        else "",
         strip_name_mentions=bool(row["strip_name_mentions"])
         if "strip_name_mentions" in keys
         else False,

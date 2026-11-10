@@ -1238,6 +1238,11 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("dest_dm", lang), callback_data="dest:dm")],
             [InlineKeyboardButton(t("dest_chat", lang), callback_data="dest:chat")],
+            [
+                InlineKeyboardButton(
+                    t("dest_discord", lang), callback_data="dest:discord"
+                )
+            ],
         ]
     )
 

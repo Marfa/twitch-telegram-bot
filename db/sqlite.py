@@ -364,6 +364,11 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN giveaway_watch_prefs "
                 "TEXT NOT NULL DEFAULT ''"
             )
+        if "discord_webhook" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN discord_webhook "
+                "TEXT NOT NULL DEFAULT ''"
+            )
         drops_auth_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(drops_auth)")
         }
@@ -1636,7 +1641,16 @@ class SqliteDatabase:
         notify_on_schedule_cancel: bool = False,
         schedule_cancel_template: str = "",
         use_stream_defaults: bool = False,
+        discord_webhook: str = "",
     ) -> int:
+        from token_crypto import encrypt_secret
+
+        webhook_store = ""
+        if dest_type == "discord":
+            webhook_store = encrypt_secret(str(discord_webhook or "").strip())
+            chat_id = 0
+            thread_id = None
+            pin_message = False
         with self._conn() as conn:
             cur = conn.execute(
                 """
@@ -1658,8 +1672,8 @@ owner_id, twitch_username, twitch_user_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
-                    use_stream_defaults
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    use_stream_defaults, discord_webhook
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1717,6 +1731,7 @@ owner_id, twitch_username, twitch_user_id,
                     int(bool(notify_on_schedule_cancel)),
                     str(schedule_cancel_template or ""),
                     int(bool(use_stream_defaults)),
+                    webhook_store,
                 ),
             )
             sub_id = int(cur.lastrowid)
@@ -1774,7 +1789,7 @@ owner_id, twitch_username, twitch_user_id,
                 SELECT * FROM subscriptions
                 WHERE COALESCE(delete_previous, 0) != 0
                   AND last_message_id IS NOT NULL
-                  AND dest_type != 'dm'
+                  AND dest_type NOT IN ('dm', 'discord')
                   AND (
                     last_message_at IS NULL
                     OR last_message_at <= ?
@@ -2026,6 +2041,22 @@ owner_id, twitch_username, twitch_user_id,
                     enabled_restored += 1
                     if not promo:
                         slots_used += 1
+                restore_dest = str(payload.get("dest_type") or "dm")
+                restore_webhook = str(payload.get("discord_webhook") or "")
+                restore_chat = int(payload.get("chat_id") or owner_id)
+                restore_thread = payload.get("thread_id")
+                restore_pin = int(bool(payload.get("pin_message")))
+                if restore_dest == "discord":
+                    restore_chat = 0
+                    restore_thread = None
+                    restore_pin = 0
+                    # Snapshot already stores ciphertext; keep as-is if prefixed.
+                    if restore_webhook and not restore_webhook.startswith("enc:v1:"):
+                        from token_crypto import encrypt_secret
+
+                        restore_webhook = encrypt_secret(restore_webhook)
+                else:
+                    restore_webhook = ""
                 conn.execute(
                     """
                     INSERT INTO subscriptions (
@@ -2048,17 +2079,17 @@ owner_id, twitch_username, twitch_user_id,
                         delete_other_alerts, pin_message,
                         top_donations, top_donations_template, is_demo,
                         notify_on_schedule_cancel, schedule_cancel_template,
-                        use_stream_defaults
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        use_stream_defaults, discord_webhook
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         owner_id,
                         payload.get("twitch_username") or "",
                         payload.get("twitch_user_id") or "",
                         payload.get("message_template") or "",
-                        payload.get("dest_type") or "dm",
-                        int(payload.get("chat_id") or owner_id),
-                        payload.get("thread_id"),
+                        restore_dest,
+                        restore_chat,
+                        restore_thread,
                         int(bool(payload.get("delete_previous"))),
                         int(bool(payload.get("notify_delete_fail"))),
                         int(bool(payload.get("disable_link_preview"))),
@@ -2098,13 +2129,14 @@ owner_id, twitch_username, twitch_user_id,
                         int(bool(payload.get("notify_on_drops"))),
                         payload.get("drops_game_id") or "",
                         int(bool(payload.get("delete_other_alerts"))),
-                        int(bool(payload.get("pin_message"))),
+                        restore_pin,
                         int(bool(payload.get("top_donations"))),
                         payload.get("top_donations_template") or "",
                         int(bool(payload.get("is_demo"))),
                         int(bool(payload.get("notify_on_schedule_cancel"))),
                         str(payload.get("schedule_cancel_template") or ""),
                         int(bool(payload.get("use_stream_defaults"))),
+                        restore_webhook,
                     ),
                 )
                 sub_id = int(
@@ -2188,6 +2220,7 @@ owner_id, twitch_username, twitch_user_id,
             "schedule_cancel_template",
             "schedule_cancel_notified_days",
             "use_stream_defaults",
+            "discord_webhook",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -2224,6 +2257,15 @@ owner_id, twitch_username, twitch_user_id,
                 "schedule_reminder_minutes",
             ):
                 values.append(max(0, int(value)))
+            elif key == "discord_webhook":
+                from token_crypto import encrypt_secret
+
+                raw = str(value or "").strip()
+                values.append(
+                    raw
+                    if not raw or raw.startswith("enc:v1:")
+                    else encrypt_secret(raw)
+                )
             elif key in (
                 "ignore_keywords",
                 "repeat_notify_minutes",
@@ -3573,6 +3615,19 @@ owner_id, twitch_username, twitch_user_id,
                 (chat_id,),
             )
             return int(cur.rowcount)
+
+    def pause_delivery_for_subscription(self, sub_id: int) -> bool:
+        """Pause one subscription (Discord dest — chat_id=0 must not mass-pause)."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE subscriptions
+                SET enabled = 0, delivery_paused = 1
+                WHERE id = ?
+                """,
+                (int(sub_id),),
+            )
+            return int(cur.rowcount) > 0
 
     def get_enabled_subscriptions_by_chat_id(
         self, chat_id: int

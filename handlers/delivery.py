@@ -1301,6 +1301,392 @@ async def _probe_alert_message_exists(
         return True
 
 
+def _discord_link_buttons(
+    sub: Subscription,
+    lang: str,
+    *,
+    db: Database | None = None,
+    bot_username: str = "",
+) -> list[tuple[str, str]]:
+    """URL-only buttons for Discord (no callback / web_app)."""
+    import custom_buttons as cbtn
+
+    out: list[tuple[str, str]] = []
+    login = (sub.twitch_username or "").strip().lstrip("@").lower()
+    for btn_def in cbtn.parse_custom_buttons(getattr(sub, "custom_buttons", None)):
+        url = str(btn_def.get("url") or "")
+        if login and "{username}" in url:
+            url = url.replace("{username}", login)
+        if "{url}" in url:
+            from twitch import twitch_profile_url
+
+            url = url.replace("{url}", twitch_profile_url(login))
+        label = str(btn_def.get("text") or "")[:80]
+        if label and url:
+            out.append((label, url))
+    if sub.attach_chat_button:
+        from chat_webapp import alert_chat_button_url
+
+        url = alert_chat_button_url(
+            login=sub.twitch_username,
+            lang=lang,
+            user_id=sub.owner_id,
+        )
+        if url:
+            out.append((t("alert_chat_button", lang), url))
+    remind_url = _live_remind_button_url(sub, lang, db=db, bot_username=bot_username)
+    if remind_url:
+        out.append((t("alert_live_remind_button", lang), remind_url))
+    return out
+
+
+async def _discord_delete_previous(db: Database, sub: Subscription, webhook_url: str) -> None:
+    import discord_webhook as dwh
+    from token_crypto import try_decrypt_secret
+
+    to_delete: list[tuple[int, int]] = []
+    seen: set[int] = set()
+    if sub.last_message_id and sub.last_message_id not in seen:
+        to_delete.append((sub.id, int(sub.last_message_id)))
+        seen.add(int(sub.last_message_id))
+    for sibling in db.get_subscriptions_by_owner(sub.owner_id):
+        if sibling.id == sub.id:
+            continue
+        if sibling.dest_type != "discord":
+            continue
+        if sibling.twitch_user_id != sub.twitch_user_id:
+            continue
+        if not sibling.last_message_id or int(sibling.last_message_id) in seen:
+            continue
+        plain = try_decrypt_secret(str(getattr(sibling, "discord_webhook", "") or ""))
+        if not plain or plain != webhook_url:
+            continue
+        to_delete.append((sibling.id, int(sibling.last_message_id)))
+        seen.add(int(sibling.last_message_id))
+    for owner_sub_id, message_id in to_delete:
+        ok = await asyncio.to_thread(
+            dwh.delete_webhook_message, webhook_url, message_id
+        )
+        if ok and owner_sub_id != sub.id:
+            db.set_last_message_id(owner_sub_id, None)
+
+
+async def _maybe_notify_discord_delivery_failure(
+    bot,
+    db: Database,
+    sub: Subscription,
+    *,
+    reason: str,
+    webhook_mask: str,
+) -> None:
+    from handlers.subscriptions import _owner_sub_number
+
+    if db.is_bot_blocked(sub.owner_id):
+        return
+    if not _delivery_fail_notice_due(sub.id):
+        return
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    notice = t(
+        "delivery_fail_notice_discord",
+        lang,
+        sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
+        twitch_username=sub.twitch_username,
+        webhook=webhook_mask,
+        reason=reason,
+    )
+    try:
+        await bot.send_message(
+            sub.owner_id,
+            notice,
+            reply_markup=delivery_fail_notice_keyboard(sub.id, lang),
+        )
+        _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
+    except (BadRequest, Forbidden) as notify_exc:
+        if _is_user_blocked_error(notify_exc):
+            apply_user_blocked(
+                db,
+                sub.owner_id,
+                source="delivery_fail_notice",
+                properties=_block_context(sub),
+            )
+        logger.warning(
+            "Cannot notify owner %s about Discord delivery failure: %s",
+            sub.owner_id,
+            notify_exc,
+        )
+
+
+async def _send_discord_notification(
+    bot,
+    db: Database,
+    sub: Subscription,
+    text: str,
+    *,
+    alert_type: str = "live",
+    stream: dict | None = None,
+    stream_id: str = "",
+    vod_offset_seconds: int | None = None,
+    twitch: TwitchClient | None = None,
+    parse_mode: str | None = None,
+    bot_data: dict | None = None,
+    job_queue=None,
+    is_scheduled_repeat: bool = False,
+) -> bool:
+    import discord_webhook as dwh
+    import premium as prem
+    from token_crypto import try_decrypt_secret
+    from twitch import template_uses_html
+
+    await _maybe_notify_stored_template_typos(bot, db, sub)
+
+    stored = str(getattr(sub, "discord_webhook", "") or "")
+    webhook_url = try_decrypt_secret(stored)
+    if webhook_url is None or not dwh.normalize_webhook_url(webhook_url or ""):
+        db.pause_delivery_for_subscription(sub.id)
+        await _maybe_notify_discord_delivery_failure(
+            bot,
+            db,
+            sub,
+            reason="webhook missing or undecryptable",
+            webhook_mask="Discord",
+        )
+        return False
+    webhook_url = dwh.normalize_webhook_url(webhook_url) or ""
+    webhook_mask = dwh.mask_webhook_url(webhook_url)
+
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    use_html = (
+        parse_mode == ParseMode.HTML
+        if parse_mode is not None
+        else template_uses_html(sub.message_template or "")
+    )
+    content = dwh.html_to_discord_markdown(text) if use_html else (text or "")
+
+    bot_username = await _cached_bot_username(bot, bot_data)
+    components = dwh.link_button_components(
+        _discord_link_buttons(
+            sub, lang, db=db, bot_username=bot_username
+        )
+    )
+
+    # Media: public URL → embed; bytes / Telegram file_id → multipart.
+    embeds: list[dict[str, Any]] | None = None
+    file_bytes: bytes | None = None
+    filename = "media.bin"
+    image_photo = await asyncio.to_thread(
+        resolve_sub_image_photo, sub, stream, twitch
+    )
+    photo_bytes: bytes | None = None
+    animation_bytes: bytes | None = None
+    video_bytes: bytes | None = None
+    if is_ai_game_cover_image(sub.image_file_id):
+        import bothub as bothub_mod
+
+        try:
+            photo_bytes = await asyncio.to_thread(
+                bothub_mod.generate_alert_cover_bytes,
+                stream=stream,
+                twitch=twitch,
+                lang=lang,
+                db=db,
+            )
+        except Exception:
+            logger.exception("AI cover failed for Discord sub %s", sub.id)
+    if is_stream_capture_preview_image(sub.image_file_id):
+        from handlers.stream_preview import (
+            build_preview_placeholder_mp4,
+            build_stream_video_mp4,
+            preview_login_from_stream,
+        )
+        from stream_capture import peek_shared_preview
+
+        login = preview_login_from_stream(stream, sub)
+        uid = str((stream or {}).get("user_id") or sub.twitch_user_id or "").strip()
+        captured = peek_shared_preview(uid) if uid else None
+        if captured is None and login and uid and alert_type != "end":
+            placeholder = await asyncio.to_thread(
+                build_preview_placeholder_mp4, stream
+            )
+            if placeholder:
+                if is_stream_file_video_preview_image(sub.image_file_id):
+                    video_bytes = placeholder
+                else:
+                    animation_bytes = placeholder
+        if (
+            captured is None
+            and not animation_bytes
+            and not video_bytes
+            and login
+            and uid
+            and alert_type != "end"
+        ):
+            captured = await asyncio.to_thread(
+                build_stream_video_mp4, login=login, twitch_user_id=uid
+            )
+        if captured is not None:
+            if is_stream_file_video_preview_image(sub.image_file_id):
+                video_bytes = captured.data
+            else:
+                animation_bytes = captured.data
+            from stream_capture import forget_and_unlink
+
+            forget_and_unlink(captured.path)
+
+    if photo_bytes:
+        file_bytes = photo_bytes
+        filename = "cover.jpg"
+    elif animation_bytes:
+        file_bytes = animation_bytes
+        filename = "preview.gif"
+    elif video_bytes:
+        file_bytes = video_bytes
+        filename = "preview.mp4"
+    elif isinstance(image_photo, str) and image_photo.startswith(
+        ("http://", "https://")
+    ):
+        embeds = [{"image": {"url": image_photo}}]
+    elif image_photo:
+        try:
+            tg_file = await bot.get_file(image_photo)
+            file_bytes = bytes(await tg_file.download_as_bytearray())
+            filename = "image.jpg"
+        except Exception:
+            logger.exception(
+                "Failed to download Telegram file for Discord sub %s", sub.id
+            )
+            file_bytes = None
+
+    if file_bytes is not None and len(file_bytes) > dwh.MAX_FILE_BYTES:
+        logger.warning(
+            "Discord media too large for sub %s (%s bytes); text only",
+            sub.id,
+            len(file_bytes),
+        )
+        file_bytes = None
+
+    if sub.delete_previous:
+        await _discord_delete_previous(db, sub, webhook_url)
+
+    async def _post_once() -> dict[str, Any] | None:
+        return await asyncio.to_thread(
+            dwh.execute_webhook,
+            webhook_url,
+            content=content,
+            embeds=embeds,
+            components=components or None,
+            file_bytes=file_bytes,
+            filename=filename,
+            wait=True,
+        )
+
+    try:
+        msg = await _post_once()
+    except dwh.DiscordWebhookError as exc:
+        if exc.status_code == 429:
+            await asyncio.sleep(1.5)
+            try:
+                msg = await _post_once()
+            except dwh.DiscordWebhookError as retry_exc:
+                if retry_exc.status_code in (401, 404):
+                    db.pause_delivery_for_subscription(sub.id)
+                await _maybe_notify_discord_delivery_failure(
+                    bot,
+                    db,
+                    sub,
+                    reason=str(retry_exc),
+                    webhook_mask=webhook_mask,
+                )
+                return False
+        elif exc.status_code in (401, 404):
+            db.pause_delivery_for_subscription(sub.id)
+            await _maybe_notify_discord_delivery_failure(
+                bot,
+                db,
+                sub,
+                reason=str(exc),
+                webhook_mask=webhook_mask,
+            )
+            return False
+        else:
+            await _maybe_notify_discord_delivery_failure(
+                bot,
+                db,
+                sub,
+                reason=str(exc),
+                webhook_mask=webhook_mask,
+            )
+            return False
+
+    mid = None
+    if isinstance(msg, dict) and msg.get("id") is not None:
+        try:
+            mid = int(msg["id"])
+        except (TypeError, ValueError):
+            mid = None
+    if mid is not None:
+        db.set_last_message_id(sub.id, mid)
+
+    if not is_scheduled_repeat:
+        suppress_m = prem.effective_suppress_repeat_minutes(sub)
+        if suppress_m > 0:
+            db.set_notify_cooldown(sub.id, suppress_m)
+    jq = job_queue
+    if jq is None and bot_data is not None:
+        jq = bot_data.get("job_queue")
+    if (
+        alert_type == "live"
+        and not is_scheduled_repeat
+        and mid is not None
+        and jq is not None
+    ):
+        from handlers.notifications import schedule_repeat_notify_jobs
+
+        schedule_repeat_notify_jobs(
+            jq,
+            db=db,
+            sub=sub,
+            stream_id=stream_id
+            or (str(stream.get("id") or "") if stream else ""),
+        )
+
+    stream_uid = str((stream or {}).get("user_id") or "").strip()
+    history_uid = (
+        stream_uid if stream_uid.isdigit() else (sub.twitch_user_id or "")
+    )
+    history_stream_id = (
+        (stream_id or "").strip()
+        or (str(stream.get("id") or "") if stream else "")
+    )
+    try:
+        db.add_alert_delivery_log(
+            sub.owner_id,
+            subscription_id=sub.id,
+            dest_type="discord",
+            chat_id=0,
+            message_id=mid,
+            thread_id=None,
+            twitch_username=sub.twitch_username,
+            alert_type=alert_type,
+            twitch_user_id=history_uid,
+            stream_id=history_stream_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to record Discord alert delivery log for sub %s", sub.id
+        )
+    analytics.capture(
+        sub.owner_id,
+        "alert_sent",
+        {
+            "alert_type": alert_type,
+            "dest_type": "discord",
+            "subscription_id": sub.id,
+            "twitch_username": sub.twitch_username,
+        },
+    )
+    return True
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -1323,6 +1709,22 @@ async def _send_notification(
     sub = prem.subscription_for_delivery(db, sub)
     if _user_notifications_paused(db, sub.owner_id):
         return True
+    if sub.dest_type == "discord":
+        return await _send_discord_notification(
+            bot,
+            db,
+            sub,
+            text,
+            alert_type=alert_type,
+            stream=stream,
+            stream_id=stream_id,
+            vod_offset_seconds=vod_offset_seconds,
+            twitch=twitch,
+            parse_mode=parse_mode,
+            bot_data=bot_data,
+            job_queue=job_queue,
+            is_scheduled_repeat=is_scheduled_repeat,
+        )
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
         return True
     if db.is_chat_unreachable(sub.chat_id):
