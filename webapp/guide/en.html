@@ -26,7 +26,7 @@
 </head>
 <body>
  <h1>Twitch → Telegram bot guide</h1>
- <p>The bot sends Twitch stream alerts where you choose: DM, channel, or group. This page covers every everyday feature. Configure everything in a <strong>private chat</strong> with the bot.</p>
+ <p>The bot sends Twitch stream alerts where you choose: DM, channel, group, Discord, or your own Webhook. This page covers every everyday feature. Configure everything in a <strong>private chat</strong> with the bot.</p>
  <p>Live bot: <a href="https://t.me/twitch2telegram_bot">@twitch2telegram_bot</a> / <a href="https://t.me/twitchbot_game">@twitchbot_game</a></p>
 
  <nav aria-label="Table of contents">
@@ -91,7 +91,7 @@
  <li><strong>Message</strong> — template with placeholders like <code>{username}</code>, <code>{game}</code>, <code>{name}</code>, <code>{game_description}</code>. Full list: <a href="/placeholders?lang=en">placeholders</a>.</li>
  <li><strong>Extras</strong> — tick what you need: image, clean title (strips @streamers and !commands), ignore words ⭐, delayed send ⭐, restart mute ⭐, repeats ⭐ / overlap guard ⭐ (stream start; overlap — dedicated screen with two checkboxes, off by default; channel/group only), delete previous messages ⭐, pin message until stream ends ⭐ (channel/group only), custom URL buttons ⭐, chat button, “Reminder button” (upcoming only — button with a link to a stream-start alert), “Block repeats” (upcoming — one alert per day; schedule changes for that day are ignored), “Top donations” (stream end, DonationAlerts), button color (default / blue / green / red when any button option is on), link preview. A tick turns the option on — no second Yes/No.</li>
  <li>The bot then asks only for steps that need extra input (cover: stream preview ⬜️/✅, stream GIF preview ⭐, stream video preview ⭐, game cover ⬜️/✅, or your own upload, then <strong>Next</strong>; delay/restart-mute minutes; interval minutes for repeats, etc.).</li>
- <li><strong>Destination</strong> — DM, channel/group, or Discord (Incoming Webhook). For a channel/group, add the bot and confirm the chat; for Discord, paste the channel webhook URL. Pin is not available on Discord.</li>
+ <li><strong>Destination</strong> — DM, channel/group, Discord, or Webhook (HTTPS URL + HMAC). For a channel/group, add the bot and confirm the chat; for Discord, paste the channel webhook URL; for Webhook — a public https://… (the bot issues a secret; integration contract in the repo <code>docs/outbound-webhook.md</code>). Pin is not available on Discord or Webhook.</li>
  </ol>
  <p>Every step has <strong>« Back</strong>, <strong>Cancel</strong>, and a way back to the menu. At the end you get “Setup complete” and a test message in the chosen chat.</p>
  <div class="note">Free plan: at most <strong>5 active</strong> alerts. A 6th is created paused — enable after upgrade or pause another. marfapr and paid streamer channel advertising do not count toward that cap.</div>

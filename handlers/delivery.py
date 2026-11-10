@@ -1687,6 +1687,244 @@ async def _send_discord_notification(
     return True
 
 
+async def _maybe_notify_outbound_webhook_delivery_failure(
+    bot,
+    db: Database,
+    sub: Subscription,
+    *,
+    reason: str,
+    webhook_mask: str,
+) -> None:
+    from handlers.subscriptions import _owner_sub_number
+
+    if db.is_bot_blocked(sub.owner_id):
+        return
+    if not _delivery_fail_notice_due(sub.id):
+        return
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    notice = t(
+        "delivery_fail_notice_webhook",
+        lang,
+        sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
+        twitch_username=sub.twitch_username,
+        webhook=webhook_mask,
+        reason=reason,
+    )
+    try:
+        await bot.send_message(
+            sub.owner_id,
+            notice,
+            reply_markup=delivery_fail_notice_keyboard(sub.id, lang),
+        )
+        _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
+    except (BadRequest, Forbidden) as notify_exc:
+        if _is_user_blocked_error(notify_exc):
+            apply_user_blocked(
+                db,
+                sub.owner_id,
+                source="delivery_fail_notice",
+                properties=_block_context(sub),
+            )
+        logger.warning(
+            "Cannot notify owner %s about webhook delivery failure: %s",
+            sub.owner_id,
+            notify_exc,
+        )
+
+
+async def _send_outbound_webhook_notification(
+    bot,
+    db: Database,
+    sub: Subscription,
+    text: str,
+    *,
+    alert_type: str = "live",
+    stream: dict | None = None,
+    stream_id: str = "",
+    vod_offset_seconds: int | None = None,
+    twitch: TwitchClient | None = None,
+    parse_mode: str | None = None,
+    bot_data: dict | None = None,
+    job_queue=None,
+    is_scheduled_repeat: bool = False,
+) -> bool:
+    """POST rendered alert JSON to dest_type=webhook."""
+    import outbound_webhook as owh
+    import premium as prem
+    from token_crypto import try_decrypt_secret
+    from twitch import template_uses_html
+    from uuid import uuid4
+
+    await _maybe_notify_stored_template_typos(bot, db, sub)
+
+    url_stored = str(getattr(sub, "webhook_url", "") or "")
+    secret_stored = str(getattr(sub, "webhook_secret", "") or "")
+    webhook_url = try_decrypt_secret(url_stored)
+    webhook_secret = try_decrypt_secret(secret_stored)
+    if (
+        not webhook_url
+        or not owh.normalize_webhook_url(webhook_url)
+        or not webhook_secret
+        or not owh.normalize_secret(webhook_secret)
+    ):
+        db.pause_delivery_for_subscription(sub.id)
+        await _maybe_notify_outbound_webhook_delivery_failure(
+            bot,
+            db,
+            sub,
+            reason="webhook url/secret missing or undecryptable",
+            webhook_mask="Webhook",
+        )
+        return False
+    webhook_url = owh.normalize_webhook_url(webhook_url) or ""
+    webhook_mask = owh.mask_webhook_url(webhook_url)
+
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    use_html = (
+        parse_mode == ParseMode.HTML
+        if parse_mode is not None
+        else template_uses_html(sub.message_template or "")
+    )
+    text_format = "html" if use_html else "plain"
+    bot_username = await _cached_bot_username(bot, bot_data)
+    buttons = _discord_link_buttons(
+        sub, lang, db=db, bot_username=bot_username
+    )
+
+    photo_url: str | None = None
+    image_photo = await asyncio.to_thread(
+        resolve_sub_image_photo, sub, stream, twitch
+    )
+    if isinstance(image_photo, str) and image_photo.startswith(
+        ("http://", "https://")
+    ):
+        photo_url = image_photo
+
+    history_stream_id = (
+        (stream_id or "").strip()
+        or (str(stream.get("id") or "") if stream else "")
+    )
+    delivery_id = str(uuid4())
+    payload = owh.build_payload(
+        delivery_id=delivery_id,
+        subscription_id=int(sub.id),
+        owner_id=int(sub.owner_id),
+        alert_type=alert_type,
+        twitch_login=sub.twitch_username or "",
+        twitch_user_id=str(sub.twitch_user_id or ""),
+        stream_id=history_stream_id,
+        text=text or "",
+        text_format=text_format,
+        photo_url=photo_url,
+        buttons=buttons,
+        meta={
+            "vod_offset_seconds": vod_offset_seconds,
+            "is_scheduled_repeat": bool(is_scheduled_repeat),
+        },
+    )
+
+    async def _post_once() -> None:
+        await asyncio.to_thread(
+            owh.post_webhook,
+            webhook_url,
+            secret=webhook_secret,
+            payload=payload,
+        )
+
+    try:
+        await _post_once()
+    except owh.OutboundWebhookError as exc:
+        if exc.status_code == 429:
+            await asyncio.sleep(1.5)
+            try:
+                await _post_once()
+            except owh.OutboundWebhookError as retry_exc:
+                if retry_exc.status_code in (401, 403, 404, 410):
+                    db.pause_delivery_for_subscription(sub.id)
+                await _maybe_notify_outbound_webhook_delivery_failure(
+                    bot,
+                    db,
+                    sub,
+                    reason=str(retry_exc),
+                    webhook_mask=webhook_mask,
+                )
+                return False
+        elif exc.status_code in (401, 403, 404, 410):
+            db.pause_delivery_for_subscription(sub.id)
+            await _maybe_notify_outbound_webhook_delivery_failure(
+                bot,
+                db,
+                sub,
+                reason=str(exc),
+                webhook_mask=webhook_mask,
+            )
+            return False
+        else:
+            await _maybe_notify_outbound_webhook_delivery_failure(
+                bot,
+                db,
+                sub,
+                reason=str(exc),
+                webhook_mask=webhook_mask,
+            )
+            return False
+
+    if not is_scheduled_repeat:
+        suppress_m = prem.effective_suppress_repeat_minutes(sub)
+        if suppress_m > 0:
+            db.set_notify_cooldown(sub.id, suppress_m)
+    jq = job_queue
+    if jq is None and bot_data is not None:
+        jq = bot_data.get("job_queue")
+    if (
+        alert_type == "live"
+        and not is_scheduled_repeat
+        and jq is not None
+    ):
+        from handlers.notifications import schedule_repeat_notify_jobs
+
+        schedule_repeat_notify_jobs(
+            jq,
+            db=db,
+            sub=sub,
+            stream_id=history_stream_id,
+        )
+
+    stream_uid = str((stream or {}).get("user_id") or "").strip()
+    history_uid = (
+        stream_uid if stream_uid.isdigit() else (sub.twitch_user_id or "")
+    )
+    try:
+        db.add_alert_delivery_log(
+            sub.owner_id,
+            subscription_id=sub.id,
+            dest_type="webhook",
+            chat_id=0,
+            message_id=None,
+            thread_id=None,
+            twitch_username=sub.twitch_username,
+            alert_type=alert_type,
+            twitch_user_id=history_uid,
+            stream_id=history_stream_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to record webhook alert delivery log for sub %s", sub.id
+        )
+    analytics.capture(
+        sub.owner_id,
+        "alert_sent",
+        {
+            "alert_type": alert_type,
+            "dest_type": "webhook",
+            "subscription_id": sub.id,
+            "twitch_username": sub.twitch_username,
+            "delivery_id": delivery_id,
+        },
+    )
+    return True
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -1711,6 +1949,22 @@ async def _send_notification(
         return True
     if sub.dest_type == "discord":
         return await _send_discord_notification(
+            bot,
+            db,
+            sub,
+            text,
+            alert_type=alert_type,
+            stream=stream,
+            stream_id=stream_id,
+            vod_offset_seconds=vod_offset_seconds,
+            twitch=twitch,
+            parse_mode=parse_mode,
+            bot_data=bot_data,
+            job_queue=job_queue,
+            is_scheduled_repeat=is_scheduled_repeat,
+        )
+    if sub.dest_type == "webhook":
+        return await _send_outbound_webhook_notification(
             bot,
             db,
             sub,

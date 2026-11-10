@@ -1243,6 +1243,11 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
                     t("dest_discord", lang), callback_data="dest:discord"
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    t("dest_webhook", lang), callback_data="dest:webhook"
+                )
+            ],
         ]
     )
 

@@ -369,6 +369,16 @@ class SqliteDatabase:
                 "ALTER TABLE subscriptions ADD COLUMN discord_webhook "
                 "TEXT NOT NULL DEFAULT ''"
             )
+        if "webhook_url" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN webhook_url "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        if "webhook_secret" not in cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN webhook_secret "
+                "TEXT NOT NULL DEFAULT ''"
+            )
         drops_auth_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(drops_auth)")
         }
@@ -1642,15 +1652,33 @@ class SqliteDatabase:
         schedule_cancel_template: str = "",
         use_stream_defaults: bool = False,
         discord_webhook: str = "",
+        webhook_url: str = "",
+        webhook_secret: str = "",
     ) -> int:
         from token_crypto import encrypt_secret
 
+        def _enc(raw: str) -> str:
+            text = str(raw or "").strip()
+            if not text:
+                return ""
+            return text if text.startswith("enc:v1:") else encrypt_secret(text)
+
         webhook_store = ""
+        outbound_url_store = ""
+        outbound_secret_store = ""
         if dest_type == "discord":
-            webhook_store = encrypt_secret(str(discord_webhook or "").strip())
+            webhook_store = _enc(discord_webhook)
             chat_id = 0
             thread_id = None
             pin_message = False
+        elif dest_type == "webhook":
+            outbound_url_store = _enc(webhook_url)
+            outbound_secret_store = _enc(webhook_secret)
+            chat_id = 0
+            thread_id = None
+            pin_message = False
+            delete_previous = False
+            notify_delete_fail = False
         with self._conn() as conn:
             cur = conn.execute(
                 """
@@ -1672,8 +1700,8 @@ owner_id, twitch_username, twitch_user_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
-                    use_stream_defaults, discord_webhook
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    use_stream_defaults, discord_webhook, webhook_url, webhook_secret
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -1732,6 +1760,8 @@ owner_id, twitch_username, twitch_user_id,
                     str(schedule_cancel_template or ""),
                     int(bool(use_stream_defaults)),
                     webhook_store,
+                    outbound_url_store,
+                    outbound_secret_store,
                 ),
             )
             sub_id = int(cur.lastrowid)
@@ -1789,7 +1819,7 @@ owner_id, twitch_username, twitch_user_id,
                 SELECT * FROM subscriptions
                 WHERE COALESCE(delete_previous, 0) != 0
                   AND last_message_id IS NOT NULL
-                  AND dest_type NOT IN ('dm', 'discord')
+                  AND dest_type NOT IN ('dm', 'discord', 'webhook')
                   AND (
                     last_message_at IS NULL
                     OR last_message_at <= ?
@@ -2043,20 +2073,41 @@ owner_id, twitch_username, twitch_user_id,
                         slots_used += 1
                 restore_dest = str(payload.get("dest_type") or "dm")
                 restore_webhook = str(payload.get("discord_webhook") or "")
+                restore_wh_url = str(payload.get("webhook_url") or "")
+                restore_wh_secret = str(payload.get("webhook_secret") or "")
                 restore_chat = int(payload.get("chat_id") or owner_id)
                 restore_thread = payload.get("thread_id")
                 restore_pin = int(bool(payload.get("pin_message")))
+                restore_delete = int(bool(payload.get("delete_previous")))
                 if restore_dest == "discord":
                     restore_chat = 0
                     restore_thread = None
                     restore_pin = 0
+                    restore_wh_url = ""
+                    restore_wh_secret = ""
                     # Snapshot already stores ciphertext; keep as-is if prefixed.
                     if restore_webhook and not restore_webhook.startswith("enc:v1:"):
                         from token_crypto import encrypt_secret
 
                         restore_webhook = encrypt_secret(restore_webhook)
+                elif restore_dest == "webhook":
+                    restore_chat = 0
+                    restore_thread = None
+                    restore_pin = 0
+                    restore_delete = 0
+                    restore_webhook = ""
+                    from token_crypto import encrypt_secret
+
+                    if restore_wh_url and not restore_wh_url.startswith("enc:v1:"):
+                        restore_wh_url = encrypt_secret(restore_wh_url)
+                    if restore_wh_secret and not restore_wh_secret.startswith(
+                        "enc:v1:"
+                    ):
+                        restore_wh_secret = encrypt_secret(restore_wh_secret)
                 else:
                     restore_webhook = ""
+                    restore_wh_url = ""
+                    restore_wh_secret = ""
                 conn.execute(
                     """
                     INSERT INTO subscriptions (
@@ -2079,8 +2130,8 @@ owner_id, twitch_username, twitch_user_id,
                         delete_other_alerts, pin_message,
                         top_donations, top_donations_template, is_demo,
                         notify_on_schedule_cancel, schedule_cancel_template,
-                        use_stream_defaults, discord_webhook
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        use_stream_defaults, discord_webhook, webhook_url, webhook_secret
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         owner_id,
@@ -2090,8 +2141,8 @@ owner_id, twitch_username, twitch_user_id,
                         restore_dest,
                         restore_chat,
                         restore_thread,
-                        int(bool(payload.get("delete_previous"))),
-                        int(bool(payload.get("notify_delete_fail"))),
+                        restore_delete,
+                        int(bool(payload.get("notify_delete_fail"))) if restore_delete else 0,
                         int(bool(payload.get("disable_link_preview"))),
                         int(bool(payload.get("strip_name_mentions"))),
                         int(bool(payload.get("attach_chat_button"))),
@@ -2137,6 +2188,8 @@ owner_id, twitch_username, twitch_user_id,
                         str(payload.get("schedule_cancel_template") or ""),
                         int(bool(payload.get("use_stream_defaults"))),
                         restore_webhook,
+                        restore_wh_url,
+                        restore_wh_secret,
                     ),
                 )
                 sub_id = int(
@@ -2221,6 +2274,8 @@ owner_id, twitch_username, twitch_user_id,
             "schedule_cancel_notified_days",
             "use_stream_defaults",
             "discord_webhook",
+            "webhook_url",
+            "webhook_secret",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -2257,7 +2312,7 @@ owner_id, twitch_username, twitch_user_id,
                 "schedule_reminder_minutes",
             ):
                 values.append(max(0, int(value)))
-            elif key == "discord_webhook":
+            elif key in ("discord_webhook", "webhook_url", "webhook_secret"):
                 from token_crypto import encrypt_secret
 
                 raw = str(value or "").strip()

@@ -89,6 +89,8 @@ class Database(Protocol):
         schedule_cancel_template: str = "",
         use_stream_defaults: bool = False,
         discord_webhook: str = "",
+        webhook_url: str = "",
+        webhook_secret: str = "",
     ) -> int: ...
 
     def set_last_message_id(self, sub_id: int, message_id: int | None) -> None: ...

@@ -2510,6 +2510,13 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             )
             _set_wizard_back(context, _wz()["DEST_CHAT"])
             return _wz()["DEST_CHAT"]
+        if dest_type == "webhook":
+            await update.effective_message.reply_text(
+                t("webhook_setup", lang),
+                reply_markup=_wizard(lang),
+            )
+            _set_wizard_back(context, _wz()["DEST_CHAT"])
+            return _wz()["DEST_CHAT"]
         context.user_data["dest_type"] = "chat"
         await update.effective_message.reply_text(
             t("chat_setup", lang),
@@ -3838,6 +3845,8 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data["notify_delete_fail"] = False
         context.user_data["pin_message"] = False
         context.user_data["discord_webhook"] = ""
+        context.user_data["webhook_url"] = ""
+        context.user_data["webhook_secret"] = ""
         return await _finish_subscription(
             update,
             context,
@@ -3849,6 +3858,8 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if dest_type == "discord":
         context.user_data["pin_message"] = False
         context.user_data["adv_want_pin"] = False
+        context.user_data["webhook_url"] = ""
+        context.user_data["webhook_secret"] = ""
         await query.edit_message_text("✓")
         await context.bot.send_message(
             reply_chat_id(update),
@@ -3858,10 +3869,27 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         _set_wizard_back(context, _wz()["DEST_CHAT"])
         return _wz()["DEST_CHAT"]
 
+    if dest_type == "webhook":
+        context.user_data["pin_message"] = False
+        context.user_data["adv_want_pin"] = False
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        context.user_data["discord_webhook"] = ""
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("webhook_setup", lang),
+            reply_markup=_wizard(lang),
+        )
+        _set_wizard_back(context, _wz()["DEST_CHAT"])
+        return _wz()["DEST_CHAT"]
+
     setup_key = "chat_setup" if dest_type == "chat" else (
         "channel_setup" if dest_type == "channel" else "group_setup"
     )
     context.user_data["discord_webhook"] = ""
+    context.user_data["webhook_url"] = ""
+    context.user_data["webhook_secret"] = ""
     await query.edit_message_text("✓")
     await context.bot.send_message(
         reply_chat_id(update),
@@ -3932,6 +3960,8 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if dest_type == "discord":
         return await _receive_discord_webhook(update, context)
+    if dest_type == "webhook":
+        return await _receive_outbound_webhook(update, context)
 
     chat_id, thread_id, error = await _parse_dest_input(
         context.bot, message, dest_type, lang
@@ -4000,6 +4030,8 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["pending_chat_id"] = chat_id
     context.user_data["pending_thread_id"] = thread_id
     context.user_data["discord_webhook"] = ""
+    context.user_data["webhook_url"] = ""
+    context.user_data["webhook_secret"] = ""
     return await _prompt_delete_old(update, context, lang)
 
 
@@ -4025,11 +4057,53 @@ async def _receive_discord_webhook(
         return _wz()["DEST_CHAT"]
 
     context.user_data["discord_webhook"] = url
+    context.user_data["webhook_url"] = ""
+    context.user_data["webhook_secret"] = ""
     context.user_data["pending_chat_id"] = 0
     context.user_data["pending_thread_id"] = None
     context.user_data["pin_message"] = False
     context.user_data["adv_want_pin"] = False
     return await _prompt_delete_old(update, context, lang)
+
+
+async def _receive_outbound_webhook(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import outbound_webhook as owh
+
+    message = update.effective_message
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (message.text or message.caption or "").strip()
+    url = owh.normalize_webhook_url(raw)
+    if not url:
+        await message.reply_text(t("webhook_invalid_url", lang))
+        return _wz()["DEST_CHAT"]
+
+    secret = owh.generate_secret()
+    err = await asyncio.to_thread(
+        owh.test_webhook, url, secret=secret, text=t("webhook_test_ok", lang)
+    )
+    if err is not None:
+        await message.reply_text(t("webhook_test_failed", lang))
+        return _wz()["DEST_CHAT"]
+
+    context.user_data["webhook_url"] = url
+    context.user_data["webhook_secret"] = secret
+    context.user_data["webhook_secret_plain"] = secret
+    context.user_data["discord_webhook"] = ""
+    context.user_data["pending_chat_id"] = 0
+    context.user_data["pending_thread_id"] = None
+    context.user_data["pin_message"] = False
+    context.user_data["adv_want_pin"] = False
+    context.user_data["delete_previous"] = False
+    context.user_data["notify_delete_fail"] = False
+    return await _finish_subscription(
+        update,
+        context,
+        update.effective_user.id,
+        0,
+        None,
+    )
 
 
 async def _post_discord_setup_sample(
@@ -4054,6 +4128,29 @@ async def _post_discord_setup_sample(
         alert_type="live",
         stream={"game_name": "Just Chatting"},
         twitch=twitch,
+        parse_mode=None,
+        job_queue=None,
+        is_scheduled_repeat=True,
+    )
+
+
+async def _post_outbound_webhook_setup_sample(
+    *,
+    bot,
+    db: Database,
+    sub: Subscription,
+    lang: str,
+) -> None:
+    """POST lasting setup sample to the user's outbound webhook."""
+    from handlers.delivery import _send_outbound_webhook_notification
+
+    await _send_outbound_webhook_notification(
+        bot,
+        db,
+        sub,
+        t("webhook_setup_sample", lang),
+        alert_type="test",
+        stream={"game_name": "Just Chatting"},
         parse_mode=None,
         job_queue=None,
         is_scheduled_repeat=True,
@@ -4212,17 +4309,31 @@ async def _finish_subscription(
         )
         context.user_data.clear()
         return ConversationHandler.END
-    delete_previous = bool(data.get("delete_previous", False)) and dest_type != "dm"
+    delete_previous = (
+        bool(data.get("delete_previous", False))
+        and dest_type not in ("dm", "webhook")
+    )
     notify_delete_fail = delete_previous
-    # Discord Incoming Webhooks cannot pin; keep pin off for DM + Discord.
+    # Discord / outbound webhook cannot pin; keep pin off for DM too.
     pin_message = (
         bool(data.get("pin_message", False) or data.get("adv_want_pin", False))
-        and dest_type not in ("dm", "discord")
+        and dest_type not in ("dm", "discord", "webhook")
     )
     discord_webhook = (
         str(data.get("discord_webhook") or "").strip() if dest_type == "discord" else ""
     )
-    if dest_type == "discord":
+    outbound_webhook_url = (
+        str(data.get("webhook_url") or "").strip() if dest_type == "webhook" else ""
+    )
+    outbound_webhook_secret = (
+        str(data.get("webhook_secret") or "").strip() if dest_type == "webhook" else ""
+    )
+    webhook_secret_plain = (
+        str(data.get("webhook_secret_plain") or outbound_webhook_secret).strip()
+        if dest_type == "webhook"
+        else ""
+    )
+    if dest_type in ("discord", "webhook"):
         chat_id = 0
         thread_id = None
     from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
@@ -4240,12 +4351,12 @@ async def _finish_subscription(
         repeat_notify_minutes = ""
     block_overlap = (
         bool(data.get("block_overlap"))
-        and dest_type not in ("dm", "discord")
+        and dest_type not in ("dm", "discord", "webhook")
         and alert_type in ("", "live")
     )
     block_repeat_when_last = (
         bool(data.get("block_repeat_when_last"))
-        and dest_type not in ("dm", "discord")
+        and dest_type not in ("dm", "discord", "webhook")
         and alert_type in ("", "live")
     )
     if alert_type and alert_type != "live":
@@ -4327,6 +4438,8 @@ async def _finish_subscription(
                 image_position=str(data.get("image_position") or ""),
                 notify_on_live=True,
                 discord_webhook=discord_webhook,
+                webhook_url=outbound_webhook_url,
+                webhook_secret=outbound_webhook_secret,
             )
             if not ok:
                 await context.bot.send_message(
@@ -4349,6 +4462,8 @@ async def _finish_subscription(
                 delete_other_alerts=delete_other_alerts,
                 pin_message=pin_message,
                 discord_webhook=discord_webhook,
+                webhook_url=outbound_webhook_url,
+                webhook_secret=outbound_webhook_secret,
             )
             if not ok:
                 await context.bot.send_message(
@@ -4486,6 +4601,8 @@ async def _finish_subscription(
                 is_demo=demo_mode.is_active(owner_id),
                 use_stream_defaults=bool(data.get("use_stream_defaults")),
                 discord_webhook=discord_webhook,
+                webhook_url=outbound_webhook_url,
+                webhook_secret=outbound_webhook_secret,
             )
             if not create_enabled:
                 context.user_data["premium_created_disabled"] = True
@@ -4499,7 +4616,10 @@ async def _finish_subscription(
         context.user_data.clear()
         return ConversationHandler.END
 
-    if edit_sub_id and dest_type == "discord" and discord_webhook:
+    if edit_sub_id and (
+        (dest_type == "discord" and discord_webhook)
+        or (dest_type == "webhook" and outbound_webhook_url)
+    ):
         can = await prem.may_enable_subscription_async(
             context.bot,
             db,
@@ -4522,6 +4642,24 @@ async def _finish_subscription(
             except Exception:
                 logger.warning(
                     "Discord setup sample failed for owner=%s sub=%s",
+                    owner_id,
+                    sub_id,
+                    exc_info=True,
+                )
+
+    if dest_type == "webhook" and outbound_webhook_url and sub_id:
+        saved = db.get_subscription(int(sub_id), owner_id)
+        if saved is not None:
+            try:
+                await _post_outbound_webhook_setup_sample(
+                    bot=context.bot,
+                    db=db,
+                    sub=saved,
+                    lang=lang,
+                )
+            except Exception:
+                logger.warning(
+                    "Webhook setup sample failed for owner=%s sub=%s",
                     owner_id,
                     sub_id,
                     exc_info=True,
@@ -4759,6 +4897,14 @@ async def _finish_subscription(
         setup_kwargs["parse_mode"] = ParseMode.HTML
         setup_kwargs["disable_web_page_preview"] = True
     await context.bot.send_message(reply_chat_id(update), text, **setup_kwargs)
+    if dest_type == "webhook" and webhook_secret_plain:
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("webhook_secret_note", lang, secret=html.escape(webhook_secret_plain)),
+            parse_mode=ParseMode.HTML,
+            reply_markup=menu_kb,
+            disable_web_page_preview=True,
+        )
     if created_disabled:
         await context.bot.send_message(
             reply_chat_id(update),

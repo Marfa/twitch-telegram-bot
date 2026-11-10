@@ -1412,12 +1412,21 @@
   "channel_stats_footer_tt": "Fonte: Twitch Helix + TwitchTracker",
   "locales_reloaded": "Localizzazioni ricaricate: {summary}",
   "locales_reload_failed": "Impossibile ricaricare le localizzazioni: {error}",
-  "dest_discord": "🎮 Su Discord (webhook)",
+  "dest_discord": "🎮 Su Discord",
   "dest_label_discord": "Discord",
+  "dest_webhook": "🔗 Webhook",
+  "dest_label_webhook": "Webhook",
   "discord_setup": "Gli avvisi andranno in un canale Discord tramite Incoming Webhook.\n\nIn Discord: canale → Modifica canale → Integrazioni → Webhook → Nuovo webhook → copia l'URL e invialo qui.\n\nServe solo l'URL — nessun bot Discord. Il pin non è disponibile per i webhook.",
   "discord_invalid_url": "Questo non sembra un URL webhook Discord.\nAtteso: https://discord.com/api/webhooks/…/…",
   "discord_test_ok": "✅ Test: il webhook può pubblicare su Discord.",
   "discord_setup_sample": "✅ Configurazione completata con successo.\nGli avvisi arriveranno in questo canale.",
   "discord_test_failed": "Impossibile pubblicare con questo webhook. Controlla URL e permessi del canale, poi riprova.",
-  "delivery_fail_notice_discord": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) su Discord ({webhook}).\n\nMotivo: {reason}\n\nQuesta destinazione Discord è in pausa. Aggiorna l'URL del webhook nelle impostazioni dell'avviso per riprendere."
+  "delivery_fail_notice_discord": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) su Discord ({webhook}).\n\nMotivo: {reason}\n\nQuesta destinazione Discord è in pausa. Aggiorna l'URL del webhook nelle impostazioni dell'avviso per riprendere.",
+  "webhook_setup": "Gli avvisi verranno inviati con POST al tuo URL HTTPS (JSON + HMAC).\n\nInvia un URL come https://example.com/hooks/alerts\n\nRequisiti: solo https, host pubblico (non localhost / IP privati). Il bot genera un secret e invia un POST di test con l'header X-Bot-Signature.\n\nPin ed eliminazione dei messaggi precedenti non sono disponibili per Webhook.",
+  "webhook_invalid_url": "Questo non sembra un URL webhook HTTPS valido.\nServe un https://… pubblico — niente localhost o IP privati.",
+  "webhook_test_ok": "✅ Test: l'endpoint ha accettato il webhook.",
+  "webhook_setup_sample": "✅ Configurazione Webhook completata.\nGli avvisi andranno al tuo URL.",
+  "webhook_test_failed": "Impossibile consegnare il POST di test. Controlla l'URL e che l'endpoint risponda 2xx, poi riprova.",
+  "webhook_secret_note": "Secret HMAC (salvalo; il bot non lo mostrerà più):\n<code>{secret}</code>\n\nHeader: <code>X-Bot-Signature: sha256=…</code> sul body della richiesta.",
+  "delivery_fail_notice_webhook": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) al Webhook ({webhook}).\n\nMotivo: {reason}\n\nQuesta destinazione Webhook è in pausa. Aggiorna l'URL nelle impostazioni dell'avviso per riprendere."
 }

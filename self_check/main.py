@@ -125,6 +125,9 @@ def main() -> None:
     from .checks_discord import run as check_discord
 
     check_discord()
+    from .checks_outbound_webhook import run as check_outbound_webhook
+
+    check_outbound_webhook()
     print("ok")
 
 

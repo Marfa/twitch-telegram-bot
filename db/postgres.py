@@ -425,6 +425,20 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS webhook_url
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS webhook_secret
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS delete_other_alerts
                 BOOLEAN NOT NULL DEFAULT FALSE
                 """
@@ -1911,15 +1925,33 @@ class PostgresDatabase:
         schedule_cancel_template: str = "",
         use_stream_defaults: bool = False,
         discord_webhook: str = "",
+        webhook_url: str = "",
+        webhook_secret: str = "",
     ) -> int:
         from token_crypto import encrypt_secret
 
+        def _enc(raw: str) -> str:
+            text = str(raw or "").strip()
+            if not text:
+                return ""
+            return text if text.startswith("enc:v1:") else encrypt_secret(text)
+
         webhook_store = ""
+        outbound_url_store = ""
+        outbound_secret_store = ""
         if dest_type == "discord":
-            webhook_store = encrypt_secret(str(discord_webhook or "").strip())
+            webhook_store = _enc(discord_webhook)
             chat_id = 0
             thread_id = None
             pin_message = False
+        elif dest_type == "webhook":
+            outbound_url_store = _enc(webhook_url)
+            outbound_secret_store = _enc(webhook_secret)
+            chat_id = 0
+            thread_id = None
+            pin_message = False
+            delete_previous = False
+            notify_delete_fail = False
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -1942,8 +1974,8 @@ owner_id, twitch_username, twitch_user_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
-                    use_stream_defaults, discord_webhook
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    use_stream_defaults, discord_webhook, webhook_url, webhook_secret
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -2005,6 +2037,8 @@ owner_id, twitch_username, twitch_user_id,
                     str(schedule_cancel_template or ""),
                     bool(use_stream_defaults),
                     webhook_store,
+                    outbound_url_store,
+                    outbound_secret_store,
                 ),
             )
             row = cur.fetchone()
@@ -2067,7 +2101,7 @@ owner_id, twitch_username, twitch_user_id,
                 SELECT * FROM subscriptions
                 WHERE COALESCE(delete_previous, FALSE)
                   AND last_message_id IS NOT NULL
-                  AND dest_type NOT IN ('dm', 'discord')
+                  AND dest_type NOT IN ('dm', 'discord', 'webhook')
                   AND (
                     last_message_at IS NULL
                     OR last_message_at <= %s
@@ -2389,6 +2423,8 @@ owner_id, twitch_username, twitch_user_id,
                     "schedule_cancel_template",
                     "use_stream_defaults",
                     "discord_webhook",
+                    "webhook_url",
+                    "webhook_secret",
                 )
                 if k in payload
             })
@@ -2483,6 +2519,8 @@ owner_id, twitch_username, twitch_user_id,
             "schedule_cancel_notified_days",
             "use_stream_defaults",
             "discord_webhook",
+            "webhook_url",
+            "webhook_secret",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -2519,7 +2557,7 @@ owner_id, twitch_username, twitch_user_id,
                 "schedule_reminder_minutes",
             ):
                 values.append(max(0, int(value)))
-            elif key == "discord_webhook":
+            elif key in ("discord_webhook", "webhook_url", "webhook_secret"):
                 from token_crypto import encrypt_secret
 
                 raw = str(value or "").strip()

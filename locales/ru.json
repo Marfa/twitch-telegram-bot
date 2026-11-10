@@ -1424,12 +1424,21 @@
   "channel_stats_footer_tt": "Данные: Twitch Helix + TwitchTracker",
   "locales_reloaded": "Локали перезагружены: {summary}",
   "locales_reload_failed": "Не удалось перезагрузить локали: {error}",
-  "dest_discord": "🎮 В Discord (webhook)",
+  "dest_discord": "🎮 В Discord",
   "dest_label_discord": "Discord",
+  "dest_webhook": "🔗 Webhook",
+  "dest_label_webhook": "Webhook",
   "discord_setup": "Оповещения уйдут в канал Discord через Incoming Webhook.\n\nВ Discord: канал → Настроить канал → Интеграция → Вебхуки → Создать вебхук → скопируйте URL и пришлите сюда.\n\nНужен только URL — Discord-бот не требуется. Закрепление для webhook недоступно.",
   "discord_invalid_url": "Это не похоже на URL Discord webhook.\nНужно: https://discord.com/api/webhooks/…/…",
   "discord_test_ok": "✅ Тест: webhook может писать в Discord.",
   "discord_setup_sample": "✅ Настройка успешно завершена.\nОповещения будут приходить в этот канал.",
   "discord_test_failed": "Не удалось отправить через этот webhook. Проверьте URL и права канала, затем попробуйте снова.",
-  "delivery_fail_notice_discord": "Не удалось отправить оповещение по подписке #{sub_id} ({twitch_username}) в Discord ({webhook}).\n\nПричина: {reason}\n\nЭто Discord-назначение на паузе. Обновите URL webhook в настройках оповещения, чтобы возобновить."
+  "delivery_fail_notice_discord": "Не удалось отправить оповещение по подписке #{sub_id} ({twitch_username}) в Discord ({webhook}).\n\nПричина: {reason}\n\nЭто Discord-назначение на паузе. Обновите URL webhook в настройках оповещения, чтобы возобновить.",
+  "webhook_setup": "Оповещения уйдут POST-запросом на ваш HTTPS URL (JSON + HMAC).\n\nПришлите URL вида https://example.com/hooks/alerts\n\nТребования: только https, публичный хост (не localhost / private IP). Бот сгенерирует секрет и отправит тестовый POST с заголовком X-Bot-Signature.\n\nЗакрепление и удаление прошлых сообщений для Webhook недоступны.",
+  "webhook_invalid_url": "Это не похоже на допустимый HTTPS webhook URL.\nНужен публичный https://… без localhost и частных IP.",
+  "webhook_test_ok": "✅ Тест: endpoint принял webhook.",
+  "webhook_setup_sample": "✅ Настройка Webhook завершена.\nОповещения будут уходить на ваш URL.",
+  "webhook_test_failed": "Не удалось доставить тестовый POST. Проверьте URL и что endpoint отвечает 2xx, затем попробуйте снова.",
+  "webhook_secret_note": "Секрет HMAC (сохраните у себя; в боте больше не показывается):\n<code>{secret}</code>\n\nЗаголовок: <code>X-Bot-Signature: sha256=…</code> по телу запроса.",
+  "delivery_fail_notice_webhook": "Не удалось отправить оповещение по подписке #{sub_id} ({twitch_username}) на Webhook ({webhook}).\n\nПричина: {reason}\n\nЭто Webhook-назначение на паузе. Обновите URL в настройках оповещения, чтобы возобновить."
 }

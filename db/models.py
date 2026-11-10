@@ -589,6 +589,9 @@ class Subscription:
     block_repeat_when_last: bool = False
     # Encrypted Incoming Webhook URL when dest_type == "discord" (else "").
     discord_webhook: str = ""
+    # Encrypted HTTPS URL + HMAC secret when dest_type == "webhook" (else "").
+    webhook_url: str = ""
+    webhook_secret: str = ""
 
 
 @dataclass(frozen=True)
@@ -759,14 +762,30 @@ def migrate_sub_fields_for_alert_type(
         out["block_overlap"] = False
         out["block_repeat_when_last"] = False
         out["discord_webhook"] = ""
+        out["webhook_url"] = ""
+        out["webhook_secret"] = ""
     elif dest == "discord":
         out["chat_id"] = 0
         out["thread_id"] = None
         out["pin_message"] = False
         out["block_overlap"] = False
         out["block_repeat_when_last"] = False
+        out["webhook_url"] = ""
+        out["webhook_secret"] = ""
+    elif dest == "webhook":
+        out["chat_id"] = 0
+        out["thread_id"] = None
+        out["pin_message"] = False
+        out["delete_previous"] = False
+        out["notify_delete_fail"] = False
+        out["delete_other_alerts"] = False
+        out["block_overlap"] = False
+        out["block_repeat_when_last"] = False
+        out["discord_webhook"] = ""
     else:
         out["discord_webhook"] = ""
+        out["webhook_url"] = ""
+        out["webhook_secret"] = ""
     out["notify_delete_fail"] = bool(out.get("delete_previous"))
     if not out.get("notify_on_category_change") or not out.get("delete_previous"):
         out["delete_other_alerts"] = False
@@ -835,6 +854,8 @@ def _subscription_cart_snapshot(sub: Subscription) -> dict[str, Any]:
         "chat_id": sub.chat_id,
         "thread_id": sub.thread_id,
         "discord_webhook": str(getattr(sub, "discord_webhook", "") or ""),
+        "webhook_url": str(getattr(sub, "webhook_url", "") or ""),
+        "webhook_secret": str(getattr(sub, "webhook_secret", "") or ""),
         "delete_previous": bool(sub.delete_previous),
         "notify_delete_fail": bool(sub.notify_delete_fail),
         "disable_link_preview": bool(sub.disable_link_preview),
@@ -1439,6 +1460,10 @@ def _row_to_sub(row: Any) -> Subscription:
         disable_link_preview=bool(row["disable_link_preview"]),
         discord_webhook=str(row["discord_webhook"] or "")
         if "discord_webhook" in keys
+        else "",
+        webhook_url=str(row["webhook_url"] or "") if "webhook_url" in keys else "",
+        webhook_secret=str(row["webhook_secret"] or "")
+        if "webhook_secret" in keys
         else "",
         strip_name_mentions=bool(row["strip_name_mentions"])
         if "strip_name_mentions" in keys

@@ -254,7 +254,8 @@ IGDB-кнопки — `ignore-igdb-categories` (тот же мастер, что
 |---|---|
 | `📩 В личку` | Финиш (без delete_old) |
 | `📢 В канал или группу` | Инструкция → `@username` / `https://t.me/…` / тема / ID / переслать → тип чата определяется автоматически → delete follow-ups (если отмечено в «Дополнительно») |
-| `🎮 В Discord (webhook)` | Инструкция → вставить Incoming Webhook URL → тестовый POST → delete follow-ups (если отмечено; pin недоступен) · оповещения только в Discord (не в Telegram) |
+| `🎮 В Discord` | Инструкция → вставить Incoming Webhook URL → тестовый POST → delete follow-ups (если отмечено; pin недоступен) · оповещения только в Discord (не в Telegram) |
+| `🔗 Webhook` | Инструкция → HTTPS URL → бот генерирует HMAC-секрет, тестовый POST (`X-Bot-Signature`) → финиш (pin/delete недоступны) · JSON-контракт наружу (Make / свой сервер / Max) |
 
 ### 2.12 Удалять старые (adv + Premium; канал/группа / Discord)
 

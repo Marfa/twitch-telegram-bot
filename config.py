@@ -165,6 +165,8 @@ POSTHOG_ISSUE_WEBHOOK_SECRET = os.getenv("POSTHOG_ISSUE_WEBHOOK_SECRET", "").str
 # Personal API key for polling Inbox reports API. Empty = polling off.
 POSTHOG_PERSONAL_API_KEY = os.getenv("POSTHOG_API_KEY_PERSONAL", "").strip()
 POSTHOG_PROJECT_ID = os.getenv("POSTHOG_PROJECT_ID", "554824").strip()
+# Optional: MAX Messenger bot token (platform-api2.max.ru). No UI yet — max_api.py only.
+MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "").strip()
 
 
 def validate() -> None:

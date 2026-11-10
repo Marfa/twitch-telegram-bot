@@ -1190,6 +1190,18 @@ async def _format_subs_overview_lines(
                     if plain
                     else dest_label("discord", lang)
                 )
+            elif sub.dest_type == "webhook":
+                import outbound_webhook as owh
+                from token_crypto import try_decrypt_secret
+
+                plain = try_decrypt_secret(
+                    str(getattr(sub, "webhook_url", "") or "")
+                )
+                chat_display = (
+                    owh.mask_webhook_url(plain or "")
+                    if plain
+                    else dest_label("webhook", lang)
+                )
             else:
                 chat_display = await _resolve_chat_display_name(bot, sub)
             lines.append(
