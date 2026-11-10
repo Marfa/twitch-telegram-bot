@@ -1313,7 +1313,6 @@ async def _scenario_wizard_dest_discord(db) -> None:
 async def _scenario_wizard_dest_webhook(db) -> None:
     """§2.11 universal Webhook destination — Cancel/Back on setup Reply keyboard."""
     from handlers.wizard import _wz, receive_dest_type
-    from i18n import DEFAULT_LOCALE
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -1334,7 +1333,8 @@ async def _scenario_wizard_dest_webhook(db) -> None:
     assert ctx.user_data.get("dest_type") == "webhook"
     assert ctx.user_data.get("pin_message") is False
     assert ctx.user_data.get("delete_previous") is False
-    setup = t("webhook_setup", DEFAULT_LOCALE)
+    # _FREE_UID locale is ru in flow-nav (same as discord dest scenario).
+    setup = t("webhook_setup", "ru")
     sent = [
         str(c.args[1] if len(c.args) > 1 else c.kwargs.get("text") or "")
         for c in bot.send_message.await_args_list
