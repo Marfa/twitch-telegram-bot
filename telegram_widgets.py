@@ -1,7 +1,6 @@
 """Telegram HTMLBubbles (Bot API 10.4 sendWidget) for admin-facing digests.
 
-User-facing cards (channel stats, alert history) stay on PNG/text — see docs/todo-htmlbubbles-*.md.
-Uses the beta Bot API host by default — stable core.telegram.org has no sendWidget yet.
+Default Bot API host is stable (`api.telegram.org`); override via TELEGRAM_WIDGET_API_ROOT.
 """
 from __future__ import annotations
 
@@ -54,7 +53,7 @@ def html_widgets_enabled() -> bool:
 def _widget_api_url(method: str) -> str:
     from config import TELEGRAM_BOT_TOKEN, TELEGRAM_WIDGET_API_ROOT
 
-    root = (TELEGRAM_WIDGET_API_ROOT or "https://api.telegram.org/beta").rstrip("/")
+    root = (TELEGRAM_WIDGET_API_ROOT or "https://api.telegram.org").rstrip("/")
     return f"{root}/bot{TELEGRAM_BOT_TOKEN}/{method}"
 
 

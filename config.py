@@ -47,10 +47,10 @@ ENABLE_PREMIUM = _env_bool("ENABLE_PREMIUM", False)
 ENABLE_HELP = _env_bool("ENABLE_HELP", False)
 ENABLE_PARTNER = _env_bool("ENABLE_PARTNER", False)
 # HTMLBubbles (Bot API 10.4). Default on: try sendWidget, fall back to PNG/text.
-# Uses TELEGRAM_WIDGET_API_ROOT (beta host) until sendWidget is on stable API.
+# Default host is stable Bot API; override TELEGRAM_WIDGET_API_ROOT only if needed.
 ENABLE_HTML_WIDGETS = _env_bool("ENABLE_HTML_WIDGETS", True)
 TELEGRAM_WIDGET_API_ROOT = (
-    os.getenv("TELEGRAM_WIDGET_API_ROOT", "https://api.telegram.org/beta") or ""
+    os.getenv("TELEGRAM_WIDGET_API_ROOT", "https://api.telegram.org") or ""
 ).strip().rstrip("/")
 PREMIUM_FREE_ACTIVE_LIMIT = int(os.getenv("PREMIUM_FREE_ACTIVE_LIMIT", "5"))
 PREMIUM_STARS_AMOUNT = int(os.getenv("PREMIUM_STARS_AMOUNT", "100"))

@@ -333,7 +333,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `ENABLE_HELP` | Help button (`0` default — hidden, paid features free; set `1` on VPS) |
 | `ENABLE_PARTNER` | Partner program (`0` default — off; set `1` on VPS) |
 | `ENABLE_HTML_WIDGETS` | HTMLBubbles (`sendWidget`) for **admin** Premium digest (`1` default; else plain text) |
-| `TELEGRAM_WIDGET_API_ROOT` | Bot API host for widgets (default `https://api.telegram.org/beta` until stable has the method) |
+| `TELEGRAM_WIDGET_API_ROOT` | Bot API host for widgets (default `https://api.telegram.org`; Bot API 10.4+) |
 | `PREMIUM_FREE_ACTIVE_LIMIT` | Active alerts without Premium (default 5) |
 | `PREMIUM_STARS_AMOUNT` | Monthly Stars subscription (default 100) |
 | `PREMIUM_STARS_YEAR` | Yearly Stars one-shot (default 1000) |

@@ -101,7 +101,7 @@ Deep link `?start=share_{token}` (**Поделиться оповещением*
 | `👥 Follow/Unfollow` · `🎬 AI-клипы` | Мониторинг Follow/Unfollow (Premium) / AI-клипы из VOD (Premium / а-ля карт) |
 | `💬 Оповещения об ЛС` · `📅 Управление расписанием` | ЛС / расписание стрима (§5) |
 | `🎲 Что посмотреть?` · `💬 Чат` | Сразу «Мне повезёт» (§6.1) / Mini App сразу (WebApp-кнопка, без сообщений бота) |
-| `🎮 Информация об игре` · `📊 Статистика канала` | Поиск IGDB → карточка / Premium `channel_stats`: OAuth → PNG-карточка (HTMLBubbles отложены — [`todo-htmlbubbles-channel-stats.md`](todo-htmlbubbles-channel-stats.md)) |
+| `🎮 Информация об игре` · `📊 Статистика канала` | Поиск IGDB → карточка / Premium `channel_stats`: OAuth → PNG-карточка |
 | `◀️ Главное меню` | Главное меню |
 
 Inline на экране Follow/Unfollow: `⬜️/✅ Включить мониторинг`; при включённом мониторинге ещё `⬜️/✅ Оповещать о новых Follow` и `⬜️/✅ Оповещать о новых Unfollow`; списки Follow / новых Follow (30 дней + дата подписки) / новых Unfollow (30 дней + дата) / Unfollow, поиск. Первое включение — OAuth Twitch (`moderator:read:followers`). Синхронизация раз в сутки; первая — baseline без «новых» событий. При активных оповещениях — одно сообщение с изменениями после sync. Списки/поиск доступны без Premium; мониторинг и оповещения — только Premium.
@@ -431,7 +431,7 @@ flowchart TD
 
 ## 7. 📜 История оповещений
 
-Канон: текстовые страницы HTML + deep links. HTMLBubbles для истории **отложены** — [`todo-htmlbubbles-alert-history.md`](todo-htmlbubbles-alert-history.md).
+Канон: текстовые страницы HTML + deep links.
 
 | | |
 |---|---|

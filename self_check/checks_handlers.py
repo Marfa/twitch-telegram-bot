@@ -1869,6 +1869,12 @@ def check_handlers() -> None:
     )
     from handlers.monitoring import build_premium_digest_chat_data
 
+    # Bot API 10.4: widgets on stable host (not api.telegram.org/beta).
+    _cfg_src = Path(__file__).resolve().parents[1] / "config.py"
+    assert 'getenv("TELEGRAM_WIDGET_API_ROOT", "https://api.telegram.org")' in _cfg_src.read_text(
+        encoding="utf-8"
+    )
+
     assert widget_zlib_size(PREMIUM_DIGEST_WIDGET_HTML) <= WIDGET_ZLIB_MAX
     assert_widget_limits(PREMIUM_DIGEST_WIDGET_HTML)
 

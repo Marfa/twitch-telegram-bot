@@ -333,7 +333,7 @@ python main.py
 | `ENABLE_HELP` | Кнопка «Помощь» (`0` по умолчанию — кнопки нет, платное бесплатно; на VPS `1`) |
 | `ENABLE_PARTNER` | Партнёрка (`0` по умолчанию — выкл; на VPS `1`) |
 | `ENABLE_HTML_WIDGETS` | HTMLBubbles (`sendWidget`) для **admin** Premium digest (`1` по умолчанию; иначе текст) |
-| `TELEGRAM_WIDGET_API_ROOT` | Хост Bot API для виджетов (по умолчанию `https://api.telegram.org/beta`, пока метода нет в stable) |
+| `TELEGRAM_WIDGET_API_ROOT` | Хост Bot API для виджетов (по умолчанию `https://api.telegram.org`; Bot API 10.4+) |
 | `PREMIUM_FREE_ACTIVE_LIMIT` | Сколько активных алертов без Premium (по умолчанию 5) |
 | `PREMIUM_STARS_AMOUNT` | Месячная Stars-подписка (по умолчанию 100) |
 | `PREMIUM_STARS_YEAR` | Год Stars разово (по умолчанию 1000) |
