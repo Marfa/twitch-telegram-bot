@@ -4034,29 +4034,30 @@ async def _receive_discord_webhook(
 
 async def _post_discord_setup_sample(
     *,
-    webhook_url: str,
-    template: str,
-    twitch_username: str,
+    bot,
+    db: Database,
+    sub: Subscription,
     lang: str,
+    twitch: TwitchClient | None = None,
 ) -> None:
-    """Post lasting Discord sample with the saved template (setup preview)."""
-    import discord_webhook as dwh
+    """Post lasting Discord setup confirmation via full delivery (text + image + buttons)."""
+    from handlers.delivery import _send_discord_notification
 
-    url = dwh.normalize_webhook_url(webhook_url)
-    tmpl = (template or "").strip()
-    login = (twitch_username or "").strip()
-    if not url or not tmpl or not login:
-        return
-    uses_html = template_uses_html(tmpl)
-    preview = render_template(
-        tmpl,
-        login,
-        "Just Chatting",
-        t("preview_stream", lang),
-        escape_html=uses_html,
+    # Confirmation copy; image/buttons still come from saved subscription settings.
+    text = t("discord_setup_sample", lang)
+    # is_scheduled_repeat: no cooldown / repeat jobs for the setup sample.
+    await _send_discord_notification(
+        bot,
+        db,
+        sub,
+        text,
+        alert_type="live",
+        stream={"game_name": "Just Chatting"},
+        twitch=twitch,
+        parse_mode=None,
+        job_queue=None,
+        is_scheduled_repeat=True,
     )
-    content = dwh.html_to_discord_markdown(preview) if uses_html else preview
-    await asyncio.to_thread(dwh.execute_webhook, url, content=content, wait=True)
 
 
 async def _prompt_delete_old(
@@ -4507,28 +4508,24 @@ async def _finish_subscription(
         )
         db.clear_delivery_paused(int(edit_sub_id), enabled=can)
 
-    if dest_type == "discord" and discord_webhook:
-        tmpl = str(data.get("message_template") or "")
-        login = str(data.get("twitch_username") or "")
-        if (not tmpl or not login) and sub_id:
-            saved = db.get_subscription(int(sub_id), owner_id)
-            if saved is not None:
-                tmpl = tmpl or str(saved.message_template or "")
-                login = login or str(saved.twitch_username or "")
-        try:
-            await _post_discord_setup_sample(
-                webhook_url=discord_webhook,
-                template=tmpl,
-                twitch_username=login,
-                lang=lang,
-            )
-        except Exception:
-            logger.warning(
-                "Discord setup sample failed for owner=%s sub=%s",
-                owner_id,
-                sub_id,
-                exc_info=True,
-            )
+    if dest_type == "discord" and discord_webhook and sub_id:
+        saved = db.get_subscription(int(sub_id), owner_id)
+        if saved is not None:
+            try:
+                await _post_discord_setup_sample(
+                    bot=context.bot,
+                    db=db,
+                    sub=saved,
+                    lang=lang,
+                    twitch=context.application.bot_data.get("twitch"),
+                )
+            except Exception:
+                logger.warning(
+                    "Discord setup sample failed for owner=%s sub=%s",
+                    owner_id,
+                    sub_id,
+                    exc_info=True,
+                )
 
     if (
         int(data.get("schedule_reminder_minutes", 0)) > 0

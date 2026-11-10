@@ -112,32 +112,45 @@ def check_discord_subscription_roundtrip() -> None:
 
 
 def check_discord_setup_sample_posts_lasting() -> None:
-    """After setup, sample alert is posted and not deleted."""
+    """After setup, sample goes through full Discord delivery (image/buttons path)."""
     import asyncio
-    from unittest.mock import patch
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     from handlers.wizard import _post_discord_setup_sample
 
-    url = (
-        "https://discord.com/api/webhooks/333/"
-        "sampletoksampletoksampletoksampletoksample"
+    sub = SimpleNamespace(
+        id=7,
+        owner_id=42,
+        twitch_username="marfapr",
+        message_template="<b>{username}</b> — {name}",
+        discord_webhook="enc:v1:x",
+        image_file_id="https://example.com/cover.jpg",
+        custom_buttons='[{"text":"Open","url":"https://twitch.tv/{username}"}]',
+        attach_chat_button=False,
     )
-    with patch("discord_webhook.execute_webhook", return_value={"id": "1"}) as post:
-        with patch("discord_webhook.delete_webhook_message") as delete:
-            asyncio.run(
-                _post_discord_setup_sample(
-                    webhook_url=url,
-                    template="<b>{username}</b> — {name}",
-                    twitch_username="marfapr",
-                    lang="en",
-                )
+    send = AsyncMock(return_value=True)
+    with patch(
+        "handlers.delivery._send_discord_notification",
+        new=send,
+    ):
+        asyncio.run(
+            _post_discord_setup_sample(
+                bot=MagicMock(),
+                db=MagicMock(),
+                sub=sub,
+                lang="ru",
+                twitch=None,
             )
-    assert post.called
-    kwargs = post.call_args.kwargs
-    content = kwargs.get("content") or ""
-    assert "marfapr" in content
-    assert "**" in content  # HTML → Discord markdown
-    assert not delete.called
+        )
+    assert send.await_count == 1
+    args, kwargs = send.await_args
+    assert args[2] is sub
+    body = str(args[3])
+    assert "Настройка успешно завершена" in body
+    assert "этот канал" in body
+    assert kwargs.get("is_scheduled_repeat") is True
+    assert kwargs.get("job_queue") is None
 
 
 def run() -> None:

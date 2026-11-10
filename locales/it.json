@@ -1417,6 +1417,7 @@
   "discord_setup": "Gli avvisi andranno in un canale Discord tramite Incoming Webhook.\n\nIn Discord: canale → Modifica canale → Integrazioni → Webhook → Nuovo webhook → copia l'URL e invialo qui.\n\nServe solo l'URL — nessun bot Discord. Il pin non è disponibile per i webhook.",
   "discord_invalid_url": "Questo non sembra un URL webhook Discord.\nAtteso: https://discord.com/api/webhooks/…/…",
   "discord_test_ok": "✅ Test: il webhook può pubblicare su Discord.",
+  "discord_setup_sample": "✅ Configurazione completata con successo.\nGli avvisi arriveranno in questo canale.",
   "discord_test_failed": "Impossibile pubblicare con questo webhook. Controlla URL e permessi del canale, poi riprova.",
   "delivery_fail_notice_discord": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) su Discord ({webhook}).\n\nMotivo: {reason}\n\nQuesta destinazione Discord è in pausa. Aggiorna l'URL del webhook nelle impostazioni dell'avviso per riprendere."
 }

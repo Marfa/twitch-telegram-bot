@@ -1429,6 +1429,7 @@
   "discord_setup": "Оповещения уйдут в канал Discord через Incoming Webhook.\n\nВ Discord: канал → Настроить канал → Интеграция → Вебхуки → Создать вебхук → скопируйте URL и пришлите сюда.\n\nНужен только URL — Discord-бот не требуется. Закрепление для webhook недоступно.",
   "discord_invalid_url": "Это не похоже на URL Discord webhook.\nНужно: https://discord.com/api/webhooks/…/…",
   "discord_test_ok": "✅ Тест: webhook может писать в Discord.",
+  "discord_setup_sample": "✅ Настройка успешно завершена.\nОповещения будут приходить в этот канал.",
   "discord_test_failed": "Не удалось отправить через этот webhook. Проверьте URL и права канала, затем попробуйте снова.",
   "delivery_fail_notice_discord": "Не удалось отправить оповещение по подписке #{sub_id} ({twitch_username}) в Discord ({webhook}).\n\nПричина: {reason}\n\nЭто Discord-назначение на паузе. Обновите URL webhook в настройках оповещения, чтобы возобновить."
 }
