@@ -862,13 +862,6 @@ def _privacy_page(lang: str) -> bytes:
     ).encode("utf-8")
 
 
-_GUIDE_DIR = Path(__file__).resolve().parent / "webapp" / "guide"
-_GUIDE_FILES = {
-    "ru": (_GUIDE_DIR / "ru.html").resolve(),
-    "en": (_GUIDE_DIR / "en.html").resolve(),
-    "uk": (_GUIDE_DIR / "uk.html").resolve(),
-    "it": (_GUIDE_DIR / "it.html").resolve(),
-}
 _OUTBOUND_WEBHOOK_DOC = (
     Path(__file__).resolve().parent / "docs" / "outbound-webhook.md"
 ).resolve()
@@ -1038,51 +1031,103 @@ def _markdown_doc_to_html(md: str) -> str:
     return "\n".join(out)
 
 
-def _webhook_docs_page() -> bytes | None:
+def _webhook_docs_page(lang: str = "en") -> bytes | None:
     """Serve docs/outbound-webhook.md as rendered HTML for integrators."""
+    import web_site
+
     try:
         raw = _OUTBOUND_WEBHOOK_DOC.read_text(encoding="utf-8")
     except OSError:
         return None
     body = _markdown_doc_to_html(raw)
-    return (
-        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        "<title>Outbound webhook</title>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<style>"
-        "body{font-family:system-ui,-apple-system,sans-serif;max-width:42rem;"
-        "margin:2rem auto;padding:0 1rem 3rem;line-height:1.55;color:#1a1a1a}"
-        "h1{font-size:1.6rem;line-height:1.25}"
-        "h2{font-size:1.25rem;margin-top:2rem;border-bottom:1px solid #ddd;"
-        "padding-bottom:0.25rem}"
-        "h3{font-size:1.05rem;margin-top:1.25rem}"
-        "table{border-collapse:collapse;width:100%;margin:0.75rem 0 1rem;"
-        "font-size:0.95rem}"
-        "th,td{border:1px solid #ddd;padding:0.45rem 0.55rem;text-align:left;"
-        "vertical-align:top}"
-        "th{background:#f6f6f6}"
-        "code{background:#f0f0f0;padding:0.1rem 0.35rem;border-radius:4px;"
-        "font-size:0.9em}"
-        "pre{background:#f6f6f6;padding:0.85rem 1rem;overflow:auto;"
-        "border-radius:6px}"
-        "pre code{background:transparent;padding:0;font-size:0.88em}"
-        "ul,ol{padding-left:1.3rem}"
-        "a{color:#0b57d0}"
-        "hr{border:none;border-top:1px solid #ddd;margin:1.5rem 0}"
-        "</style></head><body>"
-        f"{body}</body></html>"
-    ).encode("utf-8")
+    return web_site.webhook_docs_page(lang, body)
 
 
 def _guide_page(lang: str) -> bytes | None:
-    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
+    import web_site
 
-    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
-    path = _GUIDE_FILES.get(loc) or _GUIDE_FILES[DEFAULT_LOCALE]
-    try:
-        return path.read_bytes()
-    except OSError:
-        return None
+    return web_site.guide_page(lang)
+
+
+def _request_lang(handler: BaseHTTPRequestHandler) -> str:
+    import web_site
+
+    query = parse_qs(urlparse(handler.path).query)
+    raw = (query.get("lang") or [None])[0]
+    return web_site.request_lang(raw, handler.headers.get("Accept-Language"))
+
+
+def _send_bytes(
+    handler: BaseHTTPRequestHandler,
+    body: bytes,
+    *,
+    content_type: str,
+    cache_control: str | None = None,
+    status: int = 200,
+) -> None:
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    if cache_control:
+        handler.send_header("Cache-Control", cache_control)
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _try_serve_site_static(handler: BaseHTTPRequestHandler, path: str) -> bool:
+    """Serve /site/*, /assets/*, favicon, sitemap, robots. True if handled."""
+    import web_site
+
+    if path == "/favicon.ico":
+        got = web_site.read_site_file("favicon.ico")
+        if not got:
+            return False
+        body, ctype = got
+        _send_bytes(handler, body, content_type=ctype, cache_control="public, max-age=86400")
+        return True
+    if path == "/sitemap.xml":
+        body = web_site.sitemap_bytes()
+        if body is None:
+            return False
+        _send_bytes(
+            handler,
+            body,
+            content_type="application/xml; charset=utf-8",
+            cache_control="public, max-age=3600",
+        )
+        return True
+    if path == "/robots.txt":
+        body = web_site.robots_bytes()
+        if body is None:
+            return False
+        _send_bytes(
+            handler,
+            body,
+            content_type="text/plain; charset=utf-8",
+            cache_control="public, max-age=3600",
+        )
+        return True
+    if path.startswith("/site/"):
+        rel = path[len("/site/") :]
+        got = web_site.read_site_file(rel)
+        if not got:
+            handler.send_response(404)
+            handler.end_headers()
+            return True
+        body, ctype = got
+        _send_bytes(handler, body, content_type=ctype, cache_control="public, max-age=86400")
+        return True
+    if path.startswith("/assets/"):
+        rel = path[len("/assets/") :]
+        got = web_site.read_assets_file(rel)
+        if not got:
+            handler.send_response(404)
+            handler.end_headers()
+            return True
+        body, ctype = got
+        _send_bytes(handler, body, content_type=ctype, cache_control="public, max-age=86400")
+        return True
+    return False
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -1242,7 +1287,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         return urlparse(self.path).path
 
     def _health_paths(self) -> bool:
-        return self._path_only() in ("/", "/health")
+        return self._path_only() == "/health"
 
     def do_GET(self) -> None:
         path = self._path_only()
@@ -1266,68 +1311,78 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if _try_serve_site_static(self, path):
+            return
         if path.startswith("/app/chat"):
             if _handle_chat_webapp_get(self):
                 return
         if path == "/app/premium-channel":
-            query = parse_qs(urlparse(self.path).query)
-            lang = (query.get("lang") or ["en"])[0]
+            lang = _request_lang(self)
             body = _premium_channel_tip_page(lang)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "public, max-age=3600")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _send_bytes(
+                self,
+                body,
+                content_type="text/html; charset=utf-8",
+                cache_control="public, max-age=3600",
+            )
             return
         if path == "/placeholders":
-            query = parse_qs(urlparse(self.path).query)
-            lang = (query.get("lang") or ["en"])[0]
+            lang = _request_lang(self)
             body = _placeholders_page(lang)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _send_bytes(self, body, content_type="text/html; charset=utf-8")
             return
         if path == "/privacy":
-            query = parse_qs(urlparse(self.path).query)
-            lang = (query.get("lang") or ["en"])[0]
+            lang = _request_lang(self)
             body = _privacy_page(lang)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "public, max-age=3600")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _send_bytes(
+                self,
+                body,
+                content_type="text/html; charset=utf-8",
+                cache_control="public, max-age=3600",
+            )
             return
         if path == "/guide":
-            query = parse_qs(urlparse(self.path).query)
-            lang = (query.get("lang") or ["en"])[0]
+            lang = _request_lang(self)
             body = _guide_page(lang)
             if body is None:
                 self.send_response(404)
                 self.end_headers()
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "public, max-age=300")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _send_bytes(
+                self,
+                body,
+                content_type="text/html; charset=utf-8",
+                cache_control="public, max-age=300",
+            )
             return
         if path == "/webhook":
-            body = _webhook_docs_page()
+            lang = _request_lang(self)
+            body = _webhook_docs_page(lang)
             if body is None:
                 self.send_response(404)
                 self.end_headers()
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "public, max-age=300")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _send_bytes(
+                self,
+                body,
+                content_type="text/html; charset=utf-8",
+                cache_control="public, max-age=300",
+            )
+            return
+        if path == "/":
+            import web_site
+
+            body = web_site.landing_page()
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            _send_bytes(
+                self,
+                body,
+                content_type="text/html; charset=utf-8",
+                cache_control="public, max-age=300",
+            )
             return
         if path.startswith("/health/c/"):
             name = path[len("/health/c/") :]

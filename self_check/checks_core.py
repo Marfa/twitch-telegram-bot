@@ -2126,6 +2126,20 @@ def check_core() -> None:
         ).read() == b"ok"
         status, body = evaluate_health()
         assert status == 200 and body == b"ok"
+        landing = urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/", timeout=2
+        ).read()
+        assert b"data-i18n=" in landing and b"/site/css/main.css" in landing
+        assert b"Sitemap:" in urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/robots.txt", timeout=2
+        ).read()
+        assert b"<urlset" in urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/sitemap.xml", timeout=2
+        ).read()
+        guide = urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/guide?lang=ru", timeout=2
+        ).read()
+        assert b"page-docs" in guide and b"\xd0\x98\xd0\xbd\xd1\x81\xd1\x82\xd1\x80\xd1\x83\xd0\xba\xd1\x86\xd0\xb8\xd1\x8f" in guide
         clear_probe_cache_for_tests()
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}/health/c/db", timeout=2

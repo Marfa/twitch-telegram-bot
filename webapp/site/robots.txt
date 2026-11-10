@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /health
+Disallow: /health/
+Disallow: /oauth/
+Disallow: /hooks/
+Disallow: /app/
+
+Sitemap: https://bot.themarfa.name/sitemap.xml

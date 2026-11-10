@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Twitch → Telegram bot — stream alerts</title>
+    <meta name="description" content="Get Twitch live, category, schedule, and end-of-stream alerts in Telegram, Discord, or your HTTPS webhook. Free plan + Premium Stars.">
+    <meta name="author" content="Marfa">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="canonical" href="https://bot.themarfa.name/">
+    <link rel="alternate" hreflang="en" href="https://bot.themarfa.name/?lang=en">
+    <link rel="alternate" hreflang="ru" href="https://bot.themarfa.name/?lang=ru">
+    <link rel="alternate" hreflang="uk" href="https://bot.themarfa.name/?lang=uk">
+    <link rel="alternate" hreflang="it" href="https://bot.themarfa.name/?lang=it">
+    <link rel="alternate" hreflang="x-default" href="https://bot.themarfa.name/">
+    <meta property="og:title" content="Twitch → Telegram bot">
+    <meta property="og:description" content="Twitch stream alerts in Telegram, Discord, or your webhook.">
+    <meta property="og:url" content="https://bot.themarfa.name/">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://bot.themarfa.name/site/images/logo-square.png">
+    <link rel="stylesheet" href="/site/css/base.css">
+    <link rel="stylesheet" href="/site/css/vendor.css">
+    <link rel="stylesheet" href="/site/css/main.css">
+    <link rel="stylesheet" href="/site/css/site.css">
+    <script src="/site/js/modernizr.js"></script>
+    <script src="/site/js/pace.min.js"></script>
+    <link rel="shortcut icon" href="/site/favicon.ico" type="image/x-icon">
+    <link rel="icon" href="/site/favicon.ico" type="image/x-icon">
+</head>
+<body id="top">
+
+   <header id="header" class="row">
+   		<div class="header-logo">
+	        <a href="/">Twitch Telegram Bot</a>
+	    </div>
+	   	<nav id="header-nav-wrap">
+			<ul class="header-main-nav">
+				<li class="current"><a class="smoothscroll" href="#home" data-i18n="nav_home">Home</a></li>
+                <li><a class="smoothscroll" href="#about" data-i18n="nav_about">Features</a></li>
+				<li><a class="smoothscroll" href="#pricing" data-i18n="nav_pricing">Pricing</a></li>
+				<li><a data-lang-href="/guide" href="/guide?lang=en" data-i18n="nav_guide">Guide</a></li>
+			</ul>
+            <span class="lang-switch" aria-label="Language">
+                <a href="?lang=en" data-lang="en">EN</a>
+                <a href="?lang=ru" data-lang="ru">RU</a>
+                <a href="?lang=uk" data-lang="uk">UK</a>
+                <a href="?lang=it" data-lang="it">IT</a>
+            </span>
+            <a href="https://t.me/twitch2telegram_bot" class="button button-primary cta" data-i18n="nav_start">Open bot</a>
+		</nav>
+		<a class="header-menu-toggle" href="#"><span>Menu</span></a>
+   </header>
+
+   <section id="home" data-parallax="scroll" data-image-src="/site/images/hero-bg.jpg" data-natural-width="3000" data-natural-height="2000">
+        <div class="overlay"></div>
+        <div class="home-content">
+            <div class="row contents">
+                <div class="home-content-left">
+                    <h3 data-aos="fade-up" data-i18n="hero_eyebrow">Twitch alerts in Telegram</h3>
+                    <h1 data-aos="fade-up" data-i18n="hero_title">Never miss a stream you care about.</h1>
+                    <div class="buttons" data-aos="fade-up">
+                        <a href="https://t.me/twitch2telegram_bot" class="button stroke">
+                            <span class="icon-mail" aria-hidden="true"></span>
+                            <span data-i18n="hero_cta_bot">Open in Telegram</span>
+                        </a>
+                        <a data-lang-href="/guide" href="/guide?lang=en" class="button stroke">
+                            <span class="icon-file" aria-hidden="true"></span>
+                            <span data-i18n="hero_cta_guide">Read the guide</span>
+                        </a>
+                    </div>
+                </div>
+                <div class="home-image-right">
+                    <img class="product-shot"
+                        src="/assets/gallery/ph-gallery-01-main-menu.ru.png"
+                        alt="Bot main menu screenshot"
+                        data-aos="fade-up">
+                </div>
+            </div>
+        </div>
+        <ul class="home-social-list">
+            <li><a href="https://t.me/twitch2telegram_bot" title="Telegram bot"><i class="fa fa-telegram"></i></a></li>
+            <li><a href="https://github.com/Marfa/twitch-telegram-bot" title="GitHub"><i class="fa fa-github"></i></a></li>
+            <li><a href="https://www.twitch.tv/marfapr" title="Twitch"><i class="fa fa-twitch"></i></a></li>
+            <li><a href="https://pingzen.dev/status/bot-themarfa" title="Status"><i class="fa fa-heartbeat"></i></a></li>
+        </ul>
+        <div class="home-scrolldown">
+            <a href="#about" class="scroll-icon smoothscroll">
+                <span>Scroll Down</span>
+                <i class="icon-arrow-right" aria-hidden="true"></i>
+            </a>
+        </div>
+    </section>
+
+    <section id="about">
+        <div class="row about-intro">
+            <div class="col-four">
+                <h1 class="intro-header" data-aos="fade-up" data-i18n="about_title">What the bot does</h1>
+            </div>
+            <div class="col-eight">
+                <p class="lead" data-aos="fade-up" data-i18n="about_lead">
+                    Pick a Twitch channel, choose when to notify, and where to send it. The bot watches Helix and delivers the message you configured — DM, channel, Discord, or a signed webhook.
+                </p>
+            </div>
+        </div>
+
+        <div class="row about-features">
+            <div class="features-list block-1-3 block-m-1-2 block-mob-full group">
+                <div class="bgrid feature" data-aos="fade-up">
+                    <span class="icon"><i class="icon-tv"></i></span>
+                    <div class="service-content">
+                        <h3 data-i18n="feat_alerts_t">Alert types</h3>
+                        <p data-i18n="feat_alerts_d">Stream start, category change, upcoming from Twitch schedule, stream end, Drops, game alerts, release dates, and free giveaways.</p>
+                    </div>
+                </div>
+                <div class="bgrid feature" data-aos="fade-up">
+                    <span class="icon"><i class="icon-mail"></i></span>
+                    <div class="service-content">
+                        <h3 data-i18n="feat_dest_t">Anywhere you need</h3>
+                        <p data-i18n="feat_dest_d">Private chat, Telegram channel/group (topics supported), Discord Incoming Webhook, or your own HTTPS JSON webhook with HMAC.</p>
+                    </div>
+                </div>
+                <div class="bgrid feature" data-aos="fade-up">
+                    <span class="icon"><i class="icon-image"></i></span>
+                    <div class="service-content">
+                        <h3 data-i18n="feat_tpl_t">Templates &amp; covers</h3>
+                        <p data-i18n="feat_tpl_d">Message templates with placeholders, stream preview, game cover, GIF/video preview, and optional AI cover on Premium.</p>
+                    </div>
+                </div>
+                <div class="bgrid feature" data-aos="fade-up">
+                    <span class="icon"><i class="icon-refresh"></i></span>
+                    <div class="service-content">
+                        <h3 data-i18n="feat_import_t">Import follows</h3>
+                        <p data-i18n="feat_import_d">OAuth once and pull Twitch follows into subscriptions. Premium can keep them in sync automatically.</p>
+                    </div>
+                </div>
+                <div class="bgrid feature" data-aos="fade-up">
+                    <span class="icon"><i class="icon-gift"></i></span>
+                    <div class="service-content">
+                        <h3 data-i18n="feat_extra_t">Extras</h3>
+                        <p data-i18n="feat_extra_d">Lucky pick, stream chat Mini App, schedule tools, AI clips from VOD, channel stats — open more with Premium.</p>
+                    </div>
+                </div>
+                <div class="bgrid feature" data-aos="fade-up">
+                    <span class="icon"><i class="icon-earth"></i></span>
+                    <div class="service-content">
+                        <h3 data-i18n="feat_langs_t">Four languages</h3>
+                        <p data-i18n="feat_langs_d">Russian, English, Ukrainian, and Italian in the bot UI. This site follows your browser locale by default.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row about-how">
+            <h1 class="intro-header" data-aos="fade-up" data-i18n="how_title">How it works</h1>
+            <div class="about-how-content" data-aos="fade-up">
+                <div class="about-how-steps block-1-2 block-tab-full group">
+                    <div class="bgrid step" data-item="1">
+                        <h3 data-i18n="how_1_t">Open the bot</h3>
+                        <p data-i18n="how_1_d">Start @twitch2telegram_bot or @twitchbot_game and pick a language.</p>
+                    </div>
+                    <div class="bgrid step" data-item="2">
+                        <h3 data-i18n="how_2_t">Add a streamer</h3>
+                        <p data-i18n="how_2_d">New subscription → alert type → Twitch link or username → destination.</p>
+                    </div>
+                    <div class="bgrid step" data-item="3">
+                        <h3 data-i18n="how_3_t">Tune the message</h3>
+                        <p data-i18n="how_3_d">Template, image, buttons, advanced filters — keep free defaults or unlock Premium options.</p>
+                    </div>
+                    <div class="bgrid step" data-item="4">
+                        <h3 data-i18n="how_4_t">Get notified</h3>
+                        <p data-i18n="how_4_d">When the event fires, the bot sends exactly where you pointed it.</p>
+                    </div>
+                </div>
+           </div>
+        </div>
+
+        <div class="row about-bottom-image">
+           <img src="/assets/gallery/ph-gallery-05-destinations.ru.png"
+                alt="Alert destinations screenshot"
+                data-aos="fade-up">
+        </div>
+    </section>
+
+    <section id="pricing">
+        <div class="row pricing-content">
+            <div class="col-four pricing-intro">
+                <h1 class="intro-header" data-aos="fade-up" data-i18n="pricing_title">Free and Premium</h1>
+                <p data-aos="fade-up" data-i18n="pricing_lead">
+                    Free covers stream-start alerts with up to 5 active subscriptions. Premium unlocks more types, sync, advanced options, history, AI clips, and more — paid in Telegram Stars.
+                </p>
+            </div>
+            <div class="col-eight pricing-table">
+                <div class="row">
+                    <div class="col-six plan-wrap">
+                        <div class="plan-block" data-aos="fade-up">
+                            <div class="plan-top-part">
+                                <h3 class="plan-block-title" data-i18n="plan_free_t">Free</h3>
+                                <p class="plan-block-price"><sup></sup><span data-i18n="plan_free_price">0</span></p>
+                                <p class="plan-block-per" data-i18n="plan_free_per">Stars</p>
+                            </div>
+                            <div class="plan-bottom-part">
+                                <ul class="plan-block-features">
+                                    <li data-i18n="plan_free_1">5 active alerts</li>
+                                    <li data-i18n="plan_free_2">Stream start type</li>
+                                    <li data-i18n="plan_free_3">DM / channel / Discord / webhook</li>
+                                    <li data-i18n="plan_free_4">7-day alert history</li>
+                                </ul>
+                                <a class="button button-primary large" href="https://t.me/twitch2telegram_bot" data-i18n="plan_free_cta">Start free</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-six plan-wrap">
+                        <div class="plan-block primary" data-aos="fade-up">
+                            <div class="plan-top-part">
+                                <h3 class="plan-block-title" data-i18n="plan_prem_t">Premium</h3>
+                                <p class="plan-block-price"><sup></sup><span data-i18n="plan_prem_price">100+</span></p>
+                                <p class="plan-block-per" data-i18n="plan_prem_per">Stars / plans</p>
+                            </div>
+                            <div class="plan-bottom-part">
+                                <ul class="plan-block-features">
+                                    <li data-i18n="plan_prem_1">All alert types</li>
+                                    <li data-i18n="plan_prem_2">Twitch follow sync</li>
+                                    <li data-i18n="plan_prem_3">Advanced options &amp; AI tools</li>
+                                    <li data-i18n="plan_prem_4">Month / year / lifetime / à la carte</li>
+                                </ul>
+                                <a class="button button-primary large" href="https://t.me/twitch2telegram_bot" data-i18n="plan_prem_cta">See plans in bot</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="download">
+        <div class="row">
+            <div class="col-full">
+                <h1 class="intro-header" data-aos="fade-up" data-i18n="cta_title">Ready when the stream goes live</h1>
+                <p class="lead" data-aos="fade-up" data-i18n="cta_lead">
+                    Open the bot, add your first streamer, and keep the guide handy for every menu.
+                </p>
+                <p data-aos="fade-up">
+                    <a class="button button-primary large" href="https://t.me/twitch2telegram_bot" data-i18n="cta_bot">Open bot</a>
+                    <a class="button stroke large" data-lang-href="/guide" href="/guide?lang=en" data-i18n="cta_guide">User guide</a>
+                    <a class="button stroke large" href="https://pingzen.dev/status/bot-themarfa" data-i18n="cta_status">Status page</a>
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-main">
+            <div class="row">
+                <div class="col-three md-1-3 tab-full footer-info">
+                    <div class="footer-logo"></div>
+                    <p data-i18n="footer_blurb">
+                        Twitch stream alerts for Telegram and Discord. Built by Marfa. Not affiliated with Twitch.
+                    </p>
+                    <ul class="footer-social-list">
+                        <li><a href="https://t.me/twitch2telegram_bot"><i class="fa fa-telegram"></i></a></li>
+                        <li><a href="https://github.com/Marfa/twitch-telegram-bot"><i class="fa fa-github"></i></a></li>
+                        <li><a href="https://www.twitch.tv/marfapr"><i class="fa fa-twitch"></i></a></li>
+                    </ul>
+                </div>
+                <div class="col-three md-1-3 tab-1-2 mob-full footer-contact">
+                    <h4 data-i18n="footer_contact">Contact</h4>
+                    <p>
+                        <a href="https://t.me/immarfa">@immarfa</a><br>
+                        <a href="https://t.me/themarfa">@themarfa</a><br>
+                        <a href="mailto:biz@themarfa.name">biz@themarfa.name</a>
+                    </p>
+                </div>
+                <div class="col-two md-1-3 tab-1-2 mob-full footer-site-links">
+                    <h4 data-i18n="footer_links">Site links</h4>
+                    <ul class="list-links">
+                        <li><a href="/" data-i18n="footer_home">Home</a></li>
+                        <li><a data-lang-href="/guide" href="/guide?lang=en" data-i18n="footer_guide">Guide</a></li>
+                        <li><a href="/webhook" data-i18n="footer_webhook">Webhook docs</a></li>
+                        <li><a data-lang-href="/privacy" href="/privacy?lang=en" data-i18n="footer_privacy">Privacy</a></li>
+                        <li><a data-lang-href="/placeholders" href="/placeholders?lang=en" data-i18n="footer_placeholders">Placeholders</a></li>
+                        <li><a href="https://github.com/Marfa/twitch-telegram-bot" data-i18n="footer_github">GitHub</a></li>
+                    </ul>
+                </div>
+                <div class="col-four md-1-2 tab-full footer-subscribe">
+                    <h4 data-i18n="footer_support">Support the project</h4>
+                    <p>
+                        <a href="https://www.donationalerts.com/r/themarfa" data-i18n="footer_donate">Donate</a><br>
+                        <a href="https://nowpayments.io/donation/themarfa" data-i18n="footer_crypto">Crypto donate</a>
+                    </p>
+                    <p>Games metadata is powered by <a href="https://www.igdb.com">IGDB.com</a>.</p>
+                </div>
+            </div>
+        </div>
+      <div class="footer-bottom">
+      	<div class="row">
+      		<div class="col-twelve">
+	      		<div class="copyright">
+		         	<span data-i18n="footer_copy">© Marfa — Twitch → Telegram bot</span>
+		         	<span><span data-i18n="footer_design">Design by</span> <a href="https://www.styleshout.com/">styleshout</a> (Dazzle)</span>
+		         </div>
+		         <div id="go-top">
+		            <a class="smoothscroll" title="Back to Top" href="#top"><i class="icon-arrow-up"></i></a>
+		         </div>
+	      	</div>
+      	</div>
+      </div>
+    </footer>
+
+    <div id="preloader">
+    	<div id="loader"></div>
+    </div>
+
+    <script src="/site/js/jquery-2.1.3.min.js"></script>
+    <script src="/site/js/plugins.js"></script>
+    <script src="/site/js/main.js"></script>
+    <script src="/site/js/i18n.js"></script>
+</body>
+</html>

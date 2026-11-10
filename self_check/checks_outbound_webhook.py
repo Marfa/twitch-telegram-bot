@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+from urllib.parse import urlparse
 
 import max_api
 import outbound_webhook as owh
@@ -19,9 +20,9 @@ def check_outbound_webhook_validate_sign_ssrf() -> None:
     assert owh.normalize_webhook_url("") is None
 
     masked = owh.mask_webhook_url(good)
-    assert "hooks.example.com" in masked
+    assert urlparse(masked).hostname == "hooks.example.com"
     assert "***" in masked
-    assert "alerts" not in masked
+    assert urlparse(masked).path != "/alerts"
 
     secret = owh.generate_secret()
     assert owh.normalize_secret(secret) == secret
@@ -157,8 +158,10 @@ def check_outbound_webhook_docs_and_example_aligned() -> None:
     assert "<h1>" in rendered and "Outbound webhook" in rendered
     assert "<table>" in rendered and "<pre><code>" in rendered
     assert "<strong>Webhook</strong>" in rendered
-    page = (_webhook_docs_page() or b"").decode("utf-8")
-    assert "<h1>" in page and "<table>" in page
+    page = (_webhook_docs_page("en") or b"").decode("utf-8")
+    assert "Outbound webhook" in page and "<table>" in page
+    assert 'class="page-docs"' in page
+    assert "/site/css/main.css" in page
     assert "white-space:pre-wrap" not in page
     assert (
         "github.com/Marfa/twitch-telegram-bot/blob/main/outbound_webhook.py"
@@ -209,9 +212,23 @@ def check_max_api_subscribe_mock() -> None:
         assert exc.code == "proto.payload"
 
 
+def check_web_site_locale_helpers() -> None:
+    import web_site
+
+    assert web_site.lang_from_accept("ru-RU,ru;q=0.9,en;q=0.8") == "ru"
+    assert web_site.lang_from_accept("it-IT,it;q=0.9") == "it"
+    assert web_site.request_lang("uk", "en-US") == "uk"
+    assert web_site.request_lang(None, "uk-UA,uk;q=0.8") == "uk"
+    assert web_site.landing_page() is not None
+    assert web_site.sitemap_bytes() is not None
+    assert web_site.robots_bytes() is not None
+    assert web_site.safe_file(web_site.SITE_DIR, "../health.py") is None
+
+
 def run() -> None:
     check_outbound_webhook_validate_sign_ssrf()
     check_outbound_webhook_post_mock()
     check_outbound_webhook_subscription_roundtrip()
     check_outbound_webhook_docs_and_example_aligned()
+    check_web_site_locale_helpers()
     check_max_api_subscribe_mock()
