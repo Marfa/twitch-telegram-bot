@@ -3440,6 +3440,7 @@ def check_core() -> None:
         assert guide_html is not None
         assert b"<nav" in guide_html
         assert b"twitch2telegram_bot" in guide_html
+        assert b"twitchbot_game" in guide_html
     assert _guide_page("xx") is not None  # falls back to default locale
 
     from i18n import (

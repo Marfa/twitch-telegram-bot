@@ -3,7 +3,7 @@
 **Старт, смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
 
 > [!IMPORTANT]
-> **Готовый бот:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню · [статус](https://pingzen.dev/status/bot-themarfa)
+> **Готовый бот:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) / [@twitchbot_game](https://t.me/twitchbot_game) — `/start` и меню · [статус](https://pingzen.dev/status/bot-themarfa)
 
 English: [README.en.md](README.en.md)
 
@@ -17,7 +17,7 @@ English: [README.en.md](README.en.md)
 
 | Возможность | Как работает |
 |---|---|
-| Готовый бот | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню; [статус](https://pingzen.dev/status/bot-themarfa) |
+| Готовый бот | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) / [@twitchbot_game](https://t.me/twitchbot_game) — `/start` и меню; [статус](https://pingzen.dev/status/bot-themarfa) |
 | Языки | Русский, English, Українська, Italiano — выбор при первом `/start`, смена в **⚙️ Настройки** |
 | Типы оповещений | Начало стрима · смена категории · предстоящий (Twitch schedule) · окончание стрима · Drops · оповещение по игре · выход релизов (IGDB) · раздачи игр (GamerPower + ITAD) |
 | Куда слать | Личка или канал/группа/сообщество (с темами) |

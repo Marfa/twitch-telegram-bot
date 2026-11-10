@@ -3,7 +3,7 @@
 **Go-live, category change, upcoming or stream end, a new Drop, game giveaways, or a Twitch whisper — the bot notifies wherever you choose.** AI clips from VOD. Manage Twitch schedule from Telegram.
 
 > [!IMPORTANT]
-> **Live bot:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu · [status](https://pingzen.dev/status/bot-themarfa)
+> **Live bot:** [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) / [@twitchbot_game](https://t.me/twitchbot_game) — `/start` for the menu · [status](https://pingzen.dev/status/bot-themarfa)
 
 Русский: [README.md](README.md)
 
@@ -17,7 +17,7 @@
 
 | Feature | How it works |
 |---|---|
-| Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu; [status](https://pingzen.dev/status/bot-themarfa) |
+| Live bot | [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) / [@twitchbot_game](https://t.me/twitchbot_game) — `/start` for the menu; [status](https://pingzen.dev/status/bot-themarfa) |
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (GamerPower + ITAD) |
 | Destinations | DM or channel/group/community (with topics) |
