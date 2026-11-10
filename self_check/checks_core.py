@@ -676,6 +676,13 @@ def check_core() -> None:
         for b in row
     )
     assert any("сво" in lab.lower() for lab in ask_labels)
+    assert any(lab == "Далее" for lab in ask_labels)
+    assert not any("пропуст" in lab.lower() for lab in ask_labels)
+    assert any(
+        b.callback_data == "image_ask:next"
+        for row in ask_kb.inline_keyboard
+        for b in row
+    )
     from bothub import build_stream_cover_prompt
 
     prompt = build_stream_cover_prompt(

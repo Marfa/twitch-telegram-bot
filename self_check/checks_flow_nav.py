@@ -2882,7 +2882,7 @@ async def _scenario_subscriptions_edit_button_style(db) -> None:
 
 
 async def _scenario_wizard_image_ask(db) -> None:
-    """§2.6 Cover step — stream preview / GIF / video / game cover; Skip escape."""
+    """§2.6 Cover step — stream preview / GIF / video / game cover; Next continues."""
     from handlers.wizard import _go_image_ask_prompt, receive_image_ask, _wz
     from telegram.ext import ConversationHandler
     from twitch import (
@@ -2920,6 +2920,8 @@ async def _scenario_wizard_image_ask(db) -> None:
     assert any(lab.startswith("⬜️ ") and "видео" in lab.lower() for lab in labels)
     assert any(lab.startswith("⬜️ ") and "обложк" in lab.lower() for lab in labels)
     assert any("сво" in lab.lower() for lab in labels)
+    assert any(lab == "Далее" for lab in labels)
+    assert not any("пропуст" in lab.lower() for lab in labels)
     cap.assert_turn("wizard_image_ask")
 
     update, _query = _cb_update(_FREE_UID, "image_ask:stream_preview", cap)
@@ -2969,7 +2971,7 @@ async def _scenario_wizard_image_ask(db) -> None:
         for lab in toggled
     )
 
-    update, _query = _cb_update(_FREE_UID, "image_ask:skip", cap)
+    update, _query = _cb_update(_FREE_UID, "image_ask:next", cap)
     cap.wrap(bot)
     with patch(
         "handlers.wizard._go_after_image_step",

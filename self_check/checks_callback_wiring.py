@@ -246,6 +246,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("image_ask_stream_preview", "image_ask:stream_preview"),
     ("image_ask_stream_video_preview", "image_ask:stream_video_preview"),
     ("image_ask_stream_file_video_preview", "image_ask:stream_file_video_preview"),
+    ("image_ask_next", "image_ask:next"),
 )
 
 

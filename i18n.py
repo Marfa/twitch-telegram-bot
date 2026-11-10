@@ -2610,7 +2610,7 @@ def image_ask_keyboard(
                 )
             ],
             [InlineKeyboardButton(t("image_add", lang), callback_data="image_ask:add")],
-            [InlineKeyboardButton(t("image_skip", lang), callback_data="image_ask:skip")],
+            [InlineKeyboardButton(t("btn_wizard_next", lang), callback_data="image_ask:next")],
         ]
     )
 

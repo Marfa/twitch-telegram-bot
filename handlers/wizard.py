@@ -3260,8 +3260,8 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await _save_edit_image(update, context, lang)
         return await _go_after_image_step(update, context, lang)
 
-    if action == "skip":
-        # Dynamic image checkboxes stay selected until Skip/Next; only clear when unchecked.
+    if action in ("next", "skip"):
+        # Dynamic image checkboxes stay selected until Next; only clear when unchecked.
         if not is_dynamic_alert_image(context.user_data.get("image_file_id")):
             context.user_data["image_file_id"] = None
             context.user_data["image_position"] = ""
