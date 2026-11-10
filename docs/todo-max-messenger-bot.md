@@ -1,10 +1,12 @@
-# TODO: Бот в мессенджере MAX (копия UI + алерты)
+# TODO: Универсальный webhook-destination + тонкий бот MAX
 
-Дата: 2026-11-10  
+Дата: 2026-11-10 (обновлено: схема **C**)  
 Статус: **дизайн, без реализации**  
-Связанный код (целевой): новый Max-контур рядом с `bot.py` / `handlers/delivery.py` / `premium.py`; общая БД Postgres  
-Доки API: [создание бота](https://dev.max.ru/docs/chatbots/bots-create/create/), [Bot API](https://dev.max.ru/docs-api) (`platform-api2.max.ru`)  
-Контекст чата: полноценный бот в MAX с копией UI Telegram; доставка алертов в ЛС / группы / каналы; Telegram не трогаем.
+Связанный код (целевой): `handlers/delivery.py`, wizard dest / `subscriptions`, новый приёмник Max  
+Доки Max: [создание бота](https://dev.max.ru/docs/chatbots/bots-create/create/), [Bot API](https://dev.max.ru/docs-api)  
+Контекст: вся настройка алертов остаётся в Telegram; новый destination **Webhook** (универсальный URL); бот MAX — онбординг + привязка куда слать + приём нашего webhook.
+
+Связано (другой контракт payload): Discord Incoming Webhook уже в коде (`dest_type=discord`) — не универсальный JSON; этот файл про общий HTTPS webhook (+ Max).
 
 ---
 
@@ -12,122 +14,118 @@
 
 | # | Решение |
 |---|---|
-| 1 | Telegram остаётся как есть |
-| 2 | **Нет миграции** TG→Max: отдельные пользователи, подписки, каналы/группы |
-| 3 | Одна БД (новые таблицы / `platform='max'`) |
-| 4 | Доставка: ЛС, группы, каналы Max |
-| 5 | UI — **копия** сценариев Telegram |
-| 6 | Premium на Max — **заглушка** полного плана: **100 ₽/мес** или **1000 ₽/год** |
-| 7 | Логика реальной оплаты (Prodamus и пр.) — **отдельный план**, не этот файл |
-| 8 | Профиля на [MAX для партнёров](https://dev.max.ru/docs/chatbots/bots-create/create/) пока **нет** → API-код после модерации и токена |
+| 1 | Telegram остаётся основным UI (настройка подписок, шаблоны, Premium) |
+| 2 | Новый destination: **Webhook** — POST на **любой** HTTPS URL пользователя/сервиса |
+| 3 | Бот MAX — **не** копия UI: только онбординг и настройка **куда** доставлять (ЛС / группа / канал) |
+| 4 | Связка: Telegram ↔ Max (или любой приёмник) через webhook; общение ботов — HTTP |
+| 5 | Пользователи/чаты Max **отдельные**; миграции TG→Max нет; одна Postgres ок |
+| 6 | Первый официальный consumer webhook — **наш Max-бот**; тот же контракт — Make, свой сервер и т.д. |
+| 7 | Копия UI Max / рублёвый Premium на Max — **сняты** с этого плана (см. «Не в scope») |
+| 8 | Профиля MAX для партнёров пока нет → Max-часть после модерации и токена |
+| 9 | Реальная оплата на Max не нужна в этой схеме (Premium = Telegram Stars / как сейчас) |
 
 ---
 
 ## Главный вывод
 
-Полноценный порт UI + алерты — **месяцы**, не «адаптер за выходные».  
-Чтобы не получить два расходящихся продукта: domain (Twitch → событие → шаблон → entitlement) общий; UI Max — отдельный контур с теми же ключами `i18n` где возможно; identity TG и Max **не смешивать**.
+Вместо порта всего меню в Max: **один новый тип назначения в TG** + тонкий Max как приёмник.  
+Поддержка UI не удваивается. Max-пользователь без Telegram **не** настраивает алерты — только dest после связи.
 
-Big-bang «вынести весь Telegram на Messenger protocol» до токена Max **не делать**. Adapter и общий send резать по мере порта экранов.
+Схема **C** (универсальный хук) шире «только Max»: один контракт доставки наружу.
+
+```
+[Пользователь] ──настройка──► Telegram-бот
+                                    │
+                         alert готов (текст / медиа / кнопки-ссылки)
+                                    │ POST HTTPS + HMAC (идемпотентный)
+                                    ▼
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+             наш Max-бот                    любой URL
+             (онбординг + send               (Make, свой
+              в ЛС/группу/канал)              сервер, …)
+```
 
 ---
 
-## Архитектура
+## Продукт
 
-```
-shared: Twitch poll, шаблоны алертов, IGDB, entitlement helpers, jobs
-        ├── Telegram (текущий код)
-        └── Max: adapter + свои handlers/UI, те же domain-вызовы
-```
+### Telegram
 
-| Слой | Где живёт |
-|------|-----------|
-| Domain | Общий: `check_streams`, шаблоны, `has_feature` / pause map |
-| UI / callbacks | Отдельный Max-контур (копия экранов), тексты из `i18n` |
-| Transport | Max adapter: send / edit / delete / pin / upload / answer callback |
-| Identity | Только Max ids в Max-таблицах; TG-таблицы без изменений |
+- В мастере / редактировании «куда слать»: пункт **Webhook** (рядом с ЛС / группа / канал / …).
+- Поля: URL (`https://…`), опционально секрет (или секрет выдаёт бот), тест «отправить пробный».
+- Для Max: UX «Привязать Max» — ввод кода из Max-бота или deep link; под капотом пишется URL нашего Max-приёмника + `chat_ref` / binding id (пользователь может не видеть сырой URL).
+- Рендер алерта как сейчас; в webhook уходит **уже собранный** payload (не сырой Twitch event) — иначе приёмники дублируют шаблоны.
+- Ошибки доставки: retry с backoff; после лимита — notice владельцу в TG (как другие fail path’ы); не валить весь `check_streams`.
 
-Опциональная ручная связка TG↔Max аккаунтов — **вне** этого плана.
+### Max (тонкий бот)
+
+- `/start`, язык (опционально), выдача **кода связи** / ссылки в Telegram.
+- Привязка назначения: ЛС, группа, канал (бот админом где нужно).
+- Список своих dest, отвязка.
+- HTTP endpoint приёма webhook (тот же контракт, что универсальный): проверка подписи → send через Max API.
+- **Нет** wizard подписок, Premium UI, drops, schedule и пр.
+
+### Связка TG ↔ Max
+
+1. Max: пользователь получает код / ссылку.  
+2. TG: dest Webhook → «Max» → код (или открыть Max).  
+3. В БД: binding (`owner_tg`, `max_chat_id` / dest id, secret) **или** явный URL на `https://bot…/hooks/max/...`.  
+4. Алерт → POST → Max → сообщение в чат.
+
+Отдельные люди в Max и TG без связи — норма; связь только через явный онбординг.
+
+---
+
+## Контракт webhook (эскиз)
+
+Единый для Max и чужих URL.
+
+| Требование | Деталь |
+|------------|--------|
+| Метод | `POST`, HTTPS only |
+| Auth | HMAC (заголовок, напр. `X-Bot-Signature`) по телу + secret назначения |
+| Идемпотентность | `delivery_id` (или `event_id` + `subscription_id`); приёмник отвечает 2xx повторно без дубля |
+| Тело | JSON: текст (html/markdown/plain — зафиксировать одно), опционально `photo_url` / attachments, `buttons[]` типа link, meta (`twitch_login`, `alert_type`, `stream_id`, …) |
+| Ответ | `2xx` = успех; иначе retry |
+| SSRF | при сохранении URL: только `https`, block private/link-local/metadata IP (если пользователь вводит произвольный URL) |
+| Лимиты | очередь на стороне отправителя; Max: ≤ 2 msg/s на чат |
+
+Точный JSON schema — на реализации; в self_check — пример payload + verify HMAC.
+
+Кнопки callback «настроить в боте» в универсальном хуке не предполагать: только **link** (и при желании deep link в TG).
 
 ---
 
 ## Модель данных (эскиз)
 
-Новое (или зеркало с префиксом / `platform`):
+Telegram-сторона (расширение существующих подписок / dest):
 
-- `max_users` — Max user id, locale, premium stub fields, timestamps
-- `max_subscriptions` — смысл как у TG-подписок; `owner_id` → `max_users`
-- destinations: `dest_type` ∈ `dm|group|channel`, `chat_id` Max
-- при необходимости: `max_alert_history` / delivery log — отдельно от TG
-- Premium stub: семантика full plan **без** Stars / `charge_id`
+- `dest_type = webhook` (или `max` как UX-обёртка над webhook)
+- `webhook_url`, `webhook_secret`, `webhook_binding_id` (nullable)
+- флаги last_error / disabled_after_failures
 
-TG-схему не мигрируем и не объединяем identity в одних колонках без `platform`.
+Max-сторона (отдельные таблицы, без миграции TG users):
 
----
+- `max_users`, `max_destinations` (chat_id, type dm|group|channel)
+- `max_link_codes` (код → max user/dest, TTL)
+- лог принятых `delivery_id` для идемпотентности
 
-## Runtime Max
-
-1. `MAX_BOT_TOKEN`; процесс тот же или отдельный + webhook `POST /max/webhook`.
-2. Prod: webhook HTTPS :443 (рекомендация Max); long polling — только локалка.
-3. Rate limit: очередь ≤ **2 msg/s** на чат; глобально учитывать ~30 rps API.
-4. Health: `/health/c/max` рядом с telegram.
-5. PingZen: монитор Max; maintenance window при деплое с даунтаймом бота.
-6. Клиент к `platform-api2.max.ru`; учесть доверенный сертификат Минцифры в образе при необходимости.
-
-Python: community `maxapi` или тонкий HTTP-клиент по OpenAPI — выбор на фазе 1 (новая зависимость только с явным approval).
+Одна Postgres. Identity TG и Max не сливать.
 
 ---
 
-## UI (копия)
+## Runtime
 
-Порт 1:1 по сценариям; эмуляция того, чего нет в Max API:
+| Кусок | Поведение |
+|-------|-----------|
+| TG delivery | после рендера: если dest webhook → POST; TG-чаты — как сейчас |
+| Max процесс | webhook входящий + Max Bot API исходящий; токен `MAX_BOT_TOKEN` |
+| Деплой | Max endpoint на том же `PUBLIC_BASE_URL` (path `/hooks/...`) или отдельный сервис |
+| Health | `/health/c/webhook_delivery` и/или `/health/c/max` |
+| PingZen | монитор Max/hooks при появлении; maintenance на disruptive recreate |
 
-| Telegram | Max |
-|----------|-----|
-| Reply keyboard / pulse | inline + кнопки `message` / повтор меню |
-| Inline callback | `callback` + `POST /answers` |
-| HTML | `format: html` или markdown-маппинг |
-| Topics (`t.me/c/…/n`) | нет → только chat/channel id |
-| WebApp / MenuButton | `open_app` или url; chat Mini App — подэтап |
-| Setup групп только в ЛС | то же правило |
-
-Порядок экранов:
-
-1. `/start`, главное меню, язык, помощь  
-2. Подписки: список, вкл/выкл, удаление  
-3. Wizard нового алерта (live + dest ЛС/группа/канал)  
-4. Редактирование шаблона / advanced (по stub entitlement)  
-5. Settings, pause notifications  
-6. Остальные разделы меню (drops, watch, schedule, …) по продуктовому приоритету  
-7. Premium-заглушка: 100 ₽ / 1000 ₽, «оплата скоро» / disabled  
-
-Критерий «копия»: те же ветки и ключи i18n; не обязательно пиксель-в-пиксель виджеты Max.  
-Риск расхождения меню: при каждом UX-PR в TG — чеклист sync Max (или общий screen-layer позже).
-
----
-
-## Доставка алертов
-
-1. Shared job видит TG- и Max-подписки (или параллельный reader тех же Twitch-событий).  
-2. Ветка Max: `MaxDelivery.send(sub, payload)` через adapter.  
-3. Где API позволяет: delete previous, pin, custom buttons (link/callback).  
-4. Ошибки доступа → пометка чата/юзера; notice в ЛС владельца Max.  
-5. Дедуп/history Max отдельно от TG `alert_history`.
-
----
-
-## Premium-заглушка
-
-| План | Цена | Что открывает |
-|------|------|----------------|
-| Месяц | 100 ₽ | полный Premium (все `FEATURE_IDS`) |
-| Год | 1000 ₽ | то же |
-
-- UI с ценами; оплата → «скоро» (без Prodamus в этом плане).  
-- На время разработки unlock: админ/флаг в БД и/или Twitch-саб (`PREMIUM_TWITCH_LOGIN`), если решим включить.  
-- Pause map / entitlement — как у full plan в TG.  
-- À la carte / gift / партнёрка Stars на Max — **не в scope**.  
-- Реальная оплата (в т.ч. [Prodamus](https://prodamus.ru/)) — **отдельный TODO**, не этот файл.
+Вариант «один процесс, оба токена» допустим: универсальный хук всё равно есть как контракт наружу; внутренний Max может вызывать send без петли HTTP (опциональная оптимизация), но **публичный** URL для чужих приёмников обязателен по схеме C.
 
 ---
 
@@ -135,56 +133,64 @@ Python: community `maxapi` или тонкий HTTP-клиент по OpenAPI �
 
 | Фаза | Содержание | Зависимость |
 |------|------------|-------------|
-| **0. Доступ** | Профиль MAX для партнёров → бот → модерация → токен | блокер |
-| **1. Каркас** | Таблицы Max, config, webhook, adapter hello / `/start` | после 0 |
-| **2. Delivery MVP** | Seed/ручная Max-подписка → live-алерт в ЛС | после 1 |
-| **3. Destinations** | Привязка группы/канала, права админа, публикация | после 2 |
-| **4. UI core** | Меню + подписки + wizard live | после 1–3 |
-| **5. UI rest** | Остальные разделы как в TG | после 4 |
-| **6. Premium stub** | Экран 100/1000 + admin/(опц.) Twitch unlock | параллельно 4–5 |
-| **7. Ops** | health, PingZen, self_check Max smoke, README / guide / flow-map | к релизу |
-| **∞** | Prodamus / рекуррент | отдельный план |
+| **0. Доступ Max** | Профиль партнёров → бот → модерация → токен | блокер только для Max-клиента; **универсальный webhook в TG можно начать без Max** |
+| **1. Webhook dest в TG** | UI dest, хранение URL/secret, POST из delivery, тест, SSRF, retry, i18n | нет Max |
+| **2. Контракт + docs** | schema payload, README/guide: «свой endpoint», пример verify | с 1 |
+| **3. Max каркас** | таблицы, `/start`, link code, webhook receiver, send в ЛС | после 0 |
+| **4. Max destinations** | группа/канал, права, отвязка | после 3 |
+| **5. UX «Привязать Max»** | в TG wizard без ручного URL (код / deep link) | после 1+3 |
+| **6. Ops** | health, PingZen, self_check (HMAC, SSRF, idempotency), README | к релизу |
 
-До фазы 0 допустимы только эскиз схемы и точечный вынос шаблонов алертов — без Max SDK.
+---
+
+## Сравнение со старым планом (копия UI)
+
+| | **C: универсальный webhook** (этот файл) | Копия UI в Max (отменено здесь) |
+|--|------------------------------------------|----------------------------------|
+| Объём | недели после токена (Max) / раньше — только TG webhook | месяцы |
+| Где настройка | только Telegram | Telegram + Max |
+| Поддержка UI | один контур | два |
+| Max без TG | нельзя настроить алерты | можно |
+| Другие интеграции | да (любой URL) | нет |
 
 ---
 
 ## Не в scope
 
-- [ ] Миграция или обязательный линк TG↔Max аккаунтов  
-- [ ] Реальная оплата / Prodamus / автопродление  
-- [ ] Паритет Stars à la carte / gift / партнёрка на Max  
-- [ ] Выключение или перепись Telegram  
-- [ ] Обязательный полный rewrite `delivery.py` / protocol до токена Max  
+- Копия меню / wizard / Premium UI в Max  
+- Миграция или обязательный линк всех TG пользователей в Max  
+- Рублёвая оплата / Prodamus на Max  
+- Сырой Twitch event в webhook вместо отрендеренного алерта  
+- Callback-кнопки управления подпиской через чужой webhook  
+- Вынос всего TG на Messenger protocol  
 
 ---
 
 ## Риски
 
-- Копия UI без общего screen-layer → два меню разъедутся.  
-- Reply keyboard / topics / WebApp — не 1:1; эмуляцию зафиксировать до порта.  
-- 2 msg/s на чат — очереди на multi-dest и рассылки.  
-- Юр. ограничения MAX (резидент РФ, модерация до ~48 ч, ник вида `idИНН_bot`).  
-- Без профиля/токена фазы 1+ стоят.
+- SSRF при пользовательских URL — обязательный allowlist схемы + block private IP.  
+- Чужие приёмники ломаются / дублируют — идемпотентность + понятный контракт + тест-кнопка.  
+- Max 2 msg/s — очередь на приёмнике.  
+- Пользователь ждёт «полноценный бот в Max» — продуктово это **доставка**, не второй UI; зафиксировать в README.  
+- Без профиля Max фазы 3–5 ждут; фаза 1 (универсальный хук) — нет.
 
 ---
 
-## Definition of Done (релиз Max v1)
+## Definition of Done
 
-- [ ] Пользователь Max проходит основной UI-контур как в TG (с оговорками эмуляции)  
-- [ ] Алерты уходят в ЛС, группы и каналы Max  
-- [ ] Telegram-бот без регрессий  
-- [ ] Premium: заглушка 100/1000; full plan только stub/admin/(опц. Twitch)  
-- [ ] `/health` + PingZen знают Max  
-- [ ] Оплата явно «не сделано» → отдельная задача  
+- [ ] В TG можно выбрать destination Webhook, указать URL, получить тестовый POST  
+- [ ] Боевой алерт уходит на URL с HMAC; ретраи и notice при фейле  
+- [ ] Документированный JSON-контракт; пример приёмника  
+- [ ] Max-бот: онбординг, привязка ЛС/группы/канала, приём того же webhook, публикация  
+- [ ] UX «Привязать Max» из TG без обязательного ручного URL  
+- [ ] SSRF-защиты + self_check; Telegram-регрессий нет  
+- [ ] README / guide / flow-map обновлены под Webhook (+ Max как пример)  
 
 ---
 
-## Чеклист старта реализации (когда снимем «без реализации»)
+## Чеклист старта реализации
 
-- [ ] Верифицированный профиль MAX для партнёров  
-- [ ] Бот создан, модерация пройдена, токен в `.env` / VPS (не в git)  
-- [ ] Согласован выбор клиента (`maxapi` vs тонкий HTTP)  
-- [ ] Схема `max_users` / `max_subscriptions` + dual backend SQLite/Postgres  
-- [ ] Webhook + PingZen maintenance на первый disruptive деплой  
-- [ ] Отдельный TODO на оплату (Prodamus), если пора  
+- [ ] Согласовать имя dest в UI (`Webhook` / `Свой URL` / …) и i18n  
+- [ ] Зафиксировать JSON schema + заголовок подписи  
+- [ ] (Max) профиль партнёров + токен, когда понадобится фаза 3  
+- [ ] Не путать с отменённой «копией UI Max» — этот файл канон  
