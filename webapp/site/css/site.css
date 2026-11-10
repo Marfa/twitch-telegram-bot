@@ -114,10 +114,32 @@ body.page-docs #header.opaque {
   background: #fff;
 }
 
-/* Footer inherits light-on-dark colors; solid bg so it is not washed out on gray docs */
+/* Docs pages use a light body; Dazzle footer has no background of its own. */
+body.page-docs > footer,
+body.page-docs > footer .footer-main,
+body.page-docs > footer .footer-bottom {
+  background: #141515 !important;
+  background-image: none !important;
+}
+
 body.page-docs > footer {
-  background: #141515;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+body.page-docs > footer p,
+body.page-docs > footer .copyright,
+body.page-docs > footer .copyright span {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+
+body.page-docs > footer ul a,
+body.page-docs > footer ul a:visited {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+body.page-docs > footer ul a:hover,
+body.page-docs > footer ul a:focus {
+  color: #ffffff !important;
 }
 
 .doc-hero {

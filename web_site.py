@@ -339,7 +339,7 @@ def wrap_doc_page(
 <link rel="stylesheet" href="/site/css/base.css">
 <link rel="stylesheet" href="/site/css/vendor.css">
 <link rel="stylesheet" href="/site/css/main.css">
-<link rel="stylesheet" href="/site/css/site.css">
+<link rel="stylesheet" href="/site/css/site.css?v=20261110b">
 <script src="/site/js/modernizr.js"></script>
 <script src="/site/js/pace.min.js"></script>
 <link rel="shortcut icon" href="/site/favicon.ico" type="image/x-icon">
