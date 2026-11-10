@@ -66,6 +66,38 @@
 
 #download .button {
   margin: 0.4rem;
+  min-width: 16rem;
+}
+
+/* Green CTA band: primary green-on-green and gray stroke are hard to see */
+#download .button.button-primary {
+  background: #ffffff !important;
+  color: #1f7a2e !important;
+  border-color: #ffffff !important;
+}
+
+#download .button.button-primary:hover,
+#download .button.button-primary:focus {
+  background: #f3f8f3 !important;
+  color: #145a20 !important;
+}
+
+#download .button.stroke {
+  background: transparent !important;
+  color: #ffffff !important;
+  border: 0.3rem solid rgba(255, 255, 255, 0.9) !important;
+}
+
+#download .button.stroke:hover,
+#download .button.stroke:focus {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+  border-color: #ffffff !important;
+}
+
+.about-how-steps a {
+  color: #39b54a;
+  text-decoration: underline;
 }
 
 /* Inner pages (guide / webhook / privacy chrome) */
@@ -80,6 +112,12 @@ body.page-docs #header {
 
 body.page-docs #header.opaque {
   background: #fff;
+}
+
+/* Footer inherits light-on-dark colors; solid bg so it is not washed out on gray docs */
+body.page-docs > footer {
+  background: #141515;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .doc-hero {

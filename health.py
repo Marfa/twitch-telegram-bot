@@ -828,38 +828,42 @@ def _html_page(title: str, message: str) -> bytes:
 
 
 def _placeholders_page(lang: str) -> bytes:
-    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, t
+    from i18n import t
+    from web_site import normalize_lang, wrap_doc_page
 
-    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
-    title = html.escape(t("placeholders_page_title", loc))
-    intro = html.escape(t("placeholders_page_intro", loc))
+    loc = normalize_lang(lang)
+    title = t("placeholders_page_title", loc)
+    intro = t("placeholders_page_intro", loc)
     # Body already contains safe HTML tags from i18n; tokens use literal braces.
     body = t("placeholders_page_body", loc)
-    return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<title>{title}</title>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "</head><body style='font-family:sans-serif;max-width:40rem;"
-        "margin:2rem auto;padding:0 1rem;line-height:1.5'>"
-        f"<h1>{title}</h1><p>{intro}</p>{body}</body></html>"
-    ).encode("utf-8")
+    return wrap_doc_page(
+        lang=loc,
+        title=title,
+        hero=title,
+        lead=intro,
+        content_html=f"<p>{html.escape(intro)}</p>{body}",
+        nav_current="",
+        path="/placeholders",
+    )
 
 
 def _privacy_page(lang: str) -> bytes:
-    from i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, t
+    from i18n import t
+    from web_site import normalize_lang, wrap_doc_page
 
-    loc = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
-    title = html.escape(t("privacy_page_title", loc))
-    intro = html.escape(t("privacy_page_intro", loc))
+    loc = normalize_lang(lang)
+    title = t("privacy_page_title", loc)
+    intro = t("privacy_page_intro", loc)
     body = t("privacy_page_body", loc)
-    return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<title>{title}</title>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "</head><body style='font-family:sans-serif;max-width:40rem;"
-        "margin:2rem auto;padding:0 1rem;line-height:1.5'>"
-        f"<h1>{title}</h1><p>{intro}</p>{body}</body></html>"
-    ).encode("utf-8")
+    return wrap_doc_page(
+        lang=loc,
+        title=title,
+        hero=title,
+        lead=intro,
+        content_html=f"<p>{html.escape(intro)}</p>{body}",
+        nav_current="",
+        path="/privacy",
+    )
 
 
 _OUTBOUND_WEBHOOK_DOC = (

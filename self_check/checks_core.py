@@ -558,8 +558,10 @@ def check_core() -> None:
     affiliated = i18n_t("twitch_not_affiliated", "en")
     assert f"{notice}\n\n{affiliated}" in legal
     assert with_oauth_legal("Auth now.", "en").startswith("Auth now.")
-    assert b"Privacy" in _privacy_page("en") or b"privacy" in _privacy_page("en").lower()
-    assert "Developer Services Agreement".encode() in _privacy_page("en")
+    privacy_html = _privacy_page("en")
+    assert b"Privacy" in privacy_html or b"privacy" in privacy_html.lower()
+    assert "Developer Services Agreement".encode() in privacy_html
+    assert b"page-docs" in privacy_html and b"/site/css/site.css" in privacy_html
     assert t.parse_username(CHANNEL) == CHANNEL
     assert t.parse_username("https://www.twitch.tv/marfapr") == CHANNEL
     assert t.parse_username("https://twitch.tv/Marfapr") == CHANNEL
