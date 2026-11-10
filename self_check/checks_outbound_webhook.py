@@ -151,6 +151,20 @@ def check_outbound_webhook_docs_and_example_aligned() -> None:
     assert "hmac.compare_digest" in example
     assert str(owh.SCHEMA_VERSION) in docs
 
+    from health import _markdown_doc_to_html, _webhook_docs_page
+
+    rendered = _markdown_doc_to_html(docs)
+    assert "<h1>" in rendered and "Outbound webhook" in rendered
+    assert "<table>" in rendered and "<pre><code>" in rendered
+    assert "<strong>Webhook</strong>" in rendered
+    page = (_webhook_docs_page() or b"").decode("utf-8")
+    assert "<h1>" in page and "<table>" in page
+    assert "white-space:pre-wrap" not in page
+    assert (
+        "github.com/Marfa/twitch-telegram-bot/blob/main/outbound_webhook.py"
+        in page
+    )
+
 
 def check_max_api_subscribe_mock() -> None:
     session = MagicMock()

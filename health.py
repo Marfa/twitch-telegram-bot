@@ -6,6 +6,7 @@ import html
 import json
 import logging
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -871,22 +872,204 @@ _GUIDE_FILES = {
 _OUTBOUND_WEBHOOK_DOC = (
     Path(__file__).resolve().parent / "docs" / "outbound-webhook.md"
 ).resolve()
+_WEBHOOK_DOC_GITHUB_BLOB = (
+    "https://github.com/Marfa/twitch-telegram-bot/blob/main/"
+)
+_MD_INLINE_RE = re.compile(
+    r"`([^`]+)`"
+    r"|\[([^\]]+)\]\(([^)]+)\)"
+    r"|\*\*([^*]+)\*\*"
+)
+_MD_HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
+_MD_OL_RE = re.compile(r"^\d+\.\s+(.*)$")
+_MD_UL_RE = re.compile(r"^[-*]\s+(.*)$")
+_MD_HR_RE = re.compile(r"^---+$")
+_MD_TABLE_SEP_RE = re.compile(r"^\|?\s*:?-{3,}")
+
+
+def _webhook_doc_href(url: str) -> str:
+    """Map relative links from docs/outbound-webhook.md to GitHub blob URLs."""
+    u = (url or "").strip()
+    if not u or u.startswith(("http://", "https://", "mailto:", "#")):
+        return u
+    if u.startswith("../"):
+        return _WEBHOOK_DOC_GITHUB_BLOB + u[3:]
+    return _WEBHOOK_DOC_GITHUB_BLOB + "docs/" + u.lstrip("/")
+
+
+def _md_inline(text: str) -> str:
+    parts: list[str] = []
+    last = 0
+    for m in _MD_INLINE_RE.finditer(text):
+        parts.append(html.escape(text[last : m.start()]))
+        if m.group(1) is not None:
+            parts.append(f"<code>{html.escape(m.group(1))}</code>")
+        elif m.group(2) is not None:
+            href = html.escape(_webhook_doc_href(m.group(3)), quote=True)
+            parts.append(f'<a href="{href}">{html.escape(m.group(2))}</a>')
+        else:
+            parts.append(f"<strong>{html.escape(m.group(4))}</strong>")
+        last = m.end()
+    parts.append(html.escape(text[last:]))
+    return "".join(parts)
+
+
+def _md_table_cells(row: str) -> list[str]:
+    body = row.strip().strip("|")
+    return [c.strip() for c in body.split("|")]
+
+
+def _markdown_doc_to_html(md: str) -> str:
+    """Subset renderer for docs/outbound-webhook.md (headings/lists/tables/fences)."""
+    lines = md.replace("\r\n", "\n").split("\n")
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+
+    def _para_html(chunk: list[str]) -> str:
+        bits: list[str] = []
+        for j, ln in enumerate(chunk):
+            if j:
+                bits.append("<br>\n" if chunk[j - 1].endswith("  ") else " ")
+            bits.append(_md_inline(ln.rstrip()))
+        return f"<p>{''.join(bits)}</p>"
+
+    while i < n:
+        line = lines[i]
+        if line.startswith("```"):
+            i += 1
+            buf: list[str] = []
+            while i < n and not lines[i].startswith("```"):
+                buf.append(lines[i])
+                i += 1
+            if i < n:
+                i += 1
+            out.append(
+                "<pre><code>" + html.escape("\n".join(buf)) + "</code></pre>"
+            )
+            continue
+        if _MD_HR_RE.match(line.strip()):
+            out.append("<hr>")
+            i += 1
+            continue
+        hm = _MD_HEADING_RE.match(line)
+        if hm:
+            level = len(hm.group(1))
+            out.append(f"<h{level}>{_md_inline(hm.group(2))}</h{level}>")
+            i += 1
+            continue
+        if (
+            "|" in line
+            and i + 1 < n
+            and _MD_TABLE_SEP_RE.match(lines[i + 1].strip())
+        ):
+            rows = [line]
+            i += 1
+            while i < n and "|" in lines[i]:
+                rows.append(lines[i])
+                i += 1
+            header = _md_table_cells(rows[0])
+            body_rows = [_md_table_cells(r) for r in rows[2:]]
+            thead = "".join(f"<th>{_md_inline(c)}</th>" for c in header)
+            tbody = "".join(
+                "<tr>"
+                + "".join(f"<td>{_md_inline(c)}</td>" for c in row)
+                + "</tr>"
+                for row in body_rows
+            )
+            out.append(
+                f"<table><thead><tr>{thead}</tr></thead>"
+                f"<tbody>{tbody}</tbody></table>"
+            )
+            continue
+        om = _MD_OL_RE.match(line)
+        if om:
+            items: list[str] = []
+            while i < n:
+                m = _MD_OL_RE.match(lines[i])
+                if not m:
+                    break
+                items.append(m.group(1))
+                i += 1
+            out.append(
+                "<ol>"
+                + "".join(f"<li>{_md_inline(it)}</li>" for it in items)
+                + "</ol>"
+            )
+            continue
+        um = _MD_UL_RE.match(line)
+        if um:
+            items = []
+            while i < n:
+                m = _MD_UL_RE.match(lines[i])
+                if not m:
+                    break
+                items.append(m.group(1))
+                i += 1
+            out.append(
+                "<ul>"
+                + "".join(f"<li>{_md_inline(it)}</li>" for it in items)
+                + "</ul>"
+            )
+            continue
+        if not line.strip():
+            i += 1
+            continue
+        chunk = []
+        while i < n and lines[i].strip():
+            cur = lines[i]
+            if (
+                cur.startswith("```")
+                or _MD_HR_RE.match(cur.strip())
+                or _MD_HEADING_RE.match(cur)
+                or _MD_OL_RE.match(cur)
+                or _MD_UL_RE.match(cur)
+                or (
+                    "|" in cur
+                    and i + 1 < n
+                    and _MD_TABLE_SEP_RE.match(lines[i + 1].strip())
+                )
+            ):
+                break
+            chunk.append(cur)
+            i += 1
+        if chunk:
+            out.append(_para_html(chunk))
+    return "\n".join(out)
 
 
 def _webhook_docs_page() -> bytes | None:
-    """Serve docs/outbound-webhook.md as a simple HTML page for integrators."""
+    """Serve docs/outbound-webhook.md as rendered HTML for integrators."""
     try:
         raw = _OUTBOUND_WEBHOOK_DOC.read_text(encoding="utf-8")
     except OSError:
         return None
-    body = html.escape(raw)
+    body = _markdown_doc_to_html(raw)
     return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         "<title>Outbound webhook</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "</head><body style='font-family:ui-monospace,Menlo,Consolas,monospace;"
-        "max-width:48rem;margin:2rem auto;padding:0 1rem;line-height:1.45;"
-        "white-space:pre-wrap'>"
+        "<style>"
+        "body{font-family:system-ui,-apple-system,sans-serif;max-width:42rem;"
+        "margin:2rem auto;padding:0 1rem 3rem;line-height:1.55;color:#1a1a1a}"
+        "h1{font-size:1.6rem;line-height:1.25}"
+        "h2{font-size:1.25rem;margin-top:2rem;border-bottom:1px solid #ddd;"
+        "padding-bottom:0.25rem}"
+        "h3{font-size:1.05rem;margin-top:1.25rem}"
+        "table{border-collapse:collapse;width:100%;margin:0.75rem 0 1rem;"
+        "font-size:0.95rem}"
+        "th,td{border:1px solid #ddd;padding:0.45rem 0.55rem;text-align:left;"
+        "vertical-align:top}"
+        "th{background:#f6f6f6}"
+        "code{background:#f0f0f0;padding:0.1rem 0.35rem;border-radius:4px;"
+        "font-size:0.9em}"
+        "pre{background:#f6f6f6;padding:0.85rem 1rem;overflow:auto;"
+        "border-radius:6px}"
+        "pre code{background:transparent;padding:0;font-size:0.88em}"
+        "ul,ol{padding-left:1.3rem}"
+        "a{color:#0b57d0}"
+        "hr{border:none;border-top:1px solid #ddd;margin:1.5rem 0}"
+        "</style></head><body>"
         f"{body}</body></html>"
     ).encode("utf-8")
 
