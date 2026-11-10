@@ -111,7 +111,37 @@ def check_discord_subscription_roundtrip() -> None:
         assert sub2.discord_webhook == ""
 
 
+def check_discord_setup_sample_posts_lasting() -> None:
+    """After setup, sample alert is posted and not deleted."""
+    import asyncio
+    from unittest.mock import patch
+
+    from handlers.wizard import _post_discord_setup_sample
+
+    url = (
+        "https://discord.com/api/webhooks/333/"
+        "sampletoksampletoksampletoksampletoksample"
+    )
+    with patch("discord_webhook.execute_webhook", return_value={"id": "1"}) as post:
+        with patch("discord_webhook.delete_webhook_message") as delete:
+            asyncio.run(
+                _post_discord_setup_sample(
+                    webhook_url=url,
+                    template="<b>{username}</b> — {name}",
+                    twitch_username="marfapr",
+                    lang="en",
+                )
+            )
+    assert post.called
+    kwargs = post.call_args.kwargs
+    content = kwargs.get("content") or ""
+    assert "marfapr" in content
+    assert "**" in content  # HTML → Discord markdown
+    assert not delete.called
+
+
 def run() -> None:
     check_discord_webhook_validate_mask_markdown()
     check_discord_webhook_execute_mock()
     check_discord_subscription_roundtrip()
+    check_discord_setup_sample_posts_lasting()

@@ -4016,6 +4016,7 @@ async def _receive_discord_webhook(
         await message.reply_text(t("discord_invalid_url", lang))
         return _wz()["DEST_CHAT"]
 
+    # Connectivity probe only (post + delete). Lasting sample goes out after save.
     err = await asyncio.to_thread(
         dwh.test_webhook, url, text=t("discord_test_ok", lang)
     )
@@ -4029,6 +4030,33 @@ async def _receive_discord_webhook(
     context.user_data["pin_message"] = False
     context.user_data["adv_want_pin"] = False
     return await _prompt_delete_old(update, context, lang)
+
+
+async def _post_discord_setup_sample(
+    *,
+    webhook_url: str,
+    template: str,
+    twitch_username: str,
+    lang: str,
+) -> None:
+    """Post lasting Discord sample with the saved template (setup preview)."""
+    import discord_webhook as dwh
+
+    url = dwh.normalize_webhook_url(webhook_url)
+    tmpl = (template or "").strip()
+    login = (twitch_username or "").strip()
+    if not url or not tmpl or not login:
+        return
+    uses_html = template_uses_html(tmpl)
+    preview = render_template(
+        tmpl,
+        login,
+        "Just Chatting",
+        t("preview_stream", lang),
+        escape_html=uses_html,
+    )
+    content = dwh.html_to_discord_markdown(preview) if uses_html else preview
+    await asyncio.to_thread(dwh.execute_webhook, url, content=content, wait=True)
 
 
 async def _prompt_delete_old(
@@ -4478,6 +4506,29 @@ async def _finish_subscription(
             twitch_username=str(data.get("twitch_username") or ""),
         )
         db.clear_delivery_paused(int(edit_sub_id), enabled=can)
+
+    if dest_type == "discord" and discord_webhook:
+        tmpl = str(data.get("message_template") or "")
+        login = str(data.get("twitch_username") or "")
+        if (not tmpl or not login) and sub_id:
+            saved = db.get_subscription(int(sub_id), owner_id)
+            if saved is not None:
+                tmpl = tmpl or str(saved.message_template or "")
+                login = login or str(saved.twitch_username or "")
+        try:
+            await _post_discord_setup_sample(
+                webhook_url=discord_webhook,
+                template=tmpl,
+                twitch_username=login,
+                lang=lang,
+            )
+        except Exception:
+            logger.warning(
+                "Discord setup sample failed for owner=%s sub=%s",
+                owner_id,
+                sub_id,
+                exc_info=True,
+            )
 
     if (
         int(data.get("schedule_reminder_minutes", 0)) > 0
