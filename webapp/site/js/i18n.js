@@ -398,11 +398,15 @@
     document.querySelectorAll(".lang-switch a[data-lang]").forEach(function (a) {
       a.classList.toggle("is-active", a.getAttribute("data-lang") === lang);
     });
+    var langHrefs = {
+      "/guide": true,
+      "/privacy": true,
+      "/placeholders": true,
+    };
     document.querySelectorAll("a[data-lang-href]").forEach(function (a) {
       var base = a.getAttribute("data-lang-href");
-      if (!base) return;
-      var join = base.indexOf("?") >= 0 ? "&" : "?";
-      a.setAttribute("href", base + join + "lang=" + encodeURIComponent(lang));
+      if (!langHrefs[base]) return;
+      a.setAttribute("href", base + "?lang=" + encodeURIComponent(lang));
     });
     try {
       localStorage.setItem(STORAGE_KEY, lang);

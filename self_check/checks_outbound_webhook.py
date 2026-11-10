@@ -223,6 +223,9 @@ def check_web_site_locale_helpers() -> None:
     assert web_site.sitemap_bytes() is not None
     assert web_site.robots_bytes() is not None
     assert web_site.safe_file(web_site.SITE_DIR, "../health.py") is None
+    assert web_site.safe_file(web_site.SITE_DIR, "css/main.css") is not None
+    assert web_site.safe_file(web_site.SITE_DIR, "css/../../health.py") is None
+    assert web_site.safe_file(web_site.SITE_DIR, "/etc/passwd") is None
 
 
 def run() -> None:

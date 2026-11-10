@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import mimetypes
 import re
 from pathlib import Path
 
@@ -191,37 +190,52 @@ def request_lang(query_lang: str | None, accept_language: str | None) -> str:
     return lang_from_accept(accept_language)
 
 
+_SAFE_REL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+_CONTENT_TYPES = {
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".xml": "application/xml; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".eot": "application/vnd.ms-fontobject",
+    ".otf": "font/otf",
+    ".map": "application/json",
+}
+
+
 def safe_file(root: Path, rel: str) -> Path | None:
-    rel = (rel or "").lstrip("/")
-    if not rel or ".." in Path(rel).parts:
+    """Resolve a relative path under root; reject traversal / odd chars."""
+    raw = (rel or "").replace("\\", "/").lstrip("/")
+    if not raw or not _SAFE_REL_RE.fullmatch(raw):
         return None
-    candidate = (root / rel).resolve()
+    parts = [p for p in raw.split("/") if p]
+    if not parts or any(p in (".", "..") for p in parts):
+        return None
     try:
-        candidate.relative_to(root)
-    except ValueError:
+        root_resolved = root.resolve(strict=True)
+    except OSError:
+        return None
+    candidate = root_resolved.joinpath(*parts)
+    try:
+        candidate = candidate.resolve(strict=True)
+    except OSError:
+        return None
+    if root_resolved not in candidate.parents:
         return None
     return candidate if candidate.is_file() else None
 
 
 def content_type_for(path: Path) -> str:
-    guessed, _ = mimetypes.guess_type(str(path))
-    if path.suffix.lower() == ".js":
-        return "application/javascript; charset=utf-8"
-    if path.suffix.lower() == ".css":
-        return "text/css; charset=utf-8"
-    if path.suffix.lower() == ".xml":
-        return "application/xml; charset=utf-8"
-    if path.suffix.lower() == ".txt":
-        return "text/plain; charset=utf-8"
-    if path.suffix.lower() == ".html":
-        return "text/html; charset=utf-8"
-    if path.suffix.lower() == ".ico":
-        return "image/x-icon"
-    if guessed:
-        if guessed.startswith("text/") and "charset" not in guessed:
-            return guessed + "; charset=utf-8"
-        return guessed
-    return "application/octet-stream"
+    return _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
 
 
 def read_site_file(rel: str) -> tuple[bytes, str] | None:
@@ -229,9 +243,10 @@ def read_site_file(rel: str) -> tuple[bytes, str] | None:
     if path is None:
         return None
     try:
-        return path.read_bytes(), content_type_for(path)
+        data = path.read_bytes()
     except OSError:
         return None
+    return data, content_type_for(path)
 
 
 def read_assets_file(rel: str) -> tuple[bytes, str] | None:
@@ -239,9 +254,10 @@ def read_assets_file(rel: str) -> tuple[bytes, str] | None:
     if path is None:
         return None
     try:
-        return path.read_bytes(), content_type_for(path)
+        data = path.read_bytes()
     except OSError:
         return None
+    return data, content_type_for(path)
 
 
 def landing_page() -> bytes | None:

@@ -1065,10 +1065,15 @@ def _send_bytes(
     cache_control: str | None = None,
     status: int = 200,
 ) -> None:
+    # Header values must stay CRLF-free (response-splitting).
+    ctype = (content_type or "application/octet-stream").replace("\r", "").replace(
+        "\n", ""
+    )
     handler.send_response(status)
-    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Type", ctype)
     if cache_control:
-        handler.send_header("Cache-Control", cache_control)
+        cc = cache_control.replace("\r", "").replace("\n", "")
+        handler.send_header("Cache-Control", cc)
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
