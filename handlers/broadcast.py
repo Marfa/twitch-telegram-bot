@@ -122,7 +122,8 @@ def _admin_sent_broadcast_message(
     when = _format_sent_at_label(item.sent_at or item.scheduled_at)
     type_label = _broadcast_type_label(item.msg_type, lang)
     header = t("sent_line", lang, id=item.id, when=when, type=type_label)
-    message = f"{header}\n\n{item.text}"
+    footer = t("broadcast_footer", lang, type=type_label)
+    message = f"{header}\n\n{item.text}\n\n{footer}"
     up_count, down_count = db.get_broadcast_feedback_counts(item.id)
     markup = broadcast_feedback_keyboard(item.id, up_count, down_count, lang)
     return message, markup
@@ -670,6 +671,12 @@ async def _send_admin_broadcast(
     for uid in user_ids:
         locale = user_locales[uid]
         body = translations.get(locale, text)
+        footer = t(
+            "broadcast_footer",
+            locale,
+            type=_broadcast_type_label(msg_type, locale),
+        )
+        message = f"{body}\n\n{footer}"
         feedback_kb = broadcast_feedback_keyboard(
             broadcast_id, up_count, down_count, locale
         )
@@ -679,7 +686,7 @@ async def _send_admin_broadcast(
             context.bot,
             db,
             uid,
-            body,
+            message,
             reply_markup=feedback_kb,
             return_message_id=True,
             outbound_kind=f"broadcast:{broadcast_id}",
