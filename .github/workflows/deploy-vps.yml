@@ -3,7 +3,9 @@ name: Deploy VPS
 on:
   push:
     branches: [main]
-    # Docs/rules/tests-only pushes must not recreate the bot on VPS.
+    # Docs/rules/tests-only pushes must not hit VPS at all.
+    # Site/guide/assets-only pushes still run this workflow; scripts/vps-deploy.sh
+    # classifies them and docker-cp's into the running bot (no recreate).
     paths-ignore:
       - "**.md"
       - "docs/**"

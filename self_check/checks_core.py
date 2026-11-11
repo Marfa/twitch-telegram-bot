@@ -562,6 +562,11 @@ def check_core() -> None:
     assert b"Privacy" in privacy_html or b"privacy" in privacy_html.lower()
     assert "Developer Services Agreement".encode() in privacy_html
     assert b"page-docs" in privacy_html and b"/site/css/site.css" in privacy_html
+    from scripts.classify_deploy_paths import classify_deploy_paths
+
+    assert classify_deploy_paths([]) == "noop"
+    assert classify_deploy_paths(["webapp/site/index.html", "README.md"]) == "site"
+    assert classify_deploy_paths(["web_site.py", "webapp/site/index.html"]) == "full"
     assert t.parse_username(CHANNEL) == CHANNEL
     assert t.parse_username("https://www.twitch.tv/marfapr") == CHANNEL
     assert t.parse_username("https://twitch.tv/Marfapr") == CHANNEL

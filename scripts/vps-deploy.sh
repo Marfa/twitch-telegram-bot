@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Deploy / update the bot on the VPS from the local git checkout.
 # Expected layout: /opt/twitch-telegram-bot with compose.vps.yml and .env
+#
+# If only static site/guide/assets changed since the last successful deploy,
+# sync those trees into the running bot container (no image rebuild / recreate).
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/twitch-telegram-bot}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.vps.yml}"
 BRANCH="${DEPLOY_BRANCH:-main}"
+DEPLOY_SHA_FILE="${DEPLOY_SHA_FILE:-$APP_DIR/.deploy-sha}"
 
 cd "$APP_DIR"
 
@@ -17,12 +21,46 @@ fi
 # Keep secrets across hard reset
 cp -a .env /tmp/twitch-telegram-bot.env.bak
 
+PREV_SHA=""
+if [[ -f "$DEPLOY_SHA_FILE" ]]; then
+  PREV_SHA="$(tr -d '[:space:]' <"$DEPLOY_SHA_FILE" || true)"
+fi
+
 git fetch --prune origin
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
 cp -a /tmp/twitch-telegram-bot.env.bak .env
 rm -f /tmp/twitch-telegram-bot.env.bak
+
+NEW_SHA="$(git rev-parse HEAD)"
+
+mark_deployed() {
+  printf '%s\n' "$NEW_SHA" >"$DEPLOY_SHA_FILE"
+}
+
+classify_mode() {
+  local mode
+  if [[ -z "$PREV_SHA" ]]; then
+    echo "full"
+    return 0
+  fi
+  if [[ "$PREV_SHA" == "$NEW_SHA" ]]; then
+    echo "noop"
+    return 0
+  fi
+  if ! git cat-file -e "${PREV_SHA}^{commit}" 2>/dev/null; then
+    echo "full"
+    return 0
+  fi
+  mapfile -t _changed < <(git diff --name-only "$PREV_SHA" "$NEW_SHA")
+  if [[ ${#_changed[@]} -eq 0 ]]; then
+    echo "noop"
+    return 0
+  fi
+  mode="$(python3 scripts/classify_deploy_paths.py "${_changed[@]}")"
+  echo "$mode"
+}
 
 # One-shot: typo POSHTOG_API_KEY_PERSONAL on VPS → POSTHOG_API_KEY_PERSONAL
 if grep -q '^POSHTOG_API_KEY_PERSONAL=' .env; then
@@ -48,6 +86,60 @@ _ensure_env_flag() {
 _ensure_env_flag ENABLE_PREMIUM 1
 _ensure_env_flag ENABLE_HELP 1
 _ensure_env_flag ENABLE_PARTNER 1
+
+DEPLOY_MODE="$(classify_mode)"
+echo "deploy: mode=${DEPLOY_MODE} prev=${PREV_SHA:-none} new=${NEW_SHA}"
+
+wait_bot_health() {
+  local i
+  for i in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+sync_site_into_bot() {
+  local ctr
+  ctr="$(docker compose -f "$COMPOSE_FILE" ps -q bot 2>/dev/null || true)"
+  if [[ -z "$ctr" ]]; then
+    echo "deploy: bot container not running" >&2
+    return 1
+  fi
+  if ! wait_bot_health; then
+    echo "deploy: bot /health not ready before site sync" >&2
+    return 1
+  fi
+  docker cp webapp/site/. "${ctr}:/app/webapp/site/"
+  docker cp webapp/guide/. "${ctr}:/app/webapp/guide/"
+  if [[ -d assets ]]; then
+    docker cp assets/. "${ctr}:/app/assets/"
+  fi
+  # Cheap smoke: landing still served.
+  if ! curl -fsS "http://127.0.0.1:8080/" >/dev/null 2>&1; then
+    echo "deploy: GET / failed after site sync" >&2
+    return 1
+  fi
+  return 0
+}
+
+if [[ "$DEPLOY_MODE" == "noop" ]]; then
+  echo "deploy: already at ${NEW_SHA}; nothing to do"
+  mark_deployed
+  exit 0
+fi
+
+if [[ "$DEPLOY_MODE" == "site" ]]; then
+  if sync_site_into_bot; then
+    echo "deploy: site-only sync ok (bot not recreated)"
+    docker compose -f "$COMPOSE_FILE" ps
+    mark_deployed
+    exit 0
+  fi
+  echo "deploy: site-only sync failed; falling back to full recreate" >&2
+fi
 
 # Dump 17 and restore into 18 before compose up (no-op once db is already 18).
 if [[ -f scripts/pg-upgrade-to-18.sh ]]; then
@@ -126,17 +218,6 @@ EOF
   chmod 644 /etc/cron.d/twitch-telegram-bot-pg-sync-aiven
 fi
 
-wait_bot_health() {
-  local i
-  for i in $(seq 1 30); do
-    if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-  done
-  return 1
-}
-
 post_health_ok() {
   echo "health: ok"
   if [[ -f scripts/migrate-import-template.py ]]; then
@@ -144,6 +225,7 @@ post_health_ok() {
     docker compose -f "$COMPOSE_FILE" exec -T bot python scripts/migrate-import-template.py
   fi
   docker compose -f "$COMPOSE_FILE" ps
+  mark_deployed
 }
 
 if wait_bot_health; then
