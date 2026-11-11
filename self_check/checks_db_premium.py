@@ -1001,6 +1001,14 @@ def check_db_premium() -> None:
         assert "gift_life" in halloween.excluded_kinds
         assert not prem.promo_applies_to_kind(halloween, "life")
         assert prem.promo_applies_to_kind(halloween, "month")
+        promo_1111 = db.get_premium_promo_code("1111")
+        assert promo_1111 is not None
+        assert promo_1111.discount_percent == 11
+        assert "life" in promo_1111.excluded_kinds
+        assert "gift_life" in promo_1111.excluded_kinds
+        assert not prem.promo_applies_to_kind(promo_1111, "life")
+        assert prem.promo_applies_to_kind(promo_1111, "month")
+        assert prem.apply_stars_discount(100, 11) == 89
         # Pin now inside the promo window so wall-clock expiry does not mask
         # kind_blocked / used / ok reasons.
         promo_now = int(halloween.valid_from) + 1

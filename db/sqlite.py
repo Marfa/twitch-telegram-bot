@@ -695,6 +695,14 @@ class SqliteDatabase:
               AND COALESCE(excluded_kinds, '') = ''
             """
         )
+        # 1111: 11% off, 24h from 2026-11-11 15:49 UTC; not for lifetime.
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO premium_promo_codes
+                (code, discount_percent, valid_from, valid_until, excluded_kinds)
+            VALUES ('1111', 11, 1794412181, 1794498581, 'life,gift_life')
+            """
+        )
         sb_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(scheduled_broadcasts)")
         }

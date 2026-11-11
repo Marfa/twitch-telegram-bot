@@ -953,6 +953,15 @@ class PostgresDatabase:
                   AND COALESCE(excluded_kinds, '') = ''
                 """
             )
+            # 1111: 11% off, 24h from 2026-11-11 15:49 UTC; not for lifetime.
+            cur.execute(
+                """
+                INSERT INTO premium_promo_codes
+                    (code, discount_percent, valid_from, valid_until, excluded_kinds)
+                VALUES ('1111', 11, 1794412181, 1794498581, 'life,gift_life')
+                ON CONFLICT (code) DO NOTHING
+                """
+            )
             cur.execute(
                 """
                 ALTER TABLE scheduled_broadcasts
