@@ -13,7 +13,8 @@ alwaysApply: true
 |--------|---------------------|------|
 | Project `.cursor/mcp.json` → `posthog` | `project-*-posthog` / PostHog tools | analytics, errors, insights |
 | Project `.cursor/mcp.json` → `viaduct` | `project-*-viaduct` / `c4_*` | C4 architecture model |
-| Project `.cursor/mcp.json` → `aiven` | `project-*-aiven` / Aiven tools | cold DR Postgres (read-only MCP) |
+| Project `.cursor/mcp.json` → `vps-db` | `project-*-vps-db` / `run_sql` | **live VPS Postgres SoR** (read+write via `vps-psql.sh`); Aiven only for DR reads |
+| Project `.cursor/mcp.json` → `aiven` | `project-*-aiven` / Aiven tools | cold DR / Aiven cloud (not live bot DB writes) |
 | User `~/.cursor/mcp.json` → `pingzen` | `user-pingzen` | monitors, maintenance windows |
 
 Sources of truth for the list: `.cursor/mcp.json` (project) + user MCP config. If the list changes, update this table.
@@ -22,7 +23,7 @@ Sources of truth for the list: `.cursor/mcp.json` (project) + user MCP config. I
 
 1. Inspect available dynamic MCP namespaces / `namespaceStatus` (or a cheap tool call per server).
 2. Treat as **unavailable**: missing namespace, `needsAuth`, `error`, `loading` that does not become ready, auth/connection failures on a cheap probe.
-3. Cheap probes (optional, one each): PostHog `project-get` / `user-get`; Viaduct `c4_whoami`; PingZen `list_monitors` or `ping`.
+3. Cheap probes (optional, one each): PostHog `project-get` / `user-get`; Viaduct `c4_whoami`; PingZen `list_monitors` or `ping`; **vps-db** `run_sql` with `SELECT 1` (source `vps` or `auto`).
 
 Do **not** burn a long workflow before the check. One short availability pass is enough per session unless a later call fails with auth/connection.
 

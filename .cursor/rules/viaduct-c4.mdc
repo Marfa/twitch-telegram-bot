@@ -11,7 +11,7 @@ MCP: `https://mcp.quietgridlabs.com/mcp`
 ## Зачем
 
 Живая C4-модель экосистемы (бот ↔ Telegram / Twitch Helix / IGDB / CloudConvert / PostHog / PingZen / Aiven DR) для агента через MCP.  
-Не заменяет `.cursor/rules/` (gates, secrets, `vps-psql`) и код — дополняет картой связей.
+Не заменяет `.cursor/rules/` (gates, secrets, `vps-db` MCP / `vps-psql`) и код — дополняет картой связей.
 
 ## Проект модели
 

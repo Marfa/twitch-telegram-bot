@@ -1,38 +1,44 @@
 ---
-description: Prod DB queries — scripts/vps-psql.sh (live VPS, Aiven DR fallback)
+description: Prod DB — live SoR via vps-db MCP (wraps vps-psql.sh); Aiven DR fallback for reads
 alwaysApply: true
 ---
 
 # Production database queries
 
-## Canonical path
+## Canonical path (agents)
 
-**Only** use [`scripts/vps-psql.sh`](scripts/vps-psql.sh) for prod-ish data (payments, premium status, users, subscriptions).
+**Live SoR = VPS** through project MCP **`vps-db`** (`scripts/mcp_vps_db.py` → [`scripts/vps-psql.sh`](scripts/vps-psql.sh)).
+
+Use MCP tool **`run_sql`** for prod-ish data (payments, premium, users, subscriptions, DML/DDL).
+
+| `source` | Behavior |
+|----------|----------|
+| `auto` (default) | Reads: VPS, then Aiven if SSH fails. **Writes always force VPS** (no Aiven fallback). |
+| `vps` | Live VPS only |
+| `aiven` | Cold DR **reads only** (MCP refuses mutating SQL) |
+
+`format`: `aligned` (default) or `tuples` (`psql -At`).
+
+Aiven may lag (nightly ~03:15 UTC); `igdb_*` dumps are empty on Aiven by design. Prefer VPS when SSH works. Do not treat Aiven as live truth.
+
+## Transport (humans / MCP down)
+
+Same script under the hood:
 
 ```bash
 ./scripts/vps-psql.sh -c "SELECT …"
 ./scripts/vps-psql.sh -At -c "SELECT …"
-echo "SELECT …" | ./scripts/vps-psql.sh
 ./scripts/vps-psql.sh --aiven -c "SELECT …"
+./scripts/vps-psql.sh --vps -c "UPDATE …"
 ```
 
-Default (`VPS_PSQL_SOURCE=auto`):
-
-1. **Live VPS** — SSH `root@bot.themarfa.name` → `/opt/twitch-telegram-bot` →
-   `docker compose -f compose.vps.yml exec -T db psql -U bot -d bot`
-2. If SSH fails and `AIVEN_DATABASE_URL` is available — **Aiven cold DR mirror**
-   (nightly sync ≈ 03:15 UTC; **may lag**; bot does not use Aiven).
-   Sync excludes regenerable `igdb_*` partner dumps — empty IGDB on Aiven is expected.
-
-Force a source: `--vps` / `--aiven`, or `VPS_PSQL_SOURCE=vps|aiven|auto`.
-
-When using Aiven, the script prints a lag note on stderr. Prefer live VPS when SSH works.
+If **`vps-db` MCP is unavailable**: ask the user to enable/reload it (Cursor Settings → MCP). Emergency fallback = this script (same SSH path) — say so explicitly; do not invent other DB routes.
 
 ## Auth on any PC
 
 ### VPS SSH
 
-Do **not** assume `~/.ssh/artalk_vps` exists (that name is only a local convenience on one machine).
+Do **not** assume `~/.ssh/artalk_vps` exists (local convenience on one machine only).
 
 Order used by the script:
 
@@ -58,7 +64,7 @@ First match wins (URL is **never** logged):
 
 Aiven client order: local `psql` → [`scripts/aiven-psql.py`](scripts/aiven-psql.py) (psycopg/psycopg2) → Docker `postgres` image.
 
-If both VPS and Aiven fail, report the script error and **stop** — do not invent further fallbacks.
+If both VPS and Aiven fail, report the error and **stop** — do not invent further fallbacks.
 
 ## Do not invent
 
@@ -66,17 +72,18 @@ If both VPS and Aiven fail, report the script error and **stop** — do not inve
 - Local `.env` `DATABASE_URL` (`host=db`) — Docker-network only on VPS
 - Ad-hoc `ssh` / `gh workflow` / Bot API to “find” the DB
 - New one-off query scripts unless the user asks
-- Treating Aiven as live truth without saying it may lag
+- Writes via Aiven or treating Aiven as live SoR
+- Official Aiven HTTP MCP (`aiven` in mcp.json) as a substitute for live VPS writes
 
 ## Premium unlock check (example)
 
-```bash
-./scripts/vps-psql.sh -c "
+Via MCP `run_sql` (or the same SQL through `vps-psql.sh`):
+
+```sql
 SELECT user_id, premium_permanent, premium_stars_until,
        (premium_stars_until > extract(epoch from now())::bigint) AS stars_active,
        premium_stars_canceled, premium_features
 FROM users WHERE premium_stars_charge_id = 'CHARGE_ID';
-"
 ```
 
 `stars_active` / permanent / twitch / trial → `has_full_plan` → all `FEATURE_IDS` unlocked (empty `premium_features` is normal for a full plan).

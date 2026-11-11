@@ -34,7 +34,7 @@ On restart the bot **already catch-up**s still-live streams (`check_streams` / w
 
 Before any manual resend / force-notify:
 
-1. Query prod (`scripts/vps-psql.sh`) — `alert_history` (DM) and/or `alert_delivery_log` (channel/group) for that `stream_id` / login since bot recovery.
+1. Query prod (**`vps-db` MCP** `run_sql`, or `scripts/vps-psql.sh` if MCP down) — `alert_history` (DM) and/or `alert_delivery_log` (channel/group) for that `stream_id` / login since bot recovery.
 2. Resend **only** rows that are still live on Twitch **and** have no delivery for this stream after the outage.
 3. If catch-up already wrote history/log (~recovery time), leave them alone — a second send duplicates the user (as with snowboy_man / pen1ciodeltoro / sad_moustache).
 
