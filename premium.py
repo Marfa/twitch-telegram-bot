@@ -1256,6 +1256,19 @@ def credit_referral_commission(
     )
 
 
+def _twitch_refresh_requires_reauth(exc: BaseException) -> bool:
+    """True when Twitch rejected the refresh token (not a transient outage)."""
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return False
+    try:
+        status = int(getattr(resp, "status_code", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    # Token endpoint: 400/401 = dead/revoked refresh; 5xx/network stay retryable.
+    return status in (400, 401)
+
+
 def refresh_twitch_premium(
     db: Database,
     twitch: TwitchClient,
@@ -1302,7 +1315,14 @@ def refresh_twitch_premium(
         )
         db.set_premium_twitch_needs_reauth(user_id, False)
         return active, False
-    except Exception:
+    except Exception as exc:
+        if not _twitch_refresh_requires_reauth(exc):
+            logger.warning(
+                "Twitch premium refresh transient failure for %s: %s",
+                user_id,
+                exc,
+            )
+            return bool(status.twitch_active), False
         logger.exception("Twitch premium refresh failed for %s", user_id)
         already = db.get_premium_twitch_needs_reauth(user_id)
         db.set_premium_twitch(user_id, active=False)

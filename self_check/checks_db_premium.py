@@ -530,6 +530,34 @@ def check_db_premium() -> None:
         twitch_skip.refresh_user_token.assert_not_called()
         assert db.get_premium_status(77).twitch_active is False
         db.set_premium_twitch_needs_reauth(77, False)
+        # Transient Twitch 500: keep premium + allow later retry (no reauth).
+        import requests
+
+        db.set_premium_twitch(
+            77, active=True, twitch_user_id="tw77", refresh_token="fanout-rt"
+        )
+        resp500 = requests.Response()
+        resp500.status_code = 500
+        twitch_500 = MagicMock()
+        twitch_500.refresh_user_token.side_effect = requests.HTTPError(
+            "500 Server Error", response=resp500
+        )
+        still_t, newly_t = prem.refresh_twitch_premium(db, twitch_500, 77)
+        assert still_t is True and newly_t is False
+        assert db.get_premium_status(77).twitch_active is True
+        assert db.get_premium_twitch_needs_reauth(77) is False
+        # Invalid refresh token (400): disable + mark reauth once.
+        resp400 = requests.Response()
+        resp400.status_code = 400
+        twitch_400 = MagicMock()
+        twitch_400.refresh_user_token.side_effect = requests.HTTPError(
+            "400 Client Error", response=resp400
+        )
+        still_b, newly_b = prem.refresh_twitch_premium(db, twitch_400, 77)
+        assert still_b is False and newly_b is True
+        assert db.get_premium_status(77).twitch_active is False
+        assert db.get_premium_twitch_needs_reauth(77) is True
+        db.set_premium_twitch_needs_reauth(77, False)
         db.upsert_twitch_sync(
             owner_id=77,
             twitch_user_id="tw77",
