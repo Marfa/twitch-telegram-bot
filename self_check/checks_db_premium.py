@@ -525,8 +525,8 @@ def check_db_premium() -> None:
         )
         db.set_premium_twitch_needs_reauth(77, True)
         twitch_skip = MagicMock()
-        still77, newly77 = prem.refresh_twitch_premium(db, twitch_skip, 77)
-        assert still77 is False and newly77 is False
+        still77, newly77, grace77 = prem.refresh_twitch_premium(db, twitch_skip, 77)
+        assert still77 is False and newly77 is False and grace77 is False
         twitch_skip.refresh_user_token.assert_not_called()
         assert db.get_premium_status(77).twitch_active is False
         db.set_premium_twitch_needs_reauth(77, False)
@@ -542,8 +542,8 @@ def check_db_premium() -> None:
         twitch_500.refresh_user_token.side_effect = requests.HTTPError(
             "500 Server Error", response=resp500
         )
-        still_t, newly_t = prem.refresh_twitch_premium(db, twitch_500, 77)
-        assert still_t is True and newly_t is False
+        still_t, newly_t, grace_t = prem.refresh_twitch_premium(db, twitch_500, 77)
+        assert still_t is True and newly_t is False and grace_t is False
         assert db.get_premium_status(77).twitch_active is True
         assert db.get_premium_twitch_needs_reauth(77) is False
         # Invalid refresh token (400): disable + mark reauth once.
@@ -553,11 +553,73 @@ def check_db_premium() -> None:
         twitch_400.refresh_user_token.side_effect = requests.HTTPError(
             "400 Client Error", response=resp400
         )
-        still_b, newly_b = prem.refresh_twitch_premium(db, twitch_400, 77)
-        assert still_b is False and newly_b is True
+        still_b, newly_b, grace_b = prem.refresh_twitch_premium(db, twitch_400, 77)
+        assert still_b is False and newly_b is True and grace_b is False
         assert db.get_premium_status(77).twitch_active is False
         assert db.get_premium_twitch_needs_reauth(77) is True
         db.set_premium_twitch_needs_reauth(77, False)
+        # Lost Helix sub: 24h grace keeps Premium; second loss does not re-enter.
+        db.set_premium_twitch(
+            77, active=True, twitch_user_id="tw77", refresh_token="fanout-rt"
+        )
+        twitch_nosub = MagicMock()
+        twitch_nosub.refresh_user_token.return_value = {
+            "access_token": "acc",
+            "refresh_token": "fanout-rt",
+        }
+        twitch_nosub.check_user_subscription.return_value = False
+        still_g, newly_g, grace_g = prem.refresh_twitch_premium(
+            db, twitch_nosub, 77, broadcaster_id="b1"
+        )
+        assert still_g is True and newly_g is False and grace_g is True
+        assert db.get_premium_status(77).twitch_active is True
+        assert db.get_premium_twitch_grace_until(77) > int(time.time())
+        still_g2, newly_g2, grace_g2 = prem.refresh_twitch_premium(
+            db, twitch_nosub, 77, broadcaster_id="b1"
+        )
+        assert still_g2 is True and newly_g2 is False and grace_g2 is False
+        # Grace expired → Premium off.
+        db.set_premium_twitch_grace_until(77, int(time.time()) - 10)
+        still_gx, newly_gx, grace_gx = prem.refresh_twitch_premium(
+            db, twitch_nosub, 77, broadcaster_id="b1"
+        )
+        assert still_gx is False and newly_gx is False and grace_gx is False
+        assert db.get_premium_status(77).twitch_active is False
+        assert db.get_premium_twitch_grace_until(77) == 0
+        # Stars: remind 24h before; grace 24h after expiry; pay clears grace.
+        now = int(time.time())
+        db.set_premium_stars(
+            77, charge_id="stx77", until_unix=now + 3600, canceled=False
+        )
+        remind = prem.claim_stars_pay_reminders(db, now=now)
+        assert (77, now + 3600) in remind
+        assert db.get_premium_stars_pay_reminded_until(77) == now + 3600
+        assert prem.claim_stars_pay_reminders(db, now=now) == []
+        db.set_premium_stars(
+            77, charge_id="stx77", until_unix=now - 5, canceled=False, touch_paid_at=False
+        )
+        newly_sg = prem.process_stars_expiry_grace(db, now=now)
+        assert 77 in newly_sg
+        st77s = prem.get_status(db, 77)
+        assert st77s.stars_active and st77s.in_stars_grace
+        assert db.get_premium_stars_grace_until(77) > now
+        assert prem.process_stars_expiry_grace(db, now=now) == []
+        from premium_handlers import _blocks_plan_purchase
+
+        assert _blocks_plan_purchase(db, 77) is False
+        db.set_premium_stars_grace_until(77, now - 10)
+        assert prem.process_stars_expiry_grace(db, now=now) == []
+        st77x = prem.get_status(db, 77)
+        assert not st77x.stars_active and st77x.stars_until == 0
+        assert db.get_premium_stars_grace_until(77) == 0
+        prem.apply_stars_payment(
+            db, 77, charge_id="stx77b", until_unix=now + 10**6
+        )
+        assert db.get_premium_stars_grace_until(77) == 0
+        assert db.get_premium_stars_pay_reminded_until(77) == 0
+        db.set_premium_stars(
+            77, charge_id="", until_unix=0, canceled=True, touch_paid_at=False
+        )
         db.upsert_twitch_sync(
             owner_id=77,
             twitch_user_id="tw77",

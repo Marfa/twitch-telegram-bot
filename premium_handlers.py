@@ -357,7 +357,8 @@ def _premium_markup(
                 user_id=user_id,
             )
         return None
-    full = st.has_full_plan
+    # Grace-only Stars still unlocks features but must show renew/pay buttons.
+    full = st.has_full_plan and not st.in_stars_grace
     show_owned = bool(
         st.has_active_features
         or (st.stars_active and st.stars_charge_id)
@@ -765,6 +766,9 @@ def _blocks_plan_purchase(db: Database, user_id: int) -> bool:
     if _demo_force_free(user_id):
         return False
     st = prem.get_status(db, user_id)
+    # Grace-only Stars must still allow renew / pay.
+    if st.in_stars_grace:
+        return bool(st.has_active_features)
     return st.has_full_plan or st.has_active_features
 
 
@@ -816,7 +820,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    if data == "premium:feat_back":
+    if data in ("premium:feat_back", "premium:restore_pay"):
         await query.answer()
         context.user_data.pop("premium_feat_sel", None)
         await send_premium_screen(context.bot, user_id, lang, db, edit_message=query.message)
@@ -1150,6 +1154,27 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if action == "marfapr":
+        channel = prem.twitch_channel_login()
+        refresh = _usable_twitch_refresh(db, user_id)
+        if refresh:
+            from i18n import dm_main_menu_button
+
+            await query.edit_message_text(
+                t("premium_marfapr_check_prompt", lang, channel=channel),
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                btn("premium_marfapr_check", lang),
+                                callback_data="premium:marfapr_check",
+                            )
+                        ],
+                        [dm_main_menu_button(lang)],
+                    ]
+                ),
+                disable_web_page_preview=True,
+            )
+            return
         redirect = twitch_oauth_redirect_uri()
         if not redirect:
             await query.edit_message_text(t("import_failed", lang))
@@ -1160,12 +1185,40 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             state=state,
             force_verify=True,
         )
-        channel = prem.twitch_channel_login()
+        from i18n import dm_main_menu_button
+
         await query.edit_message_text(
             with_oauth_legal(t("premium_marfapr_oauth", lang, channel=channel), lang),
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton(btn("premium_marfapr", lang), url=url)]]
+                [
+                    [
+                        InlineKeyboardButton(
+                            btn("premium_marfapr_auth", lang), url=url
+                        )
+                    ],
+                    [dm_main_menu_button(lang)],
+                ]
             ),
+        )
+        return
+
+    if action == "marfapr_check":
+        await query.answer()
+        result = await _verify_marfapr_premium(context.application, user_id)
+        await _reply_marfapr_verify_result(query, context, user_id, lang, result)
+        return
+
+    if action == "marfapr_sub":
+        await query.answer()
+        result = await _verify_marfapr_premium(context.application, user_id)
+        if result in ("ok", "ok_exists", "grace", "grace_new"):
+            await _reply_marfapr_verify_result(query, context, user_id, lang, result)
+            return
+        channel = prem.twitch_channel_login()
+        await query.edit_message_text(
+            t("premium_marfapr_need_sub", lang, channel=channel),
+            reply_markup=_marfapr_need_sub_markup(lang, channel),
+            disable_web_page_preview=True,
         )
         return
 
@@ -1316,54 +1369,58 @@ async def complete_premium_channel_oauth(
     )
 
 
-async def complete_premium_oauth(
-    application: Application,
-    owner_id: int,
-    error: str | None,
-    token_info: dict[str, str] | None,
-) -> None:
-    db: Database = application.bot_data["db"]
-    twitch: TwitchClient = application.bot_data["twitch"]
-    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
-    channel = prem.twitch_channel_login()
-    menu = main_menu(
-        lang,
-        is_admin=False,
-        demo_active=demo_mode.is_active(owner_id),
-    )
-    if error:
-        await application.bot.send_message(
-            owner_id, t("import_failed", lang), reply_markup=menu
-        )
-        return
-    info = token_info or {}
-    if info.get("twitch_sub_active") != "1":
-        await application.bot.send_message(
-            owner_id,
-            t("premium_marfapr_need_sub", lang, channel=channel),
-            reply_markup=menu,
-            disable_web_page_preview=True,
-        )
-        return
-    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+def _usable_twitch_refresh(db: Database, user_id: int) -> str | None:
+    refresh = db.get_premium_twitch_refresh(user_id)
+    if refresh:
+        return refresh
+    sync = db.get_twitch_sync(user_id)
+    if sync and (sync.refresh_token or "").strip():
+        return sync.refresh_token
+    mon = db.get_follow_monitor(user_id)
+    if mon and (mon.refresh_token or "").strip():
+        return mon.refresh_token
+    chat = db.get_chat_auth(user_id)
+    if chat and (chat.refresh_token or "").strip():
+        return chat.refresh_token
+    return None
 
-    apply_oauth_success_tokens(db, owner_id, info)
-    await restore_after_twitch_oauth(application, owner_id)
-    db.set_premium_twitch(
-        owner_id,
-        active=True,
-        twitch_user_id=info.get("twitch_user_id") or "",
-        refresh_token=info.get("refresh_token") or None,
+
+def _marfapr_subscribe_url(channel: str) -> str:
+    return f"https://www.twitch.tv/subs/{channel}"
+
+
+def _marfapr_need_sub_markup(lang: str, channel: str) -> InlineKeyboardMarkup:
+    from i18n import dm_main_menu_button
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("btn_premium_marfapr_open", lang, channel=channel),
+                    url=_marfapr_subscribe_url(channel),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("premium_marfapr_check", lang),
+                    callback_data="premium:marfapr_check",
+                )
+            ],
+            [dm_main_menu_button(lang)],
+        ]
     )
-    db.set_premium_twitch_needs_reauth(owner_id, False)
+
+
+async def _ensure_marfapr_alert(
+    db: Database,
+    twitch,
+    owner_id: int,
+    lang: str,
+) -> str:
+    """Activate Premium alert for the promo channel. Returns ok | ok_exists."""
     user = await prem.resolve_marfapr_user(twitch)
     if not user:
-        await application.bot.send_message(
-            owner_id,
-            t("premium_marfapr_ok", lang, channel=channel),
-            reply_markup=menu,
-        )
-        return
+        return "ok"
     existing = next(
         (
             s
@@ -1376,12 +1433,7 @@ async def complete_premium_oauth(
     if existing:
         if not existing.enabled:
             db.toggle_subscription(existing.id, owner_id)
-        await application.bot.send_message(
-            owner_id,
-            t("premium_marfapr_ok_exists", lang, channel=channel),
-            reply_markup=menu,
-        )
-        return
+        return "ok_exists"
     db.add_subscription(
         owner_id,
         user["login"],
@@ -1396,10 +1448,181 @@ async def complete_premium_oauth(
         notify_on_end=False,
         is_demo=demo_mode.is_active(owner_id),
     )
+    return "ok"
+
+
+async def _verify_marfapr_premium(application: Application, owner_id: int) -> str:
+    """Check Helix sub to promo channel; unlock Premium when active.
+
+    Returns: ok | ok_exists | need_sub | auth_needed | error
+    """
+    from twitch import TwitchClient
+
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    refresh = _usable_twitch_refresh(db, owner_id)
+    if not refresh:
+        return "auth_needed"
+    try:
+        token_data = await asyncio.to_thread(twitch.refresh_user_token, refresh)
+        access = token_data.get("access_token") or ""
+        new_refresh = token_data.get("refresh_token") or refresh
+        me = await asyncio.to_thread(twitch.get_token_user, access)
+        if not me or not access:
+            return "error"
+        twitch_user_id = str(me.get("id") or "")
+        broadcaster = await prem.resolve_marfapr_user(twitch)
+        if not broadcaster:
+            return "error"
+        active = await asyncio.to_thread(
+            twitch.check_user_subscription,
+            access,
+            broadcaster_id=str(broadcaster["id"]),
+            user_id=twitch_user_id,
+        )
+    except Exception as exc:
+        from premium import _twitch_refresh_requires_reauth
+
+        if _twitch_refresh_requires_reauth(exc):
+            db.set_premium_twitch(owner_id, active=False)
+            db.set_premium_twitch_needs_reauth(owner_id, True)
+            return "auth_needed"
+        logger.warning(
+            "marfapr premium verify transient for %s: %s", owner_id, exc
+        )
+        return "error"
+    db.set_premium_twitch_refresh(owner_id, new_refresh)
+    db.set_premium_twitch_needs_reauth(owner_id, False)
+    if not active:
+        status = db.get_premium_status(owner_id)
+        was_entitled = bool(status.twitch_active) or bool(
+            db.get_premium_twitch_grace_until(owner_id)
+        )
+        if was_entitled:
+            newly = prem.enter_twitch_premium_grace(db, owner_id)
+            return "grace_new" if newly else "grace"
+        db.set_premium_twitch(
+            owner_id,
+            active=False,
+            twitch_user_id=twitch_user_id,
+            refresh_token=new_refresh,
+        )
+        prem.clear_twitch_premium_grace(db, owner_id)
+        return "need_sub"
+    db.set_premium_twitch(
+        owner_id,
+        active=True,
+        twitch_user_id=twitch_user_id,
+        refresh_token=new_refresh,
+    )
+    prem.clear_twitch_premium_grace(db, owner_id)
+    return await _ensure_marfapr_alert(db, twitch, owner_id, lang)
+
+
+async def _reply_marfapr_verify_result(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    lang: str,
+    result: str,
+) -> None:
+    channel = prem.twitch_channel_login()
+    if result == "ok":
+        await query.edit_message_text(
+            t("premium_marfapr_ok", lang, channel=channel)
+        )
+        return
+    if result == "ok_exists":
+        await query.edit_message_text(
+            t("premium_marfapr_ok_exists", lang, channel=channel)
+        )
+        return
+    if result in ("grace", "grace_new"):
+        await query.edit_message_text(
+            t("premium_marfapr_grace_warn", lang, channel=channel),
+            reply_markup=_twitch_grace_warning_markup(lang),
+            disable_web_page_preview=True,
+        )
+        return
+    if result == "need_sub":
+        await query.edit_message_text(
+            t("premium_marfapr_need_sub", lang, channel=channel),
+            reply_markup=_marfapr_need_sub_markup(lang, channel),
+            disable_web_page_preview=True,
+        )
+        return
+    if result == "auth_needed":
+        redirect = twitch_oauth_redirect_uri()
+        if not redirect:
+            await query.edit_message_text(t("import_failed", lang))
+            return
+        twitch = context.application.bot_data["twitch"]
+        state = create_pending_login_state(user_id, lang, purpose="premium")
+        url = twitch.build_authorize_url(
+            redirect_uri=redirect,
+            state=state,
+            force_verify=True,
+        )
+        await query.edit_message_text(
+            with_oauth_legal(t("premium_marfapr_oauth", lang, channel=channel), lang),
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(btn("premium_marfapr_auth", lang), url=url)]]
+            ),
+        )
+        return
+    await query.edit_message_text(t("import_failed", lang))
+
+
+async def complete_premium_oauth(
+    application: Application,
+    owner_id: int,
+    error: str | None,
+    token_info: dict[str, str] | None,
+) -> None:
+    db: Database = application.bot_data["db"]
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    channel = prem.twitch_channel_login()
+    menu = main_menu(
+        lang,
+        is_admin=False,
+        demo_active=demo_mode.is_active(owner_id),
+    )
+    if error:
+        await application.bot.send_message(
+            owner_id, t("import_failed", lang), reply_markup=menu
+        )
+        return
+    info = token_info or {}
+    from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
+
+    apply_oauth_success_tokens(db, owner_id, info)
+    await restore_after_twitch_oauth(application, owner_id)
+    # OAuth only binds Twitch; subscription check is a separate button.
+    db.set_premium_twitch(
+        owner_id,
+        active=False,
+        twitch_user_id=info.get("twitch_user_id") or "",
+        refresh_token=info.get("refresh_token") or None,
+    )
+    db.set_premium_twitch_needs_reauth(owner_id, False)
+    from i18n import dm_main_menu_button
+
     await application.bot.send_message(
         owner_id,
-        t("premium_marfapr_ok", lang, channel=channel),
-        reply_markup=menu,
+        t("premium_marfapr_after_auth", lang, channel=channel),
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        btn("premium_marfapr", lang),
+                        callback_data="premium:marfapr_sub",
+                    )
+                ],
+                [dm_main_menu_button(lang)],
+            ]
+        ),
+        disable_web_page_preview=True,
     )
 
 
@@ -1813,22 +2036,74 @@ async def promo_wiz_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return True
 
 
+def _twitch_grace_warning_markup(lang: str) -> InlineKeyboardMarkup:
+    from i18n import dm_main_menu_button
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    btn("premium_marfapr_restore", lang),
+                    callback_data="premium:marfapr",
+                )
+            ],
+            [dm_main_menu_button(lang)],
+        ]
+    )
+
+
+def _stars_pay_restore_markup(lang: str) -> InlineKeyboardMarkup:
+    from i18n import dm_main_menu_button
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    btn("premium_stars_restore", lang),
+                    callback_data="premium:restore_pay",
+                )
+            ],
+            [dm_main_menu_button(lang)],
+        ]
+    )
+
+
 async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     from handlers.background_jobs import sync_optional_jobs
+    from telegram.error import Forbidden
 
     db: Database = context.application.bot_data["db"]
     twitch: TwitchClient = context.application.bot_data["twitch"]
     broadcaster = await prem.resolve_marfapr_user(twitch)
     b_id = str(broadcaster["id"]) if broadcaster else None
     for uid in db.list_premium_twitch_user_ids():
-        _active, newly = await asyncio.to_thread(
+        _active, newly_reauth, newly_grace = await asyncio.to_thread(
             prem.refresh_twitch_premium, db, twitch, uid, broadcaster_id=b_id
         )
-        if not newly:
-            continue
-        from oauth_tokens import request_twitch_reauth
+        if newly_reauth:
+            from oauth_tokens import request_twitch_reauth
 
-        await request_twitch_reauth(
-            context.application, uid, reason="premium_twitch"
-        )
+            await request_twitch_reauth(
+                context.application, uid, reason="premium_twitch"
+            )
+            continue
+        if not newly_grace:
+            continue
+        if db.is_bot_blocked(uid):
+            continue
+        lang = db.get_user_locale(uid) or DEFAULT_LOCALE
+        channel = prem.twitch_channel_login()
+        try:
+            await context.bot.send_message(
+                uid,
+                t("premium_marfapr_grace_warn", lang, channel=channel),
+                reply_markup=_twitch_grace_warning_markup(lang),
+                disable_web_page_preview=True,
+            )
+        except Forbidden:
+            from handlers.delivery import apply_user_blocked
+
+            apply_user_blocked(db, uid, source="twitch_premium_grace")
+        except BadRequest:
+            logger.exception("Failed to send Twitch Premium grace warn to %s", uid)
     sync_optional_jobs(context.application.job_queue, db)

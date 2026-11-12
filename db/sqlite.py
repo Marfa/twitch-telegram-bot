@@ -779,6 +779,27 @@ class SqliteDatabase:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN twitch_reauth_notified_at TEXT"
             )
+        user_cols4 = {
+            r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "premium_twitch_grace_until" not in user_cols4:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN premium_twitch_grace_until "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        user_cols5 = {
+            r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "premium_stars_grace_until" not in user_cols5:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN premium_stars_grace_until "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "premium_stars_pay_reminded_until" not in user_cols5:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN premium_stars_pay_reminded_until "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS whisper_alerts (
@@ -4558,7 +4579,8 @@ owner_id, twitch_username, twitch_user_id,
                        premium_stars_canceled, premium_twitch_active, premium_twitch_user_id,
                        COALESCE(premium_trial_until, 0) AS premium_trial_until,
                        COALESCE(premium_trial_used, 0) AS premium_trial_used,
-                       COALESCE(premium_features, '') AS premium_features
+                       COALESCE(premium_features, '') AS premium_features,
+                       COALESCE(premium_stars_grace_until, 0) AS premium_stars_grace_until
                 FROM users WHERE user_id = ?
                 """,
                 (user_id,),
@@ -4580,6 +4602,7 @@ owner_id, twitch_username, twitch_user_id,
             features=features,
             feature_charges=charges,
             feature_canceled=canceled,
+            stars_grace_until=int(row["premium_stars_grace_until"] or 0),
         )
 
     def set_premium_stars(
@@ -4647,6 +4670,8 @@ owner_id, twitch_username, twitch_user_id,
                     premium_stars_charge_id = '',
                     premium_stars_until = 0,
                     premium_stars_canceled = 1,
+                    premium_stars_grace_until = 0,
+                    premium_stars_pay_reminded_until = 0,
                     premium_trial_until = 0,
                     premium_features = '',
                     premium_twitch_active = 0,
@@ -4856,6 +4881,130 @@ owner_id, twitch_username, twitch_user_id,
             return bool(row["premium_twitch_needs_reauth"])
         except (KeyError, IndexError, TypeError):
             return False
+
+    def get_premium_twitch_grace_until(self, user_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT premium_twitch_grace_until FROM users WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return 0
+        try:
+            return int(row["premium_twitch_grace_until"] or 0)
+        except (KeyError, IndexError, TypeError, ValueError):
+            return 0
+
+    def set_premium_twitch_grace_until(self, user_id: int, until_unix: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET premium_twitch_grace_until = ? WHERE user_id = ?
+                """,
+                (max(0, int(until_unix)), user_id),
+            )
+
+    def get_premium_stars_grace_until(self, user_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT premium_stars_grace_until FROM users WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return 0
+        try:
+            return int(row["premium_stars_grace_until"] or 0)
+        except (KeyError, IndexError, TypeError, ValueError):
+            return 0
+
+    def set_premium_stars_grace_until(self, user_id: int, until_unix: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET premium_stars_grace_until = ? WHERE user_id = ?
+                """,
+                (max(0, int(until_unix)), user_id),
+            )
+
+    def get_premium_stars_pay_reminded_until(self, user_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT premium_stars_pay_reminded_until FROM users WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return 0
+        try:
+            return int(row["premium_stars_pay_reminded_until"] or 0)
+        except (KeyError, IndexError, TypeError, ValueError):
+            return 0
+
+    def set_premium_stars_pay_reminded_until(self, user_id: int, until_unix: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET premium_stars_pay_reminded_until = ? WHERE user_id = ?
+                """,
+                (max(0, int(until_unix)), user_id),
+            )
+
+    def list_stars_pay_reminder_candidates(
+        self, *, now_unix: int | None = None, within_seconds: int = 86400
+    ) -> list[tuple[int, int]]:
+        now = int(
+            now_unix
+            if now_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        horizon = now + max(0, int(within_seconds))
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id, COALESCE(premium_stars_until, 0) AS premium_stars_until
+                FROM users
+                WHERE COALESCE(premium_permanent, 0) = 0
+                  AND COALESCE(premium_stars_until, 0) > ?
+                  AND COALESCE(premium_stars_until, 0) <= ?
+                  AND COALESCE(premium_stars_pay_reminded_until, 0)
+                      != COALESCE(premium_stars_until, 0)
+                ORDER BY premium_stars_until, user_id
+                """,
+                (now, horizon),
+            ).fetchall()
+        return [(int(r["user_id"]), int(r["premium_stars_until"])) for r in rows]
+
+    def list_expired_stars_user_ids(self, *, now_unix: int | None = None) -> list[int]:
+        now = int(
+            now_unix
+            if now_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id FROM users
+                WHERE COALESCE(premium_permanent, 0) = 0
+                  AND (
+                    (
+                      COALESCE(premium_stars_until, 0) > 0
+                      AND COALESCE(premium_stars_until, 0) <= ?
+                    )
+                    OR (
+                      COALESCE(premium_stars_grace_until, 0) > 0
+                      AND COALESCE(premium_stars_grace_until, 0) <= ?
+                    )
+                  )
+                ORDER BY user_id
+                """,
+                (now, now),
+            ).fetchall()
+        return [int(r["user_id"]) for r in rows]
 
     def list_premium_twitch_user_ids(self) -> list[int]:
         with self._conn() as conn:

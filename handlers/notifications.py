@@ -781,6 +781,54 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     "Failed to send trial expiry notice to %s", user_id
                 )
 
+    from premium_handlers import _fmt_until, _stars_pay_restore_markup
+
+    stars_reminders = await asyncio.to_thread(prem.claim_stars_pay_reminders, db)
+    if stars_reminders:
+        logger.info("Stars pay reminder(s): %s", len(stars_reminders))
+        for user_id, until in stars_reminders:
+            if db.is_bot_blocked(user_id):
+                continue
+            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    t(
+                        "premium_stars_pay_remind",
+                        lang,
+                        until=_fmt_until(until),
+                    ),
+                    reply_markup=_stars_pay_restore_markup(lang),
+                    disable_web_page_preview=True,
+                )
+            except Forbidden:
+                from handlers.delivery import apply_user_blocked
+
+                apply_user_blocked(db, user_id, source="stars_pay_remind")
+            except BadRequest:
+                logger.exception("Failed to send Stars pay reminder to %s", user_id)
+
+    stars_grace_new = await asyncio.to_thread(prem.process_stars_expiry_grace, db)
+    if stars_grace_new:
+        logger.info("Stars Premium grace started for %s user(s)", len(stars_grace_new))
+        for user_id in stars_grace_new:
+            if db.is_bot_blocked(user_id):
+                continue
+            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    t("premium_stars_grace_warn", lang),
+                    reply_markup=_stars_pay_restore_markup(lang),
+                    disable_web_page_preview=True,
+                )
+            except Forbidden:
+                from handlers.delivery import apply_user_blocked
+
+                apply_user_blocked(db, user_id, source="stars_premium_grace")
+            except BadRequest:
+                logger.exception("Failed to send Stars Premium grace warn to %s", user_id)
+
     paused_unentitled = await prem.expire_unentitled_alerts(context.bot, db)
     if paused_unentitled:
         logger.info(

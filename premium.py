@@ -162,10 +162,21 @@ class PremiumStatus:
     features: dict[str, int] = field(default_factory=dict)
     feature_charges: dict[str, str] = field(default_factory=dict)
     feature_canceled: dict[str, bool] = field(default_factory=dict)
+    stars_grace_until: int = 0
+
+    @property
+    def stars_paid_active(self) -> bool:
+        return self.stars_until > int(time.time())
+
+    @property
+    def in_stars_grace(self) -> bool:
+        now = int(time.time())
+        return self.stars_grace_until > now and self.stars_until <= now
 
     @property
     def stars_active(self) -> bool:
-        return self.stars_until > int(time.time())
+        now = int(time.time())
+        return self.stars_until > now or self.stars_grace_until > now
 
     @property
     def trial_active(self) -> bool:
@@ -1052,6 +1063,8 @@ def apply_stars_payment(
         until_unix=until_unix,
         canceled=False,
     )
+    db.set_premium_stars_grace_until(user_id, 0)
+    db.set_premium_stars_pay_reminded_until(user_id, 0)
     if credit_referral:
         credit_referral_commission(
             db,
@@ -1071,6 +1084,8 @@ def apply_lifetime_payment(
 ) -> None:
     db.upsert_user(user_id)
     db.set_premium_permanent(user_id, True)
+    db.set_premium_stars_grace_until(user_id, 0)
+    db.set_premium_stars_pay_reminded_until(user_id, 0)
     if credit_referral:
         credit_referral_commission(
             db,
@@ -1256,6 +1271,11 @@ def credit_referral_commission(
     )
 
 
+TWITCH_SUB_GRACE_SECONDS = 24 * 3600
+STARS_PAY_REMIND_SECONDS = 24 * 3600
+STARS_GRACE_SECONDS = 24 * 3600
+
+
 def _twitch_refresh_requires_reauth(exc: BaseException) -> bool:
     """True when Twitch rejected the refresh token (not a transient outage)."""
     resp = getattr(exc, "response", None)
@@ -1269,28 +1289,106 @@ def _twitch_refresh_requires_reauth(exc: BaseException) -> bool:
     return status in (400, 401)
 
 
+def clear_twitch_premium_grace(db: Database, user_id: int) -> None:
+    if db.get_premium_twitch_grace_until(user_id):
+        db.set_premium_twitch_grace_until(user_id, 0)
+
+
+def clear_stars_premium_grace(db: Database, user_id: int) -> None:
+    if db.get_premium_stars_grace_until(user_id):
+        db.set_premium_stars_grace_until(user_id, 0)
+
+
+def enter_twitch_premium_grace(
+    db: Database, user_id: int, *, now: int | None = None
+) -> bool:
+    """Keep Twitch Premium for 24h after Helix says the channel sub is gone.
+
+    Returns True when grace was just started (caller should DM once).
+    """
+    ts = int(now if now is not None else time.time())
+    grace_until = int(db.get_premium_twitch_grace_until(user_id) or 0)
+    if grace_until > ts:
+        # Still inside an existing window — keep entitlement, no second DM.
+        db.set_premium_twitch(user_id, active=True)
+        return False
+    if grace_until > 0 and grace_until <= ts:
+        db.set_premium_twitch(user_id, active=False)
+        db.set_premium_twitch_grace_until(user_id, 0)
+        return False
+    db.set_premium_twitch(user_id, active=True)
+    db.set_premium_twitch_grace_until(user_id, ts + TWITCH_SUB_GRACE_SECONDS)
+    return True
+
+
+def enter_stars_premium_grace(
+    db: Database, user_id: int, *, now: int | None = None
+) -> bool:
+    """Keep Stars Premium for 24h after stars_until; True if grace just started."""
+    ts = int(now if now is not None else time.time())
+    grace_until = int(db.get_premium_stars_grace_until(user_id) or 0)
+    if grace_until > ts:
+        return False
+    if grace_until > 0 and grace_until <= ts:
+        db.set_premium_stars(
+            user_id, charge_id="", until_unix=0, canceled=True, touch_paid_at=False
+        )
+        db.set_premium_stars_grace_until(user_id, 0)
+        return False
+    db.set_premium_stars_grace_until(user_id, ts + STARS_GRACE_SECONDS)
+    return True
+
+
+def claim_stars_pay_reminders(
+    db: Database, *, now: int | None = None
+) -> list[tuple[int, int]]:
+    """Users with Stars ending within 24h; mark reminded. Returns [(user_id, until)]."""
+    ts = int(now if now is not None else time.time())
+    claimed: list[tuple[int, int]] = []
+    for user_id, until in db.list_stars_pay_reminder_candidates(
+        now_unix=ts, within_seconds=STARS_PAY_REMIND_SECONDS
+    ):
+        db.set_premium_stars_pay_reminded_until(user_id, until)
+        claimed.append((user_id, until))
+    return claimed
+
+
+def process_stars_expiry_grace(
+    db: Database, *, now: int | None = None
+) -> list[int]:
+    """Enter or end Stars grace for expired clocks. Returns user_ids newly in grace."""
+    ts = int(now if now is not None else time.time())
+    newly: list[int] = []
+    for user_id in db.list_expired_stars_user_ids(now_unix=ts):
+        if enter_stars_premium_grace(db, user_id, now=ts):
+            newly.append(user_id)
+    return newly
+
+
 def refresh_twitch_premium(
     db: Database,
     twitch: TwitchClient,
     user_id: int,
     *,
     broadcaster_id: str | None = None,
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, bool]:
     """Re-check Twitch channel sub; update cache.
 
-    Returns (still_active, newly_marked_reauth).
+    Returns (still_active, newly_marked_reauth, newly_entered_grace).
     """
     status = db.get_premium_status(user_id)
     refresh = db.get_premium_twitch_refresh(user_id)
     if not refresh or not status.twitch_user_id:
         if status.twitch_active:
             db.set_premium_twitch(user_id, active=False)
-        return False, False
+        clear_twitch_premium_grace(db, user_id)
+        return False, False, False
     # Dead token already flagged — wait for OAuth reauth; do not hammer Twitch hourly.
     if db.get_premium_twitch_needs_reauth(user_id):
         if status.twitch_active:
             db.set_premium_twitch(user_id, active=False)
-        return False, False
+        clear_twitch_premium_grace(db, user_id)
+        return False, False, False
     try:
         token_data = twitch.refresh_user_token(refresh)
         access = token_data.get("access_token") or ""
@@ -1302,19 +1400,39 @@ def refresh_twitch_premium(
             broadcaster = twitch.get_user(PREMIUM_TWITCH_LOGIN)
             if not broadcaster:
                 db.set_premium_twitch(user_id, active=False)
-                return False, False
+                clear_twitch_premium_grace(db, user_id)
+                return False, False, False
             b_id = str(broadcaster["id"])
         active = twitch.check_user_subscription(
             access, broadcaster_id=b_id, user_id=status.twitch_user_id
         )
+        db.set_premium_twitch_needs_reauth(user_id, False)
+        if active:
+            db.set_premium_twitch(
+                user_id,
+                active=True,
+                twitch_user_id=status.twitch_user_id,
+                refresh_token=new_refresh,
+            )
+            clear_twitch_premium_grace(db, user_id)
+            return True, False, False
+        # No Helix sub: 24h grace if they still had (or just had) Twitch Premium.
+        was_entitled = bool(status.twitch_active) or bool(
+            db.get_premium_twitch_grace_until(user_id)
+        )
+        db.set_premium_twitch_refresh(user_id, new_refresh)
+        if was_entitled:
+            newly_grace = enter_twitch_premium_grace(db, user_id)
+            still = bool(db.get_premium_status(user_id).twitch_active)
+            return still, False, newly_grace
         db.set_premium_twitch(
             user_id,
-            active=active,
+            active=False,
             twitch_user_id=status.twitch_user_id,
             refresh_token=new_refresh,
         )
-        db.set_premium_twitch_needs_reauth(user_id, False)
-        return active, False
+        clear_twitch_premium_grace(db, user_id)
+        return False, False, False
     except Exception as exc:
         if not _twitch_refresh_requires_reauth(exc):
             logger.warning(
@@ -1322,25 +1440,36 @@ def refresh_twitch_premium(
                 user_id,
                 exc,
             )
-            return bool(status.twitch_active), False
+            return bool(status.twitch_active), False, False
         logger.exception("Twitch premium refresh failed for %s", user_id)
         already = db.get_premium_twitch_needs_reauth(user_id)
         db.set_premium_twitch(user_id, active=False)
+        clear_twitch_premium_grace(db, user_id)
         if not already:
             db.set_premium_twitch_needs_reauth(user_id, True)
-            return False, True
-        return False, False
+            return False, True, False
+        return False, False, False
 
 
 def prune_expired_premium_clocks(db: Database, user_id: int) -> bool:
-    """Clear expired Stars until and prune expired à-la-carte feature rows."""
+    """Advance Stars grace / clear after grace; prune expired à-la-carte rows."""
     st = get_status(db, user_id)
     now = int(time.time())
     changed = False
     if st.stars_until > 0 and st.stars_until <= now:
+        before = int(db.get_premium_stars_grace_until(user_id) or 0)
+        enter_stars_premium_grace(db, user_id, now=now)
+        after_st = get_status(db, user_id)
+        if before != int(db.get_premium_stars_grace_until(user_id) or 0) or (
+            st.stars_until > 0 and after_st.stars_until == 0
+        ):
+            changed = True
+        st = after_st
+    elif int(st.stars_grace_until or 0) > 0 and int(st.stars_grace_until) <= now:
         db.set_premium_stars(
-            user_id, charge_id="", until_unix=0, canceled=True
+            user_id, charge_id="", until_unix=0, canceled=True, touch_paid_at=False
         )
+        db.set_premium_stars_grace_until(user_id, 0)
         changed = True
         st = get_status(db, user_id)
     for fid, until in list(st.features.items()):

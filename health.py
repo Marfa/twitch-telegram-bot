@@ -721,22 +721,6 @@ def _handle_twitch_oauth(query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         "twitch_display_name": str(user.get("display_name") or twitch_login),
         "purpose": purpose,
     }
-    if purpose == "premium":
-        from config import PREMIUM_TWITCH_LOGIN
-
-        try:
-            broadcaster = _oauth_twitch.get_user(PREMIUM_TWITCH_LOGIN)
-            active = False
-            if broadcaster:
-                active = _oauth_twitch.check_user_subscription(
-                    access,
-                    broadcaster_id=str(broadcaster["id"]),
-                    user_id=twitch_user_id,
-                )
-            token_info["twitch_sub_active"] = "1" if active else "0"
-        except Exception as exc:
-            logger.warning("Premium Twitch sub check failed: %s", exc)
-            token_info["twitch_sub_active"] = "0"
     _schedule_oauth_complete(telegram_user_id, followed, None, token_info)
     body = _html_page(
         t("oauth_web_done_title", lang),

@@ -4852,6 +4852,81 @@ async def _scenario_welcome_demo_offer(db) -> None:
     assert markup_has_escape_hatch(enabled_markup)
 
 
+async def _scenario_premium_marfapr_wizard(db) -> None:
+    """§8 Premium — Twitch-sub wizard: auth / check / restore escape hatches."""
+    from premium_handlers import on_premium_callback
+
+    uid = _FREE_UID + 41
+    db.upsert_user(uid)
+    db.set_user_locale(uid, "ru")
+
+    application, bot = _app(db)
+    bot_twitch = application.bot_data["twitch"]
+    bot_twitch.build_authorize_url = MagicMock(return_value="https://id.twitch.tv/oauth")
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(uid, "premium:marfapr", cap)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True), patch(
+        "premium_handlers.twitch_oauth_redirect_uri", return_value="https://bot.example/oauth"
+    ), patch(
+        "premium_handlers.create_pending_login_state", return_value="state"
+    ):
+        await on_premium_callback(update, ctx)
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    assert any(
+        (cell.url or "").startswith("https://id.twitch.tv")
+        for row in markup.inline_keyboard
+        for cell in row
+    ), "unlinked marfapr step must offer Twitch authorize URL"
+    assert markup_has_escape_hatch(markup)
+    text = query.edit_message_text.await_args.args[0]
+    assert "Авторизуйтесь" in text or "авторизуйтесь" in text.lower()
+    cap.assert_turn("premium_marfapr_auth")
+
+    db.set_premium_twitch(
+        uid, active=False, twitch_user_id="tw_flow", refresh_token="rt_flow"
+    )
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update, query = _cb_update(uid, "premium:marfapr", cap)
+    ctx = _ctx(application)
+    with patch("config.show_premium_ui", return_value=True):
+        await on_premium_callback(update, ctx)
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    cbs = {
+        cell.callback_data
+        for row in markup.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium:marfapr_check" in cbs
+    assert markup_has_escape_hatch(markup)
+    cap.assert_turn("premium_marfapr_check")
+
+    from i18n import dm_main_menu_keyboard
+    from premium_handlers import _twitch_grace_warning_markup
+
+    grace_kb = _twitch_grace_warning_markup("ru")
+    assert markup_has_escape_hatch(grace_kb) or any(
+        (b.callback_data or "") == "dm_menu"
+        for row in grace_kb.inline_keyboard
+        for b in row
+    )
+    grace_cbs = {
+        cell.callback_data
+        for row in grace_kb.inline_keyboard
+        for cell in row
+        if cell.callback_data
+    }
+    assert "premium:marfapr" in grace_cbs
+    assert "dm_menu" in grace_cbs
+    assert markup_has_escape_hatch(dm_main_menu_keyboard("ru"))
+
+
 async def _scenario_premium_channel_ad(db) -> None:
     """§8 Premium — channel advertising intro Back; owned cancel escape."""
     import time
@@ -5058,6 +5133,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_welcome_demo_offer(db)
         await _scenario_premium_early_soft(db)
         await _scenario_premium_promo_step(db)
+        await _scenario_premium_marfapr_wizard(db)
         await _scenario_premium_channel_ad(db)
         await _scenario_wizard_channel_step(db)
         await _scenario_wizard_channel_dup_by_type(db)
