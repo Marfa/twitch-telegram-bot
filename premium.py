@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+import requests
+
 from config import (
     ENABLE_PARTNER,
     FREE_CHAT_ID,
@@ -1302,8 +1304,16 @@ def refresh_twitch_premium(
         )
         db.set_premium_twitch_needs_reauth(user_id, False)
         return active, False
-    except Exception:
+    except Exception as exc:
         logger.exception("Twitch premium refresh failed for %s", user_id)
+        # Only a 400/401 means Twitch rejected the token; 5xx and network
+        # errors are transient — keep the cached state and retry next run.
+        if not (
+            isinstance(exc, requests.HTTPError)
+            and exc.response is not None
+            and exc.response.status_code in (400, 401)
+        ):
+            return status.twitch_active, False
         already = db.get_premium_twitch_needs_reauth(user_id)
         db.set_premium_twitch(user_id, active=False)
         if not already:
