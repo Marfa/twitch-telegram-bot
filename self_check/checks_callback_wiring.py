@@ -233,6 +233,8 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("ai_clips_vod", "ai_clips:vod:123456789"),
     ("ai_clips_status", "ai_clips:status"),
     ("ai_clips_auto", "ai_clips:auto"),
+    ("ai_clips_compile", "ai_clips:compile"),
+    ("ai_clips_compile_period", "ai_clips:compile_period:7d"),
     ("ai_clips_back", "ai_clips:back"),
     ("ai_clips_rerun", "ai_clips:rerun:123456789"),
     ("ai_clips_page", "ai_clips:page:1"),

@@ -1385,6 +1385,87 @@ class TwitchClient:
             out.append(row)
         return out
 
+    def get_top_clips_for_broadcaster(
+        self,
+        broadcaster_id: str,
+        *,
+        started_at: datetime,
+        ended_at: datetime | None = None,
+        max_pages_per_window: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Helix Get Clips for a broadcaster in a time range (weekly windows).
+
+        Returns unique clips sorted by ``view_count`` descending.
+        """
+        bid = str(broadcaster_id or "").strip()
+        if not bid.isdigit():
+            return []
+        end = ended_at or datetime.now(timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        start = started_at
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if start > end:
+            start = end - timedelta(days=1)
+
+        def _page(*, win_start: datetime, win_stop: datetime) -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            cursor: str | None = None
+            for _ in range(max(1, int(max_pages_per_window))):
+                params: dict[str, str] = {
+                    "broadcaster_id": bid,
+                    "first": "100",
+                    "started_at": win_start.astimezone(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    "ended_at": win_stop.astimezone(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                }
+                if cursor:
+                    params["after"] = cursor
+                resp = self._session.get(
+                    "https://api.twitch.tv/helix/clips",
+                    headers=self._headers(),
+                    params=params,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                payload = resp.json() or {}
+                rows.extend(list(payload.get("data") or []))
+                cursor = (payload.get("pagination") or {}).get("cursor") or None
+                if not cursor:
+                    break
+            return rows
+
+        collected: list[dict[str, Any]] = []
+        window = start
+        for _ in range(52):
+            if window >= end:
+                break
+            stop = min(window + timedelta(days=7), end)
+            collected.extend(_page(win_start=window, win_stop=stop))
+            window = stop
+
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in collected:
+            cid = str(row.get("id") or "").strip()
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            out.append(row)
+
+        def _views(row: dict[str, Any]) -> int:
+            try:
+                return int(row.get("view_count") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        out.sort(key=lambda r: (-_views(r), str(r.get("id") or "")))
+        return out
+
     def send_chat_message(
         self,
         user_access_token: str,

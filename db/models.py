@@ -964,6 +964,21 @@ class AiClipsJob:
 
 
 @dataclass
+class ClipCompilationJob:
+    id: int
+    owner_id: int
+    period: str
+    status: str
+    token: str = ""
+    path: str = ""
+    error: str = ""
+    progress_pct: int = 0
+    expires_at: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
 class AiClipsAuto:
     owner_id: int
     enabled: bool = False

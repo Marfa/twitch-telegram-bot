@@ -73,7 +73,7 @@ English: [README.en.md](README.en.md)
 | История оповещений за 60 дней | На бесплатном — 7 дней |
 | Корзина удалённых подписок на 30 дней | На бесплатном — 10 дней |
 | Follow/Unfollow канала | Мониторинг и оповещения — Premium; списки Follow / новых Follow и Unfollow за 30 дней доступны без Premium |
-| AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (Premium / а-ля карт `ai_clips`): до 5 клипов — «clip»/«клип» в чате → Groq emotion (ASR+балл>3) → Groq game-контекст всплеска → остальные audio → остальные spike; без Groq — как раньше по пикам; Helix Create Clip From VOD; авто для новых VOD |
+| AI-клипы из VOD | **📦 Прочее → 🎬 AI-клипы** (Premium / а-ля карт `ai_clips`): до 5 клипов — «clip»/«клип» в чате → Groq emotion (ASR+балл>3) → Groq game-контекст всплеска → остальные audio → остальные spike; без Groq — как раньше по пикам; Helix Create Clip From VOD; авто для новых VOD; **«Сделать компиляцию»** — топ-клипы своего канала за сутки/неделю/месяц → ссылка на MP4 (3 дня) |
 | Статистика канала | **📦 Прочее → 📊 Статистика канала** (Premium / а-ля карт `channel_stats`): OAuth своего канала → PNG-карточка (онлайн/пик/часы/игры); Helix-опрос ~10 мин; обогащение TwitchTracker summary; при отмене Premium сбор паузится |
 | Реклама канала для стримеров | Бесплатные взаимодействия с ботом для зрителей, приоритет в «Оповещение по игре», welcome-рекомендация (подписка Stars) |
 
@@ -412,7 +412,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
 | `translate.py` | DeepL для админ-рассылок; при квоте 456 — RapidAPI Deep Translate |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/` лендинг (Dazzle, i18n), `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, rapidapi_translate, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/` лендинг (Dazzle, i18n), `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, rapidapi_translate, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/media/compilations/{token}.mp4` (компиляция клипов, TTL 3 дня), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS: лендинг `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
 

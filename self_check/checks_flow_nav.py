@@ -4441,10 +4441,49 @@ async def _scenario_ai_clips(db) -> None:
     ]
     assert "ai_clips:cancel" in callbacks
     assert "ai_clips:auto" in callbacks
+    assert "ai_clips:compile" in callbacks
     assert any((c or "").startswith("ai_clips:vod:") for c in callbacks)
     assert "ai_clips:page:1" in callbacks
     assert sum(1 for c in callbacks if (c or "").startswith("ai_clips:vod:")) == 5
     cap.assert_turn("other_ai_clips_pick_vod")
+
+    # Compile period picker: Cancel / Back escape hatches.
+    update, query = _cb_update(_FREE_UID, "ai_clips:compile", cap)
+    with patch(
+        "handlers.ai_clips.prem.has_feature",
+        new=AsyncMock(return_value=True),
+    ):
+        with patch(
+            "handlers.ai_clips.clip_compilation_ready",
+            return_value=True,
+        ):
+            await on_ai_clips_callback(update, ctx)
+    callbacks_compile = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ai_clips:compile_period:24h" in callbacks_compile
+    assert "ai_clips:compile_period:7d" in callbacks_compile
+    assert "ai_clips:compile_period:30d" in callbacks_compile
+    assert "ai_clips:cancel" in callbacks_compile
+    assert "ai_clips:back" in callbacks_compile
+    cap.assert_turn("other_ai_clips_compile_period")
+
+    update, query = _cb_update(_FREE_UID, "ai_clips:back", cap)
+    await on_ai_clips_callback(update, ctx)
+    callbacks_compile_back = [
+        b.callback_data
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "ai_clips:compile" in callbacks_compile_back
+    assert any((c or "").startswith("ai_clips:vod:") for c in callbacks_compile_back)
+    cap.assert_turn("other_ai_clips_compile_back")
 
     update, query = _cb_update(_FREE_UID, "ai_clips:auto", cap)
     with patch(

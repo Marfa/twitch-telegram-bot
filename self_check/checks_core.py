@@ -115,6 +115,14 @@ def check_core() -> None:
         parse_helix_duration,
         parse_rerank_order,
     )
+    from clip_compilation import (
+        TOKEN_RE,
+        clip_mp4_url,
+        parse_period,
+        period_window,
+        public_compilation_url,
+        select_clips_by_views,
+    )
 
     assert parse_helix_duration("1h2m3s") == 3723
     assert parse_helix_duration("45s") == 45
@@ -138,6 +146,54 @@ def check_core() -> None:
     assert by_end[30] > by_end[100]
     assert "ai_clips" in FEATURE_IDS
     assert "ai_clips" in purchasable_feature_ids()
+
+    assert parse_period("7d") == "7d"
+    assert parse_period("nope") is None
+    start, end = period_window("24h")
+    assert (end - start).total_seconds() == 24 * 3600
+    assert clip_mp4_url(
+        "https://clips-media-assets2.twitch.tv/AT-foo-preview-480x272.jpg"
+    ) == "https://clips-media-assets2.twitch.tv/AT-foo.mp4"
+    assert clip_mp4_url("https://example.com/x.jpg") is None
+    ranked = select_clips_by_views(
+        [
+            {
+                "id": "low",
+                "duration": 30,
+                "view_count": 1,
+                "thumbnail_url": "https://x/-preview-1.jpg",
+                "url": "https://clips.twitch.tv/low",
+                "title": "low",
+            },
+            {
+                "id": "high",
+                "duration": 40,
+                "view_count": 99,
+                "thumbnail_url": "https://x/-preview-1.jpg",
+                "url": "https://clips.twitch.tv/high",
+                "title": "high",
+            },
+            {
+                "id": "mid",
+                "duration": 500,
+                "view_count": 50,
+                "thumbnail_url": "https://x/-preview-1.jpg",
+                "url": "https://clips.twitch.tv/mid",
+                "title": "mid",
+            },
+        ],
+        max_duration_sec=60,
+    )
+    assert [c.clip_id for c in ranked] == ["high", "mid"]
+    assert TOKEN_RE.match("a" * 24)
+    assert not TOKEN_RE.match("short")
+    from unittest.mock import patch as _patch_pub
+
+    with _patch_pub("config.PUBLIC_BASE_URL", "https://bot.example"):
+        assert public_compilation_url("a" * 24).endswith(
+            "/media/compilations/" + "a" * 24 + ".mp4"
+        )
+        assert public_compilation_url("bad!") == ""
 
     # Phrase regex: mid-word, case-insensitive EN/RU.
     assert CLIP_PHRASE_RE.search("makeAClipNow")
@@ -376,6 +432,22 @@ def check_core() -> None:
         jdb.set_ai_clips_auto_enabled(7, enabled=False)
         assert jdb.get_ai_clips_auto(7).enabled is False
         assert jdb.list_enabled_ai_clips_auto() == []
+
+        ctok = "b" * 24
+        cid = jdb.create_clip_compilation_job(7, period="7d", token=ctok)
+        assert cid > 0
+        assert jdb.get_active_clip_compilation_job(7) is not None
+        jdb.update_clip_compilation_job(
+            cid,
+            status="done",
+            path="/tmp/x.mp4",
+            progress_pct=100,
+            expires_at="2000-01-01T00:00:00Z",
+        )
+        assert jdb.get_clip_compilation_by_token(ctok) is not None
+        assert len(jdb.list_expired_clip_compilation_jobs()) >= 1
+        jdb.delete_clip_compilation_job(cid)
+        assert jdb.get_clip_compilation_by_token(ctok) is None
 
     ops_py = Path(__file__).resolve().parents[1] / "scripts" / "posthog-ops-event.py"
     assert ops_py.is_file()
@@ -1113,6 +1185,8 @@ def check_core() -> None:
     assert '_stream_job_kwargs("check_cursor_status"' in _bot_build
     assert 'name="ai_clips_auto"' in _bot_build
     assert "poll_ai_clips_auto" in _bot_build
+    assert 'name="purge_expired_clip_compilations"' in _bot_build
+    assert "purge_expired_clip_compilations" in _bot_build
     # Edit image: checkbox toggles memory only; Apply/Skip/Delete persist.
     from handlers.wizard import receive_image_ask as _recv_image_ask
 

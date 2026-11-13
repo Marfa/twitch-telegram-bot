@@ -412,6 +412,7 @@ from handlers.follow_monitor import (
 from handlers.ai_clips import (
     on_ai_clips_callback,
     poll_ai_clips_auto,
+    purge_expired_clip_compilations,
     start_ai_clips,
 )
 
@@ -3045,7 +3046,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_ai_clips_callback,
-            pattern=r"^ai_clips:(cancel|status|auto|back|rerun:.+|vod:.+|page:\d+|clips_page:\d+)$",
+            pattern=r"^ai_clips:(cancel|status|auto|back|compile|compile_period:(24h|7d|30d)|rerun:.+|vod:.+|page:\d+|clips_page:\d+)$",
         ),
         group=0,
     )
@@ -4495,6 +4496,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         name="purge_old_broadcasts",
         job_kwargs=_stream_job_kwargs(
             "purge_old_broadcasts", misfire_grace=24 * 3600
+        ),
+    )
+    app.job_queue.run_repeating(
+        purge_expired_clip_compilations,
+        interval=3600,
+        first=240,
+        name="purge_expired_clip_compilations",
+        job_kwargs=_stream_job_kwargs(
+            "purge_expired_clip_compilations", misfire_grace=3600
         ),
     )
     app.job_queue.run_repeating(

@@ -1833,6 +1833,36 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS clip_compilation_jobs (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL,
+                    period TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    token TEXT NOT NULL DEFAULT '',
+                    path TEXT NOT NULL DEFAULT '',
+                    error TEXT NOT NULL DEFAULT '',
+                    progress_pct INTEGER NOT NULL DEFAULT 0,
+                    expires_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_clip_compilation_jobs_status
+                ON clip_compilation_jobs(status, id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_clip_compilation_jobs_token
+                ON clip_compilation_jobs(token)
+                WHERE token <> ''
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS premium_gifts (
                     token TEXT PRIMARY KEY,
                     buyer_id BIGINT NOT NULL,
@@ -9528,6 +9558,196 @@ owner_id, twitch_username, twitch_user_id,
             )
             rows = cur.fetchall()
         return [self._ai_clips_auto_from_row(r) for r in rows]
+
+    def create_clip_compilation_job(
+        self, owner_id: int, *, period: str, token: str
+    ) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO clip_compilation_jobs
+                    (owner_id, period, status, token)
+                VALUES (%s, %s, 'queued', %s)
+                RETURNING id
+                """,
+                (int(owner_id), str(period or ""), str(token or "")),
+            )
+            row = cur.fetchone()
+            return int(row["id"])
+
+    def update_clip_compilation_job(
+        self,
+        job_id: int,
+        *,
+        status: str | None = None,
+        path: str | None = None,
+        error: str | None = None,
+        progress_pct: int | None = None,
+        expires_at: str | None = None,
+    ) -> None:
+        sets: list[str] = ["updated_at = NOW()"]
+        args: list[object] = []
+        if status is not None:
+            sets.append("status = %s")
+            args.append(status)
+        if path is not None:
+            sets.append("path = %s")
+            args.append(path)
+        if error is not None:
+            sets.append("error = %s")
+            args.append(error)
+        if progress_pct is not None:
+            sets.append("progress_pct = %s")
+            args.append(max(0, min(100, int(progress_pct))))
+        if expires_at is not None:
+            sets.append("expires_at = %s")
+            args.append(expires_at)
+        if len(sets) == 1:
+            return
+        args.append(int(job_id))
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                f"UPDATE clip_compilation_jobs SET {', '.join(sets)} WHERE id = %s",
+                args,
+            )
+
+    def _clip_compilation_job_from_row(self, row):
+        from db.models import ClipCompilationJob
+
+        exp = row["expires_at"]
+        if exp is None:
+            exp_s = ""
+        elif hasattr(exp, "isoformat"):
+            exp_s = exp.isoformat()
+        else:
+            exp_s = str(exp or "")
+        return ClipCompilationJob(
+            id=int(row["id"]),
+            owner_id=int(row["owner_id"]),
+            period=str(row["period"] or ""),
+            status=str(row["status"] or ""),
+            token=str(row["token"] or ""),
+            path=str(row["path"] or ""),
+            error=str(row["error"] or ""),
+            progress_pct=int(row["progress_pct"] or 0),
+            expires_at=exp_s,
+            created_at=str(row["created_at"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+        )
+
+    def get_clip_compilation_job(self, job_id: int):
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs WHERE id = %s
+                """,
+                (int(job_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return self._clip_compilation_job_from_row(row)
+
+    def get_active_clip_compilation_job(self, owner_id: int):
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs
+                WHERE owner_id = %s
+                  AND status IN ('queued', 'fetching', 'building')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (int(owner_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return self._clip_compilation_job_from_row(row)
+
+    def get_clip_compilation_by_token(self, token: str):
+        tok = str(token or "").strip()
+        if not tok:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs
+                WHERE token = %s AND status = 'done'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (tok,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return self._clip_compilation_job_from_row(row)
+
+    def list_resumable_clip_compilation_jobs(self) -> list:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs
+                WHERE status IN ('queued', 'fetching', 'building')
+                ORDER BY id
+                """
+            )
+            rows = cur.fetchall()
+        return [self._clip_compilation_job_from_row(r) for r in rows]
+
+    def list_expired_clip_compilation_jobs(self, *, now_iso: str | None = None) -> list:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            if now_iso:
+                cur.execute(
+                    """
+                    SELECT id, owner_id, period, status, token, path, error,
+                           progress_pct, expires_at, created_at, updated_at
+                    FROM clip_compilation_jobs
+                    WHERE status = 'done'
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= %s::timestamptz
+                    ORDER BY id
+                    """,
+                    (now_iso,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, owner_id, period, status, token, path, error,
+                           progress_pct, expires_at, created_at, updated_at
+                    FROM clip_compilation_jobs
+                    WHERE status = 'done'
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= NOW()
+                    ORDER BY id
+                    """
+                )
+            rows = cur.fetchall()
+        return [self._clip_compilation_job_from_row(r) for r in rows]
+
+    def delete_clip_compilation_job(self, job_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM clip_compilation_jobs WHERE id = %s",
+                (int(job_id),),
+            )
 
     _IGDB_TABLES = frozenset({
         "igdb_games",

@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from html import escape as html_escape
+from pathlib import Path
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -49,6 +50,18 @@ from ai_clips import (
     score_audio_peaks_with_groq,
     start_is_occupied,
 )
+from clip_compilation import (
+    RETENTION_DAYS,
+    build_compilation,
+    clip_compilation_ready,
+    compilations_root,
+    new_compilation_token,
+    parse_period,
+    period_window,
+    public_compilation_url,
+    safe_unlink_compilation,
+    select_clips_by_views,
+)
 from bot_helpers import _user_lang, reply_chat_id, with_oauth_legal
 from db import Database
 from i18n import DEFAULT_LOCALE, other_menu, t
@@ -65,7 +78,9 @@ _VOD_FETCH_FIRST = 50
 # In-process guard so the same job id is not started twice after resume.
 _RUNNING_JOB_IDS: set[int] = set()
 _RUNNING_LOCK = asyncio.Lock()
-# One VOD at a time (Twitch/Groq/ffmpeg); extra jobs stay queued until the lock frees.
+_RUNNING_COMPILATION_IDS: set[int] = set()
+_RUNNING_COMPILATION_LOCK = asyncio.Lock()
+# One VOD / compilation at a time (Twitch/Groq/ffmpeg); extras wait on the lock.
 _WORKER_LOCK = asyncio.Lock()
 
 
@@ -106,6 +121,14 @@ def _vod_pick_keyboard(
                 )
             ]
         )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("ai_clips_compile_btn", lang),
+                callback_data="ai_clips:compile",
+            )
+        ]
+    )
     rows.append(
         [
             InlineKeyboardButton(
@@ -152,6 +175,43 @@ def _vod_pick_keyboard(
         ]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def _compile_period_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_compile_period_24h", lang),
+                    callback_data="ai_clips:compile_period:24h",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_compile_period_7d", lang),
+                    callback_data="ai_clips:compile_period:7d",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_compile_period_30d", lang),
+                    callback_data="ai_clips:compile_period:30d",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_back_vods", lang),
+                    callback_data="ai_clips:back",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("ai_clips_cancel", lang),
+                    callback_data="ai_clips:cancel",
+                )
+            ],
+        ]
+    )
 
 
 def _auto_on(db: Database, user_id: int) -> bool:
@@ -500,7 +560,9 @@ async def _show_vod_picker(
         except BadRequest:
             pass
         return
-    active = db.get_active_ai_clips_job(user_id)
+    active = db.get_active_ai_clips_job(user_id) or db.get_active_clip_compilation_job(
+        user_id
+    )
     try:
         await query.edit_message_text(
             t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
@@ -596,7 +658,9 @@ async def start_ai_clips(
 
     context.user_data["ai_clips_videos"] = archives
     context.user_data["ai_clips_page"] = 0
-    active = db.get_active_ai_clips_job(user_id)
+    active = db.get_active_ai_clips_job(user_id) or db.get_active_clip_compilation_job(
+        user_id
+    )
     await context.bot.send_message(
         chat,
         t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
@@ -623,19 +687,63 @@ async def on_ai_clips_callback(
 
     if data == "ai_clips:status":
         job = db.get_active_ai_clips_job(user_id)
-        if not job:
-            await query.answer(t("ai_clips_status_idle", lang), show_alert=True)
+        if job:
+            await query.answer(
+                t(
+                    "ai_clips_status_text",
+                    lang,
+                    title=(job.vod_title or job.vod_id)[:60],
+                    pct=max(0, min(100, int(job.progress_pct or 0))),
+                    status=job.status,
+                ),
+                show_alert=True,
+            )
             return
-        await query.answer(
-            t(
-                "ai_clips_status_text",
-                lang,
-                title=(job.vod_title or job.vod_id)[:60],
-                pct=max(0, min(100, int(job.progress_pct or 0))),
-                status=job.status,
-            ),
-            show_alert=True,
-        )
+        cjob = db.get_active_clip_compilation_job(user_id)
+        if cjob:
+            await query.answer(
+                t(
+                    "ai_clips_compile_status_text",
+                    lang,
+                    period=cjob.period,
+                    pct=max(0, min(100, int(cjob.progress_pct or 0))),
+                    status=cjob.status,
+                ),
+                show_alert=True,
+            )
+            return
+        await query.answer(t("ai_clips_status_idle", lang), show_alert=True)
+        return
+
+    if data == "ai_clips:compile":
+        beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
+        if not beta_ok or not premium_ok:
+            await query.answer(t("ai_clips_failed", lang), show_alert=True)
+            return
+        if not clip_compilation_ready():
+            await query.answer(t("ai_clips_compile_tools_missing", lang), show_alert=True)
+            return
+        await query.answer()
+        try:
+            await query.edit_message_text(
+                t("ai_clips_compile_pick_period", lang, days=RETENTION_DAYS),
+                parse_mode=ParseMode.HTML,
+                reply_markup=_compile_period_keyboard(lang),
+            )
+        except BadRequest:
+            pass
+        return
+
+    if data.startswith("ai_clips:compile_period:"):
+        await query.answer()
+        period = parse_period(data.rsplit(":", 1)[-1])
+        if not period:
+            try:
+                await query.edit_message_text(t("ai_clips_failed", lang))
+            except BadRequest:
+                pass
+            return
+        await _start_compilation(query, context, user_id=user_id, lang=lang, period=period)
         return
 
     if data == "ai_clips:auto":
@@ -676,7 +784,9 @@ async def on_ai_clips_callback(
             await query.answer(t("ai_clips_auto_enabled", lang))
         videos: list[dict[str, Any]] = context.user_data.get("ai_clips_videos") or []
         page = int(context.user_data.get("ai_clips_page") or 0)
-        active = db.get_active_ai_clips_job(user_id)
+        active = db.get_active_ai_clips_job(user_id) or db.get_active_clip_compilation_job(
+            user_id
+        )
         if videos:
             try:
                 await query.edit_message_reply_markup(
@@ -720,7 +830,9 @@ async def on_ai_clips_callback(
         except ValueError:
             page = 0
         context.user_data["ai_clips_page"] = page
-        active = db.get_active_ai_clips_job(user_id)
+        active = db.get_active_ai_clips_job(user_id) or db.get_active_clip_compilation_job(
+            user_id
+        )
         try:
             await query.edit_message_text(
                 t("ai_clips_pick_vod", lang, max_clips=MAX_CLIPS),
@@ -909,6 +1021,227 @@ async def _start_vod_job(
             lang=lang,
         )
     )
+
+
+async def _start_compilation(
+    query: Any,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int,
+    lang: str,
+    period: str,
+) -> None:
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    beta_ok, premium_ok = await _entitled(context.bot, db, user_id)
+    if not beta_ok or not premium_ok:
+        try:
+            await query.edit_message_text(t("ai_clips_failed", lang))
+        except BadRequest:
+            pass
+        return
+    if not clip_compilation_ready():
+        try:
+            await query.edit_message_text(t("ai_clips_compile_tools_missing", lang))
+        except BadRequest:
+            pass
+        return
+    if db.get_active_clip_compilation_job(user_id):
+        try:
+            await query.edit_message_text(t("ai_clips_compile_busy", lang))
+        except BadRequest:
+            pass
+        return
+    sync = db.get_twitch_sync(user_id)
+    broadcaster_id = (sync.twitch_user_id if sync else "") or ""
+    if not broadcaster_id:
+        token = await _ensure_clips_token(db, twitch, user_id)
+        broadcaster_id = (token or {}).get("twitch_user_id") or ""
+    if not broadcaster_id:
+        try:
+            await query.edit_message_text(t("ai_clips_need_auth", lang))
+        except BadRequest:
+            pass
+        await _send_oauth_prompt(context.bot, twitch, user_id, lang)
+        return
+
+    token = new_compilation_token()
+    job_id = db.create_clip_compilation_job(
+        user_id, period=period, token=token
+    )
+    try:
+        await query.edit_message_text(
+            t("ai_clips_compile_working", lang, period=period),
+            parse_mode=ParseMode.HTML,
+        )
+    except BadRequest:
+        pass
+    context.user_data.pop("ai_clips_videos", None)
+    context.user_data.pop("ai_clips_page", None)
+    _clear_clip_list(context)
+    asyncio.create_task(
+        _run_compilation_job(context.application, job_id, lang=lang)
+    )
+
+
+async def _run_compilation_job(
+    application: Application,
+    job_id: int,
+    *,
+    lang: str | None = None,
+) -> None:
+    async with _RUNNING_COMPILATION_LOCK:
+        if job_id in _RUNNING_COMPILATION_IDS:
+            return
+        _RUNNING_COMPILATION_IDS.add(job_id)
+    try:
+        async with _WORKER_LOCK:
+            await _run_compilation_body(application, job_id, lang=lang)
+    finally:
+        async with _RUNNING_COMPILATION_LOCK:
+            _RUNNING_COMPILATION_IDS.discard(job_id)
+
+
+async def _run_compilation_body(
+    application: Application,
+    job_id: int,
+    *,
+    lang: str | None = None,
+) -> None:
+    import shutil
+    import tempfile
+
+    db: Database = application.bot_data["db"]
+    twitch: TwitchClient = application.bot_data["twitch"]
+    job = db.get_clip_compilation_job(job_id)
+    if not job or job.status in ("done", "failed"):
+        return
+    user_id = job.owner_id
+    loc = lang or db.get_user_locale(user_id) or DEFAULT_LOCALE
+    period = parse_period(job.period)
+    if not period:
+        db.update_clip_compilation_job(job_id, status="failed", error="period")
+        await application.bot.send_message(user_id, t("ai_clips_compile_failed", loc))
+        return
+    sync = db.get_twitch_sync(user_id)
+    broadcaster_id = (sync.twitch_user_id if sync else "") or ""
+    if not broadcaster_id:
+        db.update_clip_compilation_job(job_id, status="failed", error="oauth")
+        await application.bot.send_message(user_id, t("ai_clips_need_auth", loc))
+        return
+
+    db.update_clip_compilation_job(job_id, status="fetching", progress_pct=5)
+    started, ended = period_window(period)
+    try:
+        rows = await asyncio.to_thread(
+            twitch.get_top_clips_for_broadcaster,
+            broadcaster_id,
+            started_at=started,
+            ended_at=ended,
+        )
+    except Exception:
+        logger.exception("clip_compilation helix failed job=%s", job_id)
+        db.update_clip_compilation_job(job_id, status="failed", error="helix")
+        await application.bot.send_message(
+            user_id, t("ai_clips_compile_no_clips", loc)
+        )
+        return
+
+    selected = select_clips_by_views(rows)
+    if not selected:
+        db.update_clip_compilation_job(job_id, status="failed", error="empty")
+        await application.bot.send_message(
+            user_id, t("ai_clips_compile_no_clips", loc)
+        )
+        return
+
+    db.update_clip_compilation_job(job_id, status="building", progress_pct=10)
+    compilations_root().mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=f"comp_{job_id}_", dir=str(compilations_root())))
+    try:
+
+        def _prog(pct: int) -> None:
+            db.update_clip_compilation_job(
+                job_id, status="building", progress_pct=pct
+            )
+
+        result = await asyncio.to_thread(
+            build_compilation,
+            selected,
+            token=job.token,
+            work_dir=work,
+            progress=_prog,
+        )
+    except Exception:
+        logger.exception("clip_compilation build failed job=%s", job_id)
+        safe_unlink_compilation(job.token)
+        db.update_clip_compilation_job(job_id, status="failed", error="build")
+        await application.bot.send_message(
+            user_id, t("ai_clips_compile_failed", loc)
+        )
+        return
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    expires_iso = result.expires_at.astimezone(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    db.update_clip_compilation_job(
+        job_id,
+        status="done",
+        path=str(result.path),
+        progress_pct=100,
+        expires_at=expires_iso,
+    )
+    url = public_compilation_url(result.token)
+    if not url:
+        await application.bot.send_message(
+            user_id, t("ai_clips_compile_failed", loc)
+        )
+        return
+    await application.bot.send_message(
+        user_id,
+        t(
+            "ai_clips_compile_done",
+            loc,
+            url=html_escape(url),
+            days=RETENTION_DAYS,
+            count=result.clip_count,
+        ),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    analytics.capture(
+        user_id,
+        "clip_compilation_done",
+        {
+            "period": period,
+            "clips": result.clip_count,
+            "job_id": job_id,
+        },
+    )
+
+
+def resume_clip_compilation_jobs(application: Application) -> None:
+    db: Database = application.bot_data["db"]
+    jobs = db.list_resumable_clip_compilation_jobs()
+    if not jobs:
+        return
+    logger.info("clip_compilation resume %s job(s)", len(jobs))
+    for job in jobs:
+        asyncio.create_task(_run_compilation_job(application, job.id))
+
+
+async def purge_expired_clip_compilations(context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    expired = db.list_expired_clip_compilation_jobs()
+    if not expired:
+        return
+    for job in expired:
+        if job.token:
+            safe_unlink_compilation(job.token)
+        db.delete_clip_compilation_job(job.id)
+    logger.info("clip_compilation purged %s expired file(s)", len(expired))
 
 
 async def complete_ai_clips_oauth(
@@ -1442,11 +1775,11 @@ def resume_ai_clips_jobs(application: Application) -> None:
     """Re-queue unfinished jobs after bot restart."""
     db: Database = application.bot_data["db"]
     jobs = db.list_resumable_ai_clips_jobs()
-    if not jobs:
-        return
-    logger.info("ai_clips resume %s job(s)", len(jobs))
-    for job in jobs:
-        asyncio.create_task(_run_job(application, job.id))
+    if jobs:
+        logger.info("ai_clips resume %s job(s)", len(jobs))
+        for job in jobs:
+            asyncio.create_task(_run_job(application, job.id))
+    resume_clip_compilation_jobs(application)
 
 
 async def poll_ai_clips_auto(context: ContextTypes.DEFAULT_TYPE) -> None:

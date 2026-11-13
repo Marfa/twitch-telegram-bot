@@ -42,7 +42,12 @@ _HTTP_RL_OAUTH_LIMIT = 60
 _HTTP_RL_OAUTH_WINDOW_SEC = 60.0
 _HTTP_RL_HOOKS_LIMIT = 300
 _HTTP_RL_HOOKS_WINDOW_SEC = 60.0
+_HTTP_RL_MEDIA_LIMIT = 30
+_HTTP_RL_MEDIA_WINDOW_SEC = 60.0
 _HTTP_RL_MAX_KEYS = 10_000
+_COMPILATION_TOKEN_RE = re.compile(r"^/media/compilations/([A-Za-z0-9_-]{20,64})\.mp4$")
+_compilation_db: Any | None = None
+_COMPILATION_DB_LOCK = threading.Lock()
 
 
 def _http_client_ip(handler: BaseHTTPRequestHandler) -> str:
@@ -105,6 +110,9 @@ def _enforce_http_rate_limit(handler: BaseHTTPRequestHandler, path: str) -> bool
     elif path.startswith("/hooks/"):
         limit, window = _HTTP_RL_HOOKS_LIMIT, _HTTP_RL_HOOKS_WINDOW_SEC
         kind = "hooks"
+    elif path.startswith("/media/"):
+        limit, window = _HTTP_RL_MEDIA_LIMIT, _HTTP_RL_MEDIA_WINDOW_SEC
+        kind = "media"
     else:
         return False
     key = f"{kind}:{_http_client_ip(handler)}"
@@ -225,9 +233,11 @@ def register_health_probes(
     *, db_ping: Callable[[], bool], db: Any | None = None
 ) -> None:
     """Wire deep /health checks (DB ping) and component probes. Call once from bot post_init."""
-    global _db_ping
+    global _db_ping, _compilation_db
     with _HEALTH_PROBES_LOCK:
         _db_ping = db_ping
+    with _COMPILATION_DB_LOCK:
+        _compilation_db = db
     from health_probes import register_component_probes
 
     def _read_streams_ok_at() -> float:
@@ -1067,6 +1077,84 @@ def _send_bytes(
     handler.wfile.write(body)
 
 
+def _parse_expires_at(raw: str) -> float | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        return None
+
+
+def _try_serve_clip_compilation(handler: BaseHTTPRequestHandler, path: str) -> bool:
+    """Stream /media/compilations/{token}.mp4 if done and not expired. True if handled."""
+    m = _COMPILATION_TOKEN_RE.match(path)
+    if not m:
+        return False
+    token = m.group(1)
+    with _COMPILATION_DB_LOCK:
+        db = _compilation_db
+    if db is None:
+        handler.send_response(503)
+        handler.end_headers()
+        return True
+    try:
+        job = db.get_clip_compilation_by_token(token)
+    except Exception:
+        logger.exception("clip compilation lookup failed token=%s", token[:8])
+        handler.send_response(500)
+        handler.end_headers()
+        return True
+    if not job or job.status != "done":
+        handler.send_response(404)
+        handler.end_headers()
+        return True
+    exp_ts = _parse_expires_at(job.expires_at)
+    if exp_ts is not None and exp_ts <= time.time():
+        handler.send_response(404)
+        handler.end_headers()
+        return True
+    file_path = Path(str(job.path or "").strip())
+    if not file_path.is_file():
+        # Fallback to canonical location if DB path drifted.
+        try:
+            from clip_compilation import compilation_file_path
+
+            file_path = compilation_file_path(token)
+        except Exception:
+            file_path = Path("")
+    if not file_path.is_file():
+        handler.send_response(404)
+        handler.end_headers()
+        return True
+    size = file_path.stat().st_size
+    handler.send_response(200)
+    handler.send_header("Content-Type", "video/mp4")
+    handler.send_header(
+        "Content-Disposition", f'attachment; filename="compilation-{token[:12]}.mp4"'
+    )
+    handler.send_header("Cache-Control", "private, max-age=3600")
+    handler.send_header("Content-Length", str(size))
+    handler.end_headers()
+    if handler.command == "HEAD":
+        return True
+    with file_path.open("rb") as fh:
+        while True:
+            chunk = fh.read(64 * 1024)
+            if not chunk:
+                break
+            handler.wfile.write(chunk)
+    return True
+
+
 def _try_serve_site_static(handler: BaseHTTPRequestHandler, path: str) -> bool:
     """Serve /site/*, /assets/*, favicon, sitemap, robots. True if handled."""
     import web_site
@@ -1303,6 +1391,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if _try_serve_clip_compilation(self, path):
             return
         if _try_serve_site_static(self, path):
             return

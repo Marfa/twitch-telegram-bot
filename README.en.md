@@ -73,7 +73,7 @@ Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Pre
 | Alert history for 60 days | Free plan keeps 7 days |
 | Deleted subscriptions cart for 30 days | Free plan keeps 10 days |
 | Channel Follow/Unfollow | Monitoring and alerts — Premium; Follow / new Follow & Unfollow lists (last 30 days) available without Premium |
-| AI clips from VOD | **📦 Other → 🎬 AI clips** (Premium / à la carte `ai_clips`): up to 5 clips — chat «clip»/«клип» → Groq emotion (ASR+score>3) → Groq game context on chat spikes → remaining audio → remaining spikes; without Groq falls back to peaks; Helix Create Clip From VOD; auto for new VODs |
+| AI clips from VOD | **📦 Other → 🎬 AI clips** (Premium / à la carte `ai_clips`): up to 5 clips — chat «clip»/«клип» → Groq emotion (ASR+score>3) → Groq game context on chat spikes → remaining audio → remaining spikes; without Groq falls back to peaks; Helix Create Clip From VOD; auto for new VODs; **Make compilation** — top clips from your channel for day/week/month → MP4 download link (3 days) |
 | Channel stats | **📦 Other → 📊 Channel stats** (Premium / à la carte `channel_stats`): OAuth your channel → PNG card (avg/peak/airtime/games); Helix poll ~10 min; TwitchTracker summary enrich; polling pauses when Premium ends |
 | Channel advertising for streamers | Free bot interactions for viewers, Game alert priority, welcome recommend (Stars subscription) |
 
@@ -412,7 +412,7 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
 | `translate.py` | DeepL for admin broadcasts; RapidAPI Deep Translate on DeepL quota 456 |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/` landing (Dazzle, i18n), `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, rapidapi_translate, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/` landing (Dazzle, i18n), `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, rapidapi_translate, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/media/compilations/{token}.mp4` (clip compilation download, 3-day TTL), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS: landing `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
 

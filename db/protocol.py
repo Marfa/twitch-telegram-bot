@@ -8,6 +8,7 @@ from .models import (
     AlertHistoryEntry,
     AiClipsAuto,
     AiClipsJob,
+    ClipCompilationJob,
     BotStats,
     ChatAuth,
     DeletedSubscriptionCartItem,
@@ -1370,3 +1371,36 @@ class Database(Protocol):
     ) -> None: ...
 
     def list_enabled_ai_clips_auto(self) -> list[AiClipsAuto]: ...
+
+    def create_clip_compilation_job(
+        self, owner_id: int, *, period: str, token: str
+    ) -> int: ...
+
+    def update_clip_compilation_job(
+        self,
+        job_id: int,
+        *,
+        status: str | None = None,
+        path: str | None = None,
+        error: str | None = None,
+        progress_pct: int | None = None,
+        expires_at: str | None = None,
+    ) -> None: ...
+
+    def get_clip_compilation_job(self, job_id: int) -> ClipCompilationJob | None: ...
+
+    def get_active_clip_compilation_job(
+        self, owner_id: int
+    ) -> ClipCompilationJob | None: ...
+
+    def get_clip_compilation_by_token(
+        self, token: str
+    ) -> ClipCompilationJob | None: ...
+
+    def list_resumable_clip_compilation_jobs(self) -> list: ...
+
+    def list_expired_clip_compilation_jobs(
+        self, *, now_iso: str | None = None
+    ) -> list: ...
+
+    def delete_clip_compilation_job(self, job_id: int) -> None: ...

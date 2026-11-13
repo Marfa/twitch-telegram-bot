@@ -1558,6 +1558,36 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS clip_compilation_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                period TEXT NOT NULL,
+                status TEXT NOT NULL,
+                token TEXT NOT NULL DEFAULT '',
+                path TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '',
+                progress_pct INTEGER NOT NULL DEFAULT 0,
+                expires_at TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_clip_compilation_jobs_status
+            ON clip_compilation_jobs(status, id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_clip_compilation_jobs_token
+            ON clip_compilation_jobs(token)
+            WHERE token != ''
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS premium_gifts (
                 token TEXT PRIMARY KEY,
                 buyer_id INTEGER NOT NULL,
@@ -8746,6 +8776,162 @@ owner_id, twitch_username, twitch_user_id,
                 """
             ).fetchall()
         return [self._ai_clips_auto_from_row(r) for r in rows]
+
+    def create_clip_compilation_job(
+        self, owner_id: int, *, period: str, token: str
+    ) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO clip_compilation_jobs
+                    (owner_id, period, status, token)
+                VALUES (?, ?, 'queued', ?)
+                """,
+                (int(owner_id), str(period or ""), str(token or "")),
+            )
+            return int(cur.lastrowid)
+
+    def update_clip_compilation_job(
+        self,
+        job_id: int,
+        *,
+        status: str | None = None,
+        path: str | None = None,
+        error: str | None = None,
+        progress_pct: int | None = None,
+        expires_at: str | None = None,
+    ) -> None:
+        sets: list[str] = ["updated_at = datetime('now')"]
+        args: list[object] = []
+        if status is not None:
+            sets.append("status = ?")
+            args.append(status)
+        if path is not None:
+            sets.append("path = ?")
+            args.append(path)
+        if error is not None:
+            sets.append("error = ?")
+            args.append(error)
+        if progress_pct is not None:
+            sets.append("progress_pct = ?")
+            args.append(max(0, min(100, int(progress_pct))))
+        if expires_at is not None:
+            sets.append("expires_at = ?")
+            args.append(expires_at)
+        if len(sets) == 1:
+            return
+        args.append(int(job_id))
+        with self._conn() as conn:
+            conn.execute(
+                f"UPDATE clip_compilation_jobs SET {', '.join(sets)} WHERE id = ?",
+                args,
+            )
+
+    def _clip_compilation_job_from_row(self, row):
+        from db.models import ClipCompilationJob
+
+        return ClipCompilationJob(
+            id=int(row["id"]),
+            owner_id=int(row["owner_id"]),
+            period=str(row["period"] or ""),
+            status=str(row["status"] or ""),
+            token=str(row["token"] or ""),
+            path=str(row["path"] or ""),
+            error=str(row["error"] or ""),
+            progress_pct=int(row["progress_pct"] or 0),
+            expires_at=str(row["expires_at"] or ""),
+            created_at=str(row["created_at"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+        )
+
+    def get_clip_compilation_job(self, job_id: int):
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs WHERE id = ?
+                """,
+                (int(job_id),),
+            ).fetchone()
+        if not row:
+            return None
+        return self._clip_compilation_job_from_row(row)
+
+    def get_active_clip_compilation_job(self, owner_id: int):
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs
+                WHERE owner_id = ?
+                  AND status IN ('queued', 'fetching', 'building')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (int(owner_id),),
+            ).fetchone()
+        if not row:
+            return None
+        return self._clip_compilation_job_from_row(row)
+
+    def get_clip_compilation_by_token(self, token: str):
+        tok = str(token or "").strip()
+        if not tok:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs
+                WHERE token = ? AND status = 'done'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (tok,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._clip_compilation_job_from_row(row)
+
+    def list_resumable_clip_compilation_jobs(self) -> list:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs
+                WHERE status IN ('queued', 'fetching', 'building')
+                ORDER BY id
+                """
+            ).fetchall()
+        return [self._clip_compilation_job_from_row(r) for r in rows]
+
+    def list_expired_clip_compilation_jobs(self, *, now_iso: str | None = None) -> list:
+        now = now_iso or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, owner_id, period, status, token, path, error,
+                       progress_pct, expires_at, created_at, updated_at
+                FROM clip_compilation_jobs
+                WHERE status = 'done'
+                  AND expires_at != ''
+                  AND expires_at <= ?
+                ORDER BY id
+                """,
+                (now,),
+            ).fetchall()
+        return [self._clip_compilation_job_from_row(r) for r in rows]
+
+    def delete_clip_compilation_job(self, job_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM clip_compilation_jobs WHERE id = ?",
+                (int(job_id),),
+            )
 
     _IGDB_TABLES = frozenset({
         "igdb_games",
