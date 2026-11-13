@@ -3,7 +3,7 @@
 Дата: 2026-11-12  
 Статус: **ожидает имя нового домена и ручных шагов**  
 Сайт сейчас: https://bot.themarfa.name/  
-Было: [`todo-search-engines.md`](todo-search-engines.md) (влит сюда; файл удалён)  
+Было: `todo-search-engines.md` (влит сюда; файл удалён)  
 Связано: [`webapp/guide/`](../webapp/guide/), [`web_site.py`](../web_site.py), [`webapp/site/`](../webapp/site/), `health.py`, `PUBLIC_BASE_URL`, PingZen monitors, `.cursor/rules/user-guide.mdc`, [Mintlify](https://www.mintlify.com/)
 
 ---

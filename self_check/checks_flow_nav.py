@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlparse
 
 from db import open_database
 from i18n import (
@@ -2247,7 +2248,7 @@ async def _scenario_other_channel_stats(db) -> None:
     assert any(
         getattr(m, "inline_keyboard", None)
         and any(
-            (b.url or "").startswith("https://id.twitch.tv/")
+            urlparse(b.url or "").hostname == "id.twitch.tv"
             for row in m.inline_keyboard
             for b in row
         )
@@ -4876,7 +4877,7 @@ async def _scenario_premium_marfapr_wizard(db) -> None:
     markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
     assert markup is not None
     assert any(
-        (cell.url or "").startswith("https://id.twitch.tv")
+        urlparse(cell.url or "").hostname == "id.twitch.tv"
         for row in markup.inline_keyboard
         for cell in row
     ), "unlinked marfapr step must offer Twitch authorize URL"

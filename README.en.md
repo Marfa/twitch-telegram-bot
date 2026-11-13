@@ -353,7 +353,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `GROQ_API_KEY` | (opt.) Groq Whisper + LLM — emotion score on top-10 audio and game/chat context on chat spikes for AI clips |
 | `BOTHUB_API_KEY` | (opt.) BotHub — AI alert covers; feature skipped if unset |
 | `BOTHUB_IMAGE_MODEL` | Cover model (default `gemini-3.1-flash-lite-image`) |
-| `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback on CAPS/`NOT_ENOUGH_TOKENS` (default `gemini-2.5-flash-image`; empty = no fallback) |
+| `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback on CAPS / NOT_ENOUGH_TOKENS error code (default `gemini-2.5-flash-image`; empty = no fallback) |
 | `ISTHEREANYDEAL_API_KEY` | (opt.) IsThereAnyDeal game giveaways; without it only GamerPower is used |
 | `YOUTUBE_API_KEY` | (opt.) YouTube Data API v3 — Multistream live checks (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Preview/MP4 refresh interval while live (default 1800) |

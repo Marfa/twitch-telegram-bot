@@ -353,7 +353,7 @@ python main.py
 | `GROQ_API_KEY` | (опц.) Groq Whisper + LLM — emotion-скоринг топ-10 audio и game/chat-контекст всплесков чата в AI-клипах |
 | `BOTHUB_API_KEY` | (опц.) BotHub — ИИ-обложки алертов; без ключа фича недоступна |
 | `BOTHUB_IMAGE_MODEL` | Модель обложки (по умолчанию `gemini-3.1-flash-lite-image`) |
-| `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback при CAPS/`NOT_ENOUGH_TOKENS` (по умолчанию `gemini-2.5-flash-image`; пусто = без fallback) |
+| `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback при CAPS / коде ошибки NOT_ENOUGH_TOKENS (по умолчанию `gemini-2.5-flash-image`; пусто = без fallback) |
 | `ISTHEREANYDEAL_API_KEY` | (опц.) IsThereAnyDeal — раздачи игр; без ключа работает только GamerPower |
 | `YOUTUBE_API_KEY` | (опц.) YouTube Data API v3 — проверка онлайн для Мультистрима (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Интервал обновления превью/MP4 на эфире (по умолчанию 1800) |
