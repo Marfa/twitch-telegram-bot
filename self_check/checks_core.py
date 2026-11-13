@@ -1843,9 +1843,14 @@ def check_core() -> None:
         {"date": _date(2026, 10, 8), "time": "18:00", "game": "Just Chatting"},
     ]
     preview = _format_week_slots_preview("ru", preview_slots)
-    assert "Актуальные слоты до конца недели" in preview
+    assert "Актуальные слоты до конца недели:" in preview
+    assert "режим отпуска" not in preview
     assert "- 7 октября <code>15:30 Deponia &lt;v1&gt;</code>" in preview
     assert "- 8 октября <code>18:00 Just Chatting</code>" in preview
+    preview_vac = _format_week_slots_preview(
+        "ru", preview_slots, on_vacation=True
+    )
+    assert "Актуальные слоты до конца недели (режим отпуска):" in preview_vac
     assert _format_week_slots_preview("en", []) == ""
 
     week_client = TwitchClient.__new__(TwitchClient)
@@ -1941,6 +1946,8 @@ def check_core() -> None:
     assert "Example" not in tr("stream_schedule_mode_intro", "en")
     assert tr("stream_schedule_mode_week_slots", "ru")
     assert tr("stream_schedule_mode_week_slots", "en")
+    assert "режим отпуска" in tr("stream_schedule_mode_week_slots_vacation", "ru")
+    assert "vacation mode" in tr("stream_schedule_mode_week_slots_vacation", "en")
     assert "Пример" not in tr("stream_schedule_intro", "ru")
     assert "Example" not in tr("stream_schedule_intro", "en")
     assert "Sovereign" not in tr("stream_schedule_intro", "ru")

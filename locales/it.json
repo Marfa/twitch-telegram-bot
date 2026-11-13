@@ -373,6 +373,7 @@
   "stream_schedule_intro": "Usa questo menu per creare un programma settimanale (dal prossimo lunedì alla domenica).",
   "stream_schedule_mode_intro": "Usa questo menu per creare un programma settimanale (dal prossimo lunedì alla domenica), correggere gli slot di un singolo giorno o attivare la modalità vacanza (correzione giorno e vacanza sono Premium).",
   "stream_schedule_mode_week_slots": "Slot attuali fino alla fine della settimana:",
+  "stream_schedule_mode_week_slots_vacation": "Slot attuali fino alla fine della settimana (modalità vacanza):",
   "stream_schedule_mode_week_btn": "Crea programma della settimana",
   "stream_schedule_mode_day_btn": "Correggi slot di un giorno ⭐",
   "stream_schedule_mode_vacation_btn": "Modalità vacanza ⭐",

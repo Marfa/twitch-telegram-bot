@@ -560,10 +560,17 @@ def _mono_schedule_slot_line(line: str) -> str:
     return f"<code>{line}</code>"
 
 
-def _format_week_slots_preview(lang: str, slots: list[dict]) -> str:
+def _format_week_slots_preview(
+    lang: str, slots: list[dict], *, on_vacation: bool = False
+) -> str:
     if not slots:
         return ""
-    lines = [t("stream_schedule_mode_week_slots", lang), ""]
+    header_key = (
+        "stream_schedule_mode_week_slots_vacation"
+        if on_vacation
+        else "stream_schedule_mode_week_slots"
+    )
+    lines = [t(header_key, lang), ""]
     for slot in slots:
         # Date stays proportional; only time + game are monospace.
         time_s = slot.get("time") or ""
@@ -586,6 +593,7 @@ async def _stream_schedule_mode_text(
     broadcaster_id = _owner_schedule_broadcaster_id(db, user_id)
     if not broadcaster_id:
         return text
+    on_vacation = await _owner_vacation_active(db, twitch, user_id)
     try:
         slots = await asyncio.to_thread(
             _slots_until_week_end,
@@ -598,7 +606,9 @@ async def _stream_schedule_mode_text(
             "Failed to load week schedule preview for user=%s", user_id
         )
         return text
-    preview = _format_week_slots_preview(lang, slots)
+    preview = _format_week_slots_preview(
+        lang, slots, on_vacation=on_vacation
+    )
     if not preview:
         return text
     return f"{text}\n\n{preview}"

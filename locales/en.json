@@ -373,6 +373,7 @@
   "stream_schedule_intro": "Use this menu to create a weekly schedule (from the next Monday through Sunday).",
   "stream_schedule_mode_intro": "Use this menu to create a weekly schedule (from the next Monday through Sunday), fix slots for a single day, or turn on vacation mode (day fix and vacation are Premium).",
   "stream_schedule_mode_week_slots": "Current slots through the end of the week:",
+  "stream_schedule_mode_week_slots_vacation": "Current slots through the end of the week (vacation mode):",
   "stream_schedule_mode_week_btn": "Create schedule for the week",
   "stream_schedule_mode_day_btn": "Fix slots for a day ⭐",
   "stream_schedule_mode_vacation_btn": "Vacation mode ⭐",

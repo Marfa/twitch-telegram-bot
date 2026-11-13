@@ -142,12 +142,38 @@ async def _smoke_schedule(db) -> None:
                 {"date": date(2026, 10, 7), "time": "15:30", "game": "Deponia"},
             ],
         ),
+        patch(
+            "handlers.stream_schedule._owner_vacation_active",
+            new=AsyncMock(return_value=False),
+        ),
     ):
         state = await start_stream_schedule(update, ctx)
     assert state == st["STREAM_SCHEDULE_MODE"]
     sent = update.effective_message.reply_text.await_args.args[0]
     assert "Актуальные слоты до конца недели" in sent or "Current slots" in sent
+    assert "(режим отпуска)" not in sent and "(vacation mode)" not in sent
     assert "15:30" in sent and "Deponia" in sent
+
+    application, bot = _app(db)
+    update = _msg_update(_FREE_UID)
+    ctx = _ctx(application)
+    with (
+        patch("handlers.stream_schedule.beta_features.is_enabled", return_value=True),
+        patch(
+            "handlers.stream_schedule._slots_until_week_end",
+            return_value=[
+                {"date": date(2026, 10, 7), "time": "15:30", "game": "Deponia"},
+            ],
+        ),
+        patch(
+            "handlers.stream_schedule._owner_vacation_active",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        state = await start_stream_schedule(update, ctx)
+    assert state == st["STREAM_SCHEDULE_MODE"]
+    sent_vac = update.effective_message.reply_text.await_args.args[0]
+    assert "(режим отпуска)" in sent_vac or "(vacation mode)" in sent_vac
     db.set_schedule_twitch_user_id(_FREE_UID, "")
 
     application, bot = _app(db)
