@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 import analytics
 import demo_mode
 import premium as prem
-from bot_helpers import _menu, _user_lang
+from bot_helpers import _menu, _pulse_reply_keyboard, _user_lang
 from handlers.alert_history import _twitch_vod_url
 from db import (
     CATEGORY_WATCH_DELIVERY_DIGEST,
@@ -610,15 +610,13 @@ async def _send_recommended_promo_suggestions(
         except BadRequest:
             pass
     await bot.send_message(
-        chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
-    )
-    await bot.send_message(
         chat_id,
         text,
         reply_markup=markup,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
+    await _pulse_reply_keyboard(bot, chat_id, _menu(lang, user_id))
 
 
 async def _fetch_watch_vod_suggestions(
@@ -694,10 +692,8 @@ async def _send_watch_suggestions(
                 return
             except BadRequest:
                 pass
-        await bot.send_message(
-            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
-        )
         await bot.send_message(chat_id, text, reply_markup=markup)
+        await _pulse_reply_keyboard(bot, chat_id, _menu(lang, user_id))
         return
 
     if streams:
@@ -738,16 +734,12 @@ async def _send_watch_suggestions(
             pass
     await bot.send_message(
         chat_id,
-        t("menu_main", lang),
-        reply_markup=_menu(lang, user_id),
-    )
-    await bot.send_message(
-        chat_id,
         text,
         reply_markup=markup,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
+    await _pulse_reply_keyboard(bot, chat_id, _menu(lang, user_id))
 
 
 def _watch_prefs_from_user_data(context: ContextTypes.DEFAULT_TYPE) -> WatchPrefs:
@@ -1153,10 +1145,8 @@ async def _run_watch_lucky(
         )
         await _show(t("watch_lucky_empty", lang), reply_markup=markup)
         if not stay_in_categories_on_empty:
-            await context.bot.send_message(
-                chat_id,
-                t("menu_main", lang),
-                reply_markup=_menu(lang, user_id),
+            await _pulse_reply_keyboard(
+                context.bot, chat_id, _menu(lang, user_id)
             )
         return (
             _ws()["WATCH_CATEGORIES"]

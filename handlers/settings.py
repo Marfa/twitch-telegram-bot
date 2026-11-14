@@ -24,6 +24,7 @@ import demo_mode
 import premium as prem
 from bot_helpers import (
     _menu,
+    _pulse_reply_keyboard,
     _settings_kb,
     _user_lang,
     _user_notifications_paused,
@@ -483,11 +484,6 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if feature_id == "stream-chat":
         await sync_stream_chat_menu_button(context.bot, db, user_id)
         chat_id = reply_chat_id(update)
-        await context.bot.send_message(
-            chat_id,
-            t("menu_main", lang),
-            reply_markup=_menu(lang, user_id),
-        )
         if new_state:
             from chat_webapp import chat_webapp_url, stream_chat_open_markup
 
@@ -503,6 +499,7 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         lang, open_url, private=is_private_chat(update)
                     ),
                 )
+        await _pulse_reply_keyboard(context.bot, chat_id, _menu(lang, user_id))
     toast = t(
         "beta_mode_opt_in" if new_state else "beta_mode_opt_out",
         lang,

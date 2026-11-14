@@ -872,9 +872,8 @@ async def _queue_schedule_publish_and_auth(
         if query:
             await _dismiss_schedule_callback(context.bot, query)
         await context.bot.send_message(
-            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            chat_id, text, reply_markup=_menu(lang, user_id)
         )
-        await context.bot.send_message(chat_id, text)
         return ConversationHandler.END
 
     db: Database = context.application.bot_data["db"]
@@ -950,9 +949,8 @@ async def _finish_stream_schedule(
     if not _has_pending_schedule_changes(context):
         context.user_data.clear()
         await context.bot.send_message(
-            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            chat_id, text, reply_markup=_menu(lang, user_id)
         )
-        await context.bot.send_message(chat_id, text)
         return ConversationHandler.END
     if update.callback_query:
         await context.bot.send_message(chat_id, text)
@@ -1905,9 +1903,8 @@ async def _start_schedule_publish_auth(
         if query:
             await _dismiss_schedule_callback(context.bot, query)
         await context.bot.send_message(
-            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
+            chat_id, text, reply_markup=_menu(lang, user_id)
         )
-        await context.bot.send_message(chat_id, text)
         return ConversationHandler.END
 
     state = create_pending_login_state(user_id, lang, purpose="schedule")

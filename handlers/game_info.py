@@ -10,7 +10,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
-from bot_helpers import _menu, reply_chat_id
+from bot_helpers import _menu, _pulse_reply_keyboard, reply_chat_id
 from db import Database
 from handlers.release_watch import (
     _send_game_card,
@@ -213,9 +213,7 @@ async def receive_game_info_pick(
         lang=lang,
         reply_markup=find_kb,
     )
-    await context.bot.send_message(
-        chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
-    )
+    await _pulse_reply_keyboard(context.bot, chat_id, _menu(lang, user_id))
     context.user_data.clear()
     return ConversationHandler.END
 

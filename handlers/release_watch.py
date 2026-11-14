@@ -19,7 +19,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 import analytics
 import beta as beta_features
 import premium as prem
-from bot_helpers import _menu, reply_chat_id
+from bot_helpers import _menu, _pulse_reply_keyboard, reply_chat_id
 from config import MAX_SUBSCRIPTIONS_PER_OWNER
 from db import (
     Database,
@@ -563,9 +563,7 @@ async def _continue_release_with_game(
             lang=lang,
             reply_markup=find_kb,
         )
-        await context.bot.send_message(
-            chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
-        )
+        await _pulse_reply_keyboard(context.bot, chat_id, _menu(lang, user_id))
         context.user_data.clear()
         return ConversationHandler.END
     context.user_data["release_game"] = game
@@ -710,9 +708,7 @@ async def _finish_platform_edit(
         mark_sync_edited=False,
     )
     await query.edit_message_text(t("release_platforms_updated", lang))
-    await context.bot.send_message(
-        chat_id, t("menu_main", lang), reply_markup=_menu(lang, user_id)
-    )
+    await _pulse_reply_keyboard(context.bot, chat_id, _menu(lang, user_id))
     context.user_data.clear()
     return ConversationHandler.END
 

@@ -2136,9 +2136,10 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
 
 
 async def _scenario_other_game_info(db) -> None:
-    """§1.4 Other → Game info — search prompt with Cancel; pick Cancel ends."""
+    """§1.4 Other → Game info — search Cancel; pick card pulses menu (no lasting menu_main)."""
     from handlers.game_info import (
         cancel_game_info_callback,
+        receive_game_info_pick,
         start_game_info,
         _wz,
     )
@@ -2170,6 +2171,36 @@ async def _scenario_other_game_info(db) -> None:
     state = await cancel_game_info_callback(update, ctx)
     assert state == ConversationHandler.END
     cap.assert_turn("other_game_info_cancel")
+
+    # Card pick: pulse restores reply keyboard; no lasting «Главное меню».
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    update, query = _cb_update(_FREE_UID, "ginfo:pick:42", cap)
+
+    async def _pulse(*_a, **_k):
+        cap.note_pulse()
+
+    with (
+        patch("handlers.game_info._send_game_card", new=AsyncMock()) as send_card,
+        patch("handlers.game_info._pulse_reply_keyboard", new=_pulse),
+        patch.object(
+            db,
+            "igdb_game_by_id",
+            return_value={"id": 42, "name": "Half-Life", "summary": "x"},
+        ),
+    ):
+        state = await receive_game_info_pick(update, ctx)
+    assert state == ConversationHandler.END
+    send_card.assert_awaited()
+    menu = t("menu_main", "ru")
+    for call in bot.send_message.await_args_list:
+        text = call.kwargs.get("text")
+        if text is None and len(call.args) > 1:
+            text = call.args[1]
+        assert text != menu, f"unexpected lasting menu_main: {text!r}"
+    cap.assert_turn("other_game_info_card")
 
 
 async def _scenario_other_channel_stats(db) -> None:

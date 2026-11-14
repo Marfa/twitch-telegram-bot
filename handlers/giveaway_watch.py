@@ -17,7 +17,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 import analytics
 import beta as beta_features
 import premium as prem
-from bot_helpers import _menu, reply_chat_id
+from bot_helpers import _menu, _pulse_reply_keyboard, reply_chat_id
 from config import MAX_SUBSCRIPTIONS_PER_OWNER
 from db import (
     Database,
@@ -679,10 +679,8 @@ async def receive_giveaway_watch_platforms(
         )
         await query.edit_message_text(t("giveaway_watch_platforms_updated", lang))
         context.user_data.clear()
-        await context.bot.send_message(
-            reply_chat_id(update),
-            t("menu_main", lang),
-            reply_markup=_menu(lang, user_id),
+        await _pulse_reply_keyboard(
+            context.bot, reply_chat_id(update), _menu(lang, user_id)
         )
         return ConversationHandler.END
 
@@ -809,10 +807,8 @@ async def _apply_giveaway_watch_discount(
                 await update.callback_query.edit_message_text(confirm)
             except BadRequest:
                 pass
-            await context.bot.send_message(
-                reply_chat_id(update),
-                t("menu_main", lang),
-                reply_markup=_menu(lang, user_id),
+            await _pulse_reply_keyboard(
+                context.bot, reply_chat_id(update), _menu(lang, user_id)
             )
         elif update.effective_message:
             await update.effective_message.reply_text(
@@ -933,11 +929,7 @@ async def _finish_create(
             await update.callback_query.edit_message_text(note)
         except BadRequest:
             pass
-        await context.bot.send_message(
-            reply_chat_id(update),
-            t("menu_main", lang),
-            reply_markup=markup,
-        )
+        await _pulse_reply_keyboard(context.bot, reply_chat_id(update), markup)
     elif update.effective_message:
         await update.effective_message.reply_text(note, reply_markup=markup)
     context.user_data.clear()

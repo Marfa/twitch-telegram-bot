@@ -24,6 +24,7 @@ from bot_helpers import (
     _inline_btn_label,
     _menu,
     _pause_notifications_enabled,
+    _pulse_reply_keyboard,
     _pulse_wizard_keyboard,
     _settings_kb,
     _user_lang,
@@ -1719,16 +1720,14 @@ async def _deliver_import_result(
             "free_active_limit": free_limit,
         },
     )
-    await application.bot.send_message(
-        owner_id,
-        t("menu_main", lang),
-        reply_markup=_menu(lang, owner_id),
-    )
     msg = await application.bot.send_message(
         owner_id,
         header,
         reply_markup=markup,
         disable_web_page_preview=True,
+    )
+    await _pulse_reply_keyboard(
+        application.bot, owner_id, _menu(lang, owner_id)
     )
     if new_subs:
         mid = getattr(msg, "message_id", None)
