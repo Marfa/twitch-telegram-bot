@@ -1094,12 +1094,29 @@ def _parse_expires_at(raw: str) -> float | None:
         return None
 
 
+def _safe_compilation_token(raw: str) -> str | None:
+    """Rebuild token from an allowlist so CodeQL treats it as sanitized."""
+    if not (20 <= len(raw) <= 64):
+        return None
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    out: list[str] = []
+    for ch in raw:
+        if ch not in allowed:
+            return None
+        out.append(ch)
+    return "".join(out)
+
+
 def _try_serve_clip_compilation(handler: BaseHTTPRequestHandler, path: str) -> bool:
     """Stream /media/compilations/{token}.mp4 if done and not expired. True if handled."""
     m = _COMPILATION_TOKEN_RE.match(path)
     if not m:
         return False
-    token = m.group(1)
+    token = _safe_compilation_token(m.group(1))
+    if token is None:
+        handler.send_response(404)
+        handler.end_headers()
+        return True
     with _COMPILATION_DB_LOCK:
         db = _compilation_db
     if db is None:
@@ -1122,13 +1139,16 @@ def _try_serve_clip_compilation(handler: BaseHTTPRequestHandler, path: str) -> b
         handler.send_response(404)
         handler.end_headers()
         return True
-    # Never serve job.path from DB — only the canonical token path under root.
+    # Never serve job.path from DB — only root / "{token}.mp4" after allowlist rebuild.
     try:
-        from clip_compilation import compilation_file_path, compilations_root
+        from clip_compilation import compilations_root
 
-        file_path = compilation_file_path(token).resolve()
         root = compilations_root().resolve()
-        file_path.relative_to(root)
+        file_path = (root / f"{token}.mp4").resolve()
+        if os.path.commonpath([str(root), str(file_path)]) != str(root):
+            handler.send_response(404)
+            handler.end_headers()
+            return True
     except (ValueError, OSError):
         handler.send_response(404)
         handler.end_headers()
@@ -1138,17 +1158,16 @@ def _try_serve_clip_compilation(handler: BaseHTTPRequestHandler, path: str) -> b
         handler.end_headers()
         return True
     size = file_path.stat().st_size
-    # token already matched [A-Za-z0-9_-]{20,64} — safe for Content-Disposition.
-    safe_name = f"compilation-{token[:12]}.mp4"
     handler.send_response(200)
     handler.send_header("Content-Type", "video/mp4")
-    handler.send_header("Content-Disposition", f'attachment; filename="{safe_name}"')
+    # Fixed name — token must not enter response headers (response-splitting).
+    handler.send_header("Content-Disposition", 'attachment; filename="compilation.mp4"')
     handler.send_header("Cache-Control", "private, max-age=3600")
     handler.send_header("Content-Length", str(size))
     handler.end_headers()
     if handler.command == "HEAD":
         return True
-    with file_path.open("rb") as fh:
+    with open(file_path, "rb") as fh:
         while True:
             chunk = fh.read(64 * 1024)
             if not chunk:
