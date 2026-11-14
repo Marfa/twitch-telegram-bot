@@ -228,7 +228,8 @@ def _probe_igdb() -> tuple[int, bytes]:
     if db is None:
         return _na()
     if is_igdb_sync_running():
-        return 200, b"syncing"
+        # Body stays "ok" — PingZen keyword checks expect that string.
+        return _ok()
     now = int(time.time())
     try:
         for ep in sorted(USED_ENDPOINTS):

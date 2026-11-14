@@ -1139,21 +1139,21 @@ def _try_serve_clip_compilation(handler: BaseHTTPRequestHandler, path: str) -> b
         handler.send_response(404)
         handler.end_headers()
         return True
-    # Never serve job.path from DB — only root / "{token}.mp4" after allowlist rebuild.
+    # Resolve via directory listing + exact name match (no path join from request).
+    wanted = f"{token}.mp4"
+    file_path: Path | None = None
     try:
         from clip_compilation import compilations_root
 
         root = compilations_root().resolve()
-        file_path = (root / f"{token}.mp4").resolve()
-        if os.path.commonpath([str(root), str(file_path)]) != str(root):
-            handler.send_response(404)
-            handler.end_headers()
-            return True
-    except (ValueError, OSError):
-        handler.send_response(404)
-        handler.end_headers()
-        return True
-    if not file_path.is_file():
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if entry.is_file() and entry.name == wanted:
+                    file_path = Path(entry.path)
+                    break
+    except OSError:
+        file_path = None
+    if file_path is None:
         handler.send_response(404)
         handler.end_headers()
         return True
