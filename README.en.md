@@ -346,8 +346,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `PUBLIC_BASE_URL` | Public HTTPS origin: [landing](https://bot.themarfa.name/) (`/`), OAuth (`…/oauth/twitch/callback`), placeholders (`…/placeholders`), [user guide](https://bot.themarfa.name/guide?lang=en) (`…/guide`), [webhook](https://bot.themarfa.name/webhook) (`…/webhook`), sitemap/robots. Prod: `https://bot.themarfa.name` |
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
-| `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language (primary) |
-| `RAPIDAPI_KEY` | Fallback when DeepL quota is exhausted (HTTP 456) — RapidAPI Deep Translate |
+| `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
 | `GROQ_API_KEY` | (opt.) Groq Whisper + LLM — emotion score on top-10 audio and game/chat context on chat spikes for AI clips |
 | `BOTHUB_API_KEY` | (opt.) BotHub — AI alert covers; feature skipped if unset |
 | `BOTHUB_IMAGE_MODEL` | Cover model (default `gemini-3.1-flash-lite-image`) |
@@ -408,9 +407,9 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 | `beta.py` | Beta catalog (`beta/manifest.json`), opt-in/out, runtime gate, Premium bypass |
 | `demo_mode.py` | Admin Demo mode flag (free UX + wipe demo subscriptions) |
 | `twitch.py` | Helix API, live discovery, templates, status.twitch.com |
-| `translate.py` | DeepL for admin broadcasts; RapidAPI Deep Translate on DeepL quota 456 |
+| `translate.py` | DeepL for admin broadcasts / IGDB blurbs |
 | `links.py` | `t.me/c/…/topic` parsing |
-| `health.py` | `/` landing (Dazzle, i18n), `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, rapidapi_translate, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/media/compilations/{token}.mp4` (clip compilation download, 3-day TTL), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/` landing (Dazzle, i18n), `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/media/compilations/{token}.mp4` (clip compilation download, 3-day TTL), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
 Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS: landing `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
 

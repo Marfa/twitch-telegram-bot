@@ -1416,7 +1416,6 @@
   "premium_promo_used": "You already used this promo code.",
   "premium_promo_expired": "This promo code has expired.",
   "premium_promo_kind_blocked": "This promo code does not apply to the selected plan.",
-  "deepl_quota_admin": "DeepL API quota exhausted (HTTP 456). Translations fall back to RapidAPI Deep Translate until a new DeepL key or plan is available.",
   "btn_channel_stats": "📊 Channel stats",
   "premium_feat_channel_stats": "Channel stats",
   "premium_feat_channel_stats_desc": "A card with average/peak viewers, airtime and games for your Twitch channel",

@@ -1122,25 +1122,27 @@ def _try_serve_clip_compilation(handler: BaseHTTPRequestHandler, path: str) -> b
         handler.send_response(404)
         handler.end_headers()
         return True
-    file_path = Path(str(job.path or "").strip())
-    if not file_path.is_file():
-        # Fallback to canonical location if DB path drifted.
-        try:
-            from clip_compilation import compilation_file_path
+    # Never serve job.path from DB — only the canonical token path under root.
+    try:
+        from clip_compilation import compilation_file_path, compilations_root
 
-            file_path = compilation_file_path(token)
-        except Exception:
-            file_path = Path("")
+        file_path = compilation_file_path(token).resolve()
+        root = compilations_root().resolve()
+        file_path.relative_to(root)
+    except (ValueError, OSError):
+        handler.send_response(404)
+        handler.end_headers()
+        return True
     if not file_path.is_file():
         handler.send_response(404)
         handler.end_headers()
         return True
     size = file_path.stat().st_size
+    # token already matched [A-Za-z0-9_-]{20,64} — safe for Content-Disposition.
+    safe_name = f"compilation-{token[:12]}.mp4"
     handler.send_response(200)
     handler.send_header("Content-Type", "video/mp4")
-    handler.send_header(
-        "Content-Disposition", f'attachment; filename="compilation-{token[:12]}.mp4"'
-    )
+    handler.send_header("Content-Disposition", f'attachment; filename="{safe_name}"')
     handler.send_header("Cache-Control", "private, max-age=3600")
     handler.send_header("Content-Length", str(size))
     handler.end_headers()

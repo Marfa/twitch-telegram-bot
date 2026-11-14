@@ -21,7 +21,8 @@ _CACHE_TTL_SEC = 300.0
 _CACHE_LOCAL_TTL_SEC = 15.0
 _HTTP_TIMEOUT = 12
 
-_IGDB_MAX_AGE_SEC = 36 * 3600
+# 48h: daily job + long multi-endpoint dump sync can exceed 36h mid-run.
+_IGDB_MAX_AGE_SEC = 48 * 3600
 
 COMPONENT_NAMES = frozenset(
     {
@@ -33,7 +34,6 @@ COMPONENT_NAMES = frozenset(
         "groq",
         "bothub",
         "deepl",
-        "rapidapi_translate",
         "youtube",
         "itad",
         "gamerpower",
@@ -142,8 +142,6 @@ def _run_probe(name: str) -> tuple[int, bytes]:
         return _probe_bothub()
     if name == "deepl":
         return _probe_deepl()
-    if name == "rapidapi_translate":
-        return _probe_rapidapi_translate()
     if name == "youtube":
         return _probe_youtube()
     if name == "itad":
@@ -223,12 +221,14 @@ def _probe_telegram() -> tuple[int, bytes]:
 
 
 def _probe_igdb() -> tuple[int, bytes]:
-    from igdb_dumps import USED_ENDPOINTS
+    from igdb_dumps import USED_ENDPOINTS, is_igdb_sync_running
 
     with _PROBES_LOCK:
         db = _db
     if db is None:
         return _na()
+    if is_igdb_sync_running():
+        return 200, b"syncing"
     now = int(time.time())
     try:
         for ep in sorted(USED_ENDPOINTS):
@@ -358,33 +358,6 @@ def _probe_deepl() -> tuple[int, bytes]:
         )
     except Exception:
         logger.exception("health probe deepl failed")
-        return _fail(b"net")
-    if r.status_code == 200:
-        return _ok()
-    return _fail(b"auth" if r.status_code in (401, 403) else b"http")
-
-
-def _probe_rapidapi_translate() -> tuple[int, bytes]:
-    """Tiny EN→RU call — validates key + Deep Translate subscription (not a public stub)."""
-    from config import RAPIDAPI_KEY
-
-    key = (RAPIDAPI_KEY or "").strip()
-    if not key:
-        return _na()
-    host = "deep-translate1.p.rapidapi.com"
-    try:
-        r = _SESSION.post(
-            f"https://{host}/language/translate/v2",
-            json={"q": "ok", "source": "en", "target": "ru", "format": "text"},
-            headers={
-                "X-RapidAPI-Key": key,
-                "X-RapidAPI-Host": host,
-                "Content-Type": "application/json",
-            },
-            timeout=_HTTP_TIMEOUT,
-        )
-    except Exception:
-        logger.exception("health probe rapidapi translate failed")
         return _fail(b"net")
     if r.status_code == 200:
         return _ok()

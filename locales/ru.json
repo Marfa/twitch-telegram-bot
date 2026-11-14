@@ -1417,7 +1417,6 @@
   "premium_promo_used": "Вы уже использовали этот промокод.",
   "premium_promo_expired": "Срок действия промокода истёк.",
   "premium_promo_kind_blocked": "Этот промокод не действует на выбранный тариф.",
-  "deepl_quota_admin": "Квота DeepL API исчерпана (HTTP 456). Переводы идут через RapidAPI Deep Translate, пока не будет новый ключ или план DeepL.",
   "btn_channel_stats": "📊 Статистика канала",
   "premium_feat_channel_stats": "Статистика канала",
   "premium_feat_channel_stats_desc": "Карточка среднего/пикового онлайна, часов эфира и игр по вашему Twitch-каналу",

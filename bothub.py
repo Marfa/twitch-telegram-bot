@@ -35,7 +35,7 @@ _gen_locks_guard = threading.Lock()
 _gen_locks: dict[str, threading.Lock] = {}
 # ponytail: after BotHub CAPS 403 on primary image model, use fallback for the rest
 # of the process (bot is long-lived; restart clears). Ceiling: no TTL probe back to
-# primary — upgrade: sticky flag like translate._deepl_quota_exhausted.
+# primary — upgrade: sticky exhausted flag for process lifetime if needed.
 _bothub_caps_fallback_run = False
 
 

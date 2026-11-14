@@ -117,8 +117,6 @@ bot ──────────────────► db
 
 ---
 
-## Backlog (DeepL / RapidAPI, без LT)
+## Backlog (DeepL, без LT)
 
-Актуально при текущей схеме DeepL primary → RapidAPI sticky fallback:
-
-- [ ] **Отключить ЛС админам об истечении лимита DeepL** — сейчас `notify_admins_deepl_quota` / ключ `deepl_quota_admin` (один DM на первый HTTP 456 за жизнь процесса). Убрать hook в `bot.py` + `set_deepl_quota_exhausted_notifier`, функцию и i18n; sticky RapidAPI оставить.
+Сейчас только DeepL (`translate.py`); RapidAPI fallback убран. При HTTP 456 текст остаётся без перевода.

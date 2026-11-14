@@ -125,8 +125,6 @@ CHAT_SEND_DAILY_RETENTION_DAYS = int(os.getenv("CHAT_SEND_DAILY_RETENTION_DAYS",
 # Ops-only log of group/channel alert deliveries (not shown in user alert history).
 ALERT_DELIVERY_LOG_DAYS = int(os.getenv("ALERT_DELIVERY_LOG_DAYS", "30"))
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
-# Fallback when DeepL quota (HTTP 456) is exhausted — RapidAPI Deep Translate.
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "").strip()
 # Optional: Groq Whisper + LLM for AI-clips emotion/game scoring on peaks.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 # Optional: BotHub AI alert covers (Flash Lite by default). Prefer Eco key. Skip if unset.

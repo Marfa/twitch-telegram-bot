@@ -3,7 +3,6 @@ from __future__ import annotations
 import html
 import logging
 import re
-from collections.abc import Callable
 
 import requests
 
@@ -14,51 +13,6 @@ logger = logging.getLogger(__name__)
 _DEEPL_SOURCE = {"en": "EN", "ru": "RU", "uk": "UK", "it": "IT"}
 _DEEPL_TARGET = {"en": "EN-US", "ru": "RU", "uk": "UK", "it": "IT"}
 _DEEPL_TIMEOUT = 30
-
-# RapidAPI Deep Translate (Google Translate v2-shaped). Fallback after DeepL 456.
-_RAPID_LANG = {"en": "en", "ru": "ru", "uk": "uk", "it": "it"}
-_RAPID_TIMEOUT = 30
-_RAPID_HOST = "deep-translate1.p.rapidapi.com"
-_RAPID_URL = f"https://{_RAPID_HOST}/language/translate/v2"
-
-# After DeepL 456, stay on RapidAPI for process lifetime (Developer credit does not reset).
-_deepl_quota_exhausted: bool = False
-_deepl_quota_notifier: Callable[[], None] | None = None
-
-
-class DeeplQuotaExceeded(RuntimeError):
-    """DeepL returned HTTP 456 (quota exhausted)."""
-
-
-def set_deepl_quota_exhausted_notifier(fn: Callable[[], None] | None) -> None:
-    """Register sync hook (schedules admin DM) fired once on first DeepL 456."""
-    global _deepl_quota_notifier
-    _deepl_quota_notifier = fn
-
-
-def clear_deepl_quota_exhausted() -> None:
-    """Reset sticky fallback (tests / after deploying a new DeepL key)."""
-    global _deepl_quota_exhausted
-    _deepl_quota_exhausted = False
-
-
-def _deepl_quota_blocked() -> bool:
-    """True after DeepL 456 — permanent RapidAPI-only until process restart / clear."""
-    return _deepl_quota_exhausted
-
-
-def _mark_deepl_quota_exhausted() -> None:
-    global _deepl_quota_exhausted
-    first = not _deepl_quota_exhausted
-    _deepl_quota_exhausted = True
-    if not first:
-        return
-    if _deepl_quota_notifier is None:
-        return
-    try:
-        _deepl_quota_notifier()
-    except Exception:
-        logger.exception("DeepL quota admin notify hook failed")
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -106,17 +60,11 @@ def _normalize_locale(locale: str | None) -> str:
     return DEFAULT_LOCALE
 
 
-def _rapidapi_configured() -> bool:
-    import config as cfg
-
-    return bool(cfg.RAPIDAPI_KEY)
-
-
 def translation_configured() -> bool:
-    """True when DeepL and/or RapidAPI Deep Translate can translate."""
+    """True when DeepL can translate."""
     import config as cfg
 
-    return bool(cfg.DEEPL_API_KEY) or _rapidapi_configured()
+    return bool(cfg.DEEPL_API_KEY)
 
 
 def _tr_deepl(
@@ -145,76 +93,13 @@ def _tr_deepl(
         timeout=_DEEPL_TIMEOUT,
     )
     if response.status_code == 456:
-        raise DeeplQuotaExceeded(response.text[:200] or "DeepL quota exceeded")
+        logger.warning("DeepL quota exceeded (HTTP 456); leaving text untranslated")
+        return text
     response.raise_for_status()
     translations = response.json().get("translations") or []
     if not translations:
         return text
     return str(translations[0].get("text") or text)
-
-
-def _parse_rapid_translation(data: object, fallback: str) -> str:
-    """Accept Deep Translate dict shape and Google-native list shape."""
-    if not isinstance(data, dict):
-        raise RuntimeError(f"Unexpected RapidAPI Deep Translate response: {data!r}")
-    translations = (data.get("data") or {}).get("translations")
-    if isinstance(translations, dict):
-        texts = translations.get("translatedText")
-        if isinstance(texts, list) and texts:
-            return str(texts[0] or fallback)
-        if isinstance(texts, str) and texts.strip():
-            return texts
-    if isinstance(translations, list) and translations:
-        first = translations[0] or {}
-        if isinstance(first, dict):
-            return str(first.get("translatedText") or fallback)
-    raise RuntimeError(f"Unexpected RapidAPI Deep Translate response: {data!r}")
-
-
-def _tr_rapidapi(
-    text: str,
-    *,
-    target: str,
-    source: str | None,
-    use_html: bool,
-) -> str:
-    import config as cfg
-
-    payload: dict[str, object] = {
-        "q": text,
-        "target": _RAPID_LANG[target],
-        "format": "html" if use_html else "text",
-    }
-    if source:
-        payload["source"] = _RAPID_LANG[source]
-    headers = {
-        "X-RapidAPI-Key": cfg.RAPIDAPI_KEY,
-        "X-RapidAPI-Host": _RAPID_HOST,
-        "Content-Type": "application/json",
-    }
-    try:
-        response = requests.post(
-            _RAPID_URL,
-            json=payload,
-            headers=headers,
-            timeout=_RAPID_TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        # Same visibility as HTTP errors → PostHog via ERROR logs.
-        logger.error(
-            "rapidapi deep translate → %s %s",
-            type(exc).__name__,
-            str(exc)[:500],
-        )
-        raise
-    if not response.ok:
-        logger.error(
-            "rapidapi deep translate → %s %s",
-            response.status_code,
-            response.text[:500],
-        )
-    response.raise_for_status()
-    return _parse_rapid_translation(response.json(), text)
 
 
 def translate_text(
@@ -224,8 +109,6 @@ def translate_text(
     source_lang: str | None = None,
     preserve_html: bool | None = None,
 ) -> str:
-    import config as cfg
-
     target = _normalize_locale(target_lang)
     source = _normalize_locale(source_lang) if source_lang else None
     if source and target == source:
@@ -243,24 +126,7 @@ def translate_text(
         else ("<" in text and ">" in text)
     )
 
-    if cfg.DEEPL_API_KEY and not _deepl_quota_blocked():
-        try:
-            return _tr_deepl(text, target=target, source=source, use_html=use_html)
-        except DeeplQuotaExceeded:
-            _mark_deepl_quota_exhausted()
-            logger.warning(
-                "DeepL quota exceeded; falling back to RapidAPI Deep Translate"
-            )
-
-    if _rapidapi_configured():
-        return _tr_rapidapi(text, target=target, source=source, use_html=use_html)
-
-    if _deepl_quota_blocked():
-        raise RuntimeError(
-            "DeepL quota exceeded and RapidAPI Deep Translate is not configured "
-            "(RAPIDAPI_KEY)"
-        )
-    return text
+    return _tr_deepl(text, target=target, source=source, use_html=use_html)
 
 
 def build_translations(

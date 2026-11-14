@@ -409,6 +409,11 @@ def endpoints_due(db: Any, endpoints: set[str]) -> list[str]:
                 due.append(ep)
     return due
 
+def is_igdb_sync_running() -> bool:
+    """True while sync_needed holds the process-local dump sync lock."""
+    return bool(_syncing)
+
+
 def sync_needed(db: Any, twitch: Any, *, force: bool = False) -> dict[str, int]:
     """Sync all used dumps that are due (or all if force). Returns {endpoint: rows}."""
     global _syncing

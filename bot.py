@@ -2671,17 +2671,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             loop, on_whisper=on_eventsub_whisper, on_revoke=on_eventsub_revoke
         )
 
-        from handlers.monitoring import notify_admins_deepl_quota
-        from translate import set_deepl_quota_exhausted_notifier
-
-        def _on_deepl_quota_exhausted() -> None:
-            application.create_task(
-                notify_admins_deepl_quota(application),
-                name="deepl-quota-admin-notify",
-            )
-
-        set_deepl_quota_exhausted_notifier(_on_deepl_quota_exhausted)
-
         # Ready only after Application init — avoid deploy cutting over before polling.
         mark_ready()
         from handlers.settings import ensure_stream_chat_menu_buttons_for_all
