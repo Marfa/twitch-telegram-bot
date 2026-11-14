@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import Application, ContextTypes
@@ -673,86 +672,6 @@ def _format_premium_purchase_line(lang: str, row) -> str:
     )
 
 
-def build_premium_digest_chat_data(
-    lang: str,
-    *,
-    rows: list,
-    new_count: int,
-    renew_count: int,
-) -> str:
-    """Compact JSON for HTMLBubble chat_data (≤1024 UTF-8 bytes)."""
-    total_stars = sum(int(getattr(row, "stars", 0) or 0) for row in rows)
-    day = datetime.now(SCHEDULE_TZ).strftime("%d.%m")
-    payload: dict[str, Any] = {
-        "t": t("premium_digest_widget_title", lang, date=day),
-        "ch": [
-            {
-                "v": str(new_count),
-                "l": " " + t("premium_digest_chip_new", lang),
-            },
-            {
-                "v": str(renew_count),
-                "l": " " + t("premium_digest_chip_renew", lang),
-            },
-            {
-                "v": str(total_stars),
-                "l": "⭐",
-            },
-        ],
-        "l": [],
-    }
-    # Fit as many short lines as chat_data allows.
-    more = 0
-    for row in rows:
-        kind = str(getattr(row, "kind", "") or "")[:8]
-        line = (
-            f"{row.user_id} · "
-            f"{'↻' if row.is_renewal else '+'} · "
-            f"{kind} · {row.stars}⭐"
-        )[:72]
-        payload["l"].append(line)
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        if len(raw.encode("utf-8")) > 1024:
-            payload["l"].pop()
-            more = len(rows) - len(payload["l"])
-            break
-    if more > 0:
-        payload["l"].append(t("premium_digest_more", lang, n=more)[:40])
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        while len(raw.encode("utf-8")) > 1024 and len(payload["l"]) > 1:
-            # Drop last real line before the "+N more" marker.
-            payload["l"].pop(-2)
-            more += 1
-            payload["l"][-1] = t("premium_digest_more", lang, n=more)[:40]
-            raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    else:
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    if len(raw.encode("utf-8")) > 1024:
-        payload["l"] = []
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    if len(raw.encode("utf-8")) > 1024:
-        raise ValueError("premium digest chat_data too large")
-    return raw
-
-
-async def on_premium_digest_full(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    query = update.callback_query
-    if query is None or query.from_user is None:
-        return
-    await query.answer()
-    admin_id = int(query.from_user.id)
-    store = context.application.bot_data.get("premium_digest_full") or {}
-    text = store.get(admin_id) if isinstance(store, dict) else None
-    if not text:
-        return
-    try:
-        await context.bot.send_message(admin_id, text)
-    except (BadRequest, Forbidden) as exc:
-        logger.warning("premium digest full text to %s: %s", admin_id, exc)
-
-
 async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     """DM admins a list of new Stars Premium purchases since the last digest."""
     from config import ADMIN_USER_IDS
@@ -766,7 +685,6 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
     renew_count = sum(1 for row in rows if row.is_renewal)
     new_count = len(rows) - renew_count
     delivered = 0
-    full_store = context.application.bot_data.setdefault("premium_digest_full", {})
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
         lines = "".join(_format_premium_purchase_line(lang, row) for row in rows)
@@ -778,60 +696,13 @@ async def daily_premium_purchases_report(context: ContextTypes.DEFAULT_TYPE) -> 
             renew_count=renew_count,
             lines=lines,
         )
-        full_store[int(admin_id)] = full_text
-        sent_ok = False
         try:
-            from telegram_widgets import PREMIUM_DIGEST_WIDGET_HTML, send_widget
-
-            chat_data = build_premium_digest_chat_data(
-                lang,
-                rows=rows,
-                new_count=new_count,
-                renew_count=renew_count,
-            )
-            kb = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            t("premium_digest_full_btn", lang),
-                            callback_data="premium_digest:full",
-                        )
-                    ]
-                ]
-            )
-            caption = t(
-                "daily_premium_purchases",
-                lang,
-                count=len(rows),
-                new_count=new_count,
-                renew_count=renew_count,
-                lines="",
-            )
-            result = send_widget(
-                chat_id=int(admin_id),
-                html=PREMIUM_DIGEST_WIDGET_HTML,
-                chat_data=chat_data,
-                caption=caption[:1024],
-                height=280,
-                reply_markup=kb,
-            )
-            sent_ok = bool(result.ok)
-        except Exception as exc:
-            logger.info(
-                "premium digest widget fallback admin=%s: %s",
-                admin_id,
-                type(exc).__name__,
-            )
-        if not sent_ok:
-            try:
-                await context.bot.send_message(admin_id, full_text)
-                sent_ok = True
-            except (BadRequest, Forbidden) as exc:
-                logger.warning(
-                    "Cannot send premium digest to admin %s: %s", admin_id, exc
-                )
-        if sent_ok:
+            await context.bot.send_message(admin_id, full_text)
             delivered += 1
+        except (BadRequest, Forbidden) as exc:
+            logger.warning(
+                "Cannot send premium digest to admin %s: %s", admin_id, exc
+            )
     if delivered:
         db.mark_premium_purchases_digested([row.id for row in rows])
         return

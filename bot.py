@@ -214,7 +214,6 @@ from handlers.monitoring import (
     check_cursor_status,
     daily_bot_stats_snapshot,
     daily_premium_purchases_report,
-    on_premium_digest_full,
     grant_and_announce_lucky_nth,
     monthly_lucky_premium,
     monthly_new_users_report,
@@ -2875,10 +2874,6 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_dm_main_menu, pattern=r"^dm_menu$"),
-        group=0,
-    )
-    app.add_handler(
-        CallbackQueryHandler(on_premium_digest_full, pattern=r"^premium_digest:full$"),
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_sb_edit_pick, pattern=r"^sb_edit:\d+$"), group=0)
