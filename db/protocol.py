@@ -1161,7 +1161,9 @@ class Database(Protocol):
         self, rows: list[dict[str, Any]]
     ) -> None: ...
 
-    def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]: ...
+    def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]:
+        """Twitch category ids; editions without a map use version_parent."""
+        ...
 
     def igdb_company_labels_for_games(
         self, game_ids: list[int]

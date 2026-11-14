@@ -147,6 +147,71 @@ def _check_release_search_punct() -> None:
         assert any(h["id"] == 9 for h in hits)
 
 
+def _check_igdb_edition_twitch_parent_and_title_base() -> None:
+    """Edition without Twitch map → version_parent; Helix miss → title before ' - '."""
+    from twitch import TwitchClient
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "bot.db")
+        with db._conn() as conn:
+            conn.execute(
+                "INSERT INTO igdb_games (id, name, version_parent, summary) "
+                "VALUES (?, ?, ?, ?)",
+                (11208, "NieR:Automata", None, ""),
+            )
+            conn.execute(
+                "INSERT INTO igdb_games (id, name, version_parent, summary) "
+                "VALUES (?, ?, ?, ?)",
+                (103294, "Nier: Automata - Become as Gods Edition", 11208, ""),
+            )
+            conn.execute(
+                "INSERT INTO igdb_games (id, name, version_parent, summary) "
+                "VALUES (?, ?, ?, ?)",
+                (28180, "Nier: Automata - 3C3C1D119440927", None, ""),
+            )
+            conn.execute(
+                "INSERT INTO igdb_external_twitch (twitch_uid, game_id) VALUES (?, ?)",
+                ("494162", 11208),
+            )
+            conn.commit()
+        assert db.igdb_twitch_uids_for_game(11208) == ["494162"]
+        assert db.igdb_twitch_uids_for_game(103294) == ["494162"]
+        assert db.igdb_twitch_uids_for_game(28180) == []
+
+        client = TwitchClient()
+        client.bind_igdb_db(db)
+        parent_cat = client.resolve_twitch_category_for_igdb_game(
+            103294, game_name="Nier: Automata - Become as Gods Edition"
+        )
+        assert parent_cat == {
+            "id": "494162",
+            "name": "Nier: Automata - Become as Gods Edition",
+        }
+
+        helix_calls: list[str] = []
+
+        def _search(query: str, *, first: int = 10, max_pages: int = 1):
+            helix_calls.append(query)
+            # Full edition title: empty (as on live Helix); base title hits.
+            q = (query or "").casefold()
+            if "3c3c" in q or "become" in q:
+                return []
+            if "nier" in q and "automata" in q:
+                return [{"id": "494162", "name": "NieR:Automata"}]
+            return []
+
+        client.search_categories = _search  # type: ignore[method-assign]
+        orphan = client.resolve_twitch_category_for_igdb_game(
+            28180, game_name="Nier: Automata - 3C3C1D119440927"
+        )
+        assert orphan == {"id": "494162", "name": "NieR:Automata"}
+        folded = [c.casefold() for c in helix_calls]
+        assert any("3c3c" in c for c in folded)
+        assert any(
+            "nier" in c and "automata" in c and "3c3c" not in c for c in folded
+        )
+
+
 def _check_release_search_live_fallback() -> None:
     """Dump miss → live IGDB search, cache game so pick/igdb_game_by_id works."""
     from twitch import TwitchClient
@@ -1000,6 +1065,7 @@ def run() -> None:
     _check_release_pick_disambiguates()
     _check_release_pick_pagination()
     _check_release_search_punct()
+    _check_igdb_edition_twitch_parent_and_title_base()
     _check_release_search_live_fallback()
     _check_release_dates_live_fallback()
     _check_release_search_control_prefix()

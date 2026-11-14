@@ -9806,19 +9806,41 @@ owner_id, twitch_username, twitch_user_id,
             conn.commit()
 
     def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]:
+        """Twitch category ids for an IGDB game; editions fall back to version_parent."""
         gid = int(game_id or 0)
         if gid <= 0:
             return []
-        with self._conn() as conn:
+
+        def _uids(conn, target: int) -> list[str]:
             rows = conn.execute(
                 """
                 SELECT twitch_uid FROM igdb_external_twitch
                 WHERE game_id = ?
                 ORDER BY twitch_uid
                 """,
-                (gid,),
+                (target,),
             ).fetchall()
-        return [str(r["twitch_uid"]).strip() for r in rows if str(r["twitch_uid"] or "").strip()]
+            return [
+                str(r["twitch_uid"]).strip()
+                for r in rows
+                if str(r["twitch_uid"] or "").strip()
+            ]
+
+        with self._conn() as conn:
+            uids = _uids(conn, gid)
+            if uids:
+                return uids
+            row = conn.execute(
+                "SELECT version_parent FROM igdb_games WHERE id = ?",
+                (gid,),
+            ).fetchone()
+            try:
+                parent = int(row["version_parent"] or 0) if row else 0
+            except (TypeError, ValueError, KeyError):
+                parent = 0
+            if parent <= 0 or parent == gid:
+                return []
+            return _uids(conn, parent)
 
     def igdb_company_labels_for_games(
         self, game_ids: list[int]

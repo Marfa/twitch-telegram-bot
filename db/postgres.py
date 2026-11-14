@@ -10678,25 +10678,43 @@ owner_id, twitch_username, twitch_user_id,
             conn.commit()
 
     def igdb_twitch_uids_for_game(self, game_id: int) -> list[str]:
+        """Twitch category ids for an IGDB game; editions fall back to version_parent."""
         gid = int(game_id or 0)
         if gid <= 0:
             return []
-        with self._conn() as conn:
-            cur = self._cursor(conn)
+
+        def _uids(cur, target: int) -> list[str]:
             cur.execute(
                 """
                 SELECT twitch_uid FROM igdb_external_twitch
                 WHERE game_id = %s
                 ORDER BY twitch_uid
                 """,
+                (target,),
+            )
+            return [
+                str(r["twitch_uid"]).strip()
+                for r in cur.fetchall()
+                if str(r["twitch_uid"] or "").strip()
+            ]
+
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            uids = _uids(cur, gid)
+            if uids:
+                return uids
+            cur.execute(
+                "SELECT version_parent FROM igdb_games WHERE id = %s",
                 (gid,),
             )
-            rows = cur.fetchall()
-        return [
-            str(r["twitch_uid"]).strip()
-            for r in rows
-            if str(r["twitch_uid"] or "").strip()
-        ]
+            row = cur.fetchone()
+            try:
+                parent = int(row["version_parent"] or 0) if row else 0
+            except (TypeError, ValueError, KeyError):
+                parent = 0
+            if parent <= 0 or parent == gid:
+                return []
+            return _uids(cur, parent)
 
     def igdb_company_labels_for_games(
         self, game_ids: list[int]

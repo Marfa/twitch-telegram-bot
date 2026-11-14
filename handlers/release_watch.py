@@ -1294,30 +1294,23 @@ async def on_release_find_streams(
     game = db.igdb_game_by_id(game_id) or {}
     game_name = str(game.get("name") or "").strip() or f"#{game_id}"
     twitch = context.application.bot_data.get("twitch")
-    uids = db.igdb_twitch_uids_for_game(game_id)
-    cat_id = uids[0] if uids else ""
+    cat_id = ""
     cat_name = game_name
-    if not cat_id and twitch is not None:
-        from search_normalize import normalize_search_query
-
+    if twitch is not None:
         try:
-            found = await asyncio.to_thread(
-                twitch.search_categories,
-                normalize_search_query(game_name) or game_name,
-                first=10,
+            cat = await asyncio.to_thread(
+                twitch.resolve_twitch_category_for_igdb_game,
+                game_id,
+                game_name=game_name,
             )
         except Exception:
-            logger.exception("release find-streams Helix search failed game=%s", game_id)
-            found = []
-        want = game_name.casefold()
-        exact = next(
-            (c for c in found if str(c.get("name") or "").casefold() == want),
-            None,
-        )
-        pick = exact or (found[0] if found else None)
-        if pick:
-            cat_id = str(pick.get("id") or "").strip()
-            cat_name = str(pick.get("name") or game_name).strip() or game_name
+            logger.exception(
+                "release find-streams category resolve failed game=%s", game_id
+            )
+            cat = None
+        if cat:
+            cat_id = str(cat.get("id") or "").strip()
+            cat_name = str(cat.get("name") or game_name).strip() or game_name
     if not cat_id:
         await context.bot.send_message(
             user_id,

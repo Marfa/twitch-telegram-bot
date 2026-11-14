@@ -2336,6 +2336,72 @@ class TwitchClient:
                     pass
         return ""
 
+    def resolve_twitch_category_for_igdb_game(
+        self, game_id: int, *, game_name: str = ""
+    ) -> dict[str, str] | None:
+        """One IGDB game → Twitch category ``{id, name}``.
+
+        Uses ``igdb_external_twitch`` (editions via ``version_parent``), then Helix
+        search on the full title and — if empty — the part before `` - ``
+        (Day One / GOTY / steelbook names that are not Twitch categories).
+        """
+        from search_normalize import normalize_search_query, rank_twitch_category_hits
+
+        name = (game_name or "").strip()
+        gid = int(game_id or 0)
+        db = self._igdb_db
+        if db is not None and gid > 0:
+            try:
+                uids = db.igdb_twitch_uids_for_game(gid)
+            except Exception:
+                logger.exception("IGDB→Twitch uid lookup failed game=%s", gid)
+                uids = []
+            if uids:
+                uid = uids[0]
+                return {"id": uid, "name": name or uid}
+
+        queries: list[str] = []
+        if name:
+            queries.append(name)
+        if " - " in name:
+            base = name.split(" - ", 1)[0].strip()
+            if base and all(base.casefold() != q.casefold() for q in queries):
+                queries.append(base)
+
+        seen_q: set[str] = set()
+        for q in queries:
+            key = normalize_search_query(q) or q.casefold()
+            if not key or key in seen_q:
+                continue
+            seen_q.add(key)
+            try:
+                found = self.search_categories(q, first=10)
+            except Exception:
+                logger.exception("Twitch category search failed for %s", q)
+                continue
+            if not found:
+                continue
+            ranked = rank_twitch_category_hits(found, q, limit=5)
+            nq = normalize_search_query(q)
+            want = q.casefold()
+            exact = next(
+                (
+                    c
+                    for c in ranked
+                    if normalize_search_query(str(c.get("name") or "")) == nq
+                    or str(c.get("name") or "").casefold() == want
+                ),
+                None,
+            )
+            pick = exact or (ranked[0] if ranked else None)
+            if not pick:
+                continue
+            cid = str(pick.get("id") or "").strip()
+            cname = str(pick.get("name") or q).strip() or q
+            if cid:
+                return {"id": cid, "name": cname}
+        return None
+
     def resolve_igdb_games_to_twitch_categories(
         self, games: list[dict[str, Any]]
     ) -> list[dict[str, str]]:
@@ -2345,34 +2411,23 @@ class TwitchClient:
         for game in games:
             name = str(game.get("name") or "").strip()
             twitch_id = self._igdb_twitch_uid(game)
-            if twitch_id:
-                if twitch_id in seen:
+            cat_name = name
+            if not twitch_id:
+                try:
+                    gid = int(game.get("id") or 0)
+                except (TypeError, ValueError):
+                    gid = 0
+                cat = self.resolve_twitch_category_for_igdb_game(
+                    gid, game_name=name
+                )
+                if not cat:
                     continue
-                seen.add(twitch_id)
-                out.append({"id": twitch_id, "name": name or twitch_id})
+                twitch_id = cat["id"]
+                cat_name = str(cat.get("name") or name).strip() or name
+            if not twitch_id or twitch_id in seen:
                 continue
-            if not name:
-                continue
-            try:
-                found = self.search_categories(name, first=10)
-            except Exception:
-                logger.exception("Twitch category search failed for %s", name)
-                continue
-            if not found:
-                continue
-            want = name.casefold()
-            exact = [
-                c
-                for c in found
-                if str(c.get("name") or "").strip().casefold() == want
-            ]
-            pick = exact[0] if exact else found[0]
-            cid = str(pick.get("id") or "").strip()
-            cname = str(pick.get("name") or name).strip()
-            if not cid or cid in seen:
-                continue
-            seen.add(cid)
-            out.append({"id": cid, "name": cname})
+            seen.add(twitch_id)
+            out.append({"id": twitch_id, "name": cat_name or twitch_id})
         return out
 
     def igdb_search_ignore_entities(
