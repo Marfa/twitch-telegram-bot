@@ -386,6 +386,20 @@ def _owned_features(st: prem.PremiumStatus) -> list[str]:
     return sorted(fid for fid, until in st.features.items() if int(until) > now)
 
 
+def _feat_checkout(
+    user_id: int, selected: list[str] | set[str], st: prem.PremiumStatus
+) -> tuple[int, int | None, int, int]:
+    """(charge_stars, subscription_period|None, prorate_until, monthly_stars)."""
+    n = len(selected)
+    monthly = prem.stars_feature_price(user_id) * max(1, n)
+    charge, period, prorate_until = prem.feature_checkout_stars(
+        user_id,
+        n,
+        anchor_until=prem.feature_billing_anchor_until(st),
+    )
+    return charge, period, prorate_until, monthly
+
+
 async def _show_owned_subscriptions(
     query, db: Database, user_id: int, lang: str
 ) -> None:
@@ -621,6 +635,7 @@ async def _send_invoice_link(
     surcharge_stars: int = 0,
     promo_code: str = "",
     promo_percent: int = 0,
+    prorate_until: int = 0,
 ) -> None:
     attr: dict[str, str] = {}
     if context is not None and user_id is not None:
@@ -641,6 +656,11 @@ async def _send_invoice_link(
             f"{description}\n"
             f"{t('premium_promo_applied', lang, percent=promo_percent, stars=base)}"
         )
+    if int(prorate_until or 0) > 0:
+        desc = (
+            f"{desc}\n"
+            f"{t('premium_pay_prorate_note', lang, stars=base, until=_fmt_until(int(prorate_until)))}"
+        )
     if extra > 0:
         desc = f"{desc}\n{t('premium_pay_surcharge_note', lang, stars=extra)}"
     prices = [LabeledPrice(title, total)]
@@ -652,9 +672,10 @@ async def _send_invoice_link(
         "currency": "XTR",
         "prices": prices,
     }
-    # Promo = one-shot invoice only. Telegram renews Stars subs at the invoice
-    # price, so a discounted subscription_period would lock in the discount.
-    period = None if promo_percent > 0 else subscription_period
+    # Promo / mid-cycle à-la-carte proration = one-shot only. Telegram renews
+    # Stars subs at the invoice price, so a discounted subscription_period
+    # would lock in the discount forever.
+    period = None if promo_percent > 0 or int(prorate_until or 0) > 0 else subscription_period
     if period is not None:
         kwargs["subscription_period"] = period
     try:
@@ -695,17 +716,21 @@ async def _begin_pay_with_promo(
     kind: str,
     surcharge_stars: int = 0,
     subscription_period: int | None = None,
+    prorate_until: int = 0,
 ) -> None:
     """Show promo-code step when applicable; otherwise create the Stars invoice."""
+    desc_kwargs = dict(description_kwargs or {})
     context.user_data[_PENDING_PAY] = {
         "title": title,
         "description_key": description_key,
-        "description_kwargs": dict(description_kwargs or {}),
+        "description_kwargs": desc_kwargs,
         "payload": payload,
         "stars": int(stars),
+        "monthly_stars": int(desc_kwargs.get("stars") or stars),
         "kind": kind,
         "surcharge_stars": int(surcharge_stars or 0),
         "subscription_period": subscription_period,
+        "prorate_until": int(prorate_until or 0),
     }
     context.user_data.pop(_AWAITING_PROMO, None)
     db: Database = context.application.bot_data["db"]
@@ -738,7 +763,9 @@ async def _finish_pending_pay(
     )
     desc_key = str(pending.get("description_key") or "")
     desc_kwargs = dict(pending.get("description_kwargs") or {})
-    desc_kwargs["stars"] = billed
+    # Tariff line keeps the monthly list price; invoice amount may be prorated.
+    monthly = int(pending.get("monthly_stars") or 0)
+    desc_kwargs["stars"] = monthly if monthly > 0 else billed
     description = t(desc_key, lang, **desc_kwargs) if desc_key else ""
     await _send_invoice_link(
         query,
@@ -754,6 +781,7 @@ async def _finish_pending_pay(
         surcharge_stars=int(pending.get("surcharge_stars") or 0),
         promo_code=promo_code,
         promo_percent=promo_percent,
+        prorate_until=int(pending.get("prorate_until") or 0),
     )
 
 
@@ -811,10 +839,17 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             if fid in prem.purchasable_feature_ids():
                 selected.add(fid)
         context.user_data["premium_feat_sel"] = sorted(selected)
+        pay_stars = (
+            _feat_checkout(user_id, selected, st)[0] if selected else None
+        )
         await query.edit_message_text(
             _premium_feat_pick_text(lang, user_id),
             reply_markup=premium_features_keyboard(
-                lang, selected, user_id=user_id, owned=owned if not _demo_force_free(user_id) else set()
+                lang,
+                selected,
+                user_id=user_id,
+                owned=owned if not _demo_force_free(user_id) else set(),
+                pay_stars=pay_stars,
             ),
             parse_mode=ParseMode.HTML,
         )
@@ -969,7 +1004,7 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.answer(t("premium_pay_failed", lang), show_alert=True)
             return
         await query.answer()
-        total = prem.stars_feature_price(user_id) * len(selected)
+        total, period, prorate_until, monthly = _feat_checkout(user_id, selected, st)
         surcharge = prem.refund_surcharge_for_features(db, user_id, selected)
         await _begin_pay_with_promo(
             query,
@@ -978,11 +1013,13 @@ async def on_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             lang=lang,
             title=t("premium_pay_feat_title", lang),
             description_key="premium_pay_feat_description",
+            description_kwargs={"stars": monthly},
             payload=prem.invoice_payload(user_id, "feat", selected),
             stars=total,
             kind="feat",
             surcharge_stars=surcharge,
-            subscription_period=prem.stars_period(),
+            subscription_period=period,
+            prorate_until=prorate_until,
         )
         return
 
@@ -1787,7 +1824,15 @@ async def successful_premium_payment(
         )
         prem.clear_all_refund_surcharge(db, parsed.user_id)
     elif parsed.kind == "feat":
-        until_unix = until_sub if until_sub > 0 else now + prem.stars_period()
+        # Telegram subscription → until_sub. One-shot (promo / mid-cycle
+        # proration) → align to existing feature billing date when present.
+        if until_sub > 0:
+            until_unix = until_sub
+        else:
+            anchor = prem.feature_billing_anchor_until(
+                prem.get_status(db, parsed.user_id), now=now
+            )
+            until_unix = anchor if anchor > now else now + prem.stars_period()
         features_s = ",".join(parsed.features)
         stars_eff = stars_paid or (
             prem.stars_feature_price(parsed.user_id) * max(1, len(parsed.features))
@@ -1800,7 +1845,8 @@ async def successful_premium_payment(
             until_unix=until_unix,
             stars_paid=stars_eff,
         )
-        if parsed.promo_code:
+        # No subscription_expiration_date ⇒ one-shot (promo or cycle align).
+        if until_sub <= 0:
             for fid in parsed.features:
                 db.set_premium_feature_canceled(parsed.user_id, fid)
         prem.clear_refund_surcharge_keys(db, parsed.user_id, list(parsed.features))

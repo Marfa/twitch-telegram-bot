@@ -259,6 +259,7 @@
   "premium_pay_life_description": "Lifetime Premium ({stars} Stars)",
   "premium_pay_feat_title": "Bot Premium — features",
   "premium_pay_feat_description": "Selected features ({stars} Stars / month)",
+  "premium_pay_prorate_note": "Due now: {stars} ⭐ until {until} (aligned with your current subscription). Then full price.",
   "premium_pay_done": "Premium activated. Thank you!\n\nIf you have problems with payment, access to paid features, or anything else with the bot, you can always message the developer @immarfa. Please include your user ID: <code>{user_id}</code>.",
   "premium_pay_link": "Open the invoice to pay with Stars:",
   "premium_trial_confirm": "Activate a free {days}-day trial?\n\nEverything stays after the trial, but alerts are paused. You can delete live-start alerts; enabling anything needs Premium again.\nOne trial per account.",

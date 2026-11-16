@@ -259,6 +259,7 @@
   "premium_pay_life_description": "Premium a vita ({stars} Stars)",
   "premium_pay_feat_title": "Bot Premium — funzioni",
   "premium_pay_feat_description": "Funzioni selezionate ({stars} Stars / mese)",
+  "premium_pay_prorate_note": "Da pagare ora: {stars} ⭐ fino al {until} (allineato all'abbonamento attuale). Poi prezzo pieno.",
   "premium_pay_done": "Premium attivato. Grazie!\n\nSe hai problemi con il pagamento, l'accesso alle funzioni a pagamento o qualsiasi altra cosa del bot, puoi sempre scrivere allo sviluppatore @immarfa. Indica il tuo ID utente: <code>{user_id}</code>.",
   "premium_pay_link": "Apri la fattura per pagare con Stars:",
   "premium_trial_confirm": "Attivare una prova gratuita di {days} giorni?\n\nDopo la prova resta tutto, ma gli avvisi sono in pausa. Puoi eliminare gli avvisi di inizio diretta; per riattivarne uno serve di nuovo Premium.\nUna prova per account.",

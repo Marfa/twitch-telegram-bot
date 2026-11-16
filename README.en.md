@@ -61,7 +61,7 @@ Stars (Telegram) plans and feature unlocks. A full plan unlocks every row in the
 | Single feature | 20 | 30 days each |
 | Channel advertising (streamers) | 300 | Stars subscription / month |
 
-Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars. One day before Stars ends — a payment reminder; after Stars expiry or a lost Twitch sub — 24h grace with a restore button, then Premium features pause. With Russian locale — **Buy Stars with RF card** button (external link). At checkout you can enter a promo code (discount on the first payment only; auto-renew / repurchase is full price).
+Also: a Twitch sub to `PREMIUM_TWITCH_LOGIN` (default `marfapr`) grants full Premium without Stars. One day before Stars ends — a payment reminder; after Stars expiry or a lost Twitch sub — 24h grace with a restore button, then Premium features pause. With Russian locale — **Buy Stars with RF card** button (external link). At checkout you can enter a promo code (discount on the first payment only; auto-renew / repurchase is full price). Mid-cycle à la carte add-ons are invoiced proportionally until the first feature’s billing date (list prices stay the same); then full price.
 
 | Feature | What it unlocks |
 |---|---|

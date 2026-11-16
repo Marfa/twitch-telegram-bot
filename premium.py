@@ -1678,6 +1678,71 @@ def _parse_purchase_paid_unix(paid_at: str) -> int:
         return 0
 
 
+def feature_billing_anchor_until(
+    st: PremiumStatus, *, now: int | None = None
+) -> int:
+    """Soonest à-la-carte until used as the shared billing date.
+
+    Prefer auto-renewing (not canceled) features — that is the Telegram
+    charge date. Fall back to any still-active one-shot / prorated row.
+    """
+    ts = int(now if now is not None else time.time())
+    renewing = [
+        int(u)
+        for fid, u in st.features.items()
+        if int(u) > ts and not st.is_feature_canceled(fid)
+    ]
+    if renewing:
+        return min(renewing)
+    active = [int(u) for u in st.features.values() if int(u) > ts]
+    return min(active) if active else 0
+
+
+def prorate_remaining_stars(
+    *,
+    stars: int,
+    now: int,
+    until_unix: int,
+    period: int | None = None,
+) -> int:
+    """Stars for time left until until_unix (ceil, min 1 if any time left)."""
+    amount = max(0, int(stars or 0))
+    period_s = max(1, int(period if period is not None else stars_period()))
+    remaining = int(until_unix) - int(now)
+    if amount <= 0 or remaining <= 0:
+        return 0
+    if remaining >= period_s:
+        return amount
+    return max(1, (amount * remaining + period_s - 1) // period_s)
+
+
+def feature_checkout_stars(
+    user_id: int | None,
+    feature_count: int,
+    *,
+    anchor_until: int = 0,
+    now: int | None = None,
+) -> tuple[int, int | None, int]:
+    """À-la-carte checkout: (charge_stars, subscription_period|None, prorate_until).
+
+    Mid-cycle adds (remaining < one period) are one-shot prorated to the
+    existing feature billing date — Telegram would lock a discounted
+    subscription_period forever (same constraint as promo codes).
+    """
+    n = max(1, int(feature_count))
+    unit = stars_feature_price(user_id)
+    monthly = unit * n
+    ts = int(now if now is not None else time.time())
+    anchor = int(anchor_until or 0)
+    period = stars_period()
+    if 0 < (anchor - ts) < period:
+        per = prorate_remaining_stars(
+            stars=unit, now=ts, until_unix=anchor, period=period
+        )
+        return per * n, None, anchor
+    return monthly, period, 0
+
+
 def prorate_refund_surcharge_stars(
     *,
     stars: int,

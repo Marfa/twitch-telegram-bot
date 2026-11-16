@@ -608,6 +608,7 @@ def premium_features_keyboard(
     *,
     user_id: int | None = None,
     owned: set[str] | None = None,
+    pay_stars: int | None = None,
 ) -> InlineKeyboardMarkup:
     from config import PREMIUM_FREE_ACTIVE_LIMIT
     from premium import feature_label_key, purchasable_feature_ids, stars_feature_price
@@ -632,7 +633,11 @@ def premium_features_keyboard(
             ]
         )
     n = len(selected)
-    total = n * stars_feature_price(user_id)
+    total = (
+        max(0, int(pay_stars))
+        if pay_stars is not None
+        else n * stars_feature_price(user_id)
+    )
     if n > 0:
         rows.append(
             [

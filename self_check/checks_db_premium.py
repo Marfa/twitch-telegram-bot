@@ -1933,6 +1933,94 @@ def check_db_premium() -> None:
             == 5
         )
 
+        from premium import (
+            PremiumStatus,
+            feature_billing_anchor_until,
+            feature_checkout_stars,
+            prorate_remaining_stars,
+            stars_feature_price,
+            stars_period,
+        )
+
+        period = stars_period()
+        now = 1_700_000_000
+        # Half period left → half price (ceil).
+        assert (
+            prorate_remaining_stars(
+                stars=20, now=now, until_unix=now + period // 2, period=period
+            )
+            == 10
+        )
+        assert (
+            prorate_remaining_stars(
+                stars=20, now=now, until_unix=now + period, period=period
+            )
+            == 20
+        )
+        assert (
+            prorate_remaining_stars(
+                stars=20, now=now, until_unix=now - 1, period=period
+            )
+            == 0
+        )
+        st_anchor = PremiumStatus(
+            permanent=False,
+            stars_until=0,
+            stars_charge_id="",
+            stars_canceled=False,
+            twitch_active=False,
+            twitch_user_id="",
+            features={"alert_types": now + 10 * 86400, "ai_clips": now + 20 * 86400},
+        )
+        assert feature_billing_anchor_until(st_anchor, now=now) == now + 10 * 86400
+        # Prefer auto-renewing feature over an earlier canceled one-shot.
+        st_pref = PremiumStatus(
+            permanent=False,
+            stars_until=0,
+            stars_charge_id="",
+            stars_canceled=False,
+            twitch_active=False,
+            twitch_user_id="",
+            features={
+                "alert_types": now + 5 * 86400,
+                "ai_clips": now + 20 * 86400,
+            },
+            feature_canceled={"alert_types": True},
+        )
+        assert feature_billing_anchor_until(st_pref, now=now) == now + 20 * 86400
+        assert feature_billing_anchor_until(
+            PremiumStatus(
+                permanent=False,
+                stars_until=0,
+                stars_charge_id="",
+                stars_canceled=False,
+                twitch_active=False,
+                twitch_user_id="",
+            ),
+            now=now,
+        ) == 0
+        unit = stars_feature_price()
+        charge, sub_period, prorate_until = feature_checkout_stars(
+            None, 2, anchor_until=now + 10 * 86400, now=now
+        )
+        assert sub_period is None and prorate_until == now + 10 * 86400
+        assert charge == 2 * prorate_remaining_stars(
+            stars=unit, now=now, until_unix=now + 10 * 86400, period=period
+        )
+        # Exactly one period left → full price with auto-renew (aligned renew).
+        full_aligned, sub_aligned, no_prorate_aligned = feature_checkout_stars(
+            None, 1, anchor_until=now + period, now=now
+        )
+        assert (
+            full_aligned == unit
+            and sub_aligned == period
+            and no_prorate_aligned == 0
+        )
+        full, sub_full, no_prorate = feature_checkout_stars(
+            None, 2, anchor_until=0, now=now
+        )
+        assert full == 2 * unit and sub_full == period and no_prorate == 0
+
         rdb = SqliteDatabase(Path(refund_tmp) / "refund.db")
         uid = 424242
         rdb.upsert_user(uid)
