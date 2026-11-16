@@ -702,18 +702,30 @@ async def _send_admin_broadcast(
     return sent, failed, len(user_ids)
 
 
+# Consecutive network errors after which Telegram counts as unreachable.
+_FEEDBACK_REFRESH_MAX_NETWORK_ERRORS = 3
+# Seconds before each retry of the deliveries that a network error left stale.
+_FEEDBACK_REFRESH_RETRY_DELAYS = (30, 120, 600)
+
+
 async def _refresh_broadcast_feedback_keyboards(
     context: ContextTypes.DEFAULT_TYPE,
     broadcast_id: int,
-) -> None:
+    deliveries: list[tuple[int, int]] | None = None,
+) -> list[tuple[int, int]]:
+    """Push current vote counts; return deliveries a network error left stale."""
     db: Database = context.application.bot_data["db"]
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
-    deliveries = db.get_broadcast_deliveries(broadcast_id)
+    if deliveries is None:
+        deliveries = db.get_broadcast_deliveries(broadcast_id)
     locales = db.get_user_locales([uid for uid, _ in deliveries])
-    for uid, message_id in deliveries:
+    failed: list[tuple[int, int]] = []
+    error_streak = 0
+    last_error: NetworkError | None = None
+    for index, (uid, message_id) in enumerate(deliveries):
         # Application.stop() waits for this task; end it quickly.
         if not context.application.running:
-            return
+            break
         lang = locales.get(uid) or DEFAULT_LOCALE
         markup = broadcast_feedback_keyboard(
             broadcast_id, up_count, down_count, lang
@@ -724,16 +736,34 @@ async def _refresh_broadcast_feedback_keyboards(
                 message_id=message_id,
                 reply_markup=markup,
             )
+            error_streak = 0
         except (BadRequest, Forbidden):
-            pass
+            error_streak = 0
         except NetworkError as exc:
-            logger.warning(
-                "Broadcast %s feedback refresh failed for %s: %s",
-                broadcast_id,
-                uid,
-                exc,
-            )
+            last_error = exc
+            failed.append((uid, message_id))
+            error_streak += 1
+            if error_streak >= _FEEDBACK_REFRESH_MAX_NETWORK_ERRORS:
+                # Each timeout costs seconds; keep the rest for the retry.
+                failed.extend(deliveries[index + 1 :])
+                break
         await asyncio.sleep(0.05)
+    if failed:
+        logger.warning(
+            "Broadcast %s feedback refresh left %s of %s deliveries stale: %s",
+            broadcast_id,
+            len(failed),
+            len(deliveries),
+            last_error,
+        )
+    return failed
+
+
+async def _wait_while_running(application: Application, seconds: int) -> None:
+    for _ in range(seconds):
+        if not application.running:
+            return
+        await asyncio.sleep(1)
 
 
 # broadcast_id -> another vote arrived while the refresh was running.
@@ -744,12 +774,29 @@ async def _run_broadcast_feedback_refresh(
     context: ContextTypes.DEFAULT_TYPE,
     broadcast_id: int,
 ) -> None:
+    deliveries: list[tuple[int, int]] | None = None
+    retries = 0
     try:
         while True:
-            await _refresh_broadcast_feedback_keyboards(context, broadcast_id)
+            failed = await _refresh_broadcast_feedback_keyboards(
+                context, broadcast_id, deliveries
+            )
             if not _feedback_refresh_pending[broadcast_id]:
-                return
-            _feedback_refresh_pending[broadcast_id] = False
+                if (
+                    not failed
+                    or retries >= len(_FEEDBACK_REFRESH_RETRY_DELAYS)
+                    or not context.application.running
+                ):
+                    return
+                await _wait_while_running(
+                    context.application, _FEEDBACK_REFRESH_RETRY_DELAYS[retries]
+                )
+                deliveries = failed
+                retries += 1
+            if _feedback_refresh_pending[broadcast_id]:
+                # New votes also changed counts on deliveries already updated.
+                _feedback_refresh_pending[broadcast_id] = False
+                deliveries, retries = None, 0
     finally:
         _feedback_refresh_pending.pop(broadcast_id, None)
 

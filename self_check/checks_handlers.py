@@ -2701,6 +2701,7 @@ def check_handlers() -> None:
 
         _check_category_watch_digest_and_legacy()
     _check_broadcast_feedback_refresh()
+    _check_broadcast_feedback_refresh_transient_failures()
     _check_posthog_inbox_poll_network_blip()
 
 
@@ -2780,6 +2781,66 @@ def _check_broadcast_feedback_refresh() -> None:
         )
     assert bot.edit_message_reply_markup.await_count == 3
     assert stopped_bot.edit_message_reply_markup.await_count == 0
+
+
+def _check_broadcast_feedback_refresh_transient_failures() -> None:
+    """Broadcast votes: repeated timeouts stop the pass; the retry resumes stale deliveries."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from telegram.error import NetworkError, TimedOut
+
+    import handlers.broadcast as broadcast
+
+    deliveries = [(uid, uid * 10) for uid in range(1, 7)]
+
+    class _Db:
+        def get_broadcast_feedback_counts(self, broadcast_id):
+            return 1, 0
+
+        def get_broadcast_deliveries(self, broadcast_id):
+            return deliveries
+
+        def get_user_locales(self, user_ids):
+            return {uid: "ru" for uid in user_ids}
+
+    def _ctx(bot):
+        app = SimpleNamespace(bot_data={"db": _Db()}, running=True)
+        return SimpleNamespace(application=app, bot=bot)
+
+    def _edited(bot):
+        return [c.kwargs["chat_id"] for c in bot.edit_message_reply_markup.await_args_list]
+
+    outage_bot = AsyncMock()
+    outage_bot.edit_message_reply_markup.side_effect = [
+        None,
+        TimedOut(),
+        NetworkError("Bad Gateway"),
+        TimedOut(),
+    ]
+    flaky_bot = AsyncMock()
+    flaky_bot.edit_message_reply_markup.side_effect = [
+        None,
+        TimedOut(),
+        None,
+        NetworkError("Bad Gateway"),
+        TimedOut(),
+        None,
+        None,
+        None,
+        None,
+    ]
+    with patch("handlers.broadcast.asyncio.sleep", new_callable=AsyncMock):
+        failed = asyncio.run(
+            broadcast._refresh_broadcast_feedback_keyboards(_ctx(outage_bot), 16)
+        )
+        broadcast._feedback_refresh_pending[16] = False
+        asyncio.run(broadcast._run_broadcast_feedback_refresh(_ctx(flaky_bot), 16))
+    assert _edited(outage_bot) == [1, 2, 3, 4]
+    assert failed == deliveries[1:]
+    assert _edited(flaky_bot) == [1, 2, 3, 4, 5, 6, 2, 4, 5]
+    assert 16 not in broadcast._feedback_refresh_pending
 
 
 def _check_category_watch_digest_and_legacy() -> None:
