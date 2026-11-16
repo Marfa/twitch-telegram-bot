@@ -1320,6 +1320,7 @@
   "category_watch_digest_empty": "За останню годину нових стрімів не було.",
   "game_card_genre": "Жанр:",
   "game_card_release_dates": "Дати релізу:",
+  "game_buy_button": "Купити",
   "game_info_prompt": "Введіть назву гри (пошук за IGDB):\n\nМетадані ігор надано <a href=\"https://www.igdb.com\">IGDB.com</a>",
   "btn_ai_clips": "🎬 AI-кліпи",
   "premium_feat_ai_clips": "AI-кліпи з VOD",

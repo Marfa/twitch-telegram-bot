@@ -24,7 +24,7 @@
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+) → **realtime or hourly digest**; live → else VOD; own category in **📋 My subscriptions** |
-| 📅 Release alerts | **➕ New subscription** under Game alert; IGDB search (local dump, live API on miss); dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform |
+| 📅 Release alerts | **➕ New subscription** under Game alert; IGDB search (local dump, live API on miss); dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform; on the card for **ru** — “Buy” (ggsel search via GGLead partner link) |
 | 🎁 Game giveaways | **➕ New subscription** under Release alerts; stores + platforms (GamerPower + IsThereAnyDeal); optional minimum discount % (ITAD deals from N%+); cards 5 at a time (photo+caption, discount after dates, store / streams, “Show more”); new games as a short summary + “Details”; **Notify about giveaway** — wait for a giveaway/discount of a chosen game (IGDB platforms + discount %), then pause |
 | 🎲 What to watch? | In **📦 Other**: feeling lucky immediately |
 | Cover | Optional alert cover — stream preview (frame, 30‑min refresh), stream GIF preview ⭐ (~30s autoplay MP4, 30‑min refresh), stream video preview ⭐ (~30s muted MP4, 30‑min refresh), game cover, **AI image** ⭐ (generated from the game description when the alert is sent; Advanced options), or your own photo; caption above or below; link preview then off |
@@ -255,7 +255,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below”, **To unwatched** |
-| 📦 Other | Follow/Unfollow (settings Premium), AI clips (Premium / à la carte), whisper alerts, schedule, what to watch (feeling lucky), chat, game info, channel stats (Premium / à la carte) |
+| 📦 Other | Follow/Unfollow (settings Premium), AI clips (Premium / à la carte), whisper alerts, schedule, what to watch (feeling lucky), chat, game info (IGDB card; for **ru** — “Buy” → ggsel search / GGLead), channel stats (Premium / à la carte) |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
 | ↳ 🎲 What to watch? | Feeling lucky immediately; suggest again |
@@ -352,6 +352,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `BOTHUB_IMAGE_MODEL` | Cover model (default `gemini-3.1-flash-lite-image`) |
 | `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback on CAPS / NOT_ENOUGH_TOKENS error code (default `gemini-2.5-flash-image`; empty = no fallback) |
 | `ISTHEREANYDEAL_API_KEY` | (opt.) IsThereAnyDeal game giveaways; without it only GamerPower is used |
+| `GGLEAD_FLOW_ID` | (opt.) GGLead flow id — “Buy” on game cards for **ru** locale (ggsel search via partner link) |
 | `YOUTUBE_API_KEY` | (opt.) YouTube Data API v3 — Multistream live checks (Google Cloud → API key) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Preview/MP4 refresh interval while live (default 1800) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |

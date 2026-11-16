@@ -1339,6 +1339,7 @@
   "category_watch_digest_empty": "No new streams in the last hour.",
   "game_card_genre": "Genre:",
   "game_card_release_dates": "Release dates:",
+  "game_buy_button": "Buy",
   "game_info_prompt": "Enter a game name (IGDB search):\n\nGames metadata is powered by <a href=\"https://www.igdb.com\">IGDB.com</a>",
   "btn_ai_clips": "🎬 AI clips",
   "premium_feat_ai_clips": "AI clips from VOD",

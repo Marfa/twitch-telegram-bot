@@ -1060,7 +1060,54 @@ def _check_sync_unfollow_skips_release_and_drops() -> None:
         assert asked_kept == []
 
 
+def _check_ggsel_partner_buy_url() -> None:
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    from ggsel_affiliate import partner_search_url, with_buy_button
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    assert partner_search_url("GTA 6", flow_id="") is None
+    assert partner_search_url("", flow_id="22483") is None
+    url = partner_search_url("GTA 6", flow_id="22483")
+    assert url is not None
+    assert url.startswith("https://gglead.org/ggsel3/?")
+    qs = parse_qs(urlparse(url).query)
+    assert qs.get("flow") == ["22483"]
+    ulp = unquote((qs.get("ulp") or [""])[0])
+    assert ulp.startswith("https://ggsel.net/?query=")
+    assert "GTA" in ulp and "6" in ulp
+    cyr = partner_search_url("Киберпанк 2077", flow_id="22483")
+    assert cyr is not None
+    assert "flow=22483" in cyr
+    assert "ulp=" in cyr
+
+    import ggsel_affiliate as ga
+
+    old = ga.GGLEAD_FLOW_ID
+    try:
+        ga.GGLEAD_FLOW_ID = "22483"
+        kb = with_buy_button(None, lang="ru", game_name="Demo")
+        assert kb is not None
+        assert len(kb.inline_keyboard) == 1
+        assert kb.inline_keyboard[0][0].url
+        assert "flow=22483" in (kb.inline_keyboard[0][0].url or "")
+        assert with_buy_button(None, lang="en", game_name="Demo") is None
+        existing = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("x", callback_data="rel:streams:1")]]
+        )
+        merged = with_buy_button(existing, lang="ru", game_name="Demo")
+        assert merged is not None
+        assert len(merged.inline_keyboard) == 2
+        assert merged.inline_keyboard[0][0].url
+        assert merged.inline_keyboard[1][0].callback_data == "rel:streams:1"
+        ga.GGLEAD_FLOW_ID = ""
+        assert with_buy_button(None, lang="ru", game_name="Demo") is None
+    finally:
+        ga.GGLEAD_FLOW_ID = old
+
+
 def run() -> None:
+    _check_ggsel_partner_buy_url()
     _check_release_prefs_roundtrip()
     _check_release_pick_disambiguates()
     _check_release_pick_pagination()

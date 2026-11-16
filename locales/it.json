@@ -1309,6 +1309,7 @@
   "category_watch_digest_empty": "Nessuno stream nuovo nell'ultima ora.",
   "game_card_genre": "Genere:",
   "game_card_release_dates": "Date di uscita:",
+  "game_buy_button": "Compra",
   "game_info_prompt": "Inserisci il nome di un gioco (ricerca IGDB):\n\nI metadati dei giochi sono forniti da <a href=\"https://www.igdb.com\">IGDB.com</a>",
   "btn_ai_clips": "🎬 Clip AI",
   "premium_feat_ai_clips": "Clip AI da VOD",

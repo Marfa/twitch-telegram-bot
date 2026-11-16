@@ -40,4 +40,13 @@ jobs:
             git fetch --prune origin
             git reset --hard origin/main
             cp -a /tmp/twitch-telegram-bot.env.bak .env
+            # RU «Купить» on game cards — partner flow id (GitHub secret GGLEAD_FLOW_ID)
+            FLOW_ID='${{ secrets.GGLEAD_FLOW_ID }}'
+            if [ -n "${FLOW_ID}" ]; then
+              if grep -q '^GGLEAD_FLOW_ID=' .env; then
+                sed -i "s|^GGLEAD_FLOW_ID=.*|GGLEAD_FLOW_ID=${FLOW_ID}|" .env
+              else
+                printf '\nGGLEAD_FLOW_ID=%s\n' "${FLOW_ID}" >> .env
+              fi
+            fi
             bash scripts/vps-deploy.sh

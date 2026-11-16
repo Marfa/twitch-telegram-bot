@@ -235,12 +235,16 @@ async def _send_game_card(
         build_game_card_html,
         fields_from_igdb,
     )
+    from ggsel_affiliate import with_buy_button
 
     cover_mid = db.igdb_cover_image_id_for_game(game_id)
     game = db.igdb_game_by_id(game_id) or {}
     page_url = igdb_game_page_url(game.get("slug")) or "https://www.igdb.com"
     attr = attribution_footer(lang, page_url=page_url)
     footer = "\n\n".join(p for p in (attr, footer_html) if p)
+    reply_markup = with_buy_button(
+        reply_markup, lang=lang, game_name=game_name
+    )
     if body_html:
         # Legacy one-liner callers (notify header) — keep as prefix above card.
         fields = fields_from_igdb(
