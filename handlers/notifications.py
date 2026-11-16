@@ -781,7 +781,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     "Failed to send trial expiry notice to %s", user_id
                 )
 
-    from premium_handlers import _stars_pay_restore_markup, send_pay_reminder_dm
+    from premium_handlers import send_pay_reminder_dm, send_stars_grace_dm
 
     pay_reminders = await asyncio.to_thread(prem.claim_pay_reminders, db)
     if pay_reminders:
@@ -813,12 +813,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                 continue
             lang = _user_lang(context, user_id) or DEFAULT_LOCALE
             try:
-                await context.bot.send_message(
-                    user_id,
-                    t("premium_stars_grace_warn", lang),
-                    reply_markup=_stars_pay_restore_markup(lang),
-                    disable_web_page_preview=True,
-                )
+                await send_stars_grace_dm(context.bot, db, user_id, lang)
             except Forbidden:
                 from handlers.delivery import apply_user_blocked
 

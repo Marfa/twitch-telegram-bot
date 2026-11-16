@@ -1353,6 +1353,42 @@ class PayReminder:
     channel_twitch_user_id: str = ""
     channel_login: str = ""
     channel_canceled: bool = False
+    # month | year | life — for stars reminders (year gets «Продлить» invoice).
+    stars_plan_kind: str = ""
+
+
+def stars_plan_kind(db: Database, user_id: int) -> str:
+    """Best-effort plan kind for the current Stars entitlement."""
+    st = get_status(db, user_id)
+    cid = str(st.stars_charge_id or "").strip()
+    if cid:
+        purchase = db.get_premium_purchase_by_charge(cid)
+        if purchase is not None:
+            k = str(purchase.kind or "").strip()
+            if k == "year":
+                return "year"
+            if k == "life":
+                return "life"
+            if k in ("month", "legacy"):
+                return "month"
+        gift = db.find_premium_gift_by_charge(cid)
+        if gift is not None:
+            gk = str(gift.kind or "").strip()
+            if gk in ("year", "life", "month"):
+                return gk
+    return "month"
+
+
+def stars_year_extend_until(
+    db: Database, user_id: int, *, now: int | None = None
+) -> int:
+    """Until unix after paying another year (stacks on remaining paid time)."""
+    ts = int(now if now is not None else time.time())
+    st = get_status(db, user_id)
+    base = ts
+    if st.stars_active and int(st.stars_until) > base:
+        base = int(st.stars_until)
+    return base + year_seconds()
 
 
 def claim_stars_pay_reminders(
@@ -1378,7 +1414,14 @@ def claim_pay_reminders(
     out: list[PayReminder] = []
 
     for user_id, until in claim_stars_pay_reminders(db, now=ts):
-        out.append(PayReminder(user_id=user_id, kind="stars", until_unix=until))
+        out.append(
+            PayReminder(
+                user_id=user_id,
+                kind="stars",
+                until_unix=until,
+                stars_plan_kind=stars_plan_kind(db, user_id),
+            )
+        )
 
     for user_id, raw in db.list_users_with_premium_features():
         features, _charges, canceled = parse_premium_features_blob(raw)

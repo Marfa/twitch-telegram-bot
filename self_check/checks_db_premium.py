@@ -595,6 +595,25 @@ def check_db_premium() -> None:
         assert (77, now + 3600) in remind
         assert db.get_premium_stars_pay_reminded_until(77) == now + 3600
         assert prem.claim_stars_pay_reminders(db, now=now) == []
+        # Year plan: kind from purchase; remind carries stars_plan_kind; extend stacks.
+        db.record_premium_purchase(
+            user_id=77,
+            charge_id="sty77",
+            kind="year",
+            stars=500,
+            until_unix=now + 86400,
+        )
+        db.set_premium_stars(
+            77, charge_id="sty77", until_unix=now + 86400, canceled=True
+        )
+        db.set_premium_stars_pay_reminded_until(77, 0)
+        assert prem.stars_plan_kind(db, 77) == "year"
+        assert prem.stars_year_extend_until(db, 77, now=now) == now + 86400 + prem.year_seconds()
+        year_rems = prem.claim_pay_reminders(db, now=now)
+        year_star = next(
+            (r for r in year_rems if r.kind == "stars" and r.user_id == 77), None
+        )
+        assert year_star is not None and year_star.stars_plan_kind == "year"
         # À-la-carte + channel pay reminders; canceled features get invoice_feature_ids.
         db.set_premium_stars(
             77, charge_id="", until_unix=0, canceled=True, touch_paid_at=False

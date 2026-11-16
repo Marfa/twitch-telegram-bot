@@ -1801,7 +1801,7 @@ async def successful_premium_payment(
             db.set_premium_stars_canceled(parsed.user_id, True)
         prem.clear_all_refund_surcharge(db, parsed.user_id)
     elif parsed.kind == "year":
-        until_unix = now + prem.year_seconds()
+        until_unix = prem.stars_year_extend_until(db, parsed.user_id, now=now)
         stars_eff = stars_paid or prem.stars_year_price(parsed.user_id)
         prem.apply_stars_payment(
             db,
@@ -2099,6 +2099,7 @@ def _twitch_grace_warning_markup(lang: str) -> InlineKeyboardMarkup:
 
 
 def _stars_pay_restore_markup(lang: str) -> InlineKeyboardMarkup:
+    """Grace-only: open Premium screen to pick a plan again."""
     from i18n import dm_main_menu_button
 
     return InlineKeyboardMarkup(
@@ -2112,6 +2113,12 @@ def _stars_pay_restore_markup(lang: str) -> InlineKeyboardMarkup:
             [dm_main_menu_button(lang)],
         ]
     )
+
+
+def _dm_menu_only_markup(lang: str) -> InlineKeyboardMarkup:
+    from i18n import dm_main_menu_keyboard
+
+    return dm_main_menu_keyboard(lang)
 
 
 def _pay_remind_url_markup(lang: str, *, label: str, url: str) -> InlineKeyboardMarkup:
@@ -2164,6 +2171,66 @@ async def _create_stars_invoice_link(
         return None
 
 
+async def _year_extend_invoice(
+    bot,
+    db: Database,
+    user_id: int,
+    lang: str,
+    *,
+    source: str,
+) -> tuple[str, int, int] | None:
+    """Create one-shot year invoice. Returns (link, list_stars, total) or None."""
+    stars = prem.stars_year_price(user_id)
+    surcharge = prem.refund_surcharge_for_plan(db, user_id)
+    total = max(1, stars + max(0, surcharge))
+    payload = prem.attach_invoice_attribution(
+        prem.invoice_payload(user_id, "year"),
+        source,
+        "",
+    )
+    desc = t("premium_pay_year_description", lang, stars=stars)
+    if surcharge > 0:
+        desc = f"{desc}\n{t('premium_pay_surcharge_note', lang, stars=surcharge)}"
+    link = await _create_stars_invoice_link(
+        bot,
+        title=t("premium_pay_year_title", lang),
+        description=desc,
+        payload=payload,
+        stars=total,
+        subscription_period=None,
+    )
+    if not link:
+        return None
+    return link, stars, total
+
+
+async def send_stars_grace_dm(bot, db: Database, user_id: int, lang: str) -> None:
+    """Grace DM: Restore for month/legacy; «Продлить» + year invoice for yearly."""
+    if prem.stars_plan_kind(db, user_id) == "year":
+        created = await _year_extend_invoice(
+            bot, db, user_id, lang, source="stars_grace"
+        )
+        if created:
+            link, _stars, total = created
+            await bot.send_message(
+                user_id,
+                t("premium_stars_grace_warn_year", lang),
+                reply_markup=_pay_remind_url_markup(
+                    lang,
+                    label=t("btn_premium_stars_extend_year", lang, stars=total),
+                    url=link,
+                ),
+                disable_web_page_preview=True,
+            )
+            return
+    await bot.send_message(
+        user_id,
+        t("premium_stars_grace_warn", lang),
+        reply_markup=_stars_pay_restore_markup(lang),
+        disable_web_page_preview=True,
+    )
+
+
 async def send_pay_reminder_dm(
     bot,
     db: Database,
@@ -2173,10 +2240,28 @@ async def send_pay_reminder_dm(
     """DM pay reminder; attach full-price renew invoice for canceled feat/channel."""
     until = _fmt_until(reminder.until_unix)
     if reminder.kind == "stars":
+        # Restore is grace-only. Yearly reminder gets «Продлить» + year invoice.
+        if reminder.stars_plan_kind == "year":
+            created = await _year_extend_invoice(
+                bot, db, reminder.user_id, lang, source="pay_remind"
+            )
+            if created:
+                link, stars, total = created
+                await bot.send_message(
+                    reminder.user_id,
+                    t("premium_stars_pay_remind_year", lang, until=until, stars=stars),
+                    reply_markup=_pay_remind_url_markup(
+                        lang,
+                        label=t("btn_premium_stars_extend_year", lang, stars=total),
+                        url=link,
+                    ),
+                    disable_web_page_preview=True,
+                )
+                return
         await bot.send_message(
             reminder.user_id,
             t("premium_stars_pay_remind", lang, until=until),
-            reply_markup=_stars_pay_restore_markup(lang),
+            reply_markup=_dm_menu_only_markup(lang),
             disable_web_page_preview=True,
         )
         return
@@ -2236,7 +2321,7 @@ async def send_pay_reminder_dm(
                 until=until,
                 features=features_txt,
             ),
-            reply_markup=_stars_pay_restore_markup(lang),
+            reply_markup=_dm_menu_only_markup(lang),
             disable_web_page_preview=True,
         )
         return
@@ -2299,7 +2384,7 @@ async def send_pay_reminder_dm(
                 until=until,
                 channel=channel,
             ),
-            reply_markup=_stars_pay_restore_markup(lang),
+            reply_markup=_dm_menu_only_markup(lang),
             disable_web_page_preview=True,
         )
 
