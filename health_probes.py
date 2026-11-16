@@ -206,8 +206,9 @@ def _probe_telegram() -> tuple[int, bytes]:
     url = f"https://api.telegram.org/bot{token}/getMe"
     try:
         r = _SESSION.get(url, timeout=_HTTP_TIMEOUT)
-    except Exception:
-        logger.exception("health probe telegram failed")
+    except Exception as exc:
+        # requests puts the full URL (with the bot token) in the exception text.
+        logger.error("health probe telegram failed: %s", type(exc).__name__)
         return _fail(b"net")
     if r.status_code != 200:
         return _fail(b"auth" if r.status_code in (401, 403) else b"http")
