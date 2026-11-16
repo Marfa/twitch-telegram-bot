@@ -141,9 +141,6 @@ BOTHUB_IMAGE_MODEL_FALLBACK = (
 )
 # Optional: IsThereAnyDeal API key for game giveaways (https://isthereanydeal.com/apps/register/)
 ISTHEREANYDEAL_API_KEY = os.getenv("ISTHEREANYDEAL_API_KEY", "").strip()
-# Optional: GGLead/ggsel affiliate flow id for RU «Купить» on game cards (public tracker, not API token).
-GGLEAD_FLOW_ID = os.getenv("GGLEAD_FLOW_ID", "").strip()
-GGLEAD_TRACK_BASE = "https://gglead.org/ggsel3"
 # Optional: YouTube Data API v3 key — multistream live checks for YouTube channels.
 # Create at https://console.cloud.google.com/ (enable YouTube Data API v3 → API key).
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
