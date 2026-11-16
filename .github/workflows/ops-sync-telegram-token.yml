@@ -1,0 +1,99 @@
+# Sync TELEGRAM_BOT_TOKEN from GitHub Actions secret → VPS .env, then recreate bot.
+# Prerequisites: TOKEN_ENCRYPTION_KEY + TWITCH_EVENTSUB_SECRET already frozen (standalone).
+# Usage:
+#   1) BotFather → Revoke → copy new token
+#   2) gh secret set TELEGRAM_BOT_TOKEN --repo Marfa/twitch-telegram-bot
+#   3) gh workflow run ops-sync-telegram-token.yml --repo Marfa/twitch-telegram-bot
+name: Ops sync Telegram token
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync token to VPS
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          envs: TELEGRAM_BOT_TOKEN
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+              echo "error: TELEGRAM_BOT_TOKEN env empty" >&2
+              exit 1
+            fi
+            # Refuse placeholders / junk (token must be digits:secret).
+            case "$TELEGRAM_BOT_TOKEN" in
+              *[[:space:]]*|your_*|'')
+                echo "error: TELEGRAM_BOT_TOKEN looks invalid" >&2
+                exit 1
+                ;;
+            esac
+            python3 - <<'PY'
+            import os, re
+            from pathlib import Path
+            token = os.environ["TELEGRAM_BOT_TOKEN"].strip()
+            if not re.fullmatch(r"[0-9]{5,}:[A-Za-z0-9_-]{30,}", token):
+                raise SystemExit("error: TELEGRAM_BOT_TOKEN format invalid")
+            # Guard: encryption keys must already be standalone.
+            text = Path(".env").read_text(encoding="utf-8")
+            keys = {}
+            for line in text.splitlines():
+                s = line.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                keys[k.strip()] = v.strip().strip("\"'")
+            if not keys.get("TOKEN_ENCRYPTION_KEY"):
+                raise SystemExit("error: TOKEN_ENCRYPTION_KEY not set — freeze first")
+            if not keys.get("TWITCH_EVENTSUB_SECRET"):
+                raise SystemExit("error: TWITCH_EVENTSUB_SECRET not set — freeze first")
+            path = Path(".env")
+            bak = Path("/tmp/twitch-telegram-bot.env.bak-before-token-rotate")
+            bak.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+            lines, seen = [], False
+            for line in path.read_text(encoding="utf-8").splitlines(True):
+                if line.startswith("TELEGRAM_BOT_TOKEN="):
+                    lines.append(f"TELEGRAM_BOT_TOKEN={token}\n")
+                    seen = True
+                else:
+                    lines.append(line if line.endswith("\n") else line + "\n")
+            if not seen:
+                lines.append(f"TELEGRAM_BOT_TOKEN={token}\n")
+            path.write_text("".join(lines), encoding="utf-8")
+            print("TELEGRAM_BOT_TOKEN updated in .env (value not logged)")
+            PY
+            docker compose -f compose.vps.yml up -d --force-recreate bot
+            for i in $(seq 1 30); do
+              if curl -fsS --max-time 3 https://bot.themarfa.name/health >/dev/null 2>&1; then
+                echo "health ok after recreate (${i})"
+                break
+              fi
+              sleep 2
+            done
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import os, urllib.request, json
+            token = os.environ["TELEGRAM_BOT_TOKEN"]
+            with urllib.request.urlopen(
+                f"https://api.telegram.org/bot{token}/getMe", timeout=15
+            ) as r:
+                data = json.loads(r.read().decode())
+            assert data.get("ok"), data
+            username = (data.get("result") or {}).get("username")
+            print("telegram getMe ok username=", username)
+            PY

@@ -1,0 +1,82 @@
+# One-shot / rare ops: freeze Fernet + EventSub secrets derived from TELEGRAM_BOT_TOKEN
+# so the bot token can be rotated without invalidating stored Twitch refresh tokens.
+name: Ops freeze crypto keys
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Freeze derived secrets on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd /opt/twitch-telegram-bot
+            cp -a .env /tmp/twitch-telegram-bot.env.bak-before-freeze
+            # Prefer script from origin/main once pulled; fall back to inline if missing.
+            git fetch --prune origin
+            git reset --hard origin/main
+            cp -a /tmp/twitch-telegram-bot.env.bak-before-freeze .env
+            if [[ -f scripts/freeze-derived-secrets.py ]]; then
+              python3 scripts/freeze-derived-secrets.py .env
+            else
+              echo "error: freeze script missing after pull" >&2
+              exit 1
+            fi
+            docker compose -f compose.vps.yml up -d --force-recreate bot
+            for i in $(seq 1 40); do
+              if curl -fsS --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                echo "health ok after ${i} checks"
+                break
+              fi
+              if [[ "$i" -eq 40 ]]; then
+                echo "error: /health not ready" >&2
+                docker compose -f compose.vps.yml logs --tail=80 bot || true
+                exit 1
+              fi
+              sleep 3
+            done
+            # Presence-only checks in the running container (no secret values).
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import hashlib, os
+            from token_crypto import encrypt_secret, decrypt_secret
+
+            def fp(v: str) -> str:
+                return hashlib.sha256(v.encode()).hexdigest()[:12]
+
+            enc = (os.getenv("TOKEN_ENCRYPTION_KEY") or "").strip()
+            sub = (os.getenv("TWITCH_EVENTSUB_SECRET") or "").strip()
+            bot = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+            assert enc, "TOKEN_ENCRYPTION_KEY missing in container"
+            assert sub, "TWITCH_EVENTSUB_SECRET missing in container"
+            assert bot, "TELEGRAM_BOT_TOKEN missing in container"
+            roundtrip = decrypt_secret(encrypt_secret("freeze-probe"))
+            assert roundtrip == "freeze-probe", "fernet roundtrip failed"
+            print(f"container TOKEN_ENCRYPTION_KEY len={len(enc)} fp={fp(enc)}")
+            print(f"container TWITCH_EVENTSUB_SECRET len={len(sub)} fp={fp(sub)}")
+            print("fernet roundtrip ok")
+            PY
+            docker compose -f compose.vps.yml exec -T bot python - <<'PY'
+            import json, os, urllib.request
+            token = os.environ["TELEGRAM_BOT_TOKEN"]
+            with urllib.request.urlopen(
+                f"https://api.telegram.org/bot{token}/getMe", timeout=15
+            ) as r:
+                data = json.loads(r.read().decode())
+            assert data.get("ok"), data
+            print("telegram getMe ok username=", (data.get("result") or {}).get("username"))
+            PY
