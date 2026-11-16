@@ -14,6 +14,8 @@ from bot_helpers import _menu, _pulse_reply_keyboard, reply_chat_id
 from db import Database
 from handlers.release_watch import (
     _send_game_card,
+    game_has_upcoming_release,
+    load_game_release_dates,
     release_game_pick_keyboard,
 )
 from i18n import DEFAULT_LOCALE, btn, t
@@ -192,16 +194,30 @@ async def receive_game_info_pick(
         await query.edit_message_text("✓")
     except BadRequest:
         pass
-    find_kb = InlineKeyboardMarkup(
-        [
+    twitch: TwitchClient | None = context.application.bot_data.get("twitch")
+    all_dates = await load_game_release_dates(db, game_id, twitch)
+    if game_has_upcoming_release(game, all_dates):
+        action_kb = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton(
-                    t("release_find_streams", lang),
-                    callback_data=f"rel:streams:{game_id}",
-                )
+                [
+                    InlineKeyboardButton(
+                        t("game_info_remind_release", lang),
+                        callback_data=f"ginfo:remind:{game_id}",
+                    )
+                ]
             ]
-        ]
-    )
+        )
+    else:
+        action_kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("release_find_streams", lang),
+                        callback_data=f"rel:streams:{game_id}",
+                    )
+                ]
+            ]
+        )
     await _send_game_card(
         context.bot,
         chat_id,
@@ -211,7 +227,7 @@ async def receive_game_info_pick(
         summary=summary,
         body_html=None,
         lang=lang,
-        reply_markup=find_kb,
+        reply_markup=action_kb,
     )
     await _pulse_reply_keyboard(context.bot, chat_id, _menu(lang, user_id))
     context.user_data.clear()

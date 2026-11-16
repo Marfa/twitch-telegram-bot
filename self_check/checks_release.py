@@ -397,16 +397,16 @@ def _check_release_search_exact_duplicates() -> None:
 def _check_release_keyboard() -> None:
     from handlers.release_watch import edit_release_options_keyboard
 
-    hidden = alert_type_keyboard("en")
+    shown = alert_type_keyboard("en")
+    cbs = [b.callback_data for r in shown.inline_keyboard for b in r]
+    assert "alert_type:release" in cbs
+    assert cbs.index("alert_type:game") < cbs.index("alert_type:release")
+    hidden = alert_type_keyboard("en", show_release=False)
     assert not any(
         (b.callback_data or "") == "alert_type:release"
         for r in hidden.inline_keyboard
         for b in r
     )
-    shown = alert_type_keyboard("en", show_release=True)
-    cbs = [b.callback_data for r in shown.inline_keyboard for b in r]
-    assert "alert_type:release" in cbs
-    assert cbs.index("alert_type:game") < cbs.index("alert_type:release")
     assert t("alert_type_release", "ru")
     assert t("alert_type_release", "en")
     assert t("release_date_unknown", "ru")
@@ -418,6 +418,8 @@ def _check_release_keyboard() -> None:
     assert t("sub_list_release_dates", "en", dates="x")
     assert t("release_find_streams", "ru")
     assert t("release_find_streams_none", "en", game="X")
+    assert t("game_info_remind_release", "ru")
+    assert t("game_info_remind_release", "en")
     assert "паузу" in t("release_notify_paused_note", "ru").lower()
     assert "paused" in t("release_notify_paused_note", "en").lower()
 
@@ -563,11 +565,6 @@ def _check_release_job_live_backfill_when_dump_empty() -> None:
         db = open_database(Path(tmp) / "bot.db")
         uid = 900_049
         db.upsert_user(uid)
-        import beta as beta_features
-        from handlers.release_watch import RELEASE_BETA_ID
-
-        db.set_beta_enrollment(uid, RELEASE_BETA_ID, True)
-        assert beta_features.is_enabled(db, uid, RELEASE_BETA_ID)
         release = int(time.time()) - 7 * 86400
         prefs = ReleaseWatchPrefs(
             igdb_game_id=421960,
@@ -656,12 +653,6 @@ def _check_release_active_cap() -> None:
         )
 
         async def _run() -> None:
-            # Beta gate: enroll user so create is allowed past beta check
-            import beta as beta_features
-            from handlers.release_watch import RELEASE_BETA_ID
-
-            db.set_beta_enrollment(uid, RELEASE_BETA_ID, True)
-            assert beta_features.is_enabled(db, uid, RELEASE_BETA_ID)
             bot = AsyncMock()
             sub, status = await create_release_subscription(
                 bot, db, uid, "en", prefs=prefs
@@ -925,11 +916,6 @@ def _check_alert_dup_edit_opens_type_menu() -> None:
             platforms=[],
             date_unknown=True,
         )
-        import beta as beta_features
-        from handlers.release_watch import RELEASE_BETA_ID
-
-        db.set_beta_enrollment(uid, RELEASE_BETA_ID, True)
-        assert beta_features.is_enabled(db, uid, RELEASE_BETA_ID)
         rel_id = db.add_subscription(
             owner_id=uid,
             twitch_username="reldup",
@@ -1080,6 +1066,22 @@ def _check_ggsel_partner_buy_url() -> None:
     assert merged.inline_keyboard[1][0].callback_data == "rel:streams:1"
 
 
+def _check_game_has_upcoming_release() -> None:
+    from handlers.release_watch import game_has_upcoming_release
+
+    now = 1_700_000_000
+    game = {"id": 1, "first_release_date": None}
+    assert not game_has_upcoming_release(game, [{"date": now - 10}], now=now)
+    assert game_has_upcoming_release(game, [{"date": now + 10}], now=now)
+    assert not game_has_upcoming_release(game, [], now=now)
+    assert game_has_upcoming_release(
+        {"id": 2, "first_release_date": now + 10}, [], now=now
+    )
+    assert not game_has_upcoming_release(
+        {"id": 3, "first_release_date": now - 10}, [], now=now
+    )
+
+
 def run() -> None:
     _check_ggsel_partner_buy_url()
     _check_release_prefs_roundtrip()
@@ -1104,3 +1106,4 @@ def run() -> None:
     _check_game_alert_early_dup_after_category()
     _check_alert_dup_edit_opens_type_menu()
     _check_sync_unfollow_skips_release_and_drops()
+    _check_game_has_upcoming_release()

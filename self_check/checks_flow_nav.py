@@ -1505,7 +1505,7 @@ async def _scenario_wizard_game_alert_delivery(db) -> None:
 
 async def _scenario_wizard_release_alert(db) -> None:
     """§6.3 Release alerts — alert_type:release → game name prompt with Cancel."""
-    from handlers.release_watch import RELEASE_BETA_ID, _wz
+    from handlers.release_watch import _wz
     from handlers.wizard import receive_alert_type
 
     application, bot = _app(db)
@@ -1515,7 +1515,6 @@ async def _scenario_wizard_release_alert(db) -> None:
     update.effective_message = query.message
     ctx = _ctx(application)
     db.upsert_user(_FREE_UID)
-    db.set_beta_enrollment(_FREE_UID, RELEASE_BETA_ID, True)
     with patch("handlers.release_watch.analytics.capture"):
         state = await receive_alert_type(update, ctx)
     assert state == _wz()["RELEASE_SEARCH"]
@@ -1534,7 +1533,6 @@ async def _scenario_wizard_release_alert(db) -> None:
 async def _scenario_wizard_release_pick_pages(db) -> None:
     """§6.3 Release game pick — pages keep Cancel; › flips markup."""
     from handlers.release_watch import (
-        RELEASE_BETA_ID,
         _wz,
         receive_release_game_text,
         receive_release_pick,
@@ -1574,7 +1572,6 @@ async def _scenario_wizard_release_pick_pages(db) -> None:
     update.effective_message.reply_text = AsyncMock(side_effect=_reply_text)
     ctx = _ctx(application)
     db.upsert_user(_FREE_UID)
-    db.set_beta_enrollment(_FREE_UID, RELEASE_BETA_ID, True)
     state = await receive_release_game_text(update, ctx)
     assert state == _wz()["RELEASE_PICK"]
     hits = ctx.user_data.get("release_search_hits") or []
@@ -1608,13 +1605,11 @@ async def _scenario_release_notify_delete(db) -> None:
         dump_release_watch_prefs,
     )
     from handlers.release_watch import (
-        RELEASE_BETA_ID,
         _release_delete_keyboard,
         on_release_delete,
     )
 
     db.upsert_user(_FREE_UID)
-    db.set_beta_enrollment(_FREE_UID, RELEASE_BETA_ID, True)
     prefs = ReleaseWatchPrefs(
         igdb_game_id=42,
         game_name="FlowNav Game",
@@ -1662,11 +1657,9 @@ async def _scenario_subscriptions_edit_release(db) -> None:
         ReleaseWatchPrefs,
         dump_release_watch_prefs,
     )
-    from handlers.release_watch import RELEASE_BETA_ID
     from handlers.subscriptions import edit_menu, on_edit_pick
 
     db.upsert_user(_FREE_UID)
-    db.set_beta_enrollment(_FREE_UID, RELEASE_BETA_ID, True)
 
     unknown = ReleaseWatchPrefs(
         igdb_game_id=88,
@@ -2172,7 +2165,7 @@ async def _scenario_other_game_info(db) -> None:
     assert state == ConversationHandler.END
     cap.assert_turn("other_game_info_cancel")
 
-    # Card pick: pulse restores reply keyboard; no lasting «Главное меню».
+    # Card pick (released): «Find streams»; pulse restores reply keyboard.
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)
@@ -2185,6 +2178,10 @@ async def _scenario_other_game_info(db) -> None:
     with (
         patch("handlers.game_info._send_game_card", new=AsyncMock()) as send_card,
         patch("handlers.game_info._pulse_reply_keyboard", new=_pulse),
+        patch(
+            "handlers.game_info.load_game_release_dates",
+            new=AsyncMock(return_value=[{"date": 1}]),
+        ),
         patch.object(
             db,
             "igdb_game_by_id",
@@ -2194,6 +2191,15 @@ async def _scenario_other_game_info(db) -> None:
         state = await receive_game_info_pick(update, ctx)
     assert state == ConversationHandler.END
     send_card.assert_awaited()
+    released_markup = send_card.await_args.kwargs.get("reply_markup")
+    assert released_markup is not None
+    released_cbs = [
+        b.callback_data or ""
+        for row in released_markup.inline_keyboard
+        for b in row
+    ]
+    assert "rel:streams:42" in released_cbs
+    assert not any(cb.startswith("ginfo:remind:") for cb in released_cbs)
     menu = t("menu_main", "ru")
     for call in bot.send_message.await_args_list:
         text = call.kwargs.get("text")
@@ -2201,6 +2207,39 @@ async def _scenario_other_game_info(db) -> None:
             text = call.args[1]
         assert text != menu, f"unexpected lasting menu_main: {text!r}"
     cap.assert_turn("other_game_info_card")
+
+    # Upcoming release: «Remind about release» instead of find-streams.
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    update, query = _cb_update(_FREE_UID, "ginfo:pick:99", cap)
+    future_ts = 4102444800  # 2100-01-01 UTC
+    with (
+        patch("handlers.game_info._send_game_card", new=AsyncMock()) as send_card,
+        patch("handlers.game_info._pulse_reply_keyboard", new=_pulse),
+        patch(
+            "handlers.game_info.load_game_release_dates",
+            new=AsyncMock(return_value=[{"date": future_ts}]),
+        ),
+        patch.object(
+            db,
+            "igdb_game_by_id",
+            return_value={"id": 99, "name": "Future", "summary": "y"},
+        ),
+    ):
+        state = await receive_game_info_pick(update, ctx)
+    assert state == ConversationHandler.END
+    upcoming_markup = send_card.await_args.kwargs.get("reply_markup")
+    assert upcoming_markup is not None
+    upcoming_cbs = [
+        b.callback_data or ""
+        for row in upcoming_markup.inline_keyboard
+        for b in row
+    ]
+    assert "ginfo:remind:99" in upcoming_cbs
+    assert "rel:streams:99" not in upcoming_cbs
+    cap.assert_turn("other_game_info_card_upcoming")
 
 
 async def _scenario_other_channel_stats(db) -> None:

@@ -2032,7 +2032,7 @@ def alert_type_keyboard(
     lang: str,
     *,
     show_drops: bool = False,
-    show_release: bool = False,
+    show_release: bool = True,
     show_giveaways: bool = False,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [

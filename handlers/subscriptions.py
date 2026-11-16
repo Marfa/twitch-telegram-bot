@@ -2624,15 +2624,9 @@ async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         )
         return _sub_states()["EDIT_REPEAT"]
     if is_release_watch_sub(sub):
-        from handlers.release_watch import (
-            edit_release_options_keyboard,
-            release_feature_available,
-        )
+        from handlers.release_watch import edit_release_options_keyboard
         from db.models import parse_release_watch_prefs
 
-        if not release_feature_available(db, query.from_user.id):
-            await query.edit_message_text(t("release_beta_required", lang))
-            return ConversationHandler.END
         prefs = parse_release_watch_prefs(sub.release_watch_prefs)
         if not prefs:
             await query.edit_message_text(t("sub_not_found", lang))
@@ -6623,10 +6617,6 @@ async def _create_shared_subscription(
     clone["twitch_username"] = login
     kind = alert_type_from_payload(clone)
     if kind == "release":
-        from handlers.release_watch import release_feature_available
-
-        if not release_feature_available(db, user_id):
-            raise ValueError("release_beta_required")
         type_ok = True
     elif kind == "giveaway_watch":
         from handlers.giveaways import giveaways_feature_available
@@ -6775,7 +6765,7 @@ async def on_share_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
     except ValueError as exc:
         code = str(exc)
-        if code in ("release_beta_required", "drops_beta_required"):
+        if code == "drops_beta_required":
             await query.edit_message_text(t(code, lang))
             return
         await query.edit_message_text(
@@ -6852,15 +6842,9 @@ async def on_share_dup_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     if is_release_watch_sub(sub):
-        from handlers.release_watch import (
-            edit_release_options_keyboard,
-            release_feature_available,
-        )
+        from handlers.release_watch import edit_release_options_keyboard
         from db.models import parse_release_watch_prefs
 
-        if not release_feature_available(db, user_id):
-            await query.edit_message_text(t("release_beta_required", lang))
-            return
         prefs = parse_release_watch_prefs(sub.release_watch_prefs)
         if not prefs:
             await query.edit_message_text(t("sub_not_found", lang))
@@ -7003,7 +6987,7 @@ async def on_share_dup_continue(
         )
     except ValueError as exc:
         code = str(exc)
-        if code in ("release_beta_required", "drops_beta_required"):
+        if code == "drops_beta_required":
             await query.edit_message_text(t(code, lang))
             return
         await query.edit_message_text(

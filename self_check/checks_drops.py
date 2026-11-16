@@ -18,6 +18,7 @@ from twitch import _parse_twitchdrops_app_campaign
 
 
 def _check_drops_alert_type_keyboard_last() -> None:
+    # Release is GA (always shown); drops/giveaways still optional flags.
     hidden = alert_type_keyboard("en")
     assert not any(
         (b.callback_data or "") == "alert_type:drops"
@@ -25,7 +26,8 @@ def _check_drops_alert_type_keyboard_last() -> None:
         for b in r
     ), "Drops must be hidden when show_drops=False"
     hidden_cbs = [b.callback_data for r in hidden.inline_keyboard for b in r]
-    assert hidden_cbs[-3] == "alert_type:game"
+    assert hidden_cbs[-4] == "alert_type:game"
+    assert hidden_cbs[-3] == "alert_type:release"
     assert hidden_cbs[-2] == "alert_type:other"
     assert hidden_cbs[-1] == "alert_type:cancel"
     markup = alert_type_keyboard("en", show_drops=True)
@@ -34,8 +36,9 @@ def _check_drops_alert_type_keyboard_last() -> None:
         (b.callback_data or "") == "alert_type:drops" for r in rows for b in r
     ), "Drops missing from alert type keyboard"
     callbacks = [b.callback_data for r in rows for b in r]
-    assert callbacks[-4] == "alert_type:drops"
-    assert callbacks[-3] == "alert_type:game"
+    assert callbacks[-5] == "alert_type:drops"
+    assert callbacks[-4] == "alert_type:game"
+    assert callbacks[-3] == "alert_type:release"
     assert callbacks[-2] == "alert_type:other"
     assert callbacks[-1] == "alert_type:cancel"
     with_rel = alert_type_keyboard("en", show_drops=True, show_release=True)

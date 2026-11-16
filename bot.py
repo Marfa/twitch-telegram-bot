@@ -479,6 +479,7 @@ from handlers.release_watch import (
     receive_release_pick,
     start_edit_release_days,
     start_edit_release_platforms,
+    start_release_from_game_remind,
     start_release_wizard,
 )
 from handlers.game_info import (
@@ -3376,6 +3377,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             MessageHandler(
                 _btn_filter("game_info"), dm_only_conv_entry(start_game_info)
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_release_from_game_remind),
+                pattern=r"^ginfo:remind:\d+$",
             ),
             MessageHandler(
                 _btn_filter("create_schedule"), dm_only_conv_entry(start_stream_schedule)

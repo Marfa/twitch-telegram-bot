@@ -17,7 +17,6 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 import analytics
-import beta as beta_features
 import premium as prem
 from bot_helpers import _menu, _pulse_reply_keyboard, reply_chat_id
 from config import MAX_SUBSCRIPTIONS_PER_OWNER
@@ -36,17 +35,48 @@ from twitch import TwitchClient
 
 logger = logging.getLogger(__name__)
 
-RELEASE_BETA_ID = "release-alerts"
 _RELEASE_PICK_PAGE_SIZE = 5
 _RELEASE_SEARCH_LIMIT = 100
 
 
-def release_feature_available(db: Database, user_id: int) -> bool:
-    return beta_features.is_enabled(db, user_id, RELEASE_BETA_ID)
-
-
 def _user_lang(db: Database, user_id: int) -> str:
     return db.get_user_locale(user_id) or DEFAULT_LOCALE
+
+
+async def load_game_release_dates(
+    db: Database,
+    game_id: int,
+    twitch: TwitchClient | None,
+) -> list[dict[str, Any]]:
+    """Local IGDB dump first; live API fallback when the game has no date rows."""
+    all_dates = db.igdb_release_dates_for_game(game_id)
+    if all_dates:
+        return all_dates
+    if twitch is None:
+        return []
+    try:
+        return await asyncio.to_thread(twitch.igdb_ensure_release_dates, game_id) or []
+    except Exception:
+        logger.exception(
+            "IGDB live release_dates fallback failed game_id=%s", game_id
+        )
+        return []
+
+
+def game_has_upcoming_release(
+    game: dict[str, Any],
+    all_dates: list[dict[str, Any]],
+    *,
+    now: int | None = None,
+) -> bool:
+    """True when any platform date is still in the future, or only first_release_date is future."""
+    ts = int(time.time()) if now is None else now
+    if any(int(r["date"]) > ts for r in all_dates):
+        return True
+    if all_dates:
+        return False
+    frd = game.get("first_release_date")
+    return frd is not None and int(frd) > ts
 
 
 def _wz() -> dict[str, int]:
@@ -286,16 +316,6 @@ async def start_release_wizard(
     user_id = update.effective_user.id
     lang = _user_lang(db, user_id)
     chat_id = reply_chat_id(update)
-    if not release_feature_available(db, user_id):
-        text = t("release_beta_required", lang)
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text)
-        else:
-            await context.bot.send_message(
-                chat_id, text, reply_markup=_menu(lang, user_id)
-            )
-        context.user_data.clear()
-        return ConversationHandler.END
     context.user_data.clear()
     context.user_data["alert_type"] = "release"
     prompt = t("release_game_prompt", lang)
@@ -328,12 +348,6 @@ async def receive_release_game_text(
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     lang = _user_lang(db, user_id)
-    if not release_feature_available(db, user_id):
-        await update.effective_message.reply_text(
-            t("release_beta_required", lang), reply_markup=_menu(lang, user_id)
-        )
-        context.user_data.clear()
-        return ConversationHandler.END
     query = (update.effective_message.text or "").strip()
     if not query:
         await update.effective_message.reply_text(
@@ -492,6 +506,56 @@ async def receive_release_dup_callback(
     return _wz()["RELEASE_DUP"]
 
 
+async def start_release_from_game_remind(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Game-info card «Remind about release» → release wizard for that IGDB game."""
+    query = update.callback_query
+    await query.answer()
+    db: Database = context.application.bot_data["db"]
+    user_id = query.from_user.id
+    lang = _user_lang(db, user_id)
+    chat_id = reply_chat_id(update)
+    data = query.data or ""
+    try:
+        game_id = int(data.rsplit(":", 1)[-1])
+    except ValueError:
+        return ConversationHandler.END
+    game = db.igdb_game_by_id(game_id)
+    if not game:
+        await context.bot.send_message(
+            chat_id,
+            t("release_game_not_found", lang),
+            reply_markup=_menu(lang, user_id),
+        )
+        return ConversationHandler.END
+    context.user_data.clear()
+    context.user_data["alert_type"] = "release"
+    exists = next(
+        (
+            s
+            for s in db.get_subscriptions_by_owner(user_id)
+            if is_release_watch_sub(s)
+            and (parsed := parse_release_watch_prefs(s.release_watch_prefs))
+            and parsed.igdb_game_id == game_id
+        ),
+        None,
+    )
+    if exists and not context.user_data.get("release_allow_duplicate"):
+        context.user_data["release_game"] = game
+        context.user_data["alert_dup_force"] = {
+            "kind": "release_wizard",
+            "sub_id": exists.id,
+        }
+        await context.bot.send_message(
+            chat_id,
+            t("release_already_subscribed", lang),
+            reply_markup=alert_dup_keyboard(lang, exists.id),
+        )
+        return _wz()["RELEASE_DUP"]
+    return await _continue_release_with_game(update, context, lang, game)
+
+
 async def _continue_release_with_game(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -504,19 +568,8 @@ async def _continue_release_with_game(
     user_id = update.effective_user.id
     game_id = int(game["id"])
     now = int(time.time())
-    all_dates = db.igdb_release_dates_for_game(game_id)
-    if not all_dates:
-        twitch = context.application.bot_data.get("twitch")
-        if twitch is not None:
-            try:
-                all_dates = await asyncio.to_thread(
-                    twitch.igdb_ensure_release_dates, game_id
-                )
-            except Exception:
-                logger.exception(
-                    "IGDB live release_dates fallback failed game_id=%s", game_id
-                )
-                all_dates = []
+    twitch = context.application.bot_data.get("twitch")
+    all_dates = await load_game_release_dates(db, game_id, twitch)
     future = [r for r in all_dates if int(r["date"]) > now]
     name = str(game["name"])
     summary = str(game.get("summary") or "")
@@ -845,8 +898,6 @@ async def create_release_subscription(
     prefs: ReleaseWatchPrefs,
     allow_duplicate: bool = False,
 ) -> tuple[Subscription | None, str]:
-    if not release_feature_available(db, user_id):
-        return None, "release_beta_required"
     existing = [
         s
         for s in db.get_subscriptions_by_owner(user_id)
@@ -1083,7 +1134,6 @@ async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None
         prefs = parse_release_watch_prefs(sub.release_watch_prefs)
         if not prefs:
             continue
-        beta_ok = release_feature_available(db, sub.owner_id)
         waiting = prefs.date_unknown or not prefs.platforms
         refreshed = _refresh_platforms_from_db(db, prefs)
         if waiting and not refreshed:
@@ -1109,8 +1159,7 @@ async def check_release_watch_alerts(context: ContextTypes.DEFAULT_TYPE) -> None
             prefs.platforms = refreshed
         lang = _user_lang(db, sub.owner_id)
         due: list[ReleasePlatformPref] = []
-        # Fire only while beta is on; still pause spent alerts if beta was turned off.
-        if sub.enabled and beta_ok:
+        if sub.enabled:
             due = _release_platforms_due(prefs, now=now)
             if due:
                 pending = set(prefs.notified_keys)
@@ -1237,6 +1286,8 @@ async def on_release_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         except BadRequest:
             pass
         return
+    import beta as beta_features
+
     to_cart = beta_features.is_enabled(db, user_id, "deleted-subscriptions-cart")
     if not db.delete_subscription(sub_id, user_id, to_cart=to_cart):
         return

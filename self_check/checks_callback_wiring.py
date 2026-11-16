@@ -126,6 +126,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("alert_dup_edit", f"alert_dup:edit:{_SAMPLE_SUB}"),
     ("alert_dup_continue", "alert_dup:continue"),
     ("rel_streams", "rel:streams:42"),
+    ("ginfo_remind", "ginfo:remind:42"),
     ("rel_del", "rel:del:42"),
     ("gv_hub", "gv:hub"),
     ("gv_stores", "gv:stores"),

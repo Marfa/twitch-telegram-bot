@@ -903,19 +903,16 @@ async def _go_alert_type_prompt(
     import beta as beta_features
     from handlers.drops import DROPS_BETA_ID
     from handlers.giveaways import GIVEAWAYS_BETA_ID
-    from handlers.release_watch import RELEASE_BETA_ID
 
     chat_id = reply_chat_id(update)
     user_id = update.effective_user.id
     db: Database = context.application.bot_data["db"]
     show_drops = beta_features.is_enabled(db, user_id, DROPS_BETA_ID)
-    show_release = beta_features.is_enabled(db, user_id, RELEASE_BETA_ID)
     show_giveaways = beta_features.is_enabled(db, user_id, GIVEAWAYS_BETA_ID)
     text = t("alert_type_prompt", lang)
     markup = alert_type_keyboard(
         lang,
         show_drops=show_drops,
-        show_release=show_release,
         show_giveaways=show_giveaways,
     )
     parse_mode = ParseMode.HTML if "<b>" in text else None
@@ -969,12 +966,8 @@ async def receive_new_sub_other(
     if action == "back":
         db: Database = context.application.bot_data["db"]
         from handlers.giveaways import GIVEAWAYS_BETA_ID
-        from handlers.release_watch import RELEASE_BETA_ID
 
         show_drops = beta_features.is_enabled(db, query.from_user.id, DROPS_BETA_ID)
-        show_release = beta_features.is_enabled(
-            db, query.from_user.id, RELEASE_BETA_ID
-        )
         show_giveaways = beta_features.is_enabled(
             db, query.from_user.id, GIVEAWAYS_BETA_ID
         )
@@ -982,7 +975,6 @@ async def receive_new_sub_other(
         markup = alert_type_keyboard(
             lang,
             show_drops=show_drops,
-            show_release=show_release,
             show_giveaways=show_giveaways,
         )
         parse_mode = ParseMode.HTML if "<b>" in text else None
