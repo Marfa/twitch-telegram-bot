@@ -69,14 +69,17 @@ def game_has_upcoming_release(
     *,
     now: int | None = None,
 ) -> bool:
-    """True when any platform date is still in the future, or only first_release_date is future."""
+    """True for remind button: future platform date, unknown date, or future first_release_date."""
     ts = int(time.time()) if now is None else now
     if any(int(r["date"]) > ts for r in all_dates):
         return True
     if all_dates:
         return False
     frd = game.get("first_release_date")
-    return frd is not None and int(frd) > ts
+    # No platform rows and no first_release_date → TBA / unknown (same as release wizard).
+    if frd is None:
+        return True
+    return int(frd) > ts
 
 
 def _wz() -> dict[str, int]:

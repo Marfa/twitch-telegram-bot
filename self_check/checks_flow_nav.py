@@ -2241,6 +2241,43 @@ async def _scenario_other_game_info(db) -> None:
     assert "rel:streams:99" not in upcoming_cbs
     cap.assert_turn("other_game_info_card_upcoming")
 
+    # Unknown release date: same remind button (release wizard TBA path).
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    update, query = _cb_update(_FREE_UID, "ginfo:pick:77", cap)
+    with (
+        patch("handlers.game_info._send_game_card", new=AsyncMock()) as send_card,
+        patch("handlers.game_info._pulse_reply_keyboard", new=_pulse),
+        patch(
+            "handlers.game_info.load_game_release_dates",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            db,
+            "igdb_game_by_id",
+            return_value={
+                "id": 77,
+                "name": "TBA",
+                "summary": "z",
+                "first_release_date": None,
+            },
+        ),
+    ):
+        state = await receive_game_info_pick(update, ctx)
+    assert state == ConversationHandler.END
+    unknown_markup = send_card.await_args.kwargs.get("reply_markup")
+    assert unknown_markup is not None
+    unknown_cbs = [
+        b.callback_data or ""
+        for row in unknown_markup.inline_keyboard
+        for b in row
+    ]
+    assert "ginfo:remind:77" in unknown_cbs
+    assert "rel:streams:77" not in unknown_cbs
+    cap.assert_turn("other_game_info_card_unknown_date")
+
 
 async def _scenario_other_channel_stats(db) -> None:
     """§1.4 Other → Channel stats: button order; upsell without Premium; OAuth when entitled."""

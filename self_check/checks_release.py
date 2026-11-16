@@ -1073,7 +1073,8 @@ def _check_game_has_upcoming_release() -> None:
     game = {"id": 1, "first_release_date": None}
     assert not game_has_upcoming_release(game, [{"date": now - 10}], now=now)
     assert game_has_upcoming_release(game, [{"date": now + 10}], now=now)
-    assert not game_has_upcoming_release(game, [], now=now)
+    # Unknown date (no platform rows, no first_release_date) → remind.
+    assert game_has_upcoming_release(game, [], now=now)
     assert game_has_upcoming_release(
         {"id": 2, "first_release_date": now + 10}, [], now=now
     )
