@@ -18,6 +18,8 @@ _SECRET_RE = re.compile(
     r"client[_-]?secret|password|token|phc_|phx_|phs_)"
     r"([\"'=\s:]*)([^\s\"'&,;]{6,})"
 )
+# Telegram bot token without a keyword, e.g. in an api.telegram.org/bot<token>/ URL.
+_TELEGRAM_TOKEN_RE = re.compile(r"(?<![0-9])[0-9]{5,}:[A-Za-z0-9_-]{30,}")
 
 _client = None
 _enabled = False
@@ -27,6 +29,7 @@ _logs_handler: logging.Handler | None = None
 
 def _redact_secrets(text: str) -> str:
     """Replace token-like substrings with a placeholder."""
+    text = _TELEGRAM_TOKEN_RE.sub("[redacted]", text)
     return _SECRET_RE.sub(r"\1\2[redacted]", text)
 
 
@@ -416,16 +419,48 @@ def _redaction_self_check() -> None:
         raise ValueError(f"The token `{secret}` was rejected by the server.")
     except ValueError:
         probe.error("Network Retry Loop (Bootstrap): Invalid token.", exc_info=True)
+    # requests error text carries the bot token in the URL, with no keyword.
+    bot_token = "123456789:FAKEtokenVALUE00000000000000000000"  # not a real credential
+    url_error = (
+        "HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries "
+        f"exceeded with url: /bot{bot_token}/getMe"
+    )
+    try:
+        raise requests.ConnectionError(url_error)
+    except requests.ConnectionError:
+        probe.error("health probe telegram failed", exc_info=True)
+
+    import health_probes
+    from unittest.mock import patch
+
+    probes_logger = logging.getLogger(health_probes.__name__)
+    probes_logger.addHandler(handler)
+    try:
+        with (
+            patch("config.TELEGRAM_BOT_TOKEN", bot_token),
+            patch.object(
+                health_probes._SESSION,
+                "get",
+                side_effect=requests.ConnectionError(url_error),
+            ),
+        ):
+            assert health_probes._probe_telegram() == (503, b"net")
+    finally:
+        probes_logger.removeHandler(handler)
     provider.force_flush()
     probe.removeHandler(handler)
 
-    assert captured, "redaction probe exported nothing"
-    record = captured[0].log_record
-    blob = (record.body or "") + "".join(
-        str(value) for value in (record.attributes or {}).values()
-    )
-    assert secret not in blob, "credential survived log redaction"
-    assert "[redacted]" in blob, "redaction placeholder missing"
+    assert len(captured) == 3, "redaction probe exported wrong record count"
+    for data in captured:
+        record = data.log_record
+        blob = (record.body or "") + "".join(
+            str(value) for value in (record.attributes or {}).values()
+        )
+        assert secret not in blob, "credential survived log redaction"
+        assert bot_token not in blob, "bot token survived log redaction"
+        assert bot_token.split(":", 1)[1] not in blob, "bot token tail survived"
+    assert "[redacted]" in str(captured[0].log_record.attributes)
+    assert "[redacted]" in str(captured[1].log_record.attributes)
 
     # Error-tracking / analytics path: before_send scrubs the event too.
     event = {
