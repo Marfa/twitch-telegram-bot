@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import os
 import re
 import sys
 from pathlib import Path
@@ -65,6 +66,23 @@ def _fp(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
+def _write_env_bytes(path: Path, data: bytes) -> None:
+    """Write .env for Compose injection (owner-only).
+
+    Plaintext is required: Docker Compose reads these values into the container
+    environment. Encrypting here would need another key on disk (same problem).
+    """
+    # Recreate so mode=0o600 applies (O_TRUNC keeps the old mode on existing files).
+    tmp = path.with_name(path.name + ".tmp-freeze")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, data)  # codeql[py/clear-text-storage-sensitive-data]
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+
+
 def _upsert_env(path: Path, updates: dict[str, str]) -> None:
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     lines = text.splitlines(keepends=True)
@@ -86,7 +104,7 @@ def _upsert_env(path: Path, updates: dict[str, str]) -> None:
     for key, val in updates.items():
         if key not in seen:
             new_lines.append(f"{key}={val}\n")
-    path.write_text("".join(new_lines), encoding="utf-8")
+    _write_env_bytes(path, "".join(new_lines).encode("utf-8"))
 
 
 def main() -> int:
@@ -129,7 +147,7 @@ def main() -> int:
         return 0
 
     bak = env_path.with_suffix(env_path.suffix + ".bak-freeze")
-    bak.write_text(env_path.read_text(encoding="utf-8"), encoding="utf-8")
+    _write_env_bytes(bak, env_path.read_text(encoding="utf-8").encode("utf-8"))
     _upsert_env(env_path, updates)
     print(f"wrote {env_path} (backup {bak.name})")
     return 0
