@@ -2114,6 +2114,196 @@ def _stars_pay_restore_markup(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def _pay_remind_url_markup(lang: str, *, label: str, url: str) -> InlineKeyboardMarkup:
+    from i18n import dm_main_menu_button
+
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(label, url=url)],
+            [dm_main_menu_button(lang)],
+        ]
+    )
+
+
+def _feat_remind_features_text(lang: str, feature_ids: tuple[str, ...] | list[str]) -> str:
+    lines: list[str] = []
+    for fid in feature_ids:
+        name = t(
+            prem.feature_label_key(fid),
+            lang,
+            free_limit=prem.free_active_limit(),
+        )
+        lines.append(f"• {name}")
+    return "\n".join(lines)
+
+
+async def _create_stars_invoice_link(
+    bot,
+    *,
+    title: str,
+    description: str,
+    payload: str,
+    stars: int,
+    subscription_period: int | None = None,
+) -> str | None:
+    prices = [LabeledPrice(title, max(1, int(stars)))]
+    kwargs: dict = {
+        "title": title,
+        "description": description,
+        "payload": payload,
+        "provider_token": "",
+        "currency": "XTR",
+        "prices": prices,
+    }
+    if subscription_period is not None:
+        kwargs["subscription_period"] = int(subscription_period)
+    try:
+        return await bot.create_invoice_link(**kwargs)
+    except Exception:
+        logger.exception("create_invoice_link failed payload=%s", payload)
+        return None
+
+
+async def send_pay_reminder_dm(
+    bot,
+    db: Database,
+    reminder: prem.PayReminder,
+    lang: str,
+) -> None:
+    """DM pay reminder; attach full-price renew invoice for canceled feat/channel."""
+    until = _fmt_until(reminder.until_unix)
+    if reminder.kind == "stars":
+        await bot.send_message(
+            reminder.user_id,
+            t("premium_stars_pay_remind", lang, until=until),
+            reply_markup=_stars_pay_restore_markup(lang),
+            disable_web_page_preview=True,
+        )
+        return
+
+    if reminder.kind == "feat":
+        features_txt = _feat_remind_features_text(lang, reminder.feature_ids)
+        invoice_ids = [
+            fid
+            for fid in reminder.invoice_feature_ids
+            if fid in prem.purchasable_feature_ids()
+        ]
+        if invoice_ids:
+            monthly = prem.stars_feature_price(reminder.user_id) * len(invoice_ids)
+            surcharge = prem.refund_surcharge_for_features(
+                db, reminder.user_id, invoice_ids
+            )
+            total = max(1, monthly + max(0, surcharge))
+            payload = prem.attach_invoice_attribution(
+                prem.invoice_payload(reminder.user_id, "feat", invoice_ids),
+                "pay_remind",
+                "",
+            )
+            desc = t("premium_pay_feat_description", lang, stars=monthly)
+            if surcharge > 0:
+                desc = f"{desc}\n{t('premium_pay_surcharge_note', lang, stars=surcharge)}"
+            link = await _create_stars_invoice_link(
+                bot,
+                title=t("premium_pay_feat_title", lang),
+                description=desc,
+                payload=payload,
+                stars=total,
+                subscription_period=prem.stars_period(),
+            )
+            if link:
+                await bot.send_message(
+                    reminder.user_id,
+                    t(
+                        "premium_feat_pay_remind_invoice",
+                        lang,
+                        until=until,
+                        features=features_txt,
+                        stars=monthly,
+                    ),
+                    reply_markup=_pay_remind_url_markup(
+                        lang,
+                        label=t("btn_premium_feat_pay", lang, stars=total),
+                        url=link,
+                    ),
+                    disable_web_page_preview=True,
+                )
+                return
+        await bot.send_message(
+            reminder.user_id,
+            t(
+                "premium_feat_pay_remind",
+                lang,
+                until=until,
+                features=features_txt,
+            ),
+            reply_markup=_stars_pay_restore_markup(lang),
+            disable_web_page_preview=True,
+        )
+        return
+
+    if reminder.kind == "channel":
+        channel = reminder.channel_login or reminder.channel_twitch_user_id
+        if reminder.channel_canceled and reminder.channel_twitch_user_id:
+            monthly = prem.stars_channel_price(reminder.user_id)
+            surcharge = prem.refund_surcharge_for_channel(db, reminder.user_id)
+            total = max(1, monthly + max(0, surcharge))
+            payload = prem.attach_invoice_attribution(
+                prem.invoice_payload(
+                    reminder.user_id,
+                    "channel",
+                    twitch_user_id=reminder.channel_twitch_user_id,
+                    twitch_login=reminder.channel_login,
+                ),
+                "pay_remind",
+                "",
+            )
+            desc = t(
+                "premium_channel_pay_description",
+                lang,
+                stars=monthly,
+                channel=channel,
+            )
+            if surcharge > 0:
+                desc = f"{desc}\n{t('premium_pay_surcharge_note', lang, stars=surcharge)}"
+            link = await _create_stars_invoice_link(
+                bot,
+                title=t("premium_channel_pay_title", lang),
+                description=desc,
+                payload=payload,
+                stars=total,
+                subscription_period=prem.stars_period(),
+            )
+            if link:
+                await bot.send_message(
+                    reminder.user_id,
+                    t(
+                        "premium_channel_pay_remind_invoice",
+                        lang,
+                        until=until,
+                        channel=channel,
+                        stars=monthly,
+                    ),
+                    reply_markup=_pay_remind_url_markup(
+                        lang,
+                        label=btn("premium_pay", lang),
+                        url=link,
+                    ),
+                    disable_web_page_preview=True,
+                )
+                return
+        await bot.send_message(
+            reminder.user_id,
+            t(
+                "premium_channel_pay_remind",
+                lang,
+                until=until,
+                channel=channel,
+            ),
+            reply_markup=_stars_pay_restore_markup(lang),
+            disable_web_page_preview=True,
+        )
+
+
 async def refresh_premium_twitch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     from handlers.background_jobs import sync_optional_jobs
     from telegram.error import Forbidden

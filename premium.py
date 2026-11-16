@@ -1119,6 +1119,7 @@ def apply_features_payment(
         until_unix=until_unix,
         charge_id=charge_id,
     )
+    clear_feat_pay_reminded_for(db, user_id, ids)
     if "advanced_mode" in ids:
         db.set_advanced_mode_setting(user_id, True)
     credit_referral_commission(
@@ -1339,6 +1340,21 @@ def enter_stars_premium_grace(
     return True
 
 
+@dataclass(frozen=True)
+class PayReminder:
+    """One pay-reminder DM candidate (stars / à-la-carte / channel)."""
+
+    user_id: int
+    kind: str  # stars | feat | channel
+    until_unix: int
+    feature_ids: tuple[str, ...] = ()
+    # Canceled / one-shot rows that need a full-price renew invoice.
+    invoice_feature_ids: tuple[str, ...] = ()
+    channel_twitch_user_id: str = ""
+    channel_login: str = ""
+    channel_canceled: bool = False
+
+
 def claim_stars_pay_reminders(
     db: Database, *, now: int | None = None
 ) -> list[tuple[int, int]]:
@@ -1351,6 +1367,81 @@ def claim_stars_pay_reminders(
         db.set_premium_stars_pay_reminded_until(user_id, until)
         claimed.append((user_id, until))
     return claimed
+
+
+def claim_pay_reminders(
+    db: Database, *, now: int | None = None
+) -> list[PayReminder]:
+    """Stars + à-la-carte + channel rows ending within 24h; mark reminded."""
+    ts = int(now if now is not None else time.time())
+    horizon = ts + STARS_PAY_REMIND_SECONDS
+    out: list[PayReminder] = []
+
+    for user_id, until in claim_stars_pay_reminders(db, now=ts):
+        out.append(PayReminder(user_id=user_id, kind="stars", until_unix=until))
+
+    for user_id, raw in db.list_users_with_premium_features():
+        features, _charges, canceled = parse_premium_features_blob(raw)
+        reminded = db.get_premium_feat_pay_reminded(user_id)
+        due: dict[int, list[str]] = {}
+        for fid, until in features.items():
+            u = int(until or 0)
+            if u <= ts or u > horizon:
+                continue
+            if int(reminded.get(fid) or 0) == u:
+                continue
+            due.setdefault(u, []).append(fid)
+        if not due:
+            continue
+        new_reminded = dict(reminded)
+        for until, fids in sorted(due.items()):
+            ids = tuple(sorted(fids))
+            invoice_ids = tuple(
+                fid for fid in ids if bool(canceled.get(fid))
+            )
+            out.append(
+                PayReminder(
+                    user_id=int(user_id),
+                    kind="feat",
+                    until_unix=int(until),
+                    feature_ids=ids,
+                    invoice_feature_ids=invoice_ids,
+                )
+            )
+            for fid in ids:
+                new_reminded[fid] = int(until)
+        db.set_premium_feat_pay_reminded(user_id, new_reminded)
+
+    for row in db.list_channel_pay_reminder_candidates(
+        now_unix=ts, within_seconds=STARS_PAY_REMIND_SECONDS
+    ):
+        owner_id, twitch_user_id, login, until, canceled = row
+        db.set_premium_channel_pay_reminded_until(twitch_user_id, until)
+        out.append(
+            PayReminder(
+                user_id=int(owner_id),
+                kind="channel",
+                until_unix=int(until),
+                channel_twitch_user_id=str(twitch_user_id),
+                channel_login=str(login),
+                channel_canceled=bool(canceled),
+            )
+        )
+    return out
+
+
+def clear_feat_pay_reminded_for(
+    db: Database, user_id: int, feature_ids: list[str] | tuple[str, ...]
+) -> None:
+    """Drop reminded markers after a fresh feature payment / clear."""
+    cur = db.get_premium_feat_pay_reminded(user_id)
+    changed = False
+    for fid in feature_ids:
+        if fid in cur:
+            del cur[fid]
+            changed = True
+    if changed:
+        db.set_premium_feat_pay_reminded(user_id, cur)
 
 
 def process_stars_expiry_grace(

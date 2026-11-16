@@ -595,6 +595,38 @@ def check_db_premium() -> None:
         assert (77, now + 3600) in remind
         assert db.get_premium_stars_pay_reminded_until(77) == now + 3600
         assert prem.claim_stars_pay_reminders(db, now=now) == []
+        # À-la-carte + channel pay reminders; canceled features get invoice_feature_ids.
+        db.set_premium_stars(
+            77, charge_id="", until_unix=0, canceled=True, touch_paid_at=False
+        )
+        feat_until = now + 7200
+        prem.apply_features_payment(
+            db,
+            77,
+            feature_ids=["alert_types"],
+            charge_id="stx_feat_rem",
+            until_unix=feat_until,
+            stars_paid=20,
+        )
+        db.set_premium_feature_canceled(77, "alert_types")
+        db.upsert_premium_channel(
+            twitch_user_id="ch77",
+            twitch_login="ch77",
+            display_name="ch77",
+            owner_telegram_id=77,
+            charge_id="stx_ch_rem",
+            until_unix=feat_until,
+            canceled=True,
+        )
+        all_rem = prem.claim_pay_reminders(db, now=now)
+        kinds = {r.kind for r in all_rem if r.user_id == 77}
+        assert "feat" in kinds and "channel" in kinds
+        feat_rem = next(r for r in all_rem if r.kind == "feat" and r.user_id == 77)
+        assert feat_rem.invoice_feature_ids == ("alert_types",)
+        assert feat_rem.until_unix == feat_until
+        assert prem.claim_pay_reminders(db, now=now) == []
+        db.clear_premium_feature(77, "alert_types")
+        db.delete_premium_channel_by_charge("stx_ch_rem")
         db.set_premium_stars(
             77, charge_id="stx77", until_unix=now - 5, canceled=False, touch_paid_at=False
         )

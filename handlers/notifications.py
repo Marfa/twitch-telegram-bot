@@ -781,32 +781,29 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                     "Failed to send trial expiry notice to %s", user_id
                 )
 
-    from premium_handlers import _fmt_until, _stars_pay_restore_markup
+    from premium_handlers import _stars_pay_restore_markup, send_pay_reminder_dm
 
-    stars_reminders = await asyncio.to_thread(prem.claim_stars_pay_reminders, db)
-    if stars_reminders:
-        logger.info("Stars pay reminder(s): %s", len(stars_reminders))
-        for user_id, until in stars_reminders:
-            if db.is_bot_blocked(user_id):
+    pay_reminders = await asyncio.to_thread(prem.claim_pay_reminders, db)
+    if pay_reminders:
+        logger.info("Premium pay reminder(s): %s", len(pay_reminders))
+        for reminder in pay_reminders:
+            if db.is_bot_blocked(reminder.user_id):
                 continue
-            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
+            lang = _user_lang(context, reminder.user_id) or DEFAULT_LOCALE
             try:
-                await context.bot.send_message(
-                    user_id,
-                    t(
-                        "premium_stars_pay_remind",
-                        lang,
-                        until=_fmt_until(until),
-                    ),
-                    reply_markup=_stars_pay_restore_markup(lang),
-                    disable_web_page_preview=True,
-                )
+                await send_pay_reminder_dm(context.bot, db, reminder, lang)
             except Forbidden:
                 from handlers.delivery import apply_user_blocked
 
-                apply_user_blocked(db, user_id, source="stars_pay_remind")
+                apply_user_blocked(
+                    db, reminder.user_id, source=f"{reminder.kind}_pay_remind"
+                )
             except BadRequest:
-                logger.exception("Failed to send Stars pay reminder to %s", user_id)
+                logger.exception(
+                    "Failed to send %s pay reminder to %s",
+                    reminder.kind,
+                    reminder.user_id,
+                )
 
     stars_grace_new = await asyncio.to_thread(prem.process_stars_expiry_grace, db)
     if stars_grace_new:

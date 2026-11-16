@@ -800,6 +800,11 @@ class SqliteDatabase:
                 "ALTER TABLE users ADD COLUMN premium_stars_pay_reminded_until "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "premium_feat_pay_reminded" not in user_cols5:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN premium_feat_pay_reminded "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS whisper_alerts (
@@ -1437,6 +1442,11 @@ class SqliteDatabase:
         if "canceled" not in pc_cols:
             conn.execute(
                 "ALTER TABLE premium_channels ADD COLUMN canceled "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "pay_reminded_until" not in pc_cols:
+            conn.execute(
+                "ALTER TABLE premium_channels ADD COLUMN pay_reminded_until "
                 "INTEGER NOT NULL DEFAULT 0"
             )
         conn.execute(
@@ -4702,6 +4712,7 @@ owner_id, twitch_username, twitch_user_id,
                     premium_stars_canceled = 1,
                     premium_stars_grace_until = 0,
                     premium_stars_pay_reminded_until = 0,
+                    premium_feat_pay_reminded = '{}',
                     premium_trial_until = 0,
                     premium_features = '',
                     premium_twitch_active = 0,
@@ -4789,6 +4800,10 @@ owner_id, twitch_username, twitch_user_id,
         charges.pop(feature_id, None)
         canceled.pop(feature_id, None)
         raw = dump_premium_features_blob(features, charges, canceled)
+        reminded = self.get_premium_feat_pay_reminded(user_id)
+        if feature_id in reminded:
+            del reminded[feature_id]
+            self.set_premium_feat_pay_reminded(user_id, reminded)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -4982,6 +4997,116 @@ owner_id, twitch_username, twitch_user_id,
                 UPDATE users SET premium_stars_pay_reminded_until = ? WHERE user_id = ?
                 """,
                 (max(0, int(until_unix)), user_id),
+            )
+
+    def get_premium_feat_pay_reminded(self, user_id: int) -> dict[str, int]:
+        import json
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT premium_feat_pay_reminded FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return {}
+        keys = row.keys()
+        raw = (
+            row["premium_feat_pay_reminded"]
+            if "premium_feat_pay_reminded" in keys
+            else "{}"
+        )
+        try:
+            data = json.loads(raw or "{}")
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        out: dict[str, int] = {}
+        for key, val in data.items():
+            try:
+                out[str(key)] = int(val or 0)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def set_premium_feat_pay_reminded(
+        self, user_id: int, reminded: dict[str, int]
+    ) -> None:
+        import json
+
+        clean = {
+            str(k): int(v)
+            for k, v in (reminded or {}).items()
+            if str(k) and int(v or 0) > 0
+        }
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET premium_feat_pay_reminded = ? WHERE user_id = ?
+                """,
+                (json.dumps(clean, ensure_ascii=False), user_id),
+            )
+
+    def list_users_with_premium_features(self) -> list[tuple[int, str]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id, COALESCE(premium_features, '') AS premium_features
+                FROM users
+                WHERE COALESCE(premium_features, '') NOT IN ('', '{}')
+                """
+            ).fetchall()
+        return [(int(r["user_id"]), str(r["premium_features"] or "")) for r in rows]
+
+    def list_channel_pay_reminder_candidates(
+        self, *, now_unix: int | None = None, within_seconds: int = 86400
+    ) -> list[tuple[int, str, str, int, bool]]:
+        from datetime import datetime, timezone
+
+        now = int(
+            now_unix
+            if now_unix is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        horizon = now + max(0, int(within_seconds))
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT owner_telegram_id, twitch_user_id, twitch_login,
+                       until_unix, canceled
+                FROM premium_channels
+                WHERE until_unix > ?
+                  AND until_unix <= ?
+                  AND COALESCE(pay_reminded_until, 0) != until_unix
+                ORDER BY until_unix, owner_telegram_id
+                """,
+                (now, horizon),
+            ).fetchall()
+        return [
+            (
+                int(r["owner_telegram_id"]),
+                str(r["twitch_user_id"]),
+                str(r["twitch_login"] or ""),
+                int(r["until_unix"] or 0),
+                bool(r["canceled"]),
+            )
+            for r in rows
+        ]
+
+    def set_premium_channel_pay_reminded_until(
+        self, twitch_user_id: str, until_unix: int
+    ) -> None:
+        uid = str(twitch_user_id or "").strip()
+        if not uid:
+            return
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE premium_channels
+                SET pay_reminded_until = ?
+                WHERE twitch_user_id = ?
+                """,
+                (int(until_unix or 0), uid),
             )
 
     def list_stars_pay_reminder_candidates(
@@ -7791,8 +7916,8 @@ owner_id, twitch_username, twitch_user_id,
                 INSERT INTO premium_channels (
                     twitch_user_id, twitch_login, display_name,
                     owner_telegram_id, charge_id, paid_at,
-                    until_unix, canceled
-                ) VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)
+                    until_unix, canceled, pay_reminded_until
+                ) VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, 0)
                 ON CONFLICT(twitch_user_id) DO UPDATE SET
                     twitch_login = excluded.twitch_login,
                     display_name = excluded.display_name,
@@ -7800,7 +7925,8 @@ owner_id, twitch_username, twitch_user_id,
                     charge_id = excluded.charge_id,
                     paid_at = datetime('now'),
                     until_unix = excluded.until_unix,
-                    canceled = excluded.canceled
+                    canceled = excluded.canceled,
+                    pay_reminded_until = 0
                 """,
                 (
                     str(twitch_user_id),
